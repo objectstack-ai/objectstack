@@ -101,12 +101,14 @@ export type HookTargetRebindPath =
   /** A per-row `before*` context on a predicate write (D4). */
   | 'per-row'
   /**
-   * [#9719] The whole-operation `beforeDelete` dispatch an UNSCOPED predicate
-   * delete delivers to registrations that declared
-   * `dispatchUnscopedMultiDelete`. Its `input.id` is present-but-`undefined` —
-   * the exact slot that used to be the batch dispatch's reroute lever — and
-   * the ladder is resolved before any handler runs, so binding it retargets
-   * nothing and is refused rather than ignored, same as the other two seams.
+   * [#9719, both write verbs since #9974] The whole-operation
+   * `beforeUpdate` / `beforeDelete` dispatch an UNSCOPED predicate write
+   * delivers to registrations that declared `dispatchUnscopedMultiWrite`. Its
+   * `input.id` is present-but-`undefined` — the exact slot that used to be the
+   * batch dispatch's reroute lever — and the ladder is resolved before any
+   * handler runs, so binding it retargets nothing and is refused rather than
+   * ignored, same as the other two seams. `event` says which verb; the seam
+   * and the rule are one.
    */
   | 'unscoped-multi';
 
@@ -175,11 +177,11 @@ function buildMessage(info: {
           `'delete()' honoured a rebind until #6752 by re-resolving the new target; that is retired ` +
           `too, so one rule now covers both.`
       : path === 'unscoped-multi'
-        ? ` This is the whole-operation dispatch an UNSCOPED predicate delete delivers to a declared ` +
-          `shape guard (#9719): its 'id' is present-but-undefined ON PURPOSE — there is no target row ` +
-          `— and the dispatch ladder was resolved before any handler ran, so binding 'input.id' here ` +
-          `retargets nothing. It is refused rather than ignored, because a silent no-op is the ` +
-          `failure this contract exists to abolish.`
+        ? ` This is the whole-operation dispatch an UNSCOPED predicate write delivers to a declared ` +
+          `shape guard (#9719, both write verbs since #9974): its 'id' is present-but-undefined ON ` +
+          `PURPOSE — there is no target row — and the dispatch ladder was resolved before any handler ` +
+          `ran, so binding 'input.id' here retargets nothing. It is refused rather than ignored, ` +
+          `because a silent no-op is the failure this contract exists to abolish.`
         : ` On a predicate write a '${event}' context arrives with 'id' ALREADY bound to its row and the ` +
           `dispatch decided, so rebinding it retargets nothing (ADR-0058 Addendum II, D4). It is refused ` +
           `rather than ignored, because a silent no-op is the failure this contract exists to abolish.`;

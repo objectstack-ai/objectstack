@@ -266,8 +266,9 @@ describe('comment access — beforeDelete (author or parent editor)', () => {
   // construction — a shape the engine's per-row dispatch (#5038/#5574) never
   // produced on either verb, so it stayed green for a behaviour the wired
   // engine did the opposite of. It is re-pointed at the REAL engine below —
-  // see "#4630 through the wired engine", which also PINS the update half's
-  // still-unreachable state rather than asserting it away.
+  // see the two "#4630 through the wired engine" blocks. [#9974] The update
+  // half's block pinned the gap as MEASURED until the dispatch existed; it now
+  // pins the refusal itself, on both verbs.
 
   it('a dangling-thread comment is modifiable only by its author', async () => {
     const orphan = { id: 'c9', thread_id: 'crm_opportunity:', author_id: 'rep1', body: 'orphan' };
@@ -670,12 +671,21 @@ const wiredComment = (id: string, authorId: string, threadId = 'crm_opportunity:
 
 /** ADR-0112 envelope of the #4630 refusal. The first sentence IS the declared
  * contract (the issue's quoted wording), so it is asserted alongside the code
- * and status rather than instead of them. */
-const UNSCOPED_REFUSAL = expect.objectContaining({
+ * and status rather than instead of them.
+ *
+ * [#9974] Parameterized by verb because the refusal now fires on BOTH, and the
+ * VERB IN THE MESSAGE is load-bearing: before this card an unscoped multi-update
+ * that was refused at all came back with the PER-ROW message
+ * (`Cannot update comment c2: …`), which names a row rather than the shape. A
+ * matcher that only checked code+status would have passed on that wording, so
+ * the shape refusal is pinned to say "unscoped". */
+const unscopedRefusal = (verb: 'update' | 'delete') => expect.objectContaining({
   code: 'RECORD_NOT_ACCESSIBLE',
   status: 403,
-  message: expect.stringContaining('Refusing an unscoped multi-delete of comments'),
+  message: expect.stringContaining(`Refusing an unscoped multi-${verb} of comments`),
 });
+const UNSCOPED_REFUSAL = unscopedRefusal('delete');
+const UNSCOPED_UPDATE_REFUSAL = unscopedRefusal('update');
 
 describe('unscoped multi-DELETE (no id, no where) — #4630 through the wired engine (#9798)', () => {
   it('refuses `{ multi: true }` even when the caller AUTHORED every matched row — and the rows survive', async () => {
@@ -779,74 +789,171 @@ describe('unscoped multi-DELETE (no id, no where) — #4630 through the wired en
   });
 });
 
-describe('unscoped multi-UPDATE (no id, no where) — the still-unreachable half (#9798)', () => {
-  // ⚠️ THESE PINS DOCUMENT A LIVE FAIL-OPEN, NOT APPROVED BEHAVIOUR. ⚠️
+describe('unscoped multi-UPDATE (no id, no where) — #4630 through the wired engine (#9974)', () => {
+  // ⚠️ THESE PINS REPLACE THREE `MEASURED GAP` PINS, AS THE CARD REQUIRED. ⚠️
   //
-  // `resolveTargetRows` declares the same refusal for `update`, and the block
-  // these replace asserted it by direct handler call — green while the wired
-  // engine did the opposite. The refusal cannot be restored the way DELETE's
-  // was: `dispatchUnscopedMultiDelete` is valid on `beforeDelete` only, and
-  // the engine refuses it elsewhere BY DESIGN, because extending the
-  // whole-operation dispatch to `beforeUpdate`'s predicate path is a
-  // product-behaviour decision rather than drift (#9719's
-  // `assertValidUnscopedMultiDeleteFlag`).
+  // Until #9974 this block documented a LIVE FAIL-OPEN on purpose: the same
+  // refusal `resolveTargetRows` declares for `delete` was declared for `update`
+  // and could not fire, because `dispatchUnscopedMultiDelete` was valid on
+  // `beforeDelete` only and the engine refused it elsewhere BY DESIGN —
+  // extending the whole-operation dispatch to `beforeUpdate`'s predicate path
+  // was a product-behaviour decision, not drift. Those pins were annotated to
+  // go RED when the decision landed, and that is what happened: the maintainer
+  // ruled option A on 2026-08-19, the flag became `dispatchUnscopedMultiWrite`
+  // valid on both write verbs, and each MEASURED-GAP assertion below is now the
+  // REFUSAL it was measuring the absence of — replaced, not relaxed or removed.
   //
-  // So the gap is pinned as MEASURED, deliberately: a suite that simply
-  // dropped the false-green block would leave nothing to notice the fail-open,
-  // and one that asserted the refusal would be false-green again. When the
-  // decision lands and the dispatch exists, these pins go RED — that is their
-  // job, and the fix is to replace them with the refusal assertions, not to
-  // relax them. Tracked at #9974 (the decision card this half was split into).
-  it('MEASURED GAP: an unscoped `{ multi: true }` update the caller AUTHORED every row of is not refused — the whole table is rewritten', async () => {
-    // The delete half's first limb, verb-swapped: the declared refusal is about
-    // the SHAPE, so it must fire whatever the rows say. It does not — the
-    // per-row author shortcut licenses each row and no dispatch ever carries
-    // the unscoped shape. The blast radius is "every row the caller happens to
-    // be entitled to", which is the issue's measured claim.
+  // The three limbs, in the order the card tabled them:
+  //   1. caller authored every row  — was "whole table rewritten", now refused;
+  //   2. empty table (zero match)   — was "nothing ran, resolves", now refused;
+  //   3. a row the caller may not touch is swept — WAS refused, but with the
+  //      PER-ROW message; now refused on the SHAPE, which is a different and
+  //      stronger claim (see limb 3's own note).
+  //
+  // ⚠️ Limb 1 is a BEHAVIOUR CHANGE, not a restoration: that call used to
+  // succeed for an entitled caller. It is what was ruled for — an overwrite
+  // leaves no trace and no pre-image, so the less recoverable verb must not be
+  // the less guarded one — and the changeset says so in those terms.
+
+  it('limb 1: an unscoped `{ multi: true }` update is refused even when the caller AUTHORED every row — and the bodies survive', async () => {
+    // The behaviour change, stated as a test: this exact call resolved before
+    // #9974 and rewrote both rows. The declared refusal is about the SHAPE, so
+    // it must fire whatever the rows say — including when every row is the
+    // caller's own and the per-row gate would have licensed all of them.
     const { ql, bodies } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'me', 'crm_opportunity:opp2')],
       sharing: { canEdit: async () => false },
     });
     await expect(
       ql.update('sys_comment', { body: 'rewritten' }, { multi: true, context: { userId: 'me' } } as any),
-    ).resolves.toBeDefined();
-    expect(bodies()).toEqual(['rewritten', 'rewritten']);
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+    expect(bodies()).toEqual(['body of c1', 'body of c2']);
   });
 
-  it('MEASURED GAP: an unscoped `{ multi: true }` update of an EMPTY table is not refused either', async () => {
-    // The zero-match limb: the per-row dispatch is gated on matched rows, so
-    // nothing runs at all and the caller sees success — the probe that tells an
-    // attacker the unscoped shape is accepted.
+  it('refuses an explicitly null `where` the same way', async () => {
+    const { ql, bodies } = await bootWired({ comments: [wiredComment('c1', 'me')] });
+    await expect(
+      ql.update('sys_comment', { body: 'rewritten' }, {
+        multi: true, where: null, context: { userId: 'me' },
+      } as any),
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+    expect(bodies()).toEqual(['body of c1']);
+  });
+
+  it('limb 2: an unscoped `{ multi: true }` update of an EMPTY table is refused too', async () => {
+    // The zero-match limb: the per-row dispatch is gated on matched rows, so a
+    // handler-only fix could never fire here — a caller probing against an
+    // empty table used to see success and ship the unscoped update.
     const { ql } = await bootWired({ comments: [] });
     await expect(
       ql.update('sys_comment', { body: 'rewritten' }, { multi: true, context: { userId: 'me' } } as any),
+    ).rejects.toEqual(UNSCOPED_UPDATE_REFUSAL);
+  });
+
+  it('positive control: an empty table is not refused per se — a scoped `where: {}` update of it resolves', async () => {
+    // Proves the empty-table refusal above measures the SHAPE, not emptiness.
+    const { ql } = await bootWired({ comments: [] });
+    await expect(
+      ql.update('sys_comment', { body: 'rewritten' }, {
+        multi: true, where: {}, context: { userId: 'me' },
+      } as any),
     ).resolves.toBeDefined();
   });
 
-  it('the per-row gate DOES still fire on an unscoped update — it is a partial, row-dependent guard', async () => {
-    // Why the update half is a smaller hole than delete's was, and why it is
-    // still a hole: rows the caller may not touch are refused individually
-    // (with the PER-ROW message, not the unscoped one), so the unscoped update
-    // is caught only when it happens to sweep a row the caller lacks rights to.
+  it('limb 3: a swept row the caller may not touch is now refused on the SHAPE, not per-row', async () => {
+    // The limb that was ALREADY refusing, and the reason it still had to
+    // change. Before #9974 this answered `Cannot update comment c2: …` — the
+    // per-row gate catching the unscoped shape by accident, on its way through
+    // a row it happened to reject. That message names a ROW, so it taught the
+    // caller "row c2 is protected" when the truth is "this shape is refused";
+    // scoping the write to c1 alone would have "fixed" it and left the hole.
+    // The shape check now runs BEFORE any row is read, so the unscoped message
+    // arrives whatever the sweep would have found.
+    const { ql, bodies } = await bootWired({
+      comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
+      sharing: { canEdit: async () => false },
+    });
+    const err = await ql
+      .update('sys_comment', { body: 'rewritten' }, { multi: true, context: { userId: 'me' } } as any)
+      .then(() => null, (e: unknown) => e);
+    expect(err).toEqual(UNSCOPED_UPDATE_REFUSAL);
+    // The old per-row wording is GONE from this shape, not merely joined by the
+    // new one — asserting only the new sentence would pass on a message that
+    // still led with the row.
+    expect(String((err as Error).message)).not.toContain('Cannot update comment c2');
+    expect(bodies()).toEqual(['body of c1', 'body of c2']);
+  });
+
+  it('the per-row gate is a DIFFERENT refusal and still fires through the wire', async () => {
+    // The delete block's twin: a SCOPED update matching a row the caller may
+    // not touch keeps answering with the per-row message. The two limbs stay
+    // distinguishable, which is what makes limb 3's assertion meaningful.
     const { ql, bodies } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
       sharing: { canEdit: async () => false },
     });
     await expect(
-      ql.update('sys_comment', { body: 'rewritten' }, { multi: true, context: { userId: 'me' } } as any),
+      ql.update('sys_comment', { body: 'rewritten' }, {
+        multi: true,
+        where: { thread_id: 'crm_opportunity:opp1' },
+        context: { userId: 'me' },
+      } as any),
     ).rejects.toEqual(
       expect.objectContaining({
         code: 'RECORD_NOT_ACCESSIBLE',
         status: 403,
-        message: expect.stringContaining('Cannot update comment c2'),
+        message: expect.stringContaining('Cannot update comment'),
       }),
     );
     expect(bodies()).toEqual(['body of c1', 'body of c2']);
   });
 
+  it('scoped controls still pass: by id, by a real `where`, and by the match-all `where: {}`', async () => {
+    // Over-firing here would break every legitimate comment edit — the blast
+    // radius pin for a refusal-widening change.
+    const byId = await bootWired({ comments: [wiredComment('c1', 'me')] });
+    await expect(
+      byId.ql.update('sys_comment', { body: 'edited' }, {
+        where: { id: 'c1' }, context: { userId: 'me' },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(byId.bodies()).toEqual(['edited']);
+
+    const byWhere = await bootWired({
+      comments: [wiredComment('c1', 'me'), wiredComment('c2', 'me', 'crm_opportunity:opp2')],
+    });
+    await expect(
+      byWhere.ql.update('sys_comment', { body: 'edited' }, {
+        multi: true, where: { author_id: 'me' }, context: { userId: 'me' },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(byWhere.bodies()).toEqual(['edited', 'edited']);
+
+    // `where: {}` is a REAL match-all query (the declared semantics): every
+    // matched row is authorized per row, and an entitled caller may rewrite the
+    // table with it — the refusal is about an ABSENT predicate only.
+    const matchAll = await bootWired({ comments: [wiredComment('c1', 'me')] });
+    await expect(
+      matchAll.ql.update('sys_comment', { body: 'edited' }, {
+        multi: true, where: {}, context: { userId: 'me' },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(matchAll.bodies()).toEqual(['edited']);
+  });
+
+  it('system context still bypasses the refusal — engine self-writes and seeds are not the caller', async () => {
+    const { ql, bodies } = await bootWired({ comments: [wiredComment('c1', 'me')] });
+    await expect(
+      ql.update('sys_comment', { body: 'rewritten' }, {
+        multi: true, context: { userId: 'x', isSystem: true },
+      } as any),
+    ).resolves.toBeDefined();
+    expect(bodies()).toEqual(['rewritten']);
+  });
+
   it('control: the scoped update paths are gated exactly as declared', async () => {
-    // The gap above is about the UNSCOPED shape only — a real predicate still
-    // reaches the per-row author-or-parent-editor gate, and refuses.
+    // Unchanged from the pre-#9974 block: a real predicate still reaches the
+    // per-row author-or-parent-editor gate, and refuses there.
     const { ql, bodies } = await bootWired({
       comments: [wiredComment('c1', 'me'), wiredComment('c2', 'someone-else')],
       sharing: { canEdit: async () => false },
