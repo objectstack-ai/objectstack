@@ -619,11 +619,14 @@ export function summarise(stats, expected, proseStats) {
   );
   if (!proseStats) return pins;
   // Named separately and unconditionally, for the same reason the pin counts are:
-  // "5 prose claim(s) read as version-free" and "the loop never ran" are the two
-  // readings of a green, and only this line tells them apart.
+  // "5 prose claim(s) were scanned" and "the loop never ran" are the two readings
+  // of a green, and only this line tells them apart. Worded as SCANNED rather than
+  // as a verdict, because this same line is printed under a FAILING run -- saying
+  // "read as version-free" there would have the scope line contradict the findings
+  // directly above it.
   return (
     `${pins}; ${proseStats.matched} anchored prose claim(s) from `
-    + `${proseStats.claims} enumerated claim site(s) read as version-free`
+    + `${proseStats.claims} enumerated claim site(s) scanned for concrete versions`
   );
 }
 
@@ -1149,6 +1152,13 @@ async function selfTest() {
     assert(
       line.includes('2 anchored prose claim(s)') && line.includes('2 enumerated claim site(s)'),
       `the summary names the prose counts too -- got "${line}"`,
+    );
+    // The scope line is printed under a FAILING run as well, so it must not word
+    // itself as a verdict -- observed contradicting its own findings before this.
+    assert(
+      !summarise(clean.stats, expected, proseDirty.stats).includes('version-free'),
+      'the scope line states what was SCANNED, not what was concluded -- the same line prints above a list '
+        + `of PROSE-VERSION findings. Got "${summarise(clean.stats, expected, proseDirty.stats)}"`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
