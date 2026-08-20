@@ -2105,6 +2105,62 @@ function ratchetRemedyCarriesAuthority(message) {
 }
 
 /**
+ * The INHERITANCE rule, spelled out in both ratchet remedies (#8553).
+ *
+ * The gate counts DECLARATION SITES: an object literal (or class body) that
+ * declares the verb alongside at least two engine siblings. Restating a double
+ * as `Object.assign(base, { … })` or `{ ...base, … }` therefore hands this gate
+ * the OVERRIDE literal, which normally carries only the members it varies —
+ * fewer than two engine siblings — so `consider()` returns and the construct is
+ * accounted for by the base it was spread over.
+ *
+ * That is CORRECT wherever the override leaves this verb alone, and #8553's own
+ * observed instance is that shape: the base is counted, the override varies
+ * `find`/`insert`, nothing about the verb changed. What made it worth a card is
+ * that the two-option framing below ("pin it" / "raise the baseline, do not")
+ * reads as exhaustive, so an author who reaches for the override spelling to
+ * get out of a red gate cannot tell from the message whether they satisfied the
+ * rule or side-stepped it — and it is cheaper than either sanctioned path. A
+ * ratchet does not erode by someone defeating it; it erodes when the cheapest
+ * route out happens to be the invisible one.
+ *
+ * ⛔ Named rather than closed by counting VALUES instead of sites, and the
+ * reason is a measurement rather than a preference: `--census` reports both
+ * `Object.assign` shapes, and on 2026-08-20 the corpus held ZERO override
+ * literals restating `delete`/`update` and six that vary other engine members
+ * and inherit the verb. Counting by value would move no construct today, at the
+ * price of a resolution step over an empty population — while every construct
+ * it might later admit arrives UNPINNED against a shrink-only, maintainer-only
+ * baseline. So the hole is documented where an author meets it and MEASURED
+ * where a maintainer can watch it: the day a VERB-shaped override lands,
+ * `--census` names it and this becomes a priced act rather than a hypothesis.
+ */
+const INHERITANCE_MARKER = 'A THIRD spelling exists and is NOT a third option';
+
+/**
+ * Same convention as `ratchetRemedyCarriesAuthority` above and for the same
+ * reason: a detector, so the self-test can prove the assertion still reaches
+ * its subject instead of passing vacuously after a rewording.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function remedyNamesInheritance(message) {
+  return message.includes(INHERITANCE_MARKER) && message.includes('Object.assign');
+}
+
+const INHERITANCE_NOTE = (verb) => (
+  ` ${INHERITANCE_MARKER}: restating this double as `
+  + '`Object.assign(base, { … })` or `{ ...base, … }` over an already-counted double leaves this '
+  + `gate reading the OVERRIDE literal, which usually declares too few engine siblings to be `
+  + `counted in its own right — so it inherits the base's accounting. That is correct while the `
+  + `override leaves ${verb}() alone. If your override RESTATES ${verb}() with a different `
+  + `contract, inheriting is a hole and not a pass: pin it there, or keep it in the literal this `
+  + 'ledger already names. `node scripts/check-engine-double-contract.mjs --census` counts both '
+  + 'shapes.'
+);
+
+/**
  * PINNED's text, named and pure so the self-test can assert on the exact string
  * the author reads. Extracted from the audit loop by #8435 for that reason --
  * a message built inline is a message no assertion can reach.
@@ -2130,6 +2186,7 @@ function pinnedMessage(slice, file, unguarded) {
       + `${BASELINE_REL} saying why not — with `
       + `"verb": ${JSON.stringify(slice.verb)}. That baseline is shrink-only, so an entry weakens a `
       + 'ratchet and needs a maintainer to agree first — do not take this path to get CI green.'
+      + INHERITANCE_NOTE(slice.verb)
   );
 }
 
@@ -2209,7 +2266,8 @@ function audit() {
         errors.push(
           `PINNED [${slice.verb}]: ${file} now has ${unguarded.length} unguarded engine double(s), `
             + `baseline records ${entry.unguarded}. The baseline is shrink-only — pin the new one `
-            + 'rather than raising it.',
+            + 'rather than raising it.'
+            + INHERITANCE_NOTE(slice.verb),
         );
       } else if (unguarded.length < entry.unguarded) {
         errors.push(
@@ -3215,6 +3273,27 @@ class Svc {
   expect(`#8435 — PINNED marks the baseline path ${RATCHET_AUTHORITY_MARKER} (it is shrink-only, so `
     + 'adding an entry is a maintainer action, not the author\'s second option)',
     ratchetRemedyCarriesAuthority(pinned));
+  // ── The INHERITANCE clause (#8553) ─────────────────────────────────────────
+  //
+  // The card's finding was that the two-option framing ("pin it" / "raise the
+  // baseline, do not") reads as exhaustive while a third, cheaper, INVISIBLE
+  // route exists — restate the double as an override of a counted one. Three
+  // assertions on the same non-overlapping plan as #8435 above: the clause is
+  // on BOTH ratchet remedies (an author meets whichever one their file's
+  // baseline state produces, so a clause on only one of them is a coin flip),
+  // and the detector discriminates.
+  expect('#8553 — the PINNED remedy names the inheritance rule, so an author who reaches for '
+    + '`Object.assign` can tell whether they satisfied the rule or side-stepped it',
+    remedyNamesInheritance(pinned));
+  const shrinkOnlyRemedy = `PINNED [update]: f.test.ts now has 2 unguarded engine double(s), `
+    + 'baseline records 1. The baseline is shrink-only — pin the new one rather than raising it.'
+    + INHERITANCE_NOTE('update');
+  expect('#8553 — …and so does the SHRINK-ONLY remedy, which is the one #8537 actually hit',
+    remedyNamesInheritance(shrinkOnlyRemedy));
+  expect('#8553 — remedyNamesInheritance() REJECTS the two-option framing this card filed against '
+    + '(proves the detector discriminates rather than approving everything)',
+    !remedyNamesInheritance('The baseline is shrink-only — pin the new one rather than raising it.'));
+
   const unmarkedOffer = `PINNED: add a MEASURED entry to ${BASELINE_REL} saying why not.`;
   expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
     RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
@@ -3458,6 +3537,23 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
     kindsOf('const e = { update };') === 'shorthand member');
   expect('#9943 — a method body is its own kind too', kindsOf('const e = { async update(o, d) {} };') === 'method body');
 
+  const assignSites = (src) => objectAssignSites(
+    ts.createSourceFile('a.test.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX), SCANNED_VERBS,
+  );
+  let sites = assignSites('const ql = Object.assign(makeQl(), { async find() { return []; }, async insert() { return null; } });');
+  expect('#8553 — an Object.assign override varying OTHER engine members reads as BASE-accounted '
+    + '(the shape #8537 actually used, and inheriting is correct there)',
+    sites.length === 1 && sites[0].shape === 'BASE' && sites[0].counted === false);
+  sites = assignSites('const ql = Object.assign(makeQl(), { async delete(o: string, opts?: any) { return true; } });');
+  expect('#8553 — an override that RESTATES the verb with too few siblings of its own is the hole, '
+    + 'and the census names it rather than leaving it silent',
+    sites.length === 1 && sites[0].shape === 'VERB' && sites[0].counted === false);
+  sites = assignSites('const ql = Object.assign(makeQl(), { async delete(o: string, opts?: any) { return true; }, '
+    + 'async find() { return []; }, async insert() { return null; } });');
+  expect('#8553 — …and an override carrying two engine siblings of its own IS counted in its own '
+    + 'right, so the census does not report a double the population already holds',
+    sites.length === 1 && sites[0].shape === 'VERB' && sites[0].counted === true);
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -3486,7 +3582,8 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
       + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
       + 'double into or out of the population it counts; and reads a DEFAULTED initializer '
       + '(#9877) on both arms of `??` and `||`, pinned and unpinned alike, while still vetoing a '
-      + 'driver there and still refusing a conditional; and buckets '
+      + 'driver there and still refusing a conditional; carries the INHERITANCE rule (#8553) on '
+      + 'BOTH ratchet remedies with a detector that rejects the two-option framing; and buckets '
       + 'the RECOGNIZER CENSUS (#9943) by initializer kind so a spelling this gate cannot read '
       + 'shows up as its own row rather than as silence.',
   );
