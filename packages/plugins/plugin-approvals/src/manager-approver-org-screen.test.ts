@@ -35,7 +35,8 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
-import { ApprovalService } from './approval-service.js';
+import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
+import { ApprovalService, type ApprovalNodeAutoOutcome } from './approval-service.js';
 
 function makeFakeEngine() {
   const tables: Record<string, any[]> = {};
@@ -96,6 +97,24 @@ function makeFakeEngine() {
   };
 }
 
+/**
+ * `openNodeRequest` returns `ApprovalRequestRow | ApprovalNodeAutoOutcome` — the
+ * second arm is the `onEmptyApprovers: 'auto_approve'` exit, which opens no
+ * request at all. Narrow rather than read through the union: every probe below
+ * asserts something about an OPENED request, so an auto-approval reaching one of
+ * them is a wrong answer that must say so, not a property read off the wrong arm.
+ * (Left unnarrowed this file billed the package's TEST_DEBT ledger 21 raw TS2339
+ * — invisible to `pnpm --filter @objectstack/plugin-approvals typecheck`, whose
+ * tsconfig excludes `**\/*.test.ts`, and caught only by `check:type-check-debt
+ * --re-measure`.)
+ */
+function opened(result: ApprovalRequestRow | ApprovalNodeAutoOutcome): ApprovalRequestRow {
+  if ('autoApproved' in result) {
+    throw new Error('expected an OPENED approval request, got an auto-approval outcome');
+  }
+  return result;
+}
+
 const ORG_A = 'org_a';
 const CTX_A = { userId: 'u_sub', organizationId: ORG_A, positions: [], permissions: [] } as any;
 
@@ -135,6 +154,12 @@ describe('#10153 manager approver org screen', () => {
     ];
   });
 
+  // `ApprovalRequestRow` — the PUBLISHED contract type — declares no
+  // `organization_id`, though `openNodeRequest` stamps one on the row it writes
+  // and returns. Read the stamp off the persisted row rather than through a
+  // property the contract does not have. (Filed separately; not this card.)
+  const storedOrg = () => (engine._tables['sys_approval_request'] ?? [])[0]?.organization_id;
+
   // `{ type: 'manager' }` and `{ type: 'manager', value: 'owner_id' }` resolve
   // through the same line (`record[a.value] ?? record.owner_id`); the explicit
   // spelling is used from here on only so the unresolved fallback slot reads as
@@ -142,43 +167,43 @@ describe('#10153 manager approver org screen', () => {
   const MGR = { type: 'manager', value: 'owner_id' };
 
   it('A — a manager whose membership is in ANOTHER organization is screened OUT', async () => {
-    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
-    console.log('[PROBE A] request org =', req.organization_id, 'pending_approvers =', JSON.stringify(req.pending_approvers));
+    const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A));
+    console.log('[PROBE A] request org =', storedOrg(), 'pending_approvers =', JSON.stringify(req.pending_approvers));
     // Inverted from round 1, which measured ['u_mgr_b'] here.
     expect(req.pending_approvers).toEqual(['manager:owner_id']);
-    expect(req.pending_approvers.some((x: string) => !x.includes(':'))).toBe(false);
+    expect((req.pending_approvers ?? []).some((x: string) => !x.includes(':'))).toBe(false);
   });
 
   it('A2 — a manager who IS a member of the request org still resolves', async () => {
     engine._tables['sys_member'].push({ id: 'm3', user_id: 'u_mgr_b', organization_id: ORG_A, role: 'member' });
-    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
+    const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A));
     console.log('[PROBE A2] pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_mgr_b']);
   });
 
   it('A3 — a manager with NO membership row anywhere is left alone (no tenancy fact)', async () => {
     engine._tables['sys_member'] = engine._tables['sys_member'].filter((m: any) => m.user_id !== 'u_mgr_b');
-    const req = await svc.openNodeRequest(input([MGR]), CTX_A);
+    const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A));
     console.log('[PROBE A3] pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_mgr_b']);
   });
 
   it('A4 — a request carrying no organization is untouched by the screen', async () => {
     const ctxNoOrg = { userId: 'u_sub', positions: [], permissions: [] } as any;
-    const req = await svc.openNodeRequest(input([MGR]), ctxNoOrg);
-    console.log('[PROBE A4] request org =', req.organization_id, 'pending_approvers =', JSON.stringify(req.pending_approvers));
+    const req = opened(await svc.openNodeRequest(input([MGR]), ctxNoOrg));
+    console.log('[PROBE A4] request org =', storedOrg(), 'pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_mgr_b']);
   });
 
   it('PREMISE B — sibling `position` IS screened to the request org (same tree)', async () => {
-    const req = await svc.openNodeRequest(input([{ type: 'position', value: 'cfo' }]), CTX_A);
+    const req = opened(await svc.openNodeRequest(input([{ type: 'position', value: 'cfo' }]), CTX_A));
     console.log('[PROBE B] pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['position:cfo']);
   });
 
   it('PREMISE B2 — same-org `position` holder DOES resolve (screen is not reject-everything)', async () => {
     engine._tables['sys_user_position'].push({ id: 'p2', user_id: 'u_pos_a', position: 'cfo', organization_id: ORG_A });
-    const req = await svc.openNodeRequest(input([{ type: 'position', value: 'cfo' }]), CTX_A);
+    const req = opened(await svc.openNodeRequest(input([{ type: 'position', value: 'cfo' }]), CTX_A));
     console.log('[PROBE B2] pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_pos_a']);
   });
@@ -197,7 +222,7 @@ describe('#10153 manager approver org screen', () => {
   });
 
   it('C-a2 — the SAME node under the DEFAULT policy still opens (the flip is confined)', async () => {
-    const req = await svc.openNodeRequest(input([MGR]), CTX_A); // onEmptyApprovers absent => admin_rescue
+    const req = opened(await svc.openNodeRequest(input([MGR]), CTX_A)); // onEmptyApprovers absent => admin_rescue
     console.log('[PROBE C-a2] status =', req.status, 'approvers =', JSON.stringify(req.pending_approvers));
     expect(req.status).toBe('pending');
     expect(req.pending_approvers).toEqual(['manager:owner_id']);
@@ -215,7 +240,7 @@ describe('#10153 manager approver org screen', () => {
   it('W — `team` is STILL not org-screened (#10230 owns it; this card did not touch it)', async () => {
     engine._tables['sys_team'] = [{ id: 'team_b', name: 'B team', organization_id: 'org_b' }];
     engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_b', user_id: 'u_team_b' }];
-    const req = await svc.openNodeRequest(input([{ type: 'team', value: 'team_b' }]), CTX_A);
+    const req = opened(await svc.openNodeRequest(input([{ type: 'team', value: 'team_b' }]), CTX_A));
     console.log('[PROBE W] org_a request, org_b team -> pending_approvers =', JSON.stringify(req.pending_approvers));
     expect(req.pending_approvers).toEqual(['u_team_b']);
   });
