@@ -7,9 +7,20 @@ import { DevPlugin } from './dev-plugin';
 // state. Every OTHER optional dependency is mocked away for the same reason as
 // #3060 (their vite transforms alone can blow the timeout), and their absence
 // is irrelevant to this file's subject.
+//
+// One FURTHER omission, measured rather than assumed:
+// `@objectstack/driver-memory` is deliberately not mocked here either,
+// because DevPlugin imports
+// `@objectstack/runtime` on the line BEFORE it and that import throws, so the
+// driver import is never evaluated and a mock for it would be dead weight. It
+// is a frozen driver under a retirement census (#5499/#5704/#6664), where an
+// unnecessary module binding is the defect the census exists to catch, so the
+// dead mock is not harmless bookkeeping. Probed, not reasoned: a marker in the
+// factory printed 0 times across the whole file while the same marker in the
+// `@objectstack/runtime` factory printed 8 times in the same run. ⛔ Do not add
+// one back.
 vi.mock('@objectstack/objectql', () => { throw Object.assign(new Error("Cannot find package '@objectstack/objectql'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/runtime', () => { throw Object.assign(new Error("Cannot find package '@objectstack/runtime'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
-vi.mock('@objectstack/driver-memory', () => { throw Object.assign(new Error("Cannot find package '@objectstack/driver-memory'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/service-i18n', () => { throw Object.assign(new Error("Cannot find package '@objectstack/service-i18n'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/service-storage', () => { throw Object.assign(new Error("Cannot find package '@objectstack/service-storage'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/service-realtime', () => { throw Object.assign(new Error("Cannot find package '@objectstack/service-realtime'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
