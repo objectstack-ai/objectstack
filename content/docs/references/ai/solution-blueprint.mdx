@@ -155,6 +155,7 @@ const result = BlueprintAppSchema.parse(data);
 | **label** | `string` | optional | Human-readable singular label |
 | **description** | `string` | optional | What this object represents |
 | **fields** | `{ name: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; required?: boolean; … }[]` | ✅ | Fields to create on the object |
+| **sharingModel** | `Enum<'private' \| 'public_read' \| 'public_read_write' \| 'controlled_by_parent'>` | optional | Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) \| public_read (everyone reads, owner writes) \| public_read_write (everyone reads+writes) \| controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user's description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform's deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it. |
 | **nameField** | `string` | optional | The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object's text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "`{order_no}` · `{customer}`"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred. |
 
 
@@ -244,7 +245,7 @@ const result = BlueprintAppSchema.parse(data);
 | **summary** | `string` | ✅ | One-line description of the proposed solution |
 | **assumptions** | `string[]` | ✅ | Design assumptions made from the underspecified goal |
 | **questions** | `string[] \| null` | ✅ | At most 1-2 structure-deciding questions to confirm before building, or null |
-| **objects** | `{ name: string; label: string \| null; description: string \| null; fields: object[] }[]` | ✅ | Objects (tables) to create |
+| **objects** | `{ name: string; label: string \| null; description: string \| null; fields: object[]; … }[]` | ✅ | Objects (tables) to create |
 | **views** | `{ object: string; name: string; label: string \| null; type: Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null; … }[] \| null` | ✅ | Views to create, or null |
 | **dashboards** | `{ name: string; label: string \| null; widgets: object[] \| null }[] \| null` | ✅ | Dashboards to create, or null |
 | **app** | `{ name: string; label: string \| null; icon: string \| null; nav: object[] \| null } \| null` | ✅ | The navigation shell (app) that surfaces the created objects/dashboards, or null |
