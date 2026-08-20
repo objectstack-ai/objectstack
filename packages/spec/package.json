@@ -166,6 +166,16 @@
         "default": "./dist/shared/index.js"
       }
     },
+    "./meta-spelling": {
+      "import": {
+        "types": "./dist/meta-spelling/index.d.mts",
+        "default": "./dist/meta-spelling/index.mjs"
+      },
+      "require": {
+        "types": "./dist/meta-spelling/index.d.ts",
+        "default": "./dist/meta-spelling/index.js"
+      }
+    },
     "./openapi.json": "./json-schema/openapi.json",
     "./package.json": "./package.json"
   },
@@ -188,6 +198,8 @@
     "gen:schema": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts",
     "gen:authorable-surface-base": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --update-base",
     "gen:openapi": "tsx scripts/build-openapi.ts",
+    "gen:meta-url-spelling": "tsx scripts/build-meta-url-spelling.ts",
+    "check:meta-url-spelling": "tsx scripts/build-meta-url-spelling.ts --check",
     "gen:docs": "tsx scripts/build-docs.ts",
     "check:docs": "tsx scripts/build-docs.ts --check",
     "check:generated": "tsx scripts/check-generated.ts",

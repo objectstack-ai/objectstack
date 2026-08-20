@@ -18,7 +18,12 @@ const entries = [
   'src/cloud/index.ts',
   'src/qa/index.ts',
   'src/identity/index.ts',
-  'src/shared/index.ts'
+  'src/shared/index.ts',
+  // [#10096] Schema-free fine-grained entry for the `/meta` URL-spelling
+  // contract — per-entry self-contained bundling is unchanged (#8133 stays on
+  // hold); this entry's whole graph is two pure modules, so "self-contained"
+  // costs a few hundred bytes here by construction.
+  'src/meta-spelling/index.ts'
 ];
 
 // Generate DTS separately to avoid memory issues

@@ -1695,6 +1695,18 @@ jobs:
       - name: Check skill docs are generated from SKILL.md frontmatter
         run: pnpm --filter @objectstack/spec check:skill-docs
 
+      # [#10096] The schema-free `/meta` URL-spelling data module
+      # (src/meta-spelling/meta-url-data.generated.ts). Re-derives the
+      # three-limb union from PLURAL_TO_SINGULAR + DEFAULT_METADATA_TYPE_REGISTRY
+      # and fails on staleness OR on a manifest/derived spelling disagreement —
+      # this step is the build-time enforcement home of what used to be a
+      # module-load `assertMetaUrlSpellingsAgree()` (maintainer ruling
+      # 2026-08-20: the assertion may move, never drop). Reads src via tsx,
+      # needs no build; belongs in this unfiltered required job for the same
+      # reason as its artifact-gate neighbours.
+      - name: Check the meta-url-spelling data module is current and spellings agree
+        run: pnpm --filter @objectstack/spec check:meta-url-spelling
+
       - name: Check spec-changes.json is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:spec-changes
 
