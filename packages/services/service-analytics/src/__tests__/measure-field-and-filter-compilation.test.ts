@@ -75,7 +75,15 @@ const OPPORTUNITY_METRICS: Dataset = DatasetSchema.parse({
   name: 'opportunity_metrics',
   label: 'Opportunity Metrics',
   object: 'crm_opportunity',
-  dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+  dimensions: [
+    { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
+    // Grouped agreement is asserted on OWNER, never on `stage`: grouping by the
+    // very column a measure filters on makes the filtered and unfiltered
+    // aggregates COINCIDE inside the matching group, so an assertion there
+    // passes with the filter dropped. Measured — that is exactly what the first
+    // draft of the grouped test did, and the ablation caught it, not the fix.
+    { name: 'owner', label: 'Owner', field: 'owner', type: 'string' },
+  ],
   measures: [
     { name: 'opp_count', label: 'Opportunities', aggregate: 'count' },
     { name: 'won_count', label: 'Won Deals', aggregate: 'count', filter: { stage: 'closed_won' } },
@@ -257,12 +265,28 @@ async function locateWasm(): Promise<((file: string) => string) | undefined> {
  * 1,290,000, 5 lost, and a grand total of 5,632,500 — the number the broken
  * door answered for `won_amount`.
  */
-const WON_AMOUNTS = [300_000, 250_000, 200_000, 150_000, 120_000, 110_000, 100_000, 60_000];
-const LOST_AMOUNTS = [90_000, 90_000, 90_000, 90_000, 90_000];
-const OPEN_AMOUNTS = [
-  350_000, 350_000, 350_000, 350_000, 350_000,
-  350_000, 350_000, 350_000, 350_000, 350_000, 392_500,
+interface Opp { amount: number; owner: string }
+const WON: Opp[] = [
+  { amount: 300_000, owner: 'u1' }, { amount: 250_000, owner: 'u2' },
+  { amount: 200_000, owner: 'u1' }, { amount: 150_000, owner: 'u2' },
+  { amount: 120_000, owner: 'u1' }, { amount: 110_000, owner: 'u2' },
+  { amount: 100_000, owner: 'u1' }, { amount: 60_000, owner: 'u2' },
 ];
+const LOST: Opp[] = [
+  { amount: 90_000, owner: 'u1' }, { amount: 90_000, owner: 'u2' },
+  { amount: 90_000, owner: 'u1' }, { amount: 90_000, owner: 'u2' },
+  { amount: 90_000, owner: 'u1' },
+];
+const OPEN: Opp[] = [
+  { amount: 350_000, owner: 'u2' }, { amount: 350_000, owner: 'u1' },
+  { amount: 350_000, owner: 'u2' }, { amount: 350_000, owner: 'u1' },
+  { amount: 350_000, owner: 'u2' }, { amount: 350_000, owner: 'u1' },
+  { amount: 350_000, owner: 'u2' }, { amount: 350_000, owner: 'u1' },
+  { amount: 350_000, owner: 'u2' }, { amount: 350_000, owner: 'u1' },
+  { amount: 392_500, owner: 'u2' },
+];
+const ALL: Opp[] = [...WON, ...LOST, ...OPEN];
+const sum = (rows: Opp[]) => rows.reduce((a, r) => a + r.amount, 0);
 
 describe('[#10298] the dashboard door and the API door answer the same numbers', () => {
   let db: any;
@@ -276,13 +300,15 @@ describe('[#10298] the dashboard door and the API door answer the same numbers',
 
     db = new SQL.Database();
     db.run(`CREATE TABLE "crm_opportunity" (
-      "id" TEXT PRIMARY KEY, "stage" TEXT, "amount" INTEGER
+      "id" TEXT PRIMARY KEY, "stage" TEXT, "owner" TEXT, "amount" INTEGER
     );`);
-    const insert = db.prepare(`INSERT INTO "crm_opportunity" ("id","stage","amount") VALUES (?,?,?)`);
+    const insert = db.prepare(
+      `INSERT INTO "crm_opportunity" ("id","stage","owner","amount") VALUES (?,?,?,?)`,
+    );
     let n = 0;
-    for (const a of WON_AMOUNTS) insert.run([`o${++n}`, 'closed_won', a]);
-    for (const a of LOST_AMOUNTS) insert.run([`o${++n}`, 'closed_lost', a]);
-    for (const a of OPEN_AMOUNTS) insert.run([`o${++n}`, 'prospecting', a]);
+    for (const r of WON) insert.run([`o${++n}`, 'closed_won', r.owner, r.amount]);
+    for (const r of LOST) insert.run([`o${++n}`, 'closed_lost', r.owner, r.amount]);
+    for (const r of OPEN) insert.run([`o${++n}`, 'prospecting', r.owner, r.amount]);
     insert.free();
 
     svc = new AnalyticsService({
@@ -305,9 +331,13 @@ describe('[#10298] the dashboard door and the API door answer the same numbers',
   const MEASURES = ['opp_count', 'won_count', 'lost_count', 'won_amount'];
 
   it('the fixture really is the card\'s org: 24 opportunities, 8 won, 5 lost', () => {
-    expect(WON_AMOUNTS.length + LOST_AMOUNTS.length + OPEN_AMOUNTS.length).toBe(24);
-    expect(WON_AMOUNTS.reduce((a, b) => a + b, 0)).toBe(1_290_000);
-    expect([...WON_AMOUNTS, ...LOST_AMOUNTS, ...OPEN_AMOUNTS].reduce((a, b) => a + b, 0)).toBe(5_632_500);
+    expect(ALL.length).toBe(24);
+    expect(WON.length).toBe(8);
+    expect(LOST.length).toBe(5);
+    expect(sum(WON)).toBe(1_290_000);
+    // The grand total is the card's WRONG answer for `won_amount` — the fixture
+    // can still produce it, which is what makes the assertion below falsifiable.
+    expect(sum(ALL)).toBe(5_632_500);
   });
 
   it('the API door answers the DECLARED numbers, not the unfiltered ones', async () => {
@@ -328,13 +358,28 @@ describe('[#10298] the dashboard door and the API door answer the same numbers',
     }
   });
 
-  it('and they agree grouped by a dimension, too', async () => {
-    const selection = { measures: MEASURES, dimensions: ['stage'] };
+  it('and they agree grouped by a dimension the filters do NOT name', async () => {
+    const selection = { measures: MEASURES, dimensions: ['owner'] };
     const viaApi = await svc.query({ cube: 'opportunity_metrics', ...selection });
     const viaDashboard = await svc.queryDataset(OPPORTUNITY_METRICS, selection);
-    const byStage = (rows: Record<string, unknown>[]) =>
-      Object.fromEntries(rows.map((r) => [String(r.stage), r.won_amount ?? 0]));
-    expect(byStage(viaDashboard.rows)).toMatchObject({ closed_won: 1_290_000 });
-    expect(byStage(viaApi.rows).closed_won).toBe(byStage(viaDashboard.rows).closed_won);
+    const byOwner = (rows: Record<string, unknown>[]) =>
+      Object.fromEntries(rows.map((r) => [String(r.owner), r]));
+
+    const api = byOwner(viaApi.rows);
+    // Each owner holds 12 of the 24 deals, four of them won.
+    expect(api.u1).toMatchObject({ opp_count: 12, won_count: 4, lost_count: 3 });
+    expect(api.u2).toMatchObject({ opp_count: 12, won_count: 4, lost_count: 2 });
+    expect(api.u1.won_amount).toBe(sum(WON.filter((r) => r.owner === 'u1')));
+    expect(api.u2.won_amount).toBe(sum(WON.filter((r) => r.owner === 'u2')));
+    // …and NOT each owner's whole book, which is what a dropped filter answers.
+    expect(api.u1.won_amount).not.toBe(sum(ALL.filter((r) => r.owner === 'u1')));
+
+    const dash = byOwner(viaDashboard.rows);
+    for (const owner of ['u1', 'u2']) {
+      for (const m of MEASURES) {
+        expect(dash[owner]?.[m], `${owner}.${m} disagrees between the two doors`)
+          .toBe(api[owner]?.[m]);
+      }
+    }
   });
 });
