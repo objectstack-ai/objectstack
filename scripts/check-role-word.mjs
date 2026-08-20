@@ -26,9 +26,15 @@
 //   node scripts/check-role-word.mjs [--update]
 //   node scripts/check-role-word.mjs --self-test   # verify the checker's own rules
 //
-// `--update` expands the baseline, which is the shrink-only direction of this
-// ratchet — the NEW-use message marks that path `⛔ MAINTAINER-ONLY` per the
-// #8435 convention, and the self-test holds the marker in place.
+// `--update` rewrites the baseline from the current tree — it never reads the
+// old ledger (see the `update` branch at the bottom) — so it moves whichever
+// way the tree moved: shrinking where the word is gone, EXPANDING where it is
+// new. Only policy tells those apart. The baseline is shrink-only, so
+// ratcheting down is the author's own remedy, while expanding WEAKENS the gate
+// and is a maintainer's call: the NEW-use message marks that path
+// `⛔ MAINTAINER-ONLY` per the #8435 convention, and the self-test holds the
+// marker in place. Both pin the WORDING, not the act — the flag takes either
+// direction from whoever runs it.
 //
 // Scope: content/docs (hand-written; references/ is generated from spec and
 // excluded — the spec source is the fix site there) and skills/. File and

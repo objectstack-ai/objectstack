@@ -888,24 +888,10 @@ export class DevPlugin implements Plugin {
     // in-process consumers handle absence exactly as they already must in
     // production. To use a capability locally, install its real service.
 
-    // The security slots deserve one loud line when empty (#4126): faking an
-    // authorization decision is the one thing ADR-0076 D12 forbids a fallback
-    // to do, so the slots stay empty rather than stubbed — but "no RBAC/RLS/
-    // masking is being enforced" is worth saying in the boot log of a stack
-    // that expected them.
-    if (enabled('security')) {
-      const missing = ['security.permissions', 'security.rls', 'security.fieldMasker'].filter((svc) => {
-        try { ctx.getService(svc); return false; } catch { return true; }
-      });
-      if (missing.length > 0) {
-        ctx.logger.warn(
-          `  ⚠ No security services (${missing.join(', ')}) — SecurityPlugin is not loaded, so RBAC, `
-          + 'row-level security and field masking are NOT enforced. The slots stay empty rather than '
-          + 'being stubbed: a fake that answers "allowed" is worse than an absent one. Install '
-          + '@objectstack/plugin-security to enforce them.',
-        );
-      }
-    }
+    // The security slots deserve one loud line when nothing is enforcing
+    // (#4126) — but that question cannot be answered HERE. It is asked in
+    // `start()` instead; see `warnIfNothingIsEnforcingSecurity` below for why
+    // the phase, and not just the service name, is load-bearing.
 
     ctx.logger.info(`DevPlugin initialized ${this.childPlugins.length} plugin(s)`);
   }
@@ -950,11 +936,84 @@ export class DevPlugin implements Plugin {
         + 'this is NOT a production stack',
       );
     }
+    // Same reasoning, same surface: "nothing is enforcing security" belongs
+    // next to the banner, not buried in the init log (#10036, #3900).
+    this.warnIfNothingIsEnforcingSecurity(ctx);
     ctx.logger.info('');
     ctx.logger.info('   API:       /api/v1/data/:object');
     ctx.logger.info('   Metadata:  /api/v1/meta/:type/:name');
     ctx.logger.info('   Discovery: /.well-known/objectstack');
     ctx.logger.info('─────────────────────────────────────────');
+  }
+
+  /**
+   * One loud line when the stack is enforcing no security at all (#4126,
+   * ADR-0076 D12: a fake that answers "allowed" is worse than an absent one,
+   * so the slots stay empty — but silence about unenforced RBAC/RLS/masking
+   * would be its own kind of fake).
+   *
+   * ## Why this asks for `security`, and why it asks in `start()` (#10036)
+   *
+   * This used to probe `security.permissions` / `security.rls` /
+   * `security.fieldMasker` from `init()`. Both halves of that were wrong, and
+   * they were wrong in the direction that is hardest to notice — silence read
+   * as health:
+   *
+   * - **Wrong signal.** Those three are `SecurityPlugin.init()` registrations.
+   *   The `ISecurityService` contract in `@objectstack/spec` names them
+   *   "implementation internals and deliberately NOT part of this contract";
+   *   the published `security` service is the contract. Their presence answers
+   *   "is SecurityPlugin loaded?", which is not the question this warning
+   *   asks. The two answers come apart at `start()`: it returns early — when
+   *   `objectql`/`metadata` will not resolve, and when the engine cannot take
+   *   middleware — BEFORE it publishes `security` and before it registers a
+   *   single enforcement middleware. A stack in that state holds all three
+   *   internal handles and enforces nothing, so the warning stayed silent in
+   *   the one state where its text is literally true. (The same presence
+   *   signal misled `plugin-hono-server`'s `/auth/me/permissions`, fixed in
+   *   #10035 by this same move — two consumers, two packages, one misread:
+   *   that is a property of the signal, not of either reader.)
+   *
+   * - **Wrong phase.** `security` is registered in `SecurityPlugin.start()`,
+   *   which this plugin runs in its OWN `start()`. Asking from `init()` would
+   *   find it absent on every stack, healthy ones included — so swapping only
+   *   the service name would have turned a false negative into a permanent
+   *   false positive. The question is answerable only after the child-start
+   *   loop has run.
+   *
+   * The internal handles keep exactly one honest use, and it is the one they
+   * can support: telling "SecurityPlugin was never loaded" apart from
+   * "SecurityPlugin loaded and then failed to start", so the operator is
+   * pointed at the right fix.
+   */
+  private warnIfNothingIsEnforcingSecurity(ctx: PluginContext): void {
+    if (this.options.services?.['security'] === false) return; // opted out
+
+    // An absent slot may throw OR resolve to undefined depending on the
+    // kernel; both mean "nothing is there".
+    const resolves = (name: string): boolean => {
+      try { return ctx.getService(name) != null; } catch { return false; }
+    };
+
+    if (resolves('security')) return; // enforcement middleware is installed
+
+    const loadedButNotEnforcing = ['security.permissions', 'security.rls', 'security.fieldMasker']
+      .some(resolves);
+
+    ctx.logger.warn(
+      loadedButNotEnforcing
+        ? '   ⚠ SecurityPlugin is LOADED but did not finish starting — it published no `security` '
+          + 'service, so no enforcement middleware was registered and RBAC, row-level security and '
+          + 'field masking are NOT enforced. Its own start() warning above says why (the objectql or '
+          + 'metadata service could not be resolved, or the engine does not accept middleware). The '
+          + '`security.permissions` / `security.rls` / `security.fieldMasker` handles ARE present — '
+          + 'they are registered in init() and mean the plugin loaded, never that anything is being '
+          + 'enforced.'
+        : '   ⚠ No `security` service — SecurityPlugin is not loaded, so RBAC, row-level security '
+          + 'and field masking are NOT enforced. The slots stay empty rather than being stubbed: a '
+          + 'fake that answers "allowed" is worse than an absent one. Install '
+          + '@objectstack/plugin-security to enforce them.',
+    );
   }
 
   /**

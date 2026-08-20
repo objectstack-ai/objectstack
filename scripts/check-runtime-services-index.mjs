@@ -97,13 +97,9 @@
 // and a page that declares no label at all is a finding: the tables that repeat
 // it cannot be checked without it.
 //
-// Deliberately NOT checked here: the label VOCABULARY. `stable` /
-// `experimental` are enumerated twice more (the "Stability Legend" table in
-// `index.mdx` and the "Stability Labels" bullets in `versioning.mdx`), and
-// nothing holds those two to each other or to the labels in use. Deriving a
-// vocabulary from one of them would make this gate the authority on which
-// labels exist -- a bigger claim than "the tables agree with the pages", and a
-// separate finding.
+// The label VOCABULARY -- which labels may exist at all -- is one level up
+// again, and is now checks 9 and 10 below (#9751). Until they landed, a page
+// declaring a label NOBODY defined was green here.
 //
 // ## What "derived" means here
 //
@@ -169,6 +165,66 @@
 //     landed. Which file is canonical for a surface is a judgement no scan can
 //     make. That the file EXISTS is not.
 
+// ## The seventh claim: which labels may EXIST at all (#9751)
+//
+// Check 7 holds each table to the page it repeats, so `stable` in the matrix
+// can no longer contradict `experimental` on the page. What none of checks 1-8
+// can see is a label NOBODY DEFINED. Measured on this tree before this limb
+// landed: `audit-service.mdx` declaring `- **Stability:** \`beta\``, with the
+// "Current Matrix" row and the `kernel/index.mdx` row faithfully repeating
+// `beta`, was GREEN -- while neither legend defined `beta` anywhere. Every
+// enumeration agreed with every other one, and the chapter published a maturity
+// promise its own reader cannot look up. The two legends could drift apart from
+// each other just as silently: a `beta` row added to the "Stability Legend" in
+// `index.mdx` ALONE was green too.
+//
+// `stable` / `experimental` was the whole vocabulary, written out by hand in
+// exactly two places that nothing compared -- the "Stability Legend" table in
+// `index.mdx` and the "Stability Labels" bullets in `versioning.mdx` -- with no
+// enum in code behind either of them.
+//
+// So the vocabulary now has ONE definition, `STABILITY_VOCABULARY` below. Both
+// legends are held to it by exact ordered EQUALITY, and every page's label is
+// drawn from it. Note which comparison does the work: equality, not membership.
+// A subset check ("every label a legend names is in the enum") passes one
+// legend quietly dropping a row the other keeps -- the two legends disagreeing
+// about what the chapter offers, which is the drift this card was filed for and
+// the leg easiest to leave out. Order is held for the same reason checks 3 and
+// 6 hold theirs: both legends are already in vocabulary order, so nothing is
+// re-sorted, and the convention is the only thing that tells the next author
+// WHERE a new row goes.
+//
+// The two TABLES are deliberately not checked against the vocabulary. They are
+// already held to the page (check 7), and the page is held to the vocabulary,
+// so a bad label reports ONCE, against the file where the label was actually
+// chosen. Two recognizers of one fact is how a gate starts contradicting
+// itself, and the author gets sent to the wrong file.
+//
+// Why a constant here rather than one of the two pages: deriving the vocabulary
+// from a legend makes whichever page an author happens to edit the authority on
+// which labels exist -- a docs edit silently widening a gate's accept set --
+// and it picks a winner between two legends nobody has ranked. A constant makes
+// extension a deliberate edit HERE, in the same PR that defines what the new
+// label promises on BOTH pages.
+//
+// Why NOT `PluginInterfaceSchema.stability` (`packages/spec/src/kernel/
+// plugin-capability.zod.ts`), the repo's only other `stability` enum: it is a
+// different surface -- the maturity a PLUGIN declares for a protocol interface
+// in its own `objectstack.config.ts` manifest (two live declarations today,
+// both `stable`), never read from or written to a docs page. Its four values
+// (`stable`/`beta`/`alpha`/`experimental`) would LEGALISE exactly the `beta`
+// page this check exists to reject, and would oblige both legends to publish
+// what `alpha` and `beta` promise about a runtime service API -- a product
+// decision this chapter has never made, made silently in a gate. If the two
+// vocabularies should ever become one, that is a ruling, not a refactor.
+//
+// Deliberately NOT checked: what a label MEANS. The two legends word the same
+// promise differently on purpose ("within a major version" against "within the
+// current major version"), and holding prose to prose would force one page's
+// wording onto the other for no gain a reader can feel. Also not checked: that
+// every defined label is USED by some page -- a legend documents what an author
+// may choose, not what they happened to choose.
+//
 import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -183,6 +239,13 @@ const PACKAGES_DIR = 'packages';
 const PAGE_SUFFIX = '-service.mdx';
 const META_SUFFIX = '-service';
 const VERSIONING_FILE = 'versioning.mdx';
+
+// The CLOSED vocabulary of stability labels (#9751). This is the one definition
+// in the repo: both legends are held to it and every page label is drawn from
+// it. Adding a label here is the deliberate act -- do it in the same PR that
+// says what the label promises, in BOTH legends. See "The seventh claim" above,
+// including why this is not derived from `PluginInterfaceSchema.stability`.
+export const STABILITY_VOCABULARY = Object.freeze(['stable', 'experimental']);
 
 /** Directories that never hold a production registration. */
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
@@ -290,15 +353,52 @@ export function readStabilityRows(text) {
 const SOURCE_HEADING_RE = /^##\s+Source of Truth\s*$/m;
 const SOURCE_ROW_RE = /^-\s+(.+?):\s*`([^`]+)`\s*$/gm;
 
+/** The text of one `## <heading>` section, or `null` when the heading is absent.
+ *  The section runs to the next `##` heading, or to the end of the file. */
+function sectionOf(text, headingRe) {
+  const at = text.search(headingRe);
+  if (at === -1) return null;
+  const rest = text.slice(at);
+  const next = rest.slice(1).search(/^##\s/m);
+  return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
 /** Canonical-source rows from the chapter index, in list order.
  *  `null` when the section is absent -- a caller must not read that as "no rows". */
 export function readSourceRows(indexText) {
-  const at = indexText.search(SOURCE_HEADING_RE);
-  if (at === -1) return null;
-  const rest = indexText.slice(at);
-  const next = rest.slice(1).search(/^##\s/m);
-  const section = next === -1 ? rest : rest.slice(0, next + 1);
+  const section = sectionOf(indexText, SOURCE_HEADING_RE);
+  if (section === null) return null;
   return [...section.matchAll(SOURCE_ROW_RE)].map((m) => ({ label: m[1].trim(), path: m[2].trim() }));
+}
+
+// The two LEGENDS that define the vocabulary (#9751). Both are read
+// section-scoped, for the same reason the canonical-source rows are: read whole,
+// each file's OTHER list has the same shape as the one wanted here. In
+// `versioning.mdx` the "Current Matrix" is a two-column table of backticked
+// cells exactly like the legend table; in `index.mdx` the chapter list and the
+// canonical-source rows are `- ` bullets exactly like the legend bullets. A
+// reader that walked either file whole would report the wrong list's contents as
+// the vocabulary -- a wrongly measured definition, which is worse than none.
+// Both directions are pinned in the self-test.
+const LEGEND_HEADING_RE = /^##\s+Stability Legend\s*$/m;
+const LABELS_HEADING_RE = /^##\s+Stability Labels\s*$/m;
+const LEGEND_ROW_RE = /^\|\s*`([A-Za-z0-9_-]+)`\s*\|/gm;
+const LABEL_BULLET_RE = /^-\s+`([A-Za-z0-9_-]+)`\s*:/gm;
+
+/** Labels defined by the "Stability Legend" table in the chapter index, in order.
+ *  `null` when the section is absent -- never read that as "defines nothing". */
+export function readLegendTable(indexText) {
+  const section = sectionOf(indexText, LEGEND_HEADING_RE);
+  if (section === null) return null;
+  return [...section.matchAll(LEGEND_ROW_RE)].map((m) => m[1]);
+}
+
+/** Labels defined by the "Stability Labels" bullets in versioning.mdx, in order.
+ *  `null` when the section is absent -- never read that as "defines nothing". */
+export function readLegendBullets(versioningText) {
+  const section = sectionOf(versioningText, LABELS_HEADING_RE);
+  if (section === null) return null;
+  return [...section.matchAll(LABEL_BULLET_RE)].map((m) => m[1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +407,7 @@ export function readSourceRows(indexText) {
 const missing = (expected, actual) => expected.filter((n) => !actual.includes(n));
 const extra = (expected, actual) => actual.filter((n) => !expected.includes(n));
 
-export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows }) {
+export function check({ pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows, legendTable, legendBullets }) {
   const findings = [];
   const add = (where, msg) => findings.push({ where, msg });
 
@@ -463,6 +563,44 @@ export function check({ pages, metaOrder, chapterList, kernelTable, registeredSl
     }
   }
 
+  // 9. Both legends define EXACTLY the vocabulary, in its order (#9751).
+  //    EQUALITY, not membership, and that is the whole point: a subset check
+  //    passes one legend dropping a row the other keeps, which is the two
+  //    legends disagreeing about what labels the chapter offers -- green today,
+  //    and indefinitely. Neither page is the authority; both answer to the
+  //    constant, so no legend can widen the vocabulary by being edited.
+  const vocabulary = [...STABILITY_VOCABULARY];
+  for (const [where, what, defined] of [
+    [`${CHAPTER_DIR}/index.mdx`, '"Stability Legend"', legendTable],
+    [`${CHAPTER_DIR}/${VERSIONING_FILE}`, '"Stability Labels"', legendBullets],
+  ]) {
+    if (!defined) continue;
+    if (defined.join() !== vocabulary.join()) {
+      add(
+        where,
+        `${what} defines ${JSON.stringify(defined)}, but the stability vocabulary is ${JSON.stringify(vocabulary)}`
+          + ` -- both legends must define exactly it, in that order. To add a label, extend STABILITY_VOCABULARY`
+          + ` in scripts/check-runtime-services-index.mjs in the same change that says what it promises on BOTH pages.`,
+      );
+    }
+  }
+
+  // 10. Every page draws its label FROM the vocabulary (#9751). Reported against
+  //     the PAGE: that is where the label was chosen, and check 7 already holds
+  //     both tables to the page, so the label reaches the tables only through
+  //     here. A page with no bullet at all is check 7's finding, not this one.
+  for (const p of pages) {
+    if (!p.stability) continue;
+    if (!STABILITY_VOCABULARY.includes(p.stability)) {
+      add(
+        `${CHAPTER_DIR}/${p.file}`,
+        `declares stability \`${p.stability}\`, which no legend defines -- the vocabulary is`
+          + ` ${vocabulary.map((l) => `\`${l}\``).join(', ')}. A label a reader cannot look up is a maturity`
+          + ` promise with no meaning behind it.`,
+      );
+    }
+  }
+
   return findings;
 }
 
@@ -472,7 +610,8 @@ export function summarise({ pages, chapterList, kernelTable, registeredSlots, st
     : '';
   const matrix = stabilityMatrix ? `, ${stabilityMatrix.length} stability-matrix row(s)` : '';
   const sources = sourceRows ? `, ${sourceRows.length} canonical-source row(s)` : '';
-  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${matrix}${sources}${slots}`;
+  const vocab = `, ${STABILITY_VOCABULARY.length} defined stability label(s) (${STABILITY_VOCABULARY.join(', ')})`;
+  return `${pages.length} chapter page(s) vs meta.json "pages", ${chapterList.length} chapter-list bullet(s) and ${kernelTable.length} kernel/index.mdx table row(s)${matrix}${sources}${slots}${vocab}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +630,8 @@ function run(root) {
   if (!existsSync(versioningPath)) {
     throw new Error(`${CHAPTER_DIR}/${VERSIONING_FILE} not found -- its stability matrix is one of the enumerations this gate holds; refusing to report OK without it`);
   }
-  const stabilityMatrix = readStabilityRows(readFileSync(versioningPath, 'utf8'));
+  const versioningText = readFileSync(versioningPath, 'utf8');
+  const stabilityMatrix = readStabilityRows(versioningText);
   const kernelStability = readStabilityRows(kernelText);
   const rawSourceRows = readSourceRows(indexText);
   // Same refusal as the empty chapter and the missing versioning.mdx: the
@@ -504,7 +644,23 @@ function run(root) {
     );
   }
   const sourceRows = rawSourceRows.map((r) => ({ ...r, exists: existsSync(join(root, r.path)) }));
-  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows };
+  // Same refusal again, for the two legends (#9751): they are the definition
+  // this gate now holds everything else to, and an ABSENT legend read as "the
+  // vocabulary is empty" would turn every page label into a finding while the
+  // one file that could have answered went unnoticed. Missing is not empty.
+  const legendTable = readLegendTable(indexText);
+  const legendBullets = readLegendBullets(versioningText);
+  if (legendTable === null || legendTable.length === 0) {
+    throw new Error(
+      `${CHAPTER_DIR}/index.mdx has no "Stability Legend" rows -- that legend is one of the two definitions of the stability vocabulary this gate holds; refusing to report OK without it`,
+    );
+  }
+  if (legendBullets === null || legendBullets.length === 0) {
+    throw new Error(
+      `${CHAPTER_DIR}/${VERSIONING_FILE} has no "Stability Labels" bullets -- that legend is one of the two definitions of the stability vocabulary this gate holds; refusing to report OK without it`,
+    );
+  }
+  const input = { pages, metaOrder, chapterList, kernelTable, registeredSlots, stabilityMatrix, kernelStability, sourceRows, legendTable, legendBullets };
   return { findings: check(input), summary: summarise(input) };
 }
 
@@ -528,9 +684,13 @@ function main() {
   console.error('  labelled with the accessor, and its path a file that exists. A row for a service this chapter');
   console.error('  has no page for is the drift that card was filed for -- drop the row, or add the page and its');
   console.error('  five other enumerations. Row ORDER is deliberately not held; the header says why.');
+    console.error('  A "Stability Legend" / "Stability Labels" finding is the label VOCABULARY (#9751): both legends');
+    console.error('  define exactly STABILITY_VOCABULARY, in that order, and every page picks its label from it. To');
+    console.error('  add a label, extend that constant in this script in the same change that says what the label');
+    console.error('  promises on BOTH pages -- never by editing one legend alone.');
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree, every declared slot is really registered, every published stability label matches its page, and every canonical-source row names a page whose file exists.`);
+  console.log(`✓ check-runtime-services-index: ${summary} -- all enumerations agree, every declared slot is really registered, every published stability label matches its page and is one the two legends define, and every canonical-source row names a page whose file exists.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +748,11 @@ function selfTest() {
       versioning = true,
       // #9629: the Source-of-Truth canonical-source rows.
       sourceRows = defaultSourceRows,
+      // #9751: the two LEGENDS that define the vocabulary. `null` omits the
+      // section entirely, so the refusal-over-a-missing-definition can be
+      // measured rather than assumed.
+      legend = [...STABILITY_VOCABULARY],
+      labels = [...STABILITY_VOCABULARY],
     } = {}) => {
       for (const f of readdirSync(chapter)) rmSync(join(chapter, f), { force: true });
       for (const n of pages) {
@@ -600,7 +765,14 @@ function selfTest() {
       if (versioning) {
         writeFileSync(
           join(chapter, VERSIONING_FILE),
-          `---\ntitle: v\n---\n\n## Stability Labels\n\n- \`stable\`: x\n- \`experimental\`: y\n\n## Current Matrix\n\n| Service | Stability |\n|:--|:--|\n${matrix.map((n) => `| \`services.${n}\` | \`${matrixLabel(n)}\` |`).join('\n')}\n`,
+          `---\ntitle: v\n---\n`
+            + (labels === null ? '' : `\n## Stability Labels\n\n${labels.map((l) => `- \`${l}\`: what it promises.`).join('\n')}\n`)
+            // A DECOY bullet, outside the labels section on purpose: it has the
+            // exact shape of a legend definition. If the reader ever stops being
+            // section-scoped this is what it picks up, and the assertion below
+            // is what notices.
+            + `\n## Breaking-Change Tracking\n\n1. Update the page.\n- \`ghost\`: not a label, and not in the section above.\n`
+            + `\n## Current Matrix\n\n| Service | Stability |\n|:--|:--|\n${matrix.map((n) => `| \`services.${n}\` | \`${matrixLabel(n)}\` |`).join('\n')}\n`,
         );
       }
       writeFileSync(join(chapter, 'meta.json'), JSON.stringify({ pages: ['index', ...meta.map((n) => `${n}${META_SUFFIX}`), 'examples'] }));
@@ -611,9 +783,13 @@ function selfTest() {
       writeFileSync(
         join(chapter, 'index.mdx'),
         `# x\n\n${list.map((n) => `- \`services.${n}\``).join('\n')}\n\n`
+          + (legend === null ? '' : `## Stability Legend\n\n| Level | Meaning |\n|:--|:--|\n${legend.map((l) => `| \`${l}\` | what it promises |`).join('\n')}\n\n`)
           + `## Source of Truth\n\nEach page links the canonical TypeScript source used to derive signatures.\n\n`
           + `${sourceRows.map((r) => `- ${r.label}: \`${r.path}\``).join('\n')}\n\n`
-          + `<Callout type="warn" title="Not this">\nA second shape shares the word: \`SettingsAuditSink\` — canonical source\n\`${REAL_PATH}\` — is constructor-injected, never registered. See \`services.audit\`: the full contrast.\n</Callout>\n`,
+          + `<Callout type="warn" title="Not this">\nA second shape shares the word: \`SettingsAuditSink\` — canonical source\n\`${REAL_PATH}\` — is constructor-injected, never registered. See \`services.audit\`: the full contrast.\n</Callout>\n`
+          // A DECOY legend row, outside the legend section on purpose -- same
+          // shape as a real one. Only the section scoping keeps it out.
+          + `\n## Other\n\n| Level | Meaning |\n|:--|:--|\n| \`ghost\` | not a label, and not in the legend |\n`,
       );
       writeFileSync(join(dir, KERNEL_INDEX), `# k\n\n${table.map((n) => `| [\`services.${n}\`](/docs/kernel/runtime-services/${hrefFor(n)}) | ${kernelLabel(n)} | d |`).join('\n')}\n`);
     };
@@ -736,7 +912,7 @@ function selfTest() {
     );
     assert(
       readStabilityRows(readFileSync(join(chapter, 'index.mdx'), 'utf8')).length === 0,
-      'the chapter index\'s prose lists (chapter bullets and canonical-source rows alike) are never read as stability rows',
+      'the chapter index\'s other lists -- chapter bullets, canonical-source rows and the Stability Legend table alike -- are never read as stability rows',
     );
     // The trailing callout lives inside the section; its prose is not a row.
     assert(
@@ -781,6 +957,93 @@ function selfTest() {
     try { findingsFor({ sourceRows: [] }); } catch { threwSources = true; }
     assert(threwSources, 'a chapter index with no Source-of-Truth rows is rejected, never reported OK over a list that is not there');
 
+
+    // ── Checks 9-10: the label VOCABULARY (#9751) ──────────────────────────
+    // The hole itself, reproduced: a page declaring a label NOBODY defined,
+    // with both tables faithfully repeating it. Check 7 is silent by
+    // construction here -- the tables agree with the page -- so this is the
+    // shape that was green before this limb existed.
+    const undefinedLabel = findingsFor({ stability: (n) => (n === 'sms' ? 'beta' : 'stable') });
+    assert(
+      undefinedLabel.some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('`beta`')),
+      `a page declaring a label no legend defines is caught -- got ${JSON.stringify(undefinedLabel)}`,
+    );
+    assert(
+      undefinedLabel.some((f) => f.msg.includes('`stable`') && f.msg.includes('`experimental`')),
+      'the finding names the ALLOWED SET, not just the rejection -- the author has to know what to pick instead',
+    );
+    // ...and reported against the PAGE alone. The tables repeat the page
+    // faithfully, so a finding against either of them would send the author to
+    // change a row that is not wrong.
+    assert(
+      undefinedLabel.every((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`)),
+      `an out-of-vocabulary label is reported once, against the page that chose it -- got ${JSON.stringify(undefinedLabel.map((f) => f.where))}`,
+    );
+
+    // The other side of the same rule: every label IN the vocabulary is
+    // accepted, including the one only a single page uses. A check that went
+    // red here would be enforcing uniformity, not a vocabulary.
+    for (const label of STABILITY_VOCABULARY) {
+      assert(
+        findingsFor({ stability: (n) => (n === 'sms' ? label : 'stable') }).length === 0,
+        `a page labelled \`${label}\` is silent -- every defined label is really accepted`,
+      );
+    }
+
+    // THE LEGENDS DRIFTING APART FROM EACH OTHER. This is the card's actual
+    // subject and the leg a membership-only check silently passes: every label
+    // still named is in the vocabulary, and the two legends no longer offer the
+    // same set. Equality is what catches it.
+    const drift = findingsFor({ labels: ['stable'] });
+    assert(
+      ['stable'].every((l) => STABILITY_VOCABULARY.includes(l)),
+      'the drifting legend names only labels that ARE in the vocabulary -- otherwise this measures membership, not drift',
+    );
+    assert(
+      drift.some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('"Stability Labels"') && f.msg.includes('experimental')),
+      `one legend dropping a label the other keeps is caught, naming both sets -- got ${JSON.stringify(drift)}`,
+    );
+    const driftIndex = findingsFor({ legend: ['stable'] });
+    assert(
+      driftIndex.some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('"Stability Legend"')),
+      `the drift is caught in the other direction too -- got ${JSON.stringify(driftIndex)}`,
+    );
+
+    // A legend widening the vocabulary on its own: the docs edit that would
+    // otherwise make a page-level `beta` legal without anyone deciding.
+    assert(
+      findingsFor({ legend: [...STABILITY_VOCABULARY, 'beta'] })
+        .some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('beta')),
+      'a legend defining a label the vocabulary does not is caught -- a page cannot be granted a new label by editing one page',
+    );
+    // Order, for the reason checks 3 and 6 hold theirs: membership alone passes.
+    assert(
+      findingsFor({ legend: [...STABILITY_VOCABULARY].reverse() })
+        .some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('"Stability Legend"')),
+      'a legend listing the right labels in the wrong order is caught (membership alone would pass)',
+    );
+
+    // Section scoping, measured rather than assumed: each file carries a DECOY
+    // with the exact shape of a legend entry, outside the legend section. A
+    // reader that walked either file whole would report `ghost` as part of the
+    // vocabulary -- a wrongly measured definition, worse than none at all.
+    writeTree();
+    const idxText = readFileSync(join(chapter, 'index.mdx'), 'utf8');
+    const verText = readFileSync(join(chapter, VERSIONING_FILE), 'utf8');
+    assert(idxText.includes('| `ghost` |') && verText.includes('- `ghost`:'), 'the decoys really are in the fixture (or the two assertions below measure nothing)');
+    assert(readLegendTable(idxText).join() === STABILITY_VOCABULARY.join(), `the legend table reads exactly the legend section -- got ${JSON.stringify(readLegendTable(idxText))}`);
+    assert(readLegendBullets(verText).join() === STABILITY_VOCABULARY.join(), `the legend bullets read exactly the labels section -- got ${JSON.stringify(readLegendBullets(verText))}`);
+
+    // Silence is not a pass: a legend that is not there is refused, exactly like
+    // the empty chapter, the missing versioning.mdx and the empty
+    // Source-of-Truth list. An absent definition read as "defines nothing" would
+    // turn every page label into a finding and never name the real cause.
+    for (const [what, opts] of [['index.mdx "Stability Legend"', { legend: null }], [`${VERSIONING_FILE} "Stability Labels"`, { labels: null }]]) {
+      let threwLegend = false;
+      try { findingsFor(opts); } catch { threwLegend = true; }
+      assert(threwLegend, `a chapter with no ${what} is rejected, never reported OK over a vocabulary that is not defined`);
+    }
+
     // ── Refuses to report OK over nothing ───────────────────────────────────
     let threwVersioning = false;
     try { findingsFor({ versioning: false }); } catch { threwVersioning = true; }
@@ -798,7 +1061,7 @@ function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
+  console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), label VOCABULARY (undefined label named with its allowed set and reported only against the page, every defined label accepted, the two legends drifting apart from EACH OTHER while every label they name is still in the enum, a legend widening it alone, legend order, section scoping past a decoy in each file, and a missing legend refused), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
 }
 
 if (process.argv.includes('--self-test')) selfTest();

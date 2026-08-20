@@ -27,6 +27,68 @@ import tsParser from '@typescript-eslint/parser';
 // rules this config never registers ("Definition for rule … was not found").
 // Don't add such a script back — scope a local run from the root instead:
 // `pnpm exec eslint --no-inline-config packages/verify/src`.
+//
+// ## Why the root `lint` script runs eslint through `node --stack-size=4000`
+//
+// `@typescript-eslint/parser` builds the ESTree AST by recursion, so the stack
+// it needs is proportional to the AST's DEPTH — not to file size. One file in
+// this repo sits past V8's default ceiling: `packages/spec/src/migrations/
+// registry.ts`, whose `step17.rationale` is a single `+` concatenation of 970
+// string fragments, giving an AST depth of 976. Measured on Node 22.22.2:
+//
+//   • that file needs a minimum `--stack-size` of 1085 KB to parse;
+//   • V8's default main-thread stack is 984 KB.
+//
+// So it is already ~10% OVER budget: parsed on its own it fails every time.
+//
+// What makes it look "flaky" (#10030: success → failure → success on identical
+// bytes) is that the verdict depends on the OTHER files in the same eslint
+// invocation, not on this file. Measured here at the default stack, same bytes,
+// same command: linting `packages/spec/src/migrations` (205 files) REDS with
+// the parse error, while `packages/spec/src` (965 files) and `packages/spec`
+// (1063 files) both go green with registry.ts reporting zero messages — it is
+// linted in all three, and only the narrow scope crashes. So the trigger is a
+// property of the run, not of the content, which is why a re-run re-rolls it
+// and can lose twice. (Not JIT tiering, which was the obvious guess and is
+// falsified: the minimum stack is 1085 KB warm and 1084 KB under `--no-opt`,
+// so optimized and interpreted frames cost the same here.) The failure is
+// `registry.ts  0:0  error  Parsing error: Maximum call stack size exceeded`,
+// on PRs that never touched `packages/spec`, and `Lint & Repo Gates` is a
+// REQUIRED context — so each strike is an unbounded hold on an innocent PR.
+//
+// Raising the parser's headroom changes NO rule and NO accept/reject semantics:
+// it lets the parser finish where it currently crashes. It is the opposite of
+// an `ignores` entry — the file is now actually linted for the first time.
+//
+// Why 4000 KB specifically, both bounds measured rather than guessed:
+//   • need is 1085 KB, and each further `+ '…'` fragment appended to that
+//     rationale costs ~1.10 KB, so 4000 KB absorbs ~2650 more fragments —
+//     roughly 3.7x the current chain;
+//   • the hard ceiling is the OS thread stack (`ulimit -s`, 8192 KB on
+//     ubuntu-latest and locally). `--stack-size` at or above it makes V8 run
+//     off the real stack and SIGSEGV instead of throwing: measured clean
+//     `RangeError` up to 8000, `rc=139` at 8192 and above. 4000 keeps a 2x
+//     margin under that.
+//   • nothing else in the repo is close: across all 4659 linted files the
+//     runner-up AST depth is 71 (`entries/semantic/18.driver-sql-unresolvable-
+//     where-column-refused.ts`). Depth does not track size — the two largest
+//     linted files, 236 KB and 183 KB, sit at depth 44 and 40.
+//
+// ⚠️ The flag CANNOT be moved to `NODE_OPTIONS`: Node rejects it outright
+// (`--stack-size= is not allowed in NODE_OPTIONS`). It has to be an argv flag
+// on the `node` process that runs eslint, which is why this script spells out
+// `node_modules/eslint/bin/eslint.js` instead of the `eslint` bin shim — the
+// shim is a shell script, so `node` cannot execute it. Keeping the flag in the
+// root `lint` script (rather than in `.github/workflows/lint.yml`) is what
+// keeps local and CI identical: the workflow step is `pnpm lint`.
+//
+// ⚠️ A local run scoped past this file — `pnpm exec eslint …` on a path that
+// includes `packages/spec/src/migrations/` — bypasses this script and will
+// still hit the ceiling. Prefix it with `node --stack-size=4000` the same way.
+//
+// The permanent fix is to stop building that string with a 970-deep `+` chain
+// (a template literal or `.join('')` is depth ~4); it is a `packages/spec`
+// content change and is tracked separately.
 
 const SUBPATH_NAMES = [
   'Data', 'UI', 'System', 'AI', 'API', 'Automation',
