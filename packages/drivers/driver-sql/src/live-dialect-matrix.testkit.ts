@@ -43,6 +43,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { SqlDriver, SqlDriverConfig } from './sql-driver.js';
 
 /** The dialects `driver-sql` speaks that the matrices are run across. */
@@ -91,6 +94,179 @@ const MYSQL_URL = process.env.OS_TEST_MYSQL_URL;
  */
 export const EXPECT_LIVE_DIALECTS = process.env.OS_EXPECT_LIVE_DIALECT_MATRIX === '1';
 
+// ── Per-FILE schema isolation (#9350) ────────────────────────────────────────
+//
+// Every live cell used to hand back the same connection string, so all ~14
+// live-matrix files in this package shared ONE conformance database: one
+// `public` schema on Postgres, one `conformance` database on MySQL. Measured on
+// a real Postgres 16 before this change, a run of the live-PG files left exactly
+// one schema behind — `public`, holding `_objectstack_sequences`, the driver's
+// internal auto-number counter table that EVERY file's autonumber path
+// lazily creates (`hasTable` → `createTable`, a check-then-act pair) and writes
+// rows into. Vitest runs those files in parallel workers, so that shared table
+// is created, migrated (`_objectstack_sequences__rebuild`, a drop+rename) and
+// written concurrently by files that know nothing about each other.
+//
+// The isolation is per FILE rather than per suite or per worker because a file
+// is the unit vitest parallelises: two suites in one file never run at the same
+// time, two files can always be running at once, and a worker is recycled
+// across files so its identity outlives the isolation it would provide.
+//
+// ## The name derives from the FILE, and cannot be given a shared value
+//
+// {@link currentLiveSchema} reads vitest's own `testPath` — the caller passes
+// nothing, so there is no parameter a copy-paste can carry over from the file
+// it was copied from, and no constant a consumer can point two files at. That
+// is the property `live-dialect-matrix.isolation.test.ts` asserts, and it is
+// asserted structurally: distinct file paths map to distinct names, over the
+// real list of live files in this package.
+//
+// ⛔ Note what this is NOT: no test is skipped, quarantined, retried or given a
+// larger budget, and no assertion changed. Isolation removes contention; it
+// does not accommodate it.
+
+/** Prefix every per-file schema/database carries, so a leftover is identifiable. */
+export const LIVE_SCHEMA_PREFIX = 'os_lv_';
+
+/**
+ * The per-file schema (Postgres) / database (MySQL — the same concept there)
+ * for one test file, named by its repo-relative path.
+ *
+ * Pure and deterministic, so the isolation test can assert distinctness over the
+ * real file list without a server. The shape is
+ * `os_lv_<slug>_<12 hex of sha256(path)>`:
+ *
+ *  - the SLUG is readable, so an operator looking at `\dn` or `show databases`
+ *    can tell which file owns a leftover;
+ *  - the HASH is what carries uniqueness. The slug is truncated to keep the
+ *    whole name inside the SHORTER of the two dialect limits (Postgres
+ *    truncates an identifier over 63 bytes SILENTLY, which would turn two long
+ *    file names back into one shared schema — the exact failure this removes),
+ *    and a truncated slug is not injective. The hash is taken over the FULL
+ *    path, so two files that truncate to the same slug still differ.
+ *
+ * `[a-z0-9_]` only, asserted below rather than assumed: the name is
+ * interpolated into DDL, and a name that can only be those characters cannot
+ * carry a quote out of a file name.
+ */
+export function liveSchemaNameFor(testFileKey: string): string {
+  const key = testFileKey.replace(/\\/g, '/');
+  const slug = basename(key)
+    .replace(/\.test\.tsx?$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 34);
+  const hash = createHash('sha256').update(key).digest('hex').slice(0, 12);
+  const name = `${LIVE_SCHEMA_PREFIX}${slug}_${hash}`;
+  if (!/^[a-z][a-z0-9_]*$/.test(name) || name.length > 63) {
+    throw new Error(
+      `live-dialect isolation: derived an unusable schema name ${JSON.stringify(name)} from ` +
+        `${JSON.stringify(testFileKey)} — it must match /^[a-z][a-z0-9_]*$/ and fit Postgres' ` +
+        `63-byte identifier limit.`,
+    );
+  }
+  return name;
+}
+
+/** Memoised so the walk below runs once per file, not once per connection. */
+const REPO_RELATIVE_CACHE = new Map<string, string>();
+
+/**
+ * An absolute test path reduced to something stable across machines: the path
+ * relative to the workspace root (the nearest ancestor holding
+ * `pnpm-workspace.yaml`).
+ *
+ * The absolute path would work for isolation — it differs per file either way —
+ * but it also differs per checkout, so the same file would get a different
+ * schema in a worktree than in CI and the isolation test could not pin a name.
+ */
+function repoRelativeTestPath(absolutePath: string): string {
+  const cached = REPO_RELATIVE_CACHE.get(absolutePath);
+  if (cached !== undefined) return cached;
+  let dir = dirname(absolutePath);
+  let relative = basename(absolutePath);
+  for (;;) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) {
+      relative = absolutePath.slice(dir.length + 1);
+      break;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached the filesystem root: fall back to the basename
+    dir = parent;
+  }
+  REPO_RELATIVE_CACHE.set(absolutePath, relative);
+  return relative;
+}
+
+/**
+ * The schema/database the CURRENT test file owns.
+ *
+ * Takes no argument on purpose. A parameter is the one thing a consumer could
+ * get wrong — two files given the same literal are back to sharing a database,
+ * and nothing about the call site would look wrong. `testPath` is vitest's own
+ * per-file fact, measured available at module scope as well as inside a test
+ * (vitest 4.1), so the derivation cannot be pointed anywhere else.
+ *
+ * Absent `testPath` is a hard error rather than a fallback: the fallback would
+ * be a shared name, which is the defect.
+ */
+export function currentLiveSchema(): string {
+  const testPath = expect.getState().testPath;
+  if (!testPath) {
+    throw new Error(
+      'live-dialect isolation (#9350): vitest reported no testPath, so this live connection ' +
+        'cannot be given a per-file schema and would fall back to sharing one database with ' +
+        'every other live file — the contention this removed. Build live connections from a ' +
+        'test file, through DIALECT_CELLS[].config().',
+    );
+  }
+  return liveSchemaNameFor(repoRelativeTestPath(testPath));
+}
+
+/**
+ * Postgres: create the file's schema and point the session at it.
+ *
+ * Both halves run on EVERY pooled connection because a pool opens connections
+ * lazily and forever — a second connection created an hour into the run must
+ * land in the same schema as the first. `if not exists` makes the repeat free
+ * and makes two connections of the same file racing each other a no-op.
+ *
+ * `searchPath` is ALSO set in the knex config (below) so knex's own schema
+ * builder qualifies its DDL; knex applies that before this hook runs, against a
+ * schema that may not exist yet — which Postgres permits, since `search_path`
+ * entries are resolved per statement, not at `SET` time.
+ */
+function pgAfterCreate(schema: string) {
+  return (conn: any, done: (err: unknown, conn: unknown) => void): void => {
+    conn.query(`create schema if not exists "${schema}"`, (err: unknown) => {
+      if (err) return done(err, conn);
+      conn.query(`set search_path to "${schema}"`, (err2: unknown) => done(err2, conn));
+    });
+  };
+}
+
+/**
+ * MySQL: create the file's database and switch the session into it.
+ *
+ * MySQL has no schema-inside-a-database, so a database IS the unit of
+ * isolation — `create database` is the same cheap dictionary write `create
+ * schema` is on Postgres, not a template copy.
+ *
+ * `use` rather than rewriting the connection URL, so the URL a runner
+ * provisioned stays the thing we connect to and only the SESSION moves. It also
+ * keeps `database()` — which several suites compare `information_schema.columns`
+ * against — reporting the isolated database.
+ */
+function mysqlAfterCreate(schema: string) {
+  return (conn: any, done: (err: unknown, conn: unknown) => void): void => {
+    conn.query(`create database if not exists \`${schema}\``, (err: unknown) => {
+      if (err) return done(err, conn);
+      conn.query(`use \`${schema}\``, (err2: unknown) => done(err2, conn));
+    });
+  };
+}
+
 /**
  * Every cell of the driver axis, available or not — a consumer iterates the
  * whole list so an unprovisioned dialect is *reported*, not omitted.
@@ -117,7 +293,17 @@ export const DIALECT_CELLS: readonly DialectCell[] = [
     available: !!PG_URL,
     live: true,
     hasLegacyStorageForm: false,
-    config: () => ({ client: 'pg', connection: PG_URL }),
+    config: () => {
+      const schema = currentLiveSchema();
+      return {
+        client: 'pg',
+        connection: PG_URL,
+        // knex qualifies its own DDL with this; `pgAfterCreate` creates the
+        // schema and re-points the session, so raw SQL in a suite lands there too.
+        searchPath: [schema],
+        pool: { afterCreate: pgAfterCreate(schema) },
+      };
+    },
   },
   {
     id: 'mysql',
@@ -127,12 +313,44 @@ export const DIALECT_CELLS: readonly DialectCell[] = [
     available: !!MYSQL_URL,
     live: true,
     hasLegacyStorageForm: false,
-    config: () => ({ client: 'mysql2', connection: MYSQL_URL }),
+    config: () => {
+      const schema = currentLiveSchema();
+      return {
+        client: 'mysql2',
+        connection: MYSQL_URL,
+        pool: { afterCreate: mysqlAfterCreate(schema) },
+      };
+    },
   },
 ] as const;
 
 /** The live cells only — the ones the server-timezone axis applies to. */
 export const LIVE_DIALECT_CELLS = DIALECT_CELLS.filter((c) => c.live);
+
+/**
+ * One cell by id — the entry point for a suite that is about ONE dialect and so
+ * has no matrix to iterate (`sql-driver-datetime-mysql-storage.test.ts` is only
+ * ever about MySQL).
+ *
+ * It exists so those suites stop reading `process.env.OS_TEST_*_URL` and
+ * building `{ client, connection }` by hand. That hand-rolled pair is what put
+ * every one of them in the SAME database: the env var is one value for the whole
+ * process, and a config built from it carries no per-file isolation. Going
+ * through the cell means `config()` — and therefore {@link currentLiveSchema} —
+ * is the only way to reach a live server, which is what
+ * `live-dialect-matrix.isolation.test.ts` enforces for this package.
+ */
+export function dialectCell(id: DialectId): DialectCell {
+  const cell = DIALECT_CELLS.find((c) => c.id === id);
+  if (!cell) throw new Error(`no dialect cell for ${id}`);
+  return cell;
+}
+
+/** The MySQL cell. `.url` is the provisioned URL (or `undefined`) for `skipIf`. */
+export const MYSQL_CELL = dialectCell('mysql');
+
+/** The Postgres cell. `.url` is the provisioned URL (or `undefined`) for `skipIf`. */
+export const PG_CELL = dialectCell('pg');
 
 /**
  * Declare a cell nobody provisioned: REPORTED, never omitted.
