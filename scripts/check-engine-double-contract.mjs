@@ -534,6 +534,53 @@ function unwrapCallImpl(init) {
 }
 
 /**
+ * The implementation behind a DEFAULTED initializer, or null (#9877).
+ *
+ * `delete: overrides.delete ?? vi.fn(async (o, arg) => …)` is a
+ * BinaryExpression, which is neither of the two shapes `fnInitializer` knew, so
+ * `implOf` answered null, `consider()` returned before `isEngineVerbShape` was
+ * ever asked, and the double left the population with no verdict recorded --
+ * not baselined, not exempt, not pinned. Absent. `rest-batch-endpoint.test.ts`
+ * held a live unguarded engine `delete` double behind exactly this spelling and
+ * the gate reddens on it the moment it can read it, so this is not cosmetic.
+ *
+ * ## Why the census above could not have found this, which is the real lesson
+ *
+ * That census enumerates "every delete/update member whose initializer is a
+ * CallExpression". A defaulted initializer is a BinaryExpression, so it was
+ * never in the census POPULATION -- the census is scoped to the shape the
+ * recognizer already reads, and a census of what the matcher already matches
+ * cannot report the matcher's blind spots however carefully it is re-run. The
+ * two spellings it lists as "measured at ZERO" are both CallExpression
+ * spellings for the same reason. `--census` fixes the population, not the
+ * arithmetic: it now buckets EVERY initializer by kind first, so a spelling
+ * outside the recognizer shows up as its own row rather than as silence.
+ *
+ * ## Which side, and why both are read
+ *
+ * `a ?? b` and `a || b` reach the subject as `a` when `a` is present and as `b`
+ * otherwise, so BOTH sides are implementations the double may run. The default
+ * is read first because it is the one this file itself authored and the only
+ * one that is statically knowable -- the left side of a `??` default is by
+ * construction the maybe-absent, caller-supplied one, and where it IS statically
+ * a function (`f ?? g`, both literals) reading the left as a fallback keeps the
+ * spelling from going dark again.
+ *
+ * Deliberately NOT widened, and this one is a judgement rather than a count:
+ * `cond ? a : b`. A conditional's arms are selected by a test this gate cannot
+ * evaluate, so "the implementation" is not a property of the initializer at all
+ * -- unlike `??`/`||`, where the fallback is unconditionally reachable. Measured
+ * at ZERO occurrences on this corpus (`--census`, ConditionalExpression row);
+ * re-run that before widening it, not the number in this sentence.
+ */
+function unwrapDefaultedImpl(init) {
+  if (!ts.isBinaryExpression(init)) return null;
+  const op = init.operatorToken.kind;
+  if (op !== ts.SyntaxKind.QuestionQuestionToken && op !== ts.SyntaxKind.BarBarToken) return null;
+  return fnInitializer(init.right) ?? fnInitializer(init.left);
+}
+
+/**
  * One initializer reading, shared by BOTH initializer spellings below.
  *
  * Shared on purpose: the object-literal (`PropertyAssignment`) and class-field
@@ -545,6 +592,8 @@ function unwrapCallImpl(init) {
 function fnInitializer(init) {
   if (!init) return null;
   if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
+  const defaulted = unwrapDefaultedImpl(init);
+  if (defaulted) return defaulted;
   return unwrapCallImpl(init);
 }
 
@@ -2518,6 +2567,49 @@ const engine = {
   expect('a mock resolving to a VALUE is not an implementation',
     scanSource('v.test.ts', viFake('vi.fn().mockResolvedValue(true)')).length === 0);
 
+  // ── The DEFAULTED spelling (#9877), driven arm by arm.
+  //
+  // `delete: overrides.delete ?? vi.fn(fn)` is a BinaryExpression, so `implOf`
+  // answered null and the double was in NEITHER half of the ledger — absent,
+  // which reads as clean, while `rest-batch-endpoint.test.ts` held a live
+  // unguarded engine delete behind it. Same discipline as the #8639 block
+  // above: one fixture per arm, because an unfixtured arm has already been
+  // measured in this file to be worth nothing.
+  d = scanSource('v.test.ts', viFake('overrides.delete ?? vi.fn(async (o: string, opts?: any) => ({ ok: true }))'));
+  expect('#9877 — a `??`-defaulted engine delete is in scope', d.length === 1 && d[0].pinned === false);
+
+  d = scanSource('v.test.ts', viFake('overrides.delete || vi.fn(async (o: string, opts?: any) => ({ ok: true }))'));
+  expect('#9877 — the `||` spelling of the same default is in scope too', d.length === 1);
+
+  d = scanSource('v.test.ts', IMPORT + viFake(
+    'overrides.delete ?? vi.fn(async (o: string, opts?: any) => { assertEngineDeleteDispatch(opts); return 1; })'));
+  expect('#9877 — a defaulted delete whose default calls the predicate is PINNED',
+    d.length === 1 && d[0].pinned === true);
+
+  // The LEFT arm. `a ?? b` runs `a` whenever `a` is present, so a function on
+  // the left is an implementation this double may run and reading only the
+  // default would go blind to it. Without this fixture that fallback is
+  // untested and could be deleted with the self-test still green.
+  d = scanSource('v.test.ts', viFake('vi.fn(async (o: string, opts?: any) => ({ ok: true })) ?? overrides.delete'));
+  expect('#9877 — a function on the LEFT of the default is read as well', d.length === 1);
+
+  // Both arms unreadable: still absent, and correctly so — there is no function
+  // anywhere in the initializer for `isEngineVerbShape` to judge.
+  expect('#9877 — a default with no function on either side is still not an implementation',
+    scanSource('v.test.ts', viFake('overrides.delete ?? base.delete')).length === 0);
+
+  // The DRIVER veto must still decide at this spelling, or the widening admits
+  // driver doubles the shape test exists to keep out (#5480's measured harm was
+  // 19 in one file).
+  expect('#9877 — a DRIVER double at the defaulted spelling is still vetoed',
+    scanSource('v.test.ts', viFake('overrides.delete ?? vi.fn(async (o: string, id: string) => true)')).length === 0);
+
+  // Deliberately NOT widened, and this is the negative that says so: a
+  // conditional's arms are selected by a test this gate cannot evaluate, unlike
+  // a `??` fallback which is unconditionally reachable.
+  expect('#9877 — a conditional `? :` initializer is deliberately NOT read',
+    scanSource('v.test.ts', viFake('flag ? vi.fn(async (o: string, opts?: any) => 1) : vi.fn(async (o: string, opts?: any) => 2)')).length === 0);
+
   // The CLASS-FIELD spelling of the same thing — `implOf`'s PropertyDeclaration
   // branch. Measured at ZERO occurrences in the corpus the fix landed against,
   // so this fixture is the only evidence that branch works at all; without it
@@ -3272,7 +3364,23 @@ function makeEngine() {
   expect('#9747 — a construct the gate CAN read is not in the census (it is in the population)',
     c.unrecognised.length === 0 && c.scopedOut.length === 0);
 
-  c = censusSource('c.test.ts', censusFake('delete: overrides.delete ?? vi.fn(async (o: string, opts?: any) => true),'), D);
+  // ⛔ This fixture used to be the census's "carries a function the unwrap
+  // declined" witness. #9877 taught `fnInitializer` to descend a `??`/`||`
+  // default, so the SAME source is now READ -- and the census must follow the
+  // recognizer rather than keep a row the population already owns. Asserted
+  // from both sides: absent from the census, present in the population.
+  const defaulted = censusFake('delete: overrides.delete ?? vi.fn(async (o: string, opts?: any) => true),');
+  c = censusSource('c.test.ts', defaulted, D);
+  expect('#9877 — a DEFAULTED initializer left the census when the recognizer learned to read it',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+  expect('#9877 — …and landed in the population instead (the two walks agree)',
+    scanSource('c.test.ts', defaulted, D).length === 1);
+
+  // The limb the fixture above used to drive still needs a witness, or the
+  // "declined to unwrap" branch becomes unreachable and rots silently. A
+  // function among SEVERAL arguments is the spelling `unwrapCallImpl`
+  // deliberately does not read (`--census` reports it, ZERO on 2026-08-20).
+  c = censusSource('c.test.ts', censusFake("delete: traced('DELETE', async (o: string, opts?: any) => true),"), D);
   expect('#9747 — an initializer carrying a function the unwrap declined is UNRECOGNISED',
     c.unrecognised.length === 1 && c.unrecognised[0].why.includes('declined to unwrap'));
 
@@ -3372,10 +3480,13 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
       + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
       + 'the receipt, and REPORTS the seam that answers without refusing at all; and, on the '
       + 'UNRECOGNISED CENSUS (#9747), counts a construct whose implementation exists but cannot '
-      + 'be reached (a defaulted mock, a local binding, a shorthand), SCOPES OUT the two '
+      + 'be reached (a function among several arguments, a local binding, a shorthand), SCOPES '
+      + 'OUT the two '
       + 'spellings that carry no implementation at all rather than reporting them as noise, '
       + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
-      + 'double into or out of the population it counts; and buckets '
+      + 'double into or out of the population it counts; and reads a DEFAULTED initializer '
+      + '(#9877) on both arms of `??` and `||`, pinned and unpinned alike, while still vetoing a '
+      + 'driver there and still refusing a conditional; and buckets '
       + 'the RECOGNIZER CENSUS (#9943) by initializer kind so a spelling this gate cannot read '
       + 'shows up as its own row rather than as silence.',
   );
