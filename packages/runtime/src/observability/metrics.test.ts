@@ -82,6 +82,18 @@ describe('RUNTIME_METRICS', () => {
     it('exposes the canonical metric names', () => {
         expect(RUNTIME_METRICS.httpRequestsTotal).toBe('http_requests_total');
         expect(RUNTIME_METRICS.httpRequestDurationMs).toBe('http_request_duration_ms');
-        expect(RUNTIME_METRICS.httpRequestErrorsTotal).toBe('http_request_errors_total');
+    });
+
+    it('no longer carries the retired http_request_errors_total name (#9834)', () => {
+        // The negative pin for the retirement, on the CONSTANT rather than on an
+        // emission: `RUNTIME_METRICS` is the published lookup a host reads to
+        // name its series, so a member reappearing here would re-publish the
+        // name even before anything wrote a sample. Asserted through a cast
+        // because the member is gone from the type — `tsc` is the other half of
+        // this pin and would reject a direct read.
+        expect(RUNTIME_METRICS as Record<string, string>).not.toHaveProperty(
+            'httpRequestErrorsTotal',
+        );
+        expect(Object.values(RUNTIME_METRICS)).not.toContain('http_request_errors_total');
     });
 });
