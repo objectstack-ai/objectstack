@@ -700,7 +700,11 @@ async function resolveLocalizationContextUncached(
   // One read for all three keys instead of a query per key (`$in` on `key`).
   // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
   // as opposed to a legitimate empty result — is visible to the caller above,
-  // which is the signal the failure-only cache keys off.
+  // which is the signal the failure-only cache keys off. `ql` is already
+  // typed `any` (its shape varies by caller — REST's engine, a test double,
+  // …), so the options literal below needs no `as any` of its own (#4918
+  // query-options-erasure guard: that cast is a distinct, counted erasure
+  // site, not implied by an already-`any` receiver).
   let rows: any[] = [];
   if (ql && typeof ql.find === 'function') {
     try {
@@ -708,7 +712,7 @@ async function resolveLocalizationContextUncached(
         where: { namespace: 'localization', key: { $in: ['timezone', 'locale', 'currency'] }, scope: 'tenant' },
         limit: 10,
         context: { isSystem: true },
-      } as any);
+      });
       if (result && (result as any).value) result = (result as any).value;
       rows = Array.isArray(result) ? result : [];
     } catch {
