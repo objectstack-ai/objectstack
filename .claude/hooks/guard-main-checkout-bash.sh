@@ -48,12 +48,27 @@
 # for anyone who means to write there, and the target of this guard is the reflexive
 # `sed -i` an agent reaches for mid-task, not a determined evader.
 #
-# Writing ABOUT the ban must never trip the ban (#4890's lesson). Two layers:
+# Writing ABOUT the ban must never trip the ban (#4890's lesson). Three layers:
 #   1. quote-aware segmentation + tokenisation — a `>` or a `sed -i` inside '…' or "…" is
 #      literal text, so `grep -n "sed -i" .claude/` and `echo "never sed -i in main"` pass;
 #   2. heredoc bodies are stripped before analysis — the LINES of a `cat > /tmp/notes <<EOF`
 #      body are documentation, not commands, and segmentation alone (which splits on
-#      newlines) would happily read them as such.
+#      newlines) would happily read them as such;
+#   3. a backslash-escaped `\"` inside a double-quoted word does NOT end the quote — POSIX
+#      says `\` keeps its meaning before `"`, `\`, `$` and a backtick there, and nowhere else.
+#      Layer 1 used to end the string at the `\"`, and everything after it — the rest of a
+#      `node -e "…"` program — was then read as bare shell. A JS arrow function `st=>st.x`
+#      in that tail put a REAL ASCII `>` in operator position, so the guard named the
+#      following JS fragment as a write "target" and blocked a pure-read command (#10247).
+#      Single quotes take no escapes: inside '…' a backslash is literal, as in a real shell.
+#
+# Redirection is recognised on ASCII operators ONLY — `>` `>>` `<` `<<` and their fd-prefixed
+# forms. No non-ASCII codepoint is ever an operator or an operator boundary, and this is
+# structural rather than a list to maintain: every byte of a non-ASCII UTF-8 codepoint is
+# >= 0x80, while `>` is 0x3e and `<` is 0x3c, so `→` (e2 86 92), `⇒` (e2 87 92) and `➜`
+# (e2 9e 9c) cannot collide with an operator byte-wise or character-wise. That matters
+# because `➜` is in this repo's own CLI boot banner (`➜  API:`, `➜  Console:`), so echoing
+# or grepping a banner must stay allowed. The self-test pins both directions.
 #
 # Exit-code contract, mirroring guard-main-checkout.sh: 0 = allow, 2 = block with the reason
 # on stderr.
@@ -130,6 +145,12 @@ split_segments() {
   for ((i = 0; i < n; i++)); do
     ch="${s:i:1}"
     if [ -n "$q" ]; then
+      if [ "$q" = '"' ] && [ "$ch" = '\' ] && [ $((i + 1)) -lt "$n" ]; then
+        case "${s:i+1:1}" in
+          '"' | '\' | '$' | '`')
+            seg+="$ch" ; i=$((i + 1)) ; seg+="${s:i:1}" ; continue ;;
+        esac
+      fi
       seg+="$ch"
       [ "$ch" = "$q" ] && q=""
       continue
@@ -155,6 +176,12 @@ tokenize() {
   for ((i = 0; i < n; i++)); do
     ch="${s:i:1}"
     if [ -n "$q" ]; then
+      if [ "$q" = '"' ] && [ "$ch" = '\' ] && [ $((i + 1)) -lt "$n" ]; then
+        case "${s:i+1:1}" in
+          '"' | '\' | '$' | '`')
+            i=$((i + 1)) ; tok+="${s:i:1}" ; have=1 ; continue ;;
+        esac
+      fi
       if [ "$ch" = "$q" ]; then q=""; else tok+="$ch"; fi
       have=1
       continue
