@@ -33,8 +33,12 @@
 //
 // #9018 asks for this directly, and it is the difference between a gate and a
 // nuisance: `content/docs/**` is full of version-shaped strings that MUST NOT
-// track the CLI version. The reference pages alone carry ~30 sentences of the
-// form "removed in @objectstack/spec 17.0.0" -- historical facts about the
+// track the CLI version. The reference pages alone carry 92 sentences of the
+// form "removed in @objectstack/spec 17.0.0" -- re-measured at #10229, where the
+// "~30" this paragraph used to say was found to be well out of date, and the
+// direction of that error is the reassuring one: the hazard grew, the argument
+// for enumerating did not weaken. (95 across all of `content/docs/**`, in 22
+// files.) They are historical facts about the
 // release something was retired in, which stay true forever and would go red on
 // the next bump under any glob-plus-version-shape rule. `packages/cli/CHANGELOG.md`
 // is the same hazard at scale. An explicit list is re-readable, and its cost --
@@ -144,8 +148,10 @@
 // Enumeration and anchoring are preserved exactly as above: PROSE_CLAIMS names
 // (file, anchor) pairs one at a time, and a claim whose anchor stops matching is a
 // FAILURE (PROSE-ANCHOR-LOST), for the same anti-vacuity reason NO-OCCURRENCES is.
-// The ~30 "removed in @objectstack/spec 17.0.0" sentences are untouched: they are
-// in neither an enumerated file nor an anchored claim.
+// The 92 "removed in @objectstack/spec 17.0.0" sentences are untouched: they are
+// in neither an enumerated file nor an anchored claim. Nor are the two shapes that
+// DO live inside enumerated files -- the upgrade-checklist rows and the reader's
+// own app version -- both of which have controls in --self-test.
 //
 // ## The release-time obligation this gate creates
 //
@@ -895,7 +901,7 @@ async function selfTest() {
     assert(
       extractOccurrences('17.0.0 and 1.2.3 are versions').length === 0,
       'a bare version-shaped string with NO anchor is not an occurrence -- this is what keeps the gate off '
-        + 'the ~30 "removed in @objectstack/spec 17.0.0" sentences in content/docs/references/**',
+        + 'the 92 "removed in @objectstack/spec 17.0.0" sentences in content/docs/references/**',
     );
     assert(
       extractOccurrences('ghcr.io/other/image:1.2.3').length === 0,
