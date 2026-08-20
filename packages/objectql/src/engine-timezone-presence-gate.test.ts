@@ -39,6 +39,7 @@
 // absence direction is asserted against the same doors.
 
 import { describe, it, expect } from 'vitest';
+import type { DataEngineInsertOptions, EngineQueryOptions, EngineReadOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
 
@@ -119,7 +120,7 @@ describe('#7279 — the `hasTz` presence gate withholds timezone when the contex
 
   it('insert: DriverOptions carry no timezone for a context without one', async () => {
     const { engine, observed } = await makeEngine();
-    await engine.insert('tz_note', { title: 'bare' }, { context: BARE } as any);
+    await engine.insert('tz_note', { title: 'bare' }, { context: BARE } as DataEngineInsertOptions);
 
     const call = observed.find((c) => c.method === 'create');
     expect(call, 'driver.create was never reached').toBeDefined();
@@ -142,7 +143,7 @@ describe('#7279 — a context carrying timezone crosses the gate on every door',
 
   it('insert: DriverOptions carry the caller timezone — the autonumber date-token consumer', async () => {
     const { engine, observed } = await makeEngine();
-    await engine.insert('tz_note', { title: 'localized' }, { context: LOCALIZED } as any);
+    await engine.insert('tz_note', { title: 'localized' }, { context: LOCALIZED } as DataEngineInsertOptions);
 
     // The write door is the one `opts.timezone` was threaded FOR: date-dependent
     // driver generation resolves the calendar day from it. Reachable from stdio
@@ -162,7 +163,15 @@ describe('#7279 — a context carrying timezone crosses the gate on every door',
     // Measured both ways before being written down: passing `timezone` in the
     // third argument silently reaches no driver at all, which is what makes the
     // argument position part of the assertion rather than a detail.
-    await engine.find('tz_note', { timezone: 'UTC' } as any, { context: LOCALIZED } as any);
+    await engine.find(
+      'tz_note',
+      // DELIBERATELY off-contract in the type, on-contract at run time: the
+      // driver-passthrough keys are legal on this bag
+      // (`ENGINE_DRIVER_PASSTHROUGH_KEYS`) but are not declared on
+      // `EngineQueryOptions`. Named rather than erased with `as any`.
+      { timezone: 'UTC' } as unknown as EngineQueryOptions,
+      { context: LOCALIZED } as EngineReadOptions,
+    );
 
     const call = observed.find((c) => c.method === 'find');
     expect(call!.options?.timezone).toBe('UTC');
