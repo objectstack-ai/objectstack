@@ -1,6 +1,55 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DevPlugin } from './dev-plugin';
 
+// [#10115] Pay the one-off `@objectstack/plugin-security` module-graph cost at
+// MODULE LOAD, not inside any hook and not inside any test.
+//
+// `DevPlugin.start()` reaches the plugin through a dynamic `await import()`, and
+// this file deliberately leaves that chain unmocked (see the header below: the
+// real plugin's `init()`/`start()` phase split IS the subject). Something has to
+// pay its cold vite transform; the only question is which clock is running when
+// it does. This file has now answered that question wrongly twice:
+//
+//   * paid inside whichever `it` ran first  -> `Test timed out in 5000ms`
+//     (idle 3110/3351/3360 ms; red on every run under four concurrent builds).
+//   * moved into a `beforeAll`              -> `Hook timed out in 10000ms`,
+//     which ejected this file from the merge queue four times in one night
+//     (runs 32334616926 / 32334642055 / 32334745861 / 32335141663, shard
+//     `Test Core (3/3)`, file duration 10024ms) while PR-side CI stayed green --
+//     the queue runs the FULL suite, PR-side CI only the affected subset, so the
+//     queue shard is far heavier than anything the PR checks measure.
+//
+// Neither move took the cost OUT of a clocked window; each only widened or
+// swapped the window around it, which relocates the cliff to the next heavier
+// shard instead of removing it. A top-level import is paid during collection,
+// and in vitest 4.1.10 collection is clocked against NOTHING. Verified against
+// the installed runner, not recalled: `@vitest/runner` wraps exactly hooks and
+// test bodies in `withTimeout(...)`, while `collectTests()` awaits
+// `runner.importFile(filepath, 'collect')` bare and merely RECORDS
+// `file.collectDuration` for reporters; and `vitest --help` on 4.1.10 offers
+// exactly three timeout knobs -- `testTimeout`, `hookTimeout`, `teardownTimeout`
+// -- none of which covers module loading.
+//
+// Measured on a 4-vCPU container with this run confined to a single core and a
+// spinner beside it (idle -> loaded): the old `beforeAll` cost 3.3s -> 7.2-7.4s,
+// i.e. 74% of its 10000ms budget on a machine that could not even reach the
+// load the queue applies. After this change the file has NO hook at all, its
+// four tests cost 2-70 ms each against the 5000ms `testTimeout`, and the run
+// stays green even under `--hookTimeout=1` -- there is no hook time left to clock.
+//
+// `vi.mock` is hoisted above every import in this file, this one included, so
+// the ten mocks below still register before this module is evaluated.
+//
+// This must stay a REAL, STATIC, side-effect import of the REAL plugin:
+//   - replacing it with a stub, here or via `vi.mock`, deletes the subject
+//     exactly as the header warns;
+//   - turning it back into a hook or a dynamic `await import()` puts the cost
+//     back inside a clocked window and re-arms the ejection;
+//   - answering a recurrence by raising `testTimeout` / `hookTimeout` widens the
+//     window around the cost rather than moving the cost out of it, and re-hides
+//     the next transform that lands in this file.
+import '@objectstack/plugin-security';
+
 // [#10036] The state under test is "SecurityPlugin LOADED but its start()
 // bailed", so `@objectstack/plugin-security` is deliberately NOT mocked here —
 // the real plugin's real `init()`/`start()` phase split is what constructs the
