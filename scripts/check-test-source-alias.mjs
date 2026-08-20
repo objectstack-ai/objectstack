@@ -676,16 +676,41 @@ function maskedProjections(source) {
   return { commentsOnly: blank(source, comment), codeOnly: blank(source, both) };
 }
 
-/** The `<` matching a closing `>`, for a return-type annotation. -1 if none. */
-function matchingAngle(code, closeIndex) {
+/**
+ * The `<` matching a closing `>`, for a return-type annotation. -1 if none.
+ *
+ * Balanced groups inside the argument list are jumped through `openOf` rather
+ * than scanned: `Promise< { app: A; wiring: B } >` carries both braces and
+ * semicolons, and a scanner that bailed on either read a real function signature
+ * as "not a function". Measured — that spelling is what
+ * `serve-marketplace-offline-runtime-config.test.ts` writes, and it was silently
+ * exempting the file until an ablation of this classifier surfaced it. Newlines
+ * are not a boundary either: these signatures routinely span lines.
+ */
+function matchingAngle(code, closeIndex, openOf) {
   let depth = 0;
   for (let i = closeIndex; i >= 0; i--) {
     const c = code[i];
-    if (c === '>') depth++;
-    else if (c === '<') {
+    if (c === '>') {
+      if (i > 0 && code[i - 1] === '=') {
+        i--; // `=>` inside a function TYPE — an arrow, not a generic closer
+        continue;
+      }
+      depth++;
+      continue;
+    }
+    if (c === '<') {
       depth--;
       if (depth === 0) return i;
-    } else if (c === ';' || c === '{' || c === '}' || c === '\n') return -1;
+      continue;
+    }
+    if (c === '}' || c === ']' || c === ')') {
+      const open = openOf.get(i);
+      if (open == null) return -1;
+      i = open;
+      continue;
+    }
+    if (c === ';' || c === '{' || c === '[' || c === '(') return -1;
   }
   return -1;
 }
@@ -721,9 +746,17 @@ function opensFunctionBody(code, braceIndex, openOf) {
       continue;
     }
     if (c === '>') {
-      const open = matchingAngle(code, j);
+      const open = matchingAngle(code, j, openOf);
       if (open < 0) return false;
       j = open - 1;
+      skipSpace();
+      continue;
+    }
+    if (c === ':') {
+      // The `:` introducing a return-type annotation, reached after stepping
+      // back over an object or array type (`): { ok: true } {`). A `case`/label
+      // colon falls out below, on the token in front of it.
+      j--;
       skipSpace();
       continue;
     }
@@ -2214,6 +2247,27 @@ function buildFixtureTree() {
       '});\n',
   });
 
+  // (25) THE SIGNATURE THAT DEFEATED THE CLASSIFIER ONCE. A module-level helper
+  // called from test bodies, whose parameter list spans lines and whose return
+  // type is `Promise< { … } >` — braces, a semicolon and newlines all between
+  // the parameter list and the body `{`. A backward walk that bailed on any of
+  // the three read this as "not a function body" and exempted the file
+  // SILENTLY, which is how `serve-marketplace-offline-runtime-config.test.ts`
+  // sat green through the sweep this rule shipped with.
+  fixture(root, 'packages/clocked-typed-signature', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-typed-signature'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      'async function boot(options: {\n' +
+      '  dir: string;\n' +
+      '  extra?: readonly unknown[];\n' +
+      '}): Promise<{ mod: object; dir: string }> {\n' +
+      "  const mod = await import('@fx/core');\n" +
+      '  return { mod, dir: options.dir };\n' +
+      '}\n' +
+      "it('y', async () => boot({ dir: '.' }));\n",
+  });
+
   return root;
 }
 
@@ -2536,6 +2590,15 @@ function selfTest() {
     expect(
       clockedIn('packages/clocked-type-query/src/thing.test.ts:4').length === 1,
       "`typeof import('x')` was read as a real module-scope load, and silenced a finding it never paid for",
+    );
+
+    // A module-level helper called from a test body is still a clocked window,
+    // and its signature is where this classifier is hardest. Pinned by shape
+    // because the corpus taught it: the miss was silent, and a silent exemption
+    // is indistinguishable from compliance in every report the gate prints.
+    expect(
+      clockedIn('packages/clocked-typed-signature/src/thing.test.ts:6').length === 1,
+      'a helper whose multi-line signature ends `}): Promise< { … } > {` was read as not a function body — a SILENT exemption',
     );
 
     // The population the green line prints has to BE a number. `check()` returning
