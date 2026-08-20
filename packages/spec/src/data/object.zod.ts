@@ -538,6 +538,38 @@ const TENANCY_MODES_EXPLAINER =
  * move of a general field-roles mechanism — a consumer other than audit
  * stamping needs its own ruling before reading it.
  *
+ * That pin is WIDENED **by name** by the maintainer ruling recorded on
+ * cloud#1395, 2026-08-17T03:18Z, accepting the decision-inbox recommendations
+ * in full — verbatim: 「新进卡六张 同意你的建议」. It is transcribed here so the
+ * widening is declared, not discovered (#10110):
+ *
+ * > Ruled: Option A — extend the #8778 ruling: `resolveRecordOrganizationField`
+ * > is promoted to a shared resolver used by all three platform-row writers
+ * > (approvals, automation runs, audit). A platform row's organization is the
+ * > SUBJECT record's organization; actor context is the fallback, never the
+ * > primary.
+ *
+ * The ruling sanctions exactly THREE consumers of this key, and no others:
+ *
+ *   1. **audit stamping** — plugin-audit's `resolveRecordOrganizationField`;
+ *      the original #8778 consumer and, as of this annotation, still the only
+ *      one wired up;
+ *   2. **`plugin-approvals`** — the approval-row writer;
+ *   3. **the automation-run recorder** — reached when
+ *      `resolveRecordOrganizationField` is promoted to the shared platform-row
+ *      resolver.
+ *
+ * Consumers 2 and 3 are sanctioned but not yet implemented: #10101 carries that
+ * behaviour change (this card is annotation-only and changes no accept/reject
+ * behaviour). Which is why the `.describe()` below still speaks of audit rows —
+ * it states what reads the key TODAY, and #10101 updates it as the readers
+ * actually land.
+ *
+ * ⛔ The refusal posture is UNCHANGED for a FOURTH consumer. Three named
+ * platform-row writers are still not a general field-roles mechanism: anything
+ * outside the list above needs its own maintainer ruling before reading this
+ * key, exactly as #8778 required.
+ *
  * @example Shared database, platform-default tenant column (organization_id)
  * {
  *   enabled: true

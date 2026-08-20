@@ -1685,7 +1685,10 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
   it('accepts the stamp-only `organizationField`, with no default materialized (#8778)', () => {
     // The shipped shape: sys_api_key stays unwalled (`enabled: false`) while
     // audit rows stamp the organization of the key they describe. The key is
-    // read by audit stamping ONLY — read-neutrality is pinned beside each
+    // consulted by the sanctioned platform-row writers only — audit stamping
+    // today, plus `plugin-approvals` and the automation-run recorder once
+    // #10101 lands under the cloud#1395 widening of the #8778 scope pin. No
+    // read path reads it either way: read-neutrality is pinned beside each
     // read path (driver tenant scope, Layer 0, injection plan), not here.
     expect(
       TenancyConfigSchema.parse({ enabled: false, organizationField: 'active_organization_id' }),

@@ -81,9 +81,15 @@ describe('resolveInjectedSystemColumns (#5378)', () => {
   });
 
   it('is blind to the stamp-only `tenancy.organizationField` (#8778 read-neutrality)', () => {
-    // The #8778 ruling's scope pin: `organizationField` is consulted by audit
-    // stamping ONLY. The injection plan must reach the same verdicts with and
-    // without it — on a plain tenant object, and on the shipped sys_api_key
+    // The #8778 scope pin, as widened by the cloud#1395 ruling (2026-08-17):
+    // `organizationField` is consulted by the sanctioned platform-row WRITERS
+    // only — audit stamping today, `plugin-approvals` and the automation-run
+    // recorder once #10101 lands. No READ path reads it, and that is what this
+    // test pins; the widening does not touch it, because all three sanctioned
+    // consumers stamp rows rather than read them.
+    //
+    // The injection plan must reach the same verdicts with and without it —
+    // on a plain tenant object, and on the shipped sys_api_key
     // shape (better-auth managed + `enabled: false`), where the plan's
     // better-auth bail must keep running BEFORE tenancy is read at all.
     const withKey = resolveInjectedSystemColumns({
