@@ -945,6 +945,60 @@ export class SharingRuleService implements ISharingRuleService {
     return [...this.inertRuleSeen];
   }
 
+  /**
+   * [#10119] The context the rule's CRITERIA query runs under — system
+   * elevation, plus the rule's OWN organization when it has one.
+   *
+   * ## What was wrong
+   *
+   * Both criteria reads used a bare {@link SYSTEM_CTX}, which carries no
+   * tenant, for EVERY rule. The recipient half is already org-aware —
+   * {@link expandRecipient} threads `rule.organization_id` into
+   * `TeamGraphService` / `BusinessUnitGraphService` / `PositionGraphService` —
+   * so an org-stamped rule expanded recipients inside its own organization and
+   * then swept every OTHER organization's records for matches. `reconcile`
+   * materialised the cross product: `sys_record_share` rows granting one org's
+   * users access to another org's records.
+   *
+   * Those rows are inert under a walled posture (Layer 0 AND-composes over
+   * sharing's Layer-1 widening), which is why this was found by reading the
+   * materialised table rather than by a read crossing the wall. What they cost
+   * is `sys_record_share` bloat — every org-stamped rule scanning the whole
+   * table at `limit: 5000` — and a population that is wrong at rest, which any
+   * consumer reading `sys_record_share` directly would inherit.
+   *
+   * ## Why `tenantId` and not a `filter` clause
+   *
+   * `tenantId` is the platform's ONE spelling of tenant scope on a read: the
+   * engine threads it to `DriverOptions.tenantId` and the driver's own
+   * chokepoint (`SqlDriver.applyTenantScope`) emits
+   * `(organization_id = ? OR organization_id IS NULL)`. Open-coding an
+   * `organization_id` equality into `filter` would be a second, worse copy —
+   * it would collide with a rule whose criteria already name that column, it
+   * would not know the object's declared tenant field, and it would drop the
+   * NULL arm that keeps platform-seeded rows visible to every tenant (#2734).
+   *
+   * ## The null-org rule keeps its unscoped sweep
+   *
+   * `organization_id = null` means "owned by no organization" — the
+   * platform-global class documented at
+   * {@link assertCanDeletePlatformGlobalRule} (#7795), whose whole point is
+   * that it grants across every tenant. It gets {@link SYSTEM_CTX} unchanged.
+   * ⛔ Do not "simplify" this into scoping every rule: that silently retires a
+   * declared behaviour, and a one-directional test suite would not notice.
+   * Both directions are pinned in `rule-criteria-org-scope.test.ts`.
+   *
+   * `isSystem` is retained either way. The elevation and the tenant are
+   * different axes (`ObjectQLEngine.buildDriverOptions` reads them separately):
+   * the evaluator must still see rows no individual recipient could, it must
+   * just stop seeing rows the RULE has no business in.
+   */
+  private criteriaContext(rule: SharingRuleRow): ExecutionContext {
+    const orgId = rule.organization_id;
+    if (orgId == null || orgId === '') return SYSTEM_CTX;
+    return { ...SYSTEM_CTX, tenantId: String(orgId) };
+  }
+
   private async findMatchingRecords(rule: SharingRuleRow): Promise<string[]> {
     if (this.isInertMatchAll(rule)) return [];
     const filter = (rule.criteria ?? {}) as any;
@@ -953,7 +1007,8 @@ export class SharingRuleService implements ISharingRuleService {
         filter,
         fields: ['id'],
         limit: 5000,
-        context: SYSTEM_CTX,
+        // [#10119] The rule's own organization, when it has one.
+        context: this.criteriaContext(rule),
       });
       return Array.isArray(rows) ? rows.map((r: any) => String(r.id)).filter(Boolean) : [];
     } catch (err: any) {
@@ -970,7 +1025,11 @@ export class SharingRuleService implements ISharingRuleService {
         filter,
         fields: ['id'],
         limit: 1,
-        context: SYSTEM_CTX,
+        // [#10119] Same scope as the whole-rule sweep — see
+        // {@link criteriaContext}. A per-record hook pass that stayed
+        // unscoped would re-mint, one write at a time, exactly the cross-org
+        // rows the sweep no longer creates.
+        context: this.criteriaContext(rule),
       });
       return Array.isArray(rows) && rows.length > 0;
     } catch {
