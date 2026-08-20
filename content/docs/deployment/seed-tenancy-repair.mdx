@@ -124,8 +124,10 @@ a wall, or that holds more than one organization, has no derivable answer to
 `no-split` writes nothing to the log. That is correct — the overwhelming
 majority of boots are healthy and should not narrate. It also means **the
 absence of a message is not evidence the repair did not run**; it is evidence
-it found nothing to do. The only positive receipt is the `info` line described
-below.
+it found nothing to do. For the positive case, the durable answer is the
+`sys_migration` row described in
+[Telling whether it ran](#telling-whether-it-ran) — the `info` line is the live
+view of the same event.
 </Callout>
 
 ---
@@ -215,8 +217,49 @@ nothing was lost.
 
 ## Telling whether it ran
 
-There is no report file, no CLI receipt and no stored history. The evidence is
-the boot/sign-up log, and there are exactly three lines to look for.
+### The durable answer: the `sys_migration` row
+
+An `applied` run records itself in the deployment's own migration ledger, so the
+question survives the log scrolling and the container being replaced:
+
+```sql
+SELECT id, last_run_at, applied_at, advisory, details
+FROM sys_migration
+WHERE id = 'seed-tenancy-backfill';
+```
+
+No row means no `applied` run has happened on this database. A row answers
+*when* (`last_run_at` / `applied_at`) and, in `details`, *what*:
+
+```json
+{
+  "status": "applied",
+  "objectsStamped": 3,
+  "organizationId": "org_…",
+  "splits": ["crm_case.case_number"],
+  "collisions": ["crm_case.case_number=CASE-00001"]
+}
+```
+
+`advisory` repeats the collision count. `blocking` is always `0` and
+`verified_at` is always empty for this id, and both are deliberate: this repair
+runs no self-check, and nothing in the platform gates on it — the row is a
+record for you to read, not a certificate anything acts on. The API surface of
+`sys_migration` is read-only (`get` / `list`), so the receipt cannot be edited
+back through the shipped routes.
+
+<Callout type="warn" title="The receipt is written once, and only on `applied`">
+A later boot finds nothing to repair (`no-split`) and writes nothing, which is
+why the row keeps the timestamp of the boot that actually rewrote your data
+rather than the timestamp of the last restart. If the row could not be written —
+a kernel composed without the platform objects, an unwritable ledger — the boot
+says so at **`error`** and the repair still stands. That line is then the only
+record: capture it before restarting.
+</Callout>
+
+### The log lines
+
+The log is the live view, and there are exactly three lines to look for.
 
 **It repaired something** — `info`:
 
