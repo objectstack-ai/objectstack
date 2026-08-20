@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { TimeRelativeTrigger } from './time-relative-trigger.js';
-import type { TimeRelativeDataEngine } from './time-relative-trigger.js';
+import type { FlowDispatchClaimSurface, TimeRelativeDataEngine } from './time-relative-trigger.js';
 import type { FlowTrigger, JobServiceSurface } from './schedule-trigger.js';
 
 /**
@@ -74,6 +74,16 @@ export class TimeRelativeTriggerPlugin implements Plugin {
                 () => this.resolveService<JobServiceSurface>(ctx, 'job'),
                 () => this.resolveDataEngine(ctx),
                 ctx.logger,
+                undefined, // default wall clock
+                // #10220 — dispatch-idempotency claims go through the SAME
+                // automation service this plugin already resolves; the trigger
+                // computes the key and never learns the ledger's table name. An
+                // automation service predating claim() resolves to null and the
+                // trigger degrades (honestly, warned once) to in-process dedup.
+                () => {
+                    const svc = this.resolveService<Partial<FlowDispatchClaimSurface>>(ctx, 'automation');
+                    return svc && typeof svc.claim === 'function' ? (svc as FlowDispatchClaimSurface) : null;
+                },
             );
             automation.registerTrigger(trigger);
             ctx.logger.info('TimeRelativeTriggerPlugin: time-relative trigger registered');

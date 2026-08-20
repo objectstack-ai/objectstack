@@ -18,11 +18,13 @@ import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnost
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
+import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 import {
     ObjectStoreSuspendedRunStore,
     DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW,
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
+import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 
 /**
  * #1928 — normalize an ObjectQL object's `fields` (a name-keyed map, or an
@@ -521,8 +523,9 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * Register {@link SysAutomationRun} with the `manifest` service so the
-     * suspended-run table migrates like every other `sys_*` object (ADR-0019).
+     * Register {@link SysAutomationRun} and {@link SysFlowDispatch} with the
+     * `manifest` service so the suspended-run and dispatch-ledger tables
+     * migrate like every other `sys_*` object (ADR-0019, #10220).
      *
      * Returns whether it landed. Callers must honour a `false` — a durable
      * store attached over an unregistered object writes to a table that does
@@ -538,7 +541,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysAutomationRun],
+                objects: [SysAutomationRun, SysFlowDispatch],
             });
             return true;
         } catch (err) {
@@ -708,6 +711,14 @@ export class AutomationServicePlugin implements Plugin {
                     durableStore = candidate;
                     this.engine.setSuspendedRunStore(durableStore);
                     ctx.logger.info('[Automation] Suspended-run persistence enabled (sys_automation_run)');
+                    // #10220 — persisted dispatch-claim ledger. Attached under
+                    // the same guard as the durable run store: it needs the same
+                    // engine surface, and its object rode the same manifest
+                    // registration, so `runObjectRegistered` vouches for both
+                    // tables. Without it the engine's claim() degrades to
+                    // in-process dedup and says so once.
+                    this.engine.setFlowDispatchStore(new ObjectStoreFlowDispatchStore(dataEngine));
+                    ctx.logger.info('[Automation] Flow-dispatch idempotency ledger enabled (sys_flow_dispatch)');
                 }
             } else {
                 ctx.logger.info('[Automation] No ObjectQL engine — suspended runs kept in-memory only');
