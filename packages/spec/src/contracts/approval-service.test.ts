@@ -9,12 +9,8 @@
 // ?? null` — a resolved org id, or `null` when none resolved, or absent on
 // rows written before stamping existed).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import type { ApprovalActionRow, ApprovalRequestRow } from './approval-service';
-
-/** Compile-time assertion helper: fails to typecheck unless `T` is exactly `true`. */
-type Expect<T extends true> = T;
-type Equals<A, B> = (<G>() => G extends A ? 1 : 2) extends (<G>() => G extends B ? 1 : 2) ? true : false;
 
 describe('approval row organization_id declaration (#10331)', () => {
     it('is readable off ApprovalRequestRow without a cast, at the stamped shape', () => {
@@ -24,7 +20,7 @@ describe('approval row organization_id declaration (#10331)', () => {
 
         // Exactly `string | null | undefined`: `null` is the write path's
         // "no org resolved" value and must not be silently narrowed away.
-        type _Shape = Expect<Equals<ApprovalRequestRow['organization_id'], string | null | undefined>>;
+        expectTypeOf<ApprovalRequestRow['organization_id']>().toEqualTypeOf<string | null | undefined>();
 
         // Optional: a row written before the stamp existed still satisfies the
         // type (this object literal fails to compile if the field is required).
@@ -46,7 +42,7 @@ describe('approval row organization_id declaration (#10331)', () => {
         // caveat (the service's `rowFromAction` mapping does not surface it).
         const read = (row: ApprovalActionRow): string | null | undefined => row.organization_id;
 
-        type _Shape = Expect<Equals<ApprovalActionRow['organization_id'], string | null | undefined>>;
+        expectTypeOf<ApprovalActionRow['organization_id']>().toEqualTypeOf<string | null | undefined>();
 
         const minimal: ApprovalActionRow = {
             id: 'aact_1',
