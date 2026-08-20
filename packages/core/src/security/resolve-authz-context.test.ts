@@ -177,10 +177,16 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
 // EVERY request's read used to fail and the sql-driver's `[sql-driver]
 // DATABASE_ERROR` warning repeated once per request, burying real errors.
 // The #2409 batching above already collapsed one request down to a single
-// query; this collapses that query across requests with a short TTL cache,
-// mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`
-// (`resolveWriteLocale`)'s existing memoization of this same read.
-describe('resolveLocalizationContext — cross-request TTL cache (#10221)', () => {
+// query; this collapses the FAILING query across requests with a short TTL
+// cache — but ONLY the failure, never a successful (or legitimately empty)
+// read. A first version cached every outcome, mirroring
+// `packages/plugins/plugin-audit/src/audit-writers.ts` (`resolveWriteLocale`)'s
+// existing memoization of this same read — that broke
+// `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` (#1982/#2018),
+// which writes a new org timezone and expects the very next analytics read to
+// bucket under it. See the cache doc on `resolveLocalizationContext` for why
+// audit-writer's staleness tolerance doesn't transfer here.
+describe('resolveLocalizationContext — failure-only cross-request cache (#10221)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -201,7 +207,7 @@ describe('resolveLocalizationContext — cross-request TTL cache (#10221)', () =
     };
   }
 
-  it('does not re-query on a second call within the TTL window (same tenant)', async () => {
+  it('does not re-query on a second call within the TTL window when the read fails (same tenant)', async () => {
     const ql = makeMissingTableQl();
     const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
     const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
@@ -221,26 +227,59 @@ describe('resolveLocalizationContext — cross-request TTL cache (#10221)', () =
     expect(ql.counts.sys_setting).toBe(2);
   });
 
-  it('keys the cache per tenant, so a lookup for one tenant never reuses another tenant\'s entry', async () => {
-    const ql = makeCountingQl({
-      sys_setting: [{ namespace: 'localization', key: 'locale', scope: 'tenant', value: 'ja-JP' }],
-    });
-    const a = await resolveLocalizationContext({ ql, tenantId: 'tenant-a' });
-    const b = await resolveLocalizationContext({ ql, tenantId: 'tenant-b' });
-    expect(ql.counts.sys_setting).toBe(2);
-    expect(a).toEqual(b);
+  it('keys the failure cache per tenant, so a lookup for one tenant never reuses another tenant\'s entry', async () => {
+    const qlA = makeMissingTableQl();
+    // Reuse the SAME underlying table state across two tenant-scoped calls by
+    // routing both through one `ql`, distinguished only by `tenantId` in the
+    // cache key (the direct-read fallback query itself is not tenant-scoped
+    // in its `where`, matching the real resolver's existing behavior).
+    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-a' });
+    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-b' });
+    expect(qlA.counts.sys_setting).toBe(2);
     // A repeat for the first tenant hits its own cache entry, not tenant-b's.
-    await resolveLocalizationContext({ ql, tenantId: 'tenant-a' });
-    expect(ql.counts.sys_setting).toBe(2);
+    await resolveLocalizationContext({ ql: qlA, tenantId: 'tenant-a' });
+    expect(qlA.counts.sys_setting).toBe(2);
   });
 
-  it('keys the cache per `ql` instance, so two environments in one process never share a cached locale', async () => {
+  it('keys the failure cache per `ql` instance, so two environments in one process never share a cached outcome', async () => {
     const qlA = makeMissingTableQl();
     const qlB = makeMissingTableQl();
     await resolveLocalizationContext({ ql: qlA, tenantId: 'o1' });
     await resolveLocalizationContext({ ql: qlB, tenantId: 'o1' });
     expect(qlA.counts.sys_setting).toBe(1);
     expect(qlB.counts.sys_setting).toBe(1);
+  });
+
+  // The dogfood-test guard (#1982/#2018 golden regression): a SUCCESSFUL read
+  // must never be served stale. Simulates the exact shape of the failing CI
+  // scenario — a settings write changes the effective row between two calls —
+  // entirely at this unit level, without booting the dogfood stack.
+  it('never caches a successful read: a value change between two calls is visible on the very next call', async () => {
+    const rows = [{ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'UTC' }];
+    const ql = makeCountingQl({ sys_setting: rows });
+    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(first.timezone).toBe('UTC');
+    // Simulate a settings write landing between the two calls — no TTL
+    // advance, so a cache would still be "fresh" if one existed.
+    rows[0].value = 'America/Los_Angeles';
+    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(second.timezone).toBe('America/Los_Angeles');
+    expect(ql.counts.sys_setting).toBe(2);
+  });
+
+  // A legitimate empty result (table exists, no settings configured for this
+  // tenant yet) is a successful read too — not a failure — so it must not be
+  // cached either: the first write for a previously-unconfigured tenant must
+  // be visible on the very next call, same as the value-change case above.
+  it('never caches a legitimate empty result: the first write for a previously-unconfigured tenant is visible immediately', async () => {
+    const rows: Array<{ namespace: string; key: string; scope: string; value: string }> = [];
+    const ql = makeCountingQl({ sys_setting: rows });
+    const first = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(first).toEqual({ timezone: 'UTC', locale: 'en-US', currency: undefined });
+    rows.push({ namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Asia/Tokyo' });
+    const second = await resolveLocalizationContext({ ql, tenantId: 'o1' });
+    expect(second.timezone).toBe('Asia/Tokyo');
+    expect(ql.counts.sys_setting).toBe(2);
   });
 });
 

@@ -580,7 +580,9 @@ export interface ResolveLocalizationInput {
 type LocalizationResult = { timezone: string; locale: string; currency?: string };
 
 /**
- * Process-local TTL cache for {@link resolveLocalizationContext} (#10221).
+ * Process-local TTL cache for the FAILED-READ outcome of
+ * {@link resolveLocalizationContext} only (#10221; narrowed after a patch
+ * round — see below).
  *
  * `resolveAuthzContext`'s #2409 de-dup already collapsed the THREE per-key
  * reads a request used to issue into one batched `sys_setting` query; what it
@@ -592,25 +594,43 @@ type LocalizationResult = { timezone: string; locale: string; currency?: string 
  * "no such table: sys_setting" warning repeats once per request and buries
  * real errors in between.
  *
- * `tryFind` below already guarantees the FUNCTIONAL fallback (catch → `[]` →
- * built-in `UTC` / `en-US` defaults) — this cache only stops the query (and
- * therefore the log line) from re-running every request. It mirrors the
- * TTL-memoization `packages/plugins/plugin-audit/src/audit-writers.ts`
- * (`resolveWriteLocale`) already applies to this exact read for the same
- * reason ("workspace locale changes rarely"); this closes the gap for the
- * OTHER callers (`@objectstack/rest`, `@objectstack/runtime`) that call
- * `resolveLocalizationContext` directly, once per request, without their own
- * cache.
+ * `tryFind`-style catches already guaranteed the FUNCTIONAL fallback (catch →
+ * `[]` → built-in `UTC` / `en-US` defaults) — this cache only stops the
+ * FAILING query (and therefore the log line) from re-running every request.
+ *
+ * ## Why only the failure, not every result (patch round, CI red)
+ *
+ * The first version of this cache memoized every outcome — including a
+ * SUCCESSFUL read — for 30s, mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`
+ * (`resolveWriteLocale`)'s existing TTL cache of this same read. That is safe
+ * for audit-writer's use: audit trail enrichment is explicitly best-effort,
+ * so a stale locale in a log line for up to 30s costs nothing observable.
+ * It is NOT safe for `@objectstack/rest`'s use of this same function: analytics
+ * date-bucketing reads the org timezone on every query, and
+ * `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` (the golden
+ * regression for #1982/#2018) writes a NEW org timezone via the real settings
+ * route and asserts the VERY NEXT analytics read buckets under it — a 30s-old
+ * cached value broke that test (CI: `expected undefined to be 3`, the bucket
+ * stayed on the previous timezone). Analytics bucketing is declared, tested
+ * behavior, not best-effort enrichment — it cannot tolerate the same
+ * staleness plugin-audit's cache is allowed to.
+ *
+ * So this cache is narrowed to memoize ONLY the case the underlying read
+ * itself THREW (a backend fault — e.g. "no such table" — not a legitimate
+ * empty/no-rows-yet result, which is a normal, cheap, un-failing read and
+ * stays uncached so a fresh write is visible on the next request same as
+ * before). That fully addresses #10221 — the log spam only exists on an env
+ * where the read is actively failing — while never caching a value a caller
+ * could observe going stale.
  *
  * Keyed on the `ql` instance (one entry-set per environment engine, so two
  * environments/tenants sharing a process never see each other's cached
- * locale) and then `tenantId|userId` beneath it, matching the audit writer's
- * key shape. A `ql` that isn't cacheable (missing/non-object — `tryFind`
- * already no-ops on that) skips the cache entirely; there is no query to
- * dedupe in that case.
+ * outcome) and then `tenantId|userId` beneath it, matching the audit writer's
+ * key shape. A `ql` that isn't cacheable (missing/non-object) skips the cache
+ * entirely — there is no query to dedupe in that case.
  */
-const LOCALIZATION_CACHE_TTL_MS = 30_000;
-const localizationCache = new WeakMap<object, Map<string, { value: LocalizationResult; expiresAt: number }>>();
+const LOCALIZATION_FAILURE_CACHE_TTL_MS = 30_000;
+const localizationFailureCache = new WeakMap<object, Map<string, { value: LocalizationResult; expiresAt: number }>>();
 
 /**
  * Resolve workspace localization defaults (reference `timezone` / `locale` /
@@ -618,56 +638,90 @@ const localizationCache = new WeakMap<object, Map<string, { value: LocalizationR
  * platform default → global → tenant); falls back to direct tenant-scoped
  * `sys_setting` rows, then the built-ins `UTC` / `en-US`. Never throws.
  *
- * Cross-request result is memoized for {@link LOCALIZATION_CACHE_TTL_MS} per
- * `(ql, tenantId, userId)` — see the cache doc above (#10221).
+ * A read that fails outright (backend fault — table missing, connection
+ * refused, etc.) is memoized for {@link LOCALIZATION_FAILURE_CACHE_TTL_MS}
+ * per `(ql, tenantId, userId)` so the failing query — and the driver's log
+ * line for it — does not repeat every request (#10221). A successful read,
+ * including a legitimate "no settings configured yet" empty result, is NEVER
+ * cached: the next call always re-reads, so a settings write takes effect
+ * immediately (see the cache doc above for why — the dogfood analytics
+ * bucketing test pins this).
  */
 export async function resolveLocalizationContext(input: ResolveLocalizationInput): Promise<LocalizationResult> {
   const { ql, tenantId, userId } = input;
+  const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
   if (ql && typeof ql === 'object') {
-    const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
-    const now = Date.now();
-    const perEngine = localizationCache.get(ql);
-    const hit = perEngine?.get(cacheKey);
-    if (hit && hit.expiresAt > now) return hit.value;
-
-    const value = await resolveLocalizationContextUncached(input);
-    const bucket = perEngine ?? new Map<string, { value: LocalizationResult; expiresAt: number }>();
-    bucket.set(cacheKey, { value, expiresAt: now + LOCALIZATION_CACHE_TTL_MS });
-    if (!perEngine) localizationCache.set(ql, bucket);
-    return value;
+    const hit = localizationFailureCache.get(ql)?.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.value;
   }
-  return resolveLocalizationContextUncached(input);
+
+  const { value, failed } = await resolveLocalizationContextUncached(input);
+  if (failed && ql && typeof ql === 'object') {
+    const bucket = localizationFailureCache.get(ql) ?? new Map<string, { value: LocalizationResult; expiresAt: number }>();
+    bucket.set(cacheKey, { value, expiresAt: Date.now() + LOCALIZATION_FAILURE_CACHE_TTL_MS });
+    localizationFailureCache.set(ql, bucket);
+  }
+  return value;
 }
 
-async function resolveLocalizationContextUncached(input: ResolveLocalizationInput): Promise<LocalizationResult> {
+async function resolveLocalizationContextUncached(
+  input: ResolveLocalizationInput,
+): Promise<{ value: LocalizationResult; failed: boolean }> {
   const { ql, settings, tenantId, userId } = input;
+  let failed = false;
   try {
     if (settings && typeof settings.get === 'function') {
       const sctx = { tenantId, userId } as any;
       const [tzRes, localeRes, currencyRes] = await Promise.all([
-        settings.get('localization', 'timezone', sctx).catch(() => undefined),
-        settings.get('localization', 'locale', sctx).catch(() => undefined),
-        settings.get('localization', 'currency', sctx).catch(() => undefined),
+        settings.get('localization', 'timezone', sctx).catch(() => {
+          failed = true;
+          return undefined;
+        }),
+        settings.get('localization', 'locale', sctx).catch(() => {
+          failed = true;
+          return undefined;
+        }),
+        settings.get('localization', 'currency', sctx).catch(() => {
+          failed = true;
+          return undefined;
+        }),
       ]);
       const tz = coerceTimeZone(tzRes?.value);
       const locale = coerceLocale(localeRes?.value);
       const currency = coerceCurrency(currencyRes?.value);
-      if (tz || locale || currency) return { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency };
+      if (tz || locale || currency) {
+        return { value: { timezone: tz ?? 'UTC', locale: locale ?? 'en-US', currency }, failed: false };
+      }
     }
   } catch {
     // settings service unavailable → direct read
+    failed = true;
   }
   // One read for all three keys instead of a query per key (`$in` on `key`).
-  const rows = await tryFind(
-    ql,
-    'sys_setting',
-    { namespace: 'localization', key: { $in: ['timezone', 'locale', 'currency'] }, scope: 'tenant' },
-    10,
-  );
+  // Inlined (rather than the shared `tryFind`) so a genuine backend fault —
+  // as opposed to a legitimate empty result — is visible to the caller above,
+  // which is the signal the failure-only cache keys off.
+  let rows: any[] = [];
+  if (ql && typeof ql.find === 'function') {
+    try {
+      let result = await ql.find('sys_setting', {
+        where: { namespace: 'localization', key: { $in: ['timezone', 'locale', 'currency'] }, scope: 'tenant' },
+        limit: 10,
+        context: { isSystem: true },
+      } as any);
+      if (result && (result as any).value) result = (result as any).value;
+      rows = Array.isArray(result) ? result : [];
+    } catch {
+      failed = true;
+    }
+  }
   const valueOf = (k: string) => rows.find((r) => r.key === k)?.value;
   return {
-    timezone: coerceTimeZone(valueOf('timezone')) ?? 'UTC',
-    locale: coerceLocale(valueOf('locale')) ?? 'en-US',
-    currency: coerceCurrency(valueOf('currency')),
+    value: {
+      timezone: coerceTimeZone(valueOf('timezone')) ?? 'UTC',
+      locale: coerceLocale(valueOf('locale')) ?? 'en-US',
+      currency: coerceCurrency(valueOf('currency')),
+    },
+    failed,
   };
 }
