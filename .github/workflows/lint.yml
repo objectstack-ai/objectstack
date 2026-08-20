@@ -1043,6 +1043,46 @@ jobs:
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
           node scripts/check-cross-repo-closer-outcome.mjs
 
+      # Merge-queue triage outcome contract (#10128, over the #4859 bot).
+      # merge-queue-triage.yml carries ~450 lines of inline github-script that
+      # only ever runs on a RED merge_group build — a condition nobody can
+      # produce on demand, so its two 2026-08-20 limbs would otherwise be
+      # unexercised code. This step is the exercise, on the same method as the
+      # cross-repo closer step above: the shipped script is extracted from the
+      # YAML with a real parser (never retyped) and run under doubles the way
+      # actions/github-script runs it, as one AsyncFunction body. No network.
+      #
+      # What it holds: (1) the excerpt names the failure REASON beside the FAIL
+      # line, driven against REAL captured vitest logs of the incident's own
+      # test file — one timeout, one assertion, byte-identical FAIL lines and
+      # opposite diagnoses, which is the confusion that produced a confidently
+      # wrong card (#10112) and cost a whole dispatch; and (2) the cross-PR
+      # aggregation files exactly ONE anchor issue at >= 2 DISTINCT PRs,
+      # REFRESHES it on the next ejection instead of filing a second, and files
+      # none for two different keys or for one PR ejecting twice. The refresh
+      # leg is driven as a PAIR — run 2's world is built from run 1's output —
+      # because idempotency is a property of the pair and a hand-written marker
+      # would prove each half while leaving the two runs free to disagree.
+      #
+      # Its --self-test runs first and is the half that stops the battery
+      # rotting into decoration: it mutates the shipped script fourteen ways —
+      # drop the reason lookahead, test the FAIL pattern before the reason
+      # pattern (which silently loses every assertion), count runs instead of
+      # distinct PRs, always create instead of refreshing, drop the sighting
+      # markers, downgrade each anti-no-op announcement to an info line, and
+      # more — and requires the battery to go RED for each, naming the scenario
+      # that catches it. A mutation whose anchor no longer exists is a failure
+      # too, so a rewrite of the workflow cannot leave the mutations silently
+      # matching nothing.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same
+      # reason as the step above: root package.json is declared territory of
+      # the @changesets/cli v3 migration lane (#9465) while it runs.
+      - name: Merge-queue triage outcome contract
+        run: |
+          node scripts/check-merge-queue-triage-outcome.mjs --self-test
+          node scripts/check-merge-queue-triage-outcome.mjs
+
       # Shard positive-attestation gate (#6082). ci.yml's two aggregate gates
       # used to decide from one `needs.<matrix>.result` word, which cannot carry
       # three shards' verdicts: run 31120902911 read the undocumented
