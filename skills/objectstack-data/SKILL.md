@@ -593,8 +593,19 @@ export const salesUser = definePermissionSet({
     contact: { allowRead: true },
   },
 });
+
+// Register it on the stack root under `permissions` — NOT `permissionSets`:
+// defineStack({ permissions: [salesUser], ... })
 ```
 
+- **Stack key: `permissions`.** The collection is named for the metadata kind,
+  not for the factory, so `definePermissionSet()` output goes into
+  `defineStack({ permissions: [...] })`. `permissionSets:` is **refused at
+  load** — the top level is strict, so the stack fails with an
+  `Unrecognized key(s) on this stack definition` error naming the key, never a
+  silent drop. `ObjectStackDefinitionSchema`
+  (`node_modules/@objectstack/spec/src/stack.zod.ts`) is the enumeration of
+  record; `objectstack-platform` lists every top-level key.
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
