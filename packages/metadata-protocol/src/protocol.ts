@@ -4377,6 +4377,68 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#10219] ADR-0005 / #3115 — resolve the org scope the PENDING DRAFT of an
+     * item actually lives in, for a per-item publish whose caller may not be in
+     * that scope.
+     *
+     * This is the single-item twin of the rule `publishPackageDrafts` already
+     * follows. The batch door DISCOVERS each draft's scope (`listDrafts`
+     * surfaces a non-null-org caller's own rows AND the env-wide ones via its
+     * `$or`, and the promote targets `d.organizationId`); the per-item door
+     * DEDUCED one instead, from `organizationIdForMetaWrite(type, activeOrg)` at
+     * the REST seam. The two answers differ for exactly the types the registry
+     * declares `allowOrgOverride: true` (`view`, `dashboard`, `report`,
+     * `translation`, `email_template`): a draft authored env-wide — which is
+     * what package/AI authoring writes, and what `PUT ?mode=draft` writes when no
+     * active org is threaded — is looked up under `organization_id = <org>`,
+     * matches nothing, and answers `404 [no_draft] … nothing to publish` over a
+     * row the console's own pending-changes list is showing. Measured on a cloud
+     * rig: four AI-authored `view` drafts, visible in `sys_metadata` at
+     * `state='draft'`, all four refused by the per-item door while the batch
+     * "publish 4 changes" button promoted them.
+     *
+     * Non-org-overridable types (`object`, `flow`, …) never reached this at all:
+     * `organizationIdForMetaWrite` already answers `undefined` for them, which is
+     * why per-item publish worked for objects and flows and failed for views.
+     *
+     * Precedence is the ADR-0005 overlay order — the caller's own org shadows
+     * env-wide — so an org holding its own draft publishes THAT draft, and only
+     * an org with no draft of its own falls through to the env-wide row it was
+     * already authoring into. When NEITHER scope holds a draft the caller's own
+     * scope is returned unchanged, so a genuinely absent draft still raises the
+     * same `NO_DRAFT` refusal, from the scope the caller asked about.
+     *
+     * ⛔ This is discovery, not a tolerant fallback: it names the one row the
+     * promote will then address, and it reads DRAFT rows in `sys_metadata` (the
+     * thing being promoted) rather than the history lineage
+     * {@link resolveMetaItemOrgScope} reads — a first-ever draft of a
+     * never-published item has no lineage to resolve.
+     *
+     * Deliberately NO `catch`, for the same reason as its read-side sibling: a
+     * driver failure must fail the publish, not resolve to a scope nobody
+     * verified.
+     */
+    private async resolveDraftOrgScopeForPublish(
+        singularType: string,
+        name: string,
+        requestOrgId: string | null,
+    ): Promise<string | null> {
+        if (requestOrgId === null) return null;
+        // The package dimension is deliberately absent from both probes: the
+        // per-item door names no package, so `promoteDraft` resolves the draft
+        // with "match any package" and these reads must ask the same question
+        // it will (see `SysMetadataRepository.whereFor`).
+        const inOrg = await this.engine.findOne('sys_metadata', {
+            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
+        });
+        if (inOrg) return requestOrgId;
+        const inEnv = await this.engine.findOne('sys_metadata', {
+            where: { organization_id: null, type: singularType, name, state: 'draft' },
+        });
+        return inEnv ? null : requestOrgId;
+    }
+
+    /**
      * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEXes exist
      * on `sys_metadata`. ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs
      * replace the old "per-project" isolation, so `environment_id` is no longer
@@ -14179,6 +14241,26 @@ export class ObjectStackProtocolImplementation implements
         // rewrites it on upgrade). Different input class, different map; see
         // {@link canonicalMetaType}'s header for why the two are not one fold.
         request = canonicalizeMetaRequestType(request);
+        // [#10219] Then resolve WHICH SCOPE's draft this publish means. The
+        // caller states the scope it is IN; the draft may live env-wide. See
+        // {@link resolveDraftOrgScopeForPublish} — the single-item twin of the
+        // #3115 rule `publishPackageDrafts` already follows.
+        //
+        // Placed after the type fold (the probe must name the canonical stored
+        // `type`) and before every gate below, so the ADR-0010 lock check, the
+        // #6190 org-scoped-write refusal and the promote all judge ONE scope —
+        // the one the row is actually in. Resolving it later would gate against
+        // a partition the promotion never touches.
+        {
+            const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+            const resolvedOrgId = await this.resolveDraftOrgScopeForPublish(
+                singular, request.name, request.organizationId ?? null,
+            );
+            if (resolvedOrgId !== (request.organizationId ?? null)) {
+                const { organizationId: _requested, ...rest } = request;
+                request = resolvedOrgId === null ? rest : { ...rest, organizationId: resolvedOrgId };
+            }
+        }
         // [#8594] The refusal's own row is written HERE, by the route that owns
         // the (absent) transaction — see `promoteDraftForPublish`'s header. This
         // site has no transaction of its own, so recording it in the `catch` is
