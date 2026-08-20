@@ -152,11 +152,17 @@ describe('#7279 — a context carrying timezone crosses the gate on every door',
     expect(call!.options?.timezone).toBe('Asia/Shanghai');
   });
 
-  it('does not overwrite a timezone the caller already put in DriverOptions', async () => {
+  it('does not overwrite a timezone the caller passed in the option bag', async () => {
     const { engine, observed } = await makeEngine();
-    // `buildDriverOptions` fills `opts.timezone` only when it is undefined; an
-    // explicit per-call timezone outranks the envelope's.
-    await engine.find('tz_note', {}, { context: LOCALIZED, timezone: 'UTC' } as any);
+    // `buildDriverOptions` fills `opts.timezone` only when it is undefined, so
+    // an explicit per-call timezone outranks the envelope's. The bag it reads
+    // is the QUERY argument (`opCtx.options = query`, one of
+    // `ENGINE_DRIVER_PASSTHROUGH_KEYS`) — NOT the third `EngineReadOptions`
+    // argument, which carries `context` and is not forwarded to the driver.
+    // Measured both ways before being written down: passing `timezone` in the
+    // third argument silently reaches no driver at all, which is what makes the
+    // argument position part of the assertion rather than a detail.
+    await engine.find('tz_note', { timezone: 'UTC' } as any, { context: LOCALIZED } as any);
 
     const call = observed.find((c) => c.method === 'find');
     expect(call!.options?.timezone).toBe('UTC');
