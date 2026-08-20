@@ -40,6 +40,10 @@ import type {
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
+import {
+  unresolvedPostureExplainDetail,
+  type UnresolvedPostureCause,
+} from './unresolved-posture.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -160,6 +164,13 @@ export interface ExplainEngineDeps {
     fieldRequiredPermissions: Record<string, string[]>;
     /** [#3545] Posture could not be read — the middleware denies (fail-closed). */
     unresolved?: boolean;
+    /**
+     * [#10401] Which condition that is — an unpublished draft, or a declaration
+     * that genuinely cannot be read. Optional: a deps bag wired without it (or a
+     * deployment whose probe could not run) explains as `'unknown'`, the wording
+     * that covers both. Never an input to the verdict — only to the prose.
+     */
+    unresolvedCause?: UnresolvedPostureCause;
   }>;
   /** The middleware's requiredPermissions AND-gate resolution for an operation. */
   requiredCaps: (meta: any, engineOperation: string) => string[];
@@ -1118,9 +1129,10 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
       ? `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
         (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
       : postureUnresolved
-        ? `The security posture of '${object}' could not be resolved (neither the live schema nor the ` +
-          `metadata service returned it) — its 'private' flag and required-capability contract are ` +
-          `unknown, so access fails CLOSED rather than defaulting to public/uncontracted (#3545).`
+        // [#10401] One wording, shared with the middleware's own throw, so
+        // explanation and enforcement cannot drift into telling a reader two
+        // different things about one refusal. See `unresolved-posture.ts`.
+        ? unresolvedPostureExplainDetail(object, secMeta.unresolvedCause ?? 'unknown')
         : delegatorMissing
           ? `Delegator no longer exists — D10 fails closed (access denied).`
           : agentCrud && !delegatorCrud
