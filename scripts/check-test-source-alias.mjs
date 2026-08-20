@@ -205,8 +205,18 @@
 // dynamic `import()` / `require()` **inside a function body** — an `it()`/`test()`
 // body, a `beforeAll`/`beforeEach`/`afterAll` hook, or any nested function —
 // with no module-scope load of the same specifier is a finding, reported against
-// the test file. The convention is stated for authors in AGENTS.md § Build & Test
-// ("clocked windows measure behaviour, never loading").
+// the test file.
+//
+// The convention, in one sentence: **clocked windows measure behaviour, never
+// loading — a test that boots a real plugin chain pays its first load at module
+// top.** It is stated here rather than in AGENTS.md § Build & Test, which is
+// where #10126 asked for it: that file sits exactly on its shrink-only line
+// ceiling (`scripts/pm/check-skill-line-ratchet.mjs`, 958, headroom 0), the
+// sentence costs three lines, and its own section has two lines of lossless
+// rewrap headroom. Raising a ceiling takes a maintainer ruling, and truncating
+// the sentence to fit one is not this gate's call to make — so the doc placement
+// is still open, and every author who trips this rule reads the sentence in the
+// failure text either way.
 //
 // Boundaries, stated so they are not rediscovered as bugs:
 //
@@ -1692,6 +1702,8 @@ function check(root, registry) {
           '    through `dist/`, so the first call transforms that dependency\'s whole module graph while a\n' +
           "    `testTimeout` or `hookTimeout` is running. Measured on the incident this rule comes from: 3.1-3.6s\n" +
           '    idle on 4 vCPU, 20.26s on a starved core — past every clock, including a hypothetical 30s.\n' +
+          '    THE CONVENTION: clocked windows measure behaviour, never loading — a test that boots a real\n' +
+          '    plugin chain pays its first load at module top.\n' +
           '    Add a module-top side-effect import so the transform is paid during COLLECTION, which vitest\n' +
           '    clocks against nothing (it clocks hooks and test bodies only):\n' +
           `      import '${load.spec}';\n` +
@@ -2561,6 +2573,16 @@ function selfTest() {
         (f) => f.includes('COLLECTION') && f.includes("import '@fx/"),
       ),
       'the clocked-window finding printed no module-top import to add, or did not say where the cost moves TO',
+    );
+    // The convention sentence itself, carried in the text the author reads.
+    // #10126 asked for it in a doc; the doc that should hold it is on a
+    // headroom-0 line ceiling, so until that is ruled on, THIS is where an
+    // author meets it — which makes it a pin, not a comment.
+    expect(
+      clockedIn('packages/clocked-load/src/thing.test.ts').every((f) =>
+        f.includes('clocked windows measure behaviour, never loading'),
+      ),
+      'the clocked-window finding no longer states the convention it enforces — the sentence is back to being comment-only',
     );
 
     // BOTH PRESENT IS COMPLIANT: the module top already paid it, so the dynamic

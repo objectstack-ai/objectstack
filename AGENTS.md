@@ -118,15 +118,6 @@ judged on the **shallowest** point a path reaches, not where it ends — a liter
 climbs past the package root and then descends into a sibling ends at a positive depth
 while addressing another package entirely.
 
-### Clocked windows measure behaviour, never loading
-
-**Clocked windows measure behaviour, never loading — a test that boots a real plugin
-chain pays its first load at module top.** vitest clocks hooks (`hookTimeout`) and test
-bodies (`testTimeout`) and nothing else; collection is clocked against nothing, so a
-module-top `import '<specifier>'` moves a cold transform OUT of every budget rather than
-into a bigger one. `pnpm check:test-source-alias` gates this for the workspace deps a
-package still resolves through `dist/`.
-
 ### Running the dev server
 
 | Scenario | Command | Notes |
