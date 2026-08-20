@@ -1931,7 +1931,7 @@ zero relearning:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v11 (#3290); read the
+> The former `ctx.session.tenantId` alias was removed in v16 (#3290); read the
 > caller's active org under `organizationId`.
 
 Action bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses

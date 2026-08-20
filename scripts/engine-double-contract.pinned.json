@@ -1422,6 +1422,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-batch-endpoint.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-batch-endpoint.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
       "verb": "delete",
       "pinned": 1

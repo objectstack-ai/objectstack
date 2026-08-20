@@ -54,24 +54,47 @@ name: Release
 #                                          the runtime image — but only for a
 #                                          version ALREADY fully on npm, which
 #                                          is repair that cannot mint anything.
-#   workflow_dispatch → `publish`          the ONLY path that runs
+#                 →  `publish`            the ONLY job that runs
 #                                          `changeset publish` or pushes a
-#                                          version tag. A dispatch event cannot
-#                                          be produced by a push, a bot merge or
-#                                          a queue landing — someone with write
-#                                          access clicks Run workflow and types
-#                                          the exact version. Additionally gated
-#                                          by `environment: release`.
+#                                          version tag. It starts only when
+#                                          `release-integrity` reports that
+#                                          main's version is ABSENT from npm —
+#                                          i.e. the Version Packages PR has just
+#                                          merged — and it is then held, whole,
+#                                          at `environment: release` until a
+#                                          required reviewer approves it.
+#   workflow_dispatch → `publish`          the repair lane. Takes no version;
+#                                          audits main exactly as the push lane
+#                                          does. Same environment gate.
 #
-# ⚠️ ONE-TIME MAINTAINER SETUP — the environment's teeth are NOT in this file.
-# `environment: release` below only creates the deployment gate; an environment
-# with no protection rules passes AUTOMATICALLY and silently. The approval click
-# exists only after a maintainer configures it:
-#     Settings → Environments → release → Required reviewers → add reviewer(s)
-# Until then the load-bearing guarantee is the `workflow_dispatch` trigger
-# itself, which already cannot fire without a human. Stated plainly rather than
-# implied, because an unprotected environment reads exactly like a protected one
-# in the run log.
+# WHERE THE HUMAN IS, AFTER ADR-0125 (2026-08-20)
+# -----------------------------------------------
+# This file used to make the human confirmation a TYPED VERSION on a
+# `workflow_dispatch` form, and its own comment called the dispatch event the
+# guarantee: no push, no queue landing, no bot token, no schedule can synthesise
+# it. That property is gone on purpose. The maintainer's ruling of 2026-08-20 is
+# that merging the Version Packages PR is already the decision to release, and
+# retyping the version afterwards confirms a decision they have just taken. So
+# the two human acts are now:
+#
+#     1. merge the `chore: version packages` PR   ← the decision
+#     2. approve the `release` environment        ← the authorisation
+#
+# The 2026-08-07 ruling 「版本发布必须是人工的」 is UNCHANGED and still binding.
+# What changed is which act carries it.
+#
+# ⛔ THE GATE IS NOW A REPO SETTING, AND NOTHING HERE CAN CHECK IT.
+# `environment: release` only creates the deployment gate. An environment with
+# no protection rules passes AUTOMATICALLY and silently, and in the run log an
+# unprotected gate is indistinguishable from an approved one. While the trigger
+# was `workflow_dispatch` that was a weakness; now that the trigger is a push it
+# is THE barrier — remove the reviewers and this file publishes 69 packages on
+# every version-PR merge with nobody deciding, which is rc.3 / rc.4 exactly.
+#     Settings → Environments → release → Required reviewers
+# Confirmed configured by the maintainer on 2026-08-20. ⚠️ Verified by a human
+# opening that page — not by this YAML, not by a CI gate, not by ADR-0125. If
+# the reviewers are ever removed, revert `publish` to a `workflow_dispatch`
+# trigger in the SAME change rather than leaving this running.
 #
 # WHAT IS DELIBERATELY STILL AUTOMATIC
 # ------------------------------------
@@ -79,34 +102,47 @@ name: Release
 # harmless bookkeeping, and #4935 must keep regenerating. Release/D4/image
 # backfill for an already-published version stays on push runs — it is the
 # #4900 repair, and it cannot mint a version. `npm publish` and `git push --tags`
-# live in exactly one job, and that job has exactly one trigger.
+# still live in exactly one job, and that job cannot start without a human
+# approving it.
 
 on:
   push:
     branches:
       - main
-  # The human lane. `workflow_dispatch` is the guarantee: no push, no merge
-  # queue landing, no bot token and no schedule can synthesise this event.
+  # The repair lane (ADR-0125 D4). Takes NO version: both lanes audit main the
+  # same way. `force` exists for the one case the push lane's predicate cannot
+  # see — a publish that died having already shipped the @objectstack/cli canary
+  # but not every package in the fixed group. It is dispatch-only by
+  # construction, so no push can set it, and it widens what may be ATTEMPTED,
+  # never what may be published unattended: the `release` environment approval
+  # below applies to this lane identically.
   workflow_dispatch:
     inputs:
-      version:
+      force:
         description: >-
-          Exact version to publish, e.g. 17.0.0-rc.5. Must equal
-          packages/cli/package.json on the selected branch (main). Typing it is
-          the human confirmation the 2026-08-07 ruling requires — a mismatch
-          fails the run before anything is published.
-        required: true
-        type: string
+          Publish even when @objectstack/cli is already on npm. Only for
+          finishing a partial publish — changeset publish skips versions the
+          registry already has, so this is a repair, never a duplicate.
+        required: false
+        default: false
+        type: boolean
 
-# Per-lane groups, NOT one shared group. GitHub keeps at most ONE pending run per
-# group: when a second run queues behind a running one, the older PENDING run is
-# cancelled. Under one group a burst of main pushes would therefore evict a
-# maintainer's queued publish silently — the click would simply evaporate. Split
-# by event so the two lanes can never displace each other; still no
-# `cancel-in-progress`, so same-lane runs serialise instead of racing.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+# ⛔ NO workflow-level concurrency — per-JOB groups below, deliberately
+# (ADR-0125 D5).
+#
+# GitHub keeps at most ONE pending run per group: when a second run queues
+# behind a running one, the older PENDING run is cancelled. The group this file
+# used to carry was keyed on `github.event_name`, and the comment on it said the
+# point was that "the two lanes can never displace each other". That key stopped
+# separating anything the moment the publish lane moved onto `push` (D1) — both
+# lanes are now the same event.
+#
+# Worse than not separating: a job waiting on the `release` environment approval
+# holds its run IN PROGRESS for as long as the maintainer takes. Under one
+# shared group every main push in that window would queue as pending and evict
+# the one before it, so an hour spent deciding would silently stop the Version
+# Packages PR from regenerating. Per-job groups keep the waiting publish from
+# touching the bookkeeping lane at all.
 
 jobs:
   # ══════════════════════════════════════════════════════════════════════════
@@ -116,6 +152,13 @@ jobs:
     name: Version PR maintenance
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Serialise against itself so two landings cannot race the force-push to
+    # `changeset-release/main`; never cancel in progress. An evicted PENDING run
+    # is harmless here — this job regenerates the PR from scratch, so the newest
+    # run's result is the one that was wanted anyway.
+    concurrency:
+      group: release-version-pr-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -203,8 +246,25 @@ jobs:
   # ══════════════════════════════════════════════════════════════════════════
   release-integrity:
     name: Release integrity (audit + no-mint backfill)
-    if: github.event_name == 'push'
+    # Runs on BOTH events now (ADR-0125 D1): it is the single place that reads
+    # what main carries and asks npm whether that version exists, so the push
+    # lane and the repair lane converge on ONE predicate and one guard instead
+    # of two code paths that can drift.
     runs-on: ubuntu-latest
+    # Serialised: its backfills create GitHub Releases and push a runtime image,
+    # and two runs doing that at once is not a state worth reasoning about.
+    #
+    # ⚠️ Residual race, stated rather than hidden: GitHub keeps one PENDING run
+    # per group, so if the version-PR landing's audit is itself queued behind an
+    # earlier one and a THIRD push arrives, this job is cancelled — and `publish`
+    # needs it, so the release quietly does not queue. It is narrow (the landing
+    # run has to be the pending one, not the running one) and it is visible (no
+    # approval request arrives) and it is recoverable without any special
+    # handling: the version is still absent from npm, so the `workflow_dispatch`
+    # repair lane re-audits and queues the same deployment.
+    concurrency:
+      group: release-integrity-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       # `contents: write` is for GitHub Releases, never for refs: this job runs
       # no `git push` of any kind.
@@ -214,6 +274,11 @@ jobs:
       # version and its runtime image is missing.
       published: ${{ steps.audit.outputs.image-missing }}
       cli-version: ${{ steps.audit.outputs.version }}
+      # THE release predicate (ADR-0125 D1): 'true' exactly when main's
+      # @objectstack/cli version is absent from npm — i.e. the Version Packages
+      # PR has just merged and nothing has shipped it yet. False on every
+      # ordinary landing, which is why an ordinary merge queues no deployment.
+      publish-pending: ${{ steps.audit.outputs.publish-pending }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -259,26 +324,29 @@ jobs:
 
           # ── npm ───────────────────────────────────────────────────────────
           if ! npm view "@objectstack/cli@$version" version >/dev/null 2>&1; then
-            # ⛔ A push run NEVER publishes (#6170 R3). Between merging the
-            # version PR and a maintainer running the publish lane this is the
-            # NORMAL, expected state — so it is reported, loudly, and the run
-            # stays green. Red here would fire on every push for hours or days
-            # and train everyone to ignore it.
-            echo "::warning::main carries @objectstack/cli@${version}, which is NOT on npm. This lane cannot publish it — that is deliberate (#6170). Run it: Actions → Release → Run workflow → version = ${version}."
+            # THE predicate (ADR-0125 D1). Not on npm = the Version Packages PR
+            # has just merged and nothing has shipped it. This job still cannot
+            # publish anything — it says so and stays green; the `publish` job
+            # below reads this output, and IT stops dead on the `release`
+            # environment until a required reviewer approves it.
+            echo "publish-pending=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::main carries @objectstack/cli@${version}, which is NOT on npm. A deployment is queued and is waiting for a maintainer to approve the 'release' environment."
             {
-              echo "## Release pending a human"
+              echo "## Release ${version} is waiting for your approval"
               echo
               echo "main (\`${SHA}\`) carries **@objectstack/cli@${version}**, which is not on npm."
               echo
-              echo "This is expected right after the \`chore: version packages\` PR merges."
-              echo "Push runs are structurally unable to publish (#6170); to ship it:"
+              echo "The **Publish ${version} to npm** job below is held at the \`release\`"
+              echo "environment gate. Nothing has been checked out, built or published —"
+              echo "GitHub holds the whole job until a required reviewer approves it."
               echo
-              echo "1. **Actions → Release → Run workflow**, branch \`main\`"
-              echo "2. version = \`${version}\`"
-              echo "3. Approve the \`release\` environment if required reviewers are configured"
+              echo "**Review this before approving:** the version above is read from the"
+              echo "object database at \`${SHA}\`, so it is what main actually carries."
+              echo "Approving publishes exactly it."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          echo "publish-pending=false" >> "$GITHUB_OUTPUT"
           echo "npm: @objectstack/cli@${version} is present."
 
           # From here on, every repair is over an ALREADY-PUBLISHED version, so
@@ -355,14 +423,52 @@ jobs:
   # HUMAN LANE — the ONLY job in this repository that publishes.
   # ══════════════════════════════════════════════════════════════════════════
   publish:
-    name: Publish to npm (human-initiated)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    # ⚠️ An environment with NO protection rules passes automatically — see the
-    # one-time setup note in this file's header. The trigger above is what
-    # guarantees a human today; this adds the approval click once
-    # Settings → Environments → release → Required reviewers is configured.
+    # The job NAME is the approval screen (ADR-0125 D2). GitHub shows the job
+    # name and the environment on the review prompt, so computing the name from
+    # the audited version is what replaces the typed one: the maintainer
+    # confirms a version they are SHOWN, read from the object database at
+    # github.sha, rather than one they recall. #10146 is why that matters — the
+    # version in that failure's log was @object-ui/console@17.5.0, the vendored
+    # objectui build, while the repo was publishing 17.1.0.
+    name: Publish ${{ needs.release-integrity.outputs.cli-version }} to npm (awaiting approval)
+    needs: [release-integrity]
+    # ⛔ THE barrier is now the environment, not the trigger (ADR-0125 D3).
+    #
+    #   An environment with NO protection rules passes AUTOMATICALLY and
+    #   SILENTLY, and a run that passed an unprotected gate is indistinguishable
+    #   in the log from one a human approved. Under this trigger that is not a
+    #   degraded gate, it is NO gate: the push lane would publish end to end
+    #   with nobody deciding, which is exactly the rc.3 / rc.4 incident — 69
+    #   packages, tags, Releases and a runtime image, twice in one week, no
+    #   human in the trigger chain.
+    #
+    #   Settings → Environments → release → Required reviewers was confirmed
+    #   configured by the maintainer on 2026-08-20, and ADR-0125 is conditional
+    #   on it staying that way. ⚠️ No file in this repo can assert it — not this
+    #   YAML, not a CI gate, not the ADR. It is checked by a human opening the
+    #   settings page. If those reviewers are ever removed, revert the `push`
+    #   trigger to `workflow_dispatch` in the SAME change; do not leave this
+    #   running.
     environment: release
+    # `publish-pending` is the whole trigger predicate: true exactly when main's
+    # version is absent from npm. Unset (an audit that died before deciding)
+    # compares false, so this fails CLOSED. `force` is dispatch-only and exists
+    # for the partial-publish repair D4 describes.
+    #
+    # `success() && (...)`, with the parentheses load-bearing: `&&` binds tighter
+    # than `||`, so `success() && A || B` would let the force branch publish on
+    # top of a FAILED audit — and the audit is what computes the version this
+    # job's name, guard and tag all read. If the audit dies, nothing publishes.
+    if: >-
+      success() &&
+      (needs.release-integrity.outputs.publish-pending == 'true' ||
+       (github.event_name == 'workflow_dispatch' && inputs.force))
+    runs-on: ubuntu-latest
+    # One publish at a time per ref, and never cancelled — a run cancelled
+    # mid-`changeset publish` is the state that leaves a fixed group half on npm.
+    concurrency:
+      group: release-publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write
     outputs:
@@ -388,31 +494,53 @@ jobs:
       # runs `changeset version`; this job publishes what the ref carries, or it
       # fails.
       # ──────────────────────────────────────────────────────────────────────
-      - name: Guard the dispatch (branch, version, human confirmation)
+      - name: Guard the approved release (branch, and the tree matches the commit)
         id: guards
         env:
-          # Human-supplied text: read through env, never interpolated into the
-          # shell.
-          REQUESTED: ${{ inputs.version }}
+          # What release-integrity read out of the object database at
+          # github.sha, and what the approval screen named. Read through env,
+          # never interpolated into the shell.
+          AUDITED: ${{ needs.release-integrity.outputs.cli-version }}
         run: |
           if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
             echo "::error::the publish lane may only run on main (got ${GITHUB_REF}). Publishing from any other ref would tag and ship code that never landed."
             exit 1
           fi
 
+          # R2's tripwire, kept (ADR-0125 D1). The typed version is gone, so
+          # this is now the ONLY thing standing between an approval and a
+          # publish of something main does not carry. It is the exact assertion
+          # the 2026-08-03 recover-publish step lacked when it shipped rc.3 off
+          # a re-versioned workspace: read the version from the OBJECT DATABASE
+          # at github.sha and refuse if the checked-out tree disagrees.
+          committed=$(git show "${GITHUB_SHA}:packages/cli/package.json" | jq -r '.version')
           declared=$(jq -r '.version' packages/cli/package.json)
-          if [ "$REQUESTED" != "$declared" ]; then
-            echo "::error::you asked to publish '${REQUESTED}' but main carries @objectstack/cli@${declared}. Merge the 'chore: version packages' PR (#4935) first, or re-run with the version main actually has."
+          if [ -z "$committed" ] || [ "$committed" = "null" ]; then
+            echo "::error::could not read @objectstack/cli version at ${GITHUB_SHA}"
+            exit 1
+          fi
+          if [ "$declared" != "$committed" ]; then
+            echo "::error::workspace carries @objectstack/cli@${declared} but ${GITHUB_SHA} carries ${committed} — something re-versioned this workspace (#6170). Refusing to publish a version main does not have."
             exit 1
           fi
 
-          echo "version=$declared" >> "$GITHUB_OUTPUT"
-          echo "Publishing @objectstack/cli@${declared} from ${GITHUB_SHA} (confirmed by ${GITHUB_ACTOR})."
+          # The approval was given against the audited number. If the tree has
+          # moved since, the human approved a different release than the one
+          # about to ship — refuse rather than ship the surprise.
+          if [ -n "$AUDITED" ] && [ "$AUDITED" != "$committed" ]; then
+            echo "::error::the release approved was @objectstack/cli@${AUDITED} but ${GITHUB_SHA} carries ${committed}. Refusing to publish a version nobody approved."
+            exit 1
+          fi
+
+          echo "version=$committed" >> "$GITHUB_OUTPUT"
+          echo "Publishing @objectstack/cli@${committed} from ${GITHUB_SHA} (approved on the 'release' environment)."
           {
-            echo "## Publishing ${declared}"
+            echo "## Publishing ${committed}"
             echo
             echo "- ref: \`${GITHUB_REF}\` @ \`${GITHUB_SHA}\`"
-            echo "- requested by: \`${GITHUB_ACTOR}\`"
+            echo "- started by: \`${GITHUB_ACTOR}\` (\`${GITHUB_EVENT_NAME}\`)"
+            echo "- authorised by: the \`release\` environment approval on this run —"
+            echo "  see the run's deployment history for the reviewer and timestamp"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enable Corepack

@@ -7,6 +7,7 @@
 // per-op API-exposure enforcement, $ref resolution, and error surfacing.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -36,8 +37,20 @@ function makeQl(overrides: Partial<Record<'insert' | 'update' | 'delete', any>> 
   const ql: any = {
     transaction: vi.fn(async (cb: any, ctx: any) => cb({ __trx: true, ctx })),
     insert: overrides.insert ?? vi.fn(async (_object: string, data: any) => ({ id: `id_${++seq}`, ...data })),
-    update: overrides.update ?? vi.fn(async (_object: string, data: any) => ({ ...data })),
-    delete: overrides.delete ?? vi.fn(async (_object: string, arg: any) => ({ success: true, id: arg?.where?.id })),
+    // Both defaults open with the producer's own dispatch predicate rather than
+    // a hand-mirrored `if` (#4434 / #5480). Until #9877 the gate could not read
+    // either of them: a `??` default is a BinaryExpression, so `implOf` answered
+    // null and these two doubles sat in NEITHER the pinned population nor the
+    // baseline — absent, which reads as clean. The delete double in particular
+    // is never driven by this suite, which is exactly the shape #4434 shipped.
+    update: overrides.update ?? vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return { ...data };
+    }),
+    delete: overrides.delete ?? vi.fn(async (_object: string, options: any) => {
+      assertEngineDeleteDispatch(options);
+      return { success: true, id: options?.where?.id };
+    }),
   };
   return ql;
 }

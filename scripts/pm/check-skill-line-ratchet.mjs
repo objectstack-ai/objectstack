@@ -87,7 +87,13 @@ export const CEILINGS = new Map([
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 244],
+  // Lowered 244 → 243: the decision-analysis template entry became a pointer
+  // to the reference file below (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 243],
+  // Business-perspective decision-analysis writing guide (maintainer ruling
+  // 2026-08-20: the four-facet analysis must argue from the business
+  // standpoint). Set at landed line count (headroom 0, same convention).
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 38],
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
