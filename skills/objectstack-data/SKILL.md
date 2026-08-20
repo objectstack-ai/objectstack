@@ -612,6 +612,105 @@ export const salesUser = definePermissionSet({
 - Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
 - Combine with `enable.apiMethods` to also restrict the HTTP surface.
 
+### Assigning a permission set to a user
+
+Declaring a set grants nobody anything. An assignment is **data**, not
+metadata: one row in the join object **`sys_user_permission_set`**
+(`@objectstack/plugin-security`). Three facts you cannot guess from the type
+surface, in the order they bite:
+
+1. **The declared set becomes a record at boot.** Everything in
+   `defineStack({ permissions })` is upserted into `sys_permission_set` by
+   `name`, with a generated `id`, on `kernel:ready` (ADR-0086 D5). That `id`
+   is minted per environment — it is never the same across dev / test / prod.
+2. **`permission_set_id` takes that RECORD ID, not the `name`.** It is a
+   lookup to `sys_permission_set.id`. The resolver collects
+   `permission_set_id` from the grant rows and then loads
+   `sys_permission_set` **by `id`** — so a `name` written into this field
+   matches nothing, no error is raised at grant time, and the user quietly
+   ends up with no capability. This is the single most expensive mistake on
+   this object.
+3. **So assigning is always two calls:** resolve `name` → `id`, then insert
+   the grant.
+
+```bash
+# 1. name → record id  (POST /query, QueryAST in the body; the path names the object)
+curl -sX POST "$BASE/api/v1/data/sys_permission_set/query" \
+  -H 'content-type: application/json' -H "authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"where":{"name":"sales_user"},"fields":["id","name","active"],"limit":1}'
+# → {"object":"sys_permission_set","records":[{"id":"ps_m4k…","name":"sales_user","active":true}]}
+
+# 2. grant it — permission_set_id is the id from step 1
+curl -sX POST "$BASE/api/v1/data/sys_user_permission_set" \
+  -H 'content-type: application/json' -H "authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"user_id":"usr_alice","permission_set_id":"ps_m4k…","organization_id":null}'
+```
+
+The same two steps through ObjectQL (`ql.find` then `ql.insert`) inside a
+plugin or seed script; the platform's own auto-grant writer does exactly this.
+
+**Row fields worth knowing** (`sys-user-permission-set.object.ts`):
+
+| Field | Notes |
+|:--|:--|
+| `user_id` | Required. Lookup to `sys_user`. |
+| `permission_set_id` | Required. Lookup to `sys_permission_set` — the **id**. |
+| `organization_id` | Optional. `null` = the grant applies in **every** org context; set it to scope the grant to one org. |
+| `valid_from` / `valid_until` | Optional half-open window `[from, until)`, UTC. Enforced **at resolution time** — an expired grant stops granting immediately, with no background job. |
+| `reason` | Free text. Required by the platform on delegation and break-glass grants. |
+| `granted_by` | **Do not author it** — the security gate stamps the calling user on insert. |
+| `id` | Omit it; the driver mints one. |
+
+Uniqueness is `(user_id, permission_set_id, organization_id)`, so the same set
+can be granted independently per org context.
+
+**Who may write this row.** Not whoever holds CRUD bits on the table — the
+gate says so in as many words: *"plain CRUD grants on RBAC tables do not make
+a permission administrator"*. Writes are accepted from a tenant administrator,
+or from a delegated `adminScope` that carries `manageAssignments`, allowlists
+that specific set, and whose business-unit subtree covers the target user
+(ADR-0090 D12). Anonymous and principal-less writes fail closed.
+
+#### Proving the deny — the minimal two-user check
+
+The reason to document this at all is that a permission story is only credible
+when you have watched it refuse someone. The smallest honest exercise:
+
+1. Two users, **A** and **B**. Grant the set to **A** only, with the two calls
+   above.
+2. As **A**, hit the object the set opens — `GET /api/v1/data/account` →
+   expect `200` with records.
+3. As **B**, hit the same object → expect `403`. That is the deny, and it is
+   the half people forget to run.
+4. Revoke: `DELETE /api/v1/data/sys_user_permission_set/{id}` (or set
+   `valid_until` to now). Re-run step 2 → **A** is now denied too.
+
+If a grant appears to do nothing, the causes are enumerable — check them in
+this order before suspecting the evaluator:
+
+- `permission_set_id` holds a `name` instead of an `id` (fact 2 above);
+- the `sys_permission_set` row has `active: false` — a deactivated set keeps
+  its assignments and grants nothing;
+- `valid_from` / `valid_until` puts the grant outside its window;
+- `organization_id` names an org other than the caller's active one.
+
+`GET /api/v1/security/explain?object=<obj>&operation=<op>&userId=<id>` answers
+"why" from the same code path that enforces, so its verdict cannot drift from
+the real one. Explaining **another** user needs `manage_users` or a delegated
+`adminScope` covering them.
+
+> ⚠️ `sys_user_permission_set` is a system object, and system objects are
+> **not exposed over MCP** unless a deployment opts in with
+> `allowSystemObjects` — the tool answers *"Object … is a system object and is
+> not exposed via MCP"*. So "ask the agent" will not find this for you; the
+> data door above is the path.
+
+Grants also arrive **indirectly**: a set bound to a position
+(`sys_position_permission_set`) is held by everyone assigned that position
+(`sys_user_position`), and every authenticated principal implicitly holds the
+`everyone` position. When auditing what a user actually has, read both sources
+— `explain` already does.
+
 ### Access depth (scope-depth) — the ERP "see my unit / my unit and below" axis
 
 For owner-scoped (`private`) objects, a per-object grant on a permission set can
