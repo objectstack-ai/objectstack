@@ -29,6 +29,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
+// ⚠️ Imported from a sibling TEST file on purpose, and the cost is measured, not
+// missed: importing a `.test.ts` re-registers its `describe`s here, so that
+// file's 10 rotation tests also execute inside this one. The alternatives are
+// worse. Minting a second engine double is a second looseness risk plus two new
+// `check:engine-double-contract` ledger entries, when this suite needs no
+// fidelity that double does not already have. Extracting it to a plain `.ts`
+// helper would REMOVE it from that gate's sight entirely — the gate discovers
+// doubles by walking `*.test.ts` only (`scripts/check-engine-double-contract.mjs`
+// `walk()`), so the pinned entries would go stale and the double would end up
+// scanned by nobody. And a suite-free `*.test.ts` fixture file is not available
+// either: this package runs a bare `vitest run`, with no `--passWithNoTests`.
+// Ten duplicated hermetic tests is the cheapest of the four.
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { ADMIN_SESSION_RECOVERY_RESPONSE_HEADER } from './impersonation-bearer-rotation';
 import { USER_NOT_FOUND } from './admin-impersonate-endpoint';
