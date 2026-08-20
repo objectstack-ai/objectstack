@@ -1549,6 +1549,21 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
  * stale」): the measured false stales #9465 and #9968 were both cards whose
  * dependents state the wait in a COMMENT, and both are pinned in the self-test.
  *
+ * ## STALE is also repo-local, and the row says so (#10139)
+ *
+ * `buildBlockingIndex` only ever scans THIS repo's open-issue listing, so
+ * `indexComplete` measures whether the comment fallback read every candidate
+ * — it says nothing about sibling repos. A dependent living in `objectui` or
+ * `cloud` with a `Blocked-by:` line naming this card is invisible to the
+ * index by construction, not by any read failure, so `indexComplete` cannot
+ * gate it and never claims to. The STALE sentence therefore does not read as
+ * exhaustive over "no dependent anywhere" — only "no dependent in this
+ * repo" — and its remedy is conditional on a cross-repo check rather than an
+ * instruction to drop the label outright: `Blocked-by:` edges are
+ * protocol-legal across repos (contract-first splits use them routinely),
+ * and #7917 / objectui#4356 is a live one this row would otherwise have
+ * instructed a reader to sever.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
  * @param {{ indexComplete?: boolean }} [options] — `false` when any gated
@@ -1561,14 +1576,16 @@ export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   if (carries && dependents.length === 0) {
     if (!indexComplete) return null;
     return (
-      '`pm:blocking` carried while NO open card\'s `Blocked-by:` line — body OR comment — targets ' +
-      'it, judged against the full two-channel index — a stale ' +
-      'derived cache. The label is not a state a seat sets: the triage sweep derives it from the ' +
-      '`Blocked-by:` reverse index, and the lane selection order ranks it second only to ' +
-      '`priority:p0`. So a stale one is worse than an absent one — it boosts a card nothing depends ' +
-      'on, with authority. Report-only: the remedy is the triage sweep\'s derivation pass dropping ' +
-      'the label (or the missing `Blocked-by:` line landing on the card that really is waiting), ' +
-      'never a label written from this script.'
+      '`pm:blocking` carried while no open card\'s `Blocked-by:` line — body OR comment — targets ' +
+      'it, judged against the two-channel index — a stale derived cache, scoped to THIS REPO ONLY: ' +
+      'no dependent found in this repo; cross-repo dependents are not swept, so this is not a claim ' +
+      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. The label ' +
+      'is not a state a seat sets: the triage sweep derives it from the `Blocked-by:` reverse index, ' +
+      'and the lane selection order ranks it second only to `priority:p0`. So a stale one is worse ' +
+      'than an absent one — it boosts a card nothing depends on, with authority. Report-only: verify ' +
+      'cross-repo dependents before the triage sweep\'s derivation pass drops the label (or the ' +
+      'missing `Blocked-by:` line landing on the card that really is waiting), never a label written ' +
+      'from this script.'
     );
   }
   if (!carries && dependents.length > 0) {
@@ -4075,6 +4092,16 @@ function selfTest() {
   t('H14-A: …and it names the stale-cache reading', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('stale derived cache'), true);
   t('H14-A: …and prescribes the derivation pass, never a label from here', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('derivation pass'), true);
   t('H14-A: …and says why stale is worse than absent', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('with authority'), true);
+  // The repo-boundary wording (#10139): STALE reads as "no dependent in this
+  // repo", never as exhaustive over the population, and the remedy is
+  // conditional on a cross-repo check rather than an outright drop.
+  t('H14-A: …names the repo boundary', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('no dependent found in this repo'), true);
+  t('H14-A: …and says cross-repo dependents are not swept', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('cross-repo dependents are not swept'), true);
+  t('H14-A: …and the remedy is conditional on verifying cross-repo dependents', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('verify cross-repo dependents before'), true);
+  // The negative: the old exhaustive phrasing ("the full two-channel index",
+  // instructing an unconditional drop) must be gone — it is what would have
+  // told a reader to sever the live #7917 / objectui#4356 edge.
+  t('H14-A: …and the old exhaustive phrasing is GONE', h14BlockingCacheIncoherent(carded(7276, ['pm:blocking']), idx([])).includes('full two-channel index'), false);
   // The negative for direction A: the label is EARNED, so nothing to report.
   t(
     'H14-A: pm:blocking with a real dependent -> clean',
