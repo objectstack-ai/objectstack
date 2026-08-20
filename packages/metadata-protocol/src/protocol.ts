@@ -3300,6 +3300,34 @@ export interface MetadataMutationEvent {
 }
 
 /**
+ * [#10219] A single item reached `active` through the per-item publish door
+ * (`publishMetaItem`, i.e. `POST /api/v1/meta/:type/:name/publish`). `type` is
+ * the CANONICAL singular metadata type name — the same spelling the promoted
+ * row carries — so a subscriber can build the `'{type}/{name}'` entry the
+ * `metadata:reloaded` payload's `changed` list is made of.
+ *
+ * Subscribe via {@link ObjectStackProtocolImplementation.onMetaItemPublished}.
+ *
+ * ## Why this is NOT the existing {@link MetadataMutationEvent}
+ *
+ * The per-item publish emits BOTH. The mutation event says "a row changed" and
+ * is emitted from `runPublishSideEffects`, the phase-2 helper the BATCH door
+ * (`publishPackageDrafts`) runs once per promoted draft as well — so a
+ * subscriber that announced a full metadata reload on it would fire N times for
+ * one "publish whole app", each announce driving a complete re-sync (schema DDL,
+ * connector re-materialization, flow re-bind) for every other item in the same
+ * batch. This event is emitted ONLY by the single-item door, which is the one
+ * the batch route's own announce does not cover.
+ */
+export interface MetaItemPublishedEvent {
+    /** Canonical singular metadata type of the promoted item. */
+    type: string;
+    name: string;
+    /** Scope the promotion landed in — `null` is env-wide. */
+    organizationId: string | null;
+}
+
+/**
  * Awaited per-type mutation projector (ADR-0094). Invoked AFTER a metadata
  * mutation persists — `saveMetaItem` (draft AND active saves),
  * `publishMetaItem`, `deleteMetaItem` — and AWAITED before the write returns,
@@ -4177,6 +4205,98 @@ export class ObjectStackProtocolImplementation implements
                 console.warn(
                     `[Protocol] metadata-mutation listener failed for ${evt.type}/${evt.name}: `
                     + `${e instanceof Error ? e.message : String(e)}`,
+                );
+            }
+        }
+    }
+
+    /**
+     * [#10219] Per-item publish listeners — the producer-side half of the
+     * publish→re-bind signal.
+     *
+     * ## The gap this closes
+     *
+     * A metadata publish at RUNTIME leaves every boot-cached consumer holding
+     * the pre-publish view; the platform's declared signal for "re-read what
+     * you cached" is the `metadata:reloaded` lifecycle event. Two announcers
+     * existed — the metadata plugin's dev-artifact watcher, and the runtime
+     * dispatcher AFTER `POST /packages/:id/publish-drafts`. The per-item door
+     * (`POST /api/v1/meta/:type/:name/publish`) announced nothing, so a flow
+     * published one item at a time never bound its trigger until the kernel was
+     * rebuilt: measured on a cloud rig, a record-change flow published as
+     * `state='active'` produced no bind log and no execution, and only the
+     * `kernel:ready` cold-boot bind (#2560) ever picked it up.
+     *
+     * ## Why the seam is here and not at the HTTP route
+     *
+     * `publishMetaItem` is the ONE producer behind every per-item publish
+     * transport (REST today; anything else that reaches the protocol next), and
+     * the batch door's announce already lives outside the protocol. Announcing
+     * from the producer means a new transport inherits the signal instead of
+     * having to remember it — the same argument {@link onMetadataMutation}
+     * makes one method over.
+     *
+     * The protocol itself holds no kernel hook bus, so it does not announce:
+     * it NOTIFIES, and the plugin that owns this protocol instance
+     * (`ObjectQLPlugin.subscribeMetadataRebind`, which is armed for both
+     * assembly modes) translates the notification into `ctx.trigger(
+     * 'metadata:reloaded', { changed })`. That keeps the lifecycle event
+     * emitted by something that actually has the kernel, exactly as the
+     * dispatcher does for the batch door.
+     *
+     * Server-side extension only — NOT part of the ObjectStackProtocol wire
+     * contract (same status as {@link onMetadataMutation}).
+     */
+    private metaItemPublishedListeners: Array<(evt: MetaItemPublishedEvent) => void | Promise<void>> = [];
+
+    /**
+     * Subscribe to per-item publishes. Returns an unsubscribe fn.
+     *
+     * Listeners are AWAITED (unlike {@link onMetadataMutation}'s fire-and-forget
+     * fan-out) so the publish's own 2xx means "the re-bind was attempted",
+     * matching the batch door — which awaits its `metadata:reloaded` announce
+     * before answering. A caller that publishes a flow and immediately writes a
+     * record must not race the bind.
+     */
+    onMetaItemPublished(listener: (evt: MetaItemPublishedEvent) => void | Promise<void>): () => void {
+        this.metaItemPublishedListeners.push(listener);
+        return () => {
+            const i = this.metaItemPublishedListeners.indexOf(listener);
+            if (i >= 0) this.metaItemPublishedListeners.splice(i, 1);
+        };
+    }
+
+    /**
+     * Notify per-item publish listeners, awaited and isolated.
+     *
+     * Best-effort by contract: the draft is already promoted and durable when
+     * this runs, so a subscriber failure must never turn a landed publish into
+     * an error response. It IS logged — losing an in-memory re-sync is the
+     * functional degradation AGENTS.md uses as its worked example ("a trigger
+     * is not armed"), and the batch door's equivalent catch logs at `warn` for
+     * the same reason. The sentence names the consequence and the recovery
+     * rather than the internal failure alone.
+     *
+     * ⛔ The caught text is NOT copied onto the publish response. The batch door
+     * carries a `rebindError` key because its response is a batch receipt; this
+     * door's response is declared by `PublishMetaItemResponseSchema` and adding
+     * a zero-reader diagnostic key to a wire contract buys no capability
+     * (the #6955 ruling, one payload over) — the operator-facing channel is
+     * this log.
+     */
+    private async emitMetaItemPublished(evt: MetaItemPublishedEvent): Promise<void> {
+        for (const listener of this.metaItemPublishedListeners) {
+            try {
+                await listener(evt);
+            } catch (e) {
+                console.warn(
+                    `[Protocol] the post-publish re-bind announce FAILED for ${evt.type}/${evt.name} — the item IS `
+                    + `published and stored, but boot-cached consumers keep the PRE-publish view until this process `
+                    + `restarts: a newly published record-triggered flow does not bind its trigger (it will not fire), `
+                    + `an edited schedule-triggered flow keeps running its old definition, and authored hooks, actions `
+                    + `and translations are not re-synced. Nothing retries this announce. Re-publish the item once the `
+                    + `cause below is resolved (it is idempotent), or restart the process to rebuild every subscriber `
+                    + `from storage. Cause: ${e instanceof Error ? e.message : String(e)}`,
                 );
             }
         }
@@ -14131,6 +14251,19 @@ export class ObjectStackProtocolImplementation implements
         if (effects.seedApplied) response.seedApplied = effects.seedApplied;
         if (effects.materializeApplied) response.materializeApplied = effects.materializeApplied;
         if (effects.projectionApplied) response.projectionApplied = effects.projectionApplied;
+        // [#10219] LAST, and awaited: tell the host that ONE item went live, so
+        // it can announce `metadata:reloaded` and boot-cached consumers re-sync
+        // without a restart — the parity the batch door has had since #2576.
+        // After the side effects because a subscriber re-reads the protocol
+        // (`resyncFlowsFromProtocol` pulls `getMetaItems({type:'flow'})`), and
+        // it must see the finished state: the active row, its table, and any
+        // materialized rows. Before the return so the caller's 2xx means the
+        // re-bind was attempted, not merely queued.
+        await this.emitMetaItemPublished({
+            type: singularType,
+            name: request.name,
+            organizationId: orgId,
+        });
         return response;
     }
 

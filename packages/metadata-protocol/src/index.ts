@@ -110,6 +110,10 @@ export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
 // against the producer's contract instead of restating it locally.
 export type { DeletePackageRequest, DeletePackageResponse } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
+// [#10219] The per-item publish notification the host bridges to the
+// kernel-wide `metadata:reloaded` announce. Exported for the same reason its
+// mutation sibling is: the subscriber lives in another package.
+export type { MetaItemPublishedEvent } from './protocol.js';
 export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';
 
 export { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
