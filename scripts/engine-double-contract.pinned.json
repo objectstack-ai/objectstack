@@ -447,6 +447,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-draft-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-draft-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-rebind-announce.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-rebind-announce.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.publish-side-effects-canonical-type.test.ts",
       "verb": "delete",
       "pinned": 1
