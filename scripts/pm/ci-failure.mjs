@@ -94,7 +94,8 @@
  *                    running, or zero check-runs on the sha. Zero is not a clean
  *                    repo, it is a broken scan.
  *   3  PREREQUISITE NOT MET — no usable transport (no token, exhausted quota,
- *                    unreachable api.github.com). Classified by
+ *                    unreachable api.github.com, or an authenticated container
+ *                    whose REPO-scoped reads are refused). Classified by
  *                    `check-half-states.mjs`'s probe, which is imported rather
  *                    than re-implemented: same numbers, same wording, one
  *                    instrument. Its header states the rule this file inherits —
@@ -128,6 +129,44 @@
  * instead of a crash loop. `--self-test` and `--help` never re-exec — they
  * open no socket.
  *
+ * ## The transport, part two — an authenticated container that cannot read THIS
+ *    repo (#9966, the fourth container class)
+ *
+ * The probe above is `/rate_limit`, and on its own it CANNOT answer the question
+ * this file asks. Measured here 2026-08-20, one container, seconds apart:
+ *
+ *   GET /rate_limit                        -> 200, 14982 left, server: github.com
+ *   GET /user                              -> 200, the real login
+ *   GET /repos/objectstack-ai/objectstack  -> 200   (this repo IS enabled here)
+ *   GET /repos/objectstack-ai/objectui     -> 403, no server: github.com and no
+ *                                             x-ratelimit-* headers at all
+ *
+ * The refusal is per-REPOSITORY, not per-session, and the account-scoped reading
+ * is genuinely healthy — byte-for-byte the healthy Routine runner's. So no care
+ * applied to `/rate_limit` could ever classify this container, and a seat
+ * pointing this file at a sibling repo (`PM_SWEEP_REPO=objectstack-ai/objectui`,
+ * the cross-repo task CLAUDE.md describes) is a live specimen of the class.
+ *
+ * What that cost before the repo-scoped stage existed, measured on the same
+ * container against the same sha — and it is WORSE than #9966 predicted. The
+ * card expected the exit-3 reading to degrade into an UNDETERMINED or a raw HTTP
+ * number. Measured, it degrades into an uncaught throw:
+ *
+ *   PM_SWEEP_REPO=<a repo this session cannot read> ci-failure.mjs --sha <sha>
+ *     -> Error: GET /repos/.../check-runs -> HTTP 403   (stack trace, exit 1)
+ *
+ * Node exits 1 on an uncaught exception, and 1 in the table above is RED — "the
+ * assertion text was retrieved for EVERY failing check, the output is the
+ * answer". A caller branching on `$?`, which the table above tells it to do,
+ * therefore read a transport refusal as a confident verdict about the TREE from
+ * a container that had not read one byte of it. That is why the fix is a probe
+ * STAGE and not a `catch` around the walk: exit 3 has to be reached before
+ * anything is read, or the answer is only a politer wrong one.
+ *
+ * The remaining uncaught-throw path — a transport failure arriving MID-walk,
+ * after the probe passed — is #10155, filed rather than fixed here: it needs an
+ * exit-code decision (2 vs 3) that this card did not scope.
+ *
  * ## History — this file reads none, so the shallow clone cannot mislead it
  *
  * Agent containers start from a 63-commit shallow clone (#9878), which answers
@@ -155,6 +194,7 @@ import {
   EXIT_PREREQUISITE_NOT_MET,
   classifyTransportProbe,
   describeProbe,
+  needsRepoProbe,
   parseRemaining,
 } from './check-half-states.mjs';
 import { PROXY_FLAG, PROXY_REARM_GUARD, proxyRearmPlan } from './check-governed-merges.mjs';
@@ -590,14 +630,59 @@ async function probeRateLimit(token) {
   }
 }
 
-async function probeTransport() {
-  const authed = await probeRateLimit(TOKEN);
-  const usable = !TOKEN || (authed.status === 200 && authed.rateLimitRemaining !== 0);
-  const anon = usable ? (TOKEN ? null : authed) : await probeRateLimit('');
+/**
+ * Stage 2 (#9966) — one repo-scoped GET, exercising the same authorization
+ * decision that every read in the walk below needs.
+ *
+ * `GET /repos/{owner}/{repo}` and NOT `GET /user`: measured in this container,
+ * `/user` answers 200 with the real login while a repo-scoped read of a repo
+ * this session does not hold answers 403. An "is this a real endpoint" probe
+ * green-lights the very class this stage exists to name — what has to be
+ * exercised is the SCOPE, not the realness. One core request, and only on the
+ * path that previously returned a green without having read anything
+ * repo-scoped.
+ */
+async function probeRepoRead(token) {
+  try {
+    const res = await fetch(`${API}/repos/${OWNER_REPO}`, {
+      headers: { accept: 'application/vnd.github+json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    });
+    return { status: res.status, rateLimitRemaining: parseRemaining(res.headers.get('x-ratelimit-remaining')) };
+  } catch (error) {
+    return { networkError: error?.code ?? error?.message ?? 'unknown' };
+  }
+}
+
+/**
+ * The two-stage probe. Stage 2 fires ONLY when stage 1 already said `reachable`
+ * — exactly the path that used to green without repo-scoped evidence — so the
+ * three failing classes short-circuit and cost precisely what they cost before.
+ *
+ * `needsRepoProbe` is IMPORTED for the same reason the classifier is: that
+ * sequencing is one decision, and #9946 pinned it next to the verdicts it gates.
+ * What stays local is the GATHERING POLICY, because it is genuinely NOT shared —
+ * measured on both files as they stand, this one also spends an anonymous probe
+ * when the quota reads 0, where `check-half-states.mjs` re-probes only on a
+ * non-200. Hoisting the whole probe into one function would have to pick one of
+ * those two and silently change the other file's request pattern.
+ *
+ * The two readers are injectable so `--self-test` can drive this against the
+ * measured container classes while opening no socket, as the header promises.
+ */
+async function probeTransport({ token = TOKEN, rateLimit = probeRateLimit, repoRead = probeRepoRead } = {}) {
+  const authed = await rateLimit(token);
+  const usable = !token || (authed.status === 200 && authed.rateLimitRemaining !== 0);
+  const anon = usable ? (token ? null : authed) : await rateLimit('');
   // The raw readings ride along: `classifyTransportProbe` returns null for a
   // shape it cannot name, and a caller that kept only the verdict would have
   // nothing to report about the container it just failed to classify.
-  return { verdict: classifyTransportProbe({ token: TOKEN, authed, anon }), authed, anon };
+  const account = classifyTransportProbe({ token, authed, anon });
+  if (!needsRepoProbe(account)) return { verdict: account, authed, anon, repo: null };
+
+  // Re-classified with the repo reading ADDED, rather than patched on top of the
+  // stage-1 verdict: one classifier, one place where a verdict is named.
+  const repo = await repoRead(token);
+  return { verdict: classifyTransportProbe({ token, authed, anon, repo }), authed, anon, repo };
 }
 
 async function rest(path) {
@@ -846,7 +931,12 @@ function render(result, target) {
 // the real tree rather than against a fixture of it.
 // ---------------------------------------------------------------------------
 
-function selfTest() {
+// Async because the fourth-class pin below drives the GATHERING, not only the
+// pure classifier — that is where this file's defect lived, and a pin that
+// exercised only `classifyTransportProbe` would restate #9946's self-test
+// instead of covering this file. It still opens no socket: the two readers are
+// injected.
+async function selfTest() {
   const failures = [];
   const t = (label, actual, expected = true) => {
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -1177,6 +1267,90 @@ function selfTest() {
     true,
   );
 
+  // -- probeTransport: the two stages, and the FOURTH container class -------
+  // Measured 2026-08-20 in an agent container whose session holds THIS repo and
+  // no other: `/rate_limit` -> 200 with a real quota and `server: github.com`,
+  // `/user` -> 200 with the real login, `GET /repos/objectstack-ai/objectui` ->
+  // 403 with no `server: github.com` and no `x-ratelimit-*` headers at all.
+  const PLACEHOLDER = 'proxy00000abcd'; // the 14-char proxy placeholder, `unrecognized` shape
+  const healthyRate = { status: 200, rateLimitRemaining: 14982 };
+  const refusedRepo = { status: 403, rateLimitRemaining: null };
+  // Injected readers that record what was actually requested, so the SEQUENCING
+  // is pinned and not merely the verdict — no socket is opened.
+  const readers = (rate, repo) => {
+    const calls = [];
+    return {
+      calls,
+      rateLimit: async (token) => {
+        calls.push(token ? 'rate:token' : 'rate:anon');
+        return rate;
+      },
+      repoRead: async () => {
+        calls.push('repo');
+        return repo;
+      },
+    };
+  };
+
+  const class4 = readers(healthyRate, refusedRepo);
+  const class4Result = await probeTransport({ token: PLACEHOLDER, ...class4 });
+  t(
+    '#9966 class 4 (measured): a healthy /rate_limit plus a refused repo read is NOT reachable',
+    class4Result.verdict.kind,
+    'repo-scope-refused',
+  );
+  t(
+    '...so the run exits 3 before the walk reads anything, instead of throwing on its first page',
+    class4Result.verdict.kind !== 'reachable',
+    true,
+  );
+  t('...and the repo read really was the SECOND request, taken only after stage 1 said reachable',
+    class4.calls, ['rate:token', 'repo']);
+  // The regression pin proper: the same observations, classified the way this
+  // file did before the stage existed, still come back green. Remove the
+  // gathering above and this case is what the class-4 case decays into — which
+  // is what makes the fixture a pin rather than a restatement of the fix.
+  t(
+    'the defect itself: those SAME readings with no repo observation still classify as reachable',
+    classifyTransportProbe({ token: PLACEHOLDER, authed: healthyRate }).kind,
+    'reachable',
+  );
+
+  const healthy = readers(healthyRate, { status: 200, rateLimitRemaining: 14981 });
+  t(
+    'both stages passing is the healthy runner class, and it still greens',
+    (await probeTransport({ token: PLACEHOLDER, ...healthy })).verdict.kind,
+    'reachable',
+  );
+
+  const badCred = readers({ status: 401, rateLimitRemaining: null }, healthyRate);
+  const badCredResult = await probeTransport({ token: PLACEHOLDER, ...badCred });
+  t('a failing stage 1 classifies exactly as it did before stage 2 existed', badCredResult.verdict.kind, 'bad-credential');
+  t('...and short-circuits, so no failing class costs one request more than it used to',
+    badCred.calls, ['rate:token', 'rate:anon']);
+
+  const notVisible = readers(healthyRate, { status: 404, rateLimitRemaining: 14980 });
+  t(
+    'a repo-scoped 404 is repo-not-visible — a wrong PM_SWEEP_REPO, or a credential that cannot see it',
+    (await probeTransport({ token: PLACEHOLDER, ...notVisible })).verdict.kind,
+    'repo-not-visible',
+  );
+
+  // A repo-scoped 5xx is left UNNAMED on purpose: the classifier's narrowness is
+  // the point, and the caller's loud generic failure beats a confident wrong
+  // diagnosis. What must never happen is that it falls back to `reachable`.
+  const unwell = await probeTransport({ token: PLACEHOLDER, ...readers(healthyRate, { status: 503, rateLimitRemaining: null }) });
+  t('a repo-scoped 5xx stays unclassified rather than being vouched for', unwell.verdict, null);
+  t('...and the stage-2 reading rides along, so the unclassified container can be reported', unwell.repo.status, 503);
+
+  const anonOnly = readers(healthyRate, refusedRepo);
+  const anonResult = await probeTransport({ token: '', ...anonOnly });
+  t(
+    'with no token the anonymous reading is the primary one and stage 2 still fires',
+    [anonResult.verdict.kind, anonOnly.calls],
+    ['repo-scope-refused', ['rate:anon', 'repo']],
+  );
+
   if (failures.length > 0) {
     console.error(`✗ ci-failure --self-test (${failures.length} failure(s)):\n`);
     for (const f of failures) console.error(`  • ${f}`);
@@ -1193,7 +1367,10 @@ function selfTest() {
     '    HTTPS proxy re-arms itself with --use-env-proxy while the offline modes never do; --help\n' +
     '    still carries every documented invocation of this file; and the exit table holds — zero\n' +
     '    checks, still-running, and a red check whose assertion could not be retrieved all land on\n' +
-    '    UNDETERMINED rather than on GREEN.',
+    '    UNDETERMINED rather than on GREEN. The transport probe runs its two stages in order: a\n' +
+    '    healthy /rate_limit is no longer enough to green a container whose repo-scoped reads are\n' +
+    '    refused (the fourth class, measured), the repo read is spent ONLY after stage 1 says\n' +
+    '    reachable, and a repo-scoped 5xx stays unclassified instead of falling back to reachable.',
   );
 }
 
@@ -1208,7 +1385,7 @@ if (!invokedDirectly) {
   // as an import side effect would make this file impossible to reuse without
   // also spending someone else's rate limit.
 } else if (process.argv.includes('--self-test')) {
-  selfTest();
+  await selfTest();
 } else if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(usageText(readFileSync(fileURLToPath(import.meta.url), 'utf8')));
 } else {
@@ -1235,12 +1412,15 @@ if (!invokedDirectly) {
     console.error('   A 401/403 below is then a TRANSPORT reading, not a verdict about the credential.');
   }
 
-  const { verdict: probe, authed, anon } = await probeTransport();
+  const { verdict: probe, authed, anon, repo } = await probeTransport();
   if (probe === null) {
     console.error('ci-failure: the transport probe returned a result its classifier does not recognise.');
     console.error(`  GET /rate_limit with the env token -> ${describeProbe(authed)}`);
     console.error(`  GET /rate_limit anonymously        -> ${describeProbe(anon)}`);
-    console.error('  That is a gap in the classifier, not a verdict about the tree — report it with both readings.');
+    // Stage 2 has its own unclassified shape (a repo-scoped 5xx), and without
+    // this line the reader would see two healthy readings and no explanation.
+    if (repo) console.error(`  GET /repos/${OWNER_REPO} (stage 2)   -> ${describeProbe(repo)}`);
+    console.error('  That is a gap in the classifier, not a verdict about the tree — report it with every reading above.');
     process.exit(EXIT_UNDETERMINED);
   }
   if (probe.kind !== 'reachable') {
