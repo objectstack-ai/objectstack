@@ -63,10 +63,15 @@
 
 export {
   buildRuntimeWriteSnapshots,
+  narrowObjectsToPackageClosure,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,
   stackKeyForType,
 } from './runtime-gate.js';
-export type { RuntimeGateResult, RuntimeStackContext } from './runtime-gate.js';
+export type {
+  RuntimeGateResult,
+  RuntimePackageScope,
+  RuntimeStackContext,
+} from './runtime-gate.js';
 export type { AuthoringFinding, AuthoringSeverity } from './authoring-rules.js';

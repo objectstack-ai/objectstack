@@ -10,6 +10,13 @@
  *                    door dispatches.
  *   --mode closure   (#9905) the whole-gate cost when the `objects` collection
  *                    is narrowed to the written item's reference closure.
+ *   --mode package   (#9612) the whole-gate cost when `objects` is narrowed to
+ *                    the written item's PACKAGE closure, by the SHIPPED
+ *                    deriver — plus the differential-verdict check and two
+ *                    positive controls. Unlike `--mode closure` this is not a
+ *                    hypothetical: it calls the same
+ *                    `narrowObjectsToPackageClosure` the gate calls, on a
+ *                    PACKAGED seed, so the number describes shipped behaviour.
  *
  * ⛔ `--mode closure` measures a HYPOTHETICAL. It narrows what the rules are
  * handed HERE, in this script, and changes nothing about the shipped gate —
@@ -132,6 +139,7 @@ import {
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   buildRuntimeWriteSnapshots,
+  narrowObjectsToPackageClosure,
 } from '../../packages/lint/dist/runtime.js';
 import * as showcaseObjects from '../../examples/app-showcase/src/data/objects/index.js';
 import { allFlows } from '../../examples/app-showcase/src/automation/flows/index.js';
@@ -405,6 +413,189 @@ function closureMode() {
   }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #9612 — `--mode package`: what narrowing to the written item's PACKAGE
+// closure buys, measured against the SHIPPED deriver rather than a hypothetical.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Objects per synthetic package in the packaged seed. */
+const PKG_SIZE = 22;
+/** The package the written item belongs to. */
+const OWN_PKG = 'pkg_0';
+/** The one package `OWN_PKG` declares a dependency on. */
+const DEP_PKG = 'pkg_1';
+/** The platform's package — never declared as a dependency by anyone. */
+const PLATFORM_PKG = 'pkg_platform';
+/** A platform object the written item legitimately references. */
+const SYSTEM_OBJECT = 'sys_bench_ledger';
+
+/**
+ * The seed, stamped with package provenance — the shape the ruling describes.
+ *
+ * A tenant that has grown to N objects is MANY packages, not one, so the seed
+ * distributes the corpus across `ceil(N / PKG_SIZE)` packages. It also carries
+ * ONE platform object (`isSystem`, `sys_` prefix, owned by a package nobody
+ * declares) so the "system objects are unconditionally in the closure" limb has
+ * something to be right or wrong about — control B below is what makes that a
+ * measurement rather than an assertion.
+ */
+function seedPackaged(shape: string, n: number): AnyRec[] {
+  const objects = SHAPES[shape]!(n).map((o, i) => ({
+    ...o,
+    _packageId: `pkg_${Math.floor(i / PKG_SIZE)}`,
+  }));
+  const platform = JSON.parse(JSON.stringify(SHOWCASE_OBJECTS[0]!)) as AnyRec;
+  platform.name = SYSTEM_OBJECT;
+  platform.isSystem = true;
+  platform._packageId = PLATFORM_PKG;
+  return [...objects, platform];
+}
+
+/** `{ packageId, dependencies }` as the host resolves it from the registry. */
+const PACKAGE_SCOPE = { packageId: OWN_PKG, dependencies: [DEP_PKG] } as const;
+
+/**
+ * The written item, stamped into `OWN_PKG` and — for a flow — repointed at the
+ * platform object so control B has a reference that must survive the closure.
+ */
+function packagedWrittenItem(): AnyRec {
+  if (WRITE_TYPE !== 'flow') return { ...WRITTEN_OBJECT, _packageId: OWN_PKG };
+  const flow = JSON.parse(JSON.stringify(SHOWCASE_FLOW)) as AnyRec;
+  const primary = referenceClosure(flow, SHAPES.real!(PKG_SIZE))[0];
+  const primaryName = primary ? String(primary.name) : undefined;
+  const repointed = primaryName
+    ? (JSON.parse(
+        JSON.stringify(flow).split(JSON.stringify(primaryName).slice(1, -1)).join(SYSTEM_OBJECT),
+      ) as AnyRec)
+    : flow;
+  repointed._packageId = OWN_PKG;
+  return repointed;
+}
+
+/**
+ * The item positive control A drives: one that really does reference objects in
+ * its OWN package, so dropping that package from the closure has something to
+ * break. For a flow that is the shipped showcase flow untouched; for an object
+ * write it is the same body the timing legs use, because the object door offers
+ * no cross-object reference to break — which is itself the measurement.
+ */
+function controlItemOwnPackage(): AnyRec {
+  if (WRITE_TYPE !== 'flow') return { ...WRITTEN_OBJECT, _packageId: OWN_PKG };
+  const flow = JSON.parse(JSON.stringify(SHOWCASE_FLOW)) as AnyRec;
+  flow._packageId = OWN_PKG;
+  return flow;
+}
+
+/**
+ * A finding's identity for verdict comparison, in two readings.
+ *
+ * ⚠️ `raw` includes `path`, and on the OBJECT door every finding's path is
+ * INDEX-based (`objects[417].sharingModel`). Narrowing moves the written item's
+ * index, so `raw` differs between a full and a narrowed run even when the two
+ * runs found the identical defect on the identical object — a naive comparison
+ * reads that as a phantom. `semantic` drops the array index and keeps
+ * everything a reader acts on (`where` already carries the object NAME), so it
+ * is the reading that answers "did narrowing change the ANSWER".
+ *
+ * BOTH are printed. The index difference is a real, wire-visible consequence of
+ * this change and hiding it behind the normalisation would be dishonest.
+ */
+const stripIndices = (p: unknown) => String(p ?? '').replace(/\[\d+\]/g, '[i]');
+const verdictRaw = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+  [...r.errors, ...r.advisories].map((f) => `${f.rule}|${f.where}|${f.path}|${f.message}`).sort();
+const verdictSemantic = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+  [...r.errors, ...r.advisories]
+    .map((f) => `${f.rule}|${f.where}|${stripIndices(f.path)}|${f.message}`)
+    .sort();
+
+function diffCount(a: string[], b: string[]): { added: number; removed: number } {
+  const bs = new Set(b);
+  const as = new Set(a);
+  return {
+    added: b.filter((x) => !as.has(x)).length,
+    removed: a.filter((x) => !bs.has(x)).length,
+  };
+}
+
+function packageMode() {
+  const item = packagedWrittenItem();
+  console.log('');
+  console.log(`  package closure — own '${OWN_PKG}' + declared dep '${DEP_PKG}' + platform/system + unpackaged`);
+  console.log(`  seed: ${PKG_SIZE} objects per package, plus one '${SYSTEM_OBJECT}' owned by '${PLATFORM_PKG}' (declared by nobody)`);
+
+  for (const shape of Object.keys(SHAPES)) {
+    for (const n of SIZES) {
+      const objects = seedPackaged(shape, n);
+      const closure = narrowObjectsToPackageClosure(objects, PACKAGE_SCOPE) as AnyRec[];
+
+      const runFull = () => runRuntimeAuthoringRules({ type: WRITE_TYPE, item, context: { objects } });
+      const runScoped = () =>
+        runRuntimeAuthoringRules({ type: WRITE_TYPE, item, context: { objects }, packageScope: PACKAGE_SCOPE });
+
+      const full = timeMedian(() => { runFull(); });
+      const scoped = timeMedian(() => { runScoped(); });
+      const fullV = runFull();
+      const scopedV = runScoped();
+
+      console.log('');
+      console.log(
+        `  shape=${shape} N=${objects.length}: |closure| = ${closure.length}`
+        + `  (closure/N = ${((closure.length / objects.length) * 100).toFixed(1)}%)`,
+      );
+      console.log(
+        `    whole gate: full ${full.toFixed(2)} ms → package closure ${scoped.toFixed(2)} ms`
+        + ` — saving ${(((full - scoped) / full) * 100).toFixed(1)}%`,
+      );
+      const rawD = diffCount(verdictRaw(fullV), verdictRaw(scopedV));
+      const semD = diffCount(verdictSemantic(fullV), verdictSemantic(scopedV));
+      console.log(
+        `    differential verdict — semantic: ${semD.added === 0 && semD.removed === 0 ? 'UNCHANGED' : `CHANGED (+${semD.added} / -${semD.removed})`}`
+        + ` · raw incl. array index: ${rawD.added === 0 && rawD.removed === 0 ? 'unchanged' : `+${rawD.added} / -${rawD.removed} (index-only differences show here)`}`,
+      );
+      console.log(`    findings: full ${fullV.errors.length}e/${fullV.advisories.length}a → scoped ${scopedV.errors.length}e/${scopedV.advisories.length}a`);
+
+      // ── Positive control A — the closure loses the written package itself.
+      //
+      // Driven by {@link controlItemOwnPackage}, NOT by `item`: the timed item
+      // above was repointed at the platform object for control B's sake, so it
+      // no longer references its own package and would make this control
+      // vacuous BY CONSTRUCTION rather than by a property of the door. This
+      // control needs an item whose references live in `pkg_0`.
+      //
+      // If it prints a zero delta the verdict check above is not falsifiable on
+      // this door, so it is printed whatever it says.
+      const ctrlItem = controlItemOwnPackage();
+      const ctrlAFull = runRuntimeAuthoringRules({ type: WRITE_TYPE, item: ctrlItem, context: { objects } });
+      const ctrlA = objects.filter((o) => {
+        const owner = String(o._packageId ?? '');
+        return owner === DEP_PKG || o.isSystem === true || String(o.name ?? '').startsWith('sys_');
+      });
+      const ctrlAV = runRuntimeAuthoringRules({ type: WRITE_TYPE, item: ctrlItem, context: { objects: ctrlA } });
+      const ctrlAD = diffCount(verdictSemantic(ctrlAFull), verdictSemantic(ctrlAV));
+      console.log(
+        `    positive control A (own package dropped, |set| = ${ctrlA.length}): `
+        + `${ctrlAD.added === 0 && ctrlAD.removed === 0 ? '⚠️ NO DELTA — control is vacuous on this door' : `delta +${ctrlAD.added} / -${ctrlAD.removed}`}`,
+      );
+
+      // ── Positive control B — the card's named hazard: a closure that omits
+      // SYSTEM objects. The written item references `sys_bench_ledger`, which
+      // no package declares, so only the unconditional system limb keeps it.
+      const ctrlB = objects.filter((o) => {
+        const owner = String(o._packageId ?? '');
+        return owner === OWN_PKG || owner === DEP_PKG;
+      });
+      const ctrlBV = runRuntimeAuthoringRules({ type: WRITE_TYPE, item, context: { objects: ctrlB } });
+      const ctrlBD = diffCount(verdictSemantic(fullV), verdictSemantic(ctrlBV));
+      console.log(
+        `    positive control B (system objects dropped, |set| = ${ctrlB.length}): `
+        + `${ctrlBD.added === 0 && ctrlBD.removed === 0 ? '⚠️ NO DELTA — this door has no objects×objects coupling' : `delta +${ctrlBD.added} / -${ctrlBD.removed}`}`,
+      );
+    }
+  }
+}
+
 if (MODE === 'per-rule') perRuleMode();
 else if (MODE === 'closure') closureMode();
+else if (MODE === 'package') packageMode();
 else totalMode();

@@ -46,7 +46,11 @@
  *   refusal to a loud log for a migration window.
  */
 
-import { runRuntimeAuthoringRules, type AuthoringFinding } from '@objectstack/lint/runtime';
+import {
+    runRuntimeAuthoringRules,
+    type AuthoringFinding,
+    type RuntimePackageScope,
+} from '@objectstack/lint/runtime';
 // The ONE declaration of "which `config` key on which container node type holds
 // a nested region" (#4401, `spec/src/automation/region-slots.ts`). Four passes
 // already walk regions over this table — three in `spec`, one in `lint` — and
@@ -425,6 +429,24 @@ export function evaluateRuntimeAuthoringGate(args: {
     /** ADR-0080 SDUI manifest when the host has one. */
     sduiManifest?: unknown;
     /**
+     * [#9612] The package this write belongs to, and the transitive closure of
+     * that package's DECLARED dependencies — resolved by the caller, which is
+     * the side holding the package registry.
+     *
+     * Present ⇒ the gate judges the write against
+     * `package + declared deps + platform/system + unpackaged overlay rows`
+     * instead of against every object in the tenant, per the maintainer's
+     * ruling that the validation unit is the package (「客户开发开发,校验是否
+     * 也应该基于软件包」·「当然这里面要考虑系统对象」).
+     *
+     * ⛔ Absent ⇒ nothing is narrowed and the whole collection is judged. That
+     * is the ONLY fallback, and its direction is deliberate: an unresolvable
+     * package buys the write MORE input, never less. A fallback that skipped
+     * rules — or skipped them past some size — would be the fail-open at scale
+     * this card was forbidden to build.
+     */
+    packageScope?: RuntimePackageScope;
+    /**
      * [#6285] The organization partition this write lands in — `saveMetaItem`'s
      * `organizationId`, absent/null for a platform-level (environment) write.
      *
@@ -451,6 +473,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     const result = runRuntimeAuthoringRules({
         type: args.type,
         item: args.body,
+        ...(args.packageScope !== undefined ? { packageScope: args.packageScope } : {}),
         context: {
             objects: args.objects ?? [],
             permissions: args.permissions ?? [],

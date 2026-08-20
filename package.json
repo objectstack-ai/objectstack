@@ -52,6 +52,7 @@
     "check:ratchet-remedy-authority": "node scripts/check-ratchet-remedy-authority.mjs --self-test && node scripts/check-ratchet-remedy-authority.mjs",
     "check:pm-skill-ratchet": "node scripts/pm/check-skill-line-ratchet.mjs --self-test && node scripts/pm/check-skill-line-ratchet.mjs",
     "check:pm-skill-id-lint": "node scripts/pm/check-skill-id-lint.mjs --self-test && node scripts/pm/check-skill-id-lint.mjs",
+    "check:pm-label-desc-cap": "node scripts/pm/check-label-desc-cap.mjs --self-test && node scripts/pm/check-label-desc-cap.mjs",
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",

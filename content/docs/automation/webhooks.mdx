@@ -84,11 +84,14 @@ CRUD, permissions, audit, and Studio UI without bespoke code.
 ### 3.1 `sys_webhook`
 
 The subscription record. One row per "I want webhook X to fire for object Y".
-The transport configuration (headers, timeout, method) is carried in
-`definition_json`, a serialised `Webhook` JSON (canonical schema:
-`WebhookSchema`, exported from `@objectstack/spec/automation`). The signing
-secret is the one authored value that does **not** live in that blob — it has
-its own encrypted column, see below.
+The authored envelope — the per-attempt `timeoutMs` and the rest of the
+`Webhook` config — is carried in `definition_json`, a serialised `Webhook` JSON
+(canonical schema: `WebhookSchema`, exported from
+`@objectstack/spec/automation`). Two authored values do **not** live in that
+blob: the signing secret and the custom HTTP headers each have their own
+encrypted column (`signing_secret`, `headers_secret`). Both are the ordinary
+place a credential goes, and `definition_json` is an ordinary `textarea`
+returned in full by `GET /api/v1/data/sys_webhook`.
 
 | Field             | Type      | Notes                                                                              |
 |-------------------|-----------|------------------------------------------------------------------------------------|
@@ -101,24 +104,62 @@ its own encrypted column, see below.
 | `method`          | select    | HTTP method — one of `GET` / `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`.   |
 | `description`     | textarea  | Free-text description.                                                              |
 | `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
-| `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — carries the transport config: custom `headers` and `timeoutMs`. **Not** the signing secret. |
+| `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — the per-attempt `timeoutMs` and the rest of the authored envelope. **Not** the signing secret and **not** the custom headers: each has its own encrypted column below. |
+| `headers_secret`  | secret    | Custom HTTP headers sent with every delivery, authored as a JSON object of string values (`{"Authorization": "Bearer …"}`) — a `Field.secret`, the same channel as `signing_secret`. Encrypted on write into `sys_secret`; the row keeps only an opaque ref and every read path returns a mask, so the headers are not recoverable over the data API. Leave the mask untouched when editing to keep the current value. A plaintext that is not a flat map of string values is refused at the write door (`VALIDATION_ERROR` / `400`), not at the next delivery. |
 | `signing_secret`  | secret    | The HMAC-SHA256 key (`Field.secret`). Encrypted on write into `sys_secret`; the row keeps only an opaque ref and every read path returns a mask, so the key is not recoverable over the data API. Leave the mask untouched when editing to keep the current value. |
 | `created_at`      | datetime  | Standard audit columns.                                                            |
 | `updated_at`      | datetime  |                                                                                    |
 
 Matching at runtime is purely `object_name` + the multi-select `triggers`
-list; the headers and per-attempt timeout are parsed out of `definition_json`
-when an event is enqueued, and the signing key is dereferenced server-side from
-`signing_secret`. There is no per-row org/tenant column, no `events[]` glob
-field, no stored `retry_policy`, and no `secret_hint` — see §6 for the actual
-signing model and §11 for the (single) retry budget.
+list; the per-attempt timeout is parsed out of `definition_json` when an event
+is enqueued, and **both** credentials are dereferenced server-side when the
+enqueuer refreshes its subscription cache — the signing key from
+`signing_secret`, the custom header map from `headers_secret`. There is no
+per-row org/tenant column, no `events[]` glob field, no stored `retry_policy`,
+and no `secret_hint` — see §6 for the actual signing model and §11 for the
+(single) retry budget.
+
+**What a read of the two encrypted columns returns, and to whom.** Both are
+masked on *every* generic read — `find` / `findOne` / `$expand`, and therefore
+the REST data API and the Studio alike — unconditionally, after hooks, with no
+persona carve-out and no privileged-caller exception on that path. A set value
+comes back as the mask (`SECRET_MASK`, eight `•` characters, ADR-0100); an
+unset one comes back as `null`, so a form can render "configured" vs "not
+configured" without seeing either value. Writing that exact mask string back
+means "unchanged" and is dropped, which is what makes editing the rest of the
+record around an untouched mask safe. The plaintext is reachable **only
+in-process**, through the engine's privileged `resolveSecretField()`
+dereference: the auto-enqueuer calls it on each cache refresh, keeps the values
+in memory, signs the body with one and attaches the other to the outbound
+request. No query string reaches that method, so nothing on the data API hands
+either value back, for any persona.
+
+Both columns are equally fail-closed on the way in and on the way out: with no
+`CryptoProvider` registered the engine **refuses** the write rather than storing
+cleartext, and a stored header map that cannot be resolved back into a flat
+string map parks the subscription — reported at `error` — rather than
+delivering it without the headers it was authored with. The per-delivery *copy*
+of those headers is a different mechanism with its own rule: it is snapshotted
+onto `sys_http_delivery.headers_json`, which is `internal` rather than
+encrypted — see §3.2.
 
 <Callout type="info">
-Until v17 the authored `secret` was serialised into `definition_json` along with
-the rest of the envelope, which made it readable through an ordinary
-`GET /api/v1/data/sys_webhook`. It now goes to `signing_secret`; existing rows
-are migrated on boot. Authoring does not change — `defineWebhook({ secret })` is
-written exactly as before.
+Until v17 the authored `secret` **and** the authored `headers` were serialised
+into `definition_json` along with the rest of the envelope, which made both
+readable through an ordinary `GET /api/v1/data/sys_webhook`. They now go to
+`signing_secret` and `headers_secret`; existing rows are migrated on boot by one
+idempotent sweep that moves both passengers and strips them from the blob in a
+single update. Authoring does not change — `defineWebhook({ secret, headers })`
+is written exactly as before, and the boot materializer routes each value to its
+own column.
+
+A row the sweep has not converted — for example a pre-v17 row on a runtime with
+no `CryptoProvider` wired, where the encrypted write is refused and the row is
+deliberately left intact — is still delivered from the blob, with a `warn`
+naming those headers as cleartext. That fallback exists for rows written before
+the move; it is **not** a supported place to author. Never type a token into
+`definition_json`: it is returned in full by the generic data API, and nothing
+ages it out.
 </Callout>
 
 ### 3.2 `sys_http_delivery`

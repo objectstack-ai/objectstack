@@ -14,6 +14,7 @@ import {
     describeInitOrderFault,
 } from './plugin-order.js';
 import { dispatchHookIsolating, dispatchHookPropagating } from './hook-dispatch.js';
+import { registerPluginByName } from './plugin-registration.js';
 
 /**
  * Enhanced Kernel Configuration
@@ -178,6 +179,14 @@ export class ObjectKernel {
 
     /**
      * Register a plugin with enhanced validation
+     *
+     * Duplicate names OVERWRITE, with one `warn` naming both versions — the
+     * declared contract in `plugin-registration.ts`, applied identically by
+     * `LiteKernel.use()` (#9864, maintainer ruling 2026-08-19). The overwrite
+     * itself is unchanged: it is what lets an app config's `plugins` entry
+     * supersede a plugin the CLI auto-registered earlier in the same boot
+     * (#9863). What changes is that it is no longer silent, and no longer
+     * disagrees with the other kernel.
      */
     async use(plugin: Plugin): Promise<this> {
         if (this.state !== 'idle') {
@@ -186,18 +195,27 @@ export class ObjectKernel {
 
         // Load plugin through enhanced loader
         const result = await this.pluginLoader.loadPlugin(plugin);
-        
+
         if (!result.success || !result.plugin) {
             throw new Error(`Failed to load plugin: ${plugin.name} - ${result.error?.message}`);
         }
 
         const pluginMeta = result.plugin;
-        this.plugins.set(pluginMeta.name, pluginMeta);
-        
-        this.logger.info(`Plugin registered: ${pluginMeta.name}@${pluginMeta.version}`, {
-            plugin: pluginMeta.name,
-            version: pluginMeta.version,
-        });
+        const superseded = registerPluginByName(this.plugins, pluginMeta, this.logger);
+
+        // [#9864] Suppressed for a superseding registration, deliberately. The
+        // defect the ruling names is that this line printed TWICE for one
+        // surviving plugin and so read as two plugins running; the `warn`
+        // `registerPluginByName` just emitted says everything this line would
+        // and says which instance survived. Suppressing it here makes the
+        // count of `Plugin registered:` lines in a boot log equal the number
+        // of plugins that will actually boot.
+        if (superseded === undefined) {
+            this.logger.info(`Plugin registered: ${pluginMeta.name}@${pluginMeta.version}`, {
+                plugin: pluginMeta.name,
+                version: pluginMeta.version,
+            });
+        }
 
         return this;
     }

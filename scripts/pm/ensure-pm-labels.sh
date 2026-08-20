@@ -45,6 +45,23 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — no dispatch, no nag; restart condition in the hold comment" 2>/dev/null || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" 2>/dev/null || true
+  # priority:p0 is the QUEUE-JUMP tier of the lane pull order, and ordering
+  # only: a p0 card still obeys the same-file serial queue and the claim
+  # protocol (SKILL.md state model, 「优先是排序,不是豁免」). Set by the triage
+  # seat when it grades a card; removed by triage when the grade changes. Named
+  # consumers: the lane pull order below (p0 > pm:blocking > target board > Bug
+  # > the rest) and the half-state sweep's H10 (stale unclaimed p0) and H11
+  # (important card parked) in scripts/pm/check-half-states.mjs. It is in this
+  # four-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO) and
+  # grading is a four-repo triage duty — the same reasoning as pm:retriage
+  # below. Measured 2026-08-20: objectui carries a live priority:p0 card whose
+  # label OBJECT was auto-created by that first application, so it has GitHub's
+  # default colour and an EMPTY description — exactly the drift this row closes
+  # for the next repo. Creation here is create-if-missing, so the objects that
+  # already exist (this repo's, with an older hand-written description) keep
+  # their current colour and description; aligning those is a separate,
+  # deliberate PM action, like the retired label objects above.
+  gh label create priority:p0         -R "$R" -c b60205 -d "Queue-jump: outranks batch and breaks the round — never exempts claiming or same-file serial" 2>/dev/null || true
   # pm:blocking is a derived CACHE, never hand state (maintainer opinion
   # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
   # the triage sweep writes/removes it from the Blocked-by: reverse index, and
@@ -84,6 +101,23 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true
 gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud)" 2>/dev/null || true
+
+# pm:seat marks a SEAT REGISTRY post — the protocol carrier, not dispatchable
+# work (SKILL.md state model): one post per seat, its body is the single-writer
+# authority, and the `label:pm:seat` list page is therefore the fleet status
+# board. Set when a seat post is created; it never comes off — the post IS the
+# seat, and a vacated seat flips its TITLE to ⏳ vacant and drops the assignee
+# instead. Named consumers: the `domain:$D` description just below, which
+# indexes seat cards by label:pm:seat; the triage round's seat-liveness patrol,
+# which scans that same list page (references/dispatch-runbook.md); and the
+# half-state sweep's H5 (title/assignee desync) and H6 (oversized body) in
+# scripts/pm/check-half-states.mjs. Main repo only: there is exactly one seat
+# per `domain:*` / `repo:*` lane and both of those families are main-repo-only
+# (lanes are main-repo-only — the objectos Option B comment above), so the seat
+# index can only be read here. Measured 2026-08-20: zero pm:seat cards in
+# objectui and objectos. Creation is create-if-missing, so this repo's existing
+# object keeps its current colour and description.
+gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
 
 # Domain lanes — the roster lives in SKILL.md's domain table; keep both in sync
 # BY PR whenever a lane is added or retired.

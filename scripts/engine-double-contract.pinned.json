@@ -407,6 +407,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.package-closure-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.package-publish-audit-rows.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1023,6 +1033,16 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
       "verb": "update",
       "pinned": 1
     },

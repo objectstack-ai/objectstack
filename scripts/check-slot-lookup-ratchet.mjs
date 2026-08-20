@@ -19,6 +19,14 @@
 //   • a baselined file's count DECREASED or the file is clean/gone (progress!)
 //     — run with --update to ratchet the baseline down and commit it.
 //
+// And it REFUSES to report at all (exit 2) when a file in the population does
+// not PARSE. ESLint's Node API returns a parse failure as a message carrying no
+// rule id, which matches nothing this script counts, so before #10123 such a
+// file contributed zero sites and this gate printed `✓ … holds` and exited 0 —
+// a clean verdict on a file it had never read, while `pnpm lint` failed loudly
+// on the same input. scripts/eslint-fatal-guard.mjs carries the measurement and
+// why a fatal is the measurement failing rather than a finding.
+//
 //   node scripts/check-slot-lookup-ratchet.mjs [--update]
 //
 // The counts are produced by running ESLint itself with the baseline's
@@ -37,6 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 
 import eslintConfig, { SLOT_LOOKUP_ANY_MESSAGE } from '../eslint.config.mjs';
+import { lintFilesStrict } from './eslint-fatal-guard.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -160,7 +169,13 @@ const eslint = new ESLint({
   allowInlineConfig: false,
 });
 
-const results = await eslint.lintFiles([LINT_TARGET]);
+// Not `eslint.lintFiles`: a parse failure inside the population is the
+// measurement failing, not a file with nothing to report, and it matches none
+// of the filters below. The guard names the file and stops (#10123).
+const results = await lintFilesStrict(eslint, [LINT_TARGET], {
+  gate: 'check-slot-lookup-ratchet',
+  repoRoot,
+});
 
 const current = {};
 for (const result of results) {
@@ -259,7 +274,8 @@ if (errors.length > 0) {
 
 console.log(
   `✓ slot-lookup ratchet holds: ${totalSites} unswept site(s) in ${totalFiles} file(s), ` +
-  `none new. Every other file under packages/ is covered by \`pnpm lint\`.`,
+  `none new, and every file in the population parsed. Every other file under ` +
+  `packages/ is covered by \`pnpm lint\`.`,
 );
 console.log(
   monotonicity

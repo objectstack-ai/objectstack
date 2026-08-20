@@ -131,7 +131,17 @@ function owdOf(obj: AnyRec): unknown {
   return obj.sharingModel;
 }
 
-function isSystemObject(obj: AnyRec): boolean {
+/**
+ * A platform / system object: one the tenant did not author.
+ *
+ * Exported (#9612) so the runtime gate's package-closure narrowing keeps
+ * system objects unconditionally inside the closure using THIS predicate,
+ * rather than a second opinion about what "system" means. A package that
+ * references a platform object, judged against a closure that omitted it,
+ * would report an unresolved reference that is not there — so the two
+ * readings have to be one reading.
+ */
+export function isSystemObject(obj: AnyRec): boolean {
   return obj.isSystem === true || String(obj.name ?? '').startsWith('sys_');
 }
 
