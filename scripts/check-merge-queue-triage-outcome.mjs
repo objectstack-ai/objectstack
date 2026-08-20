@@ -599,6 +599,21 @@ function scenarios(root) {
 
     // ── limb (2): cross-PR aggregation ────────────────────────────────────
     {
+      id: 'E7',
+      name: 'a line reported as a reason is not ALSO printed as its own excerpt line',
+      world: () => base({ logs: { 111: ASSERTION_LOG } }),
+      check(r, t) {
+        const lines = excerptLines(r);
+        const dupes = lines.filter((l) => l.includes('AssertionError: SecurityPlugin.init() ran'));
+        return [
+          t(dupes.length === 1,
+            `the assertion appears exactly once -- as the labelled reason -- got ${dupes.length}: ${JSON.stringify(dupes)}`),
+          t(dupes[0]?.startsWith('↳ 失败原因:'),
+            'and the one occurrence is the labelled one, attached to its FAIL line'),
+        ];
+      },
+    },
+    {
       id: 'A1',
       name: 'POSITIVE: the same key on a SECOND distinct PR files exactly ONE anchor',
       world: () => base({
@@ -938,7 +953,7 @@ const MUTATIONS = [
   {
     id: 'M1',
     what: 'the reason lookahead is removed, restoring the excerpt that burned 2026-08-20',
-    from: '          if (REASON_LINE.test(all[j])) { reason = all[j].trim().slice(0, 200); break; }',
+    from: '          if (REASON_LINE.test(all[j])) {\n            reason = all[j].trim().slice(0, 200);\n            consumed.add(j);\n            break;\n          }',
     to: '',
     expect: ['E1', 'E2', 'E3', 'E5', 'E6'],
   },
@@ -959,9 +974,16 @@ const MUTATIONS = [
   {
     id: 'M3b',
     what: 'the FAIL pattern is tested BEFORE the reason pattern, so `AssertionError` breaks the scan on the line it wanted',
-    from: '          if (REASON_LINE.test(all[j])) { reason = all[j].trim().slice(0, 200); break; }\n          if (FAIL_LINE.test(all[j])) break;',
-    to: '          if (FAIL_LINE.test(all[j])) break;\n          if (REASON_LINE.test(all[j])) { reason = all[j].trim().slice(0, 200); break; }',
+    from: '          if (REASON_LINE.test(all[j])) {\n            reason = all[j].trim().slice(0, 200);\n            consumed.add(j);\n            break;\n          }\n          if (FAIL_LINE.test(all[j])) break;',
+    to: '          if (FAIL_LINE.test(all[j])) break;\n          if (REASON_LINE.test(all[j])) {\n            reason = all[j].trim().slice(0, 200);\n            consumed.add(j);\n            break;\n          }',
     expect: ['E2'],
+  },
+  {
+    id: 'M14',
+    what: 'a line consumed as a reason is printed a second time as its own excerpt line',
+    from: '  if (consumed.has(i)) continue;',
+    to: '',
+    expect: ['E7'],
   },
   {
     id: 'M4',

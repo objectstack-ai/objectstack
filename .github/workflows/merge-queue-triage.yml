@@ -257,7 +257,14 @@ jobs:
                   : Buffer.from(res.data).toString('utf8');
                 const all = text.split('\n').map((l) => plain(l.replace(/^[^ ]*Z /, '')));
                 const hits = [];
+                // A line already printed as somebody's reason is not printed
+                // again as an excerpt line of its own. `AssertionError`
+                // qualifies under both patterns, so without this the assertion
+                // case reports every failure twice and spends half the budget
+                // saying the same thing.
+                const consumed = new Set();
                 for (let i = 0; i < all.length && hits.length < MAX_FAILS; i++) {
+                  if (consumed.has(i)) continue;
                   if (!FAIL_LINE.test(all[i])) continue;
                   // vitest prints the reason UNDER the `FAIL <file> > <test>`
                   // header of its Failed-Tests block, never under the `× <test>`
@@ -278,7 +285,11 @@ jobs:
                       // was looking for -- a timeout would then be reported and
                       // an assertion never would, which is the worse half of
                       // the split this limb exists to end.
-                      if (REASON_LINE.test(all[j])) { reason = all[j].trim().slice(0, 200); break; }
+                      if (REASON_LINE.test(all[j])) {
+                        reason = all[j].trim().slice(0, 200);
+                        consumed.add(j);
+                        break;
+                      }
                       if (FAIL_LINE.test(all[j])) break;
                     }
                   }
