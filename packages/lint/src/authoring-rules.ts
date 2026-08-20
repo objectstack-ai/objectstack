@@ -183,7 +183,13 @@ export interface AuthoringFinding {
   rule: string;
   /** Human-readable location, e.g. `object "leave_request"`. */
   where: string;
-  /** Config path, e.g. `objects[3].sharingModel`. */
+  /**
+   * Config path, e.g. `objects[3].sharingModel`. Positional as RULES emit it;
+   * on the runtime gate's wire surface the top-level collection index of a
+   * collection-resident finding is rewritten to the entry's NAME
+   * (`objects.acme_invoice.sharingModel`) — see `nameKeyFindingPath` in
+   * `runtime-gate.ts` (#10064).
+   */
   path: string;
   /** What is wrong. */
   message: string;
