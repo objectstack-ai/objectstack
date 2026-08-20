@@ -43,21 +43,24 @@ describe('client.meta (#3563 PR-5)', () => {
         expect(String(fetchMock.mock.calls[1][0])).toBe('http://localhost:3000/api/v1/meta/_drafts');
     });
 
-    it('getLegalNextStates hits the FSM route and forwards from=', async () => {
+    // #9180 step 2: the segment is SINGULAR. This pin is the SDK half of that
+    // flip — the plural registration it used to call no longer exists on the
+    // REST surface, so a regression here is a 404 in the field, not a style slip.
+    it('getLegalNextStates hits the singular FSM route and forwards from=', async () => {
         const { client, fetchMock } = createMockClient({
             success: true,
             data: { object: 'crm_lead', field: 'status', from: 'new', next: ['contacted'] },
         });
         const out = await client.meta.getLegalNextStates('crm_lead', 'status', 'new');
         expect(String(fetchMock.mock.calls[0][0])).toBe(
-            'http://localhost:3000/api/v1/meta/objects/crm_lead/state/status?from=new',
+            'http://localhost:3000/api/v1/meta/object/crm_lead/state/status?from=new',
         );
         expect(out.next).toEqual(['contacted']);
 
         // Omitted `from` → no query; the server answers next: null.
         await client.meta.getLegalNextStates('crm_lead', 'status');
         expect(String(fetchMock.mock.calls[1][0])).toBe(
-            'http://localhost:3000/api/v1/meta/objects/crm_lead/state/status',
+            'http://localhost:3000/api/v1/meta/object/crm_lead/state/status',
         );
     });
 });

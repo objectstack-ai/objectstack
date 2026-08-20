@@ -414,7 +414,11 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
   it('the three #7526 routes resolve to themselves and not to a catch-all sibling', () => {
     expect(server.resolveMountedRoute!('GET', '/api/v1/meta/object/lead/published'))
       .toEqual({ method: 'GET', pattern: '/api/v1/meta/:type/:name/published' });
+    expect(server.resolveMountedRoute!('GET', '/api/v1/meta/object/showcase_task/state/status'))
+      .toEqual({ method: 'GET', pattern: '/api/v1/meta/object/:name/state/:field' });
+    // #9180 step 2 retired the plural twin: the live router resolves it to
+    // NOTHING now, which is the fact the ledger's deleted row claims.
     expect(server.resolveMountedRoute!('GET', '/api/v1/meta/objects/showcase_task/state/status'))
-      .toEqual({ method: 'GET', pattern: '/api/v1/meta/objects/:name/state/:field' });
+      .toBeUndefined();
   });
 });

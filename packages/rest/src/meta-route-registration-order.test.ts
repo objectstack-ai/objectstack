@@ -113,10 +113,14 @@ describe('/meta registration order', () => {
 
   it('registers the FSM state read before the compound `/published` twin they collide on', () => {
     const order = metaRoutesInOrder();
-    // The single colliding path is `/meta/objects/x/state/published`. Two
+    // The single colliding path is `/meta/object/x/state/published`. Two
     // literal segments beat one, so the state-machine reading must win it.
-    expect(indexOf(order, 'GET /api/v1/meta/objects/:name/state/:field'))
-      .toBeLessThan(indexOf(order, 'GET /api/v1/meta/:type/:section/:name/published'));
+    //
+    // #9180 step 2 deleted the plural twin's arm of this pin along with the
+    // plural registration — but NOT the pin: the collision is between the FSM
+    // read and the compound `/published` route, and it outlives the spelling
+    // that was retired. Deleting the whole pin would have un-guarded the
+    // surviving route against exactly the #7526 defect it exists to catch.
     expect(indexOf(order, 'GET /api/v1/meta/object/:name/state/:field'))
       .toBeLessThan(indexOf(order, 'GET /api/v1/meta/:type/:section/:name/published'));
   });
@@ -126,9 +130,23 @@ describe('/meta registration order', () => {
     for (const key of [
       'GET /api/v1/meta/types',
       'GET /api/v1/meta/:type/:name/published',
-      'GET /api/v1/meta/objects/:name/state/:field',
+      'GET /api/v1/meta/object/:name/state/:field',
     ]) {
       expect(order, `${key} is not registered — this is the #7526 defect returning`).toContain(key);
     }
+  });
+
+  it('no longer registers the plural FSM state read (#9180 step 2)', () => {
+    // The retirement is the ruling's substance, so it is pinned as a fact
+    // about the mount table rather than left to the ledger's prose: the
+    // `/meta` type segment is singular, always, and re-adding the plural
+    // registration would restore the two-dialect surface the ruling retired.
+    //
+    // This asserts the withdrawal of a DECLARED route only. It says nothing
+    // about `META_URL_TO_SINGULAR`, which this route never consulted (it
+    // matches a literal segment, not a `:type` param) and which step 2 leaves
+    // exactly as it found it.
+    expect(metaRoutesInOrder())
+      .not.toContain('GET /api/v1/meta/objects/:name/state/:field');
   });
 });

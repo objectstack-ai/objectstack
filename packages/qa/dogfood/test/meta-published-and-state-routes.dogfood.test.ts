@@ -13,7 +13,7 @@
 //   * GET /meta/:type/:name/published — ADR-0033 published snapshot.
 //     404 for a name nothing declares. 200 with the current definition for one
 //     that exists but was never published (getPublished's documented fallback).
-//   * GET /meta/objects/:name/state/:field — ADR-0020 D3.3 legal next states.
+//   * GET /meta/object/:name/state/:field — ADR-0020 D3.3 legal next states.
 //     `next: null` when no state_machine governs the field or no `?from=` was
 //     given, `next: [...]` for a declared transition, `[]` for a dead end.
 
@@ -27,7 +27,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
-describe('dogfood: /meta/:type/:name/published and /meta/objects/:name/state/:field (#7526)', () => {
+describe('dogfood: /meta/:type/:name/published and /meta/object/:name/state/:field (#7526)', () => {
   let stack: VerifyStack;
   let token: string;
   let tempDir: string;
@@ -91,10 +91,10 @@ describe('dogfood: /meta/:type/:name/published and /meta/objects/:name/state/:fi
     });
   });
 
-  describe('GET /meta/objects/:name/state/:field', () => {
+  describe('GET /meta/object/:name/state/:field', () => {
     it('returns the legal next states declared by the field\'s state_machine', async () => {
       // showcase_task declares `todo → [in_progress, backlog]`.
-      const res = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/status?from=todo');
+      const res = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/status?from=todo');
       expect(res.status).toBe(200);
       const body = await res.json() as { object: string; field: string; from: string | null; next: string[] | null };
       expect(body.object).toBe('showcase_task');
@@ -105,30 +105,47 @@ describe('dogfood: /meta/:type/:name/published and /meta/objects/:name/state/:fi
 
     it('distinguishes "no FSM / no from" (null) from "a dead end" ([])', async () => {
       // No `?from=` — the caller asked nothing answerable, so `next` is null.
-      const noFrom = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/status');
+      const noFrom = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/status');
       expect(((await noFrom.json()) as { next: unknown }).next).toBeNull();
 
       // A field with no state_machine at all is also `null`, not `[]`: "nothing
       // governs this" and "this state goes nowhere" are different facts and a
       // UI has to be able to tell them apart (ADR-0020 D3.3).
-      const noRule = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/title?from=anything');
+      const noRule = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/title?from=anything');
       expect(noRule.status).toBe(200);
       expect(((await noRule.json()) as { next: unknown }).next).toBeNull();
 
       // An unknown state under a field that DOES have a machine is a dead end.
-      const deadEnd = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/status?from=not_a_state');
+      const deadEnd = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/status?from=not_a_state');
       expect(((await deadEnd.json()) as { next: unknown }).next).toEqual([]);
     });
 
     it('404s for an object the registry does not know', async () => {
-      const res = await stack.apiAs(token, 'GET', '/meta/objects/zzz_not_a_real_object/state/status?from=x');
+      const res = await stack.apiAs(token, 'GET', '/meta/object/zzz_not_a_real_object/state/status?from=x');
       expect(res.status).toBe(404);
     });
 
-    it('accepts the singular `/meta/object/...` spelling the dispatcher branch accepted', async () => {
-      const res = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/status?from=todo');
-      expect(res.status).toBe(200);
-      expect(((await res.json()) as { next: string[] }).next.sort()).toEqual(['backlog', 'in_progress']);
+    it('no longer answers the retired plural `/meta/objects/...` spelling (#9180 step 2)', async () => {
+      // The ruling's substance over real HTTP: the `/meta` type segment is
+      // singular, so the plural registration is gone and the router has
+      // nothing to match. Measured, not assumed — the declarative-endpoint
+      // fallback seam declines every path outside `/apps/**`
+      // (`dispatcher-plugin.ts`, `isAppEndpointPath`), so no second surface
+      // picks this up and the transport's own 404 is the whole answer.
+      const retired = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/status?from=todo');
+      expect(retired.status).toBe(404);
+
+      // …and it is the TRANSPORT 404, byte-identical to a path nothing
+      // mounts — the shape #7526 measured for an unregistered route. A
+      // handler's 404 here would mean the plural is still being served
+      // somewhere.
+      const unmounted = await stack.apiAs(token, 'GET', '/meta/definitely/not/a/mounted/path');
+      expect(await retired.text()).toBe(await unmounted.text());
+
+      // The control that keeps this pin honest: the singular twin answers.
+      const singular = await stack.apiAs(token, 'GET', '/meta/object/showcase_task/state/status?from=todo');
+      expect(singular.status).toBe(200);
+      expect(((await singular.json()) as { next: string[] }).next.sort()).toEqual(['backlog', 'in_progress']);
     });
 
     it('is not the transport 404 — an unmounted control answers differently', async () => {
@@ -136,7 +153,7 @@ describe('dogfood: /meta/:type/:name/published and /meta/objects/:name/state/:fi
       // path nothing mounts. Both 404s below are 404s; only one of them is a
       // HANDLER's answer, and that difference is the whole point.
       const control = await stack.apiAs(token, 'GET', '/meta/objects/showcase_task/state/status/definitely/not/mounted');
-      const handled = await stack.apiAs(token, 'GET', '/meta/objects/zzz_not_a_real_object/state/status?from=x');
+      const handled = await stack.apiAs(token, 'GET', '/meta/object/zzz_not_a_real_object/state/status?from=x');
       expect(control.status).toBe(404);
       expect(handled.status).toBe(404);
       expect(await handled.text()).not.toBe(await control.text());
