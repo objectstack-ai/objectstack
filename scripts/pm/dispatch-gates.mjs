@@ -4199,7 +4199,10 @@ function selfTest() {
     new Set(),
   );
   t('a family CI SCHEDULES for a changeset is pending on the trigger alone, with no watch hint', csTriggered.length === 1);
-  t('and its provenance says so, rather than claiming a source literal', csTriggered[0].hits[0].via.startsWith('CI trigger in'));
+  // Optional-chained on purpose: an implementation that stops finding this
+  // family must REDDEN this case, not throw out of the harness before the rest
+  // of the suite runs (measured while ablating the probe into a hand list).
+  t('and its provenance says so, rather than claiming a source literal', csTriggered[0]?.hits?.[0]?.via?.startsWith('CI trigger in') === true);
   // Rendering.
   const pendingOut = pendingChangesetLines(pending);
   t('the section heading counts the families and carries the docs-only escape', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card is docs-only:$/.test(pendingOut[0]));
