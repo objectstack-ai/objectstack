@@ -490,6 +490,14 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
 | `wait` (timer) | an ISO-8601 duration elapses | **automatically** — a one-shot job resumes the run; after a cold boot the engine re-arms pending timers from the durable store (overdue timers resume immediately) |
 | `wait` (signal) | a named external event | any caller invoking `resume(runId)` |
 
+<Callout type="warn">
+  **A pause ends the flow's retry-governed segment.** `errorHandling: { strategy:
+  'retry' }` covers one synchronous dispatch, so a failure *after* the run
+  resumes is not retried — the post-pause half needs its own failure handling in
+  the flow. See [A durable pause ends the retry-governed
+  segment](#retry-pause-boundary).
+</Callout>
+
 ### Who may resume — the gate is the suspended node
 
 The resume route is generic, so **the node the run is parked on** decides
@@ -1158,6 +1166,67 @@ is fine and simply ignored.
   engine's copy is gone; the schema is the only source, and the case that was
   ambiguous is now rejected instead of guessed.
 </Callout>
+
+### A durable pause ends the retry-governed segment [#retry-pause-boundary]
+
+`strategy: 'retry'` governs **one synchronous dispatch**. When a run parks on a
+node that pauses durably — `approval`, `screen`, `wait`
+([ADR-0019](#durable-pause--resume-adr-0019)) — the pause **ends the
+retry-governed segment**. The continuation that resumes later, possibly days
+later and in a different process, is a new segment outside it: whatever fails
+after the resume gets exactly **one** attempt.
+
+So in the ordinary shape — a flaky callout, then an approval, then the work that
+follows the decision — the two halves of the flow are not protected alike:
+
+| Where the failure happens | Under `errorHandling: { strategy: 'retry', maxRetries: 3 }` |
+| :--- | :--- |
+| before the run pauses | retried — the whole flow re-runs, up to 3 more times |
+| after the run resumes | **not retried** — one attempt, then the run fails |
+
+<Callout type="warn">
+  This is the contract, not a gap waiting to be filled. The retry knobs describe
+  an **in-process loop**: `backoffMs` and `backoffMultiplier` are delays the
+  engine sleeps through and `jitter` spreads a thundering herd — none of which a
+  pause of arbitrary duration can honestly extend across, and the persisted
+  continuation carries no attempt counter for the same reason. Having the resume
+  inherit the remaining budget is a recorded revisit path, not a planned change;
+  it would need a new field on the durable snapshot and an answer for a flow
+  republished mid-pause with a different `maxRetries`.
+</Callout>
+
+#### Protecting the half that runs after the pause
+
+Flow-level `retry` cannot reach that half, so give it its own failure handling
+**inside the flow** — both mechanisms already documented above work after a
+resume, because both are per-node and local to the segment that is running:
+
+- a **`try_catch` node** wrapping the post-resume work, with its own `retry`
+  block — the direct replacement for the flow-level budget, and the one to reach
+  for when the post-decision step is a flaky callout;
+- a **`fault` edge** from the post-resume node to a handler node, when one
+  failure has a specific recovery rather than a re-run.
+
+```typescript
+// approve branch: the post-decision callout carries its own retry, so it is
+// protected whether the run reached it on attempt 1 or after a two-day approval.
+{
+  id: 'post_approval',
+  type: 'try_catch',
+  label: 'Provision after approval',
+  config: {
+    try: { nodes: [{ id: 'provision', type: 'http', label: 'Provision', config: { /* … */ } }], edges: [] },
+    catch: { nodes: [{ id: 'flag', type: 'update_record', label: 'Flag failure', config: { /* … */ } }], edges: [] },
+    errorVariable: '$error',
+    retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
+  },
+}
+```
+
+Note this is not a workaround for the boundary — it is the better shape anyway:
+flow-level `retry` replays the flow **from the start**, which after an approval
+would mean opening a second approval request. A `try_catch` retries only the
+region that failed.
 
 ## Discovery & Registration
 

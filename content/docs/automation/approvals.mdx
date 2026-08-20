@@ -459,6 +459,18 @@ what `sys_approval_request.status` offers and what `ApprovalStatus` is derived
 from. If you add a status there, this line is a fourth copy that nothing updates
 for you.
 
+<Callout type="warn">
+  **The resumed half is not covered by the flow's `errorHandling.retry`.** A
+  durable pause ends the retry-governed segment, so `strategy: 'retry'` on the
+  flow protects the work *before* the approval and gives whatever fails after the
+  decision exactly one attempt. Wrap the post-decision work in a `try_catch` node
+  with its own `retry` (or draw a `fault` edge to a handler) — see [A durable
+  pause ends the retry-governed
+  segment](/docs/automation/flows#retry-pause-boundary). It is also the shape you
+  want regardless: a flow-level retry re-runs the flow **from the start**, which
+  would open a second approval request.
+</Callout>
+
 </Steps>
 
 ### Beyond approve/reject — the full decision surface
