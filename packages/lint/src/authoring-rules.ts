@@ -663,13 +663,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // members that judge a list view's field references and resolve only
     // against the `objects` collection the snapshot carries
     // (`validateSearchableFields`, `validateSortableFields`). The whole suite
-    // is NOT the right granularity for this door, measured not assumed:
-    // `validateActionNameRefs` (error-tier) resolves a view's `rowActions[]` /
-    // `bulkActions[]` against `stack.actions`, a collection no per-write
-    // snapshot carries, so crossing it would refuse legitimate view writes for
-    // every stack-level action they name — RUNTIME_NEEDS_FULL_SNAPSHOT's exact
-    // sentence, on the hottest write type the gate has. Flow snapshots are
-    // unchanged: every member keeps the default `flow` declaration.
+    // is NOT the right granularity for this door, measured not assumed, and
+    // the crossing fails differently per body shape — both ways wrong:
+    // `validateActionNameRefs` (error-tier) resolves `views[].list` /
+    // `views[].listViews.*` action names against `stack.actions`, a collection
+    // no per-write snapshot carries, so on a CONTAINER view write it would
+    // refuse every stack-level action the body names (measured:
+    // `action-name-undefined` on the snapshot shape, clean on the full stack)
+    // — RUNTIME_NEEDS_FULL_SNAPSHOT's exact sentence, on the hottest write
+    // type the gate has. On a FLATTENED overlay it has no rung at all, so the
+    // crossing would be a silent no-op that reads as coverage — the very shape
+    // #9313 was filed about. Flow snapshots are unchanged: every member keeps
+    // the default `flow` declaration.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow', 'view'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),

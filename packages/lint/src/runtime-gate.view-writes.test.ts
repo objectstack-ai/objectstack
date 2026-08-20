@@ -127,16 +127,39 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
   // ── the granularity wall: exactly two members cross, nothing rides along ──
 
   it('does NOT refuse an overlay for a rowAction naming a stack-level action — no member rides along', () => {
-    // THE control for the whole-suite granularity decision.
-    // `validateActionNameRefs` (error-tier) resolves `rowActions[]` against
-    // `stack.actions` — a collection the per-write snapshot does not carry —
-    // so if the suite's widening let it ride onto `view` writes, this
-    // legitimate body would be refused for every stack-level action it names.
-    // Its member declaration keeps it on `flow` snapshots; the registry entry
-    // comment in `authoring-rules.ts` carries the measurement.
+    // A regression pin on the FLATTENED shape, not the granularity
+    // discriminator: `validateActionNameRefs` walks `views[].list` /
+    // `views[].listViews.*` and has no flattened-overlay rung, so on THIS body
+    // it stays silent even if its member declaration crossed onto `view`
+    // (measured by ablation — crossing it left this test green). The
+    // behavioural discriminator is the CONTAINER control below; the
+    // declaration itself is pinned by the member-surface test.
     const result = gate(overlay({ rowActions: ['close_case'], bulkActions: ['mass_close'] }));
     expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
     // The suite RAN — the zero above is a dispatch decision, not a dead gate.
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+  });
+
+  it('does NOT refuse a CONTAINER view write naming a stack-level action — the phantom channel stays walled', () => {
+    // THE behavioural control for the granularity decision, on the shape
+    // where the channel is real. A container's `list.rowActions` IS walked by
+    // `validateActionNameRefs` (`views[].list` rung), and the per-write
+    // snapshot carries no `stack.actions` — so if the suite's widening let
+    // that member ride onto `view` writes, this legitimate body would be
+    // refused with `action-name-undefined` for every stack-level action it
+    // names (measured: 1 finding on the snapshot shape, 0 with the full
+    // stack). The member wall is what keeps this green.
+    const container = {
+      list: {
+        type: 'grid',
+        data: { provider: 'object', object: 'crm_case' },
+        columns: ['name', 'status'],
+        rowActions: ['stack_level_close_case'],
+        bulkActions: ['stack_level_mass_close'],
+      },
+    };
+    const result = gate(container);
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
     expect(result.rulesRun).toContain('validateReferenceIntegrity');
   });
 

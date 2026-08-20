@@ -27,8 +27,8 @@ the two list-view field rules (`ReferenceIntegrityRule.runtimeTypes`, default
 does not carry — `validateActionNameRefs` resolving against `stack.actions`
 would otherwise refuse legitimate view writes. CLI behaviour is unchanged (the
 commands run the full suite as before); `flow` snapshots keep every member.
-Measured before crossing: 0 refusals and 0 advisories over 102 shipped
-view-door bodies (10 containers + 92 console-shaped personalization overlays,
+Measured before crossing: 0 refusals and 0 advisories over 50 shipped
+view-door bodies (11 containers + 39 console-shaped personalization overlays,
 `sort[].id` decorations included) across four authoring lineages — a lower
 bound, as every authored corpus is. Draft saves are untouched (D1), stored rows
 keep being served (ADR-0087 asymmetry), and

@@ -132,11 +132,13 @@ export interface ReferenceIntegrityRule {
    * permissions / books / datasets and nothing else): a member that resolves
    * against a collection the snapshot does not carry would not go quiet — it
    * would report every reference into that collection as dead. Measured on the
-   * `view` widening: `validateActionNameRefs` resolves a list view's
-   * `rowActions[]` / `bulkActions[]` against `stack.actions`, which no
+   * `view` widening: `validateActionNameRefs` resolves the action names in
+   * `views[].list` / `views[].listViews.*` against `stack.actions`, which no
    * per-write snapshot carries, so crossing it with the suite would refuse a
-   * legitimate view write for every stack-level action it names — a false 422
-   * on the only door a Studio tenant has.
+   * legitimate CONTAINER view write for every stack-level action it names —
+   * a false 422 on the only door a Studio tenant has (on a FLATTENED overlay
+   * it has no rung, so the same crossing would be a silent no-op instead;
+   * measured both ways, `runtime-gate.view-writes.test.ts`).
    *
    * ABSENT = `['flow']`, the surface the whole suite has run on since #4463 P1.
    * The default is deliberately the frozen historical surface, never "all":
