@@ -3534,7 +3534,10 @@ function selfTest() {
   t('blockedByTargets: a bulleted line', blockedByTargets('- Blocked-by: #9823').map((r) => r.number).join(','), '9823');
   t('blockedByTargets: a bolded key (the `**` must not reach the ref walk)', blockedByTargets('**Blocked-by:** #9823').map((r) => r.number).join(','), '9823');
   t('blockedByTargets: bold around the whole line', blockedByTargets('**Blocked-by: #9823**').map((r) => r.number).join(','), '9823');
-  t('blockedByTargets: a decorated cross-repo ref keeps its qualifier', blockedByTargets('`Blocked-by: objectstack-ai/objectui#4356`')[0].repo, 'objectstack-ai/objectui');
+  // `.map(...).join()` rather than `[0].repo`: an assertion that THROWS when
+  // the reader returns nothing aborts the whole self-test, hiding every case
+  // after it — which is precisely what a regression in this reader produces.
+  t('blockedByTargets: a decorated cross-repo ref keeps its qualifier', blockedByTargets('`Blocked-by: objectstack-ai/objectui#4356`').map((r) => r.repo).join(','), 'objectstack-ai/objectui');
   t('blockedByTargets: a decorated comma run is all blockers', blockedByTargets('- `Blocked-by: #6234, #6245`').map((r) => r.number).join(','), '6234,6245');
   t('blockedByTargets: a mid-sentence decorated mention yields nothing', blockedByTargets('seats park the `Blocked-by: #1` line in comments').length, 0);
   t('blockedByTargets: a decorated lowercase key yields nothing', blockedByTargets('`blocked-by: #9612`').length, 0);
