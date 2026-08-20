@@ -10,6 +10,12 @@ description: Stability labels and how to track runtime service API breaking chan
 - `stable`: backward-compatible within the current major version.
 - `experimental`: can change in minor versions; verify release notes before upgrades.
 
+These two labels are the whole vocabulary. The same list is written out again as the chapter's
+[Stability Legend](/docs/kernel/runtime-services), and
+`scripts/check-runtime-services-index.mjs` holds both legends — and every page's **Stability**
+bullet — to one definition, so the two lists cannot drift apart. Adding a label means extending
+that definition in the same change that says what it promises, in both places.
+
 ## Breaking-Change Tracking
 
 When a runtime service API changes in a breaking way:

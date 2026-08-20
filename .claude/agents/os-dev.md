@@ -201,9 +201,10 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   链:非法拼写落到 schema 的具名拒收 —— 规则绿、schema 红)。报告你实际观察到的方向;永
   不硬套模板的预设。
 - **ablation 的成立条件是解析路径,不是套件名 —— 变异腿与还原腿都要重建,并在报告里说
-  明你建了。** 条件:**被测主体经依赖的 `exports` 解析**(那指向该包的 `dist/`,不是
-  `src/`),且没有 vitest alias 把 specifier 拉回源码;这批 pair 有实测台账 ——
-  `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
+  明你建了、变异又是怎么在磁盘上确认的。** 条件:**被测主体经依赖的 `exports` 解析**(那
+  指向该包的 `dist/`,不是 `src/`),且没有 vitest alias 把 specifier 拉回源码;这批
+  pair 有实测台账 —— `scripts/check-test-source-alias.mjs` 的
+  `KNOWN_UNALIASED_TEST_IMPORTS`。
   `packages/qa/dogfood` 是最眼熟的一例,不是定义:读成 dogfood 专属,普通单元套件里的
   ablation 就会被当真(实测:plugin-email → platform-objects 消融后 375 试全绿,重建后
   4 红;plugin-auth → core 那组「证明新门禁能红」的腿跑的是变异前产物)。两个方向不对
@@ -211,10 +212,19 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。⚠️ 消融本就为证
   明**新门禁能失败**时,这份假绿不是空结果 —— 它读作「门禁没触发」,指向门禁坏了而不是
   夹具坏了,于是有人去弱化一条本来正常的门禁。所以每一腿(变异**与**还原)都是:改动 →
-  `pnpm --filter <pkg> build` → **证明它到达了 `dist/`** → 才读运行结果:
-  `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`(删守卫的消融、以及每个
-  **还原腿**,用 `--absent`)。⛔ 还原腿最常被跳过 —— 留在 `dist/` 里的 marker 会让变异
-  代码对该树之后的每次运行继续生效,后面的测量量的是错的树。
+  **证明它真落到了磁盘**(下段)→ `pnpm --filter <pkg> build` → **证明它到达了 `dist/`**
+  → 才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`(删守卫的
+  消融、以及每个**还原腿**,用 `--absent`)。⛔ 还原腿最常被跳过 —— 留在 `dist/` 里的
+  marker 会让变异代码对该树之后的每次运行继续生效,后面的测量量的是错的树。
+  ⛔ **落盘那一步的证据永远不是编辑工具的退出码** —— `sed`、`perl -i`、`str.replace`、
+  `re.sub` 零命中时照样 exit 0,于是未改动的文件配上健康输出,读作一次成功的消融(实测同
+  一下午两起:一次 `str.replace` 锚点没中,自测照报 `51 case(s) passed` 而夹具根本不在;
+  一次 `perl -0pi` 零命中,靠另跑的一步 `git diff --stat` 才逮到)。这一步无条件成立,没
+  有 build/dist 的消融同样要做 —— 两起都落在那儿。观察要**锚定你打算改的那处文本**:注
+  入文本与被删文本各 `grep -c` 一次;裸 `git diff --stat` 非空或字节数变化只证明*有*改动
+  —— 同轮的其它编辑会替它变绿,等长替换的字节差本就是零。确认没过 ⇒ **这次消融没跑**,
+  读数作废:改锚点重来,并在报告里说明第一次是空操作 —— 悄悄重跑到有东西落地,是把同一
+  个缺陷复制到上一层。
 
 ## Definition of done(按序)
 
@@ -320,7 +330,7 @@ Your recommendation must be justified on all four axes;四轴冲突时如实呈�
   "pr": "<url or null>",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
-  "tests": "commands run + pass/fail evidence (real output excerpts); an ablation states its rebuild",
+  "tests": "commands run + pass/fail evidence (real output excerpts); an ablation states its rebuild and how the mutation was confirmed on disk",
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
