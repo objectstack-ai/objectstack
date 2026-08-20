@@ -2151,6 +2151,40 @@ jobs:
       - name: Check no new same-name dual-source spec exports
         run: pnpm --filter @objectstack/spec run check:dual-source-exports
 
+      # [#10199] The mechanized form of the 2026-08-20 ruling on #10096:
+      # 「浏览器可达的 spec 导出面必须 schema-free」. Walks the built module graph
+      # behind every subpath the exports map publishes and fails if one DECLARED
+      # browser-reachable (browser-reachable-entries.json — today `./meta-spelling`)
+      # links zod, directly or through a relative hop, or links an external it has
+      # not declared.
+      #
+      # WHY IT NEEDS A GATE AT ALL. The principle bound as prose until now, and
+      # the failure it guards was invisible to every check this repo had: one
+      # string fold reached through `/shared` cost +246.9 KB minified / +69.7 KB
+      # gzipped, one pure predicate through `/security` cost +261.5 KB, and
+      # objectui#5324 records the CONSUMER's own bundle-budget check reporting
+      # PASS on the PR that added the bytes. A budget cannot attribute a delta
+      # that arrives inside a dependency it already imports; a module graph can.
+      #
+      # WHY THIS JOB AND THIS POSITION. It reads the BUILT `.mjs`/`.js` bundles a
+      # consumer's import resolves to — not the source, and not the `.d.ts` — so
+      # it belongs after the build step with the other dist-reading consumer
+      # gates (`check:exported-any`, `check:dual-source-exports` above), not with
+      # the tsx-only artifact gates near the top. On an unbuilt or stale tree it
+      # is a HARD REFUSAL naming the build command, never a skip: a
+      # build-dependent gate that reads nothing reports NOT MEASURED as if it
+      # were measured and clean (#4690).
+      #
+      # It adds no required context — a step in an existing job, so no open PR
+      # waits on a check whose name no head has ever reported (#9325). Reads 34
+      # bundles in ~1.5s. Self-tests first, like its two neighbours, and that
+      # self-test is load-bearing here for a specific reason: this tree has ZERO
+      # relative hops between bundles (every entry is self-contained), so the
+      # transitive walk that keeps the gate honest the day `splitting` is turned
+      # on can only be exercised against fixtures.
+      - name: Check declared browser-reachable spec entries link no zod
+        run: pnpm --filter @objectstack/spec run check:browser-reachable-entries
+
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when
       # authoring metadata, yet nothing type-checked it — so it rotted silently
