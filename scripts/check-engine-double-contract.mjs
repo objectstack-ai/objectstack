@@ -474,24 +474,13 @@ function testFiles() {
  *
  * ## How wide to unwrap, measured rather than assumed
  *
- * Full census of the scanned corpus — every `delete`/`update` member whose
- * initializer is a CallExpression, 310 of them, no truncation:
- *
- *   163  vi.fn()                              no argument at all
- *    89  vi.fn(fn)                            ← the implementation
- *    39  vi.fn().mockResolvedValue(value)     a VALUE, not an implementation
- *     9  rec('DELETE')                        local recorder factory, string arg
- *     4  vi.fn().mockImplementation(fn)       ← the implementation
- *     3  record('DELETE')                     ditto
- *     2  on('DELETE')                         ditto
- *     1  vi.fn().mockRejectedValue(ERR())     a value, from a call
- *
- * So the criterion is STRUCTURAL and callee-agnostic: a call carrying EXACTLY
- * ONE argument which is a function expression / arrow function. That admits the
- * 93 that hold an implementation (`vi.fn(fn)` and, for free and correctly, the
- * chained `.mockImplementation(fn)` — the arrow there IS what the double runs)
- * and rejects all 217 that do not, without an allowlist of callee names that
- * would go silently blind the day someone writes `vitest.fn` or a local wrapper.
+ * The criterion is STRUCTURAL and callee-agnostic: a call carrying EXACTLY ONE
+ * argument which is a function expression / arrow function. That admits every
+ * spelling holding an implementation (`vi.fn(fn)` and, for free and correctly,
+ * the chained `.mockImplementation(fn)` — the arrow there IS what the double
+ * runs) and rejects the ones that hold a VALUE or nothing at all, without an
+ * allowlist of callee names that would go silently blind the day someone writes
+ * `vitest.fn` or a local wrapper.
  *
  * Deliberately NOT widened, both measured at ZERO occurrences on this corpus:
  *
@@ -501,7 +490,32 @@ function testFiles() {
  *   - a function in the chained receiver (`vi.fn(fn).mockResolvedValue(v)`),
  *     which would need this to recurse into `init.expression`.
  *
- * Both are measurements, not opinions — re-run that census before widening,
+ * ## ⛔ The per-spelling counts are NOT written here any more (#9943)
+ *
+ * This header used to carry the census as CONSTANTS — `310` CallExpression
+ * members, a callee table summing to it, `93` admitted and `217` rejected.
+ * Nothing regenerated them, so nothing could catch them drifting, and by
+ * 2026-08-19 they had. Writing fresher constants in their place would reproduce
+ * the defect with newer values (#9803 / PR #9909), so they are gone and
+ * `--census` prints the same table from THIS FILE'S OWN `implOf` walk instead.
+ * `#9943` had to hand-copy the criterion to re-scan and got 341 against the
+ * recorded 310 with no way to say which was wrong; that question no longer
+ * exists. The two ZERO readings above are printed by `--census` too, and were
+ * still ZERO on 2026-08-20 — re-run it rather than trusting this sentence.
+ *
+ * ## What the old census could not have told you, and #9877 is the proof
+ *
+ * Its population was "every member whose initializer is a CallExpression" —
+ * the shape this function already reads. A census of what the matcher already
+ * matches cannot report the matcher's blind spots however carefully it is
+ * re-run, and both spellings it listed as ZERO are CallExpression spellings for
+ * that reason. #9877's defaulted initializer (`overrides.delete ?? vi.fn(fn)`)
+ * is a BinaryExpression and was never in the population at all, while hiding a
+ * live unguarded engine `delete` double. `--census` buckets by initializer KIND
+ * first for exactly this reason: a spelling the gate cannot read shows up as a
+ * row with a low read-rate, not as silence.
+ *
+ * Both remain measurements, not opinions — run `--census` before widening,
  * exactly as the REPOSITORY_ONLY_MEMBERS note above asks.
  *
  * Note which way the remaining error leans. A `vi.fn()` with no argument stays
@@ -608,7 +622,7 @@ function takesObjectNameFirst(fn) {
   return /^(string|string \| number)$/.test(t);
 }
 
-function isEngineVerbShape(fn, memberNames = new Set()) {
+function isEngineVerbShape(fn, memberNames = new Set(), opts = {}) {
   const params = fn.parameters ?? [];
   // The DRIVER veto outranks everything, at every arity (#5480).
   //
@@ -643,11 +657,22 @@ function isEngineVerbShape(fn, memberNames = new Set()) {
   // facade, so a member-free reading would be guessing on a corpus that
   // genuinely disagrees with itself.
   //
-  // Measured before it was written, over the 250 doubles this gate discovers:
-  // the pair moves exactly 2, both of them #5945's witnesses, and 0 of the 82
-  // PINNED doubles. Widening it is a measurement, not an opinion — re-run that
-  // count before adding a name here.
-  if (!takesObjectNameFirst(fn)) {
+  // Measured, not assumed — and the measurement is the gate's own now. This
+  // comment used to state the corpus as constants (`250 doubles this gate
+  // discovers`, `82 PINNED`), in the present tense, so they read as standing
+  // properties rather than as the dated reading they were; nothing regenerated
+  // them and by 2026-08-19 they had drifted roughly 2x and 4x (#9943).
+  // `--census` prints this veto's effect directly — which constructs the pair
+  // moves, and how many of them are pinned — so the claim below is re-derivable
+  // instead of restated.
+  //
+  // Re-derived 2026-08-20 on the grown corpus: the pair still moves EXACTLY 2
+  // constructs, still both of #5945's `IScopedContext` witnesses under
+  // packages/spec, and still 0 pinned doubles. The conclusion survived the
+  // growth even though every number describing the corpus did not — which is
+  // the argument for deriving them rather than writing them down. Widening this
+  // is a measurement, not an opinion: run `--census` before adding a name here.
+  if (!opts.skipRepositoryVeto && !takesObjectNameFirst(fn)) {
     for (const n of memberNames) if (REPOSITORY_ONLY_MEMBERS.has(n)) return false;
   }
   if (params.length < 2) {
@@ -740,7 +765,7 @@ function localFunctions(sourceFile) {
  * producer on `delete` and hand-waving on `update` is exactly the asymmetry
  * #5393 hit and #5480 removed the excuse for.
  */
-function scanSource(fileName, text, slice = SLICES[0]) {
+function scanSource(fileName, text, slice = SLICES[0], opts = {}) {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const pinnedNames = pinnedImportsOf(sf, slice);
   const locals = localFunctions(sf);
@@ -772,7 +797,7 @@ function scanSource(fileName, text, slice = SLICES[0]) {
     // pieces of engine evidence for the update slice, `{ update }` is none.
     const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
     if (siblings.length < 2) return;
-    if (!isEngineVerbShape(target, names)) return;
+    if (!isEngineVerbShape(target, names, opts)) return;
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     doubles.push({ line, siblings: siblings.sort(), pinned: bodyIsPinned(target) });
   };
@@ -961,6 +986,277 @@ function censusUnrecognised() {
   }
   rows.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
   return { rows, scopedOut };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// THE RECOGNIZER CENSUS (#9943) -- `--census`, the gate's own walk, printed
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Every figure this file's prose used to carry about its own corpus was a
+// CONSTANT: `310` CallExpression members, `250 doubles this gate discovers`,
+// `82 PINNED`, and two spellings "measured at ZERO". Nothing regenerated any of
+// them, so nothing could catch them drifting, and by 2026-08-19 (#9943) they
+// had -- `250` had roughly doubled and `82` had roughly quadrupled. Refreshing
+// the constants would reproduce the defect with newer values (#9803 / PR
+// #9909); the answer is to stop writing them down.
+//
+// So this mode exists, and the prose above points at it instead of quoting
+// itself. It is the GATE'S OWN walk -- `implOf`, `unwrapCallImpl`,
+// `fnInitializer`, `isEngineVerbShape`, the same functions the verdict uses --
+// so its numbers cannot disagree with the criterion the way a hand-written
+// re-scan can. #9943 recorded that a hand copy of the criterion read 341 where
+// the comment said 310 and could not say which of the two was wrong. This mode
+// removes the question.
+//
+// ⛔ It reaches no verdict and changes no exit code. `--census` is a separate
+// invocation; `report()` does not call it.
+//
+// ## Why the POPULATION is by initializer kind, and this is the #9877 lesson
+//
+// The doc census was scoped to "every delete/update member whose initializer is
+// a CallExpression" -- i.e. to the shape `unwrapCallImpl` already reads. A
+// census of what the matcher already matches cannot report the matcher's blind
+// spots however carefully it is re-run: #9877's defaulted initializer
+// (`overrides.delete ?? vi.fn(fn)`) is a BinaryExpression, so it was never in
+// that population at all, and neither was the shorthand or the bare local
+// binding. Both spellings the old note listed as "measured at ZERO" are
+// CallExpression spellings -- the census could only ever have found more of
+// what it already understood.
+//
+// This one buckets EVERY member first, by initializer kind, and prints how many
+// of each kind the recognizer can read. A spelling the gate is blind to shows
+// up as a row with a low read-rate rather than as silence.
+
+/** The initializer bucket a member falls in, for the census rows. */
+function initializerKind(member) {
+  if (ts.isMethodDeclaration(member) || ts.isMethodSignature(member)) return 'method body';
+  if (ts.isShorthandPropertyAssignment(member)) return 'shorthand member';
+  const init = (ts.isPropertyAssignment(member) || ts.isPropertyDeclaration(member))
+    ? member.initializer : null;
+  if (!init) return 'no initializer (signature or abstract)';
+  if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return 'function literal';
+  if (ts.isCallExpression(init)) return 'CallExpression';
+  if (ts.isBinaryExpression(init)) {
+    const op = init.operatorToken.kind;
+    if (op === ts.SyntaxKind.QuestionQuestionToken) return 'defaulted `??`';
+    if (op === ts.SyntaxKind.BarBarToken) return 'defaulted `||`';
+    return 'BinaryExpression (other operator)';
+  }
+  if (ts.isConditionalExpression(init)) return 'conditional `? :`';
+  if (ts.isIdentifier(init)) return 'identifier (a binding elsewhere)';
+  if (ts.isPropertyAccessExpression(init)) return 'property access';
+  if (ts.isAsExpression(init) || ts.isParenthesizedExpression(init)) return 'parenthesised / `as`';
+  return `other (${ts.SyntaxKind[init.kind]})`;
+}
+
+/** `vi.fn`, `vi.fn().mockResolvedValue`, `rec` -- the callee, whitespace-collapsed. */
+function calleeSpelling(init, sf) {
+  return init.expression.getText(sf).replace(/\s+/g, '');
+}
+
+/** How a CallExpression's argument list reads, for the callee buckets. */
+function argShape(init) {
+  const args = init.arguments ?? [];
+  if (args.length === 0) return '()';
+  const fns = args.filter((a) => ts.isFunctionExpression(a) || ts.isArrowFunction(a));
+  if (args.length === 1) return fns.length === 1 ? '(fn)' : '(value)';
+  return fns.length > 0 ? `(${args.length} args, ${fns.length} fn)` : `(${args.length} args)`;
+}
+
+/** Does a function literal sit in the RECEIVER chain, `vi.fn(fn).mockResolvedValue(v)`? */
+function fnInChainedReceiver(init) {
+  let recv = init.expression;
+  while (recv) {
+    if (ts.isCallExpression(recv) && unwrapCallImpl(recv)) return true;
+    if (ts.isPropertyAccessExpression(recv) || ts.isCallExpression(recv)) recv = recv.expression;
+    else return false;
+  }
+  return false;
+}
+
+/**
+ * `Object.assign(base, { … })` sites that carry a scanned verb (#8553).
+ *
+ * The override literal is walked by `scanSource` like any other object literal,
+ * so what decides whether it is COUNTED is the two-engine-sibling test: an
+ * override literal typically carries only the one or two members it varies, and
+ * inherits `find`/`insert`/`registry` from the base it is spread over. Fewer
+ * than two siblings in the literal ITSELF, so `consider()` returns and the
+ * override is accounted for by whatever the base was pinned or baselined as --
+ * which is precisely #8553's question, and this row is the measurement of how
+ * often the situation actually arises.
+ */
+function objectAssignSites(sf, verbs) {
+  const sites = [];
+  const visit = (n) => {
+    if (
+      ts.isCallExpression(n)
+      && ts.isPropertyAccessExpression(n.expression)
+      && ts.isIdentifier(n.expression.expression)
+      && n.expression.expression.text === 'Object'
+      && n.expression.name.text === 'assign'
+    ) {
+      for (const arg of n.arguments.slice(1)) {
+        if (!ts.isObjectLiteralExpression(arg)) continue;
+        const names = new Set();
+        for (const m of arg.properties) {
+          const nm = memberName(m);
+          if (nm) names.add(nm);
+        }
+        const declaresVerb = [...verbs].filter((v) => names.has(v));
+        const siblings = [...names].filter((x) => ENGINE_SIBLINGS.has(x) && !declaresVerb.includes(x));
+        // Two different shapes, and only the first can hide a double this gate
+        // would otherwise have judged:
+        //   VERB   the override literal restates `delete`/`update` itself. If it
+        //          carries fewer than two engine siblings of its own it is not
+        //          counted, and its implementation is neither pinned nor
+        //          baselined in its own right. This is #8553's hole proper.
+        //   BASE   the override varies OTHER engine members (`find`, `insert`)
+        //          and inherits the verb from the double it is spread over.
+        //          Nothing about the verb changed, so the base's accounting is
+        //          the right accounting -- the shape #8553 actually observed.
+        if (declaresVerb.length === 0 && siblings.length === 0) continue;
+        sites.push({
+          line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
+          shape: declaresVerb.length ? 'VERB' : 'BASE',
+          verbs: declaresVerb.sort(),
+          members: [...names].filter((x) => ENGINE_SIBLINGS.has(x)).sort(),
+          siblings: siblings.length,
+          counted: declaresVerb.length > 0 && siblings.length >= 2,
+        });
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return sites;
+}
+
+/** The whole census, computed from the recognizer's own functions. */
+function censusRecognizer() {
+  const files = testFiles();
+  const byKind = new Map();
+  const byCallee = new Map();
+  const notWidened = { severalArgs: 0, chainedReceiver: 0, conditionalArms: 0 };
+  const assignSites = [];
+  let members = 0;
+
+  const bump = (map, key, read) => {
+    const row = map.get(key) ?? { total: 0, read: 0 };
+    row.total += 1;
+    if (read) row.read += 1;
+    map.set(key, row);
+  };
+
+  for (const abs of files) {
+    const rel = relative(ROOT, abs).split(sep).join('/');
+    const text = readFileSync(abs, 'utf8');
+    if (!/\b(delete|update)\s*[(:,}]/.test(text)) continue;
+    const sf = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+    const consider = (props) => {
+      for (const m of props) {
+        const nm = memberName(m);
+        if (!SCANNED_VERBS.has(nm)) continue;
+        members += 1;
+        const read = implOf(m) !== null;
+        bump(byKind, initializerKind(m), read);
+        const init = (ts.isPropertyAssignment(m) || ts.isPropertyDeclaration(m)) ? m.initializer : null;
+        if (init && ts.isCallExpression(init)) {
+          bump(byCallee, `${calleeSpelling(init, sf)}${argShape(init)}`, read);
+          const args = init.arguments ?? [];
+          if (args.length > 1 && args.some((a) => ts.isFunctionExpression(a) || ts.isArrowFunction(a))) {
+            notWidened.severalArgs += 1;
+          }
+          if (fnInChainedReceiver(init)) notWidened.chainedReceiver += 1;
+        }
+        if (init && ts.isConditionalExpression(init)) {
+          const arm = (x) => ts.isFunctionExpression(x) || ts.isArrowFunction(x) || unwrapCallImpl(x);
+          if (arm(init.whenTrue) || arm(init.whenFalse)) notWidened.conditionalArms += 1;
+        }
+      }
+    };
+
+    const visit = (n) => {
+      if (ts.isObjectLiteralExpression(n)) consider(n.properties);
+      else if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) consider(n.members);
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+
+    for (const site of objectAssignSites(sf, SCANNED_VERBS)) assignSites.push({ file: rel, ...site });
+  }
+
+  // The REPOSITORY_ONLY_MEMBERS ablation: run discovery again with that veto
+  // off and diff. The prose used to assert "the pair moves exactly 2, and 0 of
+  // the PINNED doubles" as a constant; this recomputes it on today's corpus,
+  // which is the only form of that claim worth having.
+  const vetoed = [];
+  for (const slice of SLICES) {
+    for (const abs of files) {
+      const rel = relative(ROOT, abs).split(sep).join('/');
+      const text = readFileSync(abs, 'utf8');
+      if (!new RegExp(`\\b${slice.verb}\\s*[(:]`).test(text)) continue;
+      const withVeto = scanSource(abs, text, slice);
+      const without = scanSource(abs, text, slice, { skipRepositoryVeto: true });
+      if (without.length === withVeto.length) continue;
+      const kept = new Set(withVeto.map((d) => d.line));
+      for (const d of without) {
+        if (!kept.has(d.line)) vetoed.push({ verb: slice.verb, file: rel, line: d.line, pinned: d.pinned });
+      }
+    }
+  }
+
+  return { files: files.length, members, byKind, byCallee, notWidened, assignSites, vetoed };
+}
+
+function censusReport() {
+  const c = censusRecognizer();
+  const rows = (map) => [...map].sort((a, b) => b[1].total - a[1].total);
+  const pad = (n) => String(n).padStart(5);
+
+  console.log('');
+  console.log(
+    `CENSUS [engine-double-contract]: ${c.members} member(s) named ${[...SCANNED_VERBS].join('/')} on an `
+      + `object literal or class body, across ${c.files} scanned test file(s) in ${SCAN_ROOTS.join(', ')}. `
+      + 'Computed by this gate\'s own `implOf`, so it cannot disagree with the verdict. '
+      + 'This mode reaches no verdict and never fails a run.',
+  );
+
+  console.log('\n  BY INITIALIZER KIND -- `read` is how many of them `implOf` can reach:');
+  for (const [kind, r] of rows(c.byKind)) {
+    console.log(`  ${pad(r.total)}  ${kind.padEnd(38)} read ${r.read}/${r.total}`);
+  }
+
+  console.log('\n  CallExpression initializers, by callee spelling:');
+  for (const [callee, r] of rows(c.byCallee)) {
+    console.log(`  ${pad(r.total)}  ${callee.padEnd(38)} read ${r.read}/${r.total}`);
+  }
+
+  console.log('\n  Spellings this criterion deliberately does NOT read:');
+  console.log(`  ${pad(c.notWidened.severalArgs)}  a function among SEVERAL arguments      traced('delete', fn)`);
+  console.log(`  ${pad(c.notWidened.chainedReceiver)}  a function in the chained receiver     vi.fn(fn).mockResolvedValue(v)`);
+  console.log(`  ${pad(c.notWidened.conditionalArms)}  a conditional's arms                   cond ? a : b`);
+
+  const verbSites = c.assignSites.filter((x) => x.shape === 'VERB');
+  const baseSites = c.assignSites.filter((x) => x.shape === 'BASE');
+  console.log(
+    `\n  Object.assign over an engine double (#8553): ${verbSites.length} override literal(s) restate a `
+      + `scanned verb, ${baseSites.length} vary other engine members and inherit the verb:`,
+  );
+  for (const s of c.assignSites) {
+    console.log(
+      `  ${pad(s.siblings)}  [${s.shape}] ${s.file}:${s.line}  {${s.members.join(', ')}} -- `
+        + `${s.counted ? 'COUNTED in its own right' : 'accounted for by its base'}`,
+    );
+  }
+
+  console.log(
+    `\n  REPOSITORY_ONLY_MEMBERS veto moves ${c.vetoed.length} construct(s); `
+      + `${c.vetoed.filter((v) => v.pinned).length} of them pinned:`,
+  );
+  for (const v of c.vetoed) console.log(`         [${v.verb}] ${v.file}:${v.line}${v.pinned ? ' (pinned)' : ''}`);
+  console.log('');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -3024,6 +3320,36 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
     censusSource('c.test.ts', visSrc, D).unrecognised.length === 1
       && scanSource('c.test.ts', visSrc, D).length === 0);
 
+  // ── The RECOGNIZER CENSUS (#9943) ─────────────────────────────────────────
+  //
+  // `--census` exists so this file stops writing its own corpus down as
+  // constants that nothing regenerates. It only earns that if its buckets are
+  // proved on both sides -- a census whose kinds silently collapsed into one
+  // another would print a confident table and hide the same blind spot the
+  // constants did.
+  const kindsOf = (src) => {
+    const sf = ts.createSourceFile('k.test.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const out = [];
+    const visit = (n) => {
+      if (ts.isObjectLiteralExpression(n) || ts.isClassDeclaration(n)) {
+        for (const m of (ts.isObjectLiteralExpression(n) ? n.properties : n.members)) {
+          if (SCANNED_VERBS.has(memberName(m))) out.push(initializerKind(m));
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return out.join();
+  };
+  expect('#9943 — the census gives a DEFAULTED initializer a bucket of its own, which is the row '
+    + 'the CallExpression-scoped census could not have had',
+    kindsOf('const e = { delete: o.delete ?? vi.fn(f) };') === 'defaulted `??`');
+  expect('#9943 — …and a plain call still reads as CallExpression (the split discriminates)',
+    kindsOf('const e = { delete: vi.fn(f) };') === 'CallExpression');
+  expect('#9943 — a shorthand member is its own kind, so it cannot hide inside another bucket',
+    kindsOf('const e = { update };') === 'shorthand member');
+  expect('#9943 — a method body is its own kind too', kindsOf('const e = { async update(o, d) {} };') === 'method body');
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -3049,10 +3375,13 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
       + 'be reached (a defaulted mock, a local binding, a shorthand), SCOPES OUT the two '
       + 'spellings that carry no implementation at all rather than reporting them as noise, '
       + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
-      + 'double into or out of the population it counts.',
+      + 'double into or out of the population it counts; and buckets '
+      + 'the RECOGNIZER CENSUS (#9943) by initializer kind so a spelling this gate cannot read '
+      + 'shows up as its own row rather than as silence.',
   );
 }
 
 if (process.argv.includes('--self-test')) selfTest();
 else if (process.argv.includes('--write')) writeLedger();
+else if (process.argv.includes('--census')) censusReport();
 else report();
