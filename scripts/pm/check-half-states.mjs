@@ -82,6 +82,11 @@
  *       reported every one of them as having left the machine nothing. Either
  *       channel discharges the duty; the finding names both so a reader knows
  *       which one to fix (#8941, and the #9948 gauge-recalibration ruling).
+ *       The line may be DECORATED in either channel — 「`Blocked-by: #9612`」
+ *       is the natural markdown for a line meant to be grepped, and reading it
+ *       as absent left #10063 permanently blocked in silence (#10102). H9's
+ *       `Restart-when:` shares that anchor but NOT this two-channel read; the
+ *       asymmetry is stated at H9.
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -115,8 +120,10 @@
  *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` body line —
  *       the state model (post 2026-08-16 ruling) makes the hold state legal
  *       ONLY with a machine-readable exit: `Restart-when: closed <owner/repo>#N`
- *       (fired by the same unlock scan as `Blocked-by:`, same single body
- *       channel) or a one-line executable predicate. A hold nothing can fire
+ *       (fired by the same unlock scan as `Blocked-by:`, but over the BODY
+ *       channel alone — H4/H14 read body OR comment and this does not, an
+ *       asymmetry documented at the predicate and named in the row itself,
+ *       #10102) or a one-line executable predicate. A hold nothing can fire
  *       is indistinguishable from an abandoned card. `Restart-when: manual — …`
  *       counts as MISSING, deliberately: the protocol says a card no mechanism
  *       can revive is closed `not planned` (reason + provenance in the closing
@@ -531,6 +538,13 @@ export function h3QueueAndDispatched(issue) {
 // ---------------------------------------------------------------------------
 // The `Blocked-by:` COMMENT channel — read by H4 and by the H14 index alike.
 //
+// ⚠️ This channel is `Blocked-by:`-only, and nothing else in this file inherits
+// it: H9's `Restart-when:` is read from the BODY alone, on purpose, and the
+// grounds for the difference are written out at H9's section (#10102). The two
+// directives otherwise share one anchor, so "H4 tolerates X" generalises to H9
+// and "H4 reads comments" does not — the distinction worth keeping in view
+// when either predicate is next widened.
+//
 // ## Stated boundary: no read-closure cut-off, because REST carries none
 //
 // The seat-post protocol's read-closure rule is 「只读晚于正文最后编辑时间的
@@ -564,13 +578,138 @@ export function h3QueueAndDispatched(issue) {
 // page, the same trade H2, H16 and H17 make.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// DECORATED DIRECTIVE LINES — the shared anchor for `Blocked-by:` (H4, H14)
+// and `Restart-when:` (H9). #10102, ruled option C on 2026-08-20.
+//
+// ## What the old anchors required, and the two harms that cost
+//
+// Both directives are machine-readable lines written by hand IN MARKDOWN, so
+// authors code-format them: 「`Restart-when: …`」 is the natural spelling for a
+// line whose whole purpose is that a machine greps it. The original anchors
+// (`^\s*` for H9, `^[ \t]*` for H4/H14) accept only whitespace before the key,
+// and a backtick is not whitespace — so a DECORATED directive read as an
+// ABSENT one. Measured twice on 2026-08-20, once on each predicate, failing in
+// OPPOSITE directions:
+//
+//   - #9591 — 「`Restart-when: the v18 major development cycle opens …`」 in
+//     the body. H9 reported "no `Restart-when:` body line" against a legal,
+//     maintainer-commissioned hold, and H9's own remedy text told the reading
+//     seat to close it `not planned`. LOUD, and destructive if believed.
+//   - #10063 — 「`Blocked-by: #9612`」 in the body. H4 reported the line absent
+//     in both channels, and the unlock sweep — which greps that same literal —
+//     could never have returned the card. SILENT and permanent: no row, no
+//     alarm, no expiry. That half has no detection channel of its own, which
+//     is why documenting the strictness (option B) was not enough.
+//
+// Nothing in either documented predicate ever required the line to start bare,
+// and no self-test covered a decorated one: an untested gap, not deliberate
+// strictness.
+//
+// ## What is tolerated
+//
+// In front of the key: indentation, ONE `-`/`*` list bullet, and any run of
+// inline-code backticks or `**` bold markers. A `**` may also sit between the
+// key word and its colon (`**Blocked-by**:`) or immediately after the colon
+// (`**Blocked-by:**`), because that is what a bolded directive actually looks
+// like; likewise a closing backtick when only the key was code-formatted
+// (「`Blocked-by:` #123」). A trailing marker MATCHING one that opened the line
+// is stripped off the captured value, so 「`Restart-when: closed acme/w#9`」
+// yields the same value the bare line yields — the trailing backtick never
+// reaches the `manual` test or the ref scan.
+//
+// ## What is deliberately NOT tolerated — the strictness that stays
+//
+//   - The KEY's spelling and case. The unlock scan greps the literal, so
+//     `restart-when:` is a line the machinery cannot see and must still be
+//     flagged. Decoration is about what SURROUNDS the directive; the directive
+//     itself stays byte-stable. A decorated lowercase key is still a finding.
+//   - A bullet needs its trailing space (`- Blocked-by:`, never
+//     `-Blocked-by:`) — that space is what makes it a list bullet rather than
+//     the first character of a word.
+//   - The whole prefix stays anchored to the line start, so a mid-sentence
+//     mention 「seats park the `Blocked-by: #1` line in comments」 is prose,
+//     not a directive — the property the old anchors were really protecting.
+//   - A line whose value is nothing but decoration (「`Restart-when:`」) still
+//     counts as valueless. Stripping can empty a value, so the extractor drops
+//     empties AFTER cleaning rather than trusting the match to be non-empty.
+//
+// The residual is the shape this relaxation cannot reach — a key the grep
+// itself cannot see — and H9's finding text now names that possibility
+// explicitly instead of prescribing a close.
+// ---------------------------------------------------------------------------
+
+/** Decoration markers tolerated around a directive: inline code and bold. */
+const DIRECTIVE_MARKER = String.raw`(?:\`|\*\*)`;
+
+/**
+ * Everything a directive line may carry BEFORE its key, captured so the value
+ * cleaner can tell which trailing marker would be a MATCHING one.
+ *
+ * `[ \t]*` rather than `\s*` at the head, for both predicates now: `\s`
+ * matches newlines, so with a /g/m extractor a run of blank lines could let a
+ * match begin on an earlier line than the one it reads. H9 used `^\s*` and H4
+ * `^[ \t]*`; the strict one is right and loses no real match, since `^` under
+ * /m already anchors at the directive's own line start.
+ */
+const DIRECTIVE_PREFIX = String.raw`[ \t]*(?:[-*][ \t]+)?((?:${DIRECTIVE_MARKER}[ \t]*)*)`;
+
+/** The key itself, with the bold/code markers a decorated one may carry. */
+const directiveKey = (key) => String.raw`${key}(?:\*\*)?:(?:${DIRECTIVE_MARKER})?`;
+
+/**
+ * Drop the trailing decoration that MATCHES what opened the line.
+ *
+ * "Matching" is load-bearing: a value that legitimately ends in a backtick
+ * (「Blocked-by: #1 `see note`」) opened bare and keeps every byte, while a
+ * line that opened with a backtick gives its closing one back. Looping covers
+ * the nested form (「**`Blocked-by: #1`**」).
+ */
+function stripMatchingDecoration(value, opener) {
+  let out = String(value).trim();
+  for (;;) {
+    if (opener.includes('`') && out.endsWith('`')) {
+      out = out.slice(0, -1).trim();
+      continue;
+    }
+    if (opener.includes('**') && out.endsWith('**')) {
+      out = out.slice(0, -2).trim();
+      continue;
+    }
+    break;
+  }
+  return out;
+}
+
+/**
+ * Every value carried by a `<key>:` directive line in this text, decoration
+ * removed, empties dropped — the one reader H9 and the `Blocked-by:` index
+ * share, so a decoration tolerated for one is tolerated for both.
+ *
+ * Exported for the self-test: the cleaning step has no other observable
+ * surface (H9 reports a sentence, the index reports refs), and a value that
+ * silently kept its trailing backtick is exactly the regression this shares a
+ * cause with.
+ *
+ * @param {string} text
+ * @param {'Blocked-by'|'Restart-when'} key
+ * @returns {string[]}
+ */
+export function directiveValues(text, key) {
+  const re = new RegExp(`^${DIRECTIVE_PREFIX}${directiveKey(key)}[ \\t]*(\\S.*)$`, 'gm');
+  const out = [];
+  for (const m of String(text ?? '').matchAll(re)) {
+    const value = stripMatchingDecoration(m[2], m[1]);
+    if (value) out.push(value);
+  }
+  return out;
+}
+
 /**
  * Is there a machine-readable `Blocked-by:` line in this text?
  *
- * H4's original presence test, extracted verbatim so the BODY channel's
- * behaviour is byte-identical to what it always was, and so the COMMENT
- * channel asks the same question of the same shape rather than a second,
- * subtly different one.
+ * H4's presence test — the BODY channel and the COMMENT channel ask the same
+ * question of the same shape, rather than two subtly different ones.
  *
  * A presence test, deliberately, and NOT `blockedByTargets(...).length > 0`:
  * the two readers of this line answer different questions and must keep
@@ -579,9 +718,23 @@ export function h3QueueAndDispatched(issue) {
  * discharge the duty — while the index asks 「which LOCAL open card does this
  * wait on」 and correctly extracts nothing from either. Collapsing them would
  * make H4 fire on a card whose cross-repo blocker is stated perfectly well.
+ *
+ * It is also not `directiveValues(...).length > 0`, for one preserved
+ * behaviour: the `\s*` after the key spans newlines, so a value written on the
+ * FOLLOWING line has always cleared H4, and tightening that here would fire
+ * new rows on live cards for a reason this card never ruled on. What the
+ * decoration work adds is the leading prefix, a closing marker, and the
+ * requirement that SOMETHING which is not itself decoration follows — without
+ * that last clause 「`Blocked-by:`」 would read as a line whose value is its
+ * own closing backtick, turning a valueless line into a false clear.
  */
+const BLOCKED_BY_PRESENT = new RegExp(
+  `^${DIRECTIVE_PREFIX}${directiveKey('Blocked-by')}\\s*(?:[\`*]+[ \\t]*)?[^\\s\`*]`,
+  'm',
+);
+
 export function hasBlockedByLine(text) {
-  return /^\s*Blocked-by:\s*\S/m.test(text ?? '');
+  return BLOCKED_BY_PRESENT.test(text ?? '');
 }
 
 /**
@@ -914,36 +1067,75 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
 // ---------------------------------------------------------------------------
 // H9 — `pm:on-hold` without a machine-fireable `Restart-when:` body line.
 //
-// Same shape as H4 (label's machine half is a body line), same single body
-// channel: the unlock scan greps issue bodies only, so a condition parked in a
-// comment does not exist to the machinery — which is exactly the population
-// this detector exists to surface.
+// Same shape as H4 (the label's machine half is a written line), and it reads
+// the same decorated-directive anchor. It does NOT read the same CHANNELS, and
+// that asymmetry is stated rather than left to be inferred (#10102):
+//
+//   H4 / H14  `Blocked-by:`     body OR comment  (since PR #10075)
+//   H9        `Restart-when:`   body only
+//
+// The difference is deliberate on H9's side. The unlock scan greps issue
+// BODIES for `Restart-when:`, so a condition parked in a comment genuinely
+// does not exist to the machinery, and that population is exactly what this
+// detector exists to surface — widening the read here would hide it. H4's
+// widening rests on a measurement its own line has and this one does not (26
+// of 40 blocked cards body-clean, 2026-08-19), plus a sweep that was taught to
+// read both. Undocumented, the difference was already manufacturing errors:
+// a seat that generalises the comment fallback from H4 to H9 parks a restart
+// condition in a comment and gets an H9 row it cannot explain. The finding
+// sentence says "body only" for the same reason. Closing the asymmetry — if
+// the unlock scan is ever taught the comment channel — belongs to #8941, which
+// owns the LOCATION half of this family; this card owns the DECORATION half,
+// and the two do not close each other.
 // ---------------------------------------------------------------------------
 
 /**
  * H9 — null when clean, else the finding sentence.
  *
  * Legal iff SOME `Restart-when:` line carries a value that is not `manual…`.
- * The spelling is case-sensitive and byte-stable like `Blocked-by:` (H4): the
- * scan that fires these lines greps the literal, so a lowercase variant is a
- * line the machinery cannot see and must be flagged, not tolerated.
+ * The line may be decorated (see the shared directive reader); the KEY may
+ * not. The spelling is case-sensitive and byte-stable like `Blocked-by:` (H4):
+ * the scan that fires these lines greps the literal, so a lowercase variant is
+ * a line the machinery cannot see and must be flagged, not tolerated.
+ *
+ * ## The remedy text is deliberately not "close it" (#10102)
+ *
+ * This row's old sentence offered "add the line, or apply the protocol's
+ * default: … closed `not planned`" as co-equal branches. Read literally
+ * against a FALSE row — #9591, whose legal `Restart-when:` was invisible only
+ * because it was wrapped in backticks — that prescribes closing a
+ * maintainer-commissioned card, and it reads as a legitimate cleanup while
+ * doing it. Tolerating decoration removes the measured cause; it cannot remove
+ * the class, because any future unparsed spelling produces the same "no line"
+ * row. So the sentence now names the possibility it cannot rule out and orders
+ * the remedies: verify, unwrap, add — and only then, for a card that really
+ * has no fireable exit, close.
  */
 export function h9OnHoldNoRestartWhen(issue) {
   if (!labelNames(issue).includes('pm:on-hold')) return null;
-  const values = [...(issue.body ?? '').matchAll(/^\s*Restart-when:[ \t]*(\S.*)$/gm)].map((m) =>
-    m[1].trim(),
-  );
+  const values = directiveValues(issue.body, 'Restart-when');
   if (values.some((v) => !/^manual\b/i.test(v))) return null;
   const shape =
     values.length === 0
-      ? 'no `Restart-when:` body line'
+      ? 'no `Restart-when:` body line this scan could read'
       : 'its only `Restart-when:` is `manual`, which no mechanism can fire';
+  const unparsed =
+    values.length === 0
+      ? ` ⚠️ READ THE BODY BEFORE ACTING: a line that IS there but which this scan cannot parse ` +
+        `looks exactly like an absent one. Decoration is tolerated (backticks, a \`-\`/\`*\` bullet, ` +
+        `\`**\` bold), but a mis-spelled or lowercased key is not — the unlock scan greps the ` +
+        `literal. If the line is there, unwrap or re-spell it; that is the whole fix, and no state ` +
+        `change is due.`
+      : '';
   return (
     `\`pm:on-hold\` with ${shape} — the hold state is legal only with a machine-fireable exit ` +
-    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate). Add the line, ` +
-    `or apply the protocol's default: a card no mechanism can revive is closed \`not planned\` ` +
-    `with reason + provenance in the closing comment (type:Bug holds re-route instead — see the ` +
-    `state model's Bug branch).`
+    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate).${unparsed} ` +
+    `Add or repair the line first. Closing is the LAST resort and applies only to a card that ` +
+    `genuinely has no fireable exit: such a card is closed \`not planned\` with reason + ` +
+    `provenance in the closing comment (type:Bug holds re-route instead — see the state model's ` +
+    `Bug branch). Channel: H9 reads the BODY only, unlike H4/H14, which take a \`Blocked-by:\` ` +
+    `line from the body OR a comment — a \`Restart-when:\` parked in a comment is invisible to the ` +
+    `unlock scan, so it is reported here by design (#8941 owns that gap).`
   );
 }
 
@@ -1216,14 +1408,21 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  *
  * ## Two decisions that change what gets reported
  *
- * 1. **Code is NOT stripped**, unlike H7/H8/H13. Those predicates read PROSE
- *    and must protect the careful author who quotes a spelling in backticks.
- *    This one models a MACHINE READER: the state model calls the line
- *    「机器可 grep 的反向索引」, and the unlock scan that consumes it greps the
- *    literal — so a fenced `Blocked-by:` line really does fire the live
- *    machinery, whatever the author meant. Stripping here would report
- *    coherence against an index nothing uses; H4 (the same line's other
- *    reader) does not strip either.
+ * 1. **Code context is NOT stripped from the TEXT**, unlike H7/H8/H13. Those
+ *    predicates read PROSE and must protect the careful author who quotes a
+ *    spelling in backticks. This one models a MACHINE READER: the state model
+ *    calls the line 「机器可 grep 的反向索引」, and the unlock scan that
+ *    consumes it greps the literal — so a fenced `Blocked-by:` line really
+ *    does fire the live machinery, whatever the author meant. Skipping fenced
+ *    regions here would report coherence against an index nothing uses; H4
+ *    (the same line's other reader) does not skip them either.
+ *
+ *    What IS removed is the decoration wrapping the directive itself —
+ *    「`Blocked-by: #9612`」 names a blocker (#10102, and see the shared
+ *    reader above). That is the opposite move from H7/H8/H13's: they drop a
+ *    line because it sits in code, this one reads a line whose code markers
+ *    are the author formatting a directive. Both serve the same test — would
+ *    the unlock sweep's grep act on this line — and its answer here is yes.
  * 2. **Only the LEADING ref run is taken.** Real lines carry trailing prose —
  *    「Blocked-by: #9689 (the relocation it needs is the same edit)」 — and
  *    prose can name a second card that is context, not a blocker. Scanning
@@ -1241,11 +1440,11 @@ export function h13DomainWithoutPmState(issue, nowMs = Date.now()) {
  */
 export function blockedByTargets(body) {
   const out = [];
-  // `[ \t]*`, not `\s*`: `\s` matches newlines, so with the /g/m extractor a
-  // run of blank lines could let one match begin a line early. H4's presence
-  // test cannot tell the difference; an extractor can.
-  for (const line of String(body ?? '').matchAll(/^[ \t]*Blocked-by:[ \t]*(\S.*)$/gm)) {
-    let rest = line[1];
+  // The shared decorated-directive reader: the value arrives trimmed and with
+  // a matching trailing marker already removed, so the ref walk below sees
+  // 「#9823」 whether the author wrote it bare, bulleted, bolded or in code.
+  for (const value of directiveValues(body, 'Blocked-by')) {
+    let rest = value;
     for (;;) {
       const ref = /^[\s,;+、]*(?:and[ \t]+)?([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/u.exec(rest);
       if (!ref) break;
@@ -3267,6 +3466,79 @@ function selfTest() {
   t('commentBlockedByTargets: refs from several comments accumulate', commentBlockedByTargets(['Blocked-by: #7', 'Blocked-by: #8']).map((r) => r.number).join(','), '7,8');
   t('commentBlockedByTargets: no comments at all', commentBlockedByTargets(undefined).length, 0);
   t('commentBlockedByTargets: a cross-repo ref keeps its qualifier for filtering', commentBlockedByTargets(['Blocked-by: objectstack-ai/objectui#4356'])[0].repo, 'objectstack-ai/objectui');
+
+  // -- Decorated directive lines (#10102) ------------------------------------
+  // The shared value reader first, because it is the only place the CLEANING
+  // step is observable: H9 reports a sentence and the index reports refs, so a
+  // value that silently kept its trailing backtick would pass both while being
+  // wrong. Every decoration gets a positive AND a negative case.
+  const dv = (text, key = 'Restart-when') => directiveValues(text, key);
+  t('directiveValues: the bare line is unchanged', dv('Restart-when: closed acme/w#9').join('|'), 'closed acme/w#9');
+  // #9591, byte-for-byte in shape: the whole line wrapped in inline code.
+  t('directiveValues: backtick-wrapped line yields a CLEAN value', dv('`Restart-when: closed acme/w#9`').join('|'), 'closed acme/w#9');
+  t('directiveValues: `-` bullet', dv('- Restart-when: closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: `*` bullet', dv('* Restart-when: closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: indented bullet', dv('    - Restart-when: closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: bold around the whole directive', dv('**Restart-when: closed acme/w#9**').join('|'), 'closed acme/w#9');
+  t('directiveValues: bold around the key, colon inside', dv('**Restart-when:** closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: bold around the key, colon outside', dv('**Restart-when**: closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: code around the key only', dv('`Restart-when:` closed acme/w#9').join('|'), 'closed acme/w#9');
+  t('directiveValues: bullet AND code together', dv('- `Restart-when: closed acme/w#9`').join('|'), 'closed acme/w#9');
+  t('directiveValues: bold AND code nested', dv('**`Restart-when: closed acme/w#9`**').join('|'), 'closed acme/w#9');
+  t('directiveValues: a decorated line mid-body is found', dv('Prose.\n> quote\n`Restart-when: closed acme/w#9`\nMore.').join('|'), 'closed acme/w#9');
+  t('directiveValues: two decorated lines both count', dv('- Restart-when: manual — x\n`Restart-when: closed acme/w#9`').join('|'), 'manual — x|closed acme/w#9');
+  // "Matching" is the whole rule: a value that ends in a backtick on a line
+  // that opened BARE keeps it, or the reader starts editing values it was
+  // only asked to read.
+  t('directiveValues: an UNMATCHED trailing backtick is kept', dv('Restart-when: run `npm view x`').join('|'), 'run `npm view x`');
+  t('directiveValues: …and an unmatched trailing bold is kept', dv('Restart-when: closed **acme/w#9**').join('|'), 'closed **acme/w#9**');
+  // Negatives — what decoration tolerance must NOT buy.
+  t('directiveValues: a backtick mid-line does not start a match', dv('we should add a `Restart-when: closed acme/w#9` line').length, 0);
+  t('directiveValues: prose before a bullet does not either', dv('see: - Restart-when: closed acme/w#9').length, 0);
+  t('directiveValues: a lowercase key stays invisible, decorated or not', dv('`restart-when: closed acme/w#9`').length, 0);
+  t('directiveValues: a bullet needs its space (`-Restart-when:` is a word)', dv('-Restart-when: closed acme/w#9').length, 0);
+  t('directiveValues: a decorated valueless line has no value', dv('`Restart-when:`').length, 0);
+  t('directiveValues: …nor one padded with a space', dv('`Restart-when: `').length, 0);
+  t('directiveValues: …nor a bolded valueless one', dv('**Restart-when:**').length, 0);
+  t('directiveValues: the bare valueless line is unchanged', dv('Restart-when:').length, 0);
+  t('directiveValues: the key selects (a Blocked-by line is not a Restart-when)', dv('`Blocked-by: #9612`').length, 0);
+  t('directiveValues: …and the same reader serves Blocked-by', dv('`Blocked-by: #9612`', 'Blocked-by').join('|'), '#9612');
+
+  // H4 — the decorated line clears the duty, in EITHER channel. #10063 is the
+  // measured body specimen: 「`Blocked-by: #9612`」 read as absent, and since
+  // the unlock sweep greps the same literal, nothing could ever have returned
+  // the card — the silent half of this defect.
+  const blocked = (body, comments) => h4BlockedNoBlockedBy(issue(['pm:blocked'], [], body), comments);
+  t('H4: the #10063 shape — a backticked BODY line -> clean', blocked('`Blocked-by: #9612`'), null);
+  t('H4: a backticked COMMENT line -> clean', blocked('waiting', ['`Blocked-by: #9465`']), null);
+  t('H4: a bulleted body line -> clean', blocked('- Blocked-by: #9612'), null);
+  t('H4: a `*`-bulleted body line -> clean', blocked('* Blocked-by: #9612'), null);
+  t('H4: a bolded body line -> clean', blocked('**Blocked-by:** #9612'), null);
+  t('H4: bold around the whole line -> clean', blocked('**Blocked-by: #9612**'), null);
+  t('H4: code around the key only -> clean', blocked('`Blocked-by:` #9612'), null);
+  t('H4: a bulleted, bolded comment line -> clean', blocked('waiting', ['- **Blocked-by:** #9465']), null);
+  // …and the negatives, which are the same list read the other way.
+  t('H4: a decorated VALUELESS line does not discharge the duty', typeof blocked('`Blocked-by:`'), 'string');
+  t('H4: …nor a bolded valueless one', typeof blocked('**Blocked-by:**'), 'string');
+  t('H4: …nor a decorated valueless COMMENT line', typeof blocked('waiting', ['`Blocked-by:`']), 'string');
+  t('H4: a decorated lowercase key is still invisible', typeof blocked('`blocked-by: #9612`'), 'string');
+  t('H4: a mid-sentence decorated mention is still prose', typeof blocked('seats park the `Blocked-by: #1` line in comments'), 'string');
+  // The value-in-code shape already cleared H4 before this change (its first
+  // value character is a backtick, and H4 asks only whether SOMETHING follows
+  // the key); pinned so the new "not just decoration" clause cannot take it.
+  t('H4: a value wrapped in code still discharges the duty', blocked('Blocked-by: `#9612`'), null);
+
+  // The index side of the same lines — H4 asking "is there a line" and the
+  // index asking "which card" must agree about what a line IS.
+  t('blockedByTargets: the #10063 backticked line names its blocker', blockedByTargets('`Blocked-by: #9612`').map((r) => r.number).join(','), '9612');
+  t('blockedByTargets: a bulleted line', blockedByTargets('- Blocked-by: #9823').map((r) => r.number).join(','), '9823');
+  t('blockedByTargets: a bolded key (the `**` must not reach the ref walk)', blockedByTargets('**Blocked-by:** #9823').map((r) => r.number).join(','), '9823');
+  t('blockedByTargets: bold around the whole line', blockedByTargets('**Blocked-by: #9823**').map((r) => r.number).join(','), '9823');
+  t('blockedByTargets: a decorated cross-repo ref keeps its qualifier', blockedByTargets('`Blocked-by: objectstack-ai/objectui#4356`')[0].repo, 'objectstack-ai/objectui');
+  t('blockedByTargets: a decorated comma run is all blockers', blockedByTargets('- `Blocked-by: #6234, #6245`').map((r) => r.number).join(','), '6234,6245');
+  t('blockedByTargets: a mid-sentence decorated mention yields nothing', blockedByTargets('seats park the `Blocked-by: #1` line in comments').length, 0);
+  t('blockedByTargets: a decorated lowercase key yields nothing', blockedByTargets('`blocked-by: #9612`').length, 0);
+  t('commentBlockedByTargets: a decorated comment line is a real edge', commentBlockedByTargets(['prose', '`Blocked-by: #7`']).map((r) => r.number).join(','), '7');
   t('H5: 🟢 login matching assignee -> clean', h5SeatStickerDesync(issue(['pm:seat'], ['os-zhuang'], '', '[PM seat] domain:devx — 🟢 os-zhuang')), null);
   t('H5: 🟢 login without assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], [], '', '[PM seat] domain:devx — 🟢 os-zhuang')), 'string');
   t('H5: ⏳ vacant with assignee -> finding', typeof h5SeatStickerDesync(issue(['pm:seat'], ['os-help'], '', '[PM seat] domain:cli — ⏳ vacant')), 'string');
@@ -3538,6 +3810,48 @@ function selfTest() {
   t('H9: prose mentioning the literal inline does not count', typeof h9OnHoldNoRestartWhen(hold('add a Restart-when: line later')), 'string');
   t('H9: card without pm:on-hold is out of scope', h9OnHoldNoRestartWhen(issue(['pm:queue'], [], 'no line at all')), null);
   t('H9: missing body -> finding', typeof h9OnHoldNoRestartWhen(issue(['pm:on-hold'], [], undefined)), 'string');
+
+  // -- H9 and decorated directive lines (#10102) -----------------------------
+  // #9591's shape, byte-for-byte in structure: a legal, machine-fireable hold
+  // whose line is wrapped in inline code. The old anchor read it as absent and
+  // the old remedy text told the reading seat to close a maintainer-
+  // commissioned card.
+  const held9591 = '`Restart-when: the v18 major development cycle opens (first v18 changeset-major accepted on main), or a maintainer instruction pulls it forward`';
+  t('H9: the #9591 shape — a backticked line is a LEGAL hold', h9OnHoldNoRestartWhen(hold(held9591)), null);
+  t('H9: bulleted line -> clean', h9OnHoldNoRestartWhen(hold('- Restart-when: closed acme/widgets#123')), null);
+  t('H9: `*`-bulleted line -> clean', h9OnHoldNoRestartWhen(hold('* Restart-when: closed acme/widgets#123')), null);
+  t('H9: bolded key -> clean', h9OnHoldNoRestartWhen(hold('**Restart-when:** closed acme/widgets#123')), null);
+  t('H9: bold around the whole line -> clean', h9OnHoldNoRestartWhen(hold('**Restart-when: closed acme/widgets#123**')), null);
+  t('H9: bullet + code together -> clean', h9OnHoldNoRestartWhen(hold('Context.\n- `Restart-when: closed acme/widgets#123`\nMore prose.')), null);
+  // Negatives: decoration must not rescue a line the unlock grep cannot see,
+  // and must not turn its own markers into a value.
+  t('H9: a decorated lowercase key is still a finding', typeof h9OnHoldNoRestartWhen(hold('`restart-when: closed acme/widgets#123`')), 'string');
+  t('H9: a decorated valueless line is still a finding', typeof h9OnHoldNoRestartWhen(hold('`Restart-when:`')), 'string');
+  t('H9: …and one padded with a space (the closing marker is not a value)', typeof h9OnHoldNoRestartWhen(hold('`Restart-when: `')), 'string');
+  t('H9: a decorated line quoted mid-sentence is still a finding', typeof h9OnHoldNoRestartWhen(hold('someone should add a `Restart-when: closed acme/widgets#1` line')), 'string');
+  // The stripped value reaches the `manual` test intact — the decorated manual
+  // hold must still fire, or backticks would become the opt-out the bare
+  // spelling is denied.
+  t('H9: a decorated `manual` hold still fires', typeof h9OnHoldNoRestartWhen(hold('`Restart-when: manual — first EE customer asking`')), 'string');
+  t('H9: …and still names the manual shape', h9OnHoldNoRestartWhen(hold('**Restart-when: manual — reason**')).includes('manual'), true);
+
+  // -- H9's remedy text: verify/unwrap first, close last (#10102) ------------
+  const h9NoLine = h9OnHoldNoRestartWhen(hold('parked until the train ships'));
+  t('H9: the no-line row names the decorated/unparsed possibility', h9NoLine.includes('cannot parse'), true);
+  t('H9: …and tells the seat to read the body before acting', h9NoLine.includes('READ THE BODY BEFORE ACTING'), true);
+  t('H9: …and demotes closing to the last resort', h9NoLine.includes('Closing is the LAST resort'), true);
+  t('H9: …and says an unwrapped line needs no state change', h9NoLine.includes('no state change is due'), true);
+  // The `manual` row is NOT a parse failure — a line was read — so it must not
+  // carry the "maybe it is there" hedge, or the one row that really does mean
+  // "this hold has no exit" starts reading as uncertain.
+  t('H9: the manual row carries no unparsed hedge', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('cannot parse'), false);
+  t('H9: …but does still demote closing', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('Closing is the LAST resort'), true);
+  // The channel asymmetry, stated in the row itself: H4/H14 read body OR
+  // comment, H9 reads the body only. An undocumented difference between two
+  // adjacent rules is how the last two half-states on that lane were made.
+  t('H9: the row states the body-only channel', h9NoLine.includes('reads the BODY only'), true);
+  t('H9: …and names the predicates that differ', h9NoLine.includes('H4/H14'), true);
+  t('H9: …and the manual row states it too', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x')).includes('reads the BODY only'), true);
 
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
