@@ -2493,13 +2493,19 @@ function selfTest() {
       clockedIn('packages/clocked-load/src/thing.test.ts:8').some((f) => f.includes("import('@fx/core/logger')")),
       'a dynamic import nested two functions deep inside an `it()` body went unseen — the brace scanner reads only `=> {`',
     );
+    // Counted on the FULL path: `packages/clocked-load` is also a prefix of
+    // `packages/clocked-load-paid`, and a loose needle here reads that fixture's
+    // findings as this one's — measured, when an ablation of the compliance leg
+    // moved this count to 3 for a reason that was in the assertion, not the gate.
     expect(
-      clockedIn('packages/clocked-load').length === 2,
+      clockedIn('packages/clocked-load/src/thing.test.ts').length === 2,
       'the clocked-window rule did not report exactly the two loads this fixture pays in a clocked window',
     );
     // The remedy is the one PR #10120 landed, printed as a line to paste.
     expect(
-      clockedIn('packages/clocked-load').every((f) => f.includes('COLLECTION') && f.includes("import '@fx/")),
+      clockedIn('packages/clocked-load/src/thing.test.ts').every(
+        (f) => f.includes('COLLECTION') && f.includes("import '@fx/"),
+      ),
       'the clocked-window finding printed no module-top import to add, or did not say where the cost moves TO',
     );
 
