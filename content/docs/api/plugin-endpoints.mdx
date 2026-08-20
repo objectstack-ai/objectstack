@@ -7,6 +7,10 @@ description: REST endpoints that become available when the corresponding plugin 
 
 These REST endpoints are only available when the corresponding plugin is installed. Check the [discovery manifest](/docs/api#discovery) `services` map before calling them; all paths are relative to the base URL (defaults to `/api/v1`).
 
+This page is a **catalog of routes the platform serves for you** — it is not about authoring an
+endpoint of your own. To publish your own URL as metadata, see [Declarative
+Endpoints](/docs/api/declarative-endpoints).
+
 ## Authentication (Plugin Required)
 
 <Callout type="warn">
@@ -191,3 +195,4 @@ instead of pointing at a path with nothing behind it.
 
 - [API Overview](/docs/api) — discovery, error handling, and protocol types
 - [Client SDK](/docs/api/client-sdk) — service-aware TypeScript client that adapts to installed plugins
+- [Declarative Endpoints](/docs/api/declarative-endpoints) — declaring an endpoint of your own (`apis:`), the other half of this page's name

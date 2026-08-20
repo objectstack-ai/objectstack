@@ -1,0 +1,313 @@
+---
+title: Declarative Endpoints
+description: Expose your app to systems outside the platform by declaring an apis: endpoint as metadata — which channel to pick, the four publish gates, and the obligation that comes with an anonymous endpoint.
+---
+
+# Declarative Endpoints
+
+A stack can publish an HTTP endpoint as **metadata** instead of writing a handler: a URL,
+a method, a policy block, and the pipeline it delegates to. That is the `apis:` block of
+`defineStack`, and its entries are **live from protocol 17** — an endpoint that passes its
+publish gates serves real traffic as soon as the package is published.
+
+<Callout type="warn">
+**This is not [Plugin Endpoints](/docs/api/plugin-endpoints).** That page is a *catalog of
+built-in routes* the platform serves when a plugin is installed (`/auth`, `/automation`,
+`/graphql`, …) — you call those, you do not write them. This page is about the endpoints
+**you declare**, which live under your own namespace and never overlap with that catalog.
+</Callout>
+
+## Which channel: `actions` or `apis`?
+
+This is the decision to make first, and it has a single criterion — **where the caller
+is**, not what the operation does ([ADR-0121](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0121-declarative-endpoint-routing-namespace-and-channel-split.md) D3):
+
+| The caller is | Channel | Why |
+|:---|:---|:---|
+| **Inside** the platform — a UI button, a session in the Console, an AI/MCP client, the client SDK | `actions` | It already holds a session and speaks the platform's dialect; a command surface fits it |
+| **Outside** the platform — a partner system, an inbound webhook, someone else's integration | `apis:` | The payload shape is theirs, there is no platform session, and the URL itself is the contract you publish |
+
+"What does it do?" is not the criterion, because it degrades into taste ("is deleting a
+record a command or a resource operation?"). "Where is the caller?" has exactly one answer
+for any concrete endpoint.
+
+Picking the wrong one is a style problem, not a behaviour problem: a `type: 'flow'`
+endpoint delegates to the same automation pipeline an action-triggered flow uses, with the
+same identity envelope and the same RLS semantics (ADR-0121 D5). The cost of a
+misclassification is the URL shape and the policy keys — never the execution semantics.
+
+## Declare one
+
+Endpoints are declared on the **stack**, not on an app shell — inline in
+`defineStack({ apis })`, or in one of the files the `api` metadata type is registered for
+(`*.api.ts`, `*.api.yml`, `*.api.json`). Either way the same gates judge them, at stack
+compile and again at `publishPackage`.
+
+{/* os:check */}
+```typescript
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: {
+    id: 'acme-crm',
+    name: 'Acme CRM',
+    version: '1.0.0',
+    type: 'app',
+    // REQUIRED before you can declare `apis:` — your URL carve-out is derived
+    // from it, and there is deliberately no fallback that derives it from
+    // `manifest.id` (an outward URL contract must not move because a package
+    // id was rewritten).
+    namespace: 'acme',
+  },
+  apis: [
+    {
+      name: 'acme_lead_feed',
+      // `/api/v1/apps/<manifest.namespace>/<subpath>` — only the subpath is yours.
+      path: '/api/v1/apps/acme/leads',
+      method: 'GET',
+      summary: 'Lead feed',
+      description: 'Open leads, for the partner portal.',
+      type: 'object_operation',
+      // `target` is required on every entry by the vocabulary. An
+      // object_operation is addressed by `objectParams`, so nothing reads this
+      // one — name the object it works on and keep the two in step.
+      target: 'acme_lead',
+      objectParams: { object: 'acme_lead', operation: 'find' },
+      // Omitting `authRequired` is the safe spelling — it defaults to `true`.
+      cacheTtl: 30,
+    },
+    {
+      name: 'acme_lead_intake',
+      path: '/api/v1/apps/acme/leads/intake',
+      method: 'POST',
+      summary: 'Lead intake',
+      type: 'flow',
+      target: 'acme_lead_intake',
+    },
+  ],
+});
+```
+
+Publish it (`objectstack publish`), and the two URLs answer. `objectstack validate` — and
+`os build` — run the same gates the publish path runs, so a declaration that would be
+refused is refused before you deploy.
+
+### What a request does
+
+A declared endpoint is **not a registered route**. It is matched in the dispatcher's
+unmatched-request seam, which is what makes it structurally impossible for your
+declaration to shadow a built-in one. Match → policy chain (`rateLimit` → `authRequired` →
+`cacheTtl`) → delegation to an existing pipeline:
+
+| `type` | Delegates to | Request shape |
+|:---|:---|:---|
+| `object_operation` | the same `callData` binding that serves `/api/v1/data/{object}` | `find` reads its criteria from the query string; `get` / `update` / `delete` take the record id from `query.id`; `create` / `update` take the body. `create` answers `201`, the rest `200` |
+| `flow` | the same automation pipeline as `POST /api/v1/automation/{name}/trigger` | the request body is the flow input. A refused or failed run answers a real status: `404` unknown flow, `409` `FLOW_DISABLED`, `422` `FLOW_NO_START_NODE`, `400` `FLOW_FAILED` |
+
+The frozen vocabulary has **no path-template syntax**, so an endpoint cannot express
+`/leads/{id}` — a record id travels as `?id=…`. A method that no declaration claims
+answers the transport's own bare `404`, not `405`: nothing registered a route, so there is
+no method set to report. The full request lifecycle, including the unmatched-request
+contract, is in the [HTTP protocol reference](/docs/protocol/kernel/http-protocol).
+
+## The four publish gates
+
+Every entry must satisfy all four or publish and validate fail, **naming the endpoint, the
+key and the fix** — never parsing the declaration into silence. The messages below are the
+ones you will actually read, so you can match a failure to its gate.
+
+Per endpoint the gates stop at the **first** failure, in the order below, so one endpoint
+reports one thing to fix. Across endpoints they do not stop: three bad entries produce
+three rejections in one run.
+
+### 1. Namespace — the route has to be yours
+
+`path` must be `/api/v1/apps/<manifest.namespace>/<subpath>`, with a non-empty subpath.
+The namespace segment comes from your stack's `manifest.namespace` (2–20 characters,
+`^[a-z][a-z0-9_]{1,19}$`) and is **never** written on the endpoint — a `namespace` key on
+an endpoint is refused by name.
+
+> `Endpoint 'acme_lead_feed' (apis[0])` declares path `'/api/v1/leads'`, which is not
+> inside this stack's endpoint carve-out.
+
+A stack that declares `apis:` without an explicit `manifest.namespace` is rejected once,
+against `apis` itself, before any path is judged.
+
+The `apps/<namespace>/` segment is why route ownership is **structural** rather than a
+list somebody maintains: no built-in domain lives under `apps/`, and two packages can
+never collide because their namespaces differ. A path outside the carve-out would parse
+today and match nothing at runtime — the endpoint seam only ever consults declarations
+under that mount.
+
+### 2. Supported subset — only what 17.x actually executes
+
+| Declaration | Verdict |
+|:---|:---|
+| `type: 'object_operation'` with **both** `objectParams.object` and `objectParams.operation` (`find` / `get` / `create` / `update` / `delete`) | executes |
+| `type: 'flow'` with a `target` naming the flow | executes |
+| `type: 'object_operation'` missing either half of `objectParams` | rejected — the executor cannot infer either, and the endpoint would answer `501` on every request |
+| `type: 'flow'` with no `target` | rejected |
+| `type: 'script'`, `type: 'proxy'` | rejected at publish |
+
+`target` is required on **every** entry, whatever the `type`. A `flow` endpoint is executed
+by it; an `object_operation` is addressed by `objectParams` instead, so nothing reads its
+`target` — write the object name there and keep the two in step, because leaving the key
+out is a type error before it is anything else.
+
+`script` and `proxy` are **not servable declarations**. Nothing in the platform verifies
+that a script target is reachable, and forwarding to an arbitrary outbound URL is an
+egress surface this runtime does not open. Write the logic as `type: 'flow'` instead: a
+flow whose script node runs your registered function, or whose outbound call is made by a
+declared connector. Both keys stay in the vocabulary and are refused rather than parsed
+and ignored, so you find out at publish and not in production.
+
+> `Endpoint 'acme_proxy' (apis[2])` declares `type: 'proxy'`, which this runtime does not
+> execute.
+
+**Mapping entries are gated with them.** `inputMapping` and `outputMapping` move and rename
+fields by dot path and nothing more — `inputMapping` projects the request body before
+delegation (so it can never buy a caller past the policy chain), `outputMapping` projects a
+**successful** response body only. Four shapes are refused: a `transform` key (there is no
+transformation registry anywhere in the platform — compute the value where it is produced,
+in the flow or in a formula field), an unusable dot path (empty, an empty segment such as
+`a..b`, or a JavaScript prototype key), two entries writing the same target path or one
+writing inside the other, and `inputMapping` on a `find` / `get` / `delete` operation,
+which never reads a body.
+
+<Callout type="info">
+The [HTTP protocol reference](/docs/protocol/kernel/http-protocol) tabulates mapping as a
+gate of its own, for five rows instead of four. Same checks, same messages — it splits the
+mapping refusals out of this family rather than nesting them.
+</Callout>
+
+### 3. Policy — the keys that must be able to take effect
+
+- `authRequired: false` requires `rateLimit.enabled: true` — see [Anonymous
+  endpoints](#anonymous-endpoints-are-an-open-execution-entry-point) below.
+- An **armed** budget must be usable: `maxRequests` above `0` and `windowMs` above `0`. A
+  zero-or-negative allowance rejects every request including your own health checks, and
+  the runtime fails closed on it rather than serving unmetered.
+- `cacheTtl` is seconds and cannot be negative.
+- `cacheTtl` is **GET-only**. It becomes a `Cache-Control` header on a successful answer,
+  and a non-GET answer is not a cacheable representation, so on any other method the key
+  could never take effect and is refused instead of ignored.
+
+`cacheTtl: 0` is not the same as omitting the key: `0` emits `Cache-Control: no-store`
+(saying "never store this"), while omitting it sends no caching header at all. A positive
+ttl emits `private, max-age=<ttl>` — `private` is a security rule and not a tuning choice,
+because any answer can be RLS-trimmed for its caller and a shared cache must never hand
+one caller's answer to somebody else. It rides successful answers only; a `401` / `429` /
+`5xx` never carries a cache directive.
+
+### 4. Uniqueness — one claim per METHOD and path
+
+Two endpoints in one stack cannot claim the same method and path. Paths are compared with
+one trailing slash trimmed — the same rule the matcher applies — so `/x` and `/x/` are the
+same claim, and the second one would be dead metadata that passed validation.
+
+> `Endpoint 'acme_lead_feed_v2' (apis[3])` claims `GET /api/v1/apps/acme/leads`, already
+> claimed by endpoint `'acme_lead_feed' (apis[0])`.
+
+## Anonymous endpoints are an open execution entry point
+
+`authRequired` defaults to `true`. **Omitting it is the safe spelling**, and an explicit
+`false` is the only thing that opens an endpoint — a visible line in a diff, deliberately.
+
+Read `authRequired: false` as what it is: an anonymous, internet-reachable execution entry
+point. Anyone who can reach your deployment can call it, as often as they like, without
+credentials. Because of that, ADR-0121 D6 makes an **armed rate limit its paired
+obligation**, checked at publish:
+
+{/* os:check */}
+```typescript
+import type { ApiEndpoint } from '@objectstack/spec/api';
+
+// A partner's webhook receiver: no session to present, so it must carry a budget.
+export const partnerWebhook: ApiEndpoint = {
+  name: 'acme_partner_webhook',
+  path: '/api/v1/apps/acme/webhooks/partner',
+  method: 'POST',
+  type: 'flow',
+  target: 'acme_partner_intake',
+  authRequired: false,
+  // `enabled` DEFAULTS TO FALSE. Writing only `windowMs` / `maxRequests`
+  // declares a budget that meters nothing — publish checks `enabled === true`,
+  // not the presence of the key.
+  rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
+};
+```
+
+> `Endpoint 'acme_partner_webhook' (apis[1])` declares `authRequired: false` without an
+> ARMED rate limit.
+
+What that budget buys you, and what it does not:
+
+- **Metering runs before the auth gate** (`rateLimit` → `authRequired` → `cacheTtl`). That
+  order is deliberate: the traffic that most needs a budget — credential stuffing,
+  scraping — is exactly the traffic that ends in a `401`, so a denied request still spends
+  a token.
+- **The bucket is per endpoint, per caller**: keyed on the session principal when there is
+  one, otherwise on the client address. An exhausted budget answers `429` with a
+  `Retry-After` header.
+- **Anonymity is not a permission grant.** The request still runs through the same
+  pipeline the built-in routes use, under the anonymous principal — so an anonymous
+  endpoint reaches exactly what your permission model grants anonymous callers, and
+  nothing more. Opening the door does not widen what is behind it. See
+  [Authentication](/docs/permissions/authentication) and [Record-Level
+  Security](/docs/permissions/rls).
+- **Payload authenticity is not covered.** The vocabulary has no signature keys — no HMAC,
+  no timestamp, no replay window — and none is implied by `authRequired: false`. If your
+  partner signs its webhooks, verify the signature inside the flow the endpoint triggers.
+
+<Callout type="warn">
+An `apis:` block written against an older major changes meaning without changing a byte:
+what used to be inert documentation is an execution entry point from protocol 17. Before
+upgrading, work through the `declarative-apis-endpoints-live` entry of the protocol upgrade
+guide — for an entry carrying `authRequired: false` that is a security review, not a
+rename.
+</Callout>
+
+## `api` is code-only
+
+You declare endpoints in **source**, publish them, and redeploy. The runtime metadata API
+does not create or update them, and it does not fail vaguely:
+
+```http
+PUT /api/v1/meta/api/acme_lead_feed   →  403  {"code":"NOT_CREATABLE"}
+```
+
+The `api` metadata type is registered with `allowRuntimeCreate: false` and
+`allowOrgOverride: false`, and that refusal runs **before any body validation** — so a
+perfectly valid endpoint body gets the same `403`, in `?mode=draft` as well as direct
+writes. There is no per-organization overlay of an endpoint either.
+
+The reason is that the runtime metadata door was never the door that **serves**: an
+endpoint reaches the matcher through the artifact route — stack compile, loader ingest,
+`publishPackage` — and a row written through `PUT /meta/api/…` was enumerated but never
+matched, published into `/openapi.json` as a live path while every request to it answered
+`404`. Closing the write ends that split. (`OS_METADATA_WRITABLE=api` unlocks the write on
+one deployment as a diagnostic; the endpoint still will not be served, which is why it is
+not a workaround.)
+
+## Reading the result in `/openapi.json`
+
+`GET /api/v1/openapi.json` describes your declared endpoints alongside the generated ones:
+the `path` and `method` read back verbatim, `name` as `operationId`, and `summary` /
+`description` — the only two documentation fields in the vocabulary — as written.
+
+Nothing is invented: no guessed request or response schemas, no fabricated summaries. The
+document is built from the set the **matcher confirmed it will serve**, not from the set
+you declared, so an endpoint that appears there is one that answers. That is the fastest
+way to check what a partner will see before you send them a URL.
+
+## See also
+
+- [Plugin Endpoints](/docs/api/plugin-endpoints) — the built-in routes an installed plugin
+  serves. Different thing, similar name
+- [HTTP protocol reference](/docs/protocol/kernel/http-protocol) — the normative request
+  lifecycle, the unmatched-request contract, and the gate table
+- [API endpoint schema](/docs/references/api/endpoint) — the generated field reference for
+  `ApiEndpointSchema`
+- [Data API](/docs/api/data-api) — the pipeline an `object_operation` endpoint delegates to
+- [Flows](/docs/automation/flows) — the pipeline a `flow` endpoint delegates to
+- [API Overview](/docs/api) — discovery, error envelopes, and the rest of this module

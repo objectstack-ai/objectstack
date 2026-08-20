@@ -44,6 +44,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/api/client-sdk.mdx",
   "content/docs/api/data-api.mdx",
   "content/docs/api/data-flow.mdx",
+  "content/docs/api/declarative-endpoints.mdx",
   "content/docs/api/environment-routing.mdx",
   "content/docs/api/error-catalog.mdx",
   "content/docs/api/error-handling-client.mdx",
