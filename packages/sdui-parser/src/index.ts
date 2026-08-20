@@ -1,5 +1,5 @@
 /**
- * @object-ui/sdui-parser — constrained JSX-source → SDUI SchemaNode tree (ADR-0080)
+ * @objectstack/sdui-parser — constrained JSX-source → SDUI SchemaNode tree (ADR-0080)
  *
  * Isomorphic, zero React. Run server-side as the authoritative save-time gate;
  * may also run client-side for live edit preview (re-validated on the server —

@@ -517,11 +517,17 @@ export const PageSchema = lazySchema(() => strictObject({
   kind: z.enum(['full', 'slotted', 'html', 'react', 'jsx']).default('full')
     .describe(
       "Page override mode. full | slotted = structured authoring; " +
-      "html = author-written constrained JSX/HTML+Tailwind compiled (parsed, never " +
-      "executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias); " +
-      "react = real-React source executed at render by the runtime (ADR-0081); it " +
+      "html = author-written constrained JSX compiled (parsed, never " +
+      "executed) to the tree (ADR-0080; the legacy value 'jsx' is a deprecated alias), " +
+      "styled by the registered components' structured props plus a JSON `style` " +
+      "object with hsl(var(--token)) theme colors; " +
+      "react = real-React source executed at render by the runtime (ADR-0081), styled " +
+      "by inline `style` with the same token colors; it " +
       "runs author JS, so it is gated by a host capability that defaults ON and is " +
-      "disabled server-side via the OS_PAGE_REACT=off env toggle.",
+      "disabled server-side via the OS_PAGE_REACT=off env toggle. " +
+      "Do not author Tailwind classes in page source in either tier: `source` is " +
+      "runtime metadata the build-time Tailwind never scans, so utility classNames " +
+      "silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30).",
     ),
 
   /**
@@ -557,13 +563,20 @@ export const PageSchema = lazySchema(() => strictObject({
 
   /**
    * JSX-source authoring (ADR-0080). When `kind === 'jsx'`, `source` is the
-   * source-of-truth: a constrained JSX/HTML+Tailwind text compiled by
+   * source-of-truth: a constrained JSX text compiled by
    * `@objectstack/sdui-parser` into the SchemaNode tree at SAVE time — parse,
    * never execute. `regions` then hold the DERIVED tree (a cache; the source
    * wins on any mismatch). For `full`/`slotted` pages `source` is unused.
+   *
+   * Styling (ADR-0065; ADR-0080's 2026-06-30 amendment): `source` is runtime
+   * metadata the build-time Tailwind never scans, so authored utility
+   * `className`s silently produce no CSS — do not author Tailwind classes in
+   * page source. `html` styles via the registered components' structured props
+   * plus a JSON `style` object with `hsl(var(--token))` theme colors; `react`
+   * styles via inline `style` with the same token colors.
    */
   source: z.string().optional()
-    .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX/HTML+Tailwind compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute). For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier). Authoritative over `regions` in both."),
+    .describe("Page source text. For kind==='html' (alias 'jsx') it is constrained JSX compiled to the tree by @objectstack/sdui-parser at save time (parse, never execute), styled by the registered components' structured props plus a JSON `style` object with hsl(var(--token)) theme colors. For kind==='react' it is real React/JSX executed at render by @object-ui/react-runtime (trusted tier), styled by inline `style` with the same token colors. Do not author Tailwind classes in page source in either tier: `source` is runtime metadata the build-time Tailwind never scans, so utility classNames silently produce no CSS (ADR-0065; ADR-0080 amendment 2026-06-30). Authoritative over `regions` in both."),
   /** Plugin namespaces the JSX source references — inferred at compile, checked at save AND load (ADR-0048 provenance). */
   requires: z.array(z.string()).optional()
     .describe('Plugin namespaces the JSX source references (validated at save and load)'),
