@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext } from '@objectstack/core';
+import {
+  assembleExecutionContext,
+  resolveAuthzContext,
+  resolveLocalizationContext,
+  type EntryLocalization,
+} from '@objectstack/core';
 import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
@@ -16,35 +21,66 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  * Resolve `OS_MCP_STDIO_API_KEY` into an {@link ExecutionContext} through the
  * SAME `@objectstack/core` verify + authorization chain the HTTP and REST
  * surfaces use (`resolveApiKeyPrincipal` → `resolveAuthzContext`), so a stdio
- * read is scoped exactly like the same identity over REST (RLS / FLS / tenant).
+ * call is scoped exactly like the same identity over REST (RLS / FLS / tenant).
+ *
+ * [#7279] Assembled by the SHARED `assembleExecutionContext` rather than by
+ * hand. This face was the last hand-written assembly left after #6216 converged
+ * the dispatcher / REST / share-link sites, and hand assembly is what let it
+ * fall behind the envelope twice over: it dropped `tabPermissions`, and it
+ * resolved no localization at all. The assembler's field set is CLOSED, so the
+ * NEXT `ExecutionContext` field cannot miss this transport the way those did.
  *
  * Fail-closed: returns `undefined` for an unknown / revoked / expired /
- * owner-less key (no `userId` resolved). Re-run per read, so revocation of a
- * key takes effect on the next call of a live stdio session (ADR-0101 D1).
+ * owner-less key. That contract is not re-implemented here — it IS
+ * `assembleExecutionContext`'s default entry (`!authz.userId ⇒ undefined`),
+ * which is why the explicit guard this function used to carry is gone rather
+ * than merely moved. Re-run per read, so revocation of a key takes effect on
+ * the next call of a live stdio session (ADR-0101 D1).
+ *
+ * @param localization Resolved ONCE by `start()` and threaded in — see the
+ * hoist there for why this function must not resolve it itself.
  */
 async function resolveStdioExecutionContext(
   ql: { find: (object: string, opts: unknown) => Promise<unknown> },
   apiKey: string,
+  localization: EntryLocalization | undefined,
 ): Promise<ExecutionContext | undefined> {
   const authz = await resolveAuthzContext({ ql, headers: { 'x-api-key': apiKey } });
-  if (!authz.userId) return undefined;
-  const ec: ExecutionContext = {
-    positions: authz.positions,
-    permissions: authz.permissions,
-    systemPermissions: authz.systemPermissions,
-    isSystem: false,
-    principalKind: 'human',
-    userId: authz.userId,
-  };
-  if (authz.tenantId) ec.tenantId = authz.tenantId;
-  if (authz.email) ec.email = authz.email;
-  if (authz.posture) ec.posture = authz.posture;
-  (ec as unknown as { org_user_ids?: string[] }).org_user_ids = authz.org_user_ids;
-  // [ADR-0105 D2] The caller's org access set — the `group` posture's Layer 0
-  // wall reads it directly, so every transport must carry it.
-  (ec as unknown as { accessible_org_ids?: string[] }).accessible_org_ids =
-    authz.accessible_org_ids;
-  return ec;
+  return assembleExecutionContext({
+    authz,
+    // OAuth access tokens are honoured on the `/mcp` HTTP door alone
+    // (`acceptOAuthAccessToken`); a stdio process presents an API key, never a
+    // bearer, so `principalKind: 'agent'`, `onBehalfOf` and `oauthScopes` are
+    // not representable here.
+    oauth: undefined,
+    localization,
+    // No request to carry a locale preference: a long-lived stdio transport has
+    // no per-call `Accept-Language` equivalent, so the workspace default in
+    // `localization` is the only locale this face can speak.
+    requestLocale: undefined,
+    // [#7279] WITHHELD, on the record — the same decision the REST face makes
+    // for the same reason (`rest-server.ts`, `accessToken: undefined`).
+    //
+    // Two independent reasons, either sufficient:
+    //  1. There is nothing to carry. `ResolvedAuthzContext.accessToken` is
+    //     assigned in exactly one place — inside `resolve-authz-context.ts`'s
+    //     `if (!userId && typeof input.getSession === 'function')` branch. This
+    //     call passes NO `getSession`, and the assembler discards `!userId`
+    //     anyway, so the value is unreachable on this path twice over.
+    //  2. Even once plumbed it should not be carried. This face's credential is
+    //     a LONG-LIVED `osk_` API key from the environment, not a session
+    //     bearer. `ExecutionContext.accessToken` is a PUBLISHED hook surface
+    //     (`session.accessToken`, `spec/data/hook.zod.ts`), and handing every
+    //     `beforeFind`/`afterFind` a credential with far longer life than the
+    //     session token that surface was designed around is a product decision
+    //     nobody has made — not a refactor.
+    accessToken: undefined,
+    // [ADR-0069] No authentication-policy gate: that posture is resolved from a
+    // better-auth SESSION (expired password / enforced MFA), and this face has
+    // none. REST carries it because `enforceAuth` reads it off the envelope ten
+    // lines away; nothing on the stdio path reads it.
+    authGate: undefined,
+  });
 }
 
 /**
@@ -234,7 +270,12 @@ export class MCPServerPlugin implements Plugin {
         );
       }
       // Validate the key up-front (fail-closed) before attaching the transport.
-      const initial = await resolveStdioExecutionContext(ql, apiKey);
+      // Deliberately resolved WITHOUT localization: this probe's only job is
+      // admission (`initial.userId`, logged below) — it is never handed to a
+      // data call, so it must not pay for settings reads whose result it would
+      // discard. The localization hoist below needs its `userId`/`tenantId`,
+      // which is why the probe comes first.
+      const initial = await resolveStdioExecutionContext(ql, apiKey, undefined);
       if (!initial) {
         throw new Error(
           '[MCP] OS_MCP_STDIO_API_KEY did not resolve to a valid identity (unknown / revoked / expired / owner-less). ' +
@@ -242,9 +283,34 @@ export class MCPServerPlugin implements Plugin {
         );
       }
       const scopedQl = ql;
+      // ── Localization, resolved ONCE for the life of the transport (#7279) ──
+      // `resolveStdioExecutionContext` re-runs on EVERY call below, deliberately
+      // (ADR-0101 D1: a revoked key must stop working on the next one). The
+      // IDENTITY has to be re-read for that; the workspace's timezone/locale
+      // does not — the key's tenant cannot change mid-session. Resolving it
+      // in-line would put up to three settings reads (or one `sys_setting`
+      // find, `resolveLocalizationContext`) on every single MCP call of a
+      // long-lived process, which is not acceptable steady state.
+      //
+      // `resolveLocalizationContext` never throws; a deployment with no settings
+      // service falls back to the direct `sys_setting` read and then to the
+      // built-ins (`UTC` / `en-US`), i.e. exactly the values this face used to
+      // get by carrying nothing.
+      let settingsService: unknown;
+      try {
+        settingsService = ctx.getService('settings');
+      } catch {
+        settingsService = undefined;
+      }
+      const localization: EntryLocalization = await resolveLocalizationContext({
+        ql: scopedQl,
+        settings: settingsService,
+        tenantId: initial.tenantId,
+        userId: initial.userId,
+      });
       // Re-resolve per call so a revoked/expired key stops working on the next read.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
-        const ec = await resolveStdioExecutionContext(scopedQl, apiKey);
+        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, localization);
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
         return ec;
       };
