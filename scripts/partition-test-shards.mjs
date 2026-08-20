@@ -37,7 +37,31 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// Where a `packages.items[].path` actually points.
+//
+// The document has two writers -- `turbo ls`, which emits repo-relative paths,
+// and `--union-into` in check-cross-package-test-inputs.mjs -- so the base this
+// resolves against must be stated, not inherited. `process.cwd()` is the base
+// you get by saying nothing, and it is the one base that can be wrong: CI runs
+// this from the repo root, so a relative entry happens to land on the right
+// directory, and the day something runs it from anywhere else countTestFiles()
+// reads nothing, returns 0, and the partitioner absorbs the zero without
+// complaint. Measured before this was pinned -- same document, same tree, cwd
+// `/`: `shard 1/1: 1/1 packages, weight 0`. That failure mode is not a red
+// step, it is a shard matrix that quietly stops balancing.
+//
+// `path.resolve` is also the reason this stays correct for both conventions:
+// given an already-absolute entry it returns that entry unchanged, so an old
+// document written by the previous absolute-path union step still resolves to
+// the same directory it always did.
+export function packageDir(itemPath) {
+  return path.resolve(REPO_ROOT, itemPath);
+}
 
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.turbo', '.next']);
@@ -173,6 +197,34 @@ function selfTest() {
   if (!threw(() => readPackageItems(doc({ count: 0, items: {} }), 'f'))) throw new Error('payload: a non-array items was accepted');
   if (!threw(() => readPackageItems({}, 'f'))) throw new Error('payload: a document with no packages key was accepted');
 
+  // Path resolution. `it.path` reaches this script in two conventions and the
+  // weight it produces must not depend on where the process happens to stand.
+  // The cwd leg is the one that matters: it is the exact measurement that made
+  // this a defect rather than a style question, and it fails SILENTLY (weight 0,
+  // package still assigned) rather than loudly, so nothing but an assertion can
+  // hold it.
+  if (packageDir('packages/spec') !== path.join(REPO_ROOT, 'packages', 'spec')) {
+    throw new Error('path: a repo-relative entry did not resolve against the repo root');
+  }
+  const absolute = path.join(REPO_ROOT, 'packages', 'spec');
+  if (packageDir(absolute) !== absolute) {
+    throw new Error('path: an already-absolute entry was not left alone');
+  }
+  const hereWeight = countTestFiles(packageDir('packages/spec'));
+  if (hereWeight === 0) throw new Error('path: fixture package `packages/spec` has no test files to weigh');
+  const cwdBefore = process.cwd();
+  try {
+    process.chdir(path.parse(REPO_ROOT).root);
+    if (packageDir('packages/spec') !== absolute) {
+      throw new Error('path: resolution moved with the cwd');
+    }
+    if (countTestFiles(packageDir('packages/spec')) !== hereWeight) {
+      throw new Error('path: weight changed with the cwd -- the silent weight-0 regression is back');
+    }
+  } finally {
+    process.chdir(cwdBefore);
+  }
+
   console.log('partition-test-shards: self-test OK');
 }
 
@@ -210,7 +262,7 @@ function main() {
       throw new Error(`${listPath}: package entry missing name/path: ${JSON.stringify(it)}`);
     }
     if (excluded.has(it.name)) continue;
-    weighted.push({ name: it.name, weight: countTestFiles(it.path) });
+    weighted.push({ name: it.name, weight: countTestFiles(packageDir(it.path)) });
   }
   const bins = partition(weighted, shardCount);
   const mine = bins[shardIndex - 1];
