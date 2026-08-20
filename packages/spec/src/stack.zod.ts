@@ -1577,7 +1577,7 @@ function warnUnknownAuthoringKeys(raw: unknown): void {
     // Top level first: an undeclared envelope key is the one that reads as
     // configuration that took effect (#4167).
     ...lintUnknownStackKeys(raw, ObjectStackDefinitionSchema),
-    ...lintUnknownAuthoringKeys(raw),
+    ...lintUnknownAuthoringKeys(raw, ObjectStackDefinitionSchema),
   ];
   for (const finding of findings) {
     if (warnedUnknownAuthoringKeys.has(finding.path)) continue;

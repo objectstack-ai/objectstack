@@ -344,7 +344,7 @@ describe('the CLI parses metadata through the registry schemas (#5000)', () => {
       // is what stands between the author and silence while the shape is open.
       const reported = lintUnknownAuthoringKeys({ manifest: MANIFEST, [collection]: [
         { name: 'gate_endpoint', path: '/api/v1/apps/gate_probe/things', method: 'GET', type: 'proxy', target: 'https://example.test', [INJECTED_KEY]: 1 },
-      ] } as Record<string, unknown>).map(formatUnknownAuthoringKey);
+      ] } as Record<string, unknown>, ObjectStackDefinitionSchema).map(formatUnknownAuthoringKey);
       expect(
         reported.join('\n'),
         `an undeclared key on a '${type}' item is neither rejected nor reported — that is silent metadata loss`,
