@@ -192,7 +192,7 @@ no-op — the top level refuses it and the stack fails to load:
 ```
 defineStack validation failed (1 issue):
 
-  ✗ (root): Unrecognized key(s) on this stack definition: `roles`. …
+  ✗ (root): Unrecognized key(s) on this stack definition: `policies`. …
 ```
 
 Undeclared keys are handled per surface, and the two postures are worth
