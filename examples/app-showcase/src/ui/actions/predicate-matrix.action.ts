@@ -89,15 +89,29 @@
  *    them at all, so a predicate using one silently stops being portable.
  *  - **A relation field is its FOREIGN KEY**, on every surface and on the
  *    server: `record.f_lookup == "<id>"`, never `record.f_lookup.id`.
- *  - **The RECORD HEADER does not speak CEL** (objectui#3521). It evaluates
- *    header-action predicates on objectui's legacy JS evaluator, so `.size()`,
- *    `.contains()`, `.matches()`, the `in` operator and stdlib calls like
- *    `today()` all THROW there and fail-closed hide the action, while the same
- *    predicate is correct in the row kebab and the selection bar. Every gate
- *    below that uses one of those is therefore absent from the `⋯` menu today
- *    and present in the list — see `ZooDialectSplitAction` for the one-screen
- *    comparison. Predicates built only from `==` / `!=` / `<` / `&&` / `||` /
- *    `!` agree on both.
+ *  - **The RECORD HEADER speaks CEL, like every other record surface.**
+ *    Measured in a browser at the pinned objectui (`.objectui-sha`
+ *    `82a94170c405`), on both specimens: `.contains()`, `.size()`,
+ *    `.matches()`, the `in` operator, `has()` and stdlib calls like `today()`
+ *    all evaluate on the record header and in its `⋯` overflow. Where the same
+ *    action is also declared elsewhere it agrees: the row `⋮` menu matches the
+ *    header on both specimens, and so does the selection bar for the six
+ *    specimens the view names in `bulkActions`. `record_header` / `record_more`
+ *    hand the predicate to `evalRowPredicate` WHOLE, so the
+ *    `{ dialect: 'cel' }` envelope `defineAction` normalizes to is routed to
+ *    the canonical engine rather than flattened onto a dialect guess.
+ *
+ *    ⚠️ This bullet used to say the opposite — that the header ran objectui's
+ *    legacy JS evaluator and fail-closed hid every CEL-only gate (objectui#3521,
+ *    pre-#3314 behaviour). That was stale, and it is recorded rather than
+ *    deleted because of what it would have cost: after #8990 every gate in this
+ *    file opens with `has(...)`, which the legacy evaluator answers with
+ *    `"has" is not a function`, so had the claim still been true, all 51
+ *    header-located gates would have been silently absent from the `⋯` menu.
+ *    Measured instead: the menu offers them, and hides exactly the ones whose
+ *    predicate is false on that record. ⛔ Do not restore the claim from a
+ *    source read — it is falsifiable in a browser in one click, which is the
+ *    only way it was ever settled (objectstack#9281).
  *
  * ## `visible` has three authoring forms, one meaning
  *
@@ -227,26 +241,49 @@ export const ZooUserIdentityGateAction = defineAction({
 });
 
 /**
- * **The dialect split.** One action, one predicate, two surfaces — and, as of
- * this writing, two different answers.
+ * **The dialect PIN.** One action, one CEL-only predicate, declared on all
+ * three `RECORD_SURFACES` — and, measured, one answer on each of them.
  *
- * `.contains()` is ordinary CEL and evaluates correctly wherever the canonical
- * engine runs: the row `⋮` menu, the selection bar, conditional formatting. The
- * RECORD HEADER does not run that engine — it evaluates header-action
- * predicates on objectui's legacy JS evaluator — so the same predicate throws
- * there (`.contains` is not a JS string method) and the action is fail-closed
- * hidden. Measured, not assumed: the browser console carries
- * `[page:header] action "…" hidden: its predicate threw`.
+ * `.contains()` is ordinary CEL, and this action is where "the record header
+ * runs the same engine as the row kebab" is falsifiable in one click. Measured
+ * in a browser at pinned objectui `82a94170c405`, signed in as the seeded
+ * admin (objectstack#9281):
  *
- * The same split hides every CEL-only construct on that one surface —
- * `.size()`, `.matches()`, the `in` operator, and stdlib calls like `today()`
- * (`"today" is not a function`). Filed as objectui#3521; kept here as a LIVE
- * fixture rather than papered over, because "works in the list, silently gone
- * on the detail page" is invisible to any test that exercises one surface.
+ * | surface | Specimen — Full | Specimen — Minimal |
+ * |---|---|---|
+ * | record header `⋯` (`record_more`) | OFFERED | absent |
+ * | row `⋮` menu (`list_item`)        | OFFERED | absent |
+ *
+ * ⚠️ The selection bar is deliberately NOT a row of that table: this action is
+ * not named in either view's `bulkActions` (`field-zoo.view.ts`), so it never
+ * reaches that surface at all — an absence of DECLARATION, which would read as
+ * an absence of dialect support if tabulated beside the other two. The
+ * three-surface agreement is pinned instead by the neighbours that ARE declared
+ * on all three: `ZooVisibleStringAction` and its two twins, and
+ * `ZooRelationGateAction` — whose `.size()` call is CEL-only and which likewise
+ * appears on all three for Full and on none for Minimal.
+ *
+ * Both columns are load-bearing. `f_textarea` is `'Line one\nLine two'` on Full
+ * and `null` on Minimal, so the RIGHT column is what proves the header is
+ * evaluating rather than offering everything: the same action on the same
+ * surface flips with the record. The browser console carries no
+ * `page:header action "…" visible` fail-closed warning on either record — the
+ * predicate is answering, not faulting.
+ *
+ * ⚠️ This action used to be framed as **the dialect SPLIT** — the live
+ * demonstration that the header ran objectui's legacy JS evaluator and threw on
+ * `.contains()` (objectui#3521), with "when #3521 lands, this action should
+ * appear in the header too — that is the test." That test has since passed:
+ * objectui#3314 stopped the header hand-unwrapping the envelope, and
+ * `evalRowPredicate` routes `{ dialect: 'cel' }` to `@objectstack/formula`. The
+ * fixture keeps its name and its value — inverted. It no longer demonstrates a
+ * split; it is the sentinel that FAILS if a surface ever demotes to the legacy
+ * dialect again, which is why it keeps all three `locations` rather than being
+ * deleted along with the claim.
  *
  * Compare it against `ZooVisibleStringAction` above, whose predicate uses only
- * operators BOTH dialects share and therefore agrees on every surface. When
- * #3521 lands, this action should appear in the header too — that is the test.
+ * operators both dialects share: that one agreed across surfaces even while the
+ * split was real, so it cannot detect a demotion. This one can.
  */
 export const ZooDialectSplitAction = defineAction({
   name: 'showcase_zoo_dialect_split',
