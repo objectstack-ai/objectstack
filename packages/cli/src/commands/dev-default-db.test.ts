@@ -12,16 +12,21 @@
  * cross-command agreement is pinned by `unified-db-resolution.pin.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'path';
 import { resolveDevDatabase } from './dev.js';
 
-// The dev seam lazy-imports @objectstack/runtime (oclif startup weight, #5726);
-// the FIRST import cold-loads that graph and can exceed vitest's 5s default on
-// a cold worker — warm it once, like standalone-stack.test.ts's BOOT_TIMEOUT.
-beforeAll(async () => { await import('@objectstack/runtime'); }, 60_000);
+// [#10126] The dev seam lazy-imports @objectstack/runtime (oclif startup weight,
+// #5726), and the FIRST import cold-loads that whole graph. This file used to warm
+// it in a `beforeAll` with a 60s budget; a hook is still a CLOCKED window, and any
+// budget the cost is moved INTO can be exhausted by a heavier shard — which is how
+// #10115 / PR #10120 ejected a file from the merge queue four times in one night.
+// A module-top side-effect import pays the transform during COLLECTION instead, and
+// vitest clocks hooks and test bodies only. See `scripts/check-test-source-alias.mjs`
+// (the clocked-window rule), which now gates this shape.
+import '@objectstack/runtime';
 
 let cwd: string;
 beforeEach(() => { cwd = mkdtempSync(path.join(tmpdir(), 'os-dev-db-')); });

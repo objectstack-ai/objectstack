@@ -47,6 +47,14 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { GLOBAL_TENANT, SEQUENCES_TABLE, ORGANIZATION_TABLE } from '@objectstack/metadata-protocol';
 import { bootSchemaStack } from './schema-migrate.js';
 
+// [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
+// LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
+// hook -- both of which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 / PR #10120,
+// where the same shape cost 30 ejected merge-queue builds in one night.
+import '@objectstack/objectql';
+import '@objectstack/runtime';
+
 const ORG_ID = 'org_x';
 /** The `__global__` counter the seed loader ran ahead to before the org existed. */
 const SEEDED_LAST_VALUE = 38;
