@@ -6253,10 +6253,20 @@ export class RestServer {
 
                         const svc = await this.resolveMetadataService(environmentId, req);
                         if (typeof (svc as any)?.getPublished !== 'function') {
+                            // [#8297] Reached ONLY when the overlay consult above
+                            // found nothing (a null `layered.overlay`) — so this is
+                            // no longer "this kernel cannot answer /published" (the
+                            // pre-#8278 reading); it is the narrower, rarer
+                            // condition the message below actually states: nothing
+                            // is runtime-published for this item, AND this kernel's
+                            // metadata slot has no code/package store to fall back
+                            // to (`getPublished` is optional on `IMetadataService`
+                            // and unimplemented here). Status, `code`, and routing
+                            // order are unchanged — only the prose was stale.
                             res.status(501).json({
                                 error: {
                                     code: 'NOT_IMPLEMENTED',
-                                    message: 'metadata.getPublished() is not available in this kernel',
+                                    message: 'Nothing is runtime-published for this item, and this kernel has no code/package store (metadata.getPublished() is not available).',
                                 },
                             });
                             return;
