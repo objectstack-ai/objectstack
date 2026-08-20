@@ -2,7 +2,8 @@
 
 /**
  * [#9686] The `/api/v1/datasources/:name/external/*` federation family requires
- * an authenticated caller — on every route, read and write alike.
+ * an authenticated caller — on every route, read and write alike — and
+ * [#9901] a CAPABILITY above that on four of the five.
  *
  * ## What this pins, and why it is driven through the real plugin
  *
@@ -37,6 +38,29 @@
  *    refused credentialed callers would be this fix breaking the feature, and
  *    a one-sided pin could not tell the two apart.
  *
+ * ## [#9901] "Entitled" is now two facts, and the middle of the axis is pinned
+ *
+ * Authentication was the whole gate until the 2026-08-20 ruling (verbatim:
+ * 「其他接受你的建议。」) put `manage_platform_settings` on the two read twins
+ * and `manage_metadata` on the two writes. So a THIRD posture now exists
+ * between "anonymous" and "entitled" — authenticated, holding nothing — and it
+ * gets its own cases below rather than being left to the two ends. Each asserts
+ * `403` AND the machine-readable `PERMISSION_DENIED`, never "not 200": the 401
+ * the anonymous cases already cover would satisfy that, which would mean the
+ * credential was never read at all.
+ *
+ * The split itself is asserted, not just the refusals: a caller holding ONLY
+ * `manage_platform_settings` clears the reads and is refused the writes, and a
+ * caller holding ONLY `manage_metadata` the reverse. A single gate keyed on
+ * either capability alone would pass an "unentitled is refused" case and fail
+ * here, which is what makes the read/write split falsifiable rather than
+ * merely written down.
+ *
+ * `POST /external/validate` is the one route the ruling does not name: it has
+ * no admin twin and creates no metadata, so it keeps the #9686 authentication
+ * floor. That is pinned too — an un-ruled route silently acquiring a
+ * neighbour's gate is a change nobody decided.
+ *
  * Both credential kinds the platform admits are exercised, because the cheap
  * mistake here is to read only a better-auth session: that would refuse a
  * caller presenting a valid `sys_api_key`, a credential admitted everywhere
@@ -64,20 +88,32 @@ const API_KEY = 'osk_federation_caller_secret';
 type Handler = (req: any, res: any) => any;
 
 /**
- * The five routes of the family, each with the status it answers a credentialed
- * caller and the service method it dispatches to.
+ * The five routes of the family, each with the status it answers an entitled
+ * caller, the service method it dispatches to, and [#9901] the capability it
+ * requires above authentication.
  *
  * `writes` marks the two that change state — the import creates a live
  * runtime-origin federated object, the refresh rewrites the cached catalog
  * snapshot. Both are asserted to be unreachable without an identity.
+ *
+ * `capability: null` is `POST /external/validate`, the one route the ruling
+ * does not name. Spelled as an explicit `null` rather than omitted so that a
+ * later edit which gates it has to change this table — an absent field would
+ * let that happen silently.
  */
+const READ_CAPABILITY = 'manage_platform_settings';
+const WRITE_CAPABILITY = 'manage_metadata';
+
 const FAMILY = [
-  { method: 'GET', url: `${BASE}/datasources/${DS}/external/tables`, ok: 200, call: 'listRemoteTables', writes: false },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/draft`, ok: 200, call: 'generateObjectDraft', writes: false },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/import`, ok: 201, call: 'importObject', writes: true },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/refresh-catalog`, ok: 200, call: 'refreshCatalog', writes: true },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateAll', writes: false },
+  { method: 'GET', url: `${BASE}/datasources/${DS}/external/tables`, ok: 200, call: 'listRemoteTables', writes: false, capability: READ_CAPABILITY },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/draft`, ok: 200, call: 'generateObjectDraft', writes: false, capability: READ_CAPABILITY },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/import`, ok: 201, call: 'importObject', writes: true, capability: WRITE_CAPABILITY },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/refresh-catalog`, ok: 200, call: 'refreshCatalog', writes: true, capability: WRITE_CAPABILITY },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateAll', writes: false, capability: null },
 ] as const;
+
+/** Every capability an entitled caller needs to clear all five routes. */
+const FULL_GRANT = [READ_CAPABILITY, WRITE_CAPABILITY] as const;
 
 /** A host server whose registrations land in a real handler table. */
 function createRecordingServer() {
@@ -141,7 +177,9 @@ function federationServiceSpies() {
  * consults to resolve a caller; a boot may wire either, both or neither, which
  * is how the cases below separate the credential kinds and the anonymous floor.
  */
-async function bootFederation(opts: { withAuth?: boolean; withEngine?: boolean } = {}) {
+async function bootFederation(
+  opts: { withAuth?: boolean; withEngine?: boolean; grants?: readonly string[] } = {},
+) {
   const server = createRecordingServer();
   const service = federationServiceSpies();
   const lookups: string[] = [];
@@ -155,15 +193,52 @@ async function bootFederation(opts: { withAuth?: boolean; withEngine?: boolean }
     },
   };
 
-  // A minimal engine: the api-key admission path reads `sys_api_key` by the
-  // at-rest hash of the presented secret, and the grant aggregation that
-  // follows reads membership/position objects that simply have no rows here.
+  /**
+   * A minimal engine: the api-key admission path reads `sys_api_key` by the
+   * at-rest hash of the presented secret, and the grant aggregation that
+   * follows reads membership/position objects that simply have no rows here.
+   *
+   * [#9901] …except the two it now MUST have rows in. The capability gate reads
+   * `systemPermissions`, which `resolveAuthzContext` aggregates off
+   * `sys_user_permission_set` → `sys_permission_set`, so a boot with no engine
+   * resolves an identity holding NOTHING — which is a real posture (pinned
+   * below) but not the entitled one. `opts.grants` is what the caller
+   * `u_federation` holds, so one fixture expresses every posture on the axis.
+   *
+   * The set is deliberately not `admin_full_access`: that platform set carries
+   * `manage_platform_settings` among six other capabilities, so a gate keyed on
+   * platform-admin posture rather than on the named capability would pass here
+   * unnoticed — the same reason the twin-equivalence fixture builds its own.
+   */
+  const grants = opts.grants ?? FULL_GRANT;
+  const GRANT_SET_ID = 'ps_federation_caller';
   const engine = {
     find: async (object: string, query: any) => {
-      if (object !== 'sys_api_key') return [];
-      return query?.where?.key === hashApiKey(API_KEY) && query?.where?.revoked === false
-        ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false }]
-        : [];
+      if (object === 'sys_api_key') {
+        return query?.where?.key === hashApiKey(API_KEY) && query?.where?.revoked === false
+          ? [{ id: 'key_1', key: hashApiKey(API_KEY), user_id: 'u_federation', revoked: false }]
+          : [];
+      }
+      if (object === 'sys_user_permission_set') {
+        return query?.where?.user_id === 'u_federation' && grants.length > 0
+          ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, organization_id: null }]
+          : [];
+      }
+      if (object === 'sys_permission_set') {
+        const ids: string[] = query?.where?.id?.$in ?? [];
+        return ids.includes(GRANT_SET_ID)
+          ? [{
+              id: GRANT_SET_ID,
+              name: 'federation_caller',
+              // JSON string — the spelling SQLite hands back, which the
+              // resolver parses. Pinning the stored shape keeps the fixture on
+              // the real read path.
+              system_permissions: JSON.stringify([...grants]),
+              object_permissions: '{}',
+            }]
+          : [];
+      }
+      return [];
     },
   };
 
@@ -283,7 +358,12 @@ describe('[#9686] the external-datasource federation family refuses an anonymous
 
 describe('[#9686] the same boot still serves an entitled caller', () => {
   it('answers every route with its real success status for a session-authenticated caller', async () => {
-    const { table, service } = await bootFederation({ withAuth: true });
+    // [#9901] The engine is now part of what makes this caller ENTITLED, not
+    // fixture noise: `systemPermissions` is aggregated off it, so a boot
+    // without one resolves an identity holding nothing and every gated route
+    // would answer 403. Wiring it here keeps this case measuring what it names
+    // — the success arm — rather than quietly becoming a refusal case.
+    const { table, service } = await bootFederation({ withAuth: true, withEngine: true });
 
     for (const route of FAMILY) {
       const { statusCode, body } = await call(table, route, { authorization: `Bearer ${SESSION}` });
@@ -310,5 +390,107 @@ describe('[#9686] the same boot still serves an entitled caller', () => {
     expect(statusCode).toBe(201);
     expect(body?.success).toBe(true);
     expect(service.importObject).toHaveBeenCalledWith(DS, 'customers', {});
+  });
+});
+
+describe('[#9901] the family requires a capability above authentication', () => {
+  it('refuses an authenticated caller holding NOTHING on all four ruled routes — 403 PERMISSION_DENIED, before the service', async () => {
+    const { table, service, lookups } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [],
+    });
+
+    for (const route of FAMILY.filter((r) => r.capability !== null)) {
+      const { statusCode, body } = await call(table, route, { authorization: `Bearer ${SESSION}` });
+
+      // Status AND code. "not 200" would be satisfied by the 401 the anonymous
+      // cases already cover, which would mean the credential was never read.
+      expect(statusCode, `${route.method} ${route.url}`).toBe(403);
+      expect(body?.success, `${route.method} ${route.url}`).toBe(false);
+      expect(body?.error?.code, `${route.method} ${route.url}`).toBe('PERMISSION_DENIED');
+      // The named capability is in the message, because that is the one thing a
+      // refused caller must be able to act on.
+      expect(body?.error?.message, `${route.method} ${route.url}`).toContain(route.capability);
+    }
+
+    // The refusal precedes dispatch — so on the two routes that WRITE, nothing
+    // was created before the caller was turned away.
+    for (const route of FAMILY.filter((r) => r.capability !== null)) {
+      expect(
+        (service as any)[route.call],
+        `${route.call} must not run for an unentitled caller`,
+      ).not.toHaveBeenCalled();
+    }
+    expect(lookups).not.toContain('external-datasource');
+  });
+
+  it('the read/write split is real: `manage_platform_settings` alone clears the reads and is refused the writes', async () => {
+    const { table } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [READ_CAPABILITY],
+    });
+
+    for (const route of FAMILY.filter((r) => r.capability === READ_CAPABILITY)) {
+      const { statusCode } = await call(table, route, { authorization: `Bearer ${SESSION}` });
+      expect(statusCode, `${route.method} ${route.url}`).toBe(route.ok);
+    }
+    for (const route of FAMILY.filter((r) => r.capability === WRITE_CAPABILITY)) {
+      const { statusCode, body } = await call(table, route, { authorization: `Bearer ${SESSION}` });
+      expect(statusCode, `${route.method} ${route.url}`).toBe(403);
+      expect(body?.error?.code, `${route.method} ${route.url}`).toBe('PERMISSION_DENIED');
+    }
+  });
+
+  it('…and the other way round: `manage_metadata` alone clears the writes and is refused the reads', async () => {
+    // Both directions, because a gate that required EITHER capability on every
+    // route would satisfy the unentitled case above and the two halves of the
+    // previous case would still pass one at a time. Only the crossed pair can
+    // tell "two capabilities" from "one capability spelled twice".
+    const { table } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [WRITE_CAPABILITY],
+    });
+
+    for (const route of FAMILY.filter((r) => r.capability === WRITE_CAPABILITY)) {
+      const { statusCode } = await call(table, route, { authorization: `Bearer ${SESSION}` });
+      expect(statusCode, `${route.method} ${route.url}`).toBe(route.ok);
+    }
+    for (const route of FAMILY.filter((r) => r.capability === READ_CAPABILITY)) {
+      const { statusCode, body } = await call(table, route, { authorization: `Bearer ${SESSION}` });
+      expect(statusCode, `${route.method} ${route.url}`).toBe(403);
+      expect(body?.error?.code, `${route.method} ${route.url}`).toBe('PERMISSION_DENIED');
+    }
+  });
+
+  it('POST /external/validate keeps the #9686 authentication floor — the ruling does not name it', async () => {
+    // The route the 2026-08-20 ruling enumerates NO capability for: no admin
+    // twin, no metadata created. An authenticated caller holding nothing is
+    // served here while being refused the other four on the same boot, which is
+    // the difference stated rather than implied. A later card may change this;
+    // it will have to change this case to do it.
+    const { table, service } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [],
+    });
+
+    const validate = FAMILY.find((r) => r.capability === null)!;
+    const { statusCode, body } = await call(table, validate, { authorization: `Bearer ${SESSION}` });
+
+    expect(statusCode).toBe(validate.ok);
+    expect(body?.success).toBe(true);
+    expect(service.validateAll).toHaveBeenCalled();
+  });
+
+  it('a capability the caller does not hold is not granted by an api key either', async () => {
+    // The api-key admission path seeds `permissions` from the key's scopes and
+    // then aggregates grants off the SAME `sys_*` tables — so an unentitled key
+    // holder is refused exactly like an unentitled session. A gate that read
+    // the key's scopes instead of `systemPermissions` would pass the session
+    // cases above and open the family to every key.
+    const { table, service } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [],
+    });
+
+    const { statusCode, body } = await call(table, FAMILY[2], { 'x-api-key': API_KEY });
+
+    expect(statusCode).toBe(403);
+    expect(body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(service.importObject).not.toHaveBeenCalled();
   });
 });
