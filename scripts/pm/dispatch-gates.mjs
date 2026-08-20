@@ -2031,9 +2031,15 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * The mandatory-tier policy has two clauses and only the first is a question
  * about paths:
  *
- *   - clause ①, encoded below: a card editing the PM dispatch skill is
- *     `claude-fable-5`, references included. That is a file-surface predicate
- *     and it is exactly what this script already takes as argv;
+ *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
+ *     surfaces is `claude-fable-5` — the pm-dispatch SKILL.md main file, every
+ *     file carrying an enforced copy of the decision frame (the COPIES table
+ *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
+ *     "the whole skill tree, references included" by the maintainer's
+ *     2026-08-20 ruling (「接受你的建议」— fable 当审计师用,不当施工队用):
+ *     references-only surfaces carry NO path mandate any more (opus execution,
+ *     compensated by the skill-face review at CONTRACT_REVIEW_TIER). Still a
+ *     file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is also
  *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
@@ -2050,17 +2056,19 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * it cannot reach, every time, rather than leaving the reader to remember there
  * were two. The output is a FLOOR, never a ceiling.
  *
- * The quota exemption (fable measured unavailable ⇒ opus, never lower) is a
- * claim-time note about a model's availability, not a property of the file
- * surface. This tool states the mandate; the seat records the exemption and its
- * reason in the claim comment.
+ * The sanctioned exits from a mandate — the one-line-class mechanical-edit
+ * downgrade (a card CONTENT judgment, like clause ②), the measured quota
+ * exemption (fable unavailable ⇒ opus, never lower) and the proactive
+ * low-headroom downgrade — are claim-time judgments, not properties of the
+ * file surface. This tool states the mandate; the seat records any exit and
+ * its reason in the claim comment.
  *
  * ## Why the globs are matched with `hintCovers`, asymmetry included
  *
  * Same matcher as the gate half, so there is one path-comparison rule in this
  * file rather than two — and so a glob gets the segment-boundary semantics for
- * free: `.claude/skills/pm-dispatchers/x.md` is not under
- * `.claude/skills/pm-dispatch/**`, which a string prefix would have mandated.
+ * free: a declared surface of `.claude/skills/pm-disp` is not an ancestor of
+ * `.claude/skills/pm-dispatch/SKILL.md`, though it is a string prefix of it.
  *
  * `hintCovers` also matches in the other direction — an input that is an
  * ANCESTOR of the glob (a surface declared as `.claude/skills`) counts as a
@@ -2083,10 +2091,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *
  * ## One measured side effect of putting a path in a MODULE BODY
  *
- * Comment masking cannot reach a module-body string, so this glob — and the
- * suspect glob below — is a watch hint of this file's own source: measured,
- * `extractWatchHints` yields 6 hints here against 4 on the base, the new ones
- * being the globs themselves. They are
+ * Comment masking cannot reach a module-body string, so these globs — and the
+ * suspect glob below — are watch hints of this file's own source: re-measured
+ * after the 2026-08-20 narrowing, `extractWatchHints` yields 8 hints here
+ * against 4 on the base, the new ones being the four globs themselves. They are
  * inert today because no check family resolves to THIS file — the gate that
  * covers it is `check:pm-dispatch-gates`, which resolves to
  * `check-dispatch-gates.mjs` and matches this file through that file's one
@@ -2097,16 +2105,30 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * this note is so the next reader knows the cost is known, not unnoticed.
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
- * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款).
+ * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
+ * narrowed to protocol semantics by the 2026-08-20 ruling quoted there).
  * This table is a machine-readable copy of ONE predicate from it, not a second
  * statement of the policy: when they disagree, the skill wins and this table is
- * the thing to fix.
+ * the thing to fix. The frame-copy half of the predicate is DEFINED by another
+ * gate's table — check:skill-frame-sync's COPIES — and the self-test pins this
+ * table as covering every file listed there, so a copy added to that gate
+ * cannot silently fall out of the mandate.
  */
 export const MANDATORY_TIER_GLOBS = [
   {
-    glob: '.claude/skills/pm-dispatch/**',
+    glob: '.claude/skills/pm-dispatch/SKILL.md',
     tier: 'claude-fable-5',
-    why: 'clause ① of the model-tiering ruling: a card editing the PM dispatch skill is fable-mandatory, references included — the skill is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch',
+    why: 'clause ① of the model-tiering ruling (narrowed to protocol semantics, 2026-08-20): the PM dispatch skill MAIN file is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch — references/** dropped out of the path mandate that day',
+  },
+  {
+    glob: '.claude/agents/os-dev.md',
+    tier: 'claude-fable-5',
+    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
+  },
+  {
+    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
+    tier: 'claude-fable-5',
+    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
 
@@ -2221,8 +2243,10 @@ export function tierLines(result) {
   return [
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
-    '  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason' +
-      " in the claim comment's `Container & model` line.",
+    '  Exits, each recorded with its reason in the claim comment\'s `Container & model` line: a one-line-class' +
+      ' mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM discretion,' +
+      ` compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT, never from` +
+      ' paths; the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
     clause2,
     ...suspicion,
   ];
@@ -3250,6 +3274,19 @@ function selfTest() {
   // than a pair of matching strings.
   t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
 
+  // The same coupling once more, for the frame-sync gate whose COPIES table
+  // the 2026-08-20 clause-① narrowing made a DEFINING input of the tier
+  // mandate. The tool's self-test reaches it through a spawned import — not a
+  // discoverable hint — so the gate declares it as a constant, and this pin
+  // keeps that declaration live: delete it and this reddens instead of a
+  // COPIES edit moving the gate's verdict while deriving nothing.
+  const FRAME = 'scripts/check-skill-frame-sync.mjs';
+  t(
+    'the dispatch-gates gate declares the frame-sync module the tier mandate is defined against',
+    covers(readHints('scripts/pm/check-dispatch-gates.mjs'), FRAME),
+  );
+  t('the declared frame-sync module exists', existsSync(join(ROOT, FRAME)));
+
   // The same shape again, for the TYPE-registry edge of walkMetadataForms
   // (#9144) — two specific, known files rather than a runtime-enumerated
   // population, so they are closed as coupling constants in
@@ -3768,32 +3805,41 @@ function selfTest() {
 
   // ── The model-tier derivation (#8640) ─────────────────────────────────────
   //
-  // The incident these pin: a surface containing a pm-dispatch REFERENCES file
-  // was claimed as "not under the fable-mandatory roots" and dispatched at
-  // opus. Every direction of that judgment is asserted here — the root, the
-  // references half that was actually missed, a mixed surface where the
-  // ordinary paths must not dilute the mandate, and the ordinary surface that
-  // must NOT be mandated (a tool that mandates everything is ignored, which
-  // loses the guardrail by the other road).
+  // The incident these originally pinned: a surface containing a pm-dispatch
+  // REFERENCES file was claimed as "not under the fable-mandatory roots" and
+  // dispatched at opus — nothing mechanical compared the claim to the globs.
+  // The 2026-08-20 narrowing then made references paths genuinely non-mandatory
+  // (opus execution, compensated by the fable-tier skill-face review), so the
+  // references pin is now asserted in the OPPOSITE direction; the incident's
+  // lesson — derive, never recall — is what survives unchanged. Every
+  // direction is asserted: each protocol-semantic file, the references half
+  // that dropped out, a mixed surface where ordinary paths must not dilute the
+  // mandate, and the ordinary surface that must NOT be mandated (a tool that
+  // mandates everything is ignored, which loses the guardrail by the other road).
   const fableOf = (paths) => deriveTier(paths);
-  t('a pm-dispatch ROOT path is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
-  t('a pm-dispatch REFERENCES path is fable-mandatory too — the half the incident missed', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).tier === 'claude-fable-5');
-  const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/skills/pm-dispatch/references/review-checklist.md']);
+  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === 'claude-fable-5');
+  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
+  const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
-  t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('references/review-checklist.md'));
+  t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
   t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
   t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
   // Segment boundaries, both directions of the shared matcher's asymmetry.
   t('a sibling directory sharing a name PREFIX is not mandated', fableOf(['.claude/skills/pm-dispatchers/notes.md']).mandatory === false);
-  t('a surface declared as an ANCESTOR of a mandatory root IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
+  t('a bare string PREFIX of a mandatory file is not an ancestor of it, and is not mandated', fableOf(['.claude/skills/pm-disp']).mandatory === false);
+  t('a surface declared as an ANCESTOR of a mandatory file IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
+  t('the pm-dispatch DIRECTORY (ancestor of its SKILL.md) is mandated — a card declaring the directory may touch the main file', fableOf(['.claude/skills/pm-dispatch']).mandatory === true);
   t('another skill under the same parent is not mandated', fableOf(['.claude/skills/verify/SKILL.md']).mandatory === false);
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
   t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
   t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
-  t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes('.claude/skills/pm-dispatch/references/review-checklist.md') && mandLines.includes(".claude/skills/pm-dispatch/**'"));
-  t('the mandatory rendering names the ONE exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower'));
+  t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes("- .claude/agents/os-dev.md ⇢ '.claude/agents/os-dev.md'"));
+  t('the mandatory rendering names every sanctioned exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower') && mandLines.includes('one-line-class') && mandLines.includes('proactive low-headroom'));
+  t('the mechanical-edit exit names its compensating control from the single-source constant', mandLines.includes(`skill-face review at ${CONTRACT_REVIEW_TIER}`));
   const plainLines = tierLines(fableOf(['packages/spec/src/data/filter.zod.ts'])).join('\n');
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
@@ -3825,7 +3871,31 @@ function selfTest() {
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references case is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
+  // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
+  // pinned mechanically: a copy added to that gate without a matching mandate
+  // glob here would be exactly the prose-recall drift this section exists
+  // against. Spawned rather than imported — selfTest is synchronous, and the
+  // probe also proves the module stays import-safe from a cold process.
+  const frameProbe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const m = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
+    ],
+    { encoding: 'utf8', cwd: ROOT },
+  );
+  let frameFiles = [];
+  try {
+    frameFiles = JSON.parse((frameProbe.stdout ?? '').trim());
+  } catch {
+    /* frameFiles stays empty and the cases below fail loudly */
+  }
+  t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
+  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === 'claude-fable-5'));
+  t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
