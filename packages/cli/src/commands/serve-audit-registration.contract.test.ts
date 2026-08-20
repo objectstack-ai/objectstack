@@ -52,6 +52,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// @ts-expect-error -- the repo's one comment/code separator (#9367) is a plain
+// `.mjs` script with no type declarations. This file IS in cli's tsc program,
+// so the suppression is a real one, not a phantom: delete the import and tsc
+// reports the unused directive.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,47 +97,43 @@ function readBootPath(relative: string): string {
 }
 
 /**
- * Comments stripped, because this scan is about what the two files DO.
+ * Comments MASKED, because this scan is about what the two files DO.
  *
- * Not optional here, and not a copy of the sibling's caution: `serve.ts`'s audit
- * block DESCRIBES the very construction being counted — it spells
+ * Not optional here, and not caution copied from the sibling scans: `serve.ts`'s
+ * audit block DESCRIBES the very construction being counted — it spells
  * `new AuditPlugin({ readAudit: … })` in prose to explain the app-side opt-in it
- * documents, and it names `appAuditPluginOptions` to record that the helper was
- * ruled against. Over raw text this file would count two constructions where
- * the code has one, and its own ruling assertion would fail on the sentence
- * stating the ruling.
+ * documents, and it names the helper by name to record that the helper was ruled
+ * against. Over raw text this file would count two constructions where the code
+ * has one, and its own ruling assertion would fail on the sentence stating the
+ * ruling.
  *
- * ## Line comments FIRST, and that ordering is measured, not stylistic
+ * ## Why the SHARED masker rather than a private `stripComments`
  *
- * This directory's two older parity scans run the block pass first. On
- * `serve.ts` that pass is not conservative — it is destructive. The `5d.`
- * header comment contains the URL glob `/api/v1/auth/*`, whose `/*` opens a
- * block comment as far as a regex is concerned; the next block-comment close
- * in the file is
- * the closing of `import(/* webpackIgnore: true *\/)` ten lines below, so the
- * pass silently deletes the whole intervening region — the `hasAuthPlugin`
- * computation and the `if (!hasAuthPlugin && tierEnabled('auth'))` gate this
- * file measures against. Measured over the two files this scan reads:
- * block-first keeps 1895 code-bearing lines of `serve.ts`, line-first keeps
- * 2098. The 203-line difference is code, not prose.
+ * Because the private ones are a measured defect class here (#9367), and this
+ * file walked straight into it. Its first draft used the two-regex strip the two
+ * older scans in this directory still carry, block pass first — and `serve.ts`
+ * has a route wildcard in a line comment (`/api/v1/auth/*` in the `5d.` header).
+ * A regex cannot tell that `/*` from a real opener, so it ran a phantom block
+ * comment to the next real terminator ten lines below, inside
+ * `import(/* webpackIgnore: true *\/ …)`, deleting the `hasAuthPlugin`
+ * computation and the auth gate this file measures against. Measured on this
+ * exact pair: the naive strip keeps 1895 code-bearing lines of `serve.ts`, the
+ * masker keeps 2098.
  *
- * Stripping `//` runs first, so `/api/v1/auth/*` is gone before anything looks
- * for a block opener. The verdicts do not change for the anchors either order
- * preserves (`new AuditPlugin(` 2 → 1, `new SecurityPlugin(` 2 → 1 in
- * `serve.ts`; 4 → 1 in `harness.ts` — the prose mentions dropped, the
- * constructions kept), so this is a strictly wider view of the same subject.
+ * `maskComments` also BLANKS rather than deletes — spans become spaces, newlines
+ * kept — so the offsets the ordering assertion below compares are offsets into
+ * the real file rather than into a shrunken copy of it. Cross-checked on both
+ * subjects: masker and naive-strip agree on all four anchor counts, and the
+ * masker leaves the line count identical (4638 → 4638), which is the property
+ * being bought.
  *
- * Approximate by design, and safe here: the result feeds only the literal
- * searches below, so a `//` mangled out of a string literal
- * (`'http://localhost:*'` in `serve.ts`) cannot affect a verdict. Do not reuse
- * this for anything that reads string contents.
+ * #10427 (open) has the masker desyncing on nested template literals in 16
+ * files. Neither file read here is among them, and the cross-check above is what
+ * says so rather than assuming it.
  */
-function stripComments(source: string): string {
-  return source.replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, ' ');
-}
 
-const SERVE = stripComments(readBootPath('cli/src/commands/serve.ts'));
-const HARNESS = stripComments(readBootPath('verify/src/harness.ts'));
+const SERVE = maskComments(readBootPath('cli/src/commands/serve.ts'));
+const HARNESS = maskComments(readBootPath('verify/src/harness.ts'));
 
 /**
  * Every `new AuditPlugin(...)` construction in a file, with its argument text.

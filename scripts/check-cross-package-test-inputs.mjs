@@ -242,6 +242,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // designed trade (over-collection can only widen a radius, never narrow one),
     // and declaring one rarely-touched file is cheaper than teaching the scanner to
     // tell prose from code, or than rewording a comment to dodge a scanner.
+    //
+    // `js-comment-mask.mjs` is the first entry declared for an IMPORT rather than
+    // a file read: src/commands/serve-audit-registration.contract.test.ts imports
+    // `maskComments` from it to separate code from prose in the two boot paths it
+    // scans (#9863). This gate did NOT demand the declaration -- its literal
+    // collector recognises path-shaped reads, and a relative import specifier
+    // that escapes the package is not one of the spellings it knows. Declared by
+    // hand because the coupling is real whatever the collector saw: the scan's
+    // verdict is a function of that module's masking behaviour, so a change to it
+    // has to re-run cli's suite. The undetected-import spelling is filed
+    // separately; widening a radius by hand is never the reason not to.
     globs: [
       'packages/verify/src/**',
       'packages/plugins/plugin-security/src/**',
@@ -254,6 +265,7 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
       'scripts/check-nul-bytes.mjs',
+      'scripts/js-comment-mask.mjs',
     ],
   },
   '@objectstack/lint': {
