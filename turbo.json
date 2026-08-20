@@ -112,7 +112,12 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
-        "$TURBO_ROOT$/packages/core/src/security/**"
+        "$TURBO_ROOT$/packages/core/src/security/**",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-sms/src/**",
+        "$TURBO_ROOT$/scripts/check-published-files.mjs",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts"
       ]
     },
     "@objectstack/plugin-security#test": {

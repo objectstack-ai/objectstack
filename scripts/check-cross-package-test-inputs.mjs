@@ -295,7 +295,33 @@ const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins
     // core's api-key source alongside it.
-    globs: ['packages/**/*.object.ts', 'packages/core/src/security/**'],
+    globs: [
+      'packages/**/*.object.ts',
+      'packages/core/src/security/**',
+      // src/rate-limit-storage-isolation.test.ts (#6040) walks BOTH consumer
+      // packages of the `./rate-limit-storage` subpath by directory, checking
+      // that neither reaches the counter through the package ROOT — which would
+      // silently reinstate the whole better-auth load for them. The diff that
+      // breaks that invariant is a diff in one of these two directories, so
+      // without them declared the affected-subset filter never adds plugin-auth
+      // and turbo replays a cached green over the scan (#10029, the #7802
+      // shape). Measured: before this entry, `@objectstack/plugin-auth#test`
+      // hashed to `1bf3935543ab055b` both before and after a change under
+      // `packages/runtime/src`, and the re-run was `>>> FULL TURBO` in 135ms
+      // while the invariant was live-broken in the tree.
+      'packages/runtime/src/**',
+      'packages/services/service-sms/src/**',
+      // The three below are NAMED in that test's prose rather than read by it —
+      // the same shape as `serve.ts` on the @objectstack/spec entry above and
+      // `realtime-protocol.mdx` on @objectstack/dogfood, and settled the same
+      // way: the literal collector takes quoted paths without parsing, so a
+      // mention forces a declaration, and declaring the file is cheaper than
+      // rewording prose to dodge the scanner. All three are low-churn, so the
+      // added cache invalidation is nominal next to the two directories above.
+      'scripts/check-published-files.mjs',
+      'scripts/check-cross-package-test-inputs.mjs',
+      'packages/types/src/node-isolation.test.ts',
+    ],
   },
   '@objectstack/plugin-security': {
     // src/audience-anchor-set-claims.pin.test.ts pins against spec's
