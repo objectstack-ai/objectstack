@@ -4516,7 +4516,12 @@ function selfTest() {
     t('the DEFAULT run names the families a changeset will add', /^Once a changeset exists, \d+ more famil\(ies\) apply/m.test(plainOut));
     const pendingBlock = plainOut.slice(plainOut.indexOf('Once a changeset exists,'), plainOut.indexOf('Unreachable — the'));
     t('and the live tree really has some — the probe reaching nothing must not read as "none pending"', /^ {2}- (pnpm|node) \S/m.test(pendingBlock));
-    t('every live row is runnable and carries the hypothetical path', pendingBlock.split('\n').filter((l) => l.startsWith('  - ')).every((l) => /^ {2}- (pnpm|node) /.test(l) && l.includes(CHANGESET_PROBE_PATH)));
+    // `every` over an empty list is true, so the row count is asserted BESIDE
+    // it: without that, dropping the call site leaves this case green on a slice
+    // containing nothing at all (measured — it was the one live case ablating
+    // the call site did not redden).
+    const pendingRows = pendingBlock.split('\n').filter((l) => l.startsWith('  - '));
+    t('every live row is runnable and carries the hypothetical path', pendingRows.length > 0 && pendingRows.every((l) => /^ {2}- (pnpm|node) /.test(l) && l.includes(CHANGESET_PROBE_PATH)));
     // The negative half: hand the SAME run a diff that already carries a
     // changeset. Those families must move into the matched list and the section
     // must stop printing — the double-print is the shape this section would be
