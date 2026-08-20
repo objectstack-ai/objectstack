@@ -260,6 +260,29 @@
  *       path that does not exist, and that intersection would silently never
  *       hit, which is the original defect wearing a new mask.
  *
+ * ## H18 — `pm:retriage` aged past one triage cycle
+ *
+ *   H18 an open card carrying `pm:retriage` past the threshold — the label's
+ *       own state model (maintainer ruling 2026-08-19/20, verbatim: 「同意 并
+ *       存」) has it COEXIST with the card's standing `pm:*` label rather than
+ *       replace it: the objecting seat applies it alongside its evidence
+ *       comment, and the triage Routine — which re-judges every `pm:retriage`
+ *       card each fire, high priority (SKILL.md) — is the only remover. That
+ *       division of duties is H13's healing-loop shape again: a label nobody
+ *       re-checks for age is the next "state nobody is watching", and without
+ *       this item nothing here would say so. Aged past one cycle the row names
+ *       the card and its coexisting standing `pm:*` label; `pm:retriage`
+ *       present with NO such label gets its own note instead — the
+ *       coexistence the state model requires is itself missing, so the
+ *       disputed grading is unidentifiable (异议对象不明) from the label set
+ *       alone. Age is read from `updated_at`, the same proxy H13 uses for the
+ *       same reason: this sweep makes no per-card timeline fetch for the
+ *       label-APPLICATION event, and every triage re-judgement (grade kept or
+ *       changed) bumps `updated_at`, so a stale reading means nothing touched
+ *       the card since some triage pass — which is exactly the failure this
+ *       item exists to name. Report-only and NOT loud, like H14–H16: the
+ *       remedy is the triage Routine's next fire, never a label written here.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -1937,6 +1960,63 @@ function readTrackedFiles() {
 }
 
 // ---------------------------------------------------------------------------
+// H18 — `pm:retriage` aged past one triage cycle (maintainer-ruled
+// 2026-08-19/20, verbatim: 「同意 并存」). See the header doc for the full
+// rationale; the code here is deliberately small and mirrors H13's shape —
+// same threshold reasoning, same `updated_at` proxy, same unscoped population.
+// ---------------------------------------------------------------------------
+
+/**
+ * H18 threshold — one triage-Routine cycle, the same reasoning as
+ * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and re-judges
+ * every `pm:retriage` card "each fire, high priority" (SKILL.md, 「`pm:retriage`
+ * 重判每 fire 高优先处理」), so a card still carrying the label after 2h has
+ * survived at least one re-judgement pass it should not have. Age is read
+ * from `updated_at` rather than a per-card timeline fetch for the
+ * label-APPLICATION event: this sweep makes that fetch for no item (H13's
+ * same proxy choice, for the same reason — see `h13DomainWithoutPmState`),
+ * and every triage write on the card (grade kept or changed) bumps
+ * `updated_at`, so a stale reading here means nothing touched the card since
+ * any triage pass at all, which is exactly the failure this item exists to
+ * name.
+ */
+export const RETRIAGE_STALE_HOURS = 2;
+
+/**
+ * H18 — null when clean, else the finding sentence. `pm:retriage` coexists
+ * with the card's standing `pm:*` label by design (ensure-pm-labels.sh's own
+ * comment on the label object: "COEXISTS … and ⛔ never replaces it"), so a
+ * clean-shaped row names that coexisting label; `pm:retriage` present with NO
+ * other `pm:*` label is a shape the state model does not define, and that
+ * absence is worth its own sentence rather than a silently empty list — the
+ * disputed grading is unidentifiable (异议对象不明) from the label set alone.
+ * An unreadable `updated_at` flags rather than reads as fresh, same as
+ * H10–H13 (#4690).
+ */
+export function h18RetriageAged(issue, nowMs = Date.now()) {
+  const labels = labelNames(issue);
+  if (!labels.includes('pm:retriage')) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= RETRIAGE_STALE_HOURS) return null;
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `~${Math.round(ageHours)}h without activity (threshold ${RETRIAGE_STALE_HOURS}h)`;
+  const coexisting = labels.filter((l) => l.startsWith('pm:') && l !== 'pm:retriage');
+  const carrying =
+    coexisting.length > 0
+      ? `alongside its standing ${coexisting.map((l) => `\`${l}\``).join(', ')}`
+      : 'ALONE, with no coexisting standing `pm:*` label — the disputed grading is unidentifiable (异议对象不明)';
+  return (
+    `\`pm:retriage\` carried ${carrying}, ${reading} — the objecting seat's grade is still undecided past ` +
+    `one triage cycle. The triage Routine re-judges every \`pm:retriage\` card each fire (SKILL.md); a card ` +
+    `still here past the threshold is a re-judgement pass that did not run, not inventory: resolve the ` +
+    `grade (keep or change) and drop the label in the same write, oldest first.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -2004,7 +2084,7 @@ export function summaryLine(counts, findingCount) {
   const fbCandidates = counts.fallbackCandidates ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
-    `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
+    `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
@@ -3059,6 +3139,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
     seenUnscoped.set(issue.number, issue);
     const halfState = h13DomainWithoutPmState(issue);
     if (halfState) findings.push([issue, 'H13', halfState]);
+    // H18 — same population: `pm:retriage` can coexist with a label this
+    // sweep's label pages never fetch (e.g. `pm:blocking`) or with none at
+    // all, so only the unscoped listing is guaranteed to see every carrier.
+    const retriageAged = h18RetriageAged(issue);
+    if (retriageAged) findings.push([issue, 'H18', retriageAged]);
   }
 
   // H14 + H15 — the same unscoped listing, read a second way. It is the right
@@ -3558,6 +3643,31 @@ function selfTest() {
   t('H13: P0 only inside backticks is not a self-declaration', h13SelfDeclaredP0({ title: '', body: 'the card quotes `P0` in passing' }), false);
   t('H13: P0 inside a word does not fire', h13SelfDeclaredP0({ title: '', body: 'the HTTP0 protocol note' }), false);
   t('H13: a quiet body stays on the base line', h13DomainWithoutPmState(domainCard(['domain:engine-core'], hoursAgo(26), { body: 'ordinary defect' }), NOW).includes('P0-SUSPECT'), false);
+
+  // -- H18: `pm:retriage` aged past one triage cycle (2026-08-19/20 ruling) --
+  // Reuses `domainCard` — a generic (labels, updated_at, extra) issue builder,
+  // not a domain-specific one despite the name.
+  t('H18: retriage past the threshold, coexisting pm:queue -> finding', typeof h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and the finding names the threshold', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
+  t('H18: …and names the coexisting standing label', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
+  t('H18: multiple coexisting labels are all named', h18RetriageAged(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18RetriageAged(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  // Under-threshold: fresh objection is normal intake latency, not a finding.
+  t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
+  t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
+  // No `pm:retriage` label at all is out of scope, however old.
+  t('H18: no pm:retriage label -> out of scope however old', h18RetriageAged(domainCard(['pm:queue'], hoursAgo(200)), NOW), null);
+  // The disputed-target variant: `pm:retriage` alone, no coexisting `pm:*`.
+  t('H18: retriage ALONE (no coexisting pm:* label) -> finding', typeof h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW), 'string');
+  t('H18: …and names the disputed-target note', h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  t('H18: …and does not claim a coexisting label it does not have', h18RetriageAged(domainCard(['pm:retriage'], hoursAgo(3)), NOW).includes('alongside its standing'), false);
+  // A non-`pm:*` label (e.g. `domain:*`) never counts as the coexisting label.
+  t('H18: a domain: label is not counted as a coexisting pm:* label', h18RetriageAged(domainCard(['pm:retriage', 'domain:skills'], hoursAgo(3)), NOW).includes('异议对象不明'), true);
+  // #4690 in miniature, same as H10–H13: unreadable must not read as fresh.
+  t('H18: unreadable updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], 'not-a-date'), NOW), 'string');
+  t('H18: absent updated_at -> finding, not fresh', typeof h18RetriageAged(domainCard(['pm:retriage'], undefined), NOW), 'string');
+  // Report-only, ordinary row in both media — never loud (H14–H16's own
+  // property, and the card's explicit requirement for this item).
+  t('H18: not a loud finding', isLoudFinding(h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
 
   // -- H14: `pm:blocking` cache coherence, both directions (2026-08-19) ------
   // The fixtures below are REAL lines from the 2026-08-19 census of this board
@@ -4202,6 +4312,7 @@ function selfTest() {
   t('plain: preserves the caller\'s order, applying no priority sort', renderPlain([loudRow, quietRow], counts).indexOf('#900') < renderPlain([loudRow, quietRow], counts).indexOf('#200'), true);
   t('plain: …and the markdown renderer on the same input DOES sort loud first', renderMarkdown([quietRow, loudRow], counts).indexOf('#900') < renderMarkdown([quietRow, loudRow], counts).indexOf('#200'), true);
   t('summaryLine: names what was READ, not only what was found', summaryLine(counts, 0).includes('swept 3 open pm-/p0-labeled issue(s)'), true);
+  t('summaryLine: the unscoped-pass clause names H18 alongside H13-H15', summaryLine(counts, 0).includes('unscoped pass (H13–H15, H18)'), true);
   // H16's pair is the row-granular half of the same #4690 property: a detail
   // pass that read NOTHING must not be indistinguishable from a board with no
   // conflicts, so the sentence carries `read X of Y` rather than only findings.
@@ -4252,6 +4363,16 @@ function selfTest() {
   t('loudness: an H16 row is not loud', isLoudFinding(h16Row[2]), false);
   t('markdown: a loud H13 row still sorts above an H16 row', renderMarkdown([h16Row, loudRow], counts).indexOf('#900') < renderMarkdown([h16Row, loudRow], counts).indexOf('#9826'), true);
   t('markdown: a loud H13 row still sorts above an H14 row', renderMarkdown([h14Row, loudRow], counts).indexOf('#900') < renderMarkdown([h14Row, loudRow], counts).indexOf('#7276'), true);
+
+  // H18 is an ordinary row in BOTH media too — report-only and NOT loud, the
+  // same property H14–H16 pin and the card's explicit requirement here.
+  const h18Msg = h18RetriageAged({ ...issue(['pm:retriage', 'pm:queue']), updated_at: hoursAgo(3) }, NOW);
+  const h18Row = finding(6001, 'H18', h18Msg);
+  t('plain: an H18 row renders in the standard two-line shape', renderPlain([h18Row], counts).startsWith('  H18 #6001 `pm:retriage` carried alongside'), true);
+  t('plain: …and carries the card URL on the second line', renderPlain([h18Row], counts).includes('\n     https://example.test/6001'), true);
+  t('markdown: an H18 row renders as a link row like every other', renderMarkdown([h18Row], counts).includes('- **H18** [#6001](https://example.test/6001) — '), true);
+  t('loudness: an H18 row is not loud', isLoudFinding(h18Row[2]), false);
+  t('markdown: a loud H13 row still sorts above an H18 row', renderMarkdown([h18Row, loudRow], counts).indexOf('#900') < renderMarkdown([h18Row, loudRow], counts).indexOf('#6001'), true);
 
   // A clean board says it was READ. The #4690 direction, restated in the one
   // surface where "no rows" could otherwise be mistaken for "no sweep".
