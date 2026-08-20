@@ -109,8 +109,9 @@
 //   node scripts/check-cross-package-test-inputs.mjs --list-escapes
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
-import { join, resolve, relative, dirname, sep } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -1070,7 +1071,16 @@ function unionInto(listPath, changedPath) {
     if (!hit) continue;
     const dir = escapingDirs.get(name);
     if (!dir) continue;
-    items.push({ name, path: join(REPO_ROOT, dir) });
+    // Repo-relative, because that is the convention `turbo ls` emits for every
+    // entry it wrote (measured on turbo 2.10.10: 0 of 77 items absolute). An
+    // absolute path here is not wrong for today's only consumer, but it makes a
+    // single document carry two conventions, and the obvious way to read such a
+    // document -- `join(REPO_ROOT, it.path)`, correct for every entry turbo
+    // wrote -- produces a garbage path for exactly these appended entries, which
+    // are the cross-package scans this function exists to keep running. One
+    // document, one convention; the consumer resolves it explicitly
+    // (partition-test-shards.mjs `packageDir()`).
+    items.push({ name, path: dir });
     added.push(`${name}  (declared glob matched ${hit})`);
   }
   // The push above changed the list's size, so the size the document DECLARES
@@ -1415,6 +1425,30 @@ function selfTest() {
   ok('count follows an empty list down', written({ count: 7, items: [] }).count === 0);
   ok('the write never invents items', written({ count: 0, items: [] }).items.length === 0);
   ok('the write leaves turbo\'s other fields alone', JSON.parse(serializePackageList({ packageManager: 'pnpm9', packages: { count: 0, items: [] } })).packageManager === 'pnpm9');
+
+  // The path convention this function appends in. `turbo ls` writes every entry
+  // of this document repo-relative; an entry appended in the other convention
+  // is not wrong for today's consumer but it makes one array carry two rules,
+  // and the obvious way to read it -- `join(REPO_ROOT, it.path)` -- then breaks
+  // on exactly the appended entries. End-to-end through the real `unionInto()`
+  // and the real serializer, on the fixture that first measured the divergence:
+  // a diff touching `scripts/**` pulls @objectstack/spec in by its declaration.
+  const unionDir = mkdtempSync(join(tmpdir(), 'os-union-into-'));
+  const unionList = join(unionDir, 'turbo-ls.json');
+  const unionChanged = join(unionDir, 'changed-files.txt');
+  writeFileSync(unionList, JSON.stringify({ packageManager: 'pnpm9', packages: { count: 0, items: [] } }));
+  writeFileSync(unionChanged, 'scripts/sync-template-versions.mjs\n');
+  unionInto(unionList, unionChanged);
+  const unioned = JSON.parse(readFileSync(unionList, 'utf8')).packages.items;
+  ok('the union appends the package its declaration matched', unioned.length > 0);
+  ok(
+    'every appended path is repo-relative, the convention `turbo ls` emits',
+    unioned.length > 0 && unioned.every((i) => !isAbsolute(i.path)),
+  );
+  ok(
+    'and each one still names a real directory once resolved against the repo root',
+    unioned.length > 0 && unioned.every((i) => existsSync(resolve(REPO_ROOT, i.path))),
+  );
 
   const failed = cases.filter((c) => !c.cond);
   for (const c of cases) console.log(`${c.cond ? 'ok  ' : 'FAIL'} ${c.label}`);
