@@ -1522,12 +1522,12 @@ async function selfTest() {
   );
 
   // ── (9) the shadowing collision, on the live specimen ────────────────────
-  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/3)`
+  // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/6)`
   // and its aggregate gate is named `Test Core`. Dropping the suffix makes two
   // jobs publish one context, and the surviving conclusion is whichever
   // finished last — a shard could satisfy the aggregate's required gate.
   const collided = fixture('collide the shard name with the gate name', 'ci.yml', (s) =>
-    s.replace('name: Test Core (${{ matrix.shard }}/3)', 'name: Test Core'),
+    s.replace('name: Test Core (${{ matrix.shard }}/6)', 'name: Test Core'),
   );
   assert(
     collided.problems.some((p) => p.includes("job 'test'") && p.includes("published by ci.yml:test-gate")),
@@ -1536,7 +1536,7 @@ async function selfTest() {
   // The suffixed spelling is NOT a collision — the guard must not read a
   // prefix as a clash, or ci.yml is red on main today.
   assert(
-    baseline.problems.length === 0 && sources['ci.yml'].includes('name: Test Core (${{ matrix.shard }}/3)'),
+    baseline.problems.length === 0 && sources['ci.yml'].includes('name: Test Core (${{ matrix.shard }}/6)'),
     'the real suffixed shard name coexists with the bare gate name (assertion 9 compares whole names, not prefixes)',
   );
 

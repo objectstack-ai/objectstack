@@ -136,12 +136,12 @@ jobs:
               - 'scripts/**'
 
   test:
-    # Sharded 3-way BY PACKAGE: a core-touching PR ran the affected suite
+    # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
     # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow —
     # and at 2 shards the slower shard still ran ~10 min, keeping merge-queue
     # builds at ~11 min end-to-end (#4859).
-    # scripts/partition-test-shards.mjs splits the package list into three
-    # deterministic, test-file-count-balanced thirds and each shard runs its
+    # scripts/partition-test-shards.mjs splits the package list into six
+    # deterministic, test-file-count-balanced bins and each shard runs its
     # slice through turbo. NOT the dogfood
     # job's vitest --shard passthrough, deliberately: that works for dogfood
     # because it is ONE package with ~60 files, but applied workspace-wide,
@@ -150,10 +150,45 @@ jobs:
     # on either shard (three packages have exactly one test file today). See
     # the script header for the verification.
     #
+    # ── WHY SIX AND NOT THREE (#10227) ────────────────────────────────────
+    #
+    # The per-package durations this job's logs print are CONTENDED WALL
+    # CLOCK, not package cost. `--concurrency=4` on a 4-vCPU runner means up
+    # to four suites share four cores, so each averages about one core, and
+    # the contention factor differs per package (measured spread across six
+    # packages: 0.69x-2.05x). Read as cost, those numbers said the two long
+    # poles were inherently over #4859's <=7min (420s) line and that no shard
+    # count could help. Measured like-for-like against the same suites run
+    # ALONE on an idle 4-core box (#10152 / PR #10258), both clear it:
+    #
+    #   @objectstack/cli    548.6s contended   vs  337.13s alone
+    #   @objectstack/spec   496.4s contended   vs  325.31s alone
+    #
+    # So the thing over the line is the co-tenancy, not the suites. More
+    # shards means fewer suites per runner AND four more vCPUs per added
+    # shard, because every shard gets its own runner.
+    #
+    # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
+    # shard can finish faster than its single heaviest package, and the
+    # weight function is test-file count. `@objectstack/spec` carries 415 of
+    # the ~2360 test files in the workspace — at five shards or fewer the
+    # partitioner must co-schedule it with other packages, and at six it is
+    # the only package in its bin (bins 415/389/389/389/389/388). Six is
+    # therefore the smallest count that isolates the heaviest indivisible
+    # suite; past six, spec's shard cannot improve, only the others can.
+    #
+    # ⚠ THE COST, stated because it is real: per-shard fixed overhead
+    # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
+    # 32392712980) is paid once PER SHARD, and the merge queue multiplies it
+    # by the speculative build count. Six shards trade roughly 1.7x the
+    # billed runner-minutes for a shorter critical path. `--concurrency=4` is
+    # deliberately UNCHANGED here: narrower shards may well want a lower
+    # value, but moving both at once makes the next measurement unreadable.
+    #
     # Branch protection requires the bare "Test Core" context, which a matrix
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
-    name: Test Core (${{ matrix.shard }}/3)
+    name: Test Core (${{ matrix.shard }}/6)
     needs: filter
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
     # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
@@ -173,7 +208,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout repository
@@ -383,7 +418,7 @@ jobs:
             pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
           fi
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
-            --shard ${{ matrix.shard }}/3 --exclude @objectstack/dogfood \
+            --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo "Packages on this shard:"
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -488,7 +523,7 @@ jobs:
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
 
       # ── This shard's positive attestation (#6082) ─────────────────────────
-      # The credential test-gate counts: "shard N of 3 ran, and every step of it
+      # The credential test-gate counts: "shard N of 6 ran, and every step of it
       # passed". These two steps are LAST and carry NO `if:` — that is what
       # makes the statement true, because an unguarded step runs only when every
       # preceding step of the job succeeded, and nothing after them can fail the
@@ -499,13 +534,13 @@ jobs:
       - name: Attest this shard ran and passed
         run: |
           node scripts/check-shard-attestation.mjs --emit \
-            --job test --shard ${{ matrix.shard }} --total 3 \
+            --job test --shard ${{ matrix.shard }} --total 6 \
             --out "$RUNNER_TEMP/shard-attestation"
 
       - name: Publish this shard's attestation
         uses: actions/upload-artifact@v7
         with:
-          name: shard-attest-test-${{ matrix.shard }}-of-3
+          name: shard-attest-test-${{ matrix.shard }}-of-6
           path: ${{ runner.temp }}/shard-attestation/
           if-no-files-found: error
           retention-days: 1
@@ -584,7 +619,7 @@ jobs:
             --dir "$OS_ATTEST_DIR" \
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
-            --leg "test/3:$OS_TEST_RESULT"
+            --leg "test/6:$OS_TEST_RESULT"
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────
