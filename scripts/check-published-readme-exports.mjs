@@ -109,14 +109,52 @@
 //   must be an export of that package's type entry. This is what catches all
 //   six measured instances.
 //
-//   CALL-SITE half -- for a name that DID resolve, `Name.member(` must name a
-//   real property of that symbol's type. This is where `.configure()` lives in
-//   the worse version of the defect (class real, static invented), and it is
-//   also where false positives live. It is kept honest by one rule: the object
-//   must be a name THIS FILE imported from a workspace package. `analytics.
-//   count(...)` on a locally-bound variable is pseudo-code and is never read.
-//   Anything whose type is `any`, or which carries an index signature, is not
-//   reported -- absence of a property there is not evidence.
+//   CALL-SITE half -- for a receiver this gate can TYPE, `x.member(` must name
+//   a real property of that type. This is where `.configure()` lives in the
+//   worse version of the defect (class real, static invented), and it is also
+//   where false positives live. It is kept honest by one rule: the gate must
+//   have reached the receiver's type through a workspace package's built
+//   `.d.ts`. Anything whose type is `any`, or which carries an index signature,
+//   is not reported -- absence of a property there is not evidence.
+//
+// ## Which receivers it can type, and the census that set that (#9870)
+//
+// "A name THIS FILE imported" was the whole answer until #9870 measured what
+// that excluded. Swept with this file's own `publishedDocs()`: **262** `x.y(…)`
+// call sites across **39 of 60** published documents sat on receivers the gate
+// could not type -- against **EIGHT** it was checking. The green line said
+// `60 published document(s)`, which reads as coverage of documents; what it
+// covered was the import-bound receivers inside them, and #9867 -- a fabricated
+// static that shipped through every green run -- was found by a human reading
+// the page, not by this gate.
+//
+// The card named two reasons a receiver escapes. The census sized both, and
+// they did NOT come out the same size:
+//
+//   RECEIVER NEVER IMPORT-BOUND -- 251 sites, and **109 of them already have a
+//   reachable type**, because the fence builds them from a name it did import:
+//   `const kernel = new ObjectKernel()`, `const stack = await bootStack(app)`.
+//   Reading those is this file's `extractLocalBindings`, and it is what took the
+//   call-site half from 8 checks to 78. The other 142 are free variables,
+//   function parameters, globals and non-workspace imports -- no type exists for
+//   them anywhere this gate may look, and they are now COUNTED and printed
+//   rather than passed over in silence.
+//
+//   CALL-EXPRESSION RECEIVERS (`kernel.getService('mcp').registerTool(…)`) --
+//   13 sites, **zero** of which have an import-bound base. ⛔ So no rule is
+//   written for that shape. One would ship scanning an empty population, which
+//   this header raises to a hard error rather than a skip a few paragraphs down
+//   (#4690): zero is a broken scan, not a clean repo. It becomes writable the
+//   day a fence chains off an import-bound base, against a population that
+//   exists.
+//
+// What the widening found, on the tree it was measured against: **one** finding
+// in 70 newly-read call sites, and it was real -- `plugin-hono-server`'s README
+// booting a kernel with `await kernel.start()`, where `ObjectKernel` ships
+// `bootstrap()`/`shutdown()` and eight sibling READMEs spell that step
+// `bootstrap`. Zero false positives, because every ambiguity in
+// `extractLocalBindings` rejects instead of guessing; see the asymmetry argued
+// there.
 //
 //   That fence is a CHARACTER CLASS, and #9610 measured what happens when it is
 //   spelled as a consuming alternation instead of a zero-width assertion: the
@@ -139,6 +177,13 @@ const BASELINE_REL = 'scripts/published-readme-exports.baseline.json';
 // ⛔ SHRINK-ONLY. The authority token the #8435 convention requires; the
 // baseline is a maintainer's registry, never an author's escape hatch.
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * Finding kinds produced by the CALL-SITE half, as they appear in a finding id.
+ * `member` is a static on an import-bound name; `instance` and `return` are the
+ * receivers the fence derives from one (#9870).
+ */
+const CALL_SITE_KINDS = ['member', 'instance', 'return'];
 
 /**
  * Fence info-strings whose body is TypeScript/JavaScript a reader would copy.
@@ -374,6 +419,171 @@ export function extractMemberCalls(markdown, localNames) {
   return out;
 }
 
+/**
+ * Local names the fence DERIVES from an import-bound one, with how.
+ *
+ * ## Why this exists, and what it measured (#9870)
+ *
+ * `extractMemberCalls` is called with the names the fence imported, so a call
+ * whose receiver was never import-bound is not read at all. Measured on the
+ * tree, with the gate's own `publishedDocs()`: **262 call sites** across 39 of
+ * 60 published documents sit on such receivers, against **8** the call-site
+ * half was checking. The card that asked for this named two reasons a receiver
+ * escapes, and the census sized each:
+ *
+ *   RECEIVER NEVER IMPORT-BOUND -- 251 sites. Of those, **109 have a type this
+ *   gate can already reach**, because the fence builds them out of a name it
+ *   DID import: 103 `const x = new <ImportedClass>(…)` and 6
+ *   `const x = [await] <ImportedFn>(…)`. That is the population this function
+ *   serves. The remaining 142 are free variables, function parameters, globals
+ *   (`console`, `Object`) and non-workspace imports (`z` from zod) -- no type
+ *   exists for them anywhere this gate is allowed to look.
+ *
+ *   CALL-EXPRESSION RECEIVERS (`kernel.getService('mcp').registerTool(…)`) --
+ *   13 sites, of which **ZERO** have an import-bound base. Every one is rooted
+ *   in a free variable or a non-workspace import (`z.string(…).url(`,
+ *   `res.status(…).json(`). ⛔ So no rule is written for that shape: it would
+ *   ship scanning an empty population, which this gate's own header raises to a
+ *   hard error rather than a skip (#4690). When a fence one day chains off an
+ *   import-bound base, THAT is the moment to write it, against a population
+ *   that exists.
+ *
+ * ## The safe direction, and why it is safe
+ *
+ * This scanner has no scopes. A name it types wrongly can fail two ways, and
+ * they are NOT symmetric: a wrong GREEN leaves a site unread, which is where
+ * all 262 of them already sit -- no loss. A wrong RED accuses a correct README,
+ * and this gate is merge-blocking with a baseline its own file refuses as an
+ * author remedy, so there is no cheap way to live with one. ⇒ every ambiguity
+ * below REJECTS the name rather than guessing:
+ *
+ *   - two declarations of one name that disagree on the source, or on `new`
+ *     vs call -- the call sites belong to different scopes and nothing here
+ *     can say which;
+ *   - a declaration whose initialiser is any other shape (an object literal, a
+ *     ternary, a member call on something unknown) -- the name is DECLARED, so
+ *     a later `new Foo()` declaration must not be allowed to speak for it;
+ *   - a name also introduced as a function/arrow parameter, a `for` binding, a
+ *     `catch` binding, a destructuring pattern, or a `function`/`class`
+ *     declaration -- all shadow the binding somewhere.
+ *
+ * @param markdown     the document
+ * @param importBound  local names bound by an import of a workspace package
+ * @returns `{ bound: Map<local, { via: 'instance' | 'return', source }>,
+ *            rejected: Map<local, why> }`. The reject side is RETURNED, not
+ *          discarded, because a scanner that silently stopped binding anything
+ *          also returns an empty `bound` -- the self-test asserts a positive
+ *          count there so "matched nothing" cannot pass as "nothing to match".
+ */
+export function extractLocalBindings(markdown, importBound) {
+  const wanted = new Set(importBound);
+  const bound = new Map();
+  const rejected = new Map();
+  const result = () => ({ bound, rejected });
+  if (wanted.size === 0) return result();
+
+  const reject = (name, why) => {
+    bound.delete(name);
+    if (!rejected.has(name)) rejected.set(name, why);
+  };
+  const declare = (name, binding) => {
+    if (rejected.has(name)) return;
+    if (!binding) return reject(name, 'initialiser shape this gate cannot type');
+    const prior = bound.get(name);
+    if (!prior) {
+      bound.set(name, binding);
+      return;
+    }
+    if (prior.via !== binding.via || prior.source !== binding.source) {
+      reject(name, 'declared more than once, from different sources');
+    }
+  };
+
+  const DECLARATION = /^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=]+?)?\s*=\s*(.+)$/;
+  // Every OTHER way a document introduces the same identifier. Each is a
+  // shadow: the name means something else at some call sites and this scanner
+  // cannot tell those apart, so the name is dropped entirely.
+  const SHADOWS = [
+    /\(([^()]*)\)\s*(?::[^=]*?)?=>/g, // (a, b) => …
+    /(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g, // a => …
+    /\bfunction\b[^(]*\(([^()]*)\)/g, // function f(a, b)
+    /\bcatch\s*\(\s*([A-Za-z_$][\w$]*)/g, // catch (err)
+    /\bfor\s*\(\s*(?:const|let|var)\s*[{[]?\s*([A-Za-z_$][\w$]*)/g, // for (const x of …)
+    /\b(?:const|let|var)\s*[{[]([^}\]]*)[}\]]\s*=/g, // const { a } = …
+    /\b(?:function|class)\s+([A-Za-z_$][\w$]*)/g, // function f() {} / class C {}
+  ];
+
+  const declarations = [];
+  const shadowed = new Set();
+  for (const fence of readFences(markdown)) {
+    for (const { text } of fence.lines) {
+      if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
+      for (const rx of SHADOWS) {
+        rx.lastIndex = 0;
+        let m;
+        while ((m = rx.exec(text)) !== null) {
+          for (const piece of (m[1] ?? '').split(',')) {
+            const name = piece.trim().replace(/^\.\.\./, '').split(/[:=\s]/)[0];
+            if (/^[A-Za-z_$][\w$]*$/.test(name)) shadowed.add(name);
+          }
+        }
+      }
+      const d = text.match(DECLARATION);
+      if (!d) continue;
+      const init = d[2].trim().replace(/^await\s+/, '');
+      const created = init.match(/^new\s+([A-Za-z_$][\w$]*)\s*\(/);
+      const called = created ? null : init.match(/^([A-Za-z_$][\w$]*)\s*\(/);
+      const source = created?.[1] ?? called?.[1] ?? null;
+      declarations.push({
+        name: d[1],
+        binding:
+          source && wanted.has(source) ? { via: created ? 'instance' : 'return', source } : null,
+      });
+    }
+  }
+  for (const { name, binding } of declarations) declare(name, binding);
+  for (const name of shadowed) if (bound.has(name)) reject(name, 'also introduced as a binding elsewhere');
+  return result();
+}
+
+/**
+ * How many `X.y(…)` call sites this run could NOT type, and on how many
+ * distinct receivers -- the number the GREEN line was missing (#9870).
+ *
+ * Counted with the SAME matcher and the SAME dedup as `extractMemberCalls`, so
+ * the two numbers the green line prints are commensurable: "checked 117, could
+ * not read 153" is one population split in two, not two different censuses. A
+ * shape the matcher's fence excludes on purpose (`a.b.c(`, `'str'.trim(`) is
+ * neither checked nor counted here -- it is not a receiver this gate has an
+ * opinion about, and folding it in would inflate the blind spot with text the
+ * gate is right to ignore.
+ *
+ * ⚠️ This is VISIBILITY, never a verdict. It is printed by the SUCCESS path and
+ * changes no exit code: the remedy for an unread call site is a human reading
+ * the document, which is a programme rather than something an author can do to
+ * get a build green. What it stops is the green line reading as coverage of
+ * published documents when what it covers is import-bound receivers INSIDE
+ * them.
+ */
+export function countUnreadCalls(markdown, readableNames) {
+  const known = new Set(readableNames);
+  const receivers = new Set();
+  const seen = new Set();
+  for (const fence of readFences(markdown)) {
+    for (const { text } of fence.lines) {
+      if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
+      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+      let m;
+      while ((m = rx.exec(text)) !== null) {
+        if (known.has(m[1])) continue;
+        seen.add(`${m[1]}.${m[2]}`);
+        receivers.add(m[1]);
+      }
+    }
+  }
+  return { calls: seen.size, receivers: receivers.size };
+}
+
 /** `@objectstack/spec/data` -> `{ name: '@objectstack/spec', subpath: './data' }`. */
 export function splitSpecifier(specifier) {
   if (specifier.startsWith('.') || specifier.startsWith('/')) return null;
@@ -507,6 +717,29 @@ function typeSurface(absEntries) {
   const program = ts.createProgram([...absEntries], TS_OPTIONS);
   const checker = program.getTypeChecker();
   const cache = new Map();
+  // Shared by both member questions below, so the "not knowable is never a
+  // finding" rule is written ONCE. Two copies of it would drift apart in the
+  // direction that produces a false RED, which is the only direction this
+  // gate cannot afford (a false green merely leaves a site unread, which is
+  // where every one of them already sits).
+  const unwrapAlias = (symbol) => {
+    if (!(symbol.flags & ts.SymbolFlags.Alias)) return symbol;
+    try {
+      return checker.getAliasedSymbol(symbol);
+    } catch {
+      return null;
+    }
+  };
+  const typeHasProperty = (type, member) => {
+    if (!type) return true;
+    const f = type.getFlags();
+    if (f & ts.TypeFlags.Any || f & ts.TypeFlags.Unknown || f & ts.TypeFlags.TypeParameter) {
+      return true;
+    }
+    if (checker.getPropertyOfType(type, member)) return true;
+    for (const info of checker.getIndexInfosOfType?.(type) ?? []) if (info) return true;
+    return false;
+  };
   const moduleSymbol = (abs) => {
     if (!cache.has(abs)) {
       const sf = program.getSourceFile(abs);
@@ -531,28 +764,41 @@ function typeSurface(absEntries) {
      * reported as a finding; that is what keeps the call-site half quiet.
      */
     hasMember(symbol, member) {
-      let s = symbol;
-      if (s.flags & ts.SymbolFlags.Alias) {
-        try {
-          s = checker.getAliasedSymbol(s);
-        } catch {
-          return true;
-        }
-      }
+      const s = unwrapAlias(symbol);
+      if (!s) return true;
       if (s.flags & ts.SymbolFlags.Module) {
         return checker.getExportsOfModule(s).some((e) => e.getName() === member);
       }
       const decl = s.valueDeclaration ?? s.declarations?.[0];
       if (!decl) return true;
-      const type = checker.getTypeOfSymbolAtLocation(s, decl);
-      if (!type) return true;
-      const f = type.getFlags();
-      if (f & ts.TypeFlags.Any || f & ts.TypeFlags.Unknown || f & ts.TypeFlags.TypeParameter) {
-        return true;
-      }
-      if (checker.getPropertyOfType(type, member)) return true;
-      for (const info of checker.getIndexInfosOfType?.(type) ?? []) if (info) return true;
-      return false;
+      return typeHasProperty(checker.getTypeOfSymbolAtLocation(s, decl), member);
+    },
+    /**
+     * The same question for a receiver the fence DERIVED from an import-bound
+     * name -- `const kernel = new ObjectKernel()`, `const stack = await
+     * bootStack(app)` -- where the member lives on the INSTANCE type or on the
+     * (awaited) RETURN type, never on the static side `hasMember` reads.
+     *
+     * Both extra hops are gated on there being EXACTLY ONE signature. Zero means
+     * the name is not constructible/callable as the fence writes it, which is a
+     * different claim and one the import half already owns; more than one means
+     * overload resolution, which needs the ARGUMENTS this gate deliberately does
+     * not parse. Both answer "not knowable", and not knowable is never a finding
+     * -- the same rule that keeps `any` and index signatures quiet above.
+     */
+    hasMemberVia(symbol, member, via) {
+      const s = unwrapAlias(symbol);
+      if (!s) return true;
+      const decl = s.valueDeclaration ?? s.declarations?.[0];
+      if (!decl) return true;
+      const value = checker.getTypeOfSymbolAtLocation(s, decl);
+      if (!value) return true;
+      const signatures =
+        via === 'instance' ? value.getConstructSignatures() : value.getCallSignatures();
+      if (signatures.length !== 1) return true;
+      const returned = checker.getReturnTypeOfSignature(signatures[0]);
+      if (!returned) return true;
+      return typeHasProperty(checker.getAwaitedType?.(returned) ?? returned, member);
     },
   };
 }
@@ -576,6 +822,15 @@ function typeSurface(absEntries) {
  *                 the call-site half is the half most likely to quietly stop
  *                 matching, being a text scan over prose. Passed in rather than
  *                 returned so the return type stays a plain array of findings.
+ *
+ *                 Fields: `symbolChecks`, `receivers` (import-bound),
+ *                 `derivedReceivers` and `rejectedReceivers` (#9870's local
+ *                 bindings, bound and refused), `callChecks`, and
+ *                 `unreadCalls`/`unreadReceivers` -- what this run could NOT
+ *                 type. That last pair is the one a reader needs and the run
+ *                 cannot fake: it is the complement of `callChecks` over the
+ *                 same matcher, so a widening that silently stopped widening
+ *                 shows up as the unread count refusing to fall.
  */
 export function analyzeDocument(doc, resolveTarget, measured = null) {
   const findings = [];
@@ -619,7 +874,13 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
         });
         continue;
       }
-      bound.set(local, { symbol, hasMember: target.hasMember, specifier: imp.specifier, imported });
+      bound.set(local, {
+        symbol,
+        hasMember: target.hasMember,
+        hasMemberVia: target.hasMemberVia,
+        specifier: imp.specifier,
+        imported,
+      });
     }
     if (imp.namespaceLocal) {
       // A namespace binding has no name of its own to verify; its members are
@@ -629,6 +890,7 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
         bound.set(imp.namespaceLocal, {
           symbol: ns,
           hasMember: target.hasMember,
+          hasMemberVia: target.hasMemberVia,
           specifier: imp.specifier,
           imported: '*',
         });
@@ -636,18 +898,63 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
     }
   }
   if (measured) measured.receivers += bound.size;
-  for (const call of extractMemberCalls(doc.text, [...bound.keys()])) {
-    const b = bound.get(call.object);
+
+  // Receivers the fence BUILDS out of an import-bound name (#9870). An import
+  // binding always wins over a derived one: a document that both imports
+  // `Kernel` and writes `const Kernel = new Kernel()` is pathological, and the
+  // import is the claim this gate was written to check.
+  const readable = new Map(bound);
+  const { bound: derived, rejected } = extractLocalBindings(doc.text, [...bound.keys()]);
+  for (const [local, { via, source }] of derived) {
+    if (readable.has(local)) continue;
+    const origin = bound.get(source);
+    if (!origin) continue;
+    // ⛔ A target that cannot answer the DERIVED question does not get to answer
+    // it with a default. The first cut of this widening fell back to
+    // `() => true` here, and the fallback fired for every one of the 70 sites it
+    // had just claimed to widen onto: the green line read `78 … call(s) checked`
+    // while 70 of those checks were the fallback returning "not knowable". Green,
+    // louder than before, and measuring less than it said — #4690 rebuilt inside
+    // the fix for it. So an unanswerable receiver is simply NOT READABLE: it
+    // stays out of `readable`, which keeps it out of `callChecks` and puts it in
+    // the `NOT read` count, where a vacuous widening announces itself as a
+    // widening that widened nothing.
+    if (typeof origin.hasMemberVia !== 'function') continue;
+    readable.set(local, { ...origin, via, source });
+  }
+  if (measured) {
+    measured.derivedReceivers += readable.size - bound.size;
+    measured.rejectedReceivers += rejected.size;
+  }
+
+  for (const call of extractMemberCalls(doc.text, [...readable.keys()])) {
+    const b = readable.get(call.object);
     if (!b) continue;
     if (measured) measured.callChecks++;
-    if (b.hasMember(b.symbol, call.member)) continue;
+    // A derived receiver's member lives on the instance / returned type, never
+    // on the static side — so it is a DIFFERENT question, asked by a different
+    // method, and a target that cannot answer it answers "not knowable".
+    const known = b.via
+      ? b.hasMemberVia(b.symbol, call.member, b.via)
+      : b.hasMember(b.symbol, call.member);
+    if (known) continue;
+    const how = b.via === 'instance' ? `new ${b.source}(…)` : b.via ? `${b.source}(…)` : null;
     findings.push({
-      id: `${doc.pkg}|${doc.file}|member|${b.specifier}|${b.imported}.${call.member}`,
+      id: `${doc.pkg}|${doc.file}|${b.via ?? 'member'}|${b.specifier}|${b.imported}.${call.member}`,
       line: call.line,
-      text:
-        `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
-        `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
+      text: how
+        ? `documents \`${call.object}.${call.member}(…)\` on a value the fence builds with ` +
+          `\`${how}\`, but what ${b.imported} (from '${b.specifier}') ` +
+          `${b.via === 'instance' ? 'constructs' : 'returns'} has no \`${call.member}\` member ` +
+          'in its published types.'
+        : `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
+          `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
     });
+  }
+  if (measured) {
+    const unread = countUnreadCalls(doc.text, [...readable.keys()]);
+    measured.unreadCalls += unread.calls;
+    measured.unreadReceivers += unread.receivers;
   }
   return findings;
 }
@@ -732,7 +1039,12 @@ function successSummary({ measured, baselineCount, memberChecks }) {
     `  Import half: ${measured.symbolChecks} documented symbol(s) checked against the exports ` +
     `their package publishes.\n` +
     `  Call-site half: ${measured.callChecks} documented \`X.y(…)\` call(s) checked, on ` +
-    `${measured.receivers} import-bound name(s).`
+    `${measured.receivers} import-bound name(s) and ${measured.derivedReceivers} name(s) ` +
+    `built from one.\n` +
+    `  NOT read: ${measured.unreadCalls} documented \`X.y(…)\` call(s) on ${measured.unreadReceivers} ` +
+    `receiver(s) with no type this gate can reach\n` +
+    `  (free variables, parameters, globals, non-workspace imports). Visibility, not a ` +
+    `verdict — see #9870.`
   );
 }
 
@@ -841,11 +1153,20 @@ function run() {
       exports,
       namespaceSymbol: null,
       hasMember: (sym, member) => surface.hasMember(sym, member),
+      hasMemberVia: (sym, member, via) => surface.hasMemberVia(sym, member, via),
     };
   };
 
   const findings = [];
-  const measured = { symbolChecks: 0, receivers: 0, callChecks: 0 };
+  const measured = {
+    symbolChecks: 0,
+    receivers: 0,
+    derivedReceivers: 0,
+    rejectedReceivers: 0,
+    callChecks: 0,
+    unreadCalls: 0,
+    unreadReceivers: 0,
+  };
   for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget, measured));
 
   // Reconcile against the shrink-only baseline, BOTH directions.
@@ -861,7 +1182,12 @@ function run() {
   const fresh = findings.filter((f) => !f.fatal && !baselineById.has(f.id));
   const stale = baseline.filter((e) => !observed.has(e.id));
 
-  const memberChecks = findings.filter((f) => f.id.includes('|member|')).length;
+  // Every call-site kind, not just the import-bound one: `|instance|` and
+  // `|return|` are call sites too, and counting only `|member|` would make the
+  // ledger's call-site split shrink the moment the widening found something.
+  const memberChecks = findings.filter((f) =>
+    CALL_SITE_KINDS.some((kind) => f.id.includes(`|${kind}|`)),
+  ).length;
   const header =
     `${docs.length} published document(s) across ${byName.size} workspace package(s); ` +
     `${importStatements} import statement(s), ${targets.size} workspace type entr(ies).`;
@@ -1092,6 +1418,89 @@ function selfTest() {
     [],
   );
 
+  // -- receivers the fence BUILDS from an import-bound name (#9870) -------------
+  // The census that scoped this: 262 call sites across 39 of 60 published
+  // documents sat on receivers with no type the gate could reach, against EIGHT
+  // it was checking. 109 of the 262 are built out of a name the fence DID
+  // import, and those are the ones these bindings reach.
+  const derivedDoc = [
+    '```typescript',
+    "import { ObjectKernel } from '@objectstack/core';",
+    "import { bootStack } from '@objectstack/verify';",
+    'const kernel = new ObjectKernel();',
+    'const stack = await bootStack(myApp);',
+    '```',
+  ].join('\n');
+  eq(
+    'extractLocalBindings — `new X()` and `await fn()` bind, each carrying HOW it was built',
+    [...extractLocalBindings(derivedDoc, ['ObjectKernel', 'bootStack']).bound],
+    [
+      ['kernel', { via: 'instance', source: 'ObjectKernel' }],
+      ['stack', { via: 'return', source: 'bootStack' }],
+    ],
+  );
+  eq(
+    'extractLocalBindings — a name built from something NOT import-bound is not bound',
+    [...extractLocalBindings(derivedDoc, []).bound],
+    [],
+  );
+
+  // Every ambiguity rejects rather than guesses, because the two ways this can
+  // be wrong are not symmetric: a wrong green leaves a site unread (where all
+  // 262 already sit), a wrong RED accuses a correct README on a merge-blocking
+  // gate whose baseline its own file refuses as an author remedy.
+  const ambiguousDoc = [
+    '```typescript',
+    "import { ObjectKernel } from '@objectstack/core';",
+    'const shadowed = new ObjectKernel();',
+    'const disagrees = new ObjectKernel();',
+    'const disagrees = someUnknownFactory();',
+    'const opaque = { not: "a constructor" };',
+    'items.forEach((shadowed) => shadowed.bootstrap());',
+    '```',
+  ].join('\n');
+  const ambiguous = extractLocalBindings(ambiguousDoc, ['ObjectKernel']);
+  eq('extractLocalBindings — nothing ambiguous is bound', [...ambiguous.bound.keys()], []);
+  // ⚠️ The REJECT side is asserted POSITIVELY and that is the point: a matcher
+  // that quietly stopped binding ANYTHING also yields an empty `bound`, so
+  // `bound === []` alone is the same assertion for a working scanner and a dead
+  // one. The count of what was rejected, and why, is what tells them apart.
+  eq(
+    'extractLocalBindings — the reject side is asserted by COUNT, not by the absence of binds',
+    [...ambiguous.rejected.keys()].sort(),
+    ['disagrees', 'opaque', 'shadowed'],
+  );
+  eq(
+    'extractLocalBindings — and each rejection names its reason',
+    ambiguous.rejected.get('shadowed'),
+    'also introduced as a binding elsewhere',
+  );
+
+  // -- the blind spot the GREEN line now has to state ---------------------------
+  const unreadDoc = [
+    '```typescript',
+    "import { ObjectKernel } from '@objectstack/core';",
+    'const kernel = new ObjectKernel();',
+    'kernel.bootstrap();',
+    'kernel.shutdown();',
+    "const other = kernel.getService('mcp');",
+    'other.registerTool({});',
+    '```',
+  ].join('\n');
+  eq(
+    'countUnreadCalls — a receiver with no reachable type is COUNTED, never silently dropped',
+    countUnreadCalls(unreadDoc, ['ObjectKernel']),
+    // `kernel.bootstrap`, `kernel.shutdown`, `kernel.getService` and
+    // `other.registerTool` — the call on the DECLARATION line counts too, since
+    // only import statements and comments are skipped.
+    { calls: 4, receivers: 2 },
+  );
+  eq(
+    'countUnreadCalls — and a receiver that BECAME readable leaves the count',
+    countUnreadCalls(unreadDoc, ['ObjectKernel', 'kernel']),
+    { calls: 1, receivers: 1 },
+  );
+
   // -- specifier splitting ------------------------------------------------------
   eq('splitSpecifier — scoped root', splitSpecifier('@objectstack/spec'), {
     name: '@objectstack/spec',
@@ -1135,17 +1544,32 @@ function selfTest() {
   eq('filesMatcher — glob', filesMatcher('docs/**/*.md')('docs/guides/a.md'), true);
 
   // -- END TO END, both directions, on the shape #9532 measured ------------------
-  const fakeSymbol = (members) => ({ __members: new Set(members) });
-  const target = (names, memberMap = {}) => ({
+  // A fake symbol carries THREE surfaces, because the gate asks three different
+  // questions of one exported name: what is on it (`Kernel.create`), what it
+  // CONSTRUCTS (`new Kernel().bootstrap`), and what it RETURNS
+  // (`defineStack().validate`). Collapsing them would let an instance-method
+  // fixture pass against the static surface — the exact confusion #9870's
+  // widening exists to avoid.
+  const fakeSymbol = (members, derived = {}) => ({
+    __members: new Set(members),
+    __instance: new Set(derived.instance ?? []),
+    __return: new Set(derived.return ?? []),
+  });
+  const target = (names, memberMap = {}, derivedMap = {}) => ({
     declared: true,
-    exports: new Map(names.map((n) => [n, fakeSymbol(memberMap[n] ?? [])])),
+    exports: new Map(names.map((n) => [n, fakeSymbol(memberMap[n] ?? [], derivedMap[n])])),
     hasMember: (sym, m) => sym.__members.has(m),
+    hasMemberVia: (sym, m, via) => (via === 'instance' ? sym.__instance : sym.__return).has(m),
   });
   const resolveFake = (name) => {
     if (name === '@objectstack/service-analytics') return target([]);
     if (name === '@objectstack/plugin-audit') return target(['AuditPlugin'], { AuditPlugin: [] });
-    if (name === '@objectstack/spec') return target(['defineStack'], { defineStack: [] });
-    if (name === '@objectstack/kernel') return target(['Kernel'], { Kernel: ['create'] });
+    if (name === '@objectstack/spec') {
+      return target(['defineStack'], { defineStack: [] }, { defineStack: { return: ['validate'] } });
+    }
+    if (name === '@objectstack/kernel') {
+      return target(['Kernel'], { Kernel: ['create'] }, { Kernel: { instance: ['bootstrap'] } });
+    }
     return null; // not a workspace package
   };
 
@@ -1222,6 +1646,107 @@ function selfTest() {
     ['@objectstack/kernel|packages/kernel/README.md|member|@objectstack/kernel|Kernel.configure'],
   );
 
+  // -- END TO END on the #9870 shape: the receiver is never import-bound --------
+  // `packages/plugins/plugin-hono-server/README.md` documented `await
+  // kernel.start()` on a `new ObjectKernel()`. `ObjectKernel` ships
+  // `bootstrap()`/`shutdown()` and no `start` — while the `IKernel` INTERFACE
+  // does declare `start()`, which is why the line reads plausibly and why eight
+  // sibling READMEs spell the same step `await kernel.bootstrap()`. No import
+  // claim is wrong there, so the import half is silent by construction; before
+  // this widening the call site was one of the 262 nobody read.
+  const derivedInstance = {
+    pkg: '@objectstack/kernel',
+    file: 'packages/kernel/README.md',
+    text: [
+      '```typescript',
+      "import { Kernel } from '@objectstack/kernel';",
+      'const kernel = new Kernel({});',
+      'await kernel.bootstrap();',
+      'await kernel.start();',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — an invented method on a `new`-built receiver is reported, the real one is not',
+    analyzeDocument(derivedInstance, resolveFake).map((f) => f.id),
+    ['@objectstack/kernel|packages/kernel/README.md|instance|@objectstack/kernel|Kernel.start'],
+  );
+  // The instance surface and the STATIC surface are different questions. Asking
+  // the wrong one is silent in both directions, so both directions are pinned:
+  // `Kernel.create` is a static and NOT on the instance; `bootstrap` is on the
+  // instance and NOT a static.
+  const staticVsInstance = {
+    pkg: '@objectstack/kernel',
+    file: 'packages/kernel/README.md',
+    text: [
+      '```typescript',
+      "import { Kernel } from '@objectstack/kernel';",
+      'const kernel = new Kernel({});',
+      'Kernel.create({});',
+      'kernel.bootstrap();',
+      'Kernel.bootstrap();',
+      'kernel.create({});',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — the static surface and the instance surface are not interchangeable',
+    analyzeDocument(staticVsInstance, resolveFake)
+      .map((f) => f.id.split('|').slice(2).join('|'))
+      .sort(),
+    ['instance|@objectstack/kernel|Kernel.create', 'member|@objectstack/kernel|Kernel.bootstrap'],
+  );
+  const derivedReturn = {
+    pkg: '@objectstack/spec',
+    file: 'packages/spec/README.md',
+    text: [
+      '```typescript',
+      "import { defineStack } from '@objectstack/spec';",
+      'const stack = defineStack({});',
+      'stack.validate();',
+      'stack.explode();',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a receiver bound to a function CALL is read against what it returns',
+    analyzeDocument(derivedReturn, resolveFake).map((f) => f.id),
+    ['@objectstack/spec|packages/spec/README.md|return|@objectstack/spec|defineStack.explode'],
+  );
+
+  // ⛔ THE REGRESSION THIS WIDENING NEARLY SHIPPED, and the reason the counters
+  // are asserted rather than the findings. The first cut let a target that
+  // cannot answer the DERIVED question answer it with `() => true`. Every
+  // finding stayed absent — correctly, since nothing was knowable — and the run
+  // was GREEN while the green line said `78 … call(s) checked`, of which 70 were
+  // that fallback. Louder than before and measuring less: #4690 rebuilt inside
+  // the fix for #4690's cousin. A findings-only assertion cannot see it, because
+  // the correct answer for the vacuous case is also "no findings".
+  const blank = () => ({
+    symbolChecks: 0,
+    receivers: 0,
+    derivedReceivers: 0,
+    rejectedReceivers: 0,
+    callChecks: 0,
+    unreadCalls: 0,
+    unreadReceivers: 0,
+  });
+  const answering = blank();
+  analyzeDocument(derivedInstance, resolveFake, answering);
+  eq(
+    'analyzeDocument — a target that CAN answer the derived question reads both call sites',
+    { derived: answering.derivedReceivers, checked: answering.callChecks, unread: answering.unreadCalls },
+    { derived: 1, checked: 2, unread: 0 },
+  );
+  const mute = { ...resolveFake('@objectstack/kernel'), hasMemberVia: undefined };
+  const silent = blank();
+  analyzeDocument(derivedInstance, () => mute, silent);
+  eq(
+    'analyzeDocument — a target that CANNOT answer it checks nothing there, and says so',
+    { derived: silent.derivedReceivers, checked: silent.callChecks, unread: silent.unreadCalls },
+    { derived: 0, checked: 0, unread: 2 },
+  );
+
   // Undeclared subpath: the packaged surface says something the source does not.
   const badSubpath = {
     pkg: '@objectstack/service-analytics',
@@ -1239,17 +1764,38 @@ function selfTest() {
   // The GREEN line (#9767). Its counts are interpolated too, so — exactly like
   // the remedy below — reading the SOURCE is not evidence about the sentence a
   // reader gets. Driven here instead, in the three states a passing run has.
-  const measuredReal = { symbolChecks: 283, receivers: 225, callChecks: 8 };
+  const measuredReal = {
+    symbolChecks: 313,
+    receivers: 233,
+    derivedReceivers: 46,
+    rejectedReceivers: 0,
+    callChecks: 78,
+    unreadCalls: 120,
+    unreadReceivers: 72,
+  };
   const scanned = successSummary({ measured: measuredReal, baselineCount: 0, memberChecks: 0 });
   eq(
     'successSummary — with the ledger EMPTY the line says what each half read',
     scanned.split('\n'),
     [
       '  0 known instance(s) still in scripts/published-readme-exports.baseline.json.',
-      '  Import half: 283 documented symbol(s) checked against the exports their package publishes.',
-      '  Call-site half: 8 documented `X.y(…)` call(s) checked, on 225 import-bound name(s).',
+      '  Import half: 313 documented symbol(s) checked against the exports their package publishes.',
+      '  Call-site half: 78 documented `X.y(…)` call(s) checked, on 233 import-bound name(s) and 46 name(s) built from one.',
+      '  NOT read: 120 documented `X.y(…)` call(s) on 72 receiver(s) with no type this gate can reach',
+      '  (free variables, parameters, globals, non-workspace imports). Visibility, not a verdict — see #9870.',
     ],
   );
+  // ⚠️ The blind spot must be stated as a SIZE and disclaimed as visibility. A
+  // green line that prints only what it checked is the overclaim #9870 filed:
+  // `60 published document(s)` reads as coverage of documents, when what is
+  // covered is the import-bound receivers inside them.
+  if (!/NOT read: \d+ documented/.test(scanned) || !/not a verdict/.test(scanned)) {
+    failures.push(
+      'the GREEN body must state HOW MANY call sites went unread, and mark that number as\n' +
+        '      visibility rather than a verdict. Without the first it overclaims; without the\n' +
+        '      second a reader takes an unread call site for a reported defect.',
+    );
+  }
   eq(
     'successSummary — a NON-EMPTY ledger keeps the call-site split, WITH its denominator',
     successSummary({ measured: measuredReal, baselineCount: 2, memberChecks: 1 }).split('\n')[0],
@@ -1262,11 +1808,7 @@ function selfTest() {
   // clause these pins replaced ("N of the findings are call sites") was
   // byte-identical in both, because with an empty ledger it is a ratio over an
   // empty set.
-  const unscanned = successSummary({
-    measured: { symbolChecks: 0, receivers: 0, callChecks: 0 },
-    baselineCount: 0,
-    memberChecks: 0,
-  });
+  const unscanned = successSummary({ measured: blank(), baselineCount: 0, memberChecks: 0 });
   if (scanned === unscanned) {
     failures.push(
       'the GREEN body renders IDENTICALLY for a tree that was scanned and one that was not.\n' +
@@ -1308,9 +1850,12 @@ function selfTest() {
   console.log(
     '✓ check:published-readme-exports --self-test — extraction, scoping, resolution and both\n' +
       '  analysis directions pinned (fabricated import reported, fabricated static reported,\n' +
+      '  fabricated INSTANCE and RETURN methods reported on receivers the fence builds,\n' +
       '  honest README clean, and every measured prose/bash/diff false positive silent), plus\n' +
-      '  the author-facing text: the remedy refuses the baseline, and the green line reports\n' +
-      '  what each half READ, so a scanned tree and an unread one cannot print the same body.',
+      '  the reject side by COUNT (#9870: an empty bind set is also what a dead matcher\n' +
+      '  returns) and the author-facing text: the remedy refuses the baseline, and the green\n' +
+      '  line reports what each half READ and how much it could NOT, so a scanned tree and an\n' +
+      '  unread one cannot print the same body.',
   );
 }
 
