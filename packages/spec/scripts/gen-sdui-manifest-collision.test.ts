@@ -100,8 +100,27 @@ const RUNNABLE =
 /** A tiny HTTP server on $SDUI_TEST_PORT, as a `node -e` program. */
 const HTTP_STUB = [
   'const http = require("node:http");',
-  'http.createServer((_q, r) => { r.writeHead(200); r.end("SERVER"); })',
-  '  .listen(Number(process.env.SDUI_TEST_PORT), "127.0.0.1");',
+  'const s = http.createServer((_q, r) => { r.writeHead(200); r.end("SERVER"); });',
+  // Losing the bind must EXIT, not throw: an unhandled 'error' event kills the
+  // harness with a stack trace where a vacuity guard would have named the
+  // problem. See RAW_LISTENER below for the same reasoning.
+  's.once("error", () => process.exit(1));',
+  's.listen(Number(process.env.SDUI_TEST_PORT), "127.0.0.1");',
+].join('');
+
+/**
+ * A bare TCP listener on $SDUI_TEST_PORT that reports a lost bind by exiting.
+ *
+ * The unguarded form of this line is what made the merge-queue failure this
+ * file now pins so hard to read: when a concurrent scanner took the port
+ * first, node threw `Unhandled 'error' event ... EADDRINUSE 127.0.0.1:5180`,
+ * the harness died mid-measurement, and the report was a stack trace instead
+ * of "the port this test meant to occupy was never occupied".
+ */
+const RAW_LISTENER = [
+  'const s = require("node:net").createServer();',
+  's.once("error", () => process.exit(1));',
+  's.listen(Number(process.env.SDUI_TEST_PORT), "127.0.0.1");',
 ].join('');
 
 function runHarness(): Record<string, string> {
@@ -133,7 +152,7 @@ function runHarness(): Record<string, string> {
       '# ── 2. the free-port search skips a port that is taken right now ────',
       'BUSY="$(sdui_pick_free_port 5180)"',
       'export SDUI_TEST_PORT="$BUSY"',
-      `"$NODE_BIN" -e 'require("node:net").createServer().listen(Number(process.env.SDUI_TEST_PORT), "127.0.0.1")' &`,
+      `"$NODE_BIN" -e ${JSON.stringify(RAW_LISTENER)} &`,
       'BUSY_PID=$!',
       // disown: otherwise bash prints its own "Killed" job notice when this is
       // reaped below, which reads like a test failure in the vitest output.
@@ -215,7 +234,7 @@ function runHarness(): Record<string, string> {
       // a port on every future run in this container.
       'SPORT="$(sdui_pick_free_port 5180)"',
       'export SDUI_TEST_PORT="$SPORT"',
-      `"$NODE_BIN" -e 'require("node:net").createServer().listen(Number(process.env.SDUI_TEST_PORT), "127.0.0.1")' &`,
+      `"$NODE_BIN" -e ${JSON.stringify(RAW_LISTENER)} &`,
       'STEAL_PID=$!',
       'disown "$STEAL_PID" 2>/dev/null || true',
       'for _ in $(seq 1 40); do [ "$(port_held "$SPORT")" = yes ] && break; sleep 0.25; done',
@@ -227,6 +246,12 @@ function runHarness(): Record<string, string> {
       'printf "STEAL_PORT=%s\\n" "$SPORT"',
       'printf "STEAL_PICK=%s\\n" "$STEAL_PICK"',
       'printf "STEAL_CLAIM_RELEASED=%s\\n" "$([ -e "$RESV/$SPORT" ] && echo no || echo yes)"',
+      // Positive control for the line above. "No claim file for $SPORT" is
+      // also what a registry that does not exist at all looks like, so on its
+      // own that line goes green against the version this test was written to
+      // fail — measured. The claim on the port actually HANDED OUT is the
+      // half that can only be true when the registry is real.
+      'printf "STEAL_CLAIM_ON_PICK=%s\\n" "$([ -e "$RESV/$STEAL_PICK" ] && echo yes || echo no)"',
       'kill -KILL "$STEAL_PID" 2>/dev/null',
     ].join('\n'),
     { mode: 0o755 },
@@ -295,7 +320,9 @@ describe.skipIf(!RUNNABLE)('gen-sdui-manifest.sh concurrent-run contract', () =>
     expect(seen.STEAL_HELD, JSON.stringify(seen)).toBe('yes');
     expect(seen.STEAL_PICK).toMatch(/^\d+$/);
     expect(seen.STEAL_PICK).not.toBe(seen.STEAL_PORT);
-    // The claim it took before probing must not survive a lost probe.
+    // The claim it took before probing must not survive a lost probe — and
+    // the positive control first, so "released" cannot mean "never taken".
+    expect(seen.STEAL_CLAIM_ON_PICK, JSON.stringify(seen)).toBe('yes');
     expect(seen.STEAL_CLAIM_RELEASED, JSON.stringify(seen)).toBe('yes');
   });
 
