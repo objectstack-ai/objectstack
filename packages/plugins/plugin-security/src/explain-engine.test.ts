@@ -126,7 +126,7 @@ describe('explainAccess (ADR-0090 D6)', () => {
       object: 'leave_request', operation: 'read',
       context: {
         ...CTX,
-        expiredGrants: [{ kind: 'position', name: 'payroll_approver', until: '2026-07-01T00:00:00Z' }],
+        droppedGrants: [{ kind: 'position', name: 'payroll_approver', state: 'expired', until: '2026-07-01T00:00:00Z' }],
       },
     });
     const principal = d.layers.find((l) => l.layer === 'principal')!;
@@ -140,6 +140,61 @@ describe('explainAccess (ADR-0090 D6)', () => {
     });
     // Expired grants contribute nothing to the resolved principal itself.
     expect(d.principal.positions).not.toContain('payroll_approver');
+  });
+
+  it('surfaces deactivated grants in the principal layer with the shared held-state vocabulary (ADR-0049 / #8714)', async () => {
+    const d = await explainAccess(makeDeps(), {
+      object: 'leave_request', operation: 'read',
+      context: {
+        ...CTX,
+        droppedGrants: [
+          { kind: 'permission_set', name: 'crm_full', state: 'deactivated' },
+          { kind: 'position', name: 'field_auditor', state: 'deactivated' },
+        ],
+      },
+    });
+    const principal = d.layers.find((l) => l.layer === 'principal')!;
+    expect(principal.detail).toContain('DEACTIVATED');
+    expect(principal.detail).toContain('crm_full');
+    expect(principal.detail).toContain('field_auditor');
+    expect(principal.contributors).toContainEqual({
+      kind: 'permission_set',
+      name: 'crm_full',
+      via: 'held — deactivated',
+      state: 'deactivated',
+    });
+    expect(principal.contributors).toContainEqual({
+      kind: 'position',
+      name: 'field_auditor',
+      via: 'held — deactivated',
+      state: 'deactivated',
+    });
+    // Deactivated grants contribute nothing to the resolved principal itself.
+    expect(d.principal.permissionSets).not.toContain('crm_full');
+    expect(d.principal.positions).not.toContain('field_auditor');
+  });
+
+  it('expired and deactivated rows share ONE vocabulary — both states appear side by side in one principal layer (#8714)', async () => {
+    const d = await explainAccess(makeDeps(), {
+      object: 'leave_request', operation: 'read',
+      context: {
+        ...CTX,
+        droppedGrants: [
+          { kind: 'permission_set', name: 'quarter_close_admin', state: 'expired', until: '2026-06-01T00:00:00Z' },
+          { kind: 'permission_set', name: 'crm_full', state: 'deactivated' },
+        ],
+      },
+    });
+    const principal = d.layers.find((l) => l.layer === 'principal')!;
+    // `contributors` is the z.input type (defaulted, so optional pre-parse) —
+    // normalize rather than dereference, keeping the test-layer TEST_DEBT flat.
+    const dropped = (principal.contributors ?? []).filter((c) => c.state === 'expired' || c.state === 'deactivated');
+    expect(dropped).toEqual([
+      { kind: 'permission_set', name: 'quarter_close_admin', via: 'held until 2026-06-01T00:00:00Z — expired', state: 'expired' },
+      { kind: 'permission_set', name: 'crm_full', via: 'held — deactivated', state: 'deactivated' },
+    ]);
+    expect(principal.detail).toContain('EXPIRED');
+    expect(principal.detail).toContain('DEACTIVATED');
   });
 
   it('attributes a delegated position "via delegation from X until Y" in the principal layer (ADR-0091 D3)', async () => {
@@ -659,7 +714,7 @@ describe('buildContextForUser', () => {
       // memberships. This fixture serves no `sys_member` rows, so it is empty,
       // which fails the `group` wall closed.
       accessible_org_ids: [],
-      expiredGrants: [],
+      droppedGrants: [],
       delegatedPositions: [],
       hasPlatformAdminGrant: false,
     });
@@ -699,10 +754,80 @@ describe('buildContextForUser', () => {
     const ctx = await buildContextForUser(qlWindowed, 'u2', NOW);
     expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
     expect(ctx.permissions).toEqual(['payroll_reader']);
-    expect(ctx.expiredGrants).toEqual([
-      { kind: 'position', name: 'payroll_approver', until: '2026-07-01T00:00:00Z' },
-      { kind: 'permission_set', name: 'quarter_close_admin', until: '2026-06-01T00:00:00Z' },
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'position', name: 'payroll_approver', state: 'expired', until: '2026-07-01T00:00:00Z' },
+      { kind: 'permission_set', name: 'quarter_close_admin', state: 'expired', until: '2026-06-01T00:00:00Z' },
     ]);
+  });
+
+  // [#8714 / ADR-0049] The second reason of the shared held-state vocabulary:
+  // the catalogue row's `active` switch. The resolver drops these rows
+  // fail-closed (#8613); the provenance pass re-reads them so the panel can say
+  // "held — deactivated" instead of answering like the grant never existed.
+  it('reports a directly-granted permission set whose catalogue row is deactivated (ADR-0049 / #8714)', async () => {
+    const qlDeactivated = makeGrantQl({
+      sys_user_permission_set: [
+        { user_id: 'u2', permission_set_id: 'ps1' },
+        { user_id: 'u2', permission_set_id: 'psOff' },
+      ],
+      sys_permission_set: [
+        { id: 'ps1', name: 'payroll_reader' },
+        { id: 'psOff', name: 'crm_full', active: false },
+      ],
+    });
+    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW);
+    // The resolver's fail-closed dropping is untouched…
+    expect(ctx.permissions).toEqual(['payroll_reader']);
+    // …and the dropped row is REPORTED, with the deactivated reason.
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'permission_set', name: 'crm_full', state: 'deactivated' },
+    ]);
+  });
+
+  it('reports a held position whose sys_position row is deactivated — including the 0/1 storage shape (ADR-0049 / #8714)', async () => {
+    const qlDeactivated = makeGrantQl({
+      sys_user_position: [
+        { user_id: 'u2', position: 'hr_specialist' },
+        { user_id: 'u2', position: 'field_auditor' },
+      ],
+      // 0 is what the primary driver hands back for a stored false — the
+      // shared isRowActive predicate reads it as deactivated (#8613).
+      sys_position: [
+        { id: 'pos_hr', name: 'hr_specialist' },
+        { id: 'pos_fa', name: 'field_auditor', active: 0 },
+      ],
+    });
+    const ctx = await buildContextForUser(qlDeactivated, 'u2', NOW);
+    expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'position', name: 'field_auditor', state: 'deactivated' },
+    ]);
+  });
+
+  it('a row both expired AND deactivated reports expired — one reason per row, resolver drop order (#8714)', async () => {
+    const qlBoth = makeGrantQl({
+      sys_user_permission_set: [
+        { user_id: 'u2', permission_set_id: 'psOff', valid_until: '2026-06-01T00:00:00Z' },
+      ],
+      sys_permission_set: [{ id: 'psOff', name: 'crm_full', active: false }],
+    });
+    const ctx = await buildContextForUser(qlBoth, 'u2', NOW);
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'permission_set', name: 'crm_full', state: 'expired', until: '2026-06-01T00:00:00Z' },
+    ]);
+  });
+
+  it('an absent `active` column keeps granting and is NOT reported — absent is ACTIVE (ADR-0049)', async () => {
+    const qlAbsent = makeGrantQl({
+      sys_user_position: [{ user_id: 'u2', position: 'hr_specialist' }],
+      sys_position: [{ id: 'pos_hr', name: 'hr_specialist' }],
+      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps1' }],
+      sys_permission_set: [{ id: 'ps1', name: 'payroll_reader' }],
+    });
+    const ctx = await buildContextForUser(qlAbsent, 'u2', NOW);
+    expect(ctx.positions).toEqual(['hr_specialist', 'everyone']);
+    expect(ctx.permissions).toEqual(['payroll_reader']);
+    expect(ctx.droppedGrants).toEqual([]);
   });
 });
 
@@ -895,9 +1020,19 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
         { user_id: 'u2', position: 'hr_specialist' },
         { user_id: 'u2', position: 'approver', delegated_from: 'u_boss', valid_until: '2026-07-20T00:00:00Z' },
         { user_id: 'u2', position: 'payroll_approver', valid_until: '2026-07-01T00:00:00Z' },
+        // [#8714] a held position whose catalogue row is switched off
+        { user_id: 'u2', position: 'field_auditor' },
       ],
-      sys_user_permission_set: [{ user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' }],
-      sys_permission_set: [{ id: 'ps2', name: 'quarter_close_admin' }],
+      sys_position: [{ id: 'pos_fa', name: 'field_auditor', active: false }],
+      sys_user_permission_set: [
+        { user_id: 'u2', permission_set_id: 'ps2', valid_until: '2026-06-01T00:00:00Z' },
+        // [#8714] a held direct grant whose SET's catalogue row is switched off
+        { user_id: 'u2', permission_set_id: 'psOff' },
+      ],
+      sys_permission_set: [
+        { id: 'ps2', name: 'quarter_close_admin' },
+        { id: 'psOff', name: 'crm_full', active: false },
+      ],
     };
     const grants = await resolveUserAuthzGrants(makeGrantQl(tables), 'u2', { nowMs: NOW });
     const ctx = await buildContextForUser(makeGrantQl(tables), 'u2', NOW);
@@ -906,16 +1041,20 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
     expect(ctx.delegatedPositions).toEqual([
       { name: 'approver', from: 'u_boss', until: '2026-07-20T00:00:00Z' },
     ]);
-    expect(ctx.expiredGrants).toEqual([
-      { kind: 'position', name: 'payroll_approver', until: '2026-07-01T00:00:00Z' },
-      { kind: 'permission_set', name: 'quarter_close_admin', until: '2026-06-01T00:00:00Z' },
+    expect(ctx.droppedGrants).toEqual([
+      { kind: 'position', name: 'payroll_approver', state: 'expired', until: '2026-07-01T00:00:00Z' },
+      { kind: 'position', name: 'field_auditor', state: 'deactivated' },
+      { kind: 'permission_set', name: 'quarter_close_admin', state: 'expired', until: '2026-06-01T00:00:00Z' },
+      { kind: 'permission_set', name: 'crm_full', state: 'deactivated' },
     ]);
-    // …and the aggregation is still byte-identical to enforcement's. An expired
-    // grant is REPORTED, never RESOLVED.
+    // …and the aggregation is still byte-identical to enforcement's. A dropped
+    // grant (expired OR deactivated) is REPORTED, never RESOLVED.
     expect(ctx.positions).toEqual(grants.positions);
     expect(ctx.permissions).toEqual(grants.permissions);
     expect(ctx.positions).not.toContain('payroll_approver');
+    expect(ctx.positions).not.toContain('field_auditor');
     expect(ctx.permissions).not.toContain('quarter_close_admin');
+    expect(ctx.permissions).not.toContain('crm_full');
   });
 });
 

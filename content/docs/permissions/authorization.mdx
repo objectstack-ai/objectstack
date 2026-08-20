@@ -337,7 +337,11 @@ unscoped `admin_full_access` grant no longer derives `platform_admin`.
 
 The explain engine reports an expired-but-present row as a dedicated
 contributor state ("held until 2026-08-01 — expired"), so "why did access
-disappear" is self-answering. Two authoring lint rules cover seed grants: one
+disappear" is self-answering. The state member is one shared "held but not
+resolving, because X" vocabulary: a closed enumeration of reasons (`expired`
+here; `deactivated` for the ADR-0049 `active` switch below), extended only
+deliberately — every lifecycle control that silently drops a held grant
+answers through the same member rather than growing its own shape. Two authoring lint rules cover seed grants: one
 mirrors D2 — a seed grant whose `valid_until` is already past (or unparseable)
 is dead on arrival (error) — and one mirrors the D3 dual audit: a delegation
 row (`delegated_from`) without `reason` is an error. The first runs on **both**
@@ -386,6 +390,18 @@ place, by the same discipline: **resolution-time filtering, fail-closed**, in
 - Assignments are untouched. `sys_user_position` and
   `sys_user_permission_set` rows stay exactly as they were, and re-activating
   the catalogue row restores every grant it carried, at the next resolution.
+
+The explain engine reports a deactivated-but-held row with the same dedicated
+contributor state the expired case gets (`state: 'deactivated'`, "held —
+deactivated") — the shared vocabulary above. This matters more here than for
+an expiry: deactivation is an incident-response control, installation-wide,
+and there is no date on the user's own grant row to notice — without the
+state, the admin diagnosing "why did access disappear" would get the same
+answer as for a user who never held the grant, with no pointer to the
+catalogue row somebody switched off. Reported for the grant rows explain
+already walks: `sys_user_position` rows and direct `sys_user_permission_set`
+grants (a deactivated set reached only through an active position's linkage is
+not re-derived — that would replicate the resolver's aggregation).
 
 **Absent is ACTIVE.** Only a stored value that really reads false takes a grant
 away, so a row that predates the column keeps granting. The same predicate

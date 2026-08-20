@@ -624,7 +624,35 @@ export const PageTabsProps = strictObject({
     },
   }, {
     label: I18nLabelSchema,
-    icon: z.string().optional(),
+    /**
+     * Tab-trigger icon, and the reason this key carries a docblock at all: it
+     * presents to a liveness sweep exactly as `page:accordion`'s item `icon`
+     * did one component over — declared bare, asserted nowhere — and that
+     * absence cost a full dispatch cycle re-deriving the cross-repo read point
+     * before the retirement candidate was closed (#9397 closed
+     * premise-overtaken; #9881 recorded the accordion's liveness; this is the
+     * same record for the tab item, so the sweep cannot re-derive the same
+     * false candidate a component over).
+     *
+     * The key is LIVE at the objectui pin this repo builds against
+     * (`.objectui-sha` = `82a94170c`): `containers.tsx:662-665` renders
+     * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
+     * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
+     * opacity-70`, `aria-hidden`), and the renderer's registration publishes
+     * the key to the Studio block designer at `:721` (the `items` input,
+     * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
+     * }]`).
+     *
+     * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
+     * (`lib/lazy-icon.tsx` — kebab-case or PascalCase, normalised to
+     * kebab-case, with a fallback when the name is not a real Lucide icon), the
+     * same slot every other authorable icon on this surface uses. Contrast the
+     * item `key` prescribed against above: that spelling reaches no read point
+     * at all, and a read point is precisely what separates the two verdicts.
+     */
+    icon: z.string().optional().describe(
+      'Lucide icon name rendered in the tab trigger, left of the label. Read on this component — the renderer draws it via `LazyIcon`; contrast the item `key` beside it, which no read point takes and which the alias table answers with `value`.',
+    ),
     /**
      * Conditional tab (CEL, #2606): when the predicate evaluates FALSE the
      * whole tab — header *and* panel — is omitted from the strip. This is the

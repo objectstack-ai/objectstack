@@ -173,8 +173,8 @@ interface UnmappedManagedObject {
  * coverage at all, so the reason has to say why that is the right answer for
  * this table rather than an oversight. `managedBy` alone does not mean
  * better-auth's core `getAuthTables()` surface owns the columns — a plugin may
- * be opt-in, ship in its own package, or (for sso/scim) expose no `schema`
- * option this call can read.
+ * be opt-in, ship in its own package, or (for sso/scim) be passed no `schema`
+ * option by the auth manager, leaving this call no mapping to key off.
  */
 const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   sys_api_key: {
@@ -210,21 +210,32 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
   // ── Plugins getAuthTables() cannot ADDRESS as an ObjectStack object (#3653) ─
   // Both plugins are now in the call (#7820), so their models do appear in the
   // derived tables — under better-auth's own names (`ssoProvider`,
-  // `scimProvider`, …). What they accept no `schema` option for is the mapping:
-  // there is no way to tell getAuthTables() that `ssoProvider` materializes as
-  // `sys_sso_provider`, so MODEL_TO_OBJECT cannot key off anything the library
-  // reports and the derivation has nothing to compare against the object.
+  // `scimProvider`, …). The MAPPING is what this call cannot reach: the auth
+  // manager passes neither plugin a `schema` option, so nothing tells
+  // getAuthTables() that `ssoProvider` materializes as `sys_sso_provider`,
+  // MODEL_TO_OBJECT cannot key off anything the library reports, and the
+  // derivation has nothing to compare against the object.
+  //
+  // Note the reason above is about what the auth manager PASSES, not about what
+  // the plugins ACCEPT — the two were conflated here until #8224. Measured
+  // 2026-08-19: `@better-auth/sso@1.7.1` does accept a `schema` option
+  // (`SSOOptions.schema.ssoProvider`), so passing one is a live option rather
+  // than something the dependency forbids; `@better-auth/scim@1.7.0-rc.1` still
+  // accepts none.
   sys_sso_provider: {
     reason:
-      '@better-auth/sso accepts no `schema` option, so getAuthTables() reports its models only under '
-      + "better-auth's own names and they cannot be mapped onto this object (#3653). Its columns are "
+      'The auth manager passes @better-auth/sso no `schema` option, so getAuthTables() reports its '
+      + "models only under better-auth's own names and they cannot be mapped onto this object (#3653). "
+      + '(The plugin DOES accept one as of 1.7.1 — measured 2026-08-19, #8224; it is simply not passed.) '
+      + 'Its columns are '
       + 'bridged mechanically by objectql-adapter.ts and gated by the dedicated sso/scim block in '
       + 'better-auth-schema-parity.test.ts.',
   },
   sys_scim_provider: {
     reason:
-      '@better-auth/scim accepts no `schema` option, so getAuthTables() reports its models only under '
-      + "better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
+      '@better-auth/scim accepts no `schema` option at all (measured 2026-08-19 against the installed '
+      + '1.7.0-rc.1, and the auth manager passes none either), so getAuthTables() reports its models '
+      + "only under better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
       + 'same dedicated gate as sys_sso_provider.',
   },
 

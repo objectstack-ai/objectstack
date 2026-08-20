@@ -53,6 +53,17 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # and list-page scans. A hand-set instance is mislabeling — the sweep
   # corrects it against the index.
   gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
+  # pm:retriage COEXISTS with the standing pm:* label and ⛔ never replaces it
+  # (maintainer ruling 2026-08-19/20, 「同意 并存」): the objecting seat sets it in
+  # the same write as its evidence comment, and the triage Routine is the only
+  # remover — hanging and removing belong to two different parties, which is
+  # what makes the state safe. Named consumers: the dispatchable-candidate
+  # query (a pm:queue card carrying it is skipped — objection undecided, no
+  # dispatch) and the triage round's high-priority re-judgement pass. It is in
+  # this four-repo loop because the state-model row requires the label to exist
+  # in all four; where a first application already auto-created the object,
+  # creation here is a no-op that leaves its colour and description untouched.
+  gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Awaiting triage re-judgement — coexists with the standing pm:* label; queued cards skip dispatch" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM — other PMs never dispatch into its subtree" 2>/dev/null || true
 done

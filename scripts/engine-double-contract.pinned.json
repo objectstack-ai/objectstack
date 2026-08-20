@@ -1072,6 +1072,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1088,6 +1098,16 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/revoke-session-match-guard.test.ts",
       "verb": "update",
       "pinned": 1
     },
