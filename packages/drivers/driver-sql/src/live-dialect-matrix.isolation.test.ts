@@ -38,8 +38,9 @@
  *    which statements are issued, not that a server accepts them.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
+import { SqlDriver } from '../src/index.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -47,7 +48,9 @@ import {
   MYSQL_CELL,
   PG_CELL,
   currentLiveSchema,
+  liveSchemaLedger,
   liveSchemaNameFor,
+  mysqlUrlForSchema,
 } from './live-dialect-matrix.testkit.js';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -131,21 +134,20 @@ describe('live-dialect matrix — the cell is the only route to a live server (#
       .replace(/^[ \t]*\/\/.*$/gm, '');
 
   /**
-   * This file, and only this file.
+   * The needle is ASSEMBLED rather than written as a literal.
    *
-   * The scan matched ITSELF on first run — the pattern it searches for is a
-   * regex literal in its own source. Excluding a file from the scan is exactly
-   * the shape of hole the scan exists to prevent, so the exclusion is pinned by
-   * the next case rather than trusted: this suite opens no connection at all,
-   * so it cannot be a live file however it spells the env var.
+   * Written out, it appears in this file's own source and the scan flags
+   * ITSELF — which it did, on its first run. An exclusion list was the first
+   * fix and the wrong one: excluding a file from the scan is the exact shape of
+   * hole the scan exists to close, and this file has since become a live suite
+   * itself, which would have made the exclusion actively wrong.
    */
-  const SCANNER = 'live-dialect-matrix.isolation.test.ts';
+  const ENV_READ = new RegExp('process' + '\\.env\\.OS_TEST_(POSTGRES|MYSQL)_URL');
 
   it('no test file in this package reads OS_TEST_*_URL directly', () => {
     const offenders = TEST_FILE_KEYS
       .map((k) => k.slice(k.lastIndexOf('/') + 1))
-      .filter((f) => f !== SCANNER)
-      .filter((f) => /process\.env\.OS_TEST_(POSTGRES|MYSQL)_URL/.test(codeOf(f)));
+      .filter((f) => ENV_READ.test(codeOf(f)));
     expect(
       offenders,
       'these read the env var directly, which is one value for the whole process and puts ' +
@@ -154,91 +156,163 @@ describe('live-dialect matrix — the cell is the only route to a live server (#
     ).toEqual([]);
   });
 
-  it('the one excluded file cannot itself be a live suite', () => {
-    // What earns the exclusion: no driver, no knex, no connection. If this ever
-    // stops holding, the exclusion stops being safe and this goes red first.
-    //
-    // The needles are ASSEMBLED rather than written as literals, because a
-    // literal would appear in this file and the case would match itself — the
-    // same self-reference that made the scan above flag its own source on its
-    // first run, and the reason the exclusion exists at all.
-    const own = codeOf(SCANNER);
-    const needle = (head: string, tail: string) => new RegExp(head + tail);
-    expect(own).not.toMatch(needle('new ', 'SqlDriver'));
-    expect(own).not.toMatch(needle('knex', '\\('));
-    expect(own).not.toMatch(needle('\\.', 'connect\\('));
-    expect(own).not.toMatch(needle('driver', '\\.execute'));
+  it('the scan can still see a violation — it is not matching nothing', () => {
+    // Without this, an ENV_READ that silently stopped matching would report a
+    // clean scan forever. The negative case, stated: the pattern must hit a
+    // string that DOES read the env var.
+    // assembled for the same reason the needle is — a literal here is itself a
+    // violation, and the scan would flag this file
+    expect(ENV_READ.test('const U = process' + '.env.OS_TEST_MYSQL_URL;')).toBe(true);
+    expect(ENV_READ.test('const U = MYSQL_CELL.url;')).toBe(false);
   });
 
   it('the testkit itself is the one place that reads them', () => {
     const testkit = readFileSync(join(SRC_DIR, 'live-dialect-matrix.testkit.ts'), 'utf8');
-    expect(testkit).toContain('process.env.OS_TEST_POSTGRES_URL');
-    expect(testkit).toContain('process.env.OS_TEST_MYSQL_URL');
+    // assembled, like every other spelling of these names in this file
+    expect(testkit).toContain('process' + '.env.OS_TEST_POSTGRES_URL');
+    expect(testkit).toContain('process' + '.env.OS_TEST_MYSQL_URL');
   });
 });
 
-/** A knex pool connection that records the SQL a hook issues instead of running it. */
-function recordingConnection(): { sql: string[]; conn: any } {
-  const sql: string[] = [];
-  const conn = {
-    query(text: string, cb: (err: unknown) => void) {
-      sql.push(text);
-      cb(null);
-    },
-  };
-  return { sql, conn };
-}
-
-async function runAfterCreate(config: any): Promise<string[]> {
-  const { sql, conn } = recordingConnection();
-  const afterCreate = config.pool?.afterCreate;
-  expect(typeof afterCreate, 'the live config carries no afterCreate hook').toBe('function');
-  await new Promise<void>((resolve, reject) => {
-    afterCreate(conn, (err: unknown) => (err ? reject(err) : resolve()));
-  });
-  return sql;
-}
-
-describe('live-dialect matrix — what each dialect issues to isolate itself (#9350)', () => {
+describe('live-dialect matrix — how each dialect is pointed at its own schema (#9350)', () => {
   const schema = liveSchemaNameFor(
     'packages/drivers/driver-sql/src/live-dialect-matrix.isolation.test.ts',
   );
 
-  it('postgres: knex is pointed at the file’s schema, which the hook creates', async () => {
+  it('mysql: the file’s database is named in the CONNECTION, not switched into later', () => {
+    // The distinction is the defect this replaced, and it is worth an assertion
+    // rather than a comment. With `use`, the SESSION moved but knex's
+    // `client.database()` kept returning the URL's database — and knex binds
+    // THAT into `columnInfo`, so the driver read columns from `conformance` for
+    // a table it had just created elsewhere and emitted `alter table … add
+    // <column>` for columns already present. Measured on a live MariaDB 10.11:
+    // 18 tests red, all *Duplicate column name* or a missing UNIQUE index.
+    const rewritten = mysqlUrlForSchema('mysql://root:root@127.0.0.1:3306/conformance', schema);
+    expect(new URL(rewritten).pathname).toBe(`/${schema}`);
+  });
+
+  it('mysql: only the database segment moves — host, port and credentials are the runner’s', () => {
+    const from = new URL('mysql://runner:s3cret@db.internal:3307/conformance');
+    const to = new URL(mysqlUrlForSchema(from.toString(), schema));
+    expect([to.protocol, to.host, to.username, to.password]).toEqual([
+      from.protocol, from.host, from.username, from.password,
+    ]);
+    expect(to.pathname).not.toBe(from.pathname);
+  });
+
+  it.skipIf(!MYSQL_CELL.available)(
+    'mysql: the provisioned cell connects to this file’s database, with no pool hook',
+    () => {
+      const config: any = MYSQL_CELL.config();
+      expect(config.client).toBe('mysql2');
+      expect(typeof config.connection, 'a URL string, so the driver’s connect handling applies')
+        .toBe('string');
+      expect(new URL(config.connection).pathname).toBe(`/${schema}`);
+      // nothing switches databases behind knex's back
+      expect(config.pool?.afterCreate).toBeUndefined();
+    },
+  );
+
+  it('postgres: knex is pointed at the file’s schema', () => {
     const config: any = PG_CELL.config();
     expect(config.client).toBe('pg');
     expect(config.searchPath).toEqual([schema]);
-    expect(await runAfterCreate(config)).toEqual([
-      `create schema if not exists "${schema}"`,
-      `set search_path to "${schema}"`,
-    ]);
   });
 
-  it('mysql: the session is moved into the file’s own database', async () => {
-    // MySQL has no schema-inside-a-database, so the database IS the unit. `use`
-    // rather than a rewritten URL keeps `database()` — which several suites
-    // compare `information_schema.columns` against — reporting the isolated one.
-    const config: any = MYSQL_CELL.config();
-    expect(config.client).toBe('mysql2');
-    expect(await runAfterCreate(config)).toEqual([
-      `create database if not exists \`${schema}\``,
-      `use \`${schema}\``,
-    ]);
-  });
-
-  it('runs the hook on EVERY pooled connection, not just the first', async () => {
-    // A pool opens connections lazily and forever: a connection created late in
-    // a file must land in the same schema as the first one, or half the file
-    // silently runs against the shared default database.
-    const config: any = PG_CELL.config();
-    expect(await runAfterCreate(config)).toEqual(await runAfterCreate(config));
-  });
-
-  it('the two live dialects do not resolve to one shared name', () => {
-    // Same file, so the NAME is deliberately shared across dialects — what must
-    // not happen is two FILES sharing one. This pins the axis the isolation is
-    // on, so a future edit that keyed off the dialect instead of the file is red.
+  it('two different files do not resolve to one shared name', () => {
     const other = liveSchemaNameFor('packages/drivers/driver-sql/src/some-other-live.test.ts');
     expect(other).not.toBe(schema);
   });
+});
+
+describe('live-dialect matrix — the globalSetup creates what the cells connect to (#9350)', () => {
+  // The ordering constraint the connection-named database buys: MySQL refuses
+  // the handshake for a database that does not exist, so a file whose schema the
+  // globalSetup never created fails at connect. One derivation feeds both, and
+  // this asserts it really is one.
+  it('the ledger covers every test file in the package, with distinct schemas', () => {
+    const ledger = liveSchemaLedger();
+    expect(ledger.length).toBe(TEST_FILE_KEYS.length);
+    expect(new Set(ledger.map((e) => e.schema)).size).toBe(ledger.length);
+  });
+
+  it('the ledger’s name for a file is the same one that file resolves for itself', () => {
+    const own = liveSchemaLedger().find((e) => e.file === 'live-dialect-matrix.isolation.test.ts');
+    expect(own?.schema).toBe(currentLiveSchema());
+  });
+
+  it('the cells connect to a schema the ledger knows', () => {
+    const known = new Set(liveSchemaLedger().map((e) => e.schema));
+    expect(known.has((PG_CELL.config() as any).searchPath[0])).toBe(true);
+    expect(known.has(new URL(mysqlUrlForSchema('mysql://u:p@h:3306/c', currentLiveSchema()))
+      .pathname.slice(1))).toBe(true);
+  });
+});
+
+describe('live-dialect matrix — the driver can SEE its own isolated schema (#9350)', () => {
+  // The other half of per-file isolation, and the half that fails silently.
+  //
+  // Moving the suites into their own schema is only safe if the driver's
+  // introspection follows them there. Postgres' index read pinned the schema
+  // literally (`n.nspname = 'public'`), so under an isolated search_path it
+  // returned `[]` for a table that measurably HAD a primary key and a declared
+  // unique index — and `[]` does not read as "I could not see", it reads as
+  // "there are no indexes", which `assertConflictTargetHonoured` turns into a
+  // refusal. A fail-open on an identity check, invisible to every existing test
+  // because the suites that exercise that path are MySQL-gated.
+  //
+  // Needs a live Postgres: this asserts what the SERVER reports, which is the
+  // only place the defect existed.
+  let driver: SqlDriver | undefined;
+  const TABLE = 'os9350_introspection_probe';
+
+  afterEach(async () => {
+    await driver?.execute(`drop table if exists ${TABLE}`).catch(() => {});
+    await driver?.disconnect().catch(() => {});
+    driver = undefined;
+  });
+
+  it.skipIf(!PG_CELL.available)(
+    'postgres: index introspection reports the indexes that exist in the file’s schema',
+    async () => {
+      driver = new SqlDriver(PG_CELL.config());
+      await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
+      await driver.initObjects([
+        { name: TABLE, fields: { email: { type: 'string', unique: true } } },
+      ] as any);
+
+      // What the server says is really there — the control the assertion is
+      // measured against, so a green here cannot mean "nothing was created".
+      const live: any = await driver.execute(
+        `select i.relname as name
+           from pg_index ix
+           join pg_class i on i.oid = ix.indexrelid
+          where ix.indrelid = to_regclass(?)`,
+        [TABLE] as any,
+      );
+      const actual = (live.rows ?? live).map((r: any) => r.name).sort();
+      expect(actual.length, 'fixture is vacuous unless the table really has indexes')
+        .toBeGreaterThanOrEqual(2);
+
+      const seen = await (driver as any).introspectIndexes(TABLE);
+      expect(
+        seen.map((i: any) => i.name).sort(),
+        'the driver read a different set of indexes than the server holds — it is looking in ' +
+          'another schema, and an empty read here becomes a silent upsert refusal',
+      ).toEqual(actual);
+      expect(seen.some((i: any) => i.primary)).toBe(true);
+      expect(seen.some((i: any) => i.unique && !i.primary)).toBe(true);
+    },
+  );
+
+  it.skipIf(!PG_CELL.available)(
+    'postgres: schema introspection lists a table created in the file’s schema',
+    async () => {
+      driver = new SqlDriver(PG_CELL.config());
+      await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
+      await driver.initObjects([{ name: TABLE, fields: { email: { type: 'string' } } }] as any);
+      const introspected = await driver.introspectSchema();
+      expect(Object.keys(introspected.tables ?? {})).toContain(TABLE);
+    },
+  );
 });

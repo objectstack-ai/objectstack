@@ -44,8 +44,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { SqlDriver, SqlDriverConfig } from './sql-driver.js';
 
 /** The dialects `driver-sql` speaks that the matrices are run across. */
@@ -225,46 +226,48 @@ export function currentLiveSchema(): string {
 }
 
 /**
- * Postgres: create the file's schema and point the session at it.
+ * The same MySQL URL, pointed at the file's own database.
  *
- * Both halves run on EVERY pooled connection because a pool opens connections
- * lazily and forever — a second connection created an hour into the run must
- * land in the same schema as the first. `if not exists` makes the repeat free
- * and makes two connections of the same file racing each other a no-op.
+ * The database is named in the CONNECTION, not switched afterwards with `use`,
+ * and that distinction is the whole defect this replaced. Measured on a live
+ * server: with `use` the SESSION moves, but knex's `client.database()` keeps
+ * returning the URL's database, and knex binds THAT into `columnInfo`
+ * (`mysql-querycompiler.js`: `table_schema = ?` from `this.client.database()`).
+ * So DDL executed in the per-file database while the column read answered from
+ * `conformance` — the driver saw an empty column set for a fully populated
+ * table and emitted `alter table ... add label`, which the server rejected with
+ * *Duplicate column name*. Naming the database in the URL keeps the two halves
+ * the same value by construction; there is no second place to disagree.
  *
- * `searchPath` is ALSO set in the knex config (below) so knex's own schema
- * builder qualifies its DDL; knex applies that before this hook runs, against a
- * schema that may not exist yet — which Postgres permits, since `search_path`
- * entries are resolved per statement, not at `SET` time.
+ * Consequence, and the reason {@link liveSchemaLedger} and the globalSetup
+ * exist: connecting to a database that does not exist fails at the handshake,
+ * so the databases must be created BEFORE any pool opens.
  */
-function pgAfterCreate(schema: string) {
-  return (conn: any, done: (err: unknown, conn: unknown) => void): void => {
-    conn.query(`create schema if not exists "${schema}"`, (err: unknown) => {
-      if (err) return done(err, conn);
-      conn.query(`set search_path to "${schema}"`, (err2: unknown) => done(err2, conn));
-    });
-  };
+export function mysqlUrlForSchema(url: string, schema: string): string {
+  const u = new URL(url);
+  u.pathname = `/${schema}`;
+  return u.toString();
 }
 
+/** Repo-relative prefix of this package's `src` — the key the ledger hashes. */
+const PACKAGE_SRC_PREFIX = 'packages/drivers/driver-sql/src/';
+
 /**
- * MySQL: create the file's database and switch the session into it.
+ * Every test file in this package, paired with the schema it owns.
  *
- * MySQL has no schema-inside-a-database, so a database IS the unit of
- * isolation — `create database` is the same cheap dictionary write `create
- * schema` is on Postgres, not a template copy.
- *
- * `use` rather than rewriting the connection URL, so the URL a runner
- * provisioned stays the thing we connect to and only the SESSION moves. It also
- * keeps `database()` — which several suites compare `information_schema.columns`
- * against — reporting the isolated database.
+ * ONE derivation, read off disk, shared by the three things that must agree:
+ * the globalSetup that CREATES the schemas, the cells that CONNECT to them, and
+ * `live-dialect-matrix.isolation.test.ts` which asserts they are DISTINCT.
+ * Three hand-kept lists would be three chances for a new live file to be handed
+ * a connection to a database nobody created — and on MySQL that is a handshake
+ * failure, not a silent fallback.
  */
-function mysqlAfterCreate(schema: string) {
-  return (conn: any, done: (err: unknown, conn: unknown) => void): void => {
-    conn.query(`create database if not exists \`${schema}\``, (err: unknown) => {
-      if (err) return done(err, conn);
-      conn.query(`use \`${schema}\``, (err2: unknown) => done(err2, conn));
-    });
-  };
+export function liveSchemaLedger(): { file: string; schema: string }[] {
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.test.ts'))
+    .sort()
+    .map((f) => ({ file: f, schema: liveSchemaNameFor(`${PACKAGE_SRC_PREFIX}${f}`) }));
 }
 
 /**
@@ -293,17 +296,14 @@ export const DIALECT_CELLS: readonly DialectCell[] = [
     available: !!PG_URL,
     live: true,
     hasLegacyStorageForm: false,
-    config: () => {
-      const schema = currentLiveSchema();
-      return {
-        client: 'pg',
-        connection: PG_URL,
-        // knex qualifies its own DDL with this; `pgAfterCreate` creates the
-        // schema and re-points the session, so raw SQL in a suite lands there too.
-        searchPath: [schema],
-        pool: { afterCreate: pgAfterCreate(schema) },
-      };
-    },
+    config: () => ({
+      client: 'pg',
+      connection: PG_URL,
+      // knex issues `set search_path` from this on every pooled connection and
+      // qualifies its own DDL with it, so a suite's raw SQL lands there too. The
+      // schema itself is created by the globalSetup, before any pool opens.
+      searchPath: [currentLiveSchema()],
+    }),
   },
   {
     id: 'mysql',
@@ -313,14 +313,13 @@ export const DIALECT_CELLS: readonly DialectCell[] = [
     available: !!MYSQL_URL,
     live: true,
     hasLegacyStorageForm: false,
-    config: () => {
-      const schema = currentLiveSchema();
-      return {
-        client: 'mysql2',
-        connection: MYSQL_URL,
-        pool: { afterCreate: mysqlAfterCreate(schema) },
-      };
-    },
+    config: () => ({
+      client: 'mysql2',
+      // A URL STRING deliberately: the driver's own connect handling — the UTC
+      // session pin of #3942 and the connect bound of #3769 — keys off that
+      // shape, and a hand-built connection object would quietly opt out of both.
+      connection: mysqlUrlForSchema(MYSQL_URL!, currentLiveSchema()),
+    }),
   },
 ] as const;
 
