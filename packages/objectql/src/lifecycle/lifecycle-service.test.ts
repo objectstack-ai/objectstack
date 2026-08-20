@@ -786,13 +786,18 @@ describe('LifecycleService.sweep — unguarded reap batching (#5194)', () => {
       // live session: not yet expired
       ['live', { id: 'live', expires_at: '2999-01-01T00:00:00.000Z', revoked_at: null }],
     ]);
-    /** Honour exactly the operators the Reaper composes here: $lt and $null. */
+    /** Honour scalar equality plus the operators the Reaper composes here
+     *  ($lt, $null) — and REFUSE combinators and unknown operators by
+     *  throwing rather than guessing, per the where-matcher convention
+     *  (`scripts/check-where-matcher-conformance.mjs`). */
     const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
       Object.entries(where).every(([field, pred]) => {
+        if (field.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${field}`);
+        if (typeof pred !== 'object' || pred === null) return row[field] === pred;
         const p = pred as Record<string, unknown>;
         if ('$lt' in p) return typeof row[field] === 'string' && (row[field] as string) < (p.$lt as string);
         if ('$null' in p) return p.$null === true ? row[field] == null : row[field] != null;
-        throw new Error(`unexpected operator in ${JSON.stringify(pred)}`);
+        throw new Error(`fake engine: unsupported operator in ${JSON.stringify(pred)}`);
       });
     const { engine, finds, deletes } = captureEngine(sessionObjects, {
       findImpl: (_object, options) =>
