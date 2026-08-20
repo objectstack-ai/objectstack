@@ -329,10 +329,26 @@ describe('#9510 — a pause on a RETRY attempt is durable, not a burned attempt'
     });
 
     /**
-     * ⭐ The retry-budget question the ruling required to be ANSWERED rather
-     * than assumed, measured rather than reasoned:
+     * ⭐ THE RULED CONTRACT — not merely "current behaviour" (#9705).
      *
-     *   **A resumed run gets NO retries — on either route.**
+     *   **A durable pause ENDS the retry-governed segment: a resumed run gets
+     *   NO retries — on either route.**
+     *
+     * Maintainer ruling recorded 2026-08-18 on #9705 (Option A):
+     * `errorHandling.strategy: 'retry'` describes ONE synchronous dispatch, and
+     * a resumed run is a new segment outside it. So the assertions below are a
+     * CONTRACT PIN, not a snapshot of an accident — **changing them is a
+     * contract change** and needs its own ruling, not a test fix. The boundary
+     * is stated for authors on the `errorHandling` block's `describe()` in
+     * `packages/spec/src/automation/flow.zod.ts` and in
+     * `content/docs/automation/flows.mdx` ("A durable pause ends the
+     * retry-governed segment"), with the authoring recipe for protecting the
+     * post-pause half. Option B (resume inherits the remaining budget) is the
+     * recorded revisit path only — it needs a `SuspendedRun` field, a store
+     * migration and a re-published-flow answer, none of which is bought today.
+     *
+     * The question was required to be ANSWERED rather than assumed, and it was
+     * measured rather than reasoned:
      *
      * Two independent facts produce that answer, both read off `origin/main`:
      *
@@ -348,13 +364,14 @@ describe('#9510 — a pause on a RETRY attempt is durable, not a burned attempt'
      * retry-path pause inherits the same answer the execute-path pause has
      * always had, and the two stay consistent.
      *
-     * That the resume path ignores a flow's declared retry policy is a real
-     * gap, but a DIFFERENT one, on a different method; it is filed as #9705
-     * rather than absorbed here. What is pinned below is today's measured
-     * answer, so whatever that card decides is a deliberate change and not an
-     * accident.
+     * That the resume path ignores a flow's declared retry policy was filed as
+     * a separate card (#9705) rather than absorbed here, and that card is where
+     * the ruling above landed: the behaviour pinned below is the intended
+     * contract, and the retry knobs (`backoffMs`, `backoffMultiplier`,
+     * `jitter`) model an in-process loop that a pause of arbitrary duration
+     * cannot honestly extend across.
      */
-    it('answers the retry-budget question: a resumed run does not retry, on either route', async () => {
+    it('pins the RULED contract — a durable pause ends the retry-governed segment: a resumed run does not retry, on either route', async () => {
         for (const failFirstAttempts of [0, 1]) {
             const h = bootFlow({ failFirstAttempts, afterFails: true, maxRetries: 2 });
 

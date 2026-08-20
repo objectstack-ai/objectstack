@@ -48,7 +48,7 @@
     "KeySetGuidance": "src/shared/suggestions.zod.ts#KeySetGuidance (interface)",
     "MAP_SUPPORTED_FIELDS": "src/shared/metadata-collection.zod.ts#MAP_SUPPORTED_FIELDS (const)",
     "METADATA_ALIASES": "src/shared/metadata-collection.zod.ts#METADATA_ALIASES (const)",
-    "META_URL_TO_SINGULAR": "src/shared/metadata-url-spelling.ts#META_URL_TO_SINGULAR (const)",
+    "META_URL_TO_SINGULAR": "src/meta-spelling/meta-url-data.generated.ts#META_URL_TO_SINGULAR (const)",
     "MapSupportedField": "src/shared/metadata-collection.zod.ts#MapSupportedField (type)",
     "MetadataCollectionInput": "src/shared/metadata-collection.zod.ts#MetadataCollectionInput (type)",
     "MetadataFormat": "src/shared/metadata-types.zod.ts#MetadataFormat (type)",
@@ -97,7 +97,7 @@
     "ViewNameParsed": "src/shared/branded-types.zod.ts#ViewNameParsed (type)",
     "ViewNameSchema": "src/shared/branded-types.zod.ts#ViewNameSchema (const)",
     "applyProtection": "src/shared/protection.zod.ts#applyProtection (function)",
-    "canonicalMetaUrlType": "src/shared/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
+    "canonicalMetaUrlType": "src/meta-spelling/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
     "cel": "src/shared/expression.zod.ts#cel (function)",
     "cron": "src/shared/expression.zod.ts#cron (function)",
     "expression": "src/shared/expression.zod.ts#expression (function)",
@@ -108,7 +108,7 @@
     "keySetMatches": "src/shared/suggestions.zod.ts#keySetMatches (function)",
     "lazySchema": "src/shared/lazy-schema.ts#lazySchema (function)",
     "levenshteinDistance": "src/shared/suggestions.zod.ts#levenshteinDistance (function)",
-    "metaUrlSpellingRefusal": "src/shared/metadata-url-spelling.ts#metaUrlSpellingRefusal (function)",
+    "metaUrlSpellingRefusal": "src/meta-spelling/metadata-url-spelling.ts#metaUrlSpellingRefusal (function)",
     "normalizeMetadataCollection": "src/shared/metadata-collection.zod.ts#normalizeMetadataCollection (function)",
     "normalizePluginMetadata": "src/shared/metadata-collection.zod.ts#normalizePluginMetadata (function)",
     "normalizeStackInput": "src/shared/metadata-collection.zod.ts#normalizeStackInput (function)",
@@ -122,6 +122,6 @@
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
     "suggestFieldType": "src/shared/suggestions.zod.ts#suggestFieldType (function)",
     "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
-    "unrecognisedMetaTypeRefusal": "src/shared/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
+    "unrecognisedMetaTypeRefusal": "src/meta-spelling/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
   }
 }

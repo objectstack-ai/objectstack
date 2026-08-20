@@ -95,6 +95,17 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // With that step gone, the freshness is asserted instead: every path that would
   // run either script refuses unless the tree is newer than the sources.
   { path: 'content/docs/references/**', gen: 'gen:docs', check: 'check:docs', readsSchemaTree: true },
+  // [#10096] The schema-free `/meta` URL-spelling data module — the checked-in
+  // materialization of PLURAL_TO_SINGULAR ∪ registry-derived REST plurals. A
+  // pure projection of its two sources (no hand-written half), so a conflict is
+  // always resolved by regenerating; low-churn (moves only when a metadata type
+  // is declared or the manifest map changes). No `readsDist`: the generator
+  // tsx-loads `src/`, so a merge that moved sources is all it needs.
+  {
+    path: 'packages/spec/src/meta-spelling/meta-url-data.generated.ts',
+    gen: 'gen:meta-url-spelling',
+    check: 'check:meta-url-spelling',
+  },
   // #5107. Unlike its neighbours this one is derived from the AST *plus* a
   // hand-written column (the ledger's `Class` verdicts feed the per-class
   // subtotals), which is exactly why it belongs here rather than in the ledger:

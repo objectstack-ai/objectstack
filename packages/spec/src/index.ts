@@ -33,10 +33,28 @@
  * ```typescript
  * import { Field, FieldType } from '@objectstack/spec/data';
  * import { User, Session } from '@objectstack/spec/auth';
- * 
+ *
  * const field: Field = { name: 'task_name', type: 'text' };
  * const user: User = { id: 'u1', email: 'user@example.com' };
  * ```
+ *
+ * ## Standing principle for export surfaces (#10096, maintainer ruling 2026-08-20)
+ *
+ * > **浏览器可达的 spec 导出面必须 schema-free。** A `@objectstack/spec` export
+ * > surface that browser/client consumers reach must carry vocabulary — maps,
+ * > folds, enums, pure predicates — without linking the zod schema/validation
+ * > machinery. The schema graph is the server/publish side's dependency, never
+ * > the price of spelling a URL segment or reading a posture predicate.
+ *
+ * Every subpath entry is a self-contained bundle, so a vocabulary symbol that
+ * shares an entry with schema modules costs its consumers the whole schema
+ * closure (measured on #10096: one string fold through `/shared` cost
+ * +60.1 KB gzipped). When adding an export a browser consumer will reach,
+ * either put it on a schema-free entry (`/meta-spelling` is the reference:
+ * heavy derivation happens at BUILD time via a generator + check gate, the
+ * entry ships pure data and functions) or verify the entry's module graph
+ * stays schema-free. Mechanizing this principle as a gate is a welcome
+ * follow-up; until then it binds as a stated rule.
  */
 
 // ============================================================================

@@ -62,11 +62,22 @@
  * dry-run mode of its own, which is the other half of why nothing measured this
  * before.
  *
+ * ## Both ways a description reaches GitHub
+ *
+ * The vocabulary script has two modes: create-if-missing (default) and
+ * `--reconcile`, which additionally sends colour and description to
+ * `gh label edit`. `gh label edit` 422s over the cap exactly as `gh label create`
+ * does, so the gate's charter — no description this script sends can 422 —
+ * spans both. The self-test drives the script in BOTH modes and asserts that
+ * every edit carries the same string as its create, which is what keeps the
+ * single measured `-d` literal per label sufficient. Without those cases the
+ * gate would still pass while covering only half of what the script sends.
+ *
  * Missing file or empty read is RED, never a pass — a gate that cannot find its
  * input must fail, not skip.
  */
 
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -210,36 +221,70 @@ function readTarget() {
 }
 
 /**
- * Run the real script with a fake `gh` on PATH and return every description it
- * was actually invoked with. The fake records one argument per line and closes
- * each invocation with a sentinel line; no argument in this file contains a
- * newline, and no control bytes are written.
+ * Run the real script with a fake `gh` on PATH and return every label call it
+ * actually made, plus the script's exit status. The fake records one argument
+ * per line and closes each invocation with a sentinel line; no argument in this
+ * file contains a newline, and no control bytes are written.
+ *
+ * `args` are passed through to the script — which is how the `--reconcile` mode
+ * is measured. `failEdit` makes the fake `gh` reject `label edit`, so the
+ * self-test can assert that a failed reconciliation is LOUD: unlike creation,
+ * whose `|| true` is mandatory for rerunnability, a swallowed edit failure would
+ * report success while leaving the drift live.
+ *
+ * The script is run via `spawnSync`, not `execFileSync`, because two of the
+ * behaviours under test are non-zero exits (an unknown flag, a failed edit) and
+ * a throwing runner cannot observe an exit status it converts into an exception.
  */
-export function dryRunDescriptions(scriptPath) {
+export function dryRunCalls(scriptPath, args = [], { failEdit = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pm-label-cap-'));
   try {
     const log = join(dir, 'calls.log');
     const fake = join(dir, 'gh');
     writeFileSync(
       fake,
-      ['#!/usr/bin/env bash', 'for a in "$@"; do printf "%s\\n" "$a" >> "$FAKE_GH_LOG"; done', 'printf "<<<END>>>\\n" >> "$FAKE_GH_LOG"', 'exit 0', ''].join('\n'),
+      [
+        '#!/usr/bin/env bash',
+        'for a in "$@"; do printf "%s\\n" "$a" >> "$FAKE_GH_LOG"; done',
+        'printf "<<<END>>>\\n" >> "$FAKE_GH_LOG"',
+        'if [ -n "${FAKE_GH_FAIL_EDIT:-}" ] && [ "${2:-}" = "edit" ]; then echo "fake gh: refusing" >&2; exit 1; fi',
+        'exit 0',
+        '',
+      ].join('\n'),
     );
     chmodSync(fake, 0o755);
     writeFileSync(log, '');
-    execFileSync('bash', [scriptPath], {
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, FAKE_GH_LOG: log },
-      stdio: 'ignore',
-    });
-    const out = [];
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH ?? ''}`, FAKE_GH_LOG: log };
+    if (failEdit) env.FAKE_GH_FAIL_EDIT = '1';
+    const proc = spawnSync('bash', [scriptPath, ...args], { env, stdio: 'ignore' });
+    const calls = [];
     for (const call of readFileSync(log, 'utf8').split('<<<END>>>\n')) {
-      const args = call.split('\n').filter((a) => a !== '');
-      const i = args.indexOf('-d');
-      if (args[0] === 'label' && args[1] === 'create' && i !== -1) out.push(args[i + 1]);
+      const argv = call.split('\n').filter((a) => a !== '');
+      if (argv[0] !== 'label') continue;
+      const flag = (...names) => {
+        const i = argv.findIndex((a) => names.includes(a));
+        return i === -1 ? null : argv[i + 1];
+      };
+      calls.push({
+        verb: argv[1],
+        name: argv[2],
+        repo: flag('-R', '--repo'),
+        color: flag('-c', '--color'),
+        description: flag('-d', '--description'),
+        argv,
+      });
     }
-    return out;
+    return { calls, status: proc.status };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Every description the script passes to `gh label create`. See dryRunCalls. */
+export function dryRunDescriptions(scriptPath) {
+  return dryRunCalls(scriptPath)
+    .calls.filter((c) => c.verb === 'create' && c.description !== null)
+    .map((c) => c.description);
 }
 
 function run() {
@@ -356,6 +401,74 @@ function selfTest() {
 
   // The floor: a parser that matches nothing must not read as clean.
   t('an empty parse is below the floor', parseDescriptions('echo hi').length < MIN_DESCRIPTIONS, true);
+
+  // ── The --reconcile mode ──────────────────────────────────────────────────
+  //
+  // This gate's charter is "no description the script sends to GitHub can 422".
+  // Reconcile adds a SECOND way to send one (`gh label edit`), so without the
+  // cases below the gate's coverage would silently shrink to the create path
+  // while still reading as a full pass — the parser-matches-nothing failure in
+  // a new place. The cases assert the two properties that keep the cap honest:
+  // every edit carries the same string as its create, and nothing else is sent.
+  const script = join(REPO_ROOT, TARGET);
+  // The verb is deliberately NOT part of the signature: these cases compare a
+  // create against its edit, and equality is the whole assertion.
+  const sig = (c) => JSON.stringify([c.name, c.repo, c.color, c.description]);
+  const verbs = (calls, v) => calls.filter((c) => c.verb === v);
+
+  const plain = dryRunCalls(script);
+  const reconciled = dryRunCalls(script, ['--reconcile']);
+
+  t('the default run issues no label edit at all', verbs(plain.calls, 'edit').length, 0);
+  t('…and exits 0', plain.status, 0);
+  t('reconcile exits 0 when every edit succeeds', reconciled.status, 0);
+  t(
+    'reconcile creates exactly what the default run creates',
+    verbs(reconciled.calls, 'create').map(sig),
+    verbs(plain.calls, 'create').map(sig),
+  );
+  t(
+    'reconcile edits exactly the labels it creates — same name, repo, colour and description',
+    verbs(reconciled.calls, 'edit').map(sig),
+    verbs(reconciled.calls, 'create').map(sig),
+  );
+  t(
+    'so every description reconcile SENDS is one this gate already measured',
+    verbs(reconciled.calls, 'edit').filter((c) => !real.some((r) => templateMatches(r.raw, c.description))),
+    [],
+  );
+  t(
+    '…and none of them would 422',
+    verbs(reconciled.calls, 'edit').filter((c) => charLength(c.description) > MAX_DESCRIPTION_CHARS),
+    [],
+  );
+  t(
+    'reconcile issues no verb other than create and edit — it never deletes',
+    [...new Set(reconciled.calls.map((c) => c.verb))].filter((v) => v !== 'create' && v !== 'edit'),
+    [],
+  );
+  t(
+    'reconcile never renames: no --name/-n reaches gh',
+    reconciled.calls.filter((c) => c.argv.includes('--name') || c.argv.includes('-n')).map((c) => c.name),
+    [],
+  );
+  t(
+    'reconcile is idempotent — a second run issues the identical call sequence',
+    dryRunCalls(script, ['--reconcile']).calls.map(sig),
+    reconciled.calls.map(sig),
+  );
+
+  // A mistyped flag must not fall through to a create-only run that prints the
+  // ordinary success line — the operator would read a reconciliation that never
+  // happened as done.
+  const mistyped = dryRunCalls(script, ['--reconsile']);
+  t('an unknown flag exits non-zero', mistyped.status, 2);
+  t('…and issues no gh calls at all', mistyped.calls.length, 0);
+
+  // The asymmetry with creation: a failed edit means the drift is still live.
+  const brokenEdit = dryRunCalls(script, ['--reconcile'], { failEdit: true });
+  t('a failing gh label edit makes the script exit non-zero', brokenEdit.status !== 0, true);
+  t('…while the same failure in the default mode cannot arise (no edits)', verbs(dryRunCalls(script, [], { failEdit: true }).calls, 'edit').length, 0);
 
   if (failed) {
     console.error(`\n❌ check-label-desc-cap --self-test: ${failed} case(s) failed`);

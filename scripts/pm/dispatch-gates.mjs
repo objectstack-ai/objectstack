@@ -597,6 +597,83 @@ export function maskSelfTests(source) {
 }
 
 /**
+ * The IANA top-level media types. A closed registry, not a heuristic: these ten
+ * are the whole of it, so a two-segment literal headed by one of them is a MIME
+ * type rather than a path — `application/json`, `text/event-stream`,
+ * `image/png`.
+ */
+const MEDIA_TOP_LEVEL_TYPES = new Set([
+  'application', 'audio', 'example', 'font', 'image',
+  'message', 'model', 'multipart', 'text', 'video',
+]);
+
+/**
+ * The remote names whose `<remote>/<branch>` shorthand is a git revision, not a
+ * directory. `origin` is the only one this repo's tooling ever spells — it is
+ * what `DEFAULT_BASE_REMOTE` holds, five hundred lines below, for the very
+ * reason this predicate exists.
+ */
+const GIT_REMOTE_NAMES = new Set(['origin']);
+
+/**
+ * Is this literal a name from a namespace that is NOT the filesystem?
+ *
+ * `extractWatchHints` decides "looks pathy" by "contains a slash", and a slash
+ * is the separator of several namespaces this repo's scripts also handle. When
+ * one of those strings survives into a family's hint set it becomes a DECLARED
+ * POPULATION the gate never declared — a literal scraped out of the script's
+ * operational constants and read as the corpus it watches.
+ *
+ * ## The two shapes this refuses, and why each is closed rather than a guess
+ *
+ *   MIME type        `type/subtype` headed by one of the ten IANA top-level
+ *                    types, with a subtype carrying no dot. The registry is
+ *                    closed, and the dot check keeps a real path with an
+ *                    extension (`image/logo.png`, were such a directory ever
+ *                    added) out of the refusal.
+ *   git revision     the `refs/…` namespace git reserves for refs, and the
+ *                    `origin/…` remote-tracking shorthand for it.
+ *
+ * ## Why refusing is the safe direction here (measured, not assumed)
+ *
+ * Refusing a hint cannot fabricate a lead; it can only withhold one. A family
+ * that loses its last hint lands in `undetermined` — "source names no path at
+ * all — NOT known irrelevant" — which is the honest bucket for a gate this
+ * derivation cannot place, and strictly more honest than the `unreachable`
+ * verdict a phantom population earns it.
+ *
+ * Swept over this tree at the time of writing, the refusal takes 21 distinct
+ * literals out of the hint sets (20 media types, 1 ref) and NONE of them names
+ * a tracked path or path prefix — the tree has no top-level directory called
+ * `refs`, `origin`, or any of the ten media types. So it moves no verdict for
+ * any card: every literal it removes was already dead for matching purposes.
+ * What changes is which families are reported as having a dead POPULATION.
+ *
+ * ## Why the whole class, and not the two families that surfaced it
+ *
+ * The two families whose ENTIRE population was one of these strings
+ * (`check:release-body` naming `application/json`,
+ * `check-skill-frame-freshness.mjs` naming `refs/remotes/origin/main`) are the
+ * instances that made it visible, but the same literal is scraped out of a
+ * dozen other gate sources where a real hint happens to sit beside it and hide
+ * the effect. Those survivors are the fabrication risk `extractWatchHints`'
+ * header calls the expensive direction — a lead pasted into a dispatch prompt
+ * that the dev cannot tell from a real one. One predicate closes the class.
+ *
+ * This file already knew: `DEFAULT_BASE_REF` is assembled from two unslashed
+ * halves specifically so the joined `origin/main` never enters its own hint
+ * set. That workaround is the single-file version of this rule, and its comment
+ * is the prior measurement.
+ */
+export function isNonPathNamespace(literal) {
+  const segments = String(literal).split('/');
+  if (segments.length === 2 && MEDIA_TOP_LEVEL_TYPES.has(segments[0]) && !segments[1].includes('.')) {
+    return true;
+  }
+  return segments.length >= 2 && (segments[0] === 'refs' || GIT_REMOTE_NAMES.has(segments[0]));
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -670,6 +747,10 @@ export function extractWatchHints(scriptSource) {
     if (!looksPathy) continue;
     const trimmed = s.replace(/[./]+$/, '');
     if (!trimmed) continue;
+    // A slash is the separator of several namespaces, and only one of them is
+    // the filesystem. See `isNonPathNamespace` for what is refused and why the
+    // refusal is measured rather than guessed.
+    if (isNonPathNamespace(trimmed)) continue;
     hints.add(trimmed);
   }
   return [...hints];
@@ -1252,6 +1333,35 @@ export function unreachableFamilies(entries, files) {
  * for the reader to infer from a prefix. Capped like the neighbouring residue
  * listing: the reason is a triage lead, not an inventory.
  */
+/**
+ * Which KIND of unreachable is this family — one the tree could ever fix, or
+ * one that is unreachable by construction?
+ *
+ * The three cases `deepestTrackedPrefix` distinguishes split two-to-one on the
+ * question a reader actually has, which is "is this a miss I should chase?":
+ *
+ *   by construction   the literal was never a repo path (no tracked path under
+ *                     even its first segment — a package specifier, a cross-repo
+ *                     slug), or the tree HAS the population and the covering
+ *                     rule refuses the literal as too generic. Neither is a
+ *                     defect in the gate or in the tree, and NO change to either
+ *                     makes the derivation reach it. This is the class that is
+ *                     merely a standing fact.
+ *   layout moved      the tree stops at a shorter prefix — the gate still spells
+ *                     a path whose parent survives. That is usually a REAL miss
+ *                     and it wants triage, so it must not sit under the same
+ *                     "nothing to see here" label as the other two.
+ *
+ * The split is derived from the prefix sweep, never declared: intent is not in
+ * the tree (see `unreachableFamilies`' docblock) and this does not pretend to
+ * read it. "By construction" here is a statement about the DERIVATION — this
+ * literal cannot be reached by it — not a claim about what the author meant.
+ */
+export function unreachableClass(dead) {
+  const everMoved = dead.some(({ hint, deepest }) => deepest && deepest !== collapseHint(hint));
+  return everMoved ? 'layout moved' : 'by construction';
+}
+
 export function unreachableReason(dead, cap = 3) {
   const shown = dead
     .slice(0, cap)
@@ -1764,6 +1874,77 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
  * corpus before it gets here; this validation is the second half of the same
  * refusal, for a caller that computed the count some other way.
  */
+/**
+ * The unreachable listing, rendered for the DEFAULT output rather than for
+ * `--residue` alone (#10097, option A).
+ *
+ * ## Why this moved out from behind the flag
+ *
+ * The disclosure already existed — the sweep has always reported these families
+ * and called them a standing repo fact. What did not exist was any reason for a
+ * reader to look. Every dispatch brief in this lane says "run every family
+ * `dispatch-gates` names", and nothing told a dev that the derived list is not
+ * a local pre-flight equivalent of CI. A dev who followed the brief exactly
+ * passed locally and then went red in CI on `check:driver-memory-census` — a
+ * real defect, caught by a gate no derivation could ever have named. The flag
+ * that would have shown it is one nobody was told to pass.
+ *
+ * So the limit prints at the moment of use. This is the file's own standing
+ * argument ("silent is not clearance") applied to the derivation itself.
+ *
+ * ## What the heading has to say, and what it must NOT be read as
+ *
+ * ⛔ These gates are NOT skipped. Every one of them sits in a workflow with no
+ * `pull_request` path filter, so CI schedules them on EVERY pull request. The
+ * unreachable verdict is about what this DERIVATION can name, never about what
+ * CI runs — and a reader who takes it for a skip list draws exactly the wrong
+ * conclusion, so the heading carries the correction rather than leaving it to
+ * the residue prose two screens down.
+ *
+ * Entries are grouped by `unreachableClass`, and the ordering is deliberate:
+ * "layout moved" is a real miss wanting triage and prints FIRST, while the
+ * by-construction families — the standing facts — print after it. A single flat
+ * list would bury the actionable one among the inert.
+ */
+export function unreachableLines(unreachable, swept) {
+  if (!Number.isInteger(swept) || swept <= 0) {
+    throw new Error(
+      `the unreachable listing needs the corpus it swept: got ${String(swept)} tracked file(s) ` +
+        '(an empty listing and an empty sweep read alike without it — #4690)',
+    );
+  }
+  const lines = [
+    `Unreachable — the ${unreachable.length} famil(ies) whose declared population matches NOTHING in this tree,` +
+      ` swept over ${swept} tracked file(s).`,
+    '  ⛔ NOT a skip list: CI runs these on every pull request. This says only that no path derivation can name them,',
+    '    so they score the same quiet green for every card in the tree — yours included — whether they still work or not.',
+  ];
+  if (unreachable.length === 0) {
+    lines.push('  (none — every declaring family reaches something in the tree.)');
+    return lines;
+  }
+  const byClass = new Map();
+  for (const item of [...unreachable].sort((a, b) => a.check.localeCompare(b.check))) {
+    const cls = unreachableClass(item.dead);
+    if (!byClass.has(cls)) byClass.set(cls, []);
+    byClass.get(cls).push(item);
+  }
+  for (const cls of ['layout moved', 'by construction']) {
+    const items = byClass.get(cls);
+    if (!items?.length) continue;
+    lines.push(
+      cls === 'layout moved'
+        ? `  ${items.length} where THE LAYOUT MOVED under a gate that still spells the old path — a real miss, worth triaging:`
+        : `  ${items.length} unreachable BY CONSTRUCTION — the literal is not a path this derivation can reach, and no change` +
+          ' to the gate or the tree makes it one:',
+    );
+    for (const { entry, dead } of items) {
+      lines.push(`    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}`);
+    }
+  }
+  return lines;
+}
+
 export function residueLines({ discovered, matched, undetermined, silent, unfiltered, unreachable, swept }, kinds = CHANGE_KIND_GATES) {
   const placed = matched + undetermined + silent;
   if (placed !== discovered) {
@@ -1806,8 +1987,8 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
       ' their own sources name paths and this repo has none of them, so they score the same quiet green for every card in the tree' +
-      ' whether they still work or not. A standing repo fact, not a verdict about your paths; --residue names them, each with the' +
-      ' deepest prefix the tree still has for it.',
+      ' whether they still work or not. A standing repo fact, not a verdict about your paths; they are named ABOVE on every run,' +
+      ' each with the deepest prefix the tree still has for it and whether it is unreachable by construction.',
     `  Convention-triggered gates cut ACROSS all three and are printed above when a kind hits (${kinds.map((k) => k.kind).join('; ')}).`,
     `  This script names no gate from memory. To list the ${unplaced} famil(ies) the path derivation did not place, runnably:` +
       ' node scripts/pm/dispatch-gates.mjs --residue <paths>',
@@ -2162,17 +2343,14 @@ function derive(paths, { showResidue = false } = {}) {
     };
     listing('Undetermined (source names no path at all — NOT known irrelevant)', undetermined, false);
     listing('Silent (source names paths, none of which cover yours — the weakest verdict)', silent, true);
-    // Printed with the other two because it is residue of the same kind — a
-    // family the reader is owed a word about — but its heading says plainly
-    // that this one is not about the card, and every entry carries the reason
-    // it could not reach rather than only the fact that it did not.
-    console.log(
-      `\nUnreachable (declared population matches NOTHING in the tree — about the REPO, not your paths): ${unreachable.length} famil(ies), swept over ${swept.length} tracked file(s).`,
-    );
-    for (const { entry, dead } of [...unreachable].sort((a, b) => a.check.localeCompare(b.check))) {
-      console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}`);
-    }
   }
+
+  // The unreachable listing prints on EVERY run, not only under --residue. It
+  // is the one part of the residue that is not about the card's paths at all,
+  // and the flag that used to hide it is one no dispatch brief tells anyone to
+  // pass — see `unreachableLines` for the CI failure that made that concrete.
+  console.log('');
+  for (const line of unreachableLines(unreachable, swept.length)) console.log(line);
 
   console.log('');
   for (const line of residueLines({
@@ -3437,6 +3615,78 @@ function selfTest() {
   t('and reads it null-separated, so a non-ASCII path is not quoted into a name nothing can match', !liveCorpus.some((f) => f.startsWith('"')));
   t('the collapse the reason speaks in is the one hintCovers judges by', collapseHint('packages/spec/**') === 'packages/spec' && hintCovers('packages/spec/**', 'packages/spec/src/index.ts'));
 
+  // ── A slash is not proof of a path (#10097, option C) ─────────────────────
+  //
+  // Two families declared a population that was never a population: a literal
+  // scraped out of their operational constants and read as the corpus they
+  // watch. Both directions are pinned, because a refusal this broad is only
+  // safe if it can be shown NOT to eat real paths.
+  t('a MIME type is not a path population', isNonPathNamespace('application/json'));
+  t('nor is any of the other nine IANA top-level types', ['text/plain', 'image/png', 'font/woff2', 'video/mp4', 'multipart/form-data'].every(isNonPathNamespace));
+  t('a full git ref is not a path population', isNonPathNamespace('refs/remotes/origin/main'));
+  t('nor is the remote-tracking shorthand for one', isNonPathNamespace('origin/main'));
+  // The negative half. These are the shapes a careless rule would take with it,
+  // and each is a real spelling this repo's gates use.
+  t('an ordinary package path is untouched', !isNonPathNamespace('packages/spec/src/index.ts'));
+  t('a dotted top-level dir is untouched', !isNonPathNamespace('.claude/agents'));
+  t('a declared subtree is untouched', !isNonPathNamespace('content/**'));
+  t('a THREE-segment literal headed by a media type is a path, not a MIME type', !isNonPathNamespace('application/json/schema.ts'));
+  t('a media-type head with a DOTTED second segment is a path, not a MIME type', !isNonPathNamespace('image/logo.png'));
+  t('a bare word is left to the too-generic rule that already owns it', !isNonPathNamespace('examples'));
+  t('a directory merely STARTING with a refused word is untouched', !isNonPathNamespace('origins/data.ts') && !isNonPathNamespace('refspec/x.ts'));
+  // Through the extractor, which is where it actually bites.
+  t('the extractor drops a scraped MIME type', !extractWatchHints("const H = {'content-type': 'application/json'};").includes('application/json'));
+  t('the extractor drops a scraped git ref', extractWatchHints("const R = 'refs/remotes/origin/main';").length === 0);
+  t('while a real path beside it in the same source survives', extractWatchHints("const H = 'application/json'; const P = 'packages/spec/src';").includes('packages/spec/src'));
+  // The two families the card named, read from the REAL sources. A fixture
+  // cannot show that these particular gates were repaired — the literal has to
+  // be gone from the file the derivation actually reads.
+  const misparsedFamilySources = ['scripts/release-github-releases.mjs', 'scripts/check-skill-frame-freshness.mjs'];
+  for (const rel of misparsedFamilySources) {
+    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'));
+    t(`${rel} no longer declares a phantom population`, !famHints.some(isNonPathNamespace));
+  }
+  // The live pin that the repair CHANGED the verdict: neither family may sit in
+  // the real tree's unreachable set any more. Measured, not assumed — both
+  // turned out to have had the phantom as their ONLY hint, so both land in
+  // `undetermined` ("names no path at all"), which is the honest bucket.
+  const liveSweepEntries = [];
+  for (const rel of misparsedFamilySources) {
+    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8')))]);
+  }
+  t('the repaired families declare no population at all, so the sweep skips them', unreachableFamilies([...liveSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0);
+
+  // ── The unreachable listing prints by DEFAULT (#10097, option A) ──────────
+  //
+  // The disclosure existed; the reason to look did not. These pin the shape of
+  // the default section and the class split that keeps a real miss from being
+  // buried among the standing facts.
+  t('a population that never was a path is unreachable BY CONSTRUCTION', unreachableClass([{ hint: 'application/json', deepest: '' }]) === 'by construction');
+  t('so is one the covering rule refuses as too generic', unreachableClass([{ hint: 'examples', deepest: 'examples' }]) === 'by construction');
+  t('a tree that stops at a shorter prefix is a LAYOUT MOVE — a real miss, not a standing fact', unreachableClass([{ hint: 'packages/spec/src/legacy/**', deepest: 'packages/spec/src' }]) === 'layout moved');
+  t('one moved hint among by-construction ones still reads as a layout move', unreachableClass([{ hint: 'application/json', deepest: '' }, { hint: 'packages/spec/src/legacy/**', deepest: 'packages/spec/src' }]) === 'layout moved');
+
+  const listed = unreachableLines(sweep, treeFixture.length);
+  const listedText = listed.join('\n');
+  t('the listing heading carries the count and the corpus it swept', /3 famil\(ies\).*swept over 4 tracked file\(s\)/.test(listed[0]));
+  t('⛔ and states plainly that CI still runs them — the one wrong reading', /NOT a skip list: CI runs these on every pull request/.test(listedText));
+  t('the layout-moved family prints under its own heading', /THE LAYOUT MOVED under a gate that still spells the old path/.test(listedText));
+  t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
+  t('the real miss sorts BEFORE the standing facts, never buried among them', listedText.indexOf('THE LAYOUT MOVED') < listedText.indexOf('BY CONSTRUCTION'));
+  t('every swept family is named in the listing, runnably', sweep.every((u) => listedText.includes(runnableInvocation(u.entry))));
+  t('each entry still carries the reason it could not reach', /never was a repo path/.test(listedText) && /the tree HAS it/.test(listedText));
+  // The empty case must not print as a missing section, and the corpus size is
+  // required for the #4690 reason one level down.
+  const emptyListing = unreachableLines([], 4).join('\n');
+  t('an EMPTY unreachable set still prints a section, saying so in words', /0 famil\(ies\)/.test(emptyListing) && /every declaring family reaches something/.test(emptyListing));
+  let listingNeedsCorpus = false;
+  try {
+    unreachableLines([], 0);
+  } catch {
+    listingNeedsCorpus = true;
+  }
+  t('the listing refuses to render without the corpus it swept', listingNeedsCorpus);
+
   // ── The residue accounting (#8632) ────────────────────────────────────────
   //
   // Two properties, both of which the deleted prose lacked: it accounts for
@@ -3758,6 +4008,26 @@ function selfTest() {
       'invoked directly, --tier still answers rather than exiting 0 in silence',
       direct.status === 0 && (direct.stdout ?? '').trim().length > 0,
     );
+
+    // #10097 option A, pinned END TO END. Every assertion above this one tests
+    // `unreachableLines` in ISOLATION, and all of them stay green if the call
+    // site drifts back behind `--residue` — which is the entire defect the
+    // option was ruled to fix. Only a real run of the DEFAULT invocation, with
+    // no flag, can tell the two apart.
+    const plainRun = spawnSync(process.execPath, [SELF, 'packages/spec/src/data/filter.zod.ts'], {
+      encoding: 'utf8',
+      cwd: ROOT,
+    });
+    const plainOut = plainRun.stdout ?? '';
+    t('the DEFAULT run answers at all', plainRun.status === 0 && plainOut.trim().length > 0);
+    t('the DEFAULT run — no --residue — names the unreachable families itself', /^Unreachable — the \d+ famil\(ies\)/m.test(plainOut));
+    t('and carries the ⛔ correction into the default output, where the wrong reading would be made', /NOT a skip list: CI runs these on every pull request/.test(plainOut));
+    t('and the default run stays free of the residue listings the flag owns', !/^Silent \(source names paths/m.test(plainOut));
+    // The two repaired families must not be named as unreachable by a REAL run.
+    const unreachableBlock = plainOut.slice(plainOut.indexOf('Unreachable — the'), plainOut.indexOf('Residue — all'));
+    t('a real default run no longer reports check:release-body as unreachable', !unreachableBlock.includes('check:release-body'));
+    t('nor check-skill-frame-freshness.mjs', !unreachableBlock.includes('check-skill-frame-freshness.mjs'));
+    t('and no phantom namespace literal survives into the printed reasons', !/'application\/json'|'refs\/remotes\/|'origin\/main'/.test(unreachableBlock));
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
     // Node resolves the link for the module graph, so `import.meta.url` names

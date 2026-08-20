@@ -657,7 +657,7 @@
         "capture status + code per route",
         "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
         "fire the NON-LEDGERED mounts: GET /api/settings (note the /api/settings base — NOT /api/v1), GET /api/v1/datasources/drivers, GET /api/v1/datasources",
-        "fire the dispatcher meta state route: GET /api/v1/meta/objects/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/objects/not_a_real_object/state/status as the 404 control",
+        "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
         "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control",
         "compare GET /api/v1/discovery capability bits against the families that answered (search/export/transactionalBatch at minimum)"
       ],
@@ -711,7 +711,7 @@
           "evidence": "the two traces + the unledgered-mount finding"
         },
         {
-          "clause": "the dispatcher meta state route is live AND correct: GET /api/v1/meta/objects/showcase_task/state/status?from=in_review (dispatcher ledger meta.getLegalNextStates, ADR-0020 D3.3) answers non-404 and returns next == ['done','in_progress'] — exactly the declared task_status_flow transition set for that state; ?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null, and an unknown object → 404",
+          "clause": "the dispatcher meta state route is live AND correct: GET /api/v1/meta/object/showcase_task/state/status?from=in_review (dispatcher ledger meta.getLegalNextStates, ADR-0020 D3.3) answers non-404 and returns next == ['done','in_progress'] — exactly the declared task_status_flow transition set for that state; ?from omitted returns next:null (no from ⇒ no transition table), a field with no FSM returns next:null, and an unknown object → 404",
           "oracle": "api",
           "verify": "the state-route response's next[] equals the object's state_machine transitions for the from-state (examples/app-showcase/src/data/objects/task.object.ts task_status_flow: in_review → [done, in_progress]); the null/404 controls hold",
           "evidence": "the state-route responses (from=in_review, from-omitted, unknown-object) vs the declared transitions"

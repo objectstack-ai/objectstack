@@ -874,7 +874,7 @@ export class ObjectStackClient {
         const route = this.getRoute('metadata');
         const qs = from !== undefined ? `?from=${encodeURIComponent(from)}` : '';
         const res = await this.fetch(
-            `${this.baseUrl}${route}/objects/${encodeURIComponent(object)}/state/${encodeURIComponent(field)}${qs}`,
+            `${this.baseUrl}${route}/object/${encodeURIComponent(object)}/state/${encodeURIComponent(field)}${qs}`,
         );
         return this.unwrapResponse<{ object: string; field: string; from: string | null; next: string[] | null }>(res);
     },

@@ -717,6 +717,29 @@ export const FlowSchema = lazySchema(() => strictObject(
    * The retry knobs are read **only** under `strategy: 'retry'`; `'fail'` and
    * `'continue'` ignore them (a fully spelled-out block under `'fail'` is
    * common and stays legal).
+   *
+   * **A durable pause ENDS the retry-governed segment** — ruled deliberate,
+   * not an omission. `strategy: 'retry'` describes ONE synchronous dispatch;
+   * when a run parks on an `approval`, `screen` or `wait` node (ADR-0019) the
+   * continuation is a new segment outside it, and a failure after the resume
+   * gets exactly one attempt. Measured, both directions: `SuspendedRun`
+   * carries no attempt state (nothing to inherit across the pause) and the
+   * resume path never consults this block (nothing would read it if it did).
+   * The alternative — resume inherits the remaining budget — is the recorded
+   * revisit path, not the contract: it would need a field on the persisted
+   * snapshot plus an answer for a flow republished mid-pause with a different
+   * `maxRetries`, and no deployment has asked for it. It is also what the
+   * knobs can honestly promise: `backoffMs`/`backoffMultiplier`/`jitter`
+   * model an in-process loop, which a pause of arbitrary duration is not.
+   *
+   * The authoring consequence is the part that belongs to the author, so it
+   * is stated on the block's own `.describe()` too: to protect the half of a
+   * flow that runs AFTER the pause, give that half its own failure handling
+   * in the flow — a `try_catch` node with its own `retry` around the
+   * post-resume work, or per-node `fault` edges to a handler. The pin for
+   * this behaviour is
+   * `packages/services/service-automation/src/retry-attempt-pause.test.ts`;
+   * changing it is a contract change, not a test fix.
    */
   errorHandling: strictObject({
     surface: "this flow's `errorHandling` block",
@@ -766,7 +789,7 @@ export const FlowSchema = lazySchema(() => strictObject(
       'Since #4964 the retry keys are the converged `RetryPolicySchema` contract, so a spelling ' +
       'learned on `job.retryPolicy` or a `try_catch` node\'s `retry` is correct here too.',
   }, {
-    strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe('How to handle node execution errors'),
+    strategy: z.enum(['fail', 'retry', 'continue']).default('fail').describe("How to handle node execution errors. 'retry' governs ONE synchronous dispatch: a durable pause (approval/screen/wait) ends the retry-governed segment, so a failure after the run resumes is not retried."),
 
     // ── The retry policy itself: ONE declaration (#4964) ────────────────
     // `maxRetries` / `backoffMs` / `backoffMultiplier` / `maxRetryDelayMs` /
@@ -825,7 +848,7 @@ export const FlowSchema = lazySchema(() => strictObject(
           'Note a retry re-runs the WHOLE flow, so side-effecting nodes run again.',
       });
     }
-  }).optional().describe('Flow-level error handling configuration'),
+  }).optional().describe("Flow-level error handling configuration. A durable pause ends the retry-governed segment: strategy: 'retry' describes one synchronous dispatch, so a run that parks on an approval/screen/wait node and later resumes gets one attempt for anything that fails after the pause. Protect the post-pause half with its own failure handling in the flow — a try_catch node's retry around the post-resume work, or fault edges to a handler node."),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here; the loader translates it

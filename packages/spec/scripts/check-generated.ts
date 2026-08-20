@@ -88,6 +88,16 @@ const GATED: ReadonlyArray<{
   },
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
   { check: 'check:upgrade-guide', gen: 'gen:upgrade-guide', artifact: 'docs/protocol-upgrade-guide.md' },
+  // [#10096] The schema-free `/meta` URL-spelling data module. Cheap: tsx-loads
+  // the two source maps (lazySchema keeps the kernel module light), re-derives
+  // the three-limb union, and runs the manifest/derived agreement assertion
+  // that used to live at `shared/metadata-url-spelling.ts` module load — this
+  // gate is that assertion's build-time enforcement home (ruling 2026-08-20).
+  {
+    check: 'check:meta-url-spelling',
+    gen: 'gen:meta-url-spelling',
+    artifact: 'src/meta-spelling/meta-url-data.generated.ts',
+  },
   { check: 'check:skill-docs', gen: 'gen:skill-docs', artifact: 'skill docs (from SKILL.md frontmatter)' },
   { check: 'check:skill-refs', gen: 'gen:skill-refs', artifact: 'skill references' },
   { check: 'check:react-blocks', gen: 'gen:react-blocks', artifact: 'react-blocks contract' },

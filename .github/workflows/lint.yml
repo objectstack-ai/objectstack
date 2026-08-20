@@ -388,6 +388,53 @@ jobs:
       - name: Verify-lock entry-point self-test
         run: bash scripts/pm/os-verify-lock.sh --self-test
 
+      # ci-failure self-test (#9898). Fifth member of the PM self-test family
+      # above, and until now the odd one out: `scripts/pm/ci-failure.mjs` — the
+      # one command from "a check is red" to "here is the failing assertion" —
+      # shipped a `--self-test` that NO job ran, so it executed only when a
+      # human or an agent typed it.
+      #
+      # This tool is worth the second because the rot it would hide is the exact
+      # defect its own card was about. The file was found near-complete but
+      # NEVER RUN LIVE: node 22's `fetch` ignores HTTPS_PROXY, so behind an agent
+      # container's proxy every read answered 401 and the tool's own transport
+      # probe reported PREREQUISITE NOT MET (exit 3) — and looked right doing it.
+      # ⇒ A retrieval tool that has stopped working presents as a tool correctly
+      # declining to work. Nothing about that shape reads as broken, which is
+      # what makes an unrun self-test the wrong economy here specifically.
+      #
+      # The self-test is also materially larger than when the card was filed:
+      # #9966/PR #10157 corrected the transport probe (a healthy `/rate_limit`
+      # was greening containers whose repo-scoped reads are refused — the fourth
+      # measured container class) and added nine cases, which is why this step
+      # was deliberately ordered AFTER that fix. Wiring a false green into a
+      # required job would have pinned it as CI-enforced truth.
+      #
+      # Beyond the pure predicates it pins the LIVE WIRING: `resolveStep` is run
+      # against the real `.github/workflows/` tree, so reshaping the workflows
+      # until no step name resolves to a `run:` block reddens here rather than
+      # silently degrading every gate failure from "here is the command" into
+      # "no substitute available".
+      #
+      # Unconditional and un-`if:`-ed, like every self-test above it — an
+      # exemption is precisely what a self-test must not have, or the gap moves.
+      #
+      # NO NETWORK, measured rather than assumed (#9898), because a self-test
+      # that reached GitHub would put this required context at the mercy of API
+      # availability — a far worse trade than the rot it prevents. Under
+      # `strace -f` with full egress available the run makes ZERO `socket()` and
+      # ZERO `connect()` calls (the live walk, traced identically, makes 3 and
+      # 3), and it exits 0 inside an empty network namespace where the live walk
+      # exits 3. The `--self-test` branch is chosen before the transport probe
+      # and never re-execs, and its two readers are injected. ~0.14 s.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the release-rehearsal step above: this card's declared file surface is
+      # this workflow alone, and dispatch-gates.mjs derives gate families from
+      # either spelling.
+      - name: PM ci-failure self-test
+        run: node scripts/pm/ci-failure.mjs --self-test
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal
@@ -1694,6 +1741,18 @@ jobs:
       # gitignored json-schema/ tree and refuses to touch a tracked file (#4711).
       - name: Check skill docs are generated from SKILL.md frontmatter
         run: pnpm --filter @objectstack/spec check:skill-docs
+
+      # [#10096] The schema-free `/meta` URL-spelling data module
+      # (src/meta-spelling/meta-url-data.generated.ts). Re-derives the
+      # three-limb union from PLURAL_TO_SINGULAR + DEFAULT_METADATA_TYPE_REGISTRY
+      # and fails on staleness OR on a manifest/derived spelling disagreement —
+      # this step is the build-time enforcement home of what used to be a
+      # module-load `assertMetaUrlSpellingsAgree()` (maintainer ruling
+      # 2026-08-20: the assertion may move, never drop). Reads src via tsx,
+      # needs no build; belongs in this unfiltered required job for the same
+      # reason as its artifact-gate neighbours.
+      - name: Check the meta-url-spelling data module is current and spellings agree
+        run: pnpm --filter @objectstack/spec check:meta-url-spelling
 
       - name: Check spec-changes.json is regenerated with the ADR-0087 registries
         run: pnpm --filter @objectstack/spec check:spec-changes

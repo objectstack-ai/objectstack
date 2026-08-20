@@ -30,10 +30,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       description: {
         label: "描述"
       },
-      permissions: {
-        label: "权限",
-        help: "权限字符串数组的 JSON 序列化内容"
-      },
       active: {
         label: "启用"
       },

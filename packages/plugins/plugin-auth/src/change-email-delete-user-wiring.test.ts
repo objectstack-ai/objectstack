@@ -504,8 +504,10 @@ describe('#8019 — change-email notifies the previous address without gating on
 
   it('keeps `sendChangeEmailConfirmation` OFF — the notice is not the gate in disguise', async () => {
     // ⛔ Ruling edge 1: #7735's 「策略按 better-auth 常规」 still governs the
-    // CONFIRMATION option, and in better-auth 1.7.0-rc.2 that option is not a
-    // notifier — `update-user.mjs` returns immediately after invoking it, so
+    // CONFIRMATION option, and that option is not a notifier — measured
+    // 2026-08-20 against the installed better-auth 1.7.1, whose
+    // `dist/api/routes/update-user.mjs` opens the branch at `:496` and returns
+    // `ctx.json({ status: true })` at `:505`, immediately after invoking it, so
     // the NEW address is never mailed until the OLD one clicks. Setting it
     // would silently convert this card's notification into the approval gate
     // the ruling refuses, and every assertion above would still pass. Read off

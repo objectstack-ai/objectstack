@@ -22,7 +22,10 @@
  * ⚠️ Registration is driven against `/sso/register` directly rather than through
  * the `register_sso_provider` UI action, because that bridge currently 400s on
  * an unrelated defect (#8193: it always sends `oidcConfig.mapping.id`, which
- * `@better-auth/sso@1.7.0-rc.2` rejects with a `z.strictObject`). Same adapter,
+ * the installed `@better-auth/sso@1.7.1` rejects — `oidcMappingSchema` at
+ * `dist/index.mjs:1852` is a `z.strictObject` whose members are
+ * `{ email, emailVerified?, name, image?, extraFields? }`, with no `id`;
+ * measured 2026-08-20). Same adapter,
  * same write door; #8193 is filed separately and is not this card's scope.
  */
 import { describe, it, expect, afterEach } from 'vitest';
