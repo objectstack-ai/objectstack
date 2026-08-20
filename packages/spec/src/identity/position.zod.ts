@@ -62,6 +62,15 @@ export const PositionSchema = lazySchema(() => strictObject(
         'D3, finalizing ADR-0057 D5): the visibility hierarchy is the business-unit ' +
         'tree (`sys_business_unit`) and the manager chain (`sys_user.manager_id`), ' +
         'never a position tree.',
+      permissions:
+        '`permissions` is not a Position field — there are no direct position-level ' +
+        'permission strings anywhere on the platform: capability reaches a position ' +
+        'ONLY through permission-set bindings (`sys_position_permission_set` rows, ' +
+        'created in Setup or by an app\'s kernel:ready binder). The `sys_position` ' +
+        'row column of the same name — a "JSON-serialized array of permission ' +
+        'strings" textarea no producer ever wrote and no runtime path ever read — ' +
+        'was retired under ADR-0049 enforce-or-remove (#9885). Delete the key; to ' +
+        'grant capability, bind permission sets to the position instead.',
     },
     history:
       'Until #4001 these were dropped silently — the position still parsed, so the ' +

@@ -30,10 +30,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       description: {
         label: "説明"
       },
-      permissions: {
-        label: "権限",
-        help: "権限文字列の JSON シリアライズ配列"
-      },
       active: {
         label: "有効"
       },

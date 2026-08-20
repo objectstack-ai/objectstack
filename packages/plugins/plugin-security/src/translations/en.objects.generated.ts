@@ -30,10 +30,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       description: {
         label: "Description"
       },
-      permissions: {
-        label: "Permissions",
-        help: "JSON-serialized array of permission strings"
-      },
       active: {
         label: "Active"
       },

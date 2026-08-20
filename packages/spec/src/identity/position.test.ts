@@ -253,6 +253,16 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       .toContain('FLAT');
   });
 
+  it('points `permissions` at permission-set bindings (#9885, ADR-0049 retirement)', () => {
+    // The sys_position row column of the same name was retired (no producer,
+    // no reader); this guidance is the live-authoring half of the
+    // prescription — the migrate-meta half is the semantic entry
+    // `position-permissions-column-retired`.
+    const msg = unknownKeyIssue({ name: 'p', label: 'P', permissions: '["x"]' })!.message;
+    expect(msg).toContain('sys_position_permission_set');
+    expect(msg).toContain('ADR-0049');
+  });
+
   it('round-trips the ADR-0010 runtime protection envelope', () => {
     const parsed = PositionSchema.parse({
       name: 'auditor', label: 'Auditor',
