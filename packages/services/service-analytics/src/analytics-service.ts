@@ -22,7 +22,7 @@ import { createLogger, getEnv, bucketKeyToCalendarRange, zonedDateStartToUtcMs }
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
-import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
@@ -644,7 +644,7 @@ const DEFAULT_CAPABILITIES: AnalyticsDriverCapabilities = {
 export class AnalyticsService implements IAnalyticsService {
   private readonly strategies: AnalyticsStrategy[];
   /** Context-independent part of the StrategyContext (no per-request scope). */
-  private readonly baseCtx: StrategyContext;
+  private readonly baseCtx: DatasetScopedStrategyContext;
   /** Context-aware read-scope provider (bound to the request's context per call). */
   private readonly readScopeProvider?: AnalyticsServiceConfig['getReadScope'];
   /** Compiled datasets by name — feeds the join allowlist (D-C) and queryDataset. */
@@ -724,6 +724,16 @@ export class AnalyticsService implements IAnalyticsService {
       getAllowedRelationships: (cubeName: string) =>
         this.datasetRegistry.get(cubeName)?.allowedRelationships
         ?? config.getAllowedRelationships?.(cubeName),
+      // [#10298] The compiled dataset's definition-level filter and its
+      // per-measure filters — the half of the declaration the Cube model has
+      // no room for. Same shape and same registry as `getAllowedRelationships`
+      // directly above: answered for a cube that IS a compiled dataset,
+      // `undefined` for every other cube.
+      getDatasetScope: (cubeName: string) => {
+        const compiled = this.datasetRegistry.get(cubeName);
+        if (!compiled) return undefined;
+        return { filter: compiled.filter, measureFilters: compiled.measureFilters };
+      },
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
       coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
@@ -760,7 +770,7 @@ export class AnalyticsService implements IAnalyticsService {
   private async callCtx(
     query: AnalyticsQuery,
     context?: ExecutionContext,
-  ): Promise<StrategyContext> {
+  ): Promise<DatasetScopedStrategyContext> {
     // #3602 — `context` rides along unconditionally. It is the ENGINE-side belt
     // (forwarded to `engine.aggregate`, where the middleware chain applies its
     // own RLS), so it must not be gated on the analytics-side belt being wired:
