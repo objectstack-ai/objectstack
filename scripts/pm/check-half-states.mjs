@@ -205,6 +205,44 @@
  *       GitHub computes mergeability asynchronously, so that reading is the
  *       platform saying "ask again later", not a state to name.
  *
+ * ## H17 — the one item here that is NOT an invariant
+ *
+ *   H17 the on-hold TRIGGER-FILE INDEX — an inventory SECTION, not a
+ *       predicate, and the only thing in this file that can never produce a
+ *       finding. Each row is an open `pm:on-hold` card and the repo-relative
+ *       files its hold comment(s) or body name as opportunistic-restart
+ *       triggers. A card appearing in it is a hold in perfectly good standing;
+ *       the row exists so a dispatching seat can intersect its file surface
+ *       against the board's held cards by GLANCING at the anchor it already
+ *       reads at the top of every round.
+ *
+ *       It is here because that intersection was measured NOT RUNNING (#10034,
+ *       2026-08-19): across six cards the named trigger files were touched
+ *       NINETEEN times and the rider was carried ZERO times. The mechanism is
+ *       real and maintainer-accepted (2026-08-11), but it existed only as a
+ *       remembered protocol step — in SKILL.md and in the hold comments
+ *       themselves — and a written step nobody executes is worse than none,
+ *       because holds are PRICED assuming it runs.
+ *
+ *       ⛔ Why it is NOT in `dispatch-gates.mjs`, where the intersection is
+ *       actually wanted: that script runs in a seat container, whose live
+ *       GitHub read is 403 — the same transport fact this file's prerequisite
+ *       classifier exists to name. Building the intersection there would
+ *       re-create the disease one layer down: a second mechanism that cannot
+ *       execute. The patrol runs on a runner where the transport prerequisite
+ *       is met, so it gathers and renders; the seat reads. No new seat-side
+ *       dependency, and the behaviour closes through a surface that already
+ *       has a standing caller.
+ *
+ *       Extraction is deterministic and refuses to guess: a closed set of
+ *       anchor terms (`H17_TRIGGER_ANCHOR_TERMS`, derived from a nine-card
+ *       census) plus the canonical `Restart-touch:` channel locate the clause,
+ *       and every candidate token is validated against `git ls-files`.
+ *       Anything unverifiable is DROPPED, so the index under-reports and never
+ *       invents — a fabricated row would send a seat to intersect against a
+ *       path that does not exist, and that intersection would silently never
+ *       hit, which is the original defect wearing a new mask.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -418,6 +456,7 @@
  */
 
 import process from 'node:process';
+import { execFileSync } from 'node:child_process';
 
 const OWNER_REPO = process.env.PM_SWEEP_REPO ?? 'objectstack-ai/objectstack';
 const API = 'https://api.github.com';
@@ -563,8 +602,22 @@ function partOfRe() {
  *
  * Lines are replaced by empty strings rather than deleted so that nothing is
  * spliced together across a stripped block into an accidental match.
+ *
+ * ## `{ inline: false }` — the same fence parser, opposite need (H17)
+ *
+ * H17 reads the INSIDE of inline spans: a hold comment names its trigger files
+ * as backticked repo-relative paths, so blanking spans would delete the entire
+ * signal. It still wants fenced blocks gone, and for the same reason H7 does —
+ * a hold comment routinely quotes `git grep` output and file:line evidence
+ * inside a fence, and those are citations, not triggers (measured on #8656,
+ * whose fenced block lists three `packages/spec/src/**` paths that are prose
+ * evidence for the card and name no trigger at all).
+ *
+ * So the option exists rather than a second fence parser: one fence-closing
+ * rule, read two ways, and neither reader can drift from the other. The
+ * default is unchanged, so every existing caller keeps byte-identical output.
  */
-export function stripMarkdownCode(body) {
+export function stripMarkdownCode(body, { inline = true } = {}) {
   const out = [];
   let fence = null;
   for (const line of String(body ?? '').split('\n')) {
@@ -580,7 +633,7 @@ export function stripMarkdownCode(body) {
       out.push('');
       continue;
     }
-    out.push(line.replace(/`+[^`\n]*`+/g, ' '));
+    out.push(inline ? line.replace(/`+[^`\n]*`+/g, ' ') : line);
   }
   return out.join('\n');
 }
@@ -1345,6 +1398,322 @@ export function h16StuckMergeConflict(pr, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
+// H17 — the on-hold TRIGGER-FILE INDEX. Not a predicate: an inventory.
+//
+// ## What it is for (#10034, measured 0-for-19)
+//
+// The opportunistic-restart mechanism is a maintainer-accepted design
+// (2026-08-11): a hold comment names the FILES whose next edit should wake the
+// card, and a dispatching seat is supposed to intersect its dispatch's file
+// surface against those lists before dispatching. The audit that produced this
+// item measured the intersection never running in any lane: across six cards
+// the named trigger files were touched NINETEEN times and the rider was
+// carried ZERO times. The mechanism existed in SKILL.md and in hold comments;
+// no seat's loop executed it.
+//
+// The fix is not another written protocol step. It is to put the list where
+// the seat is already looking: the patrol anchor, which the dispatch protocol
+// now makes the first thing read each round. This section renders card → files
+// so the intersection is a GLANCE at a rendered table rather than a
+// remembered procedure over 79 hold comments nobody opens.
+//
+// ## Why it lives on the PATROL side and not in `dispatch-gates.mjs`
+//
+// The obvious shape — teach the dispatch gate to grep hold comments — cannot
+// run where the dispatch gate runs. A seat container's live GitHub read is 403
+// (the repo-scoped transport fact this whole file's prerequisite classifier
+// exists to name), so an intersection built into `dispatch-gates.mjs` would be
+// a second mechanism that never executes: exactly the disease, re-created one
+// layer down. The patrol runs on a GitHub Actions runner where the transport
+// prerequisite is met, so the gathering happens there and the seat reads the
+// rendered result. Zero new runtime dependency on the seat side.
+//
+// ## REPORT-ONLY, and more strictly than the predicates above
+//
+// Every H1–H16 row is an assertion that something is WRONG. An H17 row asserts
+// nothing of the kind: a hold naming trigger files is a hold in perfectly good
+// standing. So this item writes no label, has no staleness threshold, and can
+// never produce a finding — it is inventory, rendered next to the findings
+// because that is the page the reader already opens. The only bound in it is a
+// RENDER budget (`H17_INDEX_ROW_CAP`), which is the same class of constant as
+// `MARKDOWN_BODY_BUDGET` and not a judgement about the board.
+//
+// ## The extraction is deterministic, and drops what it cannot verify
+//
+// ⛔ No fuzzy parsing, and no LLM in the loop. Two stages, both closed:
+//
+//   1. ANCHOR. A line qualifies only if it carries one of a closed set of
+//      terms (`H17_TRIGGER_ANCHOR_TERMS`) or is a canonical `Restart-touch:`
+//      line. Everything else in the comment is ignored, however path-shaped.
+//   2. VALIDATE. Every candidate token is checked against `git ls-files`. A
+//      token that is not a TRACKED FILE is DROPPED — never guessed at, never
+//      normalised into something that would match. This is what makes the
+//      index safe to render without review: a wrong row would send a seat to
+//      intersect against a path that does not exist, and the intersection
+//      would silently never hit.
+//
+// The census that produced the term set is in `H17_TRIGGER_ANCHOR_TERMS`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed set of anchor terms, matched case-insensitively as substrings of
+ * a single line. Derived from a read of nine open/just-released `pm:on-hold`
+ * cards (2026-08-19, #10034's measurement round) — seven of which carry a
+ * trigger-file clause, and all seven of those are covered here:
+ *
+ *   `trigger file`  — #8897 (`**Trigger file: \`…\`**`), #8984
+ *                     (`Restart condition (named trigger files)`), #9139
+ *                     (`**Trigger files** (opportunistic-restart clause)`),
+ *                     #8662 (`**Opportunistic trigger files**`), #8883
+ *                     (`**Restart condition (trigger files):**`)
+ *   `opportunistic` — #8656 (`3. **opportunistic:** any PR already editing …`),
+ *                     #9139, #8662
+ *   `restart condition` — #8331 (`Named restart conditions: ① …`), #8883,
+ *                     #8984, #8662
+ *
+ * ⛔ `rider` is deliberately NOT in the set, though it is the mechanism's own
+ * name. It is the word the AUDIT and RELEASE comments use ("the armed rider
+ * fired three times without being carried — PRs #9869, #9990 and #10005 all
+ * touched `.github/workflows/lint.yml`"), so admitting it would harvest the
+ * post-mortem prose of holds that are no longer held, as though the file were
+ * still a live trigger. Measured on #8331's release comment, which contains a
+ * tracked path and names no trigger at all.
+ *
+ * The two cards in the sample with NO trigger clause (#9707, #9276 — both
+ * `Restart-when: closed …#N` holds) match no term and correctly contribute no
+ * row. That is the negative half of the census, and it is pinned in the
+ * self-test.
+ */
+export const H17_TRIGGER_ANCHOR_TERMS = ['trigger file', 'opportunistic', 'restart condition'];
+
+/**
+ * The CANONICAL machine-readable channel this index also reads, proposed by
+ * #10034 and not yet adopted anywhere on the board.
+ *
+ * Same discipline as `Blocked-by:` (H4) and `Restart-when:` (H9): a
+ * case-sensitive literal at the start of a line, ONE path per line, so the
+ * value needs no parsing at all. Today it matches ZERO live cards, and that is
+ * the intended state — the mechanism precedes the convention deliberately, so
+ * that the day a hold is written with `Restart-touch:` lines the index already
+ * reads them and no second change is owed. The prose-anchor extraction above
+ * is what serves the 79 holds written before it exists.
+ *
+ * Fresh regex per call: a shared module-level `/g` literal is a `lastIndex`
+ * bug waiting for the next reader (the same note `closingKeywordRe` carries).
+ */
+export function restartTouchRe() {
+  return /^[ \t]*(?:>[ \t]*)*(?:[-*+][ \t]+)?Restart-touch:[ \t]*(\S[^\n]*)$/gm;
+}
+
+/**
+ * How far past an anchor line the list scan will follow.
+ *
+ * Two of the seven measured clauses put their paths in a bulleted list UNDER
+ * the anchor sentence (#8984's three docs pages, #8662's two gate files)
+ * rather than on the anchor line itself, so the scan has to cross into the
+ * list — and once it does, something has to stop it from swallowing an entire
+ * card body when an anchor term happens to appear above a long unrelated list.
+ *
+ * The longest measured trigger list is 3 items. 12 leaves 4× headroom while
+ * bounding the blast radius of a stray anchor to a dozen lines. It is a
+ * PARSING bound, not a threshold on board state: nothing about the board
+ * changes what it means, and no row is suppressed by it that a hold author
+ * could not fix by writing a shorter list.
+ */
+export const H17_LIST_SCAN_LIMIT = 12;
+
+/**
+ * The rendered-row cap, and the reason it is a budget rather than a judgement.
+ *
+ * The index is reserved OUT of `MARKDOWN_BODY_BUDGET` before the findings rows
+ * are laid out, so that it can never be silently truncated away by a noisy
+ * board — but the reservation itself has to be bounded, or a pathological run
+ * could starve the findings list to render inventory. At the measured rate (7
+ * of 79 open holds carry a clause) 40 is ~5× headroom. An overflow is
+ * ANNOUNCED, never silent (#4690).
+ */
+export const H17_INDEX_ROW_CAP = 40;
+
+/** Is this line a markdown list item (the shape a trigger list is written in)? */
+function isListItemLine(line) {
+  return /^[ \t]{0,6}(?:[-*+]|\d{1,2}[.)])[ \t]+\S/.test(line);
+}
+
+/**
+ * Every backticked span on one line, unwrapped and trimmed.
+ *
+ * Backticks are the ONLY delivery shape read, and that narrowness is the
+ * precision. All seven measured clauses backtick their paths; admitting bare
+ * prose tokens would mean deciding whether `rest-server.ts` in a sentence is a
+ * trigger or a mention, which is the LLM-grade judgement this item refuses to
+ * make. A hold that names its trigger without backticks contributes no row and
+ * is invisible here — a stated boundary, and the argument for the
+ * `Restart-touch:` convention rather than a reason to widen the parser.
+ */
+function backtickedSpans(line) {
+  return [...String(line ?? '').matchAll(/`([^`\n]+)`/g)].map((m) => m[1].trim());
+}
+
+/**
+ * Stage 1 — the candidate tokens a text declares as trigger files, BEFORE any
+ * validation. Exported so the self-test can pin the anchor/continuation rules
+ * separately from the tracked-file oracle, which needs a checkout.
+ *
+ * Reads fenced blocks out (citations, not triggers) and inline spans IN (the
+ * signal itself) — the `{ inline: false }` half of `stripMarkdownCode`.
+ *
+ * The continuation rule, in the shape the measurement forced: from an anchor
+ * line, harvest that line's spans, then — allowing at most ONE blank line, as
+ * markdown requires before a list — consume the consecutive list block that
+ * follows, up to `H17_LIST_SCAN_LIMIT` items. A blank line AFTER the list has
+ * started ends it, so the scan cannot rejoin the prose on the far side.
+ *
+ * ## The under-report this leaves, found while reverse-verifying
+ *
+ * A path on a WRAPPED continuation line — the author hard-wrapped the clause
+ * and the path landed on the next source line, which is neither the anchor nor
+ * a list item — is not harvested. All seven measured clauses put the path on
+ * the anchor line or in a list item, because GitHub comment bodies are written
+ * as long unwrapped source lines, so the shape is currently hypothetical. It
+ * is recorded rather than fixed: widening the scan to "any following line"
+ * would re-admit the prose this bounds away, and the error direction here is
+ * the one this whole item keeps — a missing row costs a seat the intersection
+ * it would have got anyway before #10034, while a wrong row sends it to
+ * intersect against a file nobody nominated.
+ *
+ * @param {string} text an issue body or a single comment body
+ * @returns {string[]} raw candidate tokens, in document order, not deduped
+ */
+export function h17TriggerFileCandidates(text) {
+  const stripped = stripMarkdownCode(text, { inline: false });
+  const lines = stripped.split('\n');
+  const out = [];
+
+  // The canonical channel first — a whole-line value, so no span is needed and
+  // a bare (unbackticked) path is accepted here and ONLY here.
+  for (const m of stripped.matchAll(restartTouchRe())) {
+    out.push(m[1].trim().replace(/^`+|`+$/g, '').trim());
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase();
+    if (!H17_TRIGGER_ANCHOR_TERMS.some((term) => lower.includes(term))) continue;
+    out.push(...backtickedSpans(lines[i]));
+
+    let j = i + 1;
+    let blanks = 0;
+    let started = false;
+    let taken = 0;
+    while (j < lines.length && taken < H17_LIST_SCAN_LIMIT) {
+      const line = lines[j];
+      if (line.trim() === '') {
+        if (started) break;
+        if (++blanks > 1) break;
+        j++;
+        continue;
+      }
+      if (!isListItemLine(line)) break;
+      out.push(...backtickedSpans(line));
+      started = true;
+      taken++;
+      j++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Stage 2 — candidates from every text of one card, validated against the
+ * tracked-file set and returned sorted and deduped.
+ *
+ * `isTracked` is injected rather than read here so the whole extraction stays
+ * pure and the self-test can drive it with a fixture set instead of a
+ * checkout. A token the oracle does not recognise is DROPPED in silence: the
+ * measured decoys are `Field` and `FIXTURE_CAPTURED_NEGATED` (backticked
+ * identifiers sitting inside real trigger clauses on #8656 and #8662) and
+ * `scripts/check-type-check-coverage.mjs:1679` (a real path with a line suffix
+ * — tracked as a file, NOT as that token, so the suffix form correctly fails).
+ * Each of those is a row this index would otherwise have rendered wrong.
+ *
+ * @param {string[]} texts card body plus every hold-comment body
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]}
+ */
+export function h17TriggerFiles(texts, isTracked) {
+  const found = new Set();
+  for (const text of texts ?? []) {
+    for (const token of h17TriggerFileCandidates(text)) {
+      if (token && isTracked(token)) found.add(token);
+    }
+  }
+  return [...found].sort();
+}
+
+/**
+ * The gathering policy — which cards are worth a comment fetch.
+ *
+ * Open `pm:on-hold` cards ONLY, which is exactly the population the index
+ * describes. The same candidate-gating idiom as H2's comment fetch and H16's
+ * detail GET: the request count is bounded by the population the item can
+ * actually speak about, never by the open board. Exported for the same reason
+ * `h16NeedsDetail` is — a policy that decides what gets READ AT ALL is where a
+ * silent hole would live.
+ */
+export function h17NeedsComments(issue) {
+  return labelNames(issue).includes('pm:on-hold');
+}
+
+/**
+ * Build the rendered index rows from cards already in hand.
+ *
+ * Cards contributing no validated path are omitted entirely rather than
+ * rendered empty: a hold with no trigger clause is the normal majority shape
+ * (2 of the 9 measured, and most of the 79 on the board), and printing 70
+ * empty rows would bury the handful that carry the signal this section exists
+ * to deliver.
+ *
+ * @param {Array<{ issue: object, texts: string[] }>} entries
+ * @param {(path: string) => boolean} isTracked
+ * @returns {Array<{ issue: object, files: string[] }>} ascending by number
+ */
+export function h17IndexRows(entries, isTracked) {
+  const rows = [];
+  for (const { issue, texts } of entries ?? []) {
+    const files = h17TriggerFiles(texts, isTracked);
+    if (files.length > 0) rows.push({ issue, files });
+  }
+  return rows.sort((a, b) => (a.issue?.number ?? 0) - (b.issue?.number ?? 0));
+}
+
+/**
+ * The tracked-file oracle. Returns a Set, or `null` when it could not be read.
+ *
+ * `-z` rather than plain `ls-files`: git QUOTES paths containing non-ASCII or
+ * special bytes in the default output ("packages/\303\251.ts"), and a quoted
+ * form would never match the token a hold comment backticks — silently
+ * dropping exactly the paths hardest to notice missing. The NUL-separated form
+ * is byte-exact.
+ *
+ * An EMPTY result reads as unavailable, not as "nothing is tracked". The
+ * difference is the whole #4690 posture at oracle granularity: an empty set
+ * would validate away every candidate and render a confidently empty index —
+ * the shape indistinguishable from a board where no hold names a trigger file,
+ * which is the silence this item exists to end.
+ */
+function readTrackedFiles() {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const set = new Set(out.split('\0').filter(Boolean));
+    return set.size > 0 ? set : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -1399,13 +1768,91 @@ export function isLoudFinding(message) {
 export function summaryLine(counts, findingCount) {
   const probed = counts.conflictProbed ?? 0;
   const candidates = counts.conflictCandidates ?? 0;
+  const held = counts.holdProbed ?? 0;
+  const holdCandidates = counts.holdCandidates ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
+}
+
+/**
+ * The H17 section, in either medium — one builder so the two renderers can
+ * never drift on WHAT the index says, only on how it is marked up.
+ *
+ * Returns `[]` when no index was supplied at all, which keeps every existing
+ * two-argument call byte-identical: a caller that does not gather the index
+ * gets the report it always got, rather than a section claiming an empty
+ * board.
+ *
+ * The three states it can be in are deliberately distinguishable, because two
+ * of them look identical if you let them (#4690):
+ *
+ *   - oracle unreadable  → says so, loudly, and claims nothing about holds
+ *   - read, nothing found → says the holds were READ and name no tracked file
+ *   - read, rows          → the index
+ *
+ * @param {{ rows: Array<{issue: object, files: string[]}>, candidates?: number,
+ *   probed?: number, tracked?: number|null }} [index]
+ * @param {{ markdown?: boolean }} [options]
+ */
+export function renderTriggerIndex(index, { markdown = false } = {}) {
+  if (!index) return [];
+  const rows = index.rows ?? [];
+  const probed = index.probed ?? 0;
+  const candidates = index.candidates ?? 0;
+  const read = `read on ${probed} of ${candidates} open \`pm:on-hold\` card(s)`;
+  const head = markdown
+    ? ['### On-hold trigger-file index (H17)', '']
+    : ['', 'On-hold trigger-file index (H17)'];
+
+  if (index.tracked == null) {
+    head.push(
+      `⚠️ The tracked-file oracle (\`git ls-files\`) could not be read, so NO candidate path was ` +
+        `validated and this index is EMPTY BY FAILURE, not by finding. Run the patrol from inside a ` +
+        `checkout. (${read}.)`,
+    );
+    return head;
+  }
+
+  const intro =
+    `Before dispatching, intersect your dispatch's file surface against this list and NAME any card ` +
+    `it hits in the dispatch brief. These are the trigger files open holds declare — the ` +
+    `opportunistic-restart mechanism (maintainer-accepted 2026-08-11) whose intersection was ` +
+    `measured at 0-for-19 while it lived only as a remembered protocol step (#10034). Report-only: ` +
+    `a card here is a hold in good standing, never a finding. Extraction is deterministic — every ` +
+    `path shown is a tracked file; anything unverifiable was dropped rather than guessed, so this ` +
+    `list under-reports and never invents. (${read}; ${index.tracked} tracked file(s) in the oracle.)`;
+  head.push(intro, '');
+
+  if (rows.length === 0) {
+    head.push(
+      markdown
+        ? '_No open hold names a tracked trigger file. The holds were READ — this is a clean reading, not an unread one._'
+        : '  (no open hold names a tracked trigger file — read, not unread)',
+    );
+    return head;
+  }
+
+  const shown = rows.slice(0, H17_INDEX_ROW_CAP);
+  for (const { issue, files } of shown) {
+    if (markdown) {
+      head.push(
+        `- [#${issue.number}](${issue.html_url}) — ${files.map((f) => `\`${f}\``).join(', ')}`,
+      );
+    } else {
+      head.push(`  #${issue.number} ${files.join(', ')}`, `     ${issue.html_url}`);
+    }
+  }
+  if (rows.length > shown.length) {
+    const omitted = `… ${rows.length - shown.length} further card(s) omitted at the H17_INDEX_ROW_CAP render budget; the full list is in the workflow run log.`;
+    head.push(markdown ? `- _${omitted}_` : `  ${omitted}`);
+  }
+  return head;
 }
 
 /**
@@ -1413,11 +1860,19 @@ export function summaryLine(counts, findingCount) {
  * format switch existed. Findings arrive already sorted by issue number and
  * that order is kept: a terminal has no fold, so there is nothing for a
  * priority sort to buy here, and changing it would churn every seat's habit.
+ *
+ * The H17 index sits BETWEEN the findings and the summary line, which is the
+ * one placement the terminal medium allows: the summary sentence must stay the
+ * last line of the report (it is what a seat reads off the bottom of a scroll,
+ * and the self-test pins it there), while the index must not be separated from
+ * the rows by it. In the anchor body the ordering question resolves differently
+ * — see `renderMarkdown`.
  */
-export function renderPlain(findings, counts) {
+export function renderPlain(findings, counts, options = {}) {
   const lines = findings.map(
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
+  lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
 }
@@ -1492,19 +1947,30 @@ export function renderMarkdown(findings, counts, options = {}) {
 
   head.push(`**${summaryLine(counts, rows.length)}**`, '');
 
+  // The H17 index is built BEFORE the findings are laid out and appended
+  // AFTER them: findings are alarms and keep the top of the body, while the
+  // index is the reference a dispatching seat reads on purpose. Building it
+  // first is what lets its length be RESERVED out of the budget below, so a
+  // noisy board can never truncate the index away — the trim then falls on
+  // finding rows, which announce their own omission and are recoverable from
+  // the run log. An index silently missing from the anchor would restore
+  // exactly the 0-for-19 silence this section exists to end.
+  const indexBlock = renderTriggerIndex(options.triggerIndex, { markdown: true });
+  const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
+
   if (rows.length === 0) {
     head.push(
       '✅ No half-states found in this sweep. This line means the board was READ and is clean — a sweep' +
         ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
         ' green anchor is never the sound of a broken sweeper.',
     );
-    return head.join('\n');
+    return `${head.join('\n')}${indexText}`;
   }
 
   head.push('### Findings', '', '');
   const body = head.join('\n');
   const rendered = [];
-  let used = body.length;
+  let used = body.length + indexText.length;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
@@ -1518,7 +1984,7 @@ export function renderMarkdown(findings, counts, options = {}) {
     rendered.push(line);
     used += line.length + 1;
   }
-  return `${body}${rendered.join('\n')}`;
+  return `${body}${rendered.join('\n')}${indexText}`;
 }
 
 /**
@@ -2006,9 +2472,10 @@ function reportPrerequisiteNotMet(v, options = {}) {
   const nothing =
     swept === 0
       ? [
-          `  Nothing was swept: no issue was listed and no predicate (H1–H16) ran, so this`,
-          `  result says NOTHING about whether the board carries half-states. It is not a`,
-          `  clean board and it is not a dirty one — it is no reading at all.`,
+          `  Nothing was swept: no issue was listed, no predicate (H1–H16) ran, and the H17`,
+          `  trigger-file index gathered nothing, so this result says NOTHING about whether the`,
+          `  board carries half-states. It is not a clean board and it is not a dirty one — it`,
+          `  is no reading at all.`,
         ]
       : [
           `  Nothing was judged: the transport failed after ${swept} issue(s) had been listed,`,
@@ -2077,8 +2544,12 @@ async function sweep(options = {}) {
   // H16's per-row fetch is the one input that can fail partially, so its
   // tally rides out of the sweep and into the summary line (see `summaryLine`).
   const stats = { conflictCandidates: 0, conflictProbed: 0 };
+  // H17's gathering rides out of the sweep the same way, because it has the
+  // same per-row failure mode as H16's detail pass and therefore owes the
+  // summary line the same `read X of Y`.
+  const hold = { entries: [], candidates: 0, probed: 0 };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats, hold);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
     throw err;
@@ -2093,11 +2564,23 @@ async function sweep(options = {}) {
     merged: seenMerged.size,
     conflictCandidates: stats.conflictCandidates,
     conflictProbed: stats.conflictProbed,
+    holdCandidates: hold.candidates,
+    holdProbed: hold.probed,
+  };
+  // The oracle is read ONCE per sweep, after gathering: it is a local
+  // `git ls-files`, not a request, and every candidate token is checked
+  // against the same reading so the index cannot be internally inconsistent.
+  const tracked = readTrackedFiles();
+  const triggerIndex = {
+    rows: h17IndexRows(hold.entries, (path) => (tracked ? tracked.has(path) : false)),
+    candidates: hold.candidates,
+    probed: hold.probed,
+    tracked: tracked ? tracked.size : null,
   };
   console.log(
     options.format === 'markdown'
-      ? renderMarkdown(findings, counts, { provenance: options.provenance })
-      : renderPlain(findings, counts),
+      ? renderMarkdown(findings, counts, { provenance: options.provenance, triggerIndex })
+      : renderPlain(findings, counts, { triggerIndex }),
   );
 }
 
@@ -2150,10 +2633,25 @@ async function listAllOpenIssues() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats = {}) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats = {}, hold = null) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
+
+  // At most ONE comment fetch per card, shared by the two items that need the
+  // thread: H2 reads it for the claim marker, H17 for trigger clauses. Without
+  // the memo a card carrying both `pm:dispatched` (assigned) and `pm:on-hold`
+  // — itself an H3-adjacent half-state, so exactly the card most likely to be
+  // on the board — would be fetched twice per sweep for no new information.
+  const commentCache = new Map();
+  const commentsFor = async (issue) => {
+    if (commentCache.has(issue.number)) return commentCache.get(issue.number);
+    const rows = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
+    const bodies = rows.map((c) => c.body ?? '');
+    commentCache.set(issue.number, bodies);
+    return bodies;
+  };
+  let lastHoldError = null;
 
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
@@ -2186,11 +2684,41 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
       // comment is posted at claim time, so on a healthy card it is early in
       // the thread; a >100-comment card with a late claim shows up as a
       // finding the patrol then reads by hand.
-      const comments = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
-      if (h2AssigneeNoClaimComment(issue, comments.map((c) => c.body))) {
+      const comments = await commentsFor(issue);
+      if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
     }
+
+    // H17 — the trigger-file index. Gathering only: the card's own body plus
+    // its hold comments, kept for the pure extraction the renderers consume.
+    // Fetched for open `pm:on-hold` cards ONLY (`h17NeedsComments`), which is
+    // the population the index speaks about, and never for the other label
+    // pages — the same candidate-gating trade H2 and H16 make.
+    //
+    // A failed fetch leaves ONE card out of the index and must not fail the
+    // sweep: every other item's findings are already gathered and worth
+    // printing, and the summary line's `read X of Y` is what states the gap.
+    if (hold && h17NeedsComments(issue)) {
+      hold.candidates += 1;
+      try {
+        const comments = await commentsFor(issue);
+        hold.probed += 1;
+        hold.entries.push({ issue, texts: [issue.body ?? '', ...comments] });
+      } catch (err) {
+        lastHoldError = err;
+      }
+    }
+  }
+
+  // …but if NO hold comment could be read at all, the index would render as
+  // "no open hold names a trigger file" — which is the 0-for-19 silence with a
+  // green face on it. That is the transport, not a clean board (#4690), so it
+  // is rethrown for the outer net to re-probe and classify. The predicate is
+  // H16's by name because that is where this judgement is documented; the
+  // shape is identical and deliberately shared rather than re-derived.
+  if (hold && h16DetailPassUnreadable(hold.candidates, hold.probed)) {
+    throw lastHoldError;
   }
 
   // H7 + H12 — the PR side. Listed straight from `/pulls` rather than filtered
@@ -3009,6 +3537,227 @@ function selfTest() {
   // separates "being worked" from "stuck", and 4h is well past it.
   t('H16 incident: …while one hour in, the same PR was correctly silent', h16StuckMergeConflict({ ...pr9826, updated_at: hoursAgo(1) }, NOW), null);
 
+  // -- H17: the on-hold trigger-file index (#10034) --------------------------
+  // Every fixture below is a VERBATIM excerpt from a real hold comment or card
+  // body, read on 2026-08-19 while measuring the census that produced
+  // `H17_TRIGGER_ANCHOR_TERMS`. Invented shapes would prove nothing here: the
+  // whole question this item had to answer first was whether hold comments
+  // have a greppable shape at all, and the answer is a fact about these nine
+  // cards, not about a format anyone designed.
+  //
+  // The tracked-file oracle is a fixture set, so the extraction is pinned
+  // without a checkout — and the DROP behaviour is pinned with it, because
+  // "what this refuses to emit" is the property that makes the index safe to
+  // render unreviewed.
+  const TRACKED = new Set([
+    '.github/workflows/lint.yml',
+    'packages/rest/src/rest-server.ts',
+    'packages/spec/src/data/field.zod.ts',
+    'content/docs/ui/setup-app.mdx',
+    'content/docs/automation/hook-bodies.mdx',
+    'content/docs/kernel/index.mdx',
+    'scripts/check-durability-degradation-log-level.mjs',
+    'packages/lint/src/data-model-rules.ts',
+    'packages/lint/src/validate-security-posture.test.ts',
+    'scripts/check-where-matcher-conformance.mjs',
+    'scripts/where-matcher-conformance.baseline.json',
+    'scripts/check-type-check-coverage.mjs',
+    'packages/spec/src/contracts/data-driver.ts',
+  ]);
+  const tracked = (p) => TRACKED.has(p);
+  const files = (text) => h17TriggerFiles([text], tracked).join('|');
+
+  // Shape A — anchor and path on ONE line, prose form. #8331's hold comment.
+  const c8331 =
+    'Named restart conditions: ① #8330 merged AND the next queued card that already touches ' +
+    '`.github/workflows/lint.yml` — devx seat: name this card in that dispatch brief as a declared ' +
+    'rider (comment-or-removal, dev decides against the card\'s trade-off analysis); ② the gate\'s ' +
+    'filters and the workflow step\'s filters are ever observed to diverge.';
+  t('H17 #8331: `restart condition` anchor + inline path -> the path', files(c8331), '.github/workflows/lint.yml');
+
+  // Shape B — a bolded `Restart condition (trigger files):` label. #8883.
+  const c8883 =
+    '- **Restart condition (trigger files):** after PR #8887 (the #8850 extraction) is MERGED, the ' +
+    'next dispatched card whose surface includes `packages/rest/src/rest-server.ts` metadata-endpoints ' +
+    'region carries item 1 (the JSDoc header) as a declared rider.';
+  t('H17 #8883: `trigger files` anchor -> the path', files(c8883), 'packages/rest/src/rest-server.ts');
+
+  // Shape C — an `opportunistic:` numbered item, with a backticked IDENTIFIER
+  // on the same line. `Field` is not a tracked file and must be dropped: this
+  // is the decoy that proves the oracle is doing work rather than decorating.
+  const c8656 =
+    '3. **opportunistic:** any PR already editing the `Field` builder object in ' +
+    '`packages/spec/src/data/field.zod.ts` — closing the gap there is a cheap declared rider.';
+  t('H17 #8656: `opportunistic` anchor -> only the tracked path', files(c8656), 'packages/spec/src/data/field.zod.ts');
+  t('H17 #8656: …and the backticked identifier `Field` is dropped, not guessed at', files(c8656).includes('Field'), false);
+
+  // Shape D — anchor sentence, then an IMMEDIATE bullet list. #8984.
+  const c8984 =
+    '**Restart condition (named trigger files)**: the next PR touching any of\n' +
+    '- `content/docs/ui/setup-app.mdx`\n' +
+    '- `content/docs/automation/hook-bodies.mdx`\n' +
+    '- `content/docs/kernel/index.mdx`\n' +
+    '\n' +
+    'carries the relabel as a **declared rider**.';
+  t(
+    'H17 #8984: anchor + immediate bullet list -> all three paths',
+    files(c8984),
+    'content/docs/automation/hook-bodies.mdx|content/docs/kernel/index.mdx|content/docs/ui/setup-app.mdx',
+  );
+  t('H17 #8984: …and the prose after the blank line is not rejoined', files(c8984).includes('rider'), false);
+
+  // Shape E — an explicit `Trigger file:` label inside a numbered item. #8897.
+  const c8897 =
+    '1. **Trigger file: `scripts/check-durability-degradation-log-level.mjs`** — any card or PR ' +
+    'editing this file (including the #8901 design work) must decide options 1/2/3 in the same change.\n' +
+    '2. Any seam reporting through an injected receiver goes red with a "silent" message.';
+  t('H17 #8897: `Trigger file:` label -> the path', files(c8897), 'scripts/check-durability-degradation-log-level.mjs');
+
+  // Shape F — two paths on one anchor line, in a card BODY rather than a
+  // comment. #9139, which carries zero comments: the body channel is not
+  // optional, and reading only comments would have missed this card entirely.
+  const b9139 =
+    '- **Trigger files** (opportunistic-restart clause): `packages/lint/src/data-model-rules.ts` and ' +
+    '`packages/lint/src/validate-security-posture.test.ts` — any dispatch whose file surface ' +
+    'intersects them must name this card.';
+  t(
+    'H17 #9139: two paths on one anchor line (from the card BODY) -> both',
+    files(b9139),
+    'packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts',
+  );
+
+  // Shape G — anchor, BLANK LINE, then the list; and a third bullet that is
+  // prose naming a backticked fixture CONSTANT. #8662, the second decoy.
+  const c8662 =
+    '**Opportunistic trigger files** (per the hold discipline — a restart condition nobody can see is ' +
+    'not a condition). Name this card in the dispatch order of any card whose file surface intersects:\n' +
+    '\n' +
+    '- `scripts/check-where-matcher-conformance.mjs`\n' +
+    '- `scripts/where-matcher-conformance.baseline.json`\n' +
+    '- the `FIXTURE_CAPTURED_NEGATED` self-test fixture\n';
+  t(
+    'H17 #8662: anchor, blank line, then the list -> both tracked paths',
+    files(c8662),
+    'scripts/check-where-matcher-conformance.mjs|scripts/where-matcher-conformance.baseline.json',
+  );
+  t('H17 #8662: …and the backticked constant is dropped', files(c8662).includes('FIXTURE'), false);
+
+  // The NEGATIVE half of the census — the two sampled holds with no trigger
+  // clause. Their exits are `Restart-when: closed …#N`, which H9 already
+  // judges; H17 must contribute no row for them, or the index would tell a
+  // dispatching seat to intersect against files nobody nominated.
+  const c9276 =
+    'Restart-when: closed objectstack-ai/objectstack#5499\n\n' +
+    '(Earlier restart is legitimate only if the freeze ruling is narrowed on #5499 to exclude ' +
+    'storage-contract normalization — that is a maintainer note to record there, not a seat call.)';
+  t('H17 #9276: a `Restart-when: closed` hold names no trigger file', files(c9276), '');
+  t(
+    'H17 #9707: a card-closure hold names no trigger file either',
+    files('**Card status:** `pm:on-hold`, restart-when **objectui#5266 lands** — at which point the residual should be re-measured.'),
+    '',
+  );
+
+  // ⛔ `rider` is not an anchor term, and this is the specimen that decided it:
+  // #8331's RELEASE comment is post-mortem prose about a hold that is no
+  // longer held, and it contains a tracked path. Admitting `rider` would have
+  // rendered a dead trigger as a live one.
+  const release8331 =
+    'Hold released → `pm:queue` (triage seat, rider-clause audit): the armed rider fired three times ' +
+    'without being carried — PRs #9869, #9990 and #10005 all touched `.github/workflows/lint.yml` ' +
+    'after the rider armed (verified on origin/main; `refreshBuiltClosure()` confirmed at ' +
+    '`scripts/check-type-check-coverage.mjs:1679`).';
+  t('H17: a release/audit comment saying "rider" is NOT an anchor', files(release8331), '');
+  // …and the same line's `path:line` citation form must fail validation even
+  // when something else on the line does anchor it.
+  t(
+    'H17: a `path:line` citation is not a tracked file and is dropped',
+    files(`**Trigger file:** see \`scripts/check-type-check-coverage.mjs:1679\``),
+    '',
+  );
+
+  // Fenced blocks are citations, not triggers — #8656's evidence block lists
+  // real `packages/spec/**` paths that nominate nothing.
+  //
+  // ⚠️ The fixture QUOTES ANOTHER CARD'S CLAUSE inside the fence, and that
+  // detail is load-bearing. Written first with only #8656's verbatim
+  // `path:line` citations, this case passed with fence-stripping ENTIRELY
+  // REMOVED: the `:234` suffix makes that token fail the tracked-file check on
+  // its own, so the test was measuring the ORACLE while vouching for a fence
+  // parser it never exercised. A bare path in a fence does not exercise it
+  // either — nothing unbackticked is ever harvested from prose. The shape that
+  // actually needs the strip is the one these threads are full of: a comment
+  // quoting a PRIOR comment wholesale, anchor term and backticks included.
+  // Without the strip, the quoting card inherits a trigger file it never
+  // nominated, and the index sends a seat to intersect on the wrong card.
+  const fenced =
+    '**Restart condition**: unchanged. For reference, #8656 reads:\n\n' +
+    '```\n' +
+    '3. **opportunistic:** any PR already editing the `Field` builder object in `packages/spec/src/data/field.zod.ts` — a cheap declared rider.\n' +
+    '```\n';
+  t('H17: a clause quoted inside a fenced block is not harvested', files(fenced), '');
+  t(
+    'H17: …but stripMarkdownCode({inline:false}) still keeps inline spans',
+    stripMarkdownCode('a `packages/rest/src/rest-server.ts` b', { inline: false }).includes('rest-server'),
+    true,
+  );
+  t(
+    'H17: …and the default (inline:true) is unchanged for every existing caller',
+    stripMarkdownCode('a `Fixes #1` b').includes('#1'),
+    false,
+  );
+
+  // The canonical `Restart-touch:` channel — zero live matches today by
+  // design, so these are the only cases that exercise it.
+  t('H17 Restart-touch: a bare path on the canonical line is read', files('Restart-touch: packages/rest/src/rest-server.ts'), 'packages/rest/src/rest-server.ts');
+  t('H17 Restart-touch: a backticked value is read too', files('Restart-touch: `.github/workflows/lint.yml`'), '.github/workflows/lint.yml');
+  t('H17 Restart-touch: a bulleted canonical line is read', files('- Restart-touch: packages/spec/src/data/field.zod.ts'), 'packages/spec/src/data/field.zod.ts');
+  t('H17 Restart-touch: an UNTRACKED value is dropped, never emitted', files('Restart-touch: packages/gone/removed.ts'), '');
+  // Case-sensitive like `Blocked-by:` and `Restart-when:`: a lowercase variant
+  // is a line the machinery cannot see, and must not be quietly accepted.
+  t('H17 Restart-touch: the lowercase spelling is NOT the channel', files('restart-touch: packages/rest/src/rest-server.ts'), '');
+
+  // Continuation bounds.
+  t(
+    'H17 continuation: prose immediately after the anchor stops the scan',
+    files('**Trigger files**: as follows.\nThis paragraph mentions `packages/rest/src/rest-server.ts` in passing.'),
+    '',
+  );
+  t(
+    'H17 continuation: two blank lines before a list stop the scan',
+    files('**Trigger files**:\n\n\n- `packages/rest/src/rest-server.ts`'),
+    '',
+  );
+  const longList = `**Trigger files**:\n${Array.from({ length: 20 }, (_, i) => `- item ${i}`).join('\n')}\n- \`packages/rest/src/rest-server.ts\``;
+  t('H17 continuation: the scan stops at H17_LIST_SCAN_LIMIT', files(longList), '');
+  t('H17_LIST_SCAN_LIMIT is the documented parsing bound', H17_LIST_SCAN_LIMIT, 12);
+
+  // Multi-text merge: body + comments are one card's evidence, deduped and
+  // sorted. A path named in both the body and a comment is ONE row entry.
+  t(
+    'H17: body and comments merge, dedupe and sort into one list',
+    h17TriggerFiles([b9139, c8331, '**Trigger files**: `.github/workflows/lint.yml`'], tracked).join('|'),
+    '.github/workflows/lint.yml|packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts',
+  );
+
+  // The gathering policy — the same "must never be narrower than the thing it
+  // feeds" property `h16NeedsDetail` is pinned for.
+  t('H17 gating: an open pm:on-hold card is a candidate', h17NeedsComments(issue(['pm:on-hold'])), true);
+  t('H17 gating: a queued card is not', h17NeedsComments(issue(['pm:queue', 'domain:devx'])), false);
+  t('H17 gating: a dispatched card is not', h17NeedsComments(issue(['pm:dispatched'])), false);
+  t('H17 gating: a hold carrying other labels is still a candidate', h17NeedsComments(issue(['bug', 'pm:on-hold', 'domain:engine'])), true);
+
+  // Row assembly: cards with no validated path are omitted entirely (the
+  // majority shape — most of the 79 open holds name no file), and rows sort by
+  // number so the anchor body diffs cleanly run to run.
+  const card = (number, texts) => ({ issue: { number, html_url: `https://example.test/${number}` }, texts });
+  const rows17 = h17IndexRows(
+    [card(9139, [b9139]), card(9276, [c9276]), card(8331, [c8331])],
+    tracked,
+  );
+  t('H17 rows: a hold naming nothing is omitted, not rendered empty', rows17.length, 2);
+  t('H17 rows: …and rows ascend by card number', rows17.map((r) => r.issue.number).join(','), '8331,9139');
+  t('H17 rows: …carrying the validated files', rows17[1].files.join('|'), 'packages/lint/src/data-model-rules.ts|packages/lint/src/validate-security-posture.test.ts');
+
   // -- report rendering, both media (#9844) ---------------------------------
   // The standing caller writes the markdown into a pinned issue body, so the
   // properties pinned here are the ones a broken body would cost: the plain
@@ -3109,6 +3858,71 @@ function selfTest() {
   t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
   t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
   t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // -- H17 section rendering, both media (#10034) ---------------------------
+  // The section has three states and two of them read identically if you are
+  // careless, so each is pinned by the sentence that distinguishes it.
+  const idxRows = [
+    { issue: { number: 8331, html_url: 'https://example.test/8331' }, files: ['.github/workflows/lint.yml'] },
+    { issue: { number: 9139, html_url: 'https://example.test/9139' }, files: ['packages/lint/src/data-model-rules.ts', 'packages/lint/src/validate-security-posture.test.ts'] },
+  ];
+  const triggerIdx = { rows: idxRows, candidates: 79, probed: 79, tracked: 6360 };
+  // Absent index -> byte-identical to the report this script always printed.
+  t('H17 render: no index supplied renders no section at all', renderTriggerIndex(undefined).length, 0);
+  t('H17 render: …so a two-argument renderPlain is unchanged', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+  // Present index, plain medium.
+  const plainIdx = renderPlain([quietRow], counts, { triggerIndex: triggerIdx });
+  t('H17 plain: the section is titled and present', plainIdx.includes('On-hold trigger-file index (H17)'), true);
+  t('H17 plain: a row lists card and files', plainIdx.includes('  #9139 packages/lint/src/data-model-rules.ts, packages/lint/src/validate-security-posture.test.ts'), true);
+  t('H17 plain: …with the card URL on its own line', plainIdx.includes('\n     https://example.test/9139'), true);
+  // The placement constraint the terminal medium imposes: the summary sentence
+  // stays LAST, and the index sits above it rather than after it.
+  t('H17 plain: the summary sentence is still the last line', plainIdx.endsWith('not a gate verdict.'), true);
+  t('H17 plain: …and the index sits above it', plainIdx.indexOf('On-hold trigger-file index') < plainIdx.indexOf('check-half-states: swept'), true);
+  // Markdown medium.
+  const mdIdx = renderMarkdown([quietRow], counts, { triggerIndex: triggerIdx });
+  t('H17 markdown: the section renders as a heading', mdIdx.includes('### On-hold trigger-file index (H17)'), true);
+  t('H17 markdown: a row is a link plus backticked paths', mdIdx.includes('- [#8331](https://example.test/8331) — `.github/workflows/lint.yml`'), true);
+  t('H17 markdown: the section sits BELOW the findings', mdIdx.indexOf('### Findings') < mdIdx.indexOf('### On-hold trigger-file index'), true);
+  t('H17 markdown: the intro states the measured failure it exists to end', mdIdx.includes('0-for-19'), true);
+  t('H17 markdown: …and says it is report-only, not a finding', mdIdx.includes('a card here is a hold in good standing, never a finding'), true);
+  t('H17 markdown: …and declares that it under-reports rather than invents', mdIdx.includes('under-reports and never invents'), true);
+  // A clean board still gets the index: an empty FINDINGS list is exactly the
+  // run on which a dispatching seat has nothing else to read.
+  t('H17 markdown: a findings-clean sweep still renders the index', renderMarkdown([], counts, { triggerIndex: triggerIdx }).includes('### On-hold trigger-file index'), true);
+  // Read-and-empty vs oracle-unreadable — the #4690 pair.
+  const emptyIdx = renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 79, tracked: 6360 } });
+  t('H17 empty: says the holds were READ', emptyIdx.includes('this is a clean reading, not an unread one'), true);
+  t('H17 empty: …and does not claim an oracle failure', emptyIdx.includes('EMPTY BY FAILURE'), false);
+  const noOracle = renderMarkdown([], counts, { triggerIndex: { rows: idxRows, candidates: 79, probed: 79, tracked: null } });
+  t('H17 no-oracle: says the index is empty BY FAILURE', noOracle.includes('EMPTY BY FAILURE, not by finding'), true);
+  t('H17 no-oracle: …and renders no row, so nothing unvalidated leaks out', noOracle.includes('#8331'), false);
+  // The partial-read gap is stated, never implied.
+  t('H17 partial: a partial hold read says so', renderMarkdown([], counts, { triggerIndex: { rows: [], candidates: 79, probed: 12, tracked: 10 } }).includes('read on 12 of 79'), true);
+  // Budget: the index is RESERVED, so a board noisy enough to truncate the
+  // findings list still carries the index — the property that keeps the
+  // 0-for-19 silence from coming back through the renderer.
+  const manyRows = Array.from({ length: 400 }, (_, i) => finding(1000 + i, 'H1', 'x'.repeat(400)));
+  const crowded = renderMarkdown(manyRows, counts, { triggerIndex: triggerIdx });
+  t('H17 budget: a truncated findings list still announces its trim', crowded.includes('further row(s) omitted'), true);
+  t('H17 budget: …and the index survives the trim', crowded.includes('### On-hold trigger-file index'), true);
+  // The budget, not the hard cap: reserving the index is what keeps the body
+  // under MARKDOWN_BODY_BUDGET. Asserting only ISSUE_BODY_LIMIT would pass
+  // even with the reservation removed (the index is ~1.5 KB and the two
+  // numbers are 5.5 KB apart), i.e. it would pin nothing.
+  t('H17 budget: …and the whole body stays inside the render budget', crowded.length <= MARKDOWN_BODY_BUDGET, true);
+  t('H17 budget: …which the hard cap also bounds', crowded.length <= ISSUE_BODY_LIMIT, true);
+  // The index's own overflow announces itself rather than truncating silently.
+  const overflow = renderTriggerIndex(
+    { rows: Array.from({ length: H17_INDEX_ROW_CAP + 3 }, (_, i) => ({ issue: { number: i, html_url: 'u' }, files: ['f'] })), candidates: 1, probed: 1, tracked: 1 },
+    { markdown: true },
+  ).join('\n');
+  t('H17 budget: an over-cap index announces the omission', overflow.includes('3 further card(s) omitted'), true);
+  t('H17 budget: …and renders exactly the cap', overflow.split('\n').filter((l) => /^- \[?#?\d/.test(l)).length, H17_INDEX_ROW_CAP);
+  // The summary line's H17 half, mirroring the H16 `read X of Y` discipline.
+  t('summaryLine: reports the H17 hold-comment reads', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
+  t('summaryLine: …and a partial hold read says so', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0).includes('read on 12 of 79'), true);
+  t('summaryLine: absent H17 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('Hold comments read on 0 of 0'), true);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.

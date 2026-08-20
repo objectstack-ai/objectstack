@@ -50,6 +50,11 @@ import {
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import {
+  REVOKE_SESSION_NOT_FOUND_CODE,
+  REVOKE_SESSION_NOT_FOUND_MESSAGE,
+  revokeTargetsCallerSession,
+} from './revoke-session-match-guard.js';
+import {
   reconcileMembership,
   type MembershipPolicy,
   type ReconcileOutcome,
@@ -1466,6 +1471,22 @@ export class AuthManager {
             // fall through — the vendor still re-decides everything it owns
           }
 
+          // ── #9714: a revoke that identifies NO record must not report ──
+          // success. better-auth 1.7.1's `revoke-session` handler skips the
+          // delete when the token matches zero rows (or another user's row)
+          // and still answers `200 { status: true }` — its success line is
+          // unconditional. Refuse those requests HERE, with the vendor's own
+          // admission predicate asked through the vendor's own adapter call,
+          // so the handler only ever runs on requests whose success answer is
+          // true. Before-hook on purpose: an after-hook cannot change the
+          // status. `revoke-session-match-guard.ts` carries the full reading,
+          // including the 404-over-`{status:false}` decision and the
+          // no-existence-oracle property.
+          if (ctx?.path === '/revoke-session') {
+            await this.assertRevokeSessionIdentifiesRecord(ctx);
+            // fall through — the vendor still performs the revoke itself
+          }
+
           // ── ADR-0024: admin-gate self-service SSO provider registration ──
           // `@better-auth/sso`'s POST /sso/register only checks org-admin when
           // `body.organizationId` is present (index.mjs: `if (ctx.body
@@ -2740,10 +2761,11 @@ export class AuthManager {
       // AUTH_SSO_PROVIDER_SCHEMA).
       //
       // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
-      // model and read no `schema` option. Re-checked against the pinned
-      // 1.7.0-rc.2 (`node_modules/@better-auth/sso/dist`) on 2026-08-12: that is
-      // no longer true — `SSOOptions.schema.ssoProvider` now exists
-      // (index-D1yk91me.d.mts) and the runtime honours `modelName` plus a
+      // model and read no `schema` option. Re-measured against the installed
+      // 1.7.1 (`node_modules/@better-auth/sso/dist`) on 2026-08-19 — the pin
+      // moved off 1.7.0-rc.2, so the previous stamp here had itself expired
+      // (#8224): still no longer true — `SSOOptions.schema.ssoProvider` exists
+      // (index-CZytzKv6.d.mts) and the runtime honours `modelName` plus a
       // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
       // adapter-level bridge is kept as-is here because it is what the rest of
       // the auth stack is wired to; whether to move it onto the plugin option is
@@ -2776,9 +2798,14 @@ export class AuthManager {
     // Provider; endpoints mount under /api/v1/auth/scim/v2/{Users,…} (SCIM 2.0)
     // and /api/v1/auth/scim/{generate-token,…} (management). `active:false` →
     // ban + session revoke (needs the admin plugin, forced on above); org-scoped
-    // tokens need the organization plugin. Like @better-auth/sso it hardcodes
-    // its `scimProvider` model (no schema option) — bridged to `sys_scim_provider`
-    // via AUTH_MODEL_TO_PROTOCOL. Toggle with `OS_SCIM_ENABLED`.
+    // tokens need the organization plugin. This plugin hardcodes its
+    // `scimProvider` model and accepts no `schema` option — still true of the
+    // installed 1.7.0-rc.1 (`SCIMOptions` declares no `schema` / `modelName` /
+    // `fields` member; measured 2026-08-19). NOT "like @better-auth/sso", as
+    // this line used to say: sso accepts one as of 1.7.1 (#8224), so scim is now
+    // the only one of the pair for which the adapter bridge is forced. Bridged
+    // to `sys_scim_provider` via AUTH_MODEL_TO_PROTOCOL. Toggle with
+    // `OS_SCIM_ENABLED`.
     //
     // storeSCIMToken: 'hashed' — never persist the bearer in cleartext; the
     // plaintext is returned exactly once from generate-token (for the IdP admin).
@@ -4438,6 +4465,50 @@ export class AuthManager {
       // back to better-auth unchanged.
       const { isAPIError } = await import('better-auth/api');
       if (isAPIError(error)) throw error;
+    }
+  }
+
+  /**
+   * [#9714] `/revoke-session` admission gate — refuse (404, standard
+   * `RESOURCE_NOT_FOUND`) when the supplied token identifies no session
+   * belonging to the caller, instead of letting the vendor's unconditional
+   * success line answer `{ status: true }` over a skipped delete.
+   *
+   * The predicate is the vendor's own (`findSession(token)?.session.userId ===
+   * <caller>`), asked through the same `internalAdapter.findSession` the
+   * handler calls — never a second spelling of it. Everything the guard cannot
+   * decide falls through to the vendor: unauthenticated callers (its session
+   * middleware answers 401), a non-string token (its zod body schema answers
+   * 400), an adapter read failure (never convert "could not look" into "does
+   * not exist"). Zero-match and foreign-token answers are byte-identical — no
+   * existence oracle. Full reading: `revoke-session-match-guard.ts`.
+   */
+  private async assertRevokeSessionIdentifiesRecord(ctx: any): Promise<void> {
+    const token = ctx?.body?.token;
+    if (typeof token !== 'string') return; // vendor's body schema answers 400
+
+    let admitted: boolean;
+    try {
+      const actor = await this.resolveActor(ctx);
+      // No resolvable caller → the vendor's sensitiveSessionMiddleware issues
+      // the 401. Not ours to pre-empt (and answering 404 here would grade an
+      // anonymous probe's question before its authentication).
+      if (!actor?.userId) return;
+
+      const found = await ctx.context.internalAdapter.findSession(token);
+      admitted = revokeTargetsCallerSession(found, actor.userId);
+    } catch {
+      // A lookup that did not complete hands the request back to the vendor
+      // unchanged — an engine hiccup must not invent a "not found".
+      return;
+    }
+
+    if (!admitted) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError('NOT_FOUND', {
+        message: REVOKE_SESSION_NOT_FOUND_MESSAGE,
+        code: REVOKE_SESSION_NOT_FOUND_CODE,
+      });
     }
   }
 

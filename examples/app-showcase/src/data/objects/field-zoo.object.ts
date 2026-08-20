@@ -54,7 +54,7 @@ export const FieldZoo = ObjectSchema.create({
     // ── Date & time ──────────────────────────────────────────────────────
     f_date: Field.date({ label: 'Date' }),
     f_datetime: Field.datetime({ label: 'Date / Time' }),
-    f_time: { type: 'time', label: 'Time' },
+    f_time: Field.time({ label: 'Time' }),
 
     // ── Logic ────────────────────────────────────────────────────────────
     f_boolean: Field.boolean({ label: 'Boolean' }),

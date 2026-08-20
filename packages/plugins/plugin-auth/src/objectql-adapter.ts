@@ -32,12 +32,26 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   session: SystemObjectName.SESSION,
   account: SystemObjectName.ACCOUNT,
   verification: SystemObjectName.VERIFICATION,
-  // Plugin models. `@better-auth/sso` and `@better-auth/scim` both hardcode
-  // their model name and accept NO `schema` option (verified vs 1.6.2x — no
-  // mergeSchema, runtime never reads options.schema), so the table name is
-  // bridged here and `createObjectQLAdapterFactory` (below) auto-maps their
-  // camelCase fields to snake_case (oidcConfig→oidc_config, scimToken→
-  // scim_token, …) on every CRUD op via resolveProtocolName. Off by default
+  // Plugin models, bridged HERE rather than through a plugin `schema` option.
+  // This comment used to justify that with "both hardcode their model name and
+  // accept NO `schema` option (verified vs 1.6.2x)". That expired with the pin
+  // (#8224). Measured 2026-08-19 against the installed `@better-auth/sso@1.7.1`
+  // and `@better-auth/scim@1.7.0-rc.1`:
+  //   - sso DOES accept one now — `SSOOptions.schema.ssoProvider.{modelName,
+  //     fields,additionalFields}` (dist/index-CZytzKv6.d.mts), honoured at
+  //     runtime (dist/index.mjs, the plugin's own `schema:` block: `modelName:
+  //     options?.modelName ?? options?.schema?.ssoProvider?.modelName ??
+  //     'ssoProvider'`, plus a per-field `fieldName` fallback each).
+  //   - scim still accepts none — `SCIMOptions` declares no `schema` /
+  //     `modelName` / `fields` member at all.
+  // What holds for both is narrower and is the actual reason: the auth manager
+  // passes neither plugin a `schema` option, so their models arrive under
+  // better-auth's own names. The table name is bridged here and
+  // `createObjectQLAdapterFactory` (below) auto-maps their camelCase fields to
+  // snake_case (oidcConfig→oidc_config, scimToken→scim_token, …) on every CRUD
+  // op via resolveProtocolName. For scim that is the only available route; for
+  // sso it is now a CHOICE (see #8224 — moving it onto the plugin option is an
+  // open architecture question, deliberately not decided here). Off by default
   // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0024 / ADR-0071.
   ssoProvider: 'sys_sso_provider',
   scimProvider: 'sys_scim_provider',
@@ -713,8 +727,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   // /refresh-token) see the row whole while the generic data API does not.
   // See `internal-field-readback.ts`.
   const internalFieldEngine = rawDataEngine as unknown as InternalFieldResolvingEngine;
-  // Field-name bridging for better-auth plugins that expose NO `schema` option
-  // (e.g. @better-auth/sso): when a model is remapped via AUTH_MODEL_TO_PROTOCOL,
+  // Field-name bridging for better-auth plugins the auth manager passes no
+  // `schema` option (@better-auth/sso, @better-auth/scim — NOT "plugins that
+  // expose no `schema` option": sso accepts one as of 1.7.1, #8224): when a
+  // model is remapped via AUTH_MODEL_TO_PROTOCOL,
   // its camelCase model fields are also converted to snake_case columns on the
   // way in and back to camelCase on the way out. SCOPED by `objectName !== model`
   // so core / schema-declared models are byte-for-byte untouched.

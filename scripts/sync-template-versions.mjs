@@ -380,25 +380,57 @@ function main() {
 // identical (empty) results. #9648 answered half of that by adding
 // `packages/create-objectstack/src/template-version-stamps.test.ts`, which runs
 // this CLI over a STALE two-template fixture and asserts the rewrites. Two
-// measured gaps survive it, and this flag is scoped to exactly those two —
+// measured gaps motivated this flag. GAP 1 — SCHEDULING — has since been
+// CLOSED in ci.yml; it is recorded below rather than deleted, so the next
+// reader does not re-derive a conclusion the workflow no longer supports.
+// GAP 2 is what the flag asserts, and it is scoped to exactly that —
 // re-asserting what that vitest file already owns would be worse than one
 // harness, not better.
 //
-// GAP 1 — SCHEDULING. `create-objectstack#test` is reached only from ci.yml's
-// `test` job, and that job is `if: ... needs.filter.outputs.core != 'false'`.
-// The `core` paths-filter is `packages/**`, `examples/**`, `apps/!(docs)/**`,
-// `package.json`, `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml`
-// — `scripts/**` matches NONE of them. Measured on this tree (picomatch 4.0.5,
-// the matcher dorny/paths-filter uses): a diff confined to this file yields
-// `core=false`, so Test Core is skipped in full and the vitest never runs, on
-// precisely the PR that changes the rewriter. Two further layers were measured
-// and neither rescues it: `turbo ls --affected` returns ZERO packages for that
-// diff (a package-local edit returns 1, so the probe is live) — the
-// `$TURBO_ROOT$` entry in `turbo.json` moves the task HASH, which is a
-// different thing — and the `--union-into` step that does pull
-// `create-objectstack` back in lives INSIDE the skipped job. lint.yml carries
-// no paths filter and no filter job, so a step there runs on every pull
-// request, push and merge-queue build. That is the whole of this flag's job.
+// GAP 1 — SCHEDULING, NOW CLOSED. The original argument: `create-objectstack#test`
+// is reached only from ci.yml's `test` job; that job was
+// `if: ... needs.filter.outputs.core != 'false'`; and the `core` paths-filter
+// (`packages/**`, `examples/**`, `apps/!(docs)/**`, `package.json`,
+// `pnpm-lock.yaml`, `tsconfig.json`, `.github/workflows/ci.yml`) matches NO path
+// under `scripts/` — so a diff confined to this file skipped Test Core in full,
+// and with it the vitest, on precisely the PR that changes the rewriter.
+//
+// `core` is still false for such a diff; `core` was never widened. What changed
+// is that the `test` job now ORs in a SECOND filter output — `scripts:` /
+// `'scripts/**'` — and skips only when BOTH say false (#9829).
+//
+// Re-measured against the merged workflow, with picomatch 2.3.1: that is the
+// version dorny/paths-filter@v4's own lockfile resolves and ncc-bundles, NOT the
+// 4.0.5 in this tree — the two agree on these globs, but the action is what
+// runs, so it is the one to quote. For a diff confined to this file:
+// `core=false`, `scripts=true`, so
+// `!cancelled() && (core != 'false' || scripts != 'false')` is TRUE. The job
+// runs.
+//
+// The job running is necessary, NOT sufficient — the shard tests a FILTERED
+// package set — so the rest of the chain was measured too, and the vitest does
+// now execute on such a diff. Each link, in order:
+//   - `turbo ls --affected` still returns ZERO packages for it (turbo 2.10.10),
+//     so the affected set alone would test nothing;
+//   - the `--union-into` step, which now runs because the job is no longer
+//     skipped, adds `@objectstack/spec` AND `create-objectstack` — both declare
+//     a glob matching this file in check-cross-package-test-inputs.mjs. On a
+//     push or merge-queue build the full package list is partitioned instead,
+//     which contains `create-objectstack` outright;
+//   - partition-test-shards.mjs places `create-objectstack` on a shard (2 of 3
+//     at this package set), so that shard's `turbo run test` names it;
+//   - `create-objectstack#test` declares
+//     `$TURBO_ROOT$/scripts/sync-template-versions.mjs` among its `inputs` in
+//     turbo.json, so editing this file MOVES the task hash — verified by
+//     comparing `turbo run test --filter=create-objectstack --dry=json` before
+//     and after a one-line edit — and turbo cannot replay a cached green;
+//   - `create-objectstack`'s `test` script is a bare `vitest run`, and its
+//     vitest config includes `src/**/*.test.ts`, which is that file.
+//
+// So GAP 1 no longer justifies this flag; GAP 2 carries it alone. What is
+// unchanged is WHERE the flag runs: lint.yml carries no paths filter and no
+// filter job, so a step there runs on every pull request, push and merge-queue
+// build whatever the diff touches, and GAP 2's cases need exactly that.
 //
 // GAP 2 — THE RED PATHS. Every failure contract this script's header argues for
 // is unexecuted. The vitest fixture is deliberately STALE and asserts the

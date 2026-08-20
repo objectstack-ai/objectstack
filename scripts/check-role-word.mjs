@@ -9,9 +9,14 @@
 // P1 rename wave (#2697 was identifier-driven).
 //
 // This is a RATCHET, not a ban-with-exceptions: existing occurrences are
-// frozen in scripts/role-word-baseline.json (many are legitimate — the
-// better-auth boundary, ARIA `role=` in samples, educational "formerly
-// roles" mentions — and untangling them file-by-file is incremental work).
+// frozen in scripts/role-word-baseline.json, and not all of them are bugs.
+// The legitimate KINDS — vocabulary owned upstream (better-auth's
+// `sys_member.role`), ARIA's `role=` attribute, quoted pre-rename history —
+// are named as KINDS and not as an inventory of the ledger: which of them it
+// actually holds changes with every `--update`, so the same list read as a
+// census goes wrong silently. Untangling the rest file-by-file is
+// incremental work.
+//
 // The check fails when:
 //   • a file NOT in the baseline contains the word, or
 //   • a baselined file's count INCREASES, or
@@ -21,9 +26,15 @@
 //   node scripts/check-role-word.mjs [--update]
 //   node scripts/check-role-word.mjs --self-test   # verify the checker's own rules
 //
-// `--update` expands the baseline, which is the shrink-only direction of this
-// ratchet — the NEW-use message marks that path `⛔ MAINTAINER-ONLY` per the
-// #8435 convention, and the self-test holds the marker in place.
+// `--update` rewrites the baseline from the current tree — it never reads the
+// old ledger (see the `update` branch at the bottom) — so it moves whichever
+// way the tree moved: shrinking where the word is gone, EXPANDING where it is
+// new. Only policy tells those apart. The baseline is shrink-only, so
+// ratcheting down is the author's own remedy, while expanding WEAKENS the gate
+// and is a maintainer's call: the NEW-use message marks that path
+// `⛔ MAINTAINER-ONLY` per the #8435 convention, and the self-test holds the
+// marker in place. Both pin the WORDING, not the act — the flag takes either
+// direction from whoever runs it.
 //
 // Scope: content/docs (hand-written; references/ is generated from spec and
 // excluded — the spec source is the fix site there) and skills/. File and
@@ -130,7 +141,12 @@ function newUseMessage(file, count) {
 //
 // The green line used to be, in full:
 //
-//   check-role-word: OK (43 baselined file(s), no new occurrences).
+//   check-role-word: OK (N baselined file(s), no new occurrences).
+//
+// N is written generically because this line no longer exists in the program.
+// It can never print again, at any size, so no literal here would be checkable
+// against anything the gate does — and the next `--update` could only make one
+// wrong, never right again. The quote is carried for its SHAPE.
 //
 // Every number in it came from the LEDGER. `current` holds only the files that
 // still carry the word, and a green run is precisely the run where its key set
@@ -141,11 +157,21 @@ function newUseMessage(file, count) {
 // scan that reads nothing drops every baselined file out of `current`, and the
 // ratchet-DOWN branch below then reports one "clean/gone" problem per baselined
 // file. Measured on this tree — ROOTS pointed at two non-existent directories,
-// ledger untouched — `43 problem(s)`, exit 1. That protection is a side effect
-// of still owing debt, and it evaporates at the exact moment this ratchet
-// succeeds at its purpose: with the ledger empty, `current = {}` and
-// `baseline = {}` raise nothing in either direction, and the same ablation
-// printed
+// ledger untouched — exit 1, raising exactly one problem per baselined file.
+// The magnitude is deliberately not written down, and no bound stands in its
+// place: the ratchet-DOWN loop below walks `Object.entries(baseline)` and
+// raises one error for every entry missing from `current`, so a dead scan
+// raises as many problems as the ledger holds — an identity that survives
+// every `--update`, at any ledger size, including the empty one. A SHRINK-only
+// ledger admits no durable bound to state instead: a floor rots on the first
+// sanctioned ratchet-down (the very remedy this gate tells authors to run),
+// and a ceiling rots too, because the same `--update` is also the
+// baseline-EXPANDING path the #8435 marker above gates.
+//
+// That protection is a side effect of still owing debt, and it evaporates at
+// the exact moment this ratchet succeeds at its purpose: with the ledger
+// empty, `current = {}` and `baseline = {}` raise nothing in either direction,
+// and the same ablation printed
 //
 //   check-role-word: OK (0 baselined file(s), no new occurrences).   EXIT=0
 //
@@ -269,6 +295,12 @@ function selfTest() {
   //
   // Interpolated counts again, so the source proves nothing about the rendered
   // sentence — driven here instead, in the states that used to be identical.
+  //
+  // These counts are SYNTHETIC fixtures, not a reading of the tree: every
+  // assertion below closes over them, so they stay correct however the real
+  // corpus moves. ⛔ Do not "refresh" them to match a live scan — that would
+  // turn a closed fixture into a figure the tree can falsify, which is the
+  // very defect the comment sites above were cleaned of.
   const SCANNED = [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 36 }];
   const DEAD_SCAN = [{ root: 'content/docs', files: 0 }, { root: 'skills', files: 0 }];
   const PAID_OFF = {};

@@ -196,12 +196,23 @@ export const ExplainLayerSchema = lazySchema(() => z.object({
     /** How the contributor reached the principal (e.g. `position:sales_rep`, `baseline`, `everyone`). */
     via: z.string().optional(),
     /**
-     * [ADR-0091 D2] Grant-lifecycle state. Omitted/`active` = contributing
-     * normally; `expired` = the grant row exists but is OUTSIDE its
-     * `[valid_from, valid_until)` window, so it contributed NOTHING — reported
-     * so "why did access disappear" is self-answering ("held until … — expired").
+     * Grant-lifecycle state — ONE shared "held but not resolving, because X"
+     * vocabulary for every lifecycle control that can silently take a held
+     * grant out of resolution (#8714). Omitted/`active` = contributing
+     * normally; the other members mean the row EXISTS but contributed
+     * NOTHING, and name why, so "why did access disappear" is self-answering:
+     *
+     *  - `expired` — [ADR-0091 D2] the grant row is OUTSIDE its
+     *    `[valid_from, valid_until)` window ("held until … — expired").
+     *  - `deactivated` — [ADR-0049 / #8613] the catalogue row itself
+     *    (`sys_permission_set.active` / `sys_position.active`) is switched
+     *    off, so the grant stopped resolving for EVERYONE holding it.
+     *
+     * This is a CLOSED enumeration of reasons, extended only deliberately
+     * (maintainer ruling 2026-08-18) — a new lifecycle control joins this
+     * enum rather than growing a second per-cause shape or a sibling array.
      */
-    state: z.enum(['active', 'expired']).optional(),
+    state: z.enum(['active', 'expired', 'deactivated']).optional(),
   })).default([]),
   /**
    * [C2] Per-record attribution — present only when the request carried a

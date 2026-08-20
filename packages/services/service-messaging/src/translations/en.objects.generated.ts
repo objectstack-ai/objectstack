@@ -238,7 +238,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       principal: {
         label: "Principal",
-        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | bare user id."
+        help: "Subscriber selector: 'role:x' | 'team:x' | 'user:id' | 'owner_of:object:id' | an email | a bare user id."
       },
       enabled: {
         label: "Enabled",

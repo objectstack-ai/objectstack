@@ -14,14 +14,13 @@
 
 ## 常设承诺
 
+- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - **Required checks 六个**:`TypeScript Type Check` · `Lint & Repo Gates` ·
   `Test Core` · `Dogfood Regression Gate` · `Build Core` ·
   `Temporal Conformance (live PG + MySQL)` —— 逐 job 读各自 `conclusion`,⛔ 不认
   聚合,`in_progress` 不是过;advisory 门禁红进 main 是共享损伤,照样止血立单。
-- **PR 侧绿 ≠ 队列侧绿**;队列成员资格直接可读:
-  `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`(条目名
-  `main/pr-{number}-{parent sha}`,parent sha 可重建队序;⚠️ ref 在出队后滞留、入
-  队瞬间滞后)。
+- **PR 侧绿 ≠ 队列侧绿**;队列分支读法与边界在 platform-readings(条目名
+  `main/pr-{number}-{parent sha}`,parent sha 可重建队序;⚠️ ref 在出队后滞留)。
 - `dispatch-gates.mjs` 只报**路径推导**的地板 —— 条款②从卡**内容**判且优先于它;
   已知盲区:它不点名 `pnpm lint` 族 ⇒ 本车道派发令恒补一句「跑 `pnpm lint`」。
 - ⛔ 永不削弱门禁 —— 棘轮上跳是门禁在报你的改动有缺陷;规则文案里自带的逃生舱只用

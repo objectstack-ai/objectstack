@@ -168,15 +168,18 @@ describe('auth route ledger hygiene', () => {
     expect(stray, `rows outside ${BASE_PATH}: ${stray.join(', ')}`).toEqual([]);
   });
 
-  it('the two objectstack-mounted rows are the ones auth-plugin.ts serves itself', () => {
-    // /config and /bootstrap-status are mounted on the raw app AHEAD of the
-    // catch-all, so they are absent from `auth.api` by construction. Pinned so
+  it('the objectstack-mounted rows are the ones auth-plugin.ts serves itself', () => {
+    // These are mounted on the raw app AHEAD of the catch-all, so they are
+    // absent from `auth.api`'s wire table by construction (organization/
+    // add-member exists on `auth.api` but carries NO path — server-only — so
+    // the enumeration, which reads `.path`, never sees it either). Pinned so
     // the `source` split stays honest rather than becoming a place to park a
     // row that failed the upstream check.
     const own = AUTH_ROUTE_LEDGER.filter((e) => e.source === 'objectstack').map((e) => e.route).sort();
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
+      'POST /api/v1/auth/organization/add-member',
     ]);
     for (const route of own) {
       expect(live.has(route), `${route} should NOT come from better-auth`).toBe(false);
