@@ -183,6 +183,19 @@ jobs:
       - name: PM skill issue-ID lint
         run: pnpm check:pm-skill-id-lint
 
+      # PM label description cap. GitHub hard-caps label descriptions at 100
+      # CHARACTERS and `gh label create` 422s above it; the `|| true` that makes
+      # scripts/pm/ensure-pm-labels.sh rerunnable swallows that 422, so an
+      # over-long -d means the label is never created on a repo that lacks it
+      # and a rerun can never repair it. Headroom is thin (one description sits
+      # at exactly 100), and the only previous enforcement was the author
+      # counting by hand. Measured in characters, never bytes: the live
+      # needs:contract-review description is 97 characters / 101 bytes, so a
+      # byte-length guard would red a label GitHub accepts. Unconditional, like
+      # the other self-tested gates above.
+      - name: PM label description cap
+        run: pnpm check:pm-label-desc-cap
+
       # PM dispatch-gates self-test (#8162). `scripts/pm/dispatch-gates.mjs`
       # derives the "local gates for this card" line of every dispatch prompt,
       # and carried a 61-case --self-test that NO job ran: it executed only when
