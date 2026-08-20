@@ -5826,6 +5826,55 @@ export class RestServer {
                     const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
+
+                    // [#10063] Software-package binding for the PROMOTION —
+                    // `?package=<id>`, deliberately the SAME wire spelling and the
+                    // same normalisation the `PUT` door states it with a few
+                    // hundred lines up, not a second dialect for one value.
+                    //
+                    // Why this door needed it at all. #9612 taught the runtime
+                    // publish gate to narrow `objects` to the written item's
+                    // package closure, but only when the caller can NAME the
+                    // package. Three write doors reach that gate; `saveMetaItem`
+                    // and `publishPackageDrafts` both name one, and this one —
+                    // the single-item draft→active promotion — named nothing. So
+                    // every HTTP-driven promotion, which is precisely Studio's
+                    // designer save→publish loop on every edit, handed the gate
+                    // the whole tenant. The protocol half was already built and
+                    // waiting: `promoteDraftForPublish` declares
+                    // `packageId?: string | null` and threads it into both the
+                    // gate and `repo.promoteDraft`. Only the caller was mute.
+                    //
+                    // ⚠️ THE SHARP EDGE, and the reason this is a conditional
+                    // spread rather than a plain key. `promoteDraftForPublish`
+                    // forwards to `repo.promoteDraft` with
+                    // `...('packageId' in request ? { packageId: request.packageId ?? null } : {})`
+                    // — it branches on the KEY BEING PRESENT, not on the value,
+                    // because `null` is a meaningful scope there (pin the lookup
+                    // to the UNBOUND row) while an absent key means "match any
+                    // package", the historical resolution. Writing
+                    // `packageId: packageId` here would therefore put a
+                    // present-and-`undefined` key on every publish that names no
+                    // package, coercing it to `null` downstream and pinning the
+                    // lookup to unbound rows — so a draft authored under a package
+                    // would stop being found and the door would answer `no_draft`.
+                    // That is a silent outage on the untouched path, produced by a
+                    // change that reads like it only ADDS an option. The key must
+                    // be ABSENT when the caller states nothing.
+                    //
+                    // ⛔ Not read off the draft row either — see
+                    // `promoteDraftForPublish`'s own warning: `rowToItem` projects
+                    // `sys_metadata` into a `MetadataItem`, which carries no
+                    // package id, so a read from there is `undefined` on every
+                    // path — narrowing that never fires while looking like it
+                    // does. Widening `MetadataItem` is a `packages/spec` contract
+                    // change and stays filed rather than taken here.
+                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                    const packageRaw = req.query?.package;
+                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
+                        ? packageRaw
+                        : undefined;
+
                     // [#8805] The publish half of the same organization, and it
                     // is REQUIRED for the `PUT` fix to be usable rather than a
                     // separate improvement: `promoteDraftForPublish` resolves the
@@ -5854,6 +5903,7 @@ export class RestServer {
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
+                        ...(packageId ? { packageId } : {}),
                     });
                     res.json(result);
                 } catch (error: any) {
