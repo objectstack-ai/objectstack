@@ -137,21 +137,125 @@ async function bootShowcaseApprovals(
 }
 
 /**
- * Inbox messages whose title matches, waited for rather than slept on — the
- * inbox channel materializes asynchronously after `emit()` returns.
- *
- * `expected` is required so the NEGATIVE case cannot pass by being early: when
- * none are expected this still burns the full deadline before answering.
+ * How long either direction watches the inbox. [#10106] Deliberately NOT
+ * raised: a wrong verdict handed over later is still a wrong verdict, and the
+ * defect below was never about the size of the window.
  */
-async function deliveredInbox(booted: Booted, titleFragment: string, expected: number): Promise<any[]> {
-  const deadline = Date.now() + 5_000;
-  let hits: any[] = [];
+const INBOX_WATCH_MS = 5_000;
+
+/**
+ * The verdict of one inbox watch. Discriminated on purpose — "N arrived",
+ * "the window elapsed and the inbox is empty" and "the watch gave up" are
+ * three different facts, and the `any[]` this replaces conflated the last two
+ * into the same value.
+ */
+type InboxWatch =
+  | { readonly outcome: 'delivered'; readonly hits: any[]; readonly waitedMs: number }
+  | { readonly outcome: 'quiet'; readonly hits: any[]; readonly waitedMs: number }
+  | { readonly outcome: 'timeout'; readonly hits: any[]; readonly waitedMs: number; readonly expected: number };
+
+/**
+ * Watch the inbox for messages whose title matches, and report WHY the watch
+ * ended — not merely what had accumulated when it did.
+ *
+ * [#10106] THE DEFECT THIS REPLACES. The previous helper returned its last
+ * sample when the deadline passed. Nothing distinguished that from a real
+ * absence, and both halves were measured on this very file:
+ *
+ *   - the positive sites failed with an annotation asserting something untrue
+ *     ("the Notify: Cleared inbox message was never delivered" for a message
+ *     that HAD been delivered — the poll had merely given up), and
+ *   - the negative site PASSED on a give-up: with a matching row inserted
+ *     200 ms into the window, `expect(...).toHaveLength(0)` stayed green.
+ *
+ * THE MECHANISM, since it decides the shape of the repair. A `find` ISSUED at
+ * time T and resolving at T+Δ reports the inbox as it stood at T, while the
+ * deadline is checked at T+Δ. When Δ is large — a saturated shard, the
+ * condition this suite runs under — the verdict about the whole window rests
+ * on a sample taken near its start. So the verdict here never rests on that
+ * sample: once the deadline has passed, one FINAL, FRESH read is taken and
+ * that read is what is judged. `sys_inbox_message` rows accumulate and are
+ * never retracted, so a single read after the window sees everything the
+ * window delivered — which is why one terminal read is sufficient evidence,
+ * and why poll DENSITY (how many samples fit) is not the thing to guard.
+ *
+ * `budgetMs` exists so this helper's own contract can be pinned in
+ * milliseconds instead of seconds. It is clamped to `INBOX_WATCH_MS`, so it
+ * can only ever SHRINK the window — widening it is not expressible, which is
+ * the ban in #10106 made structural rather than asked for in a comment.
+ */
+const watchWindowMs = (budgetMs: number = INBOX_WATCH_MS): number =>
+  Math.min(budgetMs, INBOX_WATCH_MS);
+
+async function watchInbox(
+  booted: Booted,
+  titleFragment: string,
+  expected: number,
+  budgetMs: number = INBOX_WATCH_MS,
+): Promise<InboxWatch> {
+  const started = Date.now();
+  const deadline = started + watchWindowMs(budgetMs);
+  const matches = async (): Promise<any[]> =>
+    (await booted.inbox()).filter((n: any) => String(n.title ?? '').includes(titleFragment));
+
   for (;;) {
-    hits = (await booted.inbox()).filter((n: any) => String(n.title ?? '').includes(titleFragment));
-    if (hits.length >= expected && expected > 0) return hits;
-    if (Date.now() > deadline) return hits;
+    const hits = await matches();
+    if (expected > 0 && hits.length >= expected) {
+      return { outcome: 'delivered', hits, waitedMs: Date.now() - started };
+    }
+    if (Date.now() >= deadline) {
+      // The one observation the verdict is allowed to rest on: taken at or
+      // after the deadline, never before it.
+      const final = await matches();
+      const waitedMs = Date.now() - started;
+      if (expected > 0) {
+        return final.length >= expected
+          ? { outcome: 'delivered', hits: final, waitedMs }
+          : { outcome: 'timeout', hits: final, waitedMs, expected };
+      }
+      return final.length === 0
+        ? { outcome: 'quiet', hits: final, waitedMs }
+        : { outcome: 'delivered', hits: final, waitedMs };
+    }
     await sleep(50);
   }
+}
+
+/**
+ * The POSITIVE direction: `expected` matching messages, or a loud and ACCURATE
+ * failure. It throws rather than returning short, so no assertion downstream
+ * can read a timeout as an absence — which is what the annotations at the two
+ * positive call sites used to do out loud.
+ */
+async function deliveredInbox(
+  booted: Booted, titleFragment: string, expected: number, budgetMs?: number,
+): Promise<any[]> {
+  if (expected < 1) {
+    throw new Error('deliveredInbox is the POSITIVE direction — use inboxStayedQuiet() for the empty case');
+  }
+  const watch = await watchInbox(booted, titleFragment, expected, budgetMs);
+  if (watch.outcome !== 'delivered') {
+    throw new Error(
+      `inbox watch TIMED OUT after ${watch.waitedMs} ms: saw ${watch.hits.length} of ${expected} message(s) ` +
+        `titled ~"${titleFragment}". This says the message did not arrive INSIDE THE WINDOW; it does NOT say ` +
+        'nobody was notified. Read it as either a real delivery failure or a runner too slow to observe one — ' +
+        'and do not "fix" it by widening the window (#10106).',
+    );
+  }
+  return watch.hits;
+}
+
+/**
+ * The NEGATIVE direction. Returns the VERDICT, never a bare array: the caller
+ * asserts on `outcome`, and `'quiet'` is constructible at exactly one place
+ * above — after a fresh read taken past the deadline. A watch that gave up
+ * therefore cannot satisfy a stays-empty assertion, which is the half of
+ * #10106 that a louder timeout alone would not have fixed.
+ */
+async function inboxStayedQuiet(
+  booted: Booted, titleFragment: string, budgetMs?: number,
+): Promise<InboxWatch> {
+  return watchInbox(booted, titleFragment, 0, budgetMs);
 }
 
 /** Insert the demo's account + a `sent` invoice owned by a real rep. */
@@ -255,8 +359,11 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     ).toBe(true);
 
     // ...and "Notify: Cleared" was really delivered, to a real recipient.
+    // A timeout here THROWS, naming itself as a timeout — so the annotation
+    // below no longer has to double as a diagnosis of absence (#10106). What
+    // is left for it to catch is the other direction: duplicate delivery.
     const delivered = await deliveredInbox(booted, 'Invoice cleared', 1);
-    expect(delivered, 'the Notify: Cleared inbox message was never delivered').toHaveLength(1);
+    expect(delivered, 'Notify: Cleared was delivered more than once').toHaveLength(1);
 
     const notice = delivered[0];
     expect(notice.title).toBe('Invoice cleared: INV-1010');
@@ -359,7 +466,17 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
     expect(strand).toContain('expand');
 
     // And nothing was delivered — the payoff message the demo promises.
-    expect(await deliveredInbox(booted, 'Invoice cleared', 0)).toHaveLength(0);
+    //
+    // [#10106] Asserted on the WATCH VERDICT, not on a length. A length
+    // assertion here was satisfied by a watch that gave up early, so this
+    // reverse check could stay green while no longer checking anything;
+    // `'quiet'` is only reachable from a fresh read taken past the deadline.
+    const quiet = await inboxStayedQuiet(booted, 'Invoice cleared');
+    expect(
+      quiet.outcome,
+      `the inbox did not stay quiet: ${quiet.outcome} after ${quiet.waitedMs} ms ` +
+        `with ${quiet.hits.length} match(es) — the pre-fix shape is no longer stranding the run`,
+    ).toBe('quiet');
   }, 30_000);
 
   /**
@@ -405,8 +522,83 @@ describe('#7381 — approving Invoice Dual Sign-off delivers the cleared notice'
 
     expect(res.success, `run failed: ${res.error ?? ''}`).toBe(true);
 
+    // As at the first call site: a timeout throws and says so, so this
+    // annotation is free to name the only other way it can fail (#10106).
     const delivered = await deliveredInbox(booted, 'Project update', 1);
-    expect(delivered, 'the subflow notified nobody — the project hop resolved to nothing').toHaveLength(1);
+    expect(delivered, 'the subflow notified more than one recipient').toHaveLength(1);
     expect(delivered[0].user_id, 'the recipient is not the project owner the hop names').toBe('grace@example.com');
   }, 30_000);
+});
+
+/**
+ * [#10106] The watch helper's OWN contract, pinned. No kernel is booted: the
+ * whole subject is which verdict `watchInbox` returns, and its only input is
+ * `booted.inbox`. Budgets are milliseconds — clamped down, never up — so these
+ * cost no meaningful wall clock on a saturated shard.
+ */
+describe('#10106 — the inbox watch reports WHY it ended, not just what it had', () => {
+  /**
+   * An inbox whose read is ISSUED at one moment and RESOLVES much later,
+   * reporting the rows that existed when it was ISSUED. That is what a real
+   * `find` does, and it is the whole mechanism: it lets a verdict about the
+   * window rest on a sample taken near the window's start.
+   */
+  function laggingInbox(readLatencyMs: number, deliverAtMs: number) {
+    const t0 = Date.now();
+    let first = true;
+    return async (): Promise<any[]> => {
+      const issuedAt = Date.now();
+      if (first) {
+        first = false;
+        await sleep(readLatencyMs);
+      }
+      return issuedAt - t0 >= deliverAtMs
+        ? [{ title: 'Invoice cleared: INV-1010', user_id: 'grace@example.com' }]
+        : [];
+    };
+  }
+
+  const fakeBooted = (inbox: () => Promise<any[]>): Booted => ({ inbox } as unknown as Booted);
+
+  it('stays-quiet is NOT satisfiable by a watch that gave up — a row landing inside the window is seen', async () => {
+    // First read issued at t=0 against an empty inbox and resolving only after
+    // the whole budget; the row lands at 20% of the window. This is exactly the
+    // shape that made the negative call site pass for the wrong reason.
+    const verdict = await inboxStayedQuiet(fakeBooted(laggingInbox(400, 60)), 'Invoice cleared', 300);
+    expect(verdict.outcome, 'a row delivered inside the window was reported as quiet').toBe('delivered');
+    expect(verdict.hits).toHaveLength(1);
+  }, 30_000);
+
+  it('an empty window really does read as quiet, so the pin above is not vacuous', async () => {
+    const verdict = await inboxStayedQuiet(fakeBooted(async () => []), 'Invoice cleared', 300);
+    expect(verdict.outcome).toBe('quiet');
+    expect(verdict.hits).toHaveLength(0);
+  }, 30_000);
+
+  it('a positive watch that runs out of window THROWS, and names a timeout rather than an absence', async () => {
+    const err: Error = await deliveredInbox(fakeBooted(async () => []), 'Invoice cleared', 1, 300)
+      .then(() => new Error('NO THROW: the watch returned short instead of failing loudly'))
+      .catch((e: unknown) => e as Error);
+    // The message IS the contract here, so it is asserted rather than the bare
+    // fact that something threw: a bare throw assertion stays green on any
+    // unrelated failure, including the very "returned short" shape this pins.
+    expect(err.message).toContain('TIMED OUT');
+    expect(err.message).toContain('did not arrive INSIDE THE WINDOW');
+    expect(err.message).not.toContain('NO THROW');
+    expect(err.message).not.toContain('never delivered');
+  }, 30_000);
+
+  it('a positive watch still returns as soon as the message lands', async () => {
+    const hits = await deliveredInbox(fakeBooted(laggingInbox(0, 60)), 'Invoice cleared', 1, 300);
+    expect(hits).toHaveLength(1);
+  }, 30_000);
+
+  it('the budget knob can only SHRINK the window — widening it is not expressible', () => {
+    // The #10106 ban on raising the deadline, made structural. Pinned where the
+    // clamp is decided, so it costs no wall clock to assert.
+    expect(watchWindowMs(3_600_000)).toBe(INBOX_WATCH_MS);
+    expect(watchWindowMs(INBOX_WATCH_MS + 1)).toBe(INBOX_WATCH_MS);
+    expect(watchWindowMs(300)).toBe(300);
+    expect(watchWindowMs()).toBe(INBOX_WATCH_MS);
+  });
 });
