@@ -60,8 +60,14 @@
       "note": "REMOVED 2026-07-31 (#4286) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No conversion strips it: QueryAST is a request surface, never stored in stack metadata, so the removal is the protocol-17 semantic migration `query-joins-retired`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). Related records are read through `expand` (batch $in resolution); the orphaned JoinNode/JoinType/JoinStrategy cluster left with the key."
     },
     "aggregations": {
-      "note": "Container. `filter` resolves `experimental` from its `[EXPERIMENTAL — not enforced]` describe marker (#4286 — a SQL FILTER (WHERE …) affordance neither the SQL builders nor the in-memory fallback applies; the FLS predicate guard walks it, predicate-guard.ts:89).",
+      "note": "Container. `filter` was `experimental` (resolved from its `[EXPERIMENTAL — not enforced]` describe marker, #4286) until #10576 took ADR-0049's enforce leg on it — see its own child entry below.",
       "children": {
+        "filter": {
+          "status": "live",
+          "verifiedAt": "2026-08-21",
+          "evidence": "packages/objectql/src/in-memory-aggregation.ts aggregateBucket narrows the source rows per aggregation via matchesAggregationFilter (having-filter.ts); packages/objectql/src/engine.ts aggregate() forces the in-memory lowering when any aggregation carries a non-empty filter; the four native driver faces refuse the key NOT_IMPLEMENTED/501 when reached directly (driver-sql sql-driver.ts, driver-turso remote-transport.ts, driver-mongodb mongodb-aggregation.ts, driver-memory memory-driver.ts performAggregation); the FLS predicate guard walks it (plugin-security predicate-guard.ts:89); pinned by packages/objectql/src/engine-aggregate-filter.test.ts",
+          "note": "ENFORCED 2026-08-21 (#10576, the contract half of #10413's ruling — maintainer 「其他接受」 accepting option A 「给引擎聚合契约加逐聚合过滤,一次修对所有驱动」). SQL FILTER (WHERE …) semantics: the predicate narrows the SOURCE rows the one aggregation reads while siblings keep the full group. Engine-owned via the in-memory lowering (the dateGranularity/having correct-first two-tier shape — a driver that grows native conditional aggregation must advertise a capability flag); a driver face reached directly refuses rather than silently aggregating the unfiltered rows, which was #10413's measured defect on the ObjectQL analytics path."
+        },
         "function": {
           "status": "live",
           "verifiedAt": "2026-07-31",

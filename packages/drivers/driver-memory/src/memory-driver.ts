@@ -28,6 +28,8 @@ import {
   // [#7536] The `$like`/`$ilike` comparand refusals, beside their siblings.
   likePatternComparandError,
   danglingLikeEscapeError,
+  // [#10576] The per-aggregation `filter` refusal — this driver evaluates none.
+  refusePerAggregationFilter,
 } from './filter-refusal.js';
 import {
   coerceTemporalValue,
@@ -1159,6 +1161,19 @@ export class InMemoryDriver implements IDataDriver {
 
   private performAggregation(records: any[], query: DriverQuery): any[] {
     const { groupBy, aggregations } = query;
+    // [#10576] A per-aggregation `filter` this face does not evaluate is
+    // refused before any group is built — silently answering the UNFILTERED
+    // aggregate is the #10413 defect. Guarded HERE because both of this
+    // driver's aggregation doors (`find()` with aggregations and
+    // `aggregate(AST)`) funnel through this method. `{}` is the vacuous
+    // filter, same convention as `where` / `having`. See
+    // {@link refusePerAggregationFilter}.
+    for (const agg of aggregations ?? []) {
+      const f = (agg as { filter?: unknown }).filter;
+      if (f && typeof f === 'object' && Object.keys(f).length > 0) {
+        refusePerAggregationFilter((agg as any).alias ?? (agg as any).field ?? '(unaliased)');
+      }
+    }
     const groups: Map<string, any[]> = new Map();
 
     const normalizeGroupBy = (node: any): { field: string; alias: string } => {

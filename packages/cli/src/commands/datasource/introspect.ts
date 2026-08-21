@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
+import type { ObjectDraft } from '@objectstack/spec/contracts';
+import { readEnvelopeFrom } from '../../utils/response-envelope.js';
 import { writeFile } from 'node:fs/promises';
 import { resolve, isAbsolute } from 'node:path';
 
@@ -50,13 +52,16 @@ export default class DatasourceIntrospect extends Command {
         body: '{}',
       },
     );
-    const body = (await res.json()) as {
-      draft?: { source?: string; review?: Array<{ column: string; note: string }> };
-      error?: string;
-    };
-    if (body.error) this.error(body.error);
+    // `data.draft`, not `body.draft`: the server wraps every payload in the
+    // declared envelope, so the flat read produced `undefined` and reported
+    // "Failed to generate draft" for drafts the server had generated (#10675).
+    const envelope = await readEnvelopeFrom<{ draft?: ObjectDraft }>(res);
+    if (!envelope.ok) {
+      this.error(envelope.message);
+      return;
+    }
 
-    const draft = body.draft;
+    const draft = envelope.data.draft;
     if (!draft?.source) {
       this.error(`Failed to generate draft for '${flags.table}' on '${args.name}'.`);
       return;

@@ -285,7 +285,19 @@ export interface StrategyContext {
      */
     executeAggregate?(objectName: string, options: {
         groupBy?: string[];
-        aggregations?: Array<{ field: string; method: string; alias: string }>;
+        /**
+         * One entry per aggregate to compute. `filter` (#10576, the contract
+         * half of #10413's ruling) is a per-aggregation predicate over the
+         * SOURCE rows — SQL `FILTER (WHERE …)` semantics — so a strategy can
+         * lower a measure-scoped filter (`stage: 'closed_won'`) into the one
+         * aggregation it belongs to instead of dropping it (the #10413 silent
+         * drop) or scoping the WHOLE call via the sibling `filter` below.
+         * Bridges forward it to `engine.aggregate`'s `aggregations[].filter`
+         * (`AggregationNodeSchema.filter`), which the engine honours on every
+         * driver by lowering in memory when the driver has no native
+         * conditional aggregation.
+         */
+        aggregations?: Array<{ field: string; method: string; alias: string; filter?: FilterCondition }>;
         filter?: Record<string, unknown>;
         /**
          * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).

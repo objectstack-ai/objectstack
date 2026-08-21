@@ -1409,6 +1409,43 @@ export default class Serve extends Command {
       // keys off it too (#4012).
       const loggerConfig = { level: bootLogLevel };
 
+      // Host-app package resolution — shared by every optional / enterprise
+      // package loaded from here down.
+      //
+      // Node ESM resolves a bare `import(pkg)` against the IMPORTER's own
+      // realpath. The CLI is reached through a workspace/`link:` dependency, so
+      // that realpath is inside the FRAMEWORK workspace: a bare import can only
+      // see what the framework itself installed. A package supplied by the app
+      // being served — a cloud-private one such as `@objectstack/organizations`,
+      // or anything a customer installs into their own project — is invisible
+      // to it no matter what the host app declares. Resolve from the host root
+      // instead; the CLI's own resolution stays as the fallback for the
+      // framework-owned packages the CLI depends on.
+      //
+      // #4719: "resolve from the host root" now means "resolve what the host
+      // root DECLARES". The host lookup was a CJS require, CJS honours
+      // NODE_PATH, and the pnpm bin shim exports NODE_PATH pointing at the
+      // hoisted workspace store — so anything transitively reachable from
+      // anywhere in the workspace resolved as if the app had declared it, and
+      // whether the D5 wall below fired came down to whether `serve` was reached
+      // through that shim. The declaration is the contract; reachability is not.
+      //
+      // Defined HERE, at the TOP of the boot sequence, because the very first
+      // optional package `serve` loads is the cluster gate a few lines below.
+      // This helper has now been hoisted twice for the same reason, which is the
+      // point worth keeping: every load placed ABOVE it silently falls back to a
+      // bare import and can only see the framework's own node_modules. It first
+      // sat below the auth block, so the enterprise organizations load resolved
+      // in the framework workspace, never found the cloud-private package, and
+      // every walled-posture deployment hit the ADR-0093 D5 fail-fast and exited
+      // 1 (cloud#1013). It then sat below the cluster block, so `serve` could not
+      // load an app-declared `@objectstack/service-cluster*` at all and EE
+      // multi-node boot died outright on `OS_CLUSTER_DRIVER=redis`. A new
+      // optional load added above this line reintroduces the same defect a third
+      // time — put it below, or hoist this further and say why here.
+      const hostRoot = process.cwd();
+      const importFromHost = createHostImporter(hostRoot);
+
       // Cluster wiring: env-driven driver selection (mirrors OS_DATABASE_URL).
       // The remote driver self-registers on import; import it dynamically so it
       // works in BOTH config-boot and compiled-artifact mode. Open-core ships
@@ -1422,8 +1459,17 @@ export default class Serve extends Command {
         // single-node rather than fail — multi-node is an add-on, never brick.
         // Dynamic, non-literal specifier so the CLI does not statically depend
         // on the cluster package (mirrors the remote-driver import below).
+        //
+        // Loaded through `importFromHost`, NOT a bare `import()`: the cluster
+        // packages ship with a distribution and are declared by the APP, so they
+        // live in the app's node_modules, while a bare import resolves against
+        // the CLI's own realpath and can only see the framework's. Measured on
+        // the EE image: the CLI's `node_modules/@objectstack/` held 48 packages
+        // and neither cluster one, so this line threw `Cannot find package
+        // '@objectstack/service-cluster'` and took the whole boot down — while
+        // app-side code loaded the very same package fine.
         const __clusterPkg: string = '@objectstack/service-cluster';
-        const { checkMultiNodeAllowed } = (await import(__clusterPkg)) as {
+        const { checkMultiNodeAllowed } = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
         };
         // Ask the gate about the topology the operator actually DECLARED.
@@ -1453,7 +1499,12 @@ export default class Serve extends Command {
           // above, and deliberately not a downgrade.
           const __capAdvisory = formatMultiNodeCapAdvisory(__gate);
           if (__capAdvisory) console.warn(__capAdvisory);
-          try { await import(`@objectstack/service-cluster-${__clusterDriver}`); }
+          // Same host-anchored resolution as the gate above — the shipped
+          // drivers (`-redis`, `-postgres`, …) are app-declared too. The catch
+          // stays deliberately silent: the driver may already have been
+          // registered by the loaded config, and an absent driver is a
+          // documented fall-back to the in-memory cluster, not a boot failure.
+          try { await importFromHost(`@objectstack/service-cluster-${__clusterDriver}`); }
           catch { /* may already be registered by the loaded config */ }
           clusterConfig = { driver: __clusterDriver, url: process.env.OS_REDIS_URL };
         }
@@ -2096,36 +2147,6 @@ export default class Serve extends Command {
           console.warn(chalk.yellow(`  ⚠ PlatformObjectsPlugin auto-inject failed: ${err?.message ?? err}`));
         }
       }
-
-      // Host-app package resolution — shared by every optional / enterprise
-      // package loaded from here down.
-      //
-      // Node ESM resolves a bare `import(pkg)` against the IMPORTER's own
-      // realpath. The CLI is reached through a workspace/`link:` dependency, so
-      // that realpath is inside the FRAMEWORK workspace: a bare import can only
-      // see what the framework itself installed. A package supplied by the app
-      // being served — a cloud-private one such as `@objectstack/organizations`,
-      // or anything a customer installs into their own project — is invisible
-      // to it no matter what the host app declares. Resolve from the host root
-      // instead; the CLI's own resolution stays as the fallback for the
-      // framework-owned packages the CLI depends on.
-      //
-      // #4719: "resolve from the host root" now means "resolve what the host
-      // root DECLARES". The host lookup was a CJS require, CJS honours
-      // NODE_PATH, and the pnpm bin shim exports NODE_PATH pointing at the
-      // hoisted workspace store — so anything transitively reachable from
-      // anywhere in the workspace resolved as if the app had declared it, and
-      // whether the D5 wall below fired came down to whether `serve` was reached
-      // through that shim. The declaration is the contract; reachability is not.
-      //
-      // Defined HERE, above the auth block, because the enterprise organizations
-      // load inside it needs it: this helper used to be declared *after* that
-      // block, so the organizations load fell back to a bare import, resolved in
-      // the framework workspace, never found the cloud-private package, and every
-      // walled-posture deployment hit the ADR-0093 D5 fail-fast and exited 1
-      // (cloud#1013).
-      const hostRoot = process.cwd();
-      const importFromHost = createHostImporter(hostRoot);
 
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.

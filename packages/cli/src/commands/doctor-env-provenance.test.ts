@@ -447,7 +447,18 @@ describe('os doctor, end to end, against a posture that only exists in .env', ()
     const healthy = await runDoctor();
 
     expect(healthy.exitCode).toBeUndefined();
-    expect(healthy.out).toContain('Environment is functional');
+    // #10679 — this used to read `toContain('Environment is functional')`, and
+    // it passed for a reason that had nothing to do with #5387: the temp cwd
+    // has no `packages/spec`, and doctor warned `@objectstack/spec Not built`
+    // about that absent workspace on every run. Removing that phantom warning
+    // leaves this cwd with no findings at all, so the summary is now the
+    // healthy one. What the control actually claims — doctor reached its
+    // summary and did NOT refuse to call this environment usable — is what the
+    // matcher says instead, and it still cannot pass for the broken leg below
+    // (that one prints `Some critical issues found`).
+    expect(healthy.out).toMatch(
+      /Environment is (healthy and ready for development|functional but has some warnings)/,
+    );
     expect(healthy.out).not.toContain('Tenancy posture');
     // The report says what it read even when everything is fine — that is the
     // "not a silent merge" half, and it is only observable on a healthy run.
