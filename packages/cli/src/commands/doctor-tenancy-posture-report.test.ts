@@ -295,8 +295,19 @@ describe('os doctor reports an unrecognized posture and exits non-zero', () => {
 
     // Doctor completes normally. This is the sentence #5382 quoted, and here it
     // is CORRECT: this environment really can start.
+    //
+    // #10679 — the matcher accepts either non-error summary. The control used
+    // to pin `Environment is functional but has some warnings` literally, and
+    // it held only because the temp cwd has no `packages/spec` and doctor
+    // warned `@objectstack/spec Not built` about that absent workspace every
+    // time. With that phantom warning gone this cwd has no findings, so the
+    // summary is the healthy one. Either sentence proves the control's actual
+    // claim; neither can be produced by the broken leg below, which prints
+    // `Some critical issues found` and exits 1.
     expect(healthy.exitCode).toBeUndefined();
-    expect(healthy.out).toContain('Environment is functional');
+    expect(healthy.out).toMatch(
+      /Environment is (healthy and ready for development|functional but has some warnings)/,
+    );
     expect(healthy.out).not.toContain('Tenancy posture');
 
     // ── The case: one character changed ──────────────────────────────────
