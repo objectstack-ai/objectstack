@@ -169,13 +169,38 @@ export class WebhookOutboxPlugin implements Plugin {
         });
     }
 
-    async dispose(): Promise<void> {
+    /**
+     * Teardown — the kernel's ONLY teardown hook.
+     *
+     * [#10772] This body used to be spelled `dispose()`. `Plugin`
+     * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+     * `destroy?()` and no `dispose()`, and `ObjectKernel.performShutdown()` /
+     * `LiteKernel.destroy()` walk the plugins in reverse calling
+     * `plugin.destroy()` — so after `await kernel.shutdown()` had RESOLVED the
+     * auto-enqueuer was still running and both engine hooks were still bound.
+     * Measured on the same revision: `dispose()` had ZERO callers anywhere in
+     * the repo, so this teardown had never run in any process at all.
+     *
+     * Idempotent: `boundEngine` is cleared as it is unbound, so a second
+     * teardown is a no-op rather than a second unbind.
+     */
+    async destroy(): Promise<void> {
         await this.autoEnqueuer?.stop();
         if (this.boundEngine) {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class: an embedder may have learned to call it directly
+     * precisely BECAUSE the kernel never did, and deleting it would break them.
+     * Same signature, same return type — a direct caller sees no change.
+     */
+    async dispose(): Promise<void> {
+        await this.destroy();
     }
 
     private getMessaging(ctx: PluginContext): MessagingHttpSurface | undefined {
