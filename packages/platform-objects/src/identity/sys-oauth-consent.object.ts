@@ -29,7 +29,7 @@ export const SysOauthConsent = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'User consent records for OAuth client applications',
   highlightFields: ['client_id', 'user_id', 'scopes'],

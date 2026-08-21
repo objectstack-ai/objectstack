@@ -48,13 +48,13 @@ describe('applyProtection', () => {
             protection: {
                 lock: 'full',
                 reason: 'Core admin UI',
-                docsUrl: 'https://docs.objectstack.ai/adr/0010',
+                docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
             },
         } as Record<string, unknown>;
         applyProtection(item, { packageId: 'com.objectstack.platform-objects' });
         expect(item._lock).toBe('full');
         expect(item._lockReason).toBe('Core admin UI');
-        expect(item._lockDocsUrl).toBe('https://docs.objectstack.ai/adr/0010');
+        expect(item._lockDocsUrl).toBe('https://objectstack.ai/docs/references/shared/protection');
         expect(item._lockSource).toBe('package');
         expect(item._provenance).toBe('package');
         expect(item._packageId).toBe('com.objectstack.platform-objects');

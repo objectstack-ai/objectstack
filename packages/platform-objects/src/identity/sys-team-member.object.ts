@@ -23,7 +23,7 @@ export const SysTeamMember = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Team membership records linking users to teams',
   titleFormat: '{user_id} in {team_id}',

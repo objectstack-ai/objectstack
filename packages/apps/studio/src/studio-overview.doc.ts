@@ -28,7 +28,7 @@ Studio is the builder app — the workbench for shaping the platform's
 *metadata*: objects, fields, views, flows, agents, and the rest. Most of its
 screens are self-explanatory; this page covers the one rule that is not visible
 on screen but governs everything you do here. For the full reference, see
-<https://docs.objectstack.ai>.
+<https://objectstack.ai>.
 
 ## Metadata-first
 
@@ -56,7 +56,7 @@ overlay so the rest of the tenant sees it. Moving changes between environments
 side effect of publishing — keeping the two distinct is what lets you build
 safely in one environment before shipping.
 
-See <https://docs.objectstack.ai> for drafts, overlays, and deployment in depth.
+See <https://objectstack.ai> for drafts, overlays, and deployment in depth.
 `,
   translations: {
     zh: {
@@ -66,7 +66,7 @@ See <https://docs.objectstack.ai> for drafts, overlays, and deployment in depth.
 
 Studio 是搭建者应用——塑造平台*元数据*的工作台:对象、字段、视图、流程、智能体等。
 它的大多数界面一目了然;本页讲的是那条界面上看不见、却支配你在这里一切操作的规则。
-完整参考见 <https://docs.objectstack.ai>。
+完整参考见 <https://objectstack.ai>。
 
 ## 元数据优先
 
@@ -88,7 +88,7 @@ UI 和 API:你改的是模型,而不是修补某个界面。
 改动(例如开发 → 生产)是单独的**部署**步骤,不是发布的自动副作用——把两者分开,
 才能让你在一个环境里安全搭建、再上线。
 
-草稿、覆盖层与部署的细节见 <https://docs.objectstack.ai>。
+草稿、覆盖层与部署的细节见 <https://objectstack.ai>。
 `,
     },
   },
