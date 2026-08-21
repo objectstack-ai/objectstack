@@ -49,6 +49,15 @@ declare module 'node:child_process' {
   ): { status: number | null; stdout: string | null; stderr: string | null };
 }
 
+// Same pin, one member: it reads the child's reporter output, and vitest
+// colourises that output on any machine `std-env` does not recognise as an
+// agent shell. Stripping is delegated to the platform rather than to a
+// hand-written escape regex, which would have to spell control characters in
+// repo source (`pnpm check:nul-bytes`'s territory).
+declare module 'node:util' {
+  export function stripVTControlCharacters(str: string): string;
+}
+
 // `env` joins `cwd()` for the same pin: the nested run must NOT inherit this
 // process's own `VITEST_*` variables, or the child believes a pool spawned it.
 declare const process: { cwd(): string; env: Record<string, string | undefined> };

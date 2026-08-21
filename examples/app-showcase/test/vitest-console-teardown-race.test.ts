@@ -53,11 +53,26 @@
  * an idle 4-vCPU container across three fixture shapes. It is therefore
  * retried, and only the exhaustion of every attempt is a failure — reported as
  * "the instrument stopped reproducing", never as "the guard broke".
+ *
+ * ⚠️ WHY THE CHILD'S OUTPUT IS NORMALISED BEFORE ANYTHING READS IT. Every
+ * predicate below is a substring of a REPORTER line, and vitest 4 decides both
+ * the colour and the reporter from the environment it finds itself in:
+ * `std-env`'s `isAgent` — true when `AI_AGENT`, `CLAUDECODE` and friends are
+ * set, i.e. in the shell an agent authors this from — makes it call
+ * tinyrainbow's `disableDefaultColors()` and select the `agent` reporter. A CI
+ * runner has none of those variables, so the SAME summary line arrives with
+ * escapes sitting BETWEEN `Test Files` and its count, and a regex written
+ * against the plain line matches in an agent shell and can never match in CI.
+ * Measured, on this pin's own first red: the anti-vacuity guard below refused
+ * to grade a run it could not read, and was right to. So the child is asked for
+ * plain bytes AND the captured text is stripped before it is read — the guard
+ * is never the thing that bends.
  */
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { stripVTControlCharacters } from 'node:util';
 
 // `process.cwd()` is this package's established seed for its own files
 // (`test/coverage.test.ts`, `test/inert-wirings.test.ts`) and the one the
@@ -81,6 +96,7 @@ const GUARDED_REPETITIONS = 4;
 
 interface Leg {
   readonly status: number | null;
+  /** The child's combined stdout+stderr, ALREADY stripped of ANSI escapes. */
   readonly output: string;
   readonly reproduced: boolean;
   readonly collectedOneFile: boolean;
@@ -94,6 +110,20 @@ interface Leg {
  * The child's environment drops vitest's own worker variables: this process IS
  * a vitest worker, and leaking `VITEST_POOL_ID` / `VITEST_WORKER_ID` into a
  * nested run makes the child believe it was spawned by a pool.
+ *
+ * It also pins the child to PLAIN, ENVIRONMENT-INDEPENDENT output, for the
+ * reason in this file's docblock:
+ *   - `NO_COLOR` is the one switch tinyrainbow short-circuits on, ahead of
+ *     every enabling condition, so it turns colour off wherever the child runs.
+ *     `FORCE_COLOR` is DELETED rather than set to `'0'`, because tinyrainbow
+ *     tests its PRESENCE (`'FORCE_COLOR' in env`) — the disabling spelling
+ *     would have switched colour ON.
+ *   - `--reporter=default` NAMES the reporter instead of letting vitest pick it
+ *     from `isAgent`, which is how the author and CI came to read two different
+ *     summary formats out of the same fixture.
+ * Then `stripVTControlCharacters` runs over the captured bytes anyway: belt and
+ * braces, so an escape arriving from some other source cannot quietly
+ * un-measure this pin the way one already did.
  */
 function runFixture(config: string): Leg {
   const env: Record<string, string | undefined> = { ...process.env };
@@ -101,20 +131,53 @@ function runFixture(config: string): Leg {
     if (key.startsWith('VITEST')) delete env[key];
   }
   delete env.NODE_V8_COVERAGE;
+  delete env.FORCE_COLOR;
+  env.NO_COLOR = '1';
 
-  const result = spawnSync(VITEST_BIN, ['run', '-c', config, '--root', FIXTURE_ROOT], {
-    encoding: 'utf8',
-    timeout: 120_000,
-    env,
-  });
+  const result = spawnSync(
+    VITEST_BIN,
+    ['run', '-c', config, '--root', FIXTURE_ROOT, '--reporter=default'],
+    {
+      encoding: 'utf8',
+      timeout: 120_000,
+      env,
+    },
+  );
 
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  const output = stripVTControlCharacters(`${result.stdout ?? ''}${result.stderr ?? ''}`);
   return {
     status: result.status,
     output,
     reproduced: output.includes(TEARDOWN_ERROR),
     collectedOneFile: /Test Files\s+1 passed \(1\)/.test(output),
   };
+}
+
+/**
+ * The anti-vacuity guards below grade the CHILD, whose output is captured and
+ * therefore never reaches the job log on its own. Saying only "measured
+ * nothing" leaves a CI-only failure undiagnosable from the log it fails in —
+ * measured, at the cost of one round trip. So every graded run names its exit
+ * status and shows the tail of what it actually wrote.
+ *
+ * Bounded at three runs and fifteen lines each: a leg can grade eight, and when
+ * they fail they fail the same way, so an unbounded dump buries the one thing
+ * being read in seven copies of itself.
+ */
+const DESCRIBED_RUNS = 3;
+
+function describeRuns(legs: readonly Leg[]): string {
+  const blocks = legs.slice(0, DESCRIBED_RUNS).map((leg, index) => {
+    const tail = leg.output.trimEnd().split('\n').slice(-15).join('\n');
+    return (
+      `\n--- child run ${index + 1}/${legs.length}: exit=${leg.status}, ` +
+      `collectedOneFile=${leg.collectedOneFile}, reproduced=${leg.reproduced}\n` +
+      `${tail === '' ? '(the child wrote nothing at all)' : tail}`
+    );
+  });
+  const elided = legs.length - blocks.length;
+  if (elided > 0) blocks.push(`\n--- ${elided} further run(s) not shown`);
+  return blocks.join('\n');
 }
 
 describe('[#10293] vitest console-forwarding teardown race', () => {
@@ -139,7 +202,8 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
       // is gone". Grade collection before grading the harm.
       expect(
         attempts.every((leg) => leg.collectedOneFile),
-        'the fixture was not collected — the ablation measured nothing',
+        `the fixture was not collected — the ablation measured nothing. What the ` +
+          `child runs actually wrote:${describeRuns(attempts)}`,
       ).toBe(true);
 
       const reproduced = attempts.find((leg) => leg.reproduced);
@@ -166,7 +230,8 @@ describe('[#10293] vitest console-forwarding teardown race', () => {
 
       expect(
         legs.every((leg) => leg.collectedOneFile),
-        'the fixture was not collected under the app config — this leg measured nothing',
+        `the fixture was not collected under the app config — this leg measured ` +
+          `nothing. What the child runs actually wrote:${describeRuns(legs)}`,
       ).toBe(true);
 
       const teardownErrors = legs.filter((leg) => leg.reproduced);
