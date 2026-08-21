@@ -100,8 +100,46 @@
 // path is only a loop variable. Each yields NO name -- never a wrong one; an
 // unreadable argument costs the name and keeps the depth, so the escape verdict
 // is unaffected and the roster never gains an entry pointing at a file nobody
-// reads. Reads that reach another package through Node's RESOLVER rather than
-// through `fs` are outside this gate entirely.
+// reads.
+//
+// ── The other way out of a package: the RESOLVER (#10452) ───────────────────
+//
+// Everything above is a path-shaped file read, seeded from `import.meta.url` or
+// `__dirname`. An ES module specifier is none of those -- it is a bare string in
+// `import` position that the module resolver, not `node:path`, turns into a
+// file -- so "reads that reach another package through Node's RESOLVER are
+// outside this gate entirely" was this file's stated boundary, and a test that
+// IMPORTS across the package boundary went undeclared silently.
+//
+// Measured on `2d3860df9a`, not reasoned: two live `packages/cli` contract tests
+// import `maskComments` from `../../../../scripts/js-comment-mask.mjs`. With the
+// hand-added glob for it removed, this gate printed `OK: 12 package(s) read
+// outside themselves, all declared` and exited 0 -- so an edit to that module
+// would not have re-run cli's suite, which is #7802 exactly, by another spelling.
+// The declaration was added by hand in PR #10450 precisely because the gate did
+// not demand it.
+//
+// So specifiers are now walked by the same `walkLiteral`, in the same two
+// coordinates, judged on the same shallowest point (RECOGNISED_IMPORT_SPELLINGS,
+// published beside the path list). Two things make it a different read rather
+// than a wider regex:
+//
+//   The BOUNDARY. Only a RELATIVE specifier is collected. A bare one
+//   (`@objectstack/verify`) is an installed dependency resolved through
+//   `node_modules`, which no glob can hash -- the same exclusion `vendored`
+//   already makes. Getting this wrong would put every package's suite on every
+//   workspace sibling.
+//
+//   The NAME. A specifier is not a path: under NodeNext `../x.js` is `../x.ts`
+//   on disk, and three cli tests import the showcase app with no extension at
+//   all. `resolveImportTarget()` maps the recognised extension rules back onto a
+//   real file, and a specifier matching none of them keeps its escape verdict
+//   and loses its name, exactly as an unreadable path argument does.
+//
+// This found six couplings nothing had ever declared: `@objectstack/client`'s
+// route-ledger conformance tests import five sibling packages' `src/` directly,
+// and `@objectstack/rest`, the three services and `plugin-auth` are not even
+// dependencies of it -- so no graph edge reached them and no glob hashed them.
 //
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
@@ -281,6 +319,68 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/check-nul-bytes.mjs',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // `translation.zod.ts` is the second entry no test READS -- named in a
+      // comment in test/i18n-section-coverage.test.ts, which describes it as the
+      // DECLARATION face of the schema that test asserts against. It appears
+      // here only now because that file had no `fs` read at all, so it never
+      // reached the scan before #10452 relaxed the pre-filter to admit
+      // import-only escapes; the flat literal collector then took the quoted
+      // path exactly as it always has. Settled the same way as
+      // `check-nul-bytes.mjs` above -- declaring one file beats teaching the
+      // scanner to tell prose from code, and this one costs nothing in practice:
+      // `@objectstack/spec` is a real dependency of this package, so the graph
+      // already re-runs these tests on any spec change.
+      'packages/spec/src/system/translation.zod.ts',
+    ],
+  },
+  '@objectstack/client': {
+    // The first entry this gate DERIVED from import specifiers rather than from
+    // a path-shaped read (#10452), and the reason that half was worth building:
+    // five tests here import six sibling packages' route ledgers directly by
+    // relative specifier, and nothing had ever declared any of them.
+    //   src/client-url-conformance.test.ts and src/route-ledger-response-schema.test.ts
+    //     import runtime, rest, service-storage, service-i18n and plugin-auth;
+    //   src/route-ledger-coverage.test.ts imports runtime;
+    //   src/rest-route-ledger-coverage.test.ts imports rest;
+    //   src/service-route-ledger-coverage.test.ts imports the three services,
+    //     service-datasource among them.
+    // Each asserts this client's URL builders still agree with the ledger the
+    // server side publishes, so a ledger edit changes the verdict by design.
+    //
+    // The graph does not carry it and cannot be made to: of the six, only
+    // `@objectstack/runtime` appears in this package's manifest at all (a
+    // devDependency) -- `@objectstack/rest`, the three services and
+    // `plugin-auth` are not dependencies in any form, which is why
+    // `turbo ls --affected` could not reach client from a ledger-only diff and
+    // `client#test` hashed the same before and after one. #7802's shape exactly,
+    // reached by the other spelling.
+    //
+    // Per-file rather than `packages/**/src/**`: a ledger is one file per
+    // package and these tests read nothing else across the boundary, so the
+    // radius stays the six files the imports name. The roster holds it -- an
+    // import added outside them fails this gate by name.
+    globs: [
+      'packages/runtime/src/route-ledger.ts',
+      'packages/rest/src/rest-route-ledger.ts',
+      'packages/services/service-storage/src/storage-route-ledger.ts',
+      'packages/services/service-i18n/src/i18n-route-ledger.ts',
+      'packages/services/service-datasource/src/datasource-route-ledger.ts',
+      'packages/plugins/plugin-auth/src/auth-route-ledger.ts',
+      // Below this line: paths these tests NAME in prose rather than read. Each
+      // docblock cross-references the sibling conformance test it mirrors, or
+      // the script that records the envelope shape, and the flat literal
+      // collector takes quoted paths without parsing. Same designed trade as the
+      // `check-nul-bytes.mjs` entry on `@objectstack/cli` -- over-collection can
+      // only widen a radius, never narrow one, and declaring the file beats
+      // rewording a comment to dodge a scanner. Not claimed as real inputs: a
+      // sibling package's TEST file cannot change this package's verdict. The
+      // six globs above are the ones the imports hold.
+      'packages/runtime/src/route-ledger.conformance.test.ts',
+      'packages/rest/src/rest-route-ledger.conformance.test.ts',
+      'packages/services/service-storage/src/storage-route-ledger.conformance.test.ts',
+      'packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts',
+      'packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts',
+      'scripts/check-route-envelope.mjs',
     ],
   },
   '@objectstack/lint': {
@@ -369,6 +469,15 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/rest/src/**',
       'packages/runtime/src/**',
       'packages/services/service-realtime/src/**',
+      // The three ledgers test/route-ledger-live-mount-parity.dogfood.test.ts
+      // IMPORTS, which no read named and nothing declared until #10452 taught
+      // this gate specifiers. That test mounts the live app and asserts every
+      // ledger entry is really routed, so each ledger is an input by
+      // construction. Per-file, matching what the imports name: the rest of
+      // these services' `src/**` is not read here.
+      'packages/services/service-storage/src/storage-route-ledger.ts',
+      'packages/services/service-i18n/src/i18n-route-ledger.ts',
+      'packages/services/service-settings/src/settings-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',
@@ -538,6 +647,8 @@ export function coversDirectory(dir, globs, root = REPO_ROOT) {
 
 // ── the escape detector ──────────────────────────────────────────────────────
 const FS_READ = /\b(readFileSync|readdirSync|statSync|existsSync|globSync|opendirSync|execFileSync)\b/;
+/** A quoted literal that climbs — the cheapest necessary condition for an escaping import (#10452). */
+const ASCENDING_LITERAL = /(['"])\.\.\//;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.turbo', '.next', '.git']);
 
 /**
@@ -567,6 +678,124 @@ export const RECOGNISED_PATH_SPELLINGS = [
   "readFileSync(resolve(HERE, '<rel>'))    // the same expressions in argument",
   "readFileSync(new URL('<rel>', import.meta.url))              // position",
 ];
+
+/**
+ * The IMPORT spellings this gate can SEE, in the words an author would write
+ * them (#10452). Published for the same reason as the list above, and printed
+ * beside it in the failure text.
+ *
+ * An ES module specifier is none of the shapes above it: it is a bare string in
+ * `import` position that the module RESOLVER, not `node:path`, turns into a
+ * file. So until this list existed the gate's stated boundary — "reads that
+ * reach another package through Node's RESOLVER rather than through `fs` are
+ * outside this gate entirely" — held, and a test importing across the package
+ * boundary went undeclared silently. Measured on `2d3860df9a`: with
+ * `scripts/js-comment-mask.mjs` deleted from `@objectstack/cli`'s globs, and two
+ * live tests importing `maskComments` from it, this gate printed
+ * `OK: 12 package(s) read outside themselves, all declared` and exited 0.
+ *
+ * ⚠️ The boundary that makes this safe: only specifiers that START RELATIVE
+ * (`./`, `../`) are read. A BARE specifier (`@objectstack/verify`, `node:fs`) is
+ * an installed dependency resolved through `node_modules` — the same thing
+ * `walkLiteral`'s `vendored` flag already drops, for the same reason: no turbo
+ * glob can name it, and collecting them would put every package's suite on every
+ * workspace sibling. A relative specifier that ESCAPES is the opposite case: it
+ * names a repo source file a glob can hash, and nothing else was seeing it.
+ */
+export const RECOGNISED_IMPORT_SPELLINGS = [
+  "import { x } from '../<rel>';     // static — `import type` counts too, it",
+  '                                  // is an input to the typecheck verdict',
+  "export { x } from '../<rel>';     // re-export, and `export * from`",
+  "import '../<rel>';                // side-effect import",
+  "await import('../<rel>');         // dynamic, with a LITERAL specifier",
+  "require('../<rel>');              // cjs (no test spells it this way today)",
+  '  ⛔ NOT `@objectstack/<pkg>`     // a BARE specifier is an installed',
+  '                                  // dependency, never a repo source input',
+];
+
+/**
+ * Every string-literal module specifier in `src`, in the four positions a
+ * specifier can occupy. The pattern set is the one `check-examples-live-imports`
+ * already proved on this same corpus — that gate reads test imports for the
+ * `examples/**` axis, and this is the same read widened to every target.
+ *
+ * Deliberately NOT comment-masked, which is where this gate parts company with
+ * that sibling. Masking is a read that can only SHRINK what is collected, and a
+ * spelling wrongly masked is a live import gone silent — the one failure mode
+ * this file exists to not have. Not masking can only over-collect, and this gate
+ * settles that trade the same way everywhere else: a mention forces a WIDER
+ * declaration, never a narrower one (see the `check-nul-bytes.mjs` roster entry,
+ * declared for exactly that reason).
+ *
+ * Measured on this tree across 2509 test sources: of the 4174 relative
+ * specifiers this finds, 6 exist only inside comments — and not one of those 6
+ * escapes its package, so none reaches the roster at all. The over-collection
+ * this trade accepts is real but currently costs nothing, and it is bounded in
+ * the safe direction by construction: a commented-out specifier can only force
+ * a declaration nobody needed, never withdraw one a live import holds.
+ */
+export function importSpecifiers(src) {
+  const out = new Set();
+  const patterns = [
+    // `from '<spec>'` covers `import … from` and `export … from`, multiline
+    // clauses included — a clause never contains a quote, so the literal that
+    // follows `from` is the specifier.
+    /\bfrom\s*(['"])([^'"\n]+)\1/g,
+    /\bimport\s*(['"])([^'"\n]+)\1/g,
+    /\bimport\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g,
+    /\brequire\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g,
+  ];
+  for (const re of patterns) for (const m of src.matchAll(re)) out.add(m[2]);
+  return out;
+}
+
+/**
+ * The specifier extensions this gate can map back to a file ON DISK.
+ *
+ * Under `moduleResolution: NodeNext` a TypeScript source is imported with the
+ * extension of the file it will EMIT, so `../x.js` is `../x.ts` on disk — while
+ * a root script really is `.mjs` and resolves as itself. Extensionless
+ * specifiers occur too. Measured on this tree, over every relative specifier
+ * that escapes its package: 15 extensionless (`packages/client`'s five
+ * route-ledger conformance tests, which import six sibling packages that way),
+ * 10 `.js` naming a `.ts` (`packages/lint` and cli, into `examples/`), and 3
+ * literal `.mjs` (the two cli tests of #10452, plus `packages/spec`'s
+ * `schema-tree-freshness.test.ts` reaching `scripts/check-regen-pending.mjs`).
+ * Each rule below is pinned by a `--self-test` case against a real file, so a
+ * rule that stops resolving fails here rather than going quiet.
+ *
+ * ⚠️ "Extensionless" is judged against the KNOWN module extensions, never
+ * against "the last segment contains a dot". This repo's authored metadata is
+ * `contact.view.ts`, `semantic-zoo.object.ts`, `task-triage.page.ts`, and it is
+ * imported as `../../../examples/app-showcase/src/ui/views/contact.view` — a
+ * trailing-dot-segment test reads `.view` as an extension, appends nothing, and
+ * the specifier resolves to nothing. Measured: that spelling is exactly the
+ * three `packages/cli` i18n-coverage imports, whose globs were on the roster by
+ * HAND. Getting this wrong does not fail loudly; it silently declines to hold a
+ * radius somebody already wrote down.
+ *
+ * A specifier matching none of them keeps its ESCAPE verdict and loses its NAME
+ * — the same trade `walkLiteral` makes for an argument it cannot read, and for
+ * the same reason: a roster entry pointing at a file nobody reads is worse than
+ * a missing one. The author still gets a red gate naming the test.
+ */
+const KNOWN_MODULE_EXTENSION = /\.(?:[cm]?[jt]sx?|json|node)$/;
+
+function resolveImportTarget(name) {
+  const candidates = [name];
+  if (/\.js$/.test(name)) candidates.push(name.replace(/\.js$/, '.ts'), name.replace(/\.js$/, '.tsx'));
+  else if (/\.mjs$/.test(name)) candidates.push(name.replace(/\.mjs$/, '.mts'));
+  else if (/\.cjs$/.test(name)) candidates.push(name.replace(/\.cjs$/, '.cts'));
+  else if (!KNOWN_MODULE_EXTENSION.test(name)) candidates.push(`${name}.ts`, `${name}.tsx`, `${name}.mts`);
+  for (const c of candidates) {
+    try {
+      if (statSync(join(REPO_ROOT, c)).isFile()) return c;
+    } catch {
+      // Not this candidate — try the next.
+    }
+  }
+  return null;
+}
 
 function walkTests(dir, out = []) {
   let entries;
@@ -828,6 +1057,12 @@ function scanPathExpressions(src, hereDepth, fileSegs = null) {
   const escapes = [];
   const files = new Set();
   const dirs = new Set();
+  // Module specifiers this file imports from outside the package, as the
+  // repo-relative names they SPELL — mapped onto real files by the caller.
+  const imports = new Set();
+  // An import resolves against the importing file's DIRECTORY, which is what
+  // `fileSegs` names one level below.
+  const dirSegs = fileSegs ? fileSegs.slice(0, -1) : null;
   const report = (name, info) => {
     // `vendored`: the read escapes the package but lands in an installed
     // dependency, which no declaration can name. Not a cross-package input.
@@ -861,7 +1096,23 @@ function scanPathExpressions(src, hereDepth, fileSegs = null) {
     if (known.has(first)) continue;
     report(`read #${n} argument`, info);
   }
-  return { escapes, files, dirs };
+
+  // The RESOLVER half (#10452). A relative specifier resolves against the
+  // importing FILE's directory — the same base as the two seeds and as
+  // `new URL(rel, import.meta.url)` — so it is the same `walkLiteral` walk in
+  // the same two coordinates, and the escape verdict is the same shallowest
+  // point. What differs is only that the name it produces is a MODULE
+  // specifier, so it goes in its own bucket for `findEscapingPackages()` to map
+  // back onto a file (`resolveImportTarget`); everything else here is shared.
+  for (const spec of importSpecifiers(src)) {
+    // ⚠️ The boundary. Anything not starting `.` is a bare specifier: an
+    // installed dependency, which no declared glob can name.
+    if (!spec.startsWith('.')) continue;
+    const info = walkLiteral(hereDepth, spec, dirSegs);
+    report(`import '${spec}'`, info);
+    if (info.segs?.length && !info.vendored) imports.add(info.segs.join('/'));
+  }
+  return { escapes, files, dirs, imports };
 }
 
 /**
@@ -914,7 +1165,13 @@ export function findEscapingPackages() {
     if (!existsSync(dir)) continue;
     for (const file of walkTests(dir)) {
       const src = readFileSync(file, 'utf8');
-      if (!FS_READ.test(src)) continue;
+      // Two ways out of a package, so two cheap pre-filters. The second is what
+      // lets a test that ONLY imports across the boundary be seen at all: before
+      // #10452 a file with no `fs` call never reached the scan, so the import
+      // half would have been unreachable no matter how well it resolved. An
+      // escaping specifier must contain an ascending relative literal, which is
+      // all this asks before paying for the walk.
+      if (!FS_READ.test(src) && !ASCENDING_LITERAL.test(src)) continue;
       const pkgRoot = packageRootOf(file);
       if (!pkgRoot) continue;
       const hereDepth = relative(pkgRoot, dirname(file)).split(sep).filter(Boolean).length;
@@ -938,8 +1195,14 @@ export function findEscapingPackages() {
       // expressions RESOLVE to — the reads that hold a radius without ever
       // spelling it (#9763). A reconstructed directory counts only when a
       // directory-listing read consumed it; everything else must name a file.
+      // A third source, same filter: the modules the test IMPORTS from outside
+      // the package (#10452). A specifier is mapped onto the file it really
+      // resolves to first — `../x.js` is `../x.ts` on disk under NodeNext — and
+      // one that resolves to nothing drops out here rather than entering the
+      // roster as a name nobody reads.
+      const imported = [...scan.imports].map((p) => resolveImportTarget(p)).filter((p) => p !== null);
       const roster = [
-        ...[...repoRelativeLiterals(src), ...scan.files].map((p) => [p, 'file']),
+        ...[...repoRelativeLiterals(src), ...scan.files, ...imported].map((p) => [p, 'file']),
         ...[...scan.dirs].map((p) => [p, 'dir']),
       ];
       for (const [lit, kind] of roster) {
@@ -1060,6 +1323,12 @@ function verify() {
         '\n    Reaching for a spelling that is not here? Add it to the detector (with a\n' +
         '    --self-test case) rather than working around it — an unseen read is the\n' +
         '    defect above, not a style question.',
+    );
+    console.error(
+      '\nA test reaches outside its package by IMPORTING as well as by reading, and\n' +
+        'those specifiers are read too (#10452). The recognised list, same rule — a\n' +
+        'spelling that is not here yields no flag:\n' +
+        RECOGNISED_IMPORT_SPELLINGS.map((s) => `      ${s}`).join('\n'),
     );
     process.exit(1);
   }
@@ -1458,6 +1727,106 @@ function selfTest() {
     'without a file seed the walk still answers on depth alone (--self-test above)',
     named("const P = resolve(__dirname, '../../scripts/x.mjs');", 1, null).length === 0 &&
       at("const P = resolve(__dirname, '../../scripts/x.mjs');", 1),
+  );
+
+  // ── the RESOLVER half (#10452) ─────────────────────────────────────────────
+  //
+  // One case per entry in RECOGNISED_IMPORT_SPELLINGS, which is the rule this
+  // file publishes for its path spellings and now owes its import spellings
+  // too: a list of what the gate can see is a claim, and a claim nothing runs
+  // is the phantom check this repo keeps re-learning. Adding a spelling to that
+  // array without a case here should feel like the omission it is.
+  //
+  // Then the BOUNDARY, in its own cases and deliberately over-covered. Reading
+  // a bare specifier as an escape would put every package's suite on every
+  // workspace sibling — the one way this half could do more damage than the
+  // blind spot it closes — so `@objectstack/*`, `node:*` and a plain package
+  // name are each pinned NOT to flag, rather than trusting one case to stand
+  // for the class.
+  const specOf = (src, depth, fileSegs) =>
+    [...scanPathExpressions(src, depth, fileSegs).imports].map((p) => resolveImportTarget(p)).filter((p) => p !== null);
+  // `packages/cli/src/commands/x.contract.test.ts` — the #10452 specimen, two
+  // directories below its package root.
+  const CLI = ['packages', 'cli', 'src', 'commands', 'x.contract.test.ts'];
+
+  ok('flags a static import that escapes the package (the #10452 specimen)', at("import { maskComments } from '../../../../scripts/js-comment-mask.mjs';", 2));
+  ok(
+    'flags an `import type` — it is an input to the typecheck verdict',
+    at("import type { RouteLedgerEntry } from '../../runtime/src/route-ledger';", 1),
+  );
+  ok('flags a re-export (`export … from`)', at("export { ROUTE_LEDGER } from '../../runtime/src/route-ledger';", 1));
+  ok('flags a star re-export (`export * from`)', at("export * from '../../runtime/src/route-ledger';", 1));
+  ok('flags a side-effect import with no clause', at("import '../../../../scripts/js-comment-mask.mjs';", 2));
+  ok('flags a dynamic import with a literal specifier', at("const m = await import('../../../../scripts/js-comment-mask.mjs');", 2));
+  ok('flags a cjs require with a literal specifier', at("const { maskComments } = require('../../../../scripts/js-comment-mask.mjs');", 2));
+
+  // ⛔ The boundary. An installed dependency is not a repo source input and no
+  // turbo glob can name it, which is the same exclusion `vendored` already
+  // makes for path reads.
+  ok('does NOT flag a bare workspace specifier', !at("import { verify } from '@objectstack/verify';", 2));
+  ok('does NOT flag a node: builtin', !at("import { readFileSync } from 'node:fs';", 2));
+  ok('does NOT flag an unscoped package name', !at("import { describe, it } from 'vitest';", 2));
+  ok('does NOT flag a same-directory relative import', !at("import { helper } from './helper.js';", 2));
+  ok(
+    'does NOT flag an ascent that stays inside the package',
+    !at("import { fixture } from '../fixtures/app.js';", 2),
+  );
+  ok(
+    'a bare specifier contributes no roster name either',
+    specOf("import { verify } from '@objectstack/verify';", 2, CLI).length === 0,
+  );
+
+  // The NAME half. Each case pins the repo-relative path the specifier must
+  // produce AGAINST A REAL FILE, so an extension rule that stops resolving
+  // fails here instead of quietly dropping a package's radius. A case asserting
+  // only "something came out" would pass just as happily on a wrong name.
+  ok(
+    'a literal .mjs specifier resolves as itself (cli -> the comment masker)',
+    specOf("import { maskComments } from '../../../../scripts/js-comment-mask.mjs';", 2, CLI).includes('scripts/js-comment-mask.mjs'),
+  );
+  ok(
+    'an extensionless specifier resolves to the .ts on disk (client -> runtime`s ledger)',
+    specOf("import { ROUTE_LEDGER } from '../../runtime/src/route-ledger';", 1, [
+      'packages',
+      'client',
+      'src',
+      'client-url-conformance.test.ts',
+    ]).includes('packages/runtime/src/route-ledger.ts'),
+  );
+  ok(
+    'a NodeNext .js specifier resolves to the .ts on disk (dogfood -> runtime`s ledger)',
+    specOf("import { ROUTE_LEDGER } from '../../../runtime/src/route-ledger.js';", 1, [
+      'packages',
+      'qa',
+      'dogfood',
+      'test',
+      'route-ledger-live-mount-parity.dogfood.test.ts',
+    ]).includes('packages/runtime/src/route-ledger.ts'),
+  );
+  // ⚠️ The metadata spelling. `contact.view` is extensionless as a SPECIFIER
+  // while its last segment carries a dot, so a "does it end in .something" test
+  // appends no candidate and the name is lost. Measured before the fix: this
+  // exact import went unnamed, and the glob holding it was on the roster only
+  // because a human had written it there.
+  ok(
+    'an extensionless specifier whose last segment contains a dot still resolves (cli -> a .view)',
+    specOf("import { contactView } from '../../../examples/app-showcase/src/ui/views/contact.view';", 1, [
+      'packages',
+      'cli',
+      'test',
+      'i18n-section-coverage.test.ts',
+    ]).includes('examples/app-showcase/src/ui/views/contact.view.ts'),
+  );
+  // The same trade `walkLiteral` makes for an unreadable argument: no name, but
+  // the escape verdict survives, so the author still gets a red gate naming the
+  // test rather than a silent pass.
+  ok(
+    'a specifier that resolves to no file yields no name',
+    specOf("import { x } from '../../../no-such-dir-10452/x';", 1, CLI).length === 0,
+  );
+  ok(
+    'but it still flags the escape',
+    at("import { x } from '../../../no-such-dir-10452/x';", 1),
   );
 
   // The `skills/` prefix -- the one spelling of #9763 that is a DATA fix in the
