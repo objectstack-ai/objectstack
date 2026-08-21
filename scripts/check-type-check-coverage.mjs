@@ -410,10 +410,18 @@ const DEBT = {
   },
   '@objectstack/metadata': {
     errors: 89,
-    note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '
-      + 'Re-measured 92 at 5ab08428, up from 87. Composition moved as well as the count: the note used to '
-      + 'name TS2353, which is gone, and TS2322 has taken its place. Two thirds of the pile sits in '
-      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16).',
+    note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). '
+      + 'Re-measured 89 at 4b84834a32, DOWN from 92 at 5ab08428 -- itself up from 87, so this entry has '
+      + 'now drifted both ways. Against the composition recorded here at 92 the delta is attributable '
+      + 'tier by tier: code-tier lost the 4 TS2322 (-4), config-tier gained one TS2835 (+1), noise did '
+      + 'not move. TS2353 then TS2322 have each passed through the code tier and left; TS2345 x30 is its '
+      + 'only lasting resident. Read the 89 as three mechanical repairs, not 89 problems: all 30 TS2345 '
+      + 'are one defect thirty times over, in metadata.test.ts between 608 and 945, every one the same '
+      + 'mock PluginContext literal missing registerServiceFactory and getServiceScoped, so one shared '
+      + 'fixture closes the code tier outright; the 25 TS2835 are the widest spread (12 files) and are '
+      + 'one codemod, a relative import wanting an explicit .js extension under node16 resolution. '
+      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16) do still hold 50 of the 89, '
+      + 'but that is over HALF -- the "two thirds" claimed here was true at neither 92 nor 89.',
   },
   '@objectstack/metadata-protocol': {
     errors: 63,
@@ -440,15 +448,17 @@ const DEBT = {
   },
   '@objectstack/service-automation': {
     errors: 3,
-    note: 'code-tier 5. Two are the TS2741 this note used to describe as the whole debt: '
-      + 'engine.test.ts:2547/2577 build a descriptor literal missing a required field, the #4198 discovery '
-      + 'that opened #4311 (the missing field TS names moved from resumeAuthority to handlerContract in '
-      + '#5561, which made resumeAuthority optional; both literals omit both, and TS reports one at a '
-      + 'time). The other 3 are TS2341 in src/nested-region-parity.test.ts, where the tests dot-read the '
-      + 'private `engine.flows` -- not `engine[\'flows\']`, not `as any`. Re-measured 5 at 5ab08428. This is '
-      + 'the specimen #5278 cites for composition drift: an entry reading "2, two descriptor literals" '
-      + 'looks like a free graduation, while the real residue includes a decision about whether tests may '
-      + 'read private state at all.',
+    note: 'code-tier 3 (TS2341 x3), all in src/nested-region-parity.test.ts at 95/151/180, where the '
+      + 'tests dot-read the private `engine.flows` -- not `engine[\'flows\']`, not `as any` (the casts on '
+      + 'two of those lines sit on `.config`, not on the engine, so they do not suppress it). Re-measured '
+      + '3 at 53a48c93f4, DOWN from 5 at 5ab08428: the two TS2741 in engine.test.ts this note used to '
+      + 'itemise alongside them have graduated -- that file now builds its pausing fixtures through a '
+      + 'single defineActionDescriptor helper that declares resumeAuthority (#5561), and engine.test.ts '
+      + 'still compiles in this project (`--listFiles` lists it) while reporting nothing. The residue is '
+      + 'therefore one decision, not an oversight: whether tests may read private state at all. This '
+      + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
+      + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
+      + 'made of before sizing it, never just the number.',
   },
   '@objectstack/service-cluster': {
     errors: 1,

@@ -17,30 +17,12 @@ import { SchemaRegistry } from './registry';
  * These tests assert on what the DRIVER receives: the middleware's filter
  * must be present in the ast that reaches driver.count / driver.aggregate.
  */
-vi.mock('./registry', () => {
-  const instance: any = {
-    getObject: vi.fn(),
-    resolveObject: vi.fn((n: string) => instance.getObject(n)),
-    registerObject: vi.fn(),
-    getObjectOwner: vi.fn(),
-    registerNamespace: vi.fn(),
-    registerKind: vi.fn(),
-    registerItem: vi.fn(),
-    registerApp: vi.fn(),
-    installPackage: vi.fn(),
-    reset: vi.fn(),
-    metadata: { get: vi.fn(() => new Map()) },
-  };
-  function SchemaRegistry() {
-    return instance;
-  }
-  Object.assign(SchemaRegistry, instance);
-  return {
-    SchemaRegistry,
-    computeFQN: (_ns: string | undefined, name: string) => name,
-    parseFQN: (fqn: string) => ({ namespace: undefined, shortName: fqn }),
-    RESERVED_NAMESPACES: new Set(['base', 'system']),
-  };
+vi.mock('./registry', async () => {
+  // [#10551] The one shared factory — see `registry-module-mock.ts` for the
+  // member set, the #9002 / #9154 lessons it carries, and why the async factory
+  // form is what makes this import legal under `vi.mock` hoisting.
+  const { createRegistryModuleMock } = await import('./registry-module-mock.js');
+  return createRegistryModuleMock();
 });
 
 const NOTE_SCHEMA = {

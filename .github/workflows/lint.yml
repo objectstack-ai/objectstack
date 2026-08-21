@@ -621,6 +621,41 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # Docs frontmatter parses (#10493). Nothing local YAML-parsed these pages.
+      # The one gate that reads them line by line — `check:doc-anchors` below —
+      # deliberately BLANKS the frontmatter block ("preserving line count"),
+      # which is right for heading ids and left the closest thing to a
+      # frontmatter reader as the thing that erases it. So "every page's
+      # frontmatter parses" had exactly one owner: the `Build Docs` job in
+      # ci.yml, a full `next build` on a 30-minute-timeout runner that exists
+      # only in CI and is path-filtered besides. A page landed whose unquoted
+      # `description` contained `apis: `, YAML read the colon-plus-space as the
+      # start of a nested mapping, and that build was what said so.
+      #
+      # This reads the corpus with the docs build's OWN extractor regex and the
+      # same `yaml` parser fumadocs resolves, and types the two keys
+      # `pageSchema` declares (`title: z.string()` required,
+      # `description: z.string().optional()` typed when present) — not a schema
+      # of its own: the shape one character from the original defect PARSES and
+      # yields an object, and only the type assertion sees it.
+      #
+      # Population is the WHOLE corpus, generated `references/**` included,
+      # because that is what `Build Docs` parses; scoping to the hand-written
+      # half would leave 214 of 403 pages carrying the gap this closes. Every
+      # unread state is a refusal rather than a quiet pass — an absent root, a
+      # tree resolving to zero pages, or a page that cannot be read all exit 1
+      # naming what could not be read (#4690 / #7484).
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the aggregator-roster step below: that alias belongs in root
+      # package.json, declared territory of the @changesets/cli v3 migration
+      # lane (#9465) while it runs. Dependency-free filesystem read, sub-second
+      # over the whole corpus.
+      - name: Docs frontmatter parses
+        run: |
+          node scripts/check-doc-frontmatter.mjs --self-test
+          node scripts/check-doc-frontmatter.mjs
+
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
       # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
@@ -1679,6 +1714,47 @@ jobs:
       # here: 4 dispatched hooks, 0 problems.
       - name: Paired kernel-hook pin gate
         run: pnpm check:kernel-hook-pairs
+
+      # Plugin teardown-shape gate (#10619, from #9371 / #10371). `Plugin`
+      # declares exactly one teardown hook — `destroy?()` — and both kernels
+      # call only that one. A plugin whose teardown is spelled `stop()` is
+      # therefore never torn down: `await kernel.shutdown()` RESOLVES with its
+      # timers still armed. #9371 measured 48 further delivery reads/writes in
+      # the 80 ms after a resolved shutdown, and the bill arrived as merge-queue
+      # evictions of two green PRs — because an `unref`'d timer lets a host
+      # process exit while a test process stays alive through teardown.
+      # WHY A GATE AND NOT THE REPAIRS: the trap is an ASYMMETRY. `start?()` IS
+      # on the interface and does fire, so a `start`/`stop` pair reads symmetric
+      # to a reviewer while only one half is ever called — which is how this
+      # survived review in two packages and was found only by the evictions. Fix
+      # the known instances and the next one arrives spelled `shutdown()` or
+      # `close()`; a gate makes the class unreachable. Ruled FOR by the
+      # `domain:devx` PM on the #9371 thread.
+      # The roster is `stop` / `shutdown` / `close` / `dispose`, and what was
+      # deliberately left OFF it (`disconnect`, `release`, `end`, `cleanup` …)
+      # is argued in the script header and pinned as green cases by the
+      # self-test — a roster chosen silently is the thing that goes stale.
+      # The delegating alias (`stop()` calling `destroy()`, the #9371 repair
+      # shape landed by PR #10375) stays green, and the self-test's positive
+      # control is the REAL pre-#10375 revision of that same file rather than a
+      # synthesised class.
+      # The 11 instances that predate the gate are baselined shrink-only, each
+      # pointing at #10371 which owns their repair; the list refuses new members
+      # outright, so nothing can join it to get CI green.
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the other `node scripts/…` steps in this lane: that alias is a line in
+      # root package.json, inside the @changesets/cli v3 fence (#9465).
+      # Runs its own --self-test first, and that leg is not decoration: this
+      # gate computes its own population, so a scan that stopped matching would
+      # print a confident green over a tree it never read (#4690's family). The
+      # self-test's refusal cases are each PAIRED with a readable tree that
+      # still returns a verdict, so "refuses unconditionally" cannot satisfy it.
+      # Static AST over ~4,400 sources plus one `git show` and two spawns;
+      # 3.4s + 2.5s measured locally, no build needed, so it belongs in this job.
+      - name: Plugin teardown-shape gate
+        run: |
+          node scripts/check-plugin-teardown-shape.mjs --self-test
+          node scripts/check-plugin-teardown-shape.mjs
 
       # Resume-authority declaration gate (#5561, from #3823). The #3801 resume
       # gate keys on the SUSPENDED NODE, so it covers a pausing node type exactly

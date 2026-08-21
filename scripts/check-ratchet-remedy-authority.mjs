@@ -637,6 +637,16 @@ const CONTROL = {
     expect: 'refused',
     why: 'The other refusal precedent, refusing by the same predication shape. Its registry states its own nature in the same message since #8576, so stage 2 reaches it rather than declining on a path target.',
   },
+  // The fourth refusal instance, and the second gate to join the convention as a
+  // NEW gate rather than by retrofit (#10619). Refusal — not marking — is the
+  // honest shape here because there is no legitimate act for anyone to own: its
+  // baseline exists solely to hold the instances that predate the gate, whose
+  // repair is another lane's card (#10371), so a maintainer is not the missing
+  // authority. Refusal is BOUND, the same limb check-adr-links.mjs uses.
+  'check-plugin-teardown-shape.mjs': {
+    expect: 'refused',
+    why: 'PR for #10619. Refuses by binding a negation to the verb, over a shrink-only baseline that exists only to hold the instances predating the gate; their repair belongs to the #10371 lane, so no authority is missing.',
+  },
 
   // ── Declaration registries and near-misses: recording the fact IS the fix ──
   'check-agent-model-declared.mjs': {

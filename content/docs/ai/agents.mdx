@@ -207,8 +207,8 @@ own `ask` / `build` records use exactly these fields):
 | `instructions` | System prompt / prime directives |
 | `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
 | `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
-| `tools` | Direct tool **references** `{ type, name, description }` — `type` is `action` \| `flow` \| `query` \| `vector_search`; `name` points at an existing Action/Flow/query |
-| `knowledge` | RAG access: `{ sources: string[], indexes: string[] }`. `sources` is the only key; the `topics` alias was removed in protocol 17 (#3855) — `os migrate meta --from 16` rewrites it |
+| `tools` | **Removed in protocol 17 (#3894)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. This is **not** a rename: there is no key the value moves to. Declare each tool on a **skill** instead — a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — and attach that skill through `skills` (ADR-0064) |
+| `knowledge` | **Removed in protocol 17 (#3896)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who “scoped” access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |
 
 There is no `type` field and no fixed agent "type" taxonomy — behaviour comes from
 persona, instructions, skills, and tools. There are no `triggers` / `schedule`
@@ -217,9 +217,15 @@ the **ObjectOS** runtime — via the in-product chat endpoint
 (`/api/v1/ai/*`). On the open-source framework, invoke the underlying Actions/Flows through
 `@objectstack/mcp`.
 
-<Callout type="info">
-Agent tools are **references** to existing Actions, Flows, or queries — you do
-not define ad-hoc tool names with inline parameter schemas here. See
+<Callout type="warn">
+**An agent has no tool slot of its own.** Its tool set is exactly the union of
+its surface-compatible skills' tools, with no fall-through to the global
+registry ([ADR-0064](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0064-tool-scoping-to-agent.md)).
+The removed `tools` key was the one seam that broke that invariant: the runtime
+resolved `agent.tools[].name` against the **full** registry with no surface
+check, so an `ask`-surface agent could name an authoring tool and reach it. So
+there is nowhere on the agent to move a reference **to** — re-declare each one
+in a skill's `tools` by hand, then attach the skill. See
 [Actions as Tools](/docs/ai/actions-as-tools) for how an Action becomes
 LLM-callable.
 </Callout>
