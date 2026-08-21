@@ -22,8 +22,9 @@
  *           no read to perform it).
  *   B/B2  — the sibling `position` expansion IS screened, and its screen is not
  *           reject-everything.
- *   W     — `team` is still NOT screened. #10230 owns that; this card did not
- *           touch it, and the pin says so out loud.
+ *   W     — `team` was still NOT screened when this file was written; #10230
+ *           closed that and INVERTED this pin. It stays here as the cross-file
+ *           statement that no unscreened expansion is left.
  *   C-a   — THE ACCEPT-TO-REJECT FLIP. Under `onEmptyApprovers: 'fail'` a node
  *           whose sole approver is a cross-org `manager` used to OPEN; it now
  *           throws `NO_APPROVERS`. That throw is PRE-EXISTING code and a bare
@@ -237,11 +238,15 @@ describe('#10153 manager approver org screen', () => {
     expect(err).toBeTruthy();
   });
 
-  it('W — `team` is STILL not org-screened (#10230 owns it; this card did not touch it)', async () => {
+  it('W — `team` IS org-screened now too (#10230 landed; the gap this pin held is closed)', async () => {
     engine._tables['sys_team'] = [{ id: 'team_b', name: 'B team', organization_id: 'org_b' }];
     engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 'team_b', user_id: 'u_team_b' }];
     const req = opened(await svc.openNodeRequest(input([{ type: 'team', value: 'team_b' }]), CTX_A));
     console.log('[PROBE W] org_a request, org_b team -> pending_approvers =', JSON.stringify(req.pending_approvers));
-    expect(req.pending_approvers).toEqual(['u_team_b']);
+    // Inverted by #10230, which this pin was written to hand off to. The two
+    // directions and the `null` / absent-row limbs live in that card's own file
+    // (`team-approver-org-screen.test.ts`); what stays HERE is the cross-file
+    // fact this file exists to keep true — the last unscreened expansion is gone.
+    expect(req.pending_approvers).toEqual(['team:team_b']);
   });
 });

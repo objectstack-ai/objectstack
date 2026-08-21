@@ -462,6 +462,31 @@ function testFiles() {
 }
 
 /**
+ * The cheap pre-filter EVERY walk in this file shares: could this text declare
+ * a member named `verb` at all? If not, there is nothing to parse.
+ *
+ * ⛔ It is one function because it was FOUR copies and two of them were
+ * narrower than the others (#10175). `scanSlice` and the `--census` veto
+ * ablation tested `\b<verb>\s*[(:]`, which admits `delete(` and `delete:` and
+ * nothing else; the two census walks tested `[(:,}]`, which also admits the
+ * SHORTHAND spellings `update,` and `update }`. While `implOf` could not read a
+ * shorthand that difference was invisible -- discovery would have found nothing
+ * in those files anyway. The moment it can (below), the narrow copies become a
+ * silent skip: a file whose ONLY spelling of the verb is a shorthand member is
+ * never parsed by discovery while the census parses it and reports it, so the
+ * two walks disagree for a reason that is nowhere near the code that decides.
+ *
+ * That is #9747's self-test failure with a pre-filter wearing the costume, and
+ * it is the same class as the widening hazard #10175's structural note names --
+ * one step further upstream, where a reader looking at `implOf` cannot see it.
+ * So the class is closed rather than the instance: there is one spelling now,
+ * and a fifth walk gets it by calling this.
+ */
+function mentionsVerb(text, verb) {
+  return new RegExp(`\\b${verb}\\s*[(:,}]`).test(text);
+}
+
+/**
  * The implementation a MOCK CONSTRUCTOR wraps, or null (#8639).
  *
  * `delete: vi.fn(async (o, opts) => …)` is a CallExpression, so the two
@@ -575,11 +600,110 @@ function unwrapCallImpl(init) {
  * at ZERO occurrences on this corpus (`--census`, ConditionalExpression row);
  * re-run that before widening it, not the number in this sentence.
  */
-function unwrapDefaultedImpl(init) {
+function unwrapDefaultedImpl(init, seen) {
   if (!ts.isBinaryExpression(init)) return null;
   const op = init.operatorToken.kind;
   if (op !== ts.SyntaxKind.QuestionQuestionToken && op !== ts.SyntaxKind.BarBarToken) return null;
-  return fnInitializer(init.right) ?? fnInitializer(init.left);
+  return fnInitializer(init.right, seen) ?? fnInitializer(init.left, seen);
+}
+
+/**
+ * The NEAREST declaration of `name` visible from `node`, or null (#10175).
+ *
+ * Resolution is by SCOPE CHAIN -- walk out through the enclosing statement
+ * lists and take the first one that declares the name -- and not by a
+ * file-wide `name -> node` map, which is the cheaper shape and the one the
+ * card proposed. The reason is measured on this corpus rather than argued:
+ *
+ *   packages/metadata-protocol/src/protocol.dropped-fields.bulk.test.ts
+ *     declares `const update` TWICE (two fakes, two `describe` blocks)
+ *   packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts
+ *     declares `const engineUpdate` TWICE (module scope and a nested block)
+ *
+ * A file-wide map has to pick one of each pair for every use site, so on three
+ * of the constructs this card is about it would be reading a DIFFERENT
+ * function than the one that runs. Today the two spellings happen to agree --
+ * each pair's members carry the same shape, so the verdict is the same either
+ * way -- and "they agree today" is exactly the kind of property that is true
+ * until someone edits one half of a pair. Getting it right costs a parent
+ * walk, which `setParentNodes: true` (fixed in `ts-parse.mjs`) already pays
+ * for.
+ *
+ * What it deliberately does NOT reach, both for the same reason -- the
+ * implementation is not statically knowable, so refusing keeps the construct
+ * in the UNRECOGNISED census instead of guessing at it:
+ *
+ *   - PARAMETERS (`function make(del) { return { delete: del }; }`). The
+ *     implementation is whatever the caller passed.
+ *   - imported bindings. The function is in another file, and one file is all
+ *     any walk here has.
+ *
+ * Note which way the error leans, the same way `takesObjectNameFirst` states
+ * it: answering null leaves a construct UNRECOGNISED -- printed, counted, and
+ * visible -- while answering with the wrong function would put a verdict on a
+ * double this gate never read. The first is a row in a census; the second is
+ * the failure mode this gate exists to prevent, wearing the gate's own badge.
+ */
+function resolveBinding(node, name) {
+  for (let scope = node.parent; scope; scope = scope.parent) {
+    let statements = null;
+    if (ts.isSourceFile(scope) || ts.isBlock(scope) || ts.isModuleBlock(scope)) statements = scope.statements;
+    else if (ts.isCaseClause(scope) || ts.isDefaultClause(scope)) statements = scope.statements;
+    if (!statements) continue;
+    let found = null;
+    for (const st of statements) {
+      if (ts.isFunctionDeclaration(st) && st.name?.text === name) found = st;
+      else if (ts.isVariableStatement(st)) {
+        for (const d of st.declarationList.declarations) {
+          if (ts.isIdentifier(d.name) && d.name.text === name && d.initializer) found = d.initializer;
+        }
+      }
+    }
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * The implementation behind a BARE LOCAL BINDING, or null (#10175).
+ *
+ * `delete: del` (with `const del = vi.fn(async (o, opts) => …)` above it) and
+ * the shorthand `{ registry, insert, findOne, update }` are the two remaining
+ * spellings #9877 named and narrowed away from. Both are the same shape: the
+ * initializer is an IDENTIFIER, so `fnInitializer` had nothing to unwrap,
+ * `implOf` answered null, and the double left the population with no verdict
+ * recorded -- not pinned, not baselined, not exempt. Absent. Measured on the
+ * tree this landed against, they were the WHOLE of the UNRECOGNISED census:
+ * 21 constructs, 7 rooting at a named binding and 14 shorthand.
+ *
+ * ## Why it recurses through `fnInitializer` rather than reading the binding
+ *
+ * The binding is not usually a bare arrow -- every one of the 21 is
+ * `vi.fn(async (…) => …)`, which is the CallExpression spelling `unwrapCallImpl`
+ * already reads. Handing the resolved initializer back to `fnInitializer` means
+ * this spelling composes with every other one for free (`const del =
+ * overrides.delete ?? vi.fn(fn)` reads, and so does a binding that is itself
+ * another binding) instead of re-implementing a second, narrower unwrap that
+ * would drift from the first -- the drift `fnInitializer` was extracted to
+ * remove (#8639's sibling half).
+ *
+ * `seen` is keyed on the resolved DECLARATION NODE rather than on the name,
+ * because `const a = b` in one scope and `const b = a` in another are two
+ * different bindings that share a spelling. A cycle answers null, which leaves
+ * the construct in the census where it belongs.
+ *
+ * A `FunctionDeclaration` is returned as itself: everything downstream reads
+ * `.parameters` and walks the body (`isEngineVerbShape`, `calleesIn`), and both
+ * work on a declaration exactly as they do on the expression forms. One without
+ * a body is an overload signature -- no implementation, so null.
+ */
+function unwrapBoundImpl(init, seen) {
+  if (!ts.isIdentifier(init)) return null;
+  const decl = resolveBinding(init, init.text);
+  if (!decl || seen.has(decl)) return null;
+  seen.add(decl);
+  if (ts.isFunctionDeclaration(decl)) return decl.body ? decl : null;
+  return fnInitializer(decl, seen);
 }
 
 /**
@@ -591,20 +715,34 @@ function unwrapDefaultedImpl(init) {
  * one spelling and not the other reproduces this card at the next reading. With
  * one function there is no second copy to forget.
  */
-function fnInitializer(init) {
+function fnInitializer(init, seen = new Set()) {
   if (!init) return null;
   if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
-  const defaulted = unwrapDefaultedImpl(init);
+  const defaulted = unwrapDefaultedImpl(init, seen);
   if (defaulted) return defaulted;
-  return unwrapCallImpl(init);
+  const called = unwrapCallImpl(init);
+  if (called) return called;
+  return unwrapBoundImpl(init, seen);
 }
 
-/** A member's function-ish implementation, or null. */
+/**
+ * A member's function-ish implementation, or null.
+ *
+ * ⛔ It takes no binding map and no `SourceFile`, and that is deliberate rather
+ * than an omission: `resolveBinding` walks `node.parent`, so the ONE function
+ * every walk in this file already calls gained the local-binding spellings
+ * without a second parameter to thread -- and therefore without a call site
+ * that could be missed. #10175's structural note is about exactly that hazard:
+ * a widening applied to `scanSource` alone leaves `censusSource` reporting the
+ * same constructs as UNRECOGNISED, the two walks disagree, and #9747's
+ * self-test reddens. Here there is no second place to apply it.
+ */
 function implOf(member) {
   if (ts.isMethodDeclaration(member) || ts.isMethodSignature(member)) return member;
   if (ts.isPropertyAssignment(member)) return fnInitializer(member.initializer);
   if (ts.isPropertyDeclaration(member)) return fnInitializer(member.initializer);
-  if (ts.isShorthandPropertyAssignment(member)) return null;
+  // `{ registry, insert, findOne, update }` -- the member's NAME is the binding.
+  if (ts.isShorthandPropertyAssignment(member)) return unwrapBoundImpl(member.name, new Set());
   return null;
 }
 
@@ -925,9 +1063,18 @@ function scanSource(fileName, text, slice = SLICES[0], opts = {}) {
 //
 //   UNRECOGNISED  an implementation demonstrably EXISTS and this gate cannot
 //                 reach it: the initializer carries a function the unwrap
-//                 declined, or it roots at a binding this file declares. Each
-//                 one is a double that could be looser than the producer and
-//                 is in no ledger. Reported by file, line and spelling.
+//                 declined, or it roots at a binding this file declares whose
+//                 value the recogniser cannot resolve. Each one is a double
+//                 that could be looser than the producer and is in no ledger.
+//                 Reported by file, line and spelling.
+//
+// The membership of the second bucket is not fixed, and it MOVES when the
+// recogniser learns a spelling: #9877 took the `??` default out of it and
+// #10175 took the bare local binding and the shorthand -- 21 constructs, the
+// whole census on the tree that card was measured against. That is the
+// direction this section exists to produce. What must never happen is a
+// construct leaving this census WITHOUT entering the population, so every
+// migration is asserted from both sides in the self-test.
 //
 // The discriminator is structural, never an allowlist of callee names -- the
 // same choice `unwrapCallImpl` documents, and for the same reason: an
@@ -1029,7 +1176,7 @@ function censusUnrecognised() {
     const rel = relative(ROOT, abs).split(sep).join('/');
     const text = readFileSync(abs, 'utf8');
     for (const slice of SLICES) {
-      if (!new RegExp(`\\b${slice.verb}\\s*[(:,}]`).test(text)) continue;
+      if (!mentionsVerb(text, slice.verb)) continue;
       const c = censusSource(abs, text, slice);
       scopedOut += c.scopedOut.length;
       for (const u of c.unrecognised) rows.push({ verb: slice.verb, file: rel, ...u });
@@ -1202,7 +1349,7 @@ function censusRecognizer() {
   for (const abs of files) {
     const rel = relative(ROOT, abs).split(sep).join('/');
     const text = readFileSync(abs, 'utf8');
-    if (!/\b(delete|update)\s*[(:,}]/.test(text)) continue;
+    if (![...SCANNED_VERBS].some((v) => mentionsVerb(text, v))) continue;
     const sf = parseSourceFile(abs, text);
 
     const consider = (props) => {
@@ -1247,7 +1394,7 @@ function censusRecognizer() {
     for (const abs of files) {
       const rel = relative(ROOT, abs).split(sep).join('/');
       const text = readFileSync(abs, 'utf8');
-      if (!new RegExp(`\\b${slice.verb}\\s*[(:]`).test(text)) continue;
+      if (!mentionsVerb(text, slice.verb)) continue;
       const withVeto = scanSource(abs, text, slice);
       const without = scanSource(abs, text, slice, { skipRepositoryVeto: true });
       if (without.length === withVeto.length) continue;
@@ -1492,17 +1639,22 @@ function censusReport() {
 // build produces -- keeps the other rows and passes it. The ledger names each
 // row, so partial drift reddens with the row's own identity in the message.
 //
-// ⚠️ What this does NOT do is widen the population, and the scope is worth
-// stating because a census scoped by the wrong instrument holds a blind spot no
-// amount of re-running finds (#8999): `productionFiles()` walks `packages/`
-// only, while the DOUBLE side of this gate walks `SCAN_ROOTS` (`packages`,
-// `examples`). MEASURED 2026-08-21 with the same walk widened to `examples`,
-// `apps`, `skills` and `scripts`: the SAME rows, zero extra -- a controlled
-// zero, since the widened walk still finds all of the known ones rather than
-// silently returning nothing. Filed as #10496 rather than folded in here: a
-// seam landing in an example app tomorrow is outside this population and
-// therefore outside its ledger too, and that is a scope decision rather than a
-// governance one.
+// ⚠️ What this does NOT do is widen the population BEYOND the roots the rest
+// of this file already reads, and the scope is worth stating because a census
+// scoped by the wrong instrument holds a blind spot no amount of re-running
+// finds (#8999). `productionFiles()` used to walk `packages/` only while the
+// DOUBLE side walked `SCAN_ROOTS` (`packages`, `examples`); measured
+// 2026-08-21 with the walk widened to `examples`, `apps`, `skills` and
+// `scripts`, that asymmetry cost the SAME rows, zero extra -- a controlled
+// zero, since the widened walk still found all of the known ones rather than
+// silently returning nothing. Filed as #10496 and CLOSED there by taking the
+// asymmetry out: both scans now read `SCAN_ROOTS`, so one constant governs
+// which roots this gate reads. The reading above is left as the dated
+// measurement it was; `productionFiles()` carries the re-measurement on this
+// branch and the planted-seam positive control that makes its zero mean
+// something. Why it was worth doing for zero rows: a seam landing in an
+// example app tomorrow was outside this population and therefore outside its
+// ledger too, so neither half would have reported it.
 
 /** Where the repo's ONE not-found envelope may be imported from (#7867). */
 const ENVELOPE_MODULES = [
@@ -1539,7 +1691,43 @@ const RECEIPT_KEYS = new Set(['success', 'record', 'deleted', 'updated', 'remove
  */
 const SEAM_VERBS = new Set(['update', 'delete']);
 
-/** Production sources: the seams live in `src`, never in a test. */
+/**
+ * Production sources: the seams live in `src`, never in a test.
+ *
+ * Walks `SCAN_ROOTS` -- the SAME constant the TEST DOUBLE side walks (#10496).
+ * It used to walk `packages/` alone, and nothing anywhere stated the narrower
+ * scope as a decision: the stated scope test is the sentence above, which
+ * `examples/` satisfies exactly as much as `packages/` does. An example app
+ * performing a by-id write on a caller-supplied id and answering a success
+ * receipt is the three-conjunct seam this invariant is about, and it would have
+ * been judged by nothing -- and since #9708's ledger is keyed on the rows THIS
+ * walk discovers, it would have been outside the ledger too, so neither half
+ * would have reported it.
+ *
+ * ## What widening bought TODAY: nothing, and that is the point
+ *
+ * Re-measured on this branch (the numbers in the CONSUMER SEAMS header above
+ * were taken before #10573 and are left as the dated reading they were):
+ *
+ *     narrow (packages only)                     6 seams in 3 files
+ *     wide   (SCAN_ROOTS = packages, examples)   6 seams in 3 files
+ *     rows the wider walk adds                   []
+ *
+ * ⛔ A zero is worth nothing without a POSITIVE CONTROL, because a walk that
+ * silently stopped working returns the same zero. Two were run, and the second
+ * is the one that matters: the wide walk still returns all six known rows (so
+ * it did not stop walking `packages/`), AND a synthetic seam planted at
+ * `examples/app-showcase/src/os-10496-seam-control.ts` -- a by-id update on a
+ * caller-supplied id answering `{ success: true }` -- was discovered by the
+ * wide walk (7 seams in 4 files, the new row reported `[NONE]`) and NOT by the
+ * narrow one (6 in 3, no row), then removed.
+ * Without that limb "zero extra rows" and "never looked at `examples/`" are the
+ * same reading.
+ *
+ * So this is not a fix for a live defect. It removes an unexplained asymmetry
+ * between two scans in one file, at a measured cost of zero rows, and puts the
+ * next example app's write seam inside the population instead of outside it.
+ */
 function productionFiles() {
   const out = [];
   const walkSrc = (dir) => {
@@ -1556,7 +1744,7 @@ function productionFiles() {
       else if (/\.(ts|tsx|mts)$/.test(e.name) && !/\.(test|spec|bench)\.(ts|tsx|mts)$/.test(e.name)) out.push(p);
     }
   };
-  walkSrc(join(ROOT, 'packages'));
+  for (const r of SCAN_ROOTS) walkSrc(join(ROOT, r));
   return out.sort();
 }
 
@@ -2522,7 +2710,7 @@ function scanSlice(slice) {
     const rel = relative(ROOT, abs).split(sep).join('/');
     const text = readFileSync(abs, 'utf8');
     // Cheap pre-filter: no member with this verb's name, nothing to parse.
-    if (!new RegExp(`\\b${slice.verb}\\s*[(:]`).test(text)) continue;
+    if (!mentionsVerb(text, slice.verb)) continue;
     const doubles = scanSource(abs, text, slice);
     if (doubles.length === 0) continue;
     found.push({ file: rel, doubles });
@@ -4002,21 +4190,139 @@ function makeEngine() {
   expect('#9747 — an initializer carrying a function the unwrap declined is UNRECOGNISED',
     c.unrecognised.length === 1 && c.unrecognised[0].why.includes('declined to unwrap'));
 
-  c = censusSource('c.test.ts', censusFake('delete: del,',
-    'const del = async (o: string, opts?: any) => true;\n'), D);
-  expect('#9747 — an initializer rooting at a binding this file declares is UNRECOGNISED',
-    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('`del`'));
+  // ⛔ The two fixtures below used to be this census's "local binding" and
+  // "shorthand" witnesses. #10175 taught `fnInitializer` to resolve a bare
+  // binding through the file's own scopes, so BOTH sources are now read -- and,
+  // exactly as the `??` limb above states it, the census must follow the
+  // recognizer rather than keep a row the population already owns. Each is
+  // asserted from both sides, because "left the census" and "entered the
+  // population" are two different facts and the failure this card exists for is
+  // a construct that is in NEITHER.
+  const bound = censusFake('delete: del,', 'const del = async (o: string, opts?: any) => true;\n');
+  c = censusSource('c.test.ts', bound, D);
+  expect('#10175 — an initializer rooting at a LOCAL BINDING left the census when the recognizer '
+    + 'learned to resolve it',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+  expect('#10175 — …and landed in the population instead (the two walks agree)',
+    scanSource('c.test.ts', bound, D).length === 1);
 
   // The shorthand limb is driven on the UPDATE slice, not delete: `{ delete }`
   // is not valid shorthand (a reserved word), so the delete spelling could
   // never occur in the tree and a fixture using it would assert nothing. Every
   // shorthand row the real corpus carries is an `update`.
-  c = censusSource('c.test.ts', `
+  const U9747 = SLICES.find((s) => s.verb === 'update');
+  const shorthand = `
 const update = async (o: string, data: any, opts?: any) => data;
 const engine: any = { registry: {}, insert: async (o: string, d: any) => d, findOne: async (o: string) => null, update };
-`, SLICES.find((s) => s.verb === 'update'));
-  expect('#9747 — a shorthand member is UNRECOGNISED',
+`;
+  c = censusSource('c.test.ts', shorthand, U9747);
+  expect('#10175 — a SHORTHAND member left the census the same way (the member name IS the binding)',
+    c.unrecognised.length === 0 && c.scopedOut.length === 0);
+  expect('#10175 — …and landed in the population instead',
+    scanSource('c.test.ts', shorthand, U9747).length === 1);
+
+  // Both limbs above removed a census witness, so both branches need a fixture
+  // that STILL fires or they become unreachable and rot silently -- the same
+  // debt the `traced(…)` fixture above pays for the "declined to unwrap" arm.
+  // These are the honest residue of the widening: a binding whose value is not
+  // a function this gate can read, and a name this file never declares.
+  c = censusSource('c.test.ts', censusFake('delete: del,', 'const del = makeDeleter();\n'), D);
+  expect('#10175 — a binding whose value is NOT a readable function is still UNRECOGNISED '
+    + '(resolution answers null; it does not invent a verdict)',
+    c.unrecognised.length === 1 && c.unrecognised[0].why.includes('`del`'));
+
+  c = censusSource('c.test.ts', `
+import { update } from './fixtures.js';
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, findOne: async (o: string) => null, update };
+`, U9747);
+  expect('#10175 — a shorthand whose binding is IMPORTED is still UNRECOGNISED (one file is all '
+    + 'this walk has, so the implementation is not knowable here)',
     c.unrecognised.length === 1 && c.unrecognised[0].why.includes('shorthand'));
+
+  expect('#10175 — a binding bound to a PARAMETER is not resolved either: the implementation is '
+    + 'whatever the caller passed',
+    scanSource('c.test.ts', `
+function makeEngine(del: any) {
+  return { registry: {}, async insert(o: string, d: any) { return d; }, async find(o: string) { return []; }, delete: del };
+}
+`, D).length === 0);
+
+  // A cycle must answer null rather than recurse forever. `seen` is keyed on
+  // the resolved DECLARATION, so this terminates on the second visit.
+  expect('#10175 — a cyclic binding pair answers null instead of looping',
+    scanSource('c.test.ts', `
+const a = b;
+const b = a;
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find: async (o: string) => [], delete: a };
+`, D).length === 0);
+
+  // A `function` declaration is the other spelling of the same binding, and it
+  // has to be read as itself: everything downstream takes `.parameters` and
+  // walks the body, which works on a declaration exactly as on an arrow.
+  expect('#10175 — a binding that is a FUNCTION DECLARATION is read',
+    scanSource('c.test.ts', `
+function del(o: string, opts?: any) { return true; }
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find: async (o: string) => [], delete: del };
+`, D).length === 1);
+
+  // ⭐ The discriminating limb for resolving by SCOPE CHAIN rather than by a
+  // file-wide name map. Two bindings share the name; the NEARER one is the one
+  // that runs. It is driven in the direction where the two answers DIFFER --
+  // the inner `del` takes a primary key in second position, so reading it
+  // vetoes the construct as a DRIVER while reading the outer one would admit it
+  // as an engine double. A file-wide map picks one binding for every use site
+  // and gets this wrong in one direction or the other; two files in this repo's
+  // own corpus declare the same name twice (see `resolveBinding`).
+  const shadowed = `
+const del = async (o: string, opts?: any) => true;
+function inner() {
+  const del = async (o: string, id: string) => true;
+  const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find: async (o: string) => [], delete: del };
+  return engine;
+}
+`;
+  expect('#10175 — a SHADOWED binding resolves to the nearest declaration, not to a file-wide '
+    + 'name match (here the inner one is the driver shape, so the construct is out of scope)',
+    scanSource('c.test.ts', shadowed, D).length === 0);
+  expect('#10175 — …and the control: the SAME construct with no inner shadow reads the outer '
+    + 'binding and IS discovered, so the limb above measures the shadow and not the fixture',
+    scanSource('c.test.ts', shadowed.replace('  const del = async (o: string, id: string) => true;\n', ''), D)
+      .length === 1);
+
+  // The pinning verdict has to survive the extra hop, in both directions --
+  // resolution that lost the body would report every newly-read double as
+  // unpinned, which is the noisiest possible way to be wrong.
+  expect('#10175 — a resolved binding whose body calls the predicate is PINNED',
+    scanSource('c.test.ts', IMPORT + `
+const del = async (o: string, opts?: any) => { assertEngineDeleteDispatch(opts); return true; };
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find: async (o: string) => [], delete: del };
+`, D)[0].pinned === true);
+  expect('#10175 — …and one that does not is NOT pinned',
+    scanSource('c.test.ts', IMPORT + `
+const del = async (o: string, opts?: any) => true;
+const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find: async (o: string) => [], delete: del };
+`, D)[0].pinned === false);
+
+  // The DRIVER veto is decided on the sibling members, so it must still fire
+  // when the implementation arrived through a binding. Widening a recogniser
+  // into a veto is how a gate starts reporting the wrong contract.
+  expect('#10175 — the driver veto still applies at the bound spelling',
+    scanSource('d.test.ts', `
+const del = async (o: string, opts?: any) => true;
+const driver: any = { create: async (o: string, d: any) => d, find: async (o: string) => [], connect: async () => {}, delete: del };
+`, D).length === 0);
+
+  // ⛔ The pre-filter is part of the recogniser, and it was FOUR copies with two
+  // different character classes (#10175). While a shorthand could not be read
+  // the difference was invisible; the moment it can, a narrow copy silently
+  // skips any file whose only spelling of the verb is a shorthand member -- and
+  // the two walks then disagree for a reason nowhere near `implOf`.
+  expect('#10175 — the shared pre-filter admits the SHORTHAND spellings, not just `verb(` / `verb:`',
+    mentionsVerb('const e = { registry, insert, update, findOne };', 'update')
+      && mentionsVerb('return { engine, insert, update }', 'update')
+      && mentionsVerb('async update(o: string, d: any) {}', 'update')
+      && mentionsVerb('const e = { update: fn }', 'update')
+      && !mentionsVerb('await p.updateManyData({});', 'update'));
 
   // ⛔ The H4 trap, pinned in both spellings: a bare mock and a mock returning a
   // VALUE carry no implementation at all, so nothing about them could be looser
@@ -4040,7 +4346,11 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
   // ⛔ Visibility only: the census must not be able to move discovery. Same
   // source, both walks -- the double count is what it was before this section
   // existed. Without this limb "it only counts" is a claim, not a property.
-  const visSrc = censusFake('delete: del,', 'const del = async (o: string, opts?: any) => true;\n');
+  // (Re-based by #10175: the `delete: del` fixture this used to drive is READ
+  // now, so it proves nothing about the census's inability to widen discovery.
+  // A function among SEVERAL arguments is the spelling that is still outside
+  // the recognizer, so it is the one that can carry this property.)
+  const visSrc = censusFake("delete: traced('DELETE', async (o: string, opts?: any) => true),");
   expect('#9747 — a construct in the UNRECOGNISED census is still absent from the population '
     + '(the census cannot widen discovery)',
     censusSource('c.test.ts', visSrc, D).unrecognised.length === 1
@@ -4115,7 +4425,8 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
       + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
       + 'the receipt, and REPORTS the seam that answers without refusing at all; and, on the '
       + 'UNRECOGNISED CENSUS (#9747), counts a construct whose implementation exists but cannot '
-      + 'be reached (a function among several arguments, a local binding, a shorthand), SCOPES '
+      + 'be reached (a function among several arguments, a binding whose value it cannot read, an '
+      + 'imported one), SCOPES '
       + 'OUT the two '
       + 'spellings that carry no implementation at all rather than reporting them as noise, '
       + 'ignores constructs with too few engine siblings to be in scope, and cannot move one '
@@ -4124,7 +4435,12 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
       + 'driver there and still refusing a conditional; carries the INHERITANCE rule (#8553) on '
       + 'BOTH ratchet remedies with a detector that rejects the two-option framing; and buckets '
       + 'the RECOGNIZER CENSUS (#9943) by initializer kind so a spelling this gate cannot read '
-      + 'shows up as its own row rather than as silence.',
+      + 'shows up as its own row rather than as silence; and resolves a BARE LOCAL BINDING '
+      + '(#10175) on both the named-initializer and the shorthand spelling -- through the SCOPE '
+      + 'CHAIN, so a shadowed name reads the nearest declaration and not a file-wide match -- '
+      + 'carrying the pinned verdict and the driver veto across that hop, refusing a parameter, an '
+      + 'import and a cycle, and reading one shared pre-filter that admits the shorthand spellings '
+      + 'so discovery and the census cannot be scoped differently.',
   );
 }
 

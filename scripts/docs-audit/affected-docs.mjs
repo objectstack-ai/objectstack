@@ -155,7 +155,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 // The one answer to "is this span a comment, or code?" (#9367). Dependency-free and
 // side-effect-free on import, so the no-install contract this script runs under holds.
-import { maskComments } from '../js-comment-mask.mjs';
+import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 
 const repoRoot = execSync('git rev-parse --show-toplevel').toString().trim();
 const args = process.argv.slice(2);
@@ -1183,8 +1183,8 @@ function bridgeCoverageFrom(ledgers, tails) {
       const named = l.declined.slice(0, 3).map((d) => `line ${d.line}: ${d.text}`).join(', ');
       brokenScan.push(
         `${l.file} is a PARTIAL read of that ledger, not its shape — the row recognizer reads single-quoted values only`
-        + ` and read ${l.rowsParsed} of ${l.routesDeclared} declared string-literal \`route:\` value(s)`
-        + ` and ${l.clientRows} of ${l.clientsDeclared} declared string-literal \`client:\` value(s)`
+        + ` and read ${l.rowsParsed} of ${l.routesDeclared} declared \`route:\` value(s)`
+        + ` and ${l.clientRows} of ${l.clientsDeclared} declared \`client:\` value(s)`
         + (l.declined.length
           ? `; declined ${l.declined.length}: ${named}${l.declined.length > 3 ? `, +${l.declined.length - 3} more` : ''}`
           : '')
@@ -1241,6 +1241,91 @@ function scanRouteSurface() {
 }
 
 /**
+ * The source with comments AND string/template/regex CONTENTS blanked, quotes and all other
+ * code bytes kept in place. Both masks come from the one answer to "is this span code?"
+ * (`js-comment-mask.mjs`), so this cannot drift from what the rest of the repo means by it.
+ *
+ * The quote characters SURVIVE the blanking, which is the property `unreadableIn` rides on:
+ * a value that still opens with a quote here is one the recognizer or `declinedIn` already
+ * accounts for, and a value that does not is one nothing has read.
+ */
+function codeOnly(source) {
+  const { comment, literal } = scanSource(source);
+  const both = new Uint8Array(comment.length);
+  for (let i = 0; i < both.length; i++) both[i] = comment[i] || literal[i];
+  return blank(source, both);
+}
+
+/**
+ * The spans of every `interface X { … }` / `type X = { … }` declaration in already-blanked
+ * source. This is the EXACT discriminator against the `route: string;` member that all seven
+ * ledgers' own entry interfaces declare — the one thing a widened counter must not bill as a
+ * row (#10500). It is structural, not a guess about the value's spelling: a type member is
+ * inside a type declaration's braces and a table row never is, whatever either is written as.
+ *
+ * A `type X = string;` with no object body is skipped rather than brace-matched onto some
+ * later block: the `;` arriving before any `{` is what says the declaration has no members.
+ */
+function typeDeclRegions(code) {
+  const regions = [];
+  const re = /\b(?:interface\s+[A-Za-z_$][\w$]*|type\s+[A-Za-z_$][\w$]*\s*=)/g;
+  let m;
+  while ((m = re.exec(code)) !== null) {
+    const open = code.indexOf('{', m.index);
+    if (open === -1) continue;
+    const semi = code.indexOf(';', m.index);
+    if (semi !== -1 && semi < open) continue;
+    let depth = 0;
+    let end = code.length;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '{') depth++;
+      else if (code[i] === '}' && --depth === 0) { end = i; break; }
+    }
+    regions.push([m.index, end]);
+  }
+  return regions;
+}
+
+/**
+ * Every `route:` / `client:` declaration a ledger makes that is not a string literal in ANY
+ * quote — `route: ROUTES.health`, `route: BASE + '/types'` — and so is read by NEITHER the
+ * recognizer (which needs a leading `'`) NOR `declinedIn` (which needs a leading `"` or
+ * backtick). Before #10500 such a row left the population with no verdict at all: not read,
+ * not declined, not counted in the denominator. That is the same silence #9896 closed for the
+ * quote spellings, one spelling further out, and silence is the defect either way.
+ *
+ * ⛔ This does NOT widen the recognizer either. Like `declinedIn`, it only reports what could
+ * not be read — `rows` is untouched, byte for byte.
+ *
+ * Two exclusions, both exact rather than heuristic, and both measured on the seven live
+ * ledgers (`route:` 267 raw occurrences, 259 read, 8 non-quoted — and all 8 are excluded here):
+ *   • COMMENTS and STRING CONTENTS are blanked, so the English sentence in
+ *     `runtime/src/route-ledger.ts` ("It never named a mounted route: the branch") is gone by
+ *     construction rather than by an allowlist.
+ *   • TYPE DECLARATIONS are skipped, so the `route: string;` member each of the seven entry
+ *     interfaces declares is not billed as an unread row. #9896 kept the quote requirement
+ *     precisely because it was the only exact discriminator it had against that member;
+ *     `typeDeclRegions` is a second exact one, which is what lets the counter widen at all.
+ */
+function unreadableIn(text) {
+  const code = codeOnly(text);
+  const skip = typeDeclRegions(code);
+  const out = [];
+  const re = /\b(route|client)\s*:[ \t]*/g;
+  let m;
+  while ((m = re.exec(code)) !== null) {
+    const at = m.index + m[0].length;
+    const ch = code[at];
+    if (ch === "'" || ch === '"' || ch === '`') continue;
+    if (skip.some(([a, b]) => m.index >= a && m.index <= b)) continue;
+    const line = text.slice(at).split('\n')[0];
+    const cut = line.search(/[,;]/);
+    out.push({ index: m.index, key: m[1], text: `${m[1]}: ${(cut === -1 ? line : line.slice(0, cut)).trim().slice(0, 60)}` });
+  }
+  return out;
+}
+
+/**
  * Every `route:` / `client:` declaration in a ledger whose value opens with a quote the row
  * recognizer below does NOT read. Written once, here, so the recognizer and its complement
  * cannot drift into agreeing while both are wrong; `--self-test` pins the partition
@@ -1292,11 +1377,14 @@ function declinedIn(s) {
  * would move the measured population, which is a separate decision with a before/after
  * standard attached — see the header of `--bridge-coverage`.
  *
- * ⚠️ KNOWN BOUNDARY, pinned in `--self-test` rather than left to be discovered: a `route:`
- * whose value is not a string literal at all (`route: ROUTES.health`) is invisible to the
- * recognizer AND to this counter, because the only exact discriminator against the
- * `route: string;` member every ledger's own entry interface declares is the quote. The
- * numerator below therefore says "string-literal declaration(s)" and claims nothing wider.
+ * THAT BOUNDARY IS NOW CLOSED (#10500). A `route:` whose value is not a string literal at
+ * all (`route: ROUTES.health`, `route: BASE + '/x'`) used to be invisible to the recognizer
+ * AND to this counter — read by neither half, so the row left the population with no verdict
+ * of any kind. `unreadableIn` counts those too, and the `route: string;` member every
+ * ledger's own entry interface declares stays out of the count on an EXACT discriminator
+ * rather than on the quote heuristic: the member sits inside a type declaration and a table
+ * row never does. The denominator below is therefore every declared `route:` value, in any
+ * spelling, and the partition `rows + declined === routesDeclared` is pinned in `--self-test`.
  *
  * @returns {{rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number}}
  */
@@ -1324,6 +1412,12 @@ function parseLedgerSource(text) {
   // which is precisely why it was invisible.
   for (const d of declinedIn(text)) {
     if (d.key === 'route') declined.push({ key: 'route', line: lineAt(d.index), text: d.text });
+  }
+  // …and the values no quote-keyed scan can see at all (#10500). File-wide for the same
+  // reason: a row whose `route:` is not a literal has no window either, which is exactly
+  // why it used to leave the population without a verdict of any kind.
+  for (const d of unreadableIn(text)) {
+    declined.push({ key: d.key, line: lineAt(d.index), text: d.text });
   }
   // THE DENOMINATOR. Leads the recognizer's own regex would start on, plus the ones it
   // declined — so `routesDeclared - rows.length` is every declared row value this parse did
@@ -1708,7 +1802,7 @@ function selfTest() {
   check('parseLedgerSource', 'and the declined client, on its own line', 'line 5 backtick client',
     true, partial.declined.some((d) => d.key === 'client' && d.line === 5 && d.text.includes('meta.getAudit')));
   // The partition — the reason a shared spelling constant is not needed and would not help.
-  // Every declared string-literal `route:` is either read as a row or declined; a future
+  // Every declared `route:`, in ANY spelling, is either read as a row or declined; a future
   // edit that lets one fall between the two fails HERE rather than in production silence.
   check('parseLedgerSource', 'read + declined accounts for every declared `route:`', 'partition',
     partial.routesDeclared, partial.rows.length + partial.declined.filter((d) => d.key === 'route').length);
@@ -1717,7 +1811,7 @@ function selfTest() {
   check('bridgeCoverageFrom', 'a partial read is a VERDICT, not a smaller number', 'brokenScan',
     true, partialCov.brokenScan.some((v) => v.includes('PARTIAL read')));
   check('bridgeCoverageFrom', 'and the verdict carries the numerator', '2 of 4',
-    true, partialCov.brokenScan.some((v) => v.includes('2 of 4 declared string-literal `route:`')));
+    true, partialCov.brokenScan.some((v) => v.includes('2 of 4 declared `route:`')));
   check('bridgeCoverageFrom', 'and NAMES the entry it could not read', 'i18n/locales',
     true, partialCov.brokenScan.some((v) => v.includes('GET /api/v1/i18n/locales')));
   // ⛔ THE POINT. The pre-existing guard is `rowsParsed === 0` — all-or-nothing — so it is
@@ -1752,21 +1846,82 @@ function selfTest() {
     true, stealCov.brokenScan.some((v) => v.includes('PARTIAL read')));
   check('bridgeCoverageFrom', 'and the correctly spelled twin carries none', 'brokenScan', 0, cleanCov.brokenScan.length);
 
-  // ⚠️ THE COUNTER'S OWN BOUNDARY, declared rather than discovered later. A `route:` whose
-  // value is not a string literal is invisible to the recognizer AND to the counter: the
-  // only exact discriminator against the `route: string;` member that every ledger's entry
-  // interface declares (7 of 7 on this tree, one each) is the opening quote. Filed rather
-  // than absorbed — see the issue linked from this block's PR.
-  const nonLiteral = parseLedgerSource([
-    'export interface Entry { route: string; client?: string }',
+  // ---- A NON-LITERAL `route:` IS A VERDICT TOO (#10500) ---------------------
+  // #9896 made the QUOTED spellings loud and declared this one out of scope: a value that
+  // is not a string literal at all (`route: ROUTES.health`, `route: BASE + '/x'`) was read
+  // by neither the recognizer nor the counter, so the row left the population with no
+  // verdict — the same silence, one spelling further out. The quote requirement was kept
+  // because it was the only EXACT discriminator against the `route: string;` member every
+  // ledger's entry interface declares. `unreadableIn` has a second exact one — the member
+  // is inside a type declaration and a row never is — so the counter can widen without
+  // billing that member as a row. Both directions are pinned here, because counting the
+  // interface member is precisely how a fix here goes wrong.
+  const nonLiteralSource = [
+    'export interface Entry { route: string; client: string }',
     'export const L = [',
     '  { route: ROUTES.health, family: \'ops\', disposition: \'server-only\' },',
     "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
     '];',
-  ].join('\n'));
-  check('parseLedgerSource', 'a non-literal `route:` is out of scope for the counter, and so is `route: string;`',
-    'declared', '1 route / 1 client / 0 declined',
+  ].join('\n');
+  const nonLiteral = parseLedgerSource(nonLiteralSource);
+  check('parseLedgerSource', 'a non-literal `route:` is COUNTED now — read + unread accounts for every row',
+    'declared', '2 route / 1 client / 1 declined',
     `${nonLiteral.routesDeclared} route / ${nonLiteral.clientsDeclared} client / ${nonLiteral.declined.length} declined`);
+  check('parseLedgerSource', 'the narrow population is UNCHANGED — this reports, it does not widen', 'row count',
+    1, nonLiteral.rows.length);
+  check('parseLedgerSource', 'and the unread row NAMES itself, with its line', 'line 3 ROUTES.health',
+    'line 3 route: ROUTES.health',
+    nonLiteral.declined.map((d) => `line ${d.line} ${d.text}`).join(' | '));
+
+  // THE NEGATIVE CONTROL, asserted positively rather than by the absence of a failure: the
+  // `route: string;` / `client: string` members on line 1 are TYPES, not rows. Two ways to
+  // say it, because "0 extra declined" alone would also pass if the scan had stopped working.
+  check('parseLedgerSource', 'the `route: string;` interface member is NOT billed as an unread row',
+    'no member in the declined list', false,
+    nonLiteral.declined.some((d) => /\bstring\b/.test(d.text)));
+  const noInterface = parseLedgerSource(nonLiteralSource.split('\n').slice(1).join('\n'));
+  check('parseLedgerSource', 'and deleting the interface changes NOTHING — it contributed no count',
+    'declared', `${noInterface.routesDeclared} route / ${noInterface.declined.length} declined`,
+    `${nonLiteral.routesDeclared} route / ${nonLiteral.declined.length} declined`);
+
+  // The verdict actually reaches the surface a reader sees.
+  const nonLiteralCov = bridgeCoverageFrom([{ file: 'f-route-ledger.ts', ...nonLiteral }], ['/api/v1/meta']);
+  check('bridgeCoverageFrom', 'an unreadable row is a VERDICT, not a smaller number', 'brokenScan',
+    true, nonLiteralCov.brokenScan.some((v) => v.includes('PARTIAL read') && v.includes('ROUTES.health')));
+
+  // …and the correctly spelled twin still carries none, so this cannot false-red an
+  // accurate ledger — the failure mode a naive "count every `route:`" would have had on
+  // all seven of today's ledgers at once.
+  const literalTwin = parseLedgerSource(nonLiteralSource.replace('ROUTES.health', "'GET /api/v1/health'"));
+  check('parseLedgerSource', 'the single-quoted twin declines nothing', 'declined', 0, literalTwin.declined.length);
+  check('bridgeCoverageFrom', 'and carries no verdict', 'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'f-route-ledger.ts', ...literalTwin }], ['/api/v1/meta', '/api/v1/health']).brokenScan.length);
+
+  // A non-literal `client:` is the same defect on the other key: the row keeps its seat and
+  // loses its binding, which no count comparison can see.
+  const nonLiteralClient = parseLedgerSource([
+    'export interface Entry { route: string; client: string }',
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: CLIENTS.getTypes },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a non-literal `client:` costs the row its binding, and is COUNTED',
+    '1 route / 1 client / 1 declined', '1 route / 1 client / 1 declined',
+    `${nonLiteralClient.routesDeclared} route / ${nonLiteralClient.clientsDeclared} client / ${nonLiteralClient.declined.length} declined`);
+  check('parseLedgerSource', 'and the declined entry is the CLIENT one', 'client', 'client',
+    nonLiteralClient.declined[0]?.key);
+
+  // Comments and string payloads are not declarations. `runtime/src/route-ledger.ts` carries
+  // the live instance of the first ("It never named a mounted route: the branch"), which is
+  // why a raw `/route\s*:/` scan would red on an accurate ledger.
+  const prose = parseLedgerSource([
+    '// It never named a mounted route: the branch was dead.',
+    "const msg = 'route: not a declaration';",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'prose and string payloads are not unread rows', 'declined', 0, prose.declined.length);
 
   // End to end over those three fixtures: the #9192 recall miss must come back.
   // `auditMetaItem` (changed) → `/:type/:name/audit` (registrar) → `meta.getAudit`

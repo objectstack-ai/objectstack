@@ -43,14 +43,35 @@
  * findings against line numbers that no longer exist in the file it read, and
  * the drift is invisible until someone opens the file at the reported line.
  *
- * ## The direction it fails in
+ * ## The direction it fails in -- a guarantee this module once claimed falsely
  *
- * A shape this scan gets wrong fails toward masking MORE than it should, which
- * costs recall (a real finding dropped) and cannot fabricate a lead. That is
- * the deliberate direction: a gate that over-masks under-reports loudly the
- * next time someone re-derives its scope, while a gate that under-masks
- * manufactures findings out of prose and burns a reader's afternoon proving
- * the sentence it quoted meant the opposite.
+ * Over-masking is the direction to fail in: a gate that over-masks under-
+ * reports loudly the next time someone re-derives its scope, while a gate that
+ * under-masks manufactures findings out of prose and burns a reader's
+ * afternoon proving the sentence it quoted meant the opposite.
+ *
+ * This header used to state that as a property -- "cannot fabricate a lead".
+ * It was not one. Measured on 2026-08-21 (#10427): walk every
+ * `.{ts,tsx,mts,cts,js,mjs,cjs,jsx}` file in the tree (minus `node_modules`,
+ * `dist`, `.next`, `build`, `.turbo`, `coverage`), parse each with
+ * `@typescript-eslint/parser` (`{ comment: true, range: true }`), and diff the
+ * comment ranges it reports against this scan's `comment` array byte for byte.
+ * Over 4,739 files, 16 disagreed -- 15 in the FABRICATES direction, up to
+ * 10,252 comment bytes handed to a caller as live code in a single file. The
+ * cause was the template scan above; the same sweep after the fix disagrees on
+ * 0 files.
+ *
+ * The lesson is about the claim, not the bug. A failure DIRECTION is a
+ * property of an implementation, not of an intention, and this one cannot be
+ * read off the code -- it took an independent parser over the whole tree to
+ * find out which way the module actually failed. So the honest statement is
+ * the one that can be re-derived: the shapes below are pinned, the sweep just
+ * described is the way to check the rest, and neither direction is promised by
+ * construction. Re-run it after touching `scanSource` -- and note that the
+ * sweep is the STRONGER instrument of the two. A mutation that deleted the
+ * brace counting inside `${...}` passed every case below AND the whole sweep,
+ * because the tree did not happen to write the shape; the case that now holds
+ * it was written from the mutation, not from the corpus.
  */
 
 /** A character that can end an identifier -- i.e. a value, so `/` is division. */
@@ -77,9 +98,21 @@ const REGEX_AFTER_KEYWORD = new Set([
  *
  * The literal flag covers a literal's CONTENT, not its delimiters, so a caller
  * blanking comments still sees every string intact. Template interiors are
- * treated as literal through `${...}` as well: an interpolation's braces are
- * balanced by construction, so ignoring them is right for depth counting, and
- * a caller reading raw characters sees them either way.
+ * reported as literal through `${...}` as well, so a caller reading raw
+ * characters sees them either way.
+ *
+ * That is the FLAG. The SCAN of an interpolation is not the same question, and
+ * conflating the two is the defect #10427 measured: `${...}` was walked as
+ * plain literal text on the reasoning that its braces are balanced by
+ * construction, which is true of the braces and false of everything else the
+ * interpolation may hold. It is code, so it can hold a nested template
+ * (``${xs.map((x) => `<${x}>`)}``, exactly how this tree formats a list of
+ * names), a backtick inside a regex or a string (`packages/cli`'s `quoteIdent`
+ * writes both), or a brace inside a string. Reading a nested opener as the
+ * outer template's CLOSER flipped the parity of every backtick after it, and
+ * the phantom span ran to the next backtick anywhere in the file. So the
+ * interpolation is scanned as code here -- the same loop, with the same string,
+ * regex and comment branches -- and its bytes are flagged literal at the end.
  *
  * @param {string} source
  * @returns {{ comment: Uint8Array, literal: Uint8Array }}
@@ -92,6 +125,15 @@ export function scanSource(source) {
   let prev = ''; // last significant CODE character
   let word = ''; // ...and the identifier it is the tail of, if any
 
+  // Open templates, innermost last. `braces` is the `{` depth inside the
+  // frame's CURRENT interpolation: 0 means the scanner is in that template's
+  // literal BODY, and > 0 means it is inside `${...}`, where the language says
+  // the bytes are code. `start` is where that `${` began.
+  const templates = [];
+  // Closed `${...}` spans, flushed to `literal` after the pass -- see the
+  // closing block of this function for why they are not flagged inline.
+  const interpolations = [];
+
   // A shebang is a comment to node; it is also the one line whose slashes are
   // neither division nor a regex.
   if (source.startsWith('#!')) {
@@ -99,6 +141,42 @@ export function scanSource(source) {
   }
 
   while (i < n) {
+    const frame = templates.length ? templates[templates.length - 1] : null;
+
+    // A template's literal BODY: every byte is content until `${` opens an
+    // interpolation, a backtick closes the template, or the file ends.
+    if (frame && frame.braces === 0) {
+      const ch = source[i];
+      if (ch === '\\' && i + 1 < n) {
+        literal[i] = 1;
+        literal[++i] = 1;
+        i++;
+        continue;
+      }
+      if (ch === '`') {
+        templates.pop();
+        // A NESTED template's delimiters are the outer template's content.
+        if (templates.length) literal[i] = 1;
+        i++;
+        prev = 'x'; // a value just ended
+        word = '';
+        continue;
+      }
+      if (ch === '$' && source[i + 1] === '{') {
+        literal[i] = 1;
+        literal[i + 1] = 1;
+        frame.braces = 1;
+        frame.start = i;
+        i += 2;
+        prev = ''; // `${/re/.test(x)}` -- the interpolation starts a fresh expression
+        word = '';
+        continue;
+      }
+      literal[i] = 1;
+      i++;
+      continue;
+    }
+
     const c = source[i];
     const next = source[i + 1];
 
@@ -127,15 +205,12 @@ export function scanSource(source) {
       continue;
     }
     if (c === '`') {
+      // A template OPENS here -- at the top level, or nested inside a `${...}`
+      // this same loop is already reading as code. The body, and the matching
+      // closer, are handled by the template-body branch above.
+      if (templates.length) literal[i] = 1;
+      templates.push({ braces: 0, start: -1 });
       i++;
-      while (i < n && source[i] !== '`') {
-        literal[i] = 1;
-        if (source[i] === '\\' && i + 1 < n) literal[++i] = 1;
-        i++;
-      }
-      if (i < n) i++;
-      prev = 'x';
-      word = '';
       continue;
     }
     if (c === '/' && !(IDENT_CHAR.test(prev) || prev === ')' || prev === ']')) {
@@ -166,12 +241,32 @@ export function scanSource(source) {
       word = '';
       continue; // re-read this `/` with prev cleared, as a regex
     }
+    // Inside `${...}`: balance the braces, so the interpolation ends at ITS
+    // `}` and not at one quoted inside it. A `{` or `}` in a string, regex or
+    // comment never reaches here -- its own branch consumed it already.
+    if (frame && frame.braces > 0) {
+      if (c === '{') frame.braces++;
+      else if (c === '}' && --frame.braces === 0) {
+        interpolations.push([frame.start, i + 1]);
+        frame.start = -1;
+      }
+    }
     if (!/\s/.test(c)) {
       prev = c;
       word = IDENT_CHAR.test(c) ? word + c : '';
     }
     i++;
   }
+
+  // `${...}` is CODE to the language, and the scan above reads it as code so a
+  // backtick quoted inside it cannot flip the template's parity. The flag it
+  // reports is the documented one: an interpolation's bytes are the enclosing
+  // template's LITERAL content, marked in one pass at the end because the span
+  // is only known once its closing brace is found. An unterminated one (EOF
+  // inside `${`) still gets flagged, so truncated source cannot leak code
+  // bytes into a caller's "this is not a literal" test.
+  for (const frame of templates) if (frame.braces > 0 && frame.start >= 0) interpolations.push([frame.start, n]);
+  for (const [start, end] of interpolations) for (let k = start; k < end; k++) literal[k] = 1;
   return { comment, literal };
 }
 
@@ -268,6 +363,43 @@ export function selfTest() {
       ['#!/usr/bin/env node', "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
     ['division after a paren, then a quote-bearing regex',
       ['const r = (a) / b;', 'const q = /["' + BT + ']/g;', "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    // Templates whose interior puts a real backtick where a flat scan expects
+    // the closer. Each pins BOTH sides: a genuine comment that must go, and
+    // live code after it that must stay. A parity flip anywhere in the line
+    // moves one of the two, so neither assertion can pass by accident.
+    ['nested template inside an interpolation',
+      ['const g = ' + BT + '${xs.map((x) => ' + BT + '\\' + BT + '${x}\\' + BT + BT + ").join(', ')} tail" + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['escaped backtick inside a template, without nesting',
+      ['const t = ' + BT + 'a \\' + BT + ' b' + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    // Depth alone is NOT a defect shape: matched backticks pair off whatever a
+    // scan believes about nesting, and this case stayed green under every
+    // mutation of the fix that produced it (#10427). It is here for coverage of
+    // the depth-2 path. The shapes that DO discriminate are the ones below,
+    // where nesting meets an escape or a quoted backtick and the pairing breaks.
+    ['template nested inside a nested template',
+      ['const d = ' + BT + '${rows.map((r) => ' + BT + '${r.cells.map((c) => ' + BT + '<${c}>' + BT + ").join('')}" + BT + ").join('')}" + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['template spanning lines, carrying a nested template',
+      ['const m = ' + BT + 'head',
+        '  ${xs.map((x) => ' + BT + '\\' + BT + '${x}\\' + BT + BT + ").join(', ')}",
+        'tail' + BT + ';', "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    // The interpolation is CODE, so a backtick or a brace QUOTED inside it is
+    // neither a delimiter nor a nesting level. Both shapes are live in this
+    // tree (`quoteIdent` in packages/cli writes the first one verbatim), and a
+    // scan that only counts `${`/`}` desyncs on both.
+    ['a backtick inside a regex inside an interpolation',
+      ['const q = ' + BT + '\\' + BT + '${name.replace(/' + BT + "/g, '" + BT + BT + "')}\\" + BT + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['an object literal, then a nested template, in one interpolation',
+      ['const o = ' + BT + '${fmt({ a: 1 }, ' + BT + '\\' + BT + BT + ')} tail' + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['a brace and a backtick quoted inside an interpolation',
+      ['const b = ' + BT + "${fmt({ a: 1 }, '" + BT + "')} tail" + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['a real comment inside an interpolation',
+      ['const c = ' + BT + "${x /* err.code = 'GHOST' */} tail" + BT + ';', "err.code = 'REAL';"].join('\n')],
     ['a genuine docblock is still removed',
       ['/** Retired: err.code = ' + "'GHOST'" + ' must never come back. */', "err.code = 'REAL';"].join('\n')],
     ['a genuine line comment is still removed',

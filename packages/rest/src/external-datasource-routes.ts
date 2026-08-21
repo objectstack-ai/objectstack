@@ -110,11 +110,12 @@ export interface ExternalDatasourceRoutesOptions {
 
 /**
  * [#9901] The capability the federation family's READ routes require:
- * `GET /external/tables` and `POST /external/tables/:remote/draft`.
+ * `GET /external/tables`, `POST /external/tables/:remote/draft` and
+ * [#10255] `POST /external/validate`.
  *
- * It is `manage_platform_settings` because these two routes are the DECLARED
- * TWINS of `GET /:name/remote-tables` and `POST /:name/object-draft` on the
- * admin spelling, which measured exactly this capability in #9593
+ * It is `manage_platform_settings` because the first two routes are the
+ * DECLARED TWINS of `GET /:name/remote-tables` and `POST /:name/object-draft`
+ * on the admin spelling, which measured exactly this capability in #9593
  * (`DATASOURCE_ADMIN_CAPABILITY`). One operation reached through two mounted
  * routes cannot admit two different sets of callers — that asymmetry is what
  * this card closes, and `remote-tables-twin.equivalence.test.ts` is where the
@@ -122,6 +123,17 @@ export interface ExternalDatasourceRoutesOptions {
  *
  * Maintainer ruling, 2026-08-20 (verbatim: 「其他接受你的建议。」): the
  * federation family is NOT deliberately the lower-privilege door.
+ *
+ * [#10255] `validate` has no admin twin to converge with, so #9901 left it on
+ * the #9686 authentication floor and filed the question instead of deciding
+ * it. The follow-up ruling (maintainer, 2026-08-20, verbatim:
+ * 「同意你的意见。」, accepting option A on #10255) converged it here: what
+ * `validateAll` does is drive the SAME live remote-schema introspection the
+ * two read twins gate (`introspect` per datasource, in
+ * `service-datasource/src/external-datasource-service.ts`), and its report —
+ * schema diffs naming remote columns and types, driver error strings for
+ * unreachable remotes — is a read of the same federation surface. One family,
+ * one door-type: reads here, writes on {@link FEDERATION_WRITE_CAPABILITY}.
  */
 export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
 
@@ -194,7 +206,7 @@ export function registerExternalDatasourceRoutes(
    * `503` which services a deployment has wired, and — for the two routes that
    * write — so the refusal provably precedes the write rather than following it.
    *
-   * ## [#9901] …and a CAPABILITY above it, on four of the five routes
+   * ## [#9901/#10255] …and a CAPABILITY above it, on every route
    *
    * #9686 left this family gated on authentication alone and pointed the
    * capability question at #9593, which answered it for the admin half only.
@@ -240,19 +252,23 @@ export function registerExternalDatasourceRoutes(
    * — since `isSystem` is never resolved from inbound HTTP — one no wire caller
    * could ever take, so it would be unfalsifiable divergence from the twin.
    *
-   * ## `'authenticated'`: the one route the ruling does not name
+   * ## [#10255] `validate` joined the reads; the `'authenticated'` kind retired
    *
-   * `POST /external/validate` has no twin on the admin spelling, creates no
-   * metadata, and is NOT one of the four routes the 2026-08-20 ruling
-   * enumerates. It keeps the #9686 authentication floor and says so with its
-   * own kind rather than silently inheriting a neighbour's gate — an un-ruled
-   * route that shared a constant would read as ruled. Filed separately rather
-   * than decided here.
+   * #9901's ruling enumerated four routes, so `POST /external/validate` — no
+   * twin on the admin spelling, no metadata created — kept the #9686
+   * authentication floor under its own explicit kind: an un-ruled route
+   * silently inheriting a neighbour's gate would have read as ruled. The
+   * question was filed as #10255 and ruled on 2026-08-20: validate takes the
+   * READ capability (see {@link FEDERATION_READ_CAPABILITY}'s note for why it
+   * is a read). With every route now ruled, the `'authenticated'` kind would
+   * be a door no route walks through, so it is REMOVED rather than kept — a
+   * spare lower gate is exactly what a future un-ruled route could silently
+   * adopt.
    */
   const refuseFederationRequest = async (
     req: any,
     res: any,
-    kind: 'read' | 'write' | 'authenticated',
+    kind: 'read' | 'write',
   ): Promise<boolean> => {
     let authz:
       | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[] }
@@ -268,7 +284,6 @@ export function registerExternalDatasourceRoutes(
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
       return true;
     }
-    if (kind === 'authenticated') return false;
     const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
     const held = Array.isArray(authz?.systemPermissions) ? authz.systemPermissions : [];
     if (!held.includes(required)) {
@@ -421,13 +436,16 @@ export function registerExternalDatasourceRoutes(
       },
     },
 
-    // Validate the federated objects on this datasource.
+    // Validate the federated objects on this datasource. [#10255] A 'read':
+    // validateAll drives the same live remote-schema introspection the two
+    // read twins gate, so it answers to the same capability (ruled 2026-08-20;
+    // the constant's doc carries the reasoning).
     {
       method: 'POST',
       path: `${ext}/validate`,
       metadata: { summary: 'Validate the federated objects on a datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseFederationRequest(req, res, 'authenticated')) return;
+        if (await refuseFederationRequest(req, res, 'read')) return;
         const svc = externalService();
         if (!svc?.validateAll) return unavailable(res);
         try {

@@ -74,7 +74,30 @@
         "$TURBO_ROOT$/content/docs/permissions/authentication.mdx",
         "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/packages/spec/src/system/translation.zod.ts"
+      ]
+    },
+    "@objectstack/client#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/route-ledger.ts",
+        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.ts",
+        "$TURBO_ROOT$/packages/runtime/src/route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/rest/src/rest-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/scripts/check-route-envelope.mjs"
       ]
     },
     "@objectstack/lint#test": {
@@ -148,6 +171,9 @@
         "$TURBO_ROOT$/packages/rest/src/**",
         "$TURBO_ROOT$/packages/runtime/src/**",
         "$TURBO_ROOT$/packages/services/service-realtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
