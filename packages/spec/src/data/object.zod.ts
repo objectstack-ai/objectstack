@@ -278,7 +278,7 @@ export const ObjectCapabilities = strictObject({
    * `Field.file` / `Field.image` column attachments are independent of
    * this flag.
    */
-  files: z.boolean().default(false).describe('Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent'),
+  files: z.boolean().default(false).describe('Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments to target this object; otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike. Field.file/Field.image are independent'),
 
   /**
    * Social collaboration (Comments, Mentions, Feeds) — opt-out.
@@ -287,7 +287,7 @@ export const ObjectCapabilities = strictObject({
    * rejects new `sys_comment` rows targeting this object (403
    * FEEDS_DISABLED, enforced at the engine hook seam by plugin-audit).
    */
-  feeds: z.boolean().default(true).describe('Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object'),
+  feeds: z.boolean().default(true).describe('Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'),
 
   /**
    * Activity timeline (sys_activity mirror of create/update/delete) — opt-out.
