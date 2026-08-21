@@ -87,6 +87,14 @@ export class AppPlugin implements Plugin {
 
     private bundle: any;
     private projectContext?: AppPluginProjectContext;
+    /**
+     * The context handed to `init()`, retained so `destroy()` can emit the
+     * `app:unregistered` catalog event. [#10772] `Plugin.destroy()` takes NO
+     * argument — it is the kernel's only teardown hook — so the context the
+     * old `stop(ctx)` alias received has to be captured at init time instead
+     * of arriving at teardown time.
+     */
+    private initCtx?: PluginContext;
     /** When true, init/start become no-ops — env has no app payload. */
     private readonly empty: boolean = false;
     /**
@@ -176,6 +184,11 @@ export class AppPlugin implements Plugin {
     }
 
     init = async (ctx: PluginContext) => {
+        // [#10772] Retained for `destroy()`, which the kernel calls with no
+        // context. Assigned before anything that can throw, and before the
+        // empty-env early return, so teardown is armed on every path init
+        // takes.
+        this.initCtx = ctx;
         // Install the engine-wide default hook body runner FIRST — even for
         // empty envs (an empty env is exactly where a user will author their
         // first Studio hook). Runs in init (Phase 1) so it is in place before
@@ -1419,9 +1432,39 @@ export class AppPlugin implements Plugin {
         });
     }
 
-    stop = async (ctx: PluginContext) => {
+    /**
+     * Teardown — the kernel's ONLY teardown hook.
+     *
+     * [#10772] This body used to be spelled `stop(ctx)`. `Plugin`
+     * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+     * `destroy?()` and no `stop()`, and `ObjectKernel.performShutdown()` /
+     * `LiteKernel.destroy()` walk the plugins in reverse calling
+     * `plugin.destroy()` — so `app:unregistered` was never emitted on a real
+     * shutdown and the control plane's `sys_app` row outlived the kernel that
+     * registered it. The `start`/`stop` pair read symmetric to a reviewer
+     * because `start()` really is on the interface; only one half was called.
+     *
+     * No-ops without a project context or a captured context, exactly as the
+     * alias did.
+     */
+    destroy = async (): Promise<void> => {
+        const ctx = this.initCtx;
+        if (!ctx) return;
         const sys = this.bundle.manifest || this.bundle;
         this.emitCatalogEvent(ctx, 'app:unregistered', sys);
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class: an embedder may have learned to call it directly
+     * precisely BECAUSE the kernel never did, and deleting it would break them.
+     * Still an arrow property, so a detached `const { stop } = plugin` call
+     * keeps working too. The parameter is now optional and ignored —
+     * `destroy()` takes no context, so teardown uses the context captured in
+     * `init()`.
+     */
+    stop = async (_ctx?: PluginContext): Promise<void> => {
+        await this.destroy();
     }
 
     /**
