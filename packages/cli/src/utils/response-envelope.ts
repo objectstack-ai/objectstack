@@ -113,3 +113,95 @@ export async function readEnvelopeFrom<T>(res: EnvelopeSource): Promise<Envelope
   }
   return readEnvelope<T>(body, res.status);
 }
+
+/**
+ * Read a PRINTABLE failure message out of a response body the CLI has already
+ * decided is a failure.
+ *
+ * ## Why this is tolerant when {@link readEnvelope} above is strict
+ *
+ * They do different jobs, and the strictness follows the job rather than the
+ * file. `readEnvelope` decides **whether** a request succeeded and hands back
+ * its payload; tolerating an off-spec body there would let a payload be read as
+ * data, which is how a second de-facto contract grows (Prime Directive #12) and
+ * why that reader refuses the legacy flat shape outright.
+ *
+ * This function decides **nothing**. The caller has already seen
+ * `!response.ok`; the only remaining question is which bytes to show a human.
+ * The failure is reported either way — the choice is between the server's own
+ * sentence and a placeholder.
+ *
+ * ## What the control plane actually sends (measured, not assumed)
+ *
+ * The `/api/v1/cloud/**` publish routes are served by the sibling `cloud` repo,
+ * which this repo's dispatcher explicitly refuses — so no in-repo ledger can
+ * vouch for them (`docs/audits/2026-07-dispatcher-client-route-coverage.md`
+ * §10). The measurement comes from the closest first-hand reader of that same
+ * `service-cloud` family, `readApiError` in objectui's
+ * `packages/app-shell/src/console/marketplace/marketplaceApi.ts`, which records
+ * that those routes answer failures in TWO shapes and are mid-conversion from
+ * one to the other (cloud#944):
+ *
+ *     { success: false, error: 'a sentence' }        today, via the cloud's `fail()`
+ *     { success: false, error: { code, message } }   the declared envelope
+ *
+ * So BOTH arms are live. That is what rules out reusing `readEnvelope` here:
+ * against the dialect the control plane still emits today it would discard a
+ * real explanation and print "not the declared envelope" instead — trading one
+ * unreadable failure for another.
+ *
+ * ## This accommodation is bounded, and it is the consumer's only option
+ *
+ * The flat dialect is a PRODUCER defect, tracked and being converted at the
+ * producer (cloud#944) — it is not a shape this repo can fix, and not one it is
+ * hiding. When that conversion lands, the `fail()` branch below is deletable on
+ * its own, and nothing else here changes.
+ *
+ * Deliberately NOT accepted: a top-level `body.message`. objectui's reader
+ * tolerates one because a few OTHER routes in that family put text there; no
+ * publish route was measured doing it, and inventing a third dialect to read is
+ * the accretion #12 forbids.
+ *
+ * ## Why it can never return `[object Object]`
+ *
+ * Every branch either yields a checked non-empty string or falls through. The
+ * defect under repair was `String(parsed?.error)` over an `error` that is an
+ * OBJECT: `??` never fell through to `statusText`, because an object is not
+ * nullish, so the fallback chain was unreachable and the operator got
+ * `[object Object]` instead of the reason the publish was refused.
+ *
+ * `statusText` is treated as absent when blank for the same reason the original
+ * chain failed: HTTP/2 carries no reason phrase, so `??` would have kept an
+ * empty string and printed nothing at all.
+ */
+export function readErrorMessage(
+  body: unknown,
+  res: { status: number; statusText?: string },
+): string {
+  return errorTextFrom(body) ?? blankToUndefined(res.statusText) ?? `HTTP ${res.status}`;
+}
+
+/** A string is usable as a message only when it is actually a non-blank string. */
+function blankToUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * The server's own text, in whichever of the two measured dialects it arrived —
+ * or `undefined` when the body carries none, so the caller can fall back.
+ */
+function errorTextFrom(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const error = (body as { error?: unknown }).error;
+
+  if (typeof error === 'object' && error !== null) {
+    // The declared envelope: `message` is a FIELD of `error`, never the object
+    // itself. `code` is the last resort that keeps a refusal naming SOMETHING
+    // machine-readable rather than degrading to a bare status line.
+    const declared = error as { code?: unknown; message?: unknown };
+    return blankToUndefined(declared.message) ?? blankToUndefined(declared.code);
+  }
+
+  // The control plane's `fail()` dialect (cloud#944): `error` IS the sentence.
+  return blankToUndefined(error);
+}
