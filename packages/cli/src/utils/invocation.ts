@@ -30,8 +30,11 @@
  * budget is one small module and no side effects. Pulling `./format.js` for
  * {@link CLI_NAME} would drag chalk, zod and `@objectstack/spec` into a shim
  * whose whole job is to print one line and get out of the way, so the prefix is
- * spelled locally and `invocation.cli-name-parity.test.ts` fails if the two
- * spellings ever disagree.
+ * spelled locally and the parity case in `invocation.test.ts` (`INVOCATION_PREFIX`
+ * vs `CLI_NAME`) fails if the two spellings ever disagree. ⚠️ That case lives in
+ * `invocation.test.ts`, NOT in an `invocation.cli-name-parity.test.ts` — this
+ * header named the latter until #10269 and no such file is in the tree, so a
+ * reader grepping for it finds nothing and could read the parity as unguarded.
  */
 
 import { realpathSync } from 'node:fs';
@@ -60,14 +63,16 @@ function realOrSelf(path: string): string {
  * at — rather than a module someone imported?
  *
  * ⚠️ The obvious spelling of this predicate is the bug it guards against.
- * #10086 measured the `invokedDirectly` guard across `scripts/` in ~8 spellings,
- * all of them some form of `resolve(argv[1]) === fileURLToPath(import.meta.url)`,
- * and EVERY one of them answers **false** when the script is reached through a
- * symlink — because node resolves symlinks for the module graph but leaves
- * `process.argv[1]` exactly as the caller typed it. A guard used the usual way
- * ("only run when invoked directly") then makes its script silently inert: exit
- * 0, no output. That is precisely the defect this module exists to remove, so
- * reproducing it here would have been the same bug wearing the fix's clothes.
+ * #10086 measured the `invokedDirectly` guard across `scripts/` in ELEVEN distinct
+ * spellings over 33 files — the measurement, not the "~8" estimate this header
+ * carried until #10269 — and NINE of the eleven were wrong. The dominant family is
+ * some form of `resolve(argv[1]) === fileURLToPath(import.meta.url)`, and every
+ * member of it answers **false** when the script is reached through a symlink —
+ * because node resolves symlinks for the module graph but leaves `process.argv[1]`
+ * exactly as the caller typed it. A guard used the usual way ("only run when
+ * invoked directly") then makes its script silently inert: exit 0, no output. That
+ * is precisely the defect this module exists to remove, so reproducing it here
+ * would have been the same bug wearing the fix's clothes.
  *
  * Two things follow, and both are load-bearing:
  *

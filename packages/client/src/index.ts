@@ -4240,10 +4240,13 @@ export class ObjectStackClient {
     /**
      * Named agents.
      *
-     * `/ai/chat` talks to the environment's default agent; these talk to one
-     * you name. Both routes have been mounted since long before this namespace
-     * existed — `objectui` hand-built their URLs in five places because the SDK
-     * offered nothing to call (#3718).
+     * These are the only SDK methods that reach an agent. `POST /ai/chat`
+     * (`ai.chat` / `ai.chatStream`) is a raw chat plane that resolves no agent
+     * at all — it loads none, so nothing about that call is scoped by an
+     * agent's skills. Read it as agent-less, never as "the environment's
+     * default agent". Both routes have been mounted since long before this
+     * namespace existed — `objectui` hand-built their URLs in five places
+     * because the SDK offered nothing to call (#3718).
      */
     agents: {
       /**

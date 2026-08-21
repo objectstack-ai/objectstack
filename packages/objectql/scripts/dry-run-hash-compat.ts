@@ -28,6 +28,8 @@
  * the probe against synthetic fixtures covering legacy edge cases.
  */
 
+import { realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { hashSpec } from '@objectstack/metadata-core';
 
 export interface LegacyMetadataRow {
@@ -257,8 +259,57 @@ export function formatReport(report: DryRunReport): string {
     return lines.join('\n');
 }
 
-// CLI entrypoint — only runs when invoked directly.
-if (typeof process !== 'undefined' && process.argv[1] && /dry-run-hash-compat\.ts$/.test(process.argv[1])) {
+// ─── entry guard ───────────────────────────────────────────────────────
+// ⛔ NOT ``import.meta.url === `file://${process.argv[1]}` ``. Node symlink-resolves
+// `import.meta.url` but leaves `process.argv[1]` exactly as the caller typed it, and
+// the template also skips the percent-encoding `pathToFileURL` applies — so that
+// spelling goes INERT (exit 0, no output) through a symlink AND on any checkout path
+// containing a character that needs encoding (a `#` in a parent directory name is
+// enough, with no symlink involved). Compare RESOLVED PATHS, never URL strings.
+//
+// Same predicate as `packages/cli/src/utils/invocation.ts` (`isProcessEntry`) and
+// `scripts/invoked-as.mjs` (`invokedAs`) — both legs identical: realpath for the
+// symlink, directory resolution for `node <dir>`. Spelled out rather than imported
+// because neither home is legally reachable from this file — the PR for #10269
+// carries the boundary measurement. ⚠️ Two predicates answering this question
+// differently IS the defect this closes; change one, change all of them.
+//
+// ⚠️ ONE spelling DIVERGES from those two, and the divergence is FORCED — do not
+// "restore consistency" here: the self-path seed is `__filename`, NOT
+// `fileURLToPath(import.meta.url)`. `packages/objectql/package.json` declares no
+// `"type"`, so under the repo-wide `module: NodeNext` every file in this package
+// compiles as COMMONJS, and `import.meta` in a CommonJS-format file is a hard
+// compile error (TS1470). This file IS inside a tsc program despite the package's
+// own `include` naming only `src/**/*`: `src/dry-run-hash-compat.test.ts` imports
+// it, and the TEST_DEBT re-measure in `scripts/check-type-check-coverage.mjs`
+// type-checks the tests — so the ESM seed costs a ratchet failure on a ledger that
+// may only shrink. The PREDICATE is untouched by this: `invokedAs(entryArg,
+// selfPath)` is the shared core and it takes a PATH, `isEntrypoint(import.meta.url)`
+// is merely the ESM way to seed it, and `__filename` is the CommonJS way — node's
+// CJS loader hands it an absolute path that is ALREADY symlink-resolved and
+// percent-decoded, which is exactly the property the guard rests on.
+function isProcessEntry(): boolean {
+    const entryArg = process.argv[1];
+    if (!entryArg) return false; // `node --eval` / the REPL
+    const self = resolve(__filename);
+    const entry = resolve(entryArg);
+    // `node <dir>` gives the ENTRY ARGUMENT, and only it, directory resolution.
+    const candidates = [entry, join(entry, 'index.js'), join(entry, 'index.mjs'), join(entry, 'index.ts')];
+    if (candidates.includes(self)) return true;
+    const realSelf = realOrSelf(self);
+    return candidates.some((candidate) => realOrSelf(candidate) === realSelf);
+}
+
+/** `realpathSync`, degrading to the input for a path that cannot be read. */
+function realOrSelf(p: string): string {
+    try {
+        return realpathSync(p);
+    } catch {
+        return p;
+    }
+}
+
+if (isProcessEntry()) {
     const path = process.argv[2];
     if (!path) {
         console.error('Usage: pnpm tsx packages/objectql/scripts/dry-run-hash-compat.ts <snapshot.json>');
