@@ -52,10 +52,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-// @ts-expect-error -- the repo's one comment/code separator (#9367) is a plain
-// `.mjs` script with no type declarations. This file IS in cli's tsc program,
-// so the suppression is a real one, not a phantom: delete the import and tsc
-// reports the unused directive.
+// The separator (#9367) is a plain `.mjs`, but it ships a hand-written `.d.mts`
+// declaration alongside it (#10398), so this import is typed and needs no
+// suppression. A `@ts-expect-error` here is an UNUSED directive, and cli's tsc
+// program does include this file, so tsc fails the build on one.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
