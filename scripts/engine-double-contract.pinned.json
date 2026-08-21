@@ -842,6 +842,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts",
       "verb": "delete",
       "pinned": 1
