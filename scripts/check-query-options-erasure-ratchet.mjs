@@ -97,7 +97,12 @@ import eslintConfig, {
   QUERY_OPTIONS_TEST_GLOBS,
   QUERY_OPTIONS_ANY_MESSAGE,
 } from '../eslint.config.mjs';
-import { checkGuardAdoption, collectFatalMessages, lintFilesStrict } from './eslint-fatal-guard.mjs';
+import {
+  checkGuardAdoption,
+  collectFatalMessages,
+  guardAdoptionProblems,
+  lintFilesStrict,
+} from './eslint-fatal-guard.mjs';
 import {
   HEADROOM_CANARY_FILE,
   PARSER_STACK_SIZE_KB,
@@ -269,6 +274,59 @@ function baselineKeysAddedSinceMergeBase(baselineKeys) {
 
 // ---------------------------------------------------------------------------
 // --self-test
+
+// ── Guard-adoption fixtures (#10458) ──────────────────────────────────────
+//
+// checkGuardAdoption() reads THIS FILE, so its fixtures cannot be written the
+// obvious way. `stripComments` deliberately keeps string literals — a gate's
+// signal usually IS a string — so a contiguous `lintFilesStrict` + `(` inside
+// a fixture would satisfy this gate's own call test after its real calls were
+// gone, and a contiguous `.lintFiles` + `(` would report this gate as
+// unguarded outright. Both call shapes are therefore spelled with a `+`: the
+// runtime string is what the check sees, the source text is not a decoy. Do
+// not "tidy" them into single literals.
+const FIXTURE_CALL_STRICT = 'const results = await lintFilesStrict' + '(eslint, [TARGET], { gate: G });';
+const FIXTURE_CALL_RAW = 'const results = await eslint.lintFiles' + '([TARGET]);';
+const FIXTURE_IMPORT = "import { lintFilesStrict } from './eslint-fatal-guard.mjs';";
+const FIXTURE_PROSE = '// on the same input. scripts/eslint-fatal-guard.mjs carries the measurement and';
+const FIXTURE_COUNT = 'const sites = (await eslint.lintText(code)).messages.filter(matches).length;';
+
+const NO_IMPORT = 'does not import scripts/eslint-fatal-guard.mjs';
+const NOT_ARMED = 'Importing the guard does not arm it';
+const RAW_CALL = 'directly, so a parse failure in its population';
+
+/**
+ * The adoption check in both directions, over sources written here.
+ *
+ * The live-tree assertion below can only prove the direction today's tree is
+ * in, and both gates are adopted today — so on its own it is exactly the shape
+ * #4690 warns about: a check that has only ever been green. The reject side is
+ * asserted positively here, and each case is a real regression someone could
+ * land: `[name, source lines, the problems it must produce]`.
+ */
+const GUARD_ADOPTION_CASES = [
+  // The positive control. A zero-hit result over the other five means nothing
+  // without a case that is supposed to come back clean and does.
+  ['imports the guard and calls it', [FIXTURE_PROSE, FIXTURE_IMPORT, FIXTURE_CALL_STRICT], []],
+  // The measured reproduction: the real import line deleted, the docblock left
+  // exactly as it was. Against the raw text this came back CLEAN and the
+  // self-test printed "both gates still routed through it".
+  ['a docblock mention is not an import', [FIXTURE_PROSE, FIXTURE_COUNT], [NO_IMPORT]],
+  // "A guard imported once is not a guard still called" — the docblock's own
+  // thesis, which nothing used to assert.
+  ['imports the guard and never calls it', [FIXTURE_PROSE, FIXTURE_IMPORT, FIXTURE_COUNT], [NOT_ARMED]],
+  // The same sentence one step further: commenting the call out leaves the
+  // identifier in the text.
+  ['a commented-out call is not a call', [FIXTURE_IMPORT, '// ' + FIXTURE_CALL_STRICT], [NOT_ARMED]],
+  // Back to unguarded ESLint: both problems, because it is both.
+  // (the case NAME avoids the raw call shape too — a decoy is a decoy in a
+  // label as much as in a fixture, and this one did red the gate once.)
+  ['went back to unguarded ESLint', [FIXTURE_IMPORT, FIXTURE_CALL_RAW], [NOT_ARMED, RAW_CALL]],
+  // The mask's other direction. Over-masking costs recall; UNDER-masking
+  // fabricates a finding out of prose (#9367), and this check must not.
+  ['a commented-out raw call is not a raw call',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// was: ' + FIXTURE_CALL_RAW], []],
+];
 
 async function selfTest() {
   const failures = [];
@@ -456,9 +514,20 @@ async function selfTest() {
       'lintFilesStrict must pass the results through when every file parsed',
     );
 
-    // A guard imported once is not a guard still called. This is also the only
-    // wired coverage of the OTHER gate's call site: `pnpm check:slot-lookup`
-    // has no --self-test hook, and CI runs this one before the gate itself.
+    // A guard imported once is not a guard still called — proved in both
+    // directions over the fixtures above, because the live-tree call that
+    // follows can only ever confirm the direction this tree is already in.
+    for (const [name, lines, expected] of GUARD_ADOPTION_CASES) {
+      const problems = guardAdoptionProblems('scripts/__adoption_fixture__.mjs', lines.join('\n'));
+      assert(
+        problems.length === expected.length && expected.every((e) => problems.some((p) => p.includes(e))),
+        `guard adoption, ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(problems)}`,
+      );
+    }
+
+    // And the live tree. This is also the only wired coverage of the OTHER
+    // gate's call site: `pnpm check:slot-lookup` has no --self-test hook, and
+    // CI runs this one before the gate itself.
     for (const problem of checkGuardAdoption(repoRoot)) assert(false, problem);
   }
 
@@ -544,7 +613,8 @@ async function selfTest() {
   console.log(
     `✓ self-test: ${reports.length} reporting shape(s), ${silent.length} silent counterpart(s), ` +
     `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s), ` +
-    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it, ` +
+    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it ` +
+    `(adoption proved both ways over ${GUARD_ADOPTION_CASES.length} synthetic gate source(s)), ` +
     `and ${HEADROOM_CANARY_FILE} parses at --stack-size=${PARSER_STACK_SIZE_KB} through this gate's own channel.`,
   );
 }

@@ -71,9 +71,31 @@
 // runs ahead of the gate itself (`pnpm check:query-options-erasure`);
 // `pnpm check:slot-lookup` has no self-test hook of its own, so the coverage of
 // ITS call site is the source assertion, not a second wired self-test.
+//
+// ── MEASURED (#10458): reading the source has to mean reading CODE ────────
+//
+// Those assertions scanned the RAW file, comments included — and both gates
+// carry a `//` line naming this module in their own docblocks. So the import
+// test was satisfied by PROSE. Deleting check-slot-lookup-ratchet.mjs's real
+// `import { lintFilesStrict } …` line and leaving its docblock exactly as it
+// was measured:
+//
+//   ON-DISK: real import lines=0 ; docblock mentions=1
+//   $ node scripts/check-query-options-erasure-ratchet.mjs --self-test
+//   ✓ self-test: … both gates still routed through it.
+//   exit=0
+//
+// Green, with the sentence it printed false, on the one check whose whole job
+// is noticing that a gate went quiet. Two things follow, and both are below:
+// the source is read through scripts/js-comment-mask.mjs (the repo-wide answer
+// to "comment or code", #9367) rather than raw; and "the name appears" was
+// never the claim — `lintFilesStrict(` must actually be CALLED, because a
+// guard imported once is not a guard still called.
 import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
+
+import { stripComments } from './js-comment-mask.mjs';
 
 /** "This gate could not measure", as distinct from 1 = "the ratchet moved". */
 export const FATAL_GUARD_EXIT_CODE = 2;
@@ -197,18 +219,54 @@ export function checkGuardAdoption(repoRoot) {
       problems.push(`${gate}: named by the fatal-parse guard but unreadable — renamed or removed?`);
       continue;
     }
-    if (!/eslint-fatal-guard\.mjs/.test(src)) {
-      problems.push(
-        `${gate}: does not import scripts/eslint-fatal-guard.mjs. A gate that counts ` +
-        'ESLint messages scores an unparseable file as clean without it (#10123).',
-      );
-    }
-    if (/\.lintFiles\s*\(/.test(src)) {
-      problems.push(
-        `${gate}: calls \`.lintFiles(\` directly, so a parse failure in its population ` +
-        'is discarded as a message matching no rule. Call lintFilesStrict() instead.',
-      );
-    }
+    problems.push(...guardAdoptionProblems(gate, src));
+  }
+  return problems;
+}
+
+/**
+ * The adoption verdict for ONE gate, from its source text.
+ *
+ * Split out and kept pure so the self-test can drive it over synthetic sources
+ * in BOTH directions. The live-tree call above can only ever prove the
+ * direction today's tree happens to be in, and being green when it should be
+ * red is this check's entire failure mode (#10458).
+ *
+ * @param {string} gate the gate's name, for the messages
+ * @param {string} source the gate's source, comments and all
+ * @returns {string[]} problems, empty when this gate is still guarded
+ */
+export function guardAdoptionProblems(gate, source) {
+  const problems = [];
+  // Prose is not adoption. Both gates name this module in their docblocks, so
+  // against the RAW text the import test below was satisfied by a comment —
+  // green at exactly the moment a gate stopped importing it (#10458). The
+  // repo-wide answer to "comment or code" is scripts/js-comment-mask.mjs
+  // (#9367); a private strip here would be another copy of what that exists to
+  // retire. `stripComments` rather than `maskComments` because this reports
+  // gate NAMES, never a line or an offset into the original text.
+  const src = stripComments(source);
+  if (!/eslint-fatal-guard\.mjs/.test(src)) {
+    problems.push(
+      `${gate}: does not import scripts/eslint-fatal-guard.mjs. A gate that counts ` +
+      'ESLint messages scores an unparseable file as clean without it (#10123).',
+    );
+  } else if (!/lintFilesStrict\s*\(/.test(src)) {
+    // The docblock's own thesis, asserted rather than assumed: a guard imported
+    // once is not a guard still called. Importing this module runs none of it,
+    // and the `.lintFiles(` test below cannot cover the gap — a gate that
+    // stopped calling anything has no direct call left to catch.
+    problems.push(
+      `${gate}: imports scripts/eslint-fatal-guard.mjs but never calls lintFilesStrict(). ` +
+      'Importing the guard does not arm it: a gate measuring around it still scores an ' +
+      'unparseable file as clean (#10123).',
+    );
+  }
+  if (/\.lintFiles\s*\(/.test(src)) {
+    problems.push(
+      `${gate}: calls \`.lintFiles(\` directly, so a parse failure in its population ` +
+      'is discarded as a message matching no rule. Call lintFilesStrict() instead.',
+    );
   }
   return problems;
 }
