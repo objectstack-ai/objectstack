@@ -68,11 +68,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const openKernels: Array<{ shutdown?: () => Promise<void> }> = [];
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
 afterEach(async () => {
-  while (openDrivers.length) {
-    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
-  }
+  // Kernels first, drivers second: the kernel's own teardown still wants a
+  // live driver to drain against. (Reversing these is what makes a suite
+  // shout DATABASE_ERROR at teardown time.)
   while (openKernels.length) {
     try { await openKernels.pop()?.shutdown?.(); } catch { /* noop */ }
+  }
+  while (openDrivers.length) {
+    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
   }
 });
 
