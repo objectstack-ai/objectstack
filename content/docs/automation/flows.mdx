@@ -242,8 +242,9 @@ Replace them per branch — they are different mechanisms, not one rename:
 | `actionType: 'my_fn'` (shorthand) | `function: 'my_fn'` — the conversion moves it for you |
 | inline `config.script` | move the logic into a registered function and call it via `config.function` |
 
-Stored flows are rewritten by `os migrate meta --from 16`; authoring one of
-these keys in TypeScript is now a compile error carrying the same prescription.
+Run `os migrate meta --from 16` to list the mechanical edits for existing flow
+sources; apply them by hand. Authoring one of these keys in TypeScript is now a
+compile error carrying the same prescription.
 
 [#4343]: https://github.com/objectstack-ai/objectstack/issues/4343
 

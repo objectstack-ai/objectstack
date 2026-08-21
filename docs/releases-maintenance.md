@@ -62,11 +62,10 @@ question and **warns** — it does not refuse:
 * **Not on `origin/main`** — a loud warning naming the branch(es) the commit *is*
   on, and saying which situation it is: pushed onto a branch that never merged, or
   never pushed at all. The pin is still written; deciding is yours.
-* **Cannot be answered** — no `origin/main` in the checkout, or the commit object
-  is absent — it says *that*, and never borrows the wording of either verdict.
-  (`git merge-base --is-ancestor` exits **128** on an absent object: an error, not
-  a "no". And `git rev-parse HEAD` exits 0 for a commit whose object is missing,
-  so the pin arriving is no proof the object is there.)
+* **Cannot be answered** — no `origin/main` in the checkout — it says *that*, and
+  never borrows the wording of either verdict. (`git merge-base --is-ancestor`
+  exits **128** rather than returning a verdict when it cannot read an object: an
+  error, not a "no".)
 
 It is a warning rather than a gate on purpose: `origin/main` is only as fresh as
 your last fetch, so a hard failure here would reject a legitimately-just-merged
@@ -77,6 +76,37 @@ against a fresh full clone and **refuses to cut** (#9450). Until an RC is cut,
 though, a bad pin merges and `pnpm sdui:manifest` below would ratchet
 spec↔registry parity against a tree that is not on main — which is why the
 producer half warns at all.
+
+#### A commit object it cannot read is refused, not warned about (#10797)
+
+The bullets above are about a pin that is not on `main` — a real commit you can
+still meaningfully pin. A pin whose commit **object cannot be read at all** is a
+different thing: there is nothing to pin, and no changeset entry or commit message
+can be derived from it. That refuses, and it refuses **before writing anything**:
+
+```
+✗ REFUSING to bump: the objectui commit object <short> cannot be read in <path>.
+  …
+  NOTHING WAS WRITTEN — .objectui-sha is untouched and still holds the old pin.
+```
+
+`.objectui-sha` is byte-identical to what it was before the run — a failed bump
+leaves no half-applied state. It used to: the pin file was written *before* the
+run read the commit subject, so `git log` failing killed the script under `set -e`
+with the file already rewritten, no changeset, no commit, and a bare
+`fatal: bad object` as the whole explanation. Re-running did not self-correct,
+because the pin file now held the bad SHA.
+
+You reach this with no argument at all — `git rev-parse HEAD` exits **0** and
+prints the sha even when that commit's object is missing from the store, since it
+resolves the ref without reading the object. A partial clone that has not fetched
+the object, or an interrupted object store, is enough. The remedy the message
+names is `git -C <objectui> fetch origin`, then re-run the bump.
+
+`pnpm check:objectui-bump` (`scripts/bump-objectui.selftest.sh`, run by the lint
+job) pins this: it asserts the file's **bytes** across a refused run, because the
+broken and the fixed script both exit non-zero here and only the file tells them
+apart.
 
 #### After the pin moves: run the declaration-parity ratchet (#5960)
 

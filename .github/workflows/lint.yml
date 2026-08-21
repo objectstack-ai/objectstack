@@ -1176,6 +1176,28 @@ jobs:
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 
+      # objectui pin write-ordering guard (#10797). Its sibling above is about
+      # WHAT the bump writes; this one is about WHEN. `bump-objectui.sh` wrote
+      # `.objectui-sha` before it read the commit subject out of the objectui
+      # checkout, so a commit object that cannot be read killed the run under
+      # `set -e` with the pin file ALREADY REWRITTEN — no changeset, no commit,
+      # a bare `fatal: bad object` as the whole explanation, and a tree the
+      # operator had to clean up by hand. Re-running did not self-correct: the
+      # pin file now held the bad SHA. Reachable with no argument at all —
+      # measured, git 2.43.0, `git rev-parse HEAD` exits 0 and prints the sha
+      # for a commit whose object is missing, because it resolves the ref
+      # without reading the object.
+      #
+      # The self-test asserts the invariant on BYTES, not on the message: both
+      # the broken and the fixed script exit non-zero on this input (128 from
+      # `set -e` vs 1 from the refusal), so "did it fail?" does not tell them
+      # apart and a test asking only that would have passed against the defect.
+      # It also drives two readable-commit cases all the way through, because
+      # `exit 1` at the top of the script would satisfy every refusal case on
+      # its own. Offline: throwaway git repos, no node, no network, ~1s.
+      - name: objectui pin write-ordering guard
+        run: pnpm check:objectui-bump
+
       # Changeset-family gate self-tests (#6509). The SELF-TEST halves only —
       # the real scans stay in pr-automation.yml's `changeset-check`, and the
       # split is the whole point of this step.

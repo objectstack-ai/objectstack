@@ -2636,10 +2636,23 @@ function selfTest() {
       `STDOUT:${r4.stdout}\nSTDERR:${r4.stderr}`,
     );
 
-    // R5 — STATE 3, cause 2: the object is absent. Two git behaviours make this
-    // reachable and make 128 the thing that must not be read as "no"; both are
-    // MEASURED here rather than asserted in prose, so a future git that changes
-    // either one fails this test instead of silently flipping the branch taken.
+    // R5 — the object is absent. Two git behaviours make this reachable and make
+    // 128 the thing that must not be read as "no"; both are MEASURED here rather
+    // than asserted in prose, so a future git that changes either one fails this
+    // test instead of silently flipping the branch taken.
+    //
+    // R5c CHANGED VERDICT under #10797 (triage ruling, 2026-08-21). It used to
+    // pin "reported as UNDETERMINED" — the same three-answer treatment R4 gets.
+    // That was #10495's reading, and #10495's warning-not-gate ruling is about a
+    // pin that is NOT ON MAIN: a real commit you can still meaningfully pin,
+    // where origin/main may just be stale and the judgement is the operator's.
+    // A pin whose object cannot be READ is a different question with no
+    // judgement in it — there is nothing to pin, and neither the changeset nor
+    // the commit message can be derived from it — so it REFUSES, before the
+    // first mutation of `.objectui-sha`. Reporting it was what let the pin file
+    // be rewritten and the run then die on `git log` (#10797). The case is
+    // rewritten rather than deleted: the fixture still pins the exact shape,
+    // only the verdict it demands moved.
     const uiMiss = mkUi('objectui-missing-object');
     const missBase = uiMiss.c('chore: base');
     uiMiss.gg('update-ref', 'refs/remotes/origin/main', missBase);
@@ -2665,13 +2678,28 @@ function selfTest() {
       isAncestorMissing.status === 128,
       `status=${isAncestorMissing.status} stderr=${isAncestorMissing.stderr}`,
     );
-    const r5 = runBump(mkFramework('fw-reach-missing-object', missBase), uiMiss.dir, ['--no-commit']);
+    const missFw = mkFramework('fw-reach-missing-object', missBase);
+    const missPinBefore = readFileSync(join(missFw, '.objectui-sha'), 'utf8');
+    const r5 = runBump(missFw, uiMiss.dir, ['--no-commit']);
     check(
-      '#10495 R5c an absent object is reported as UNDETERMINED and says which failure it was',
-      r5.stderr.includes('COULD NOT DETERMINE') &&
-        r5.stderr.includes('NOT PRESENT') &&
+      '#10495/#10797 R5c an unreadable object REFUSES — it is not a verdict to report, there is nothing to pin',
+      r5.status !== 0 &&
+        r5.stderr.includes('REFUSING to bump') &&
         !r5.stderr.includes('is NOT reachable from origin/main'),
       `status=${r5.status}\nSTDERR:${r5.stderr}`,
+    );
+    check(
+      '#10797 R5d the refused run left NO half-applied state — .objectui-sha is byte-identical',
+      readFileSync(join(missFw, '.objectui-sha'), 'utf8') === missPinBefore &&
+        r5.stderr.includes('NOTHING WAS WRITTEN'),
+      `before=${JSON.stringify(missPinBefore)} after=${JSON.stringify(
+        readFileSync(join(missFw, '.objectui-sha'), 'utf8'),
+      )}`,
+    );
+    check(
+      '#10797 R5e the refusal names the remedy, so git\'s bare `fatal:` is not the whole explanation',
+      r5.stderr.includes('fetch origin') && r5.stderr.includes('cat-file -e'),
+      r5.stderr,
     );
 
     // R6 — the branch list is CAPPED, and a cap that fires says so with the real
