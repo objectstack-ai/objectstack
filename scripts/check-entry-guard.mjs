@@ -438,7 +438,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-changeset-no-major.mjs',
   'scripts/check-empty-changeset.mjs',
   'scripts/check-error-status-conformance.mjs',
-  'scripts/check-filter-alias-parity.mjs',
   'scripts/check-org-identifier.mjs',
   'scripts/check-query-options-erasure-ratchet.mjs',
   'scripts/check-quick-reference-counts.mjs',
