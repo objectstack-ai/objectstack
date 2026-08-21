@@ -37,6 +37,10 @@
 //     vocabulary is READ from that table, never copied into this file, and a
 //     table this script cannot parse is a refusal rather than an empty
 //     allow-list (see the trap-vocabulary block below for why that matters).
+//   - every `fixtures.provisioning.use` resolves to a recipe key in its OWN
+//     area's area-level `fixtures` block — an item that reads as provisioned
+//     and is not costs the run the clauses the recipe was meant to unblock,
+//     mid-run and on a live boot (see the provisioning block below).
 //
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
@@ -220,6 +224,71 @@ function trapProblems(item, vocabulary) {
   return out;
 }
 
+// ── Area-scoped provisioning recipes (`fixtures.provisioning.use`) ──────────
+// An area may write ONE provisioning recipe at the area level and have many
+// items opt into it by key (README "Area-level `fixtures` — one named
+// provisioning recipe, many items"). Both halves have to be real: a recipe
+// nobody references is dead text, and a `use` naming a key that is not there
+// is a dangling pointer — an item that READS as provisioned and is not. The
+// run finds out at the worst possible moment: mid-run, on a live boot, with
+// the clauses the recipe was supposed to unblock now scoring blocked(fixture).
+//
+// This resolves the dangling direction. It was deliberately deferred while the
+// recipe shape lived in exactly one area (option C on #7716's open question,
+// tracked at #7720), on the stated condition that it be revisited if the shape
+// spread. It has: three area files, six references (#10593).
+//
+// Scope, deliberately narrow in two directions:
+//
+//   1. SAME-AREA resolution only, because that is the mechanism the README
+//      documents. Cross-area reuse has no spelling at all today (the second,
+//      undecided gap on #10593), so a `use` pointing at another area's recipe
+//      key IS a dangling pointer here — and the message says so, instead of
+//      letting a reference that resolves nowhere read as if it worked.
+//   2. The reverse direction — a recipe no item references — is NOT checked,
+//      unlike the bidirectional trap vocabulary above. With cross-area reuse
+//      unspelled, a recipe whose only consumer sits in another area is cited
+//      from that item's `knownGaps` prose; redding it here would settle gap 2
+//      by accident, in the direction of "recipes are area-local", which is a
+//      convention decision and not this check's to make.
+//
+// `$`-prefixed keys are annotations, not recipes — every area `fixtures` block
+// opens with a `$comment` stating the block's purpose and replay rule — so
+// they are excluded from the recipe set, and from the did-you-mean.
+
+/** The recipe keys of one area doc's area-level `fixtures` block. `$…` keys are annotations, not recipes. */
+function areaRecipeKeys(doc) {
+  const f = doc?.fixtures;
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return [];
+  return Object.keys(f).filter((k) => !k.startsWith('$'));
+}
+
+/** Problems with one item's `fixtures.provisioning`, as message strings. Pure; battery-tested below. */
+function provisioningProblems(item, recipeKeys) {
+  const out = [];
+  const p = item?.fixtures?.provisioning;
+  if (p === undefined) return out; // optional field: 6 of 205 items opt into a recipe
+  if (typeof p !== 'object' || p === null || Array.isArray(p) || typeof p.use !== 'string' || !p.use.trim()) {
+    out.push('"fixtures.provisioning" must carry a non-empty string "use" naming a recipe in this area\'s area-level "fixtures" block — a provisioning block that opts into nothing reads as provisioned and is not');
+    return out;
+  }
+  const recipes = new Set(recipeKeys);
+  if (recipes.has(p.use)) return out;
+  if (recipes.size === 0) {
+    out.push(
+      `"fixtures.provisioning.use" names "${p.use}" but this area file has no area-level "fixtures" block to resolve it against` +
+        ' — write the recipe as a sibling of "area"/"title"/"items" (README "Area-level `fixtures`"), or drop the reference.',
+    );
+    return out;
+  }
+  out.push(
+    `"fixtures.provisioning.use" names "${p.use}", which is not a recipe in this area's area-level "fixtures" block${didYouMean(p.use, recipes)}` +
+      ` — this area offers ${[...recipes].map((k) => `\`${k}\``).join(', ')}. References are AREA-SCOPED: a recipe another area owns cannot be opted into by key` +
+      ' (cross-area reuse has no spelling yet, #10593) — cite that recipe by name in this item\'s "knownGaps" instead, and do not fork a second copy.',
+  );
+  return out;
+}
+
 /**
  * The positive control. Proves the extractor reads a good table AND refuses an
  * empty / renamed / reshaped one, and that the item-side checker catches both
@@ -289,14 +358,64 @@ function selfTestTrapVocabulary() {
   return { checked, failures };
 }
 
+/**
+ * The positive control for the provisioning resolve — same shape and the same
+ * reason as the trap battery above. This check's entire value is that it
+ * FIRES, and the failure it prevents is invisible from the outside: measured
+ * on `main` at 112a8c6731, a typo'd `use` (`qa-media-constraint` for
+ * `qa-media-constraints`) and a cross-area `use` each validated clean, exit 0,
+ * printing the same OK line as an untouched tree. A check that quietly stopped
+ * firing would restore exactly that green. Zero I/O — every subject literal.
+ */
+function selfTestProvisioningUse() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok) => {
+    checked++;
+    if (!ok) failures.push(what);
+  };
+
+  const keys = areaRecipeKeys({ fixtures: { $comment: 'what this block is, and the replay rule', 'qa-scratch-authz': {}, 'qa-media-constraints': {} } });
+  const item = (use) => ({ fixtures: { app: 'showcase', provisioning: { use, why: 'which clauses it unblocks' } } });
+
+  t('U1 a `use` naming a recipe of this area passes', provisioningProblems(item('qa-scratch-authz'), keys).length === 0);
+  t('U2 an item whose fixtures carry no provisioning is fine (optional field)', provisioningProblems({ fixtures: { app: 'showcase' } }, keys).length === 0);
+  t('U3 an item with no fixtures block at all is fine', provisioningProblems({}, keys).length === 0);
+
+  const dangling = provisioningProblems(item('qa-recipe-nobody-wrote'), keys);
+  t('U4 a `use` no recipe answers to is flagged', dangling.length === 1 && dangling[0].includes('qa-recipe-nobody-wrote'));
+
+  const typo = provisioningProblems(item('qa-media-constraint'), keys);
+  t('U5 a TYPO of a real recipe is flagged — the drift shape review is worst at', typo.length === 1);
+  t('U6 the typo message names the recipe that was meant', typo.length === 1 && typo[0].includes('did you mean `qa-media-constraints`'));
+  t('U7 the message lists the recipes this area does offer', typo.length === 1 && typo[0].includes('`qa-scratch-authz`'));
+
+  t('U8 a recipe key ANOTHER area owns does not resolve here (references are area-scoped)', provisioningProblems(item('qa-contributor-bound-member'), keys).length === 1);
+  t('U9 `$comment` is an annotation, not a recipe', !keys.includes('$comment') && provisioningProblems(item('$comment'), keys).length === 1);
+  t('U10 a whitespace-padded spelling does not resolve', provisioningProblems(item('qa-scratch-authz '), keys).length === 1);
+  t('U11 a provisioning block with no "use" is flagged', provisioningProblems({ fixtures: { provisioning: { why: 'because' } } }, keys).length === 1);
+  t('U12 a non-string "use" is flagged', provisioningProblems({ fixtures: { provisioning: { use: 42 } } }, keys).length === 1);
+
+  const noBlock = provisioningProblems(item('qa-scratch-authz'), areaRecipeKeys({ area: 'records-forms', items: [] }));
+  t('U13 an area with NO fixtures block says so, rather than offering an empty list', noBlock.length === 1 && noBlock[0].includes('no area-level "fixtures" block'));
+  t('U14 a fixtures block holding only annotations exposes zero recipes', areaRecipeKeys({ fixtures: { $comment: 'x' } }).length === 0);
+
+  return { checked, failures };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
-  const r = selfTestTrapVocabulary();
-  if (r.failures.length === 0) {
-    console.log(`✓ check-platform-checklist --self-test: ${r.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one.`);
+  const trap = selfTestTrapVocabulary();
+  const prov = selfTestProvisioningUse();
+  const failures = [...trap.failures, ...prov.failures];
+  if (failures.length === 0) {
+    console.log(
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+        ' `fixtures.provisioning.use` resolves against its own area and fires on a dangling one.',
+    );
     process.exit(0);
   }
-  console.error(`✗ check-platform-checklist --self-test — ${r.failures.length} failure(s)\n`);
-  for (const f of r.failures) console.error(`  • ${f}`);
+  console.error(`✗ check-platform-checklist --self-test — ${failures.length} failure(s)\n`);
+  for (const f of failures) console.error(`  • ${f}`);
   process.exit(1);
 }
 
@@ -305,6 +424,15 @@ const trapControl = selfTestTrapVocabulary();
 if (trapControl.failures.length) {
   console.error("check-platform-checklist: the trap-vocabulary extractor's own positive control FAILED — this check cannot be trusted, and a green from it would mean nothing.\n");
   for (const f of trapControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+// Same, for the provisioning resolve: a green from a check that cannot fire is
+// indistinguishable from the green this gate printed before it existed.
+const provisioningControl = selfTestProvisioningUse();
+if (provisioningControl.failures.length) {
+  console.error("check-platform-checklist: the provisioning-resolve check's own positive control FAILED — a `use` that resolves to nothing would pass, which is the exact defect this check was added to close.\n");
+  for (const f of provisioningControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
 
@@ -336,6 +464,8 @@ if (files.length === 0) {
 
 const allIds = new Map(); // id -> file
 const allItems = [];
+let recipeTotal = 0; // area-level provisioning recipes, across all areas
+let recipeRefs = 0; // item references that resolved to one
 
 for (const file of files) {
   let doc;
@@ -352,6 +482,13 @@ for (const file of files) {
     err(file, null, '"items" must be a non-empty array');
     continue;
   }
+
+  // Area-scoped: the universe a `provisioning.use` resolves against is THIS
+  // file's recipe keys, so it is read once here rather than in the post-loop
+  // cross-file section where `supersededBy` (whose universe is every id in the
+  // ledger) has to live. Same reporting: `err(file, item.id, …)`.
+  const recipeKeys = areaRecipeKeys(doc);
+  recipeTotal += recipeKeys.length;
 
   for (const item of doc.items) {
     const id = typeof item.id === 'string' ? item.id : '<no id>';
@@ -390,6 +527,10 @@ for (const file of files) {
     if (!Array.isArray(item.steps) || item.steps.length === 0) where('"steps" must be a non-empty array of strings');
 
     for (const msg of trapProblems(item, TRAPS)) where(msg);
+
+    const useProblems = provisioningProblems(item, recipeKeys);
+    for (const msg of useProblems) where(msg);
+    if (item.fixtures?.provisioning !== undefined && useProblems.length === 0) recipeRefs++;
 
     if (item.status === 'retired') {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
@@ -585,5 +726,7 @@ const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
 console.log(
   `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
-    ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use (extractor control: ${trapControl.checked} assertions).`,
+    ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
+    ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved` +
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve assertions).`,
 );
