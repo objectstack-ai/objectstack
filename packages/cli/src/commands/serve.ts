@@ -3436,7 +3436,28 @@ export default class Serve extends Command {
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
       printServerReady({
-        port,
+        // #10646 — the banner used to take `port` and compose
+        // `http://localhost:<port>` itself, which is where this process
+        // LISTENS, not where an operator can reach it. On the EE 4.1.0 compose
+        // stack that address is `expose`-only (no `ports:` mapping, and less
+        // reachable still under `--scale app=N`) while Caddy publishes `:80`
+        // and `OS_AUTH_URL` is already `http://localhost` — so the Console link
+        // 404'd at the shell and the `MCP:` line customers paste into an AI
+        // client could never connect.
+        //
+        // Resolved through the runtime's OWN chain, not a banner-local copy of
+        // it: `resolveAuthBaseUrl` is the same function whose `baseOrigin` is
+        // pushed onto the CSRF allow-list a few hundred lines above, so the
+        // banner cannot disagree with what the deployment actually trusts. It
+        // reads only `process.env` and the port, so calling it here changes
+        // nothing about what is bound or advertised — this is printed text.
+        //
+        // `port` is the port the server ACTUALLY bound (past any dev auto-shift),
+        // so the `http://localhost:<port>` tail of the chain still names the
+        // right address in the local dev loop. `baseOrigin` is `null` when the
+        // chain produced something unparseable; the banner then prints paths
+        // with no origin rather than a confident wrong URL.
+        externalBaseOrigin: resolveAuthBaseUrl(port).baseOrigin,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,

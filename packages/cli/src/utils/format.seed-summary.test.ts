@@ -14,7 +14,7 @@ import { printServerReady, type ServerReadyOptions, type SeedSourceSummary } fro
  */
 describe('printServerReady seed summary (#3415/#3430)', () => {
   const base: ServerReadyOptions = {
-    port: 3000,
+    externalBaseOrigin: 'http://localhost:3000',
     configFile: 'objectstack.config.ts',
     isDev: true,
     pluginCount: 1,
