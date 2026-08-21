@@ -385,8 +385,8 @@ backend, which left "what can this backend actually compute" unpredictable to th
 Both were retired (#6188, ADR-0049 enforce-or-remove): a query carrying either is now
 refused at parse with a prescription. There is no replacement in the query vocabulary —
 read the rows with an ordinary `fields` query and shape them in the caller, or materialise
-the roll-up as a stored field. `os migrate meta --from 16` rewrites affected dataset
-measures.
+the roll-up as a stored field. Run `os migrate meta --from 16` to list the mechanical
+edits for the affected dataset measures; apply them by hand.
 </Callout>
 
 <Callout type="info">

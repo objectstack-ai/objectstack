@@ -78,12 +78,12 @@ interface PendingDataMigration {
  * leaves for the operator (ADR-0104's 2026-07-30 addendum, #3438).
  *
  * Metadata migration and data migration are different jobs with different
- * subjects: this command rewrites an author's source, while these two rewrite
- * (or vouch for) a deployment's rows, one deployment at a time. Nothing here
- * can run them, and — with no database in reach — nothing here can say whether
- * they have run; the booting server reports that. What this can do is make
- * sure the upgrade never *ends* without naming them, because a gate nobody is
- * told about is served by nobody.
+ * subjects: this command reports the edits an author's source needs, while
+ * these two rewrite (or vouch for) a deployment's rows, one deployment at a
+ * time. Nothing here can run them, and — with no database in reach — nothing
+ * here can say whether they have run; the booting server reports that. What
+ * this can do is make sure the upgrade never *ends* without naming them,
+ * because a gate nobody is told about is served by nobody.
  *
  * Listed only when the author's own metadata declares the field classes each
  * gate is about, so the advice is never noise.
