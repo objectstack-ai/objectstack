@@ -113,7 +113,78 @@ const CODE_POSITION_PATTERNS = [
   { name: 'comparison', re: /\bcode\s*(?:===|!==)\s*'([a-z][a-z0-9_]*)'/g },
   // literal-union type: code?: 'x' | 'y'   (the one that breaks a consumer's dts)
   { name: 'union-type', re: /\bcode\??\s*:\s*'([a-z][a-z0-9_]*)'\s*\|/g },
+  // [#10658] the OUR-DEFAULT slot of a fallback chain:
+  //   code: parsed?.code || 'verify_domain_failed'
+  //   err.code = e?.code ?? 'lookup_failed'
+  //
+  // The four patterns above all anchor the quote DIRECTLY after the position
+  // token, so any intervening expression makes the literal invisible to the
+  // whole set — silently, and then the run prints a total that reads as
+  // complete. Two live wire codes shipped through exactly that gap.
+  //
+  // Where the line is drawn, and why it cannot start flagging a pass-through:
+  // this pattern still only ever captures a STRING LITERAL, and a literal in
+  // our source is by construction ours. A vendor code "passing through" is a
+  // RUNTIME value (`parsed?.code`, `err.code`, a variable) — it has no literal
+  // for any pattern here to capture, before or after this widening. So the
+  // operand this reaches is only ever the default WE author. (A vendor's
+  // spelling hard-coded as our default — `parsed?.code || 'invalid_grant'` — is
+  // a real D1 violation: it is the code OUR failing request answers with.)
+  //
+  // The gap class is what keeps the match inside one property's value. It
+  // admits an operand chain (identifiers, member/optional access, calls,
+  // indexes, further `||`/`??`) and refuses `, ; : { } =` and every quote, so a
+  // match cannot leap out of `code:` into a NEIGHBOUR's fallback — the real
+  // false positive here is `{ code: a.code, message: m || 'lower' }`, and that
+  // comma is what stops it. The length bound is a runaway guard; both are
+  // pinned in --self-test.
+  {
+    name: 'fallback',
+    re: /(?:\bcode\s*\??\s*:|\.code\s*=(?!=))\s*(?![`'"])[\w$.?!()[\]|&\s]{0,80}?(?:\|\||\?\?)\s*'([a-z][a-z0-9_]*)'/g,
+  },
 ];
+
+/**
+ * ⛔ SHRINK-ONLY. Lowercase codes that are ALREADY ON THE WIRE and whose rename
+ * belongs to another lane's card, keyed `<file>::<literal>` so a line shift
+ * cannot invalidate an entry.
+ *
+ * This list exists for one reason and admits nothing else: widening the
+ * recognizer above made this gate able to see codes that shipped while it was
+ * blind. Renaming them is a WIRE change — a client matching on the old spelling
+ * breaks, and one is pinned by name in
+ * `packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts` — so
+ * it is owned by the service that emits them, not by the tooling change that
+ * revealed them.
+ *
+ * The list only ever shrinks. An entry that stops matching is a FAILURE (the
+ * rename landed — delete the line), which is what keeps this from drifting into
+ * an allowlist nobody re-reads. A NEW lowercase code never joins it: the gate
+ * refuses that, and the remedy for a fresh finding is a registered SCREAMING
+ * code, never a line here.
+ */
+const KNOWN_LOWERCASE_CODES = new Map([
+  [
+    'packages/plugins/plugin-auth/src/register-sso-provider.ts::request_domain_verification_failed',
+    'wire-visible; rename owned by #10716 (services lane)',
+  ],
+  [
+    'packages/plugins/plugin-auth/src/register-sso-provider.ts::verify_domain_failed',
+    'wire-visible; rename owned by #10716 (services lane); pinned by name in the dogfood suite',
+  ],
+]);
+
+/** Split findings into the two the wire already carries and everything else. */
+export function partitionKnown(violations) {
+  const known = [];
+  const fresh = [];
+  for (const v of violations) {
+    (KNOWN_LOWERCASE_CODES.has(`${v.file}::${v.literal}`) ? known : fresh).push(v);
+  }
+  const reached = new Set(known.map((v) => `${v.file}::${v.literal}`));
+  const stale = [...KNOWN_LOWERCASE_CODES.keys()].filter((k) => !reached.has(k)).sort();
+  return { known, fresh, stale };
+}
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -128,7 +199,7 @@ function walk(dir, out = []) {
 
 
 
-export function findViolations(src, file) {
+export function findViolations(src, file, stats = null) {
   const text = maskComments(src);
   const hits = [];
   for (const { name, re } of CODE_POSITION_PATTERNS) {
@@ -163,7 +234,12 @@ export function findViolations(src, file) {
       const rawLines = src.split('\n');
       const own = rawLines[lineNo - 1] ?? '';
       const prev = rawLines[lineNo - 2] ?? '';
-      if (/adr0112-ok:\s*\S/.test(own) || /adr0112-ok:\s*\S/.test(prev)) continue;
+      if (/adr0112-ok:\s*\S/.test(own) || /adr0112-ok:\s*\S/.test(prev)) {
+        // Counted, not just skipped: a suppression this run APPLIED is part of
+        // what the verdict line has to own up to.
+        if (stats) stats.optOuts++;
+        continue;
+      }
       hits.push({ file, line: lineNo, literal, form: name });
     }
   }
@@ -190,6 +266,30 @@ function selfTest() {
     [`const plan = PlanSchema.parse({ code: 'pro_v1', features: [] });`, 0, 'license plan code is domain data'],
     [`records: [{ code: 'tech', name: 'Technology' }],`, 0, 'seed industry code is domain data'],
     [`{ code: 'required', message: 'x', target: 'email' }`, 0, "D6 via OData's target"],
+
+    // [#10658] The `||` / `??` fallback slot. Pinned as a PAIR with the direct
+    // spelling of the same code: a recognizer that reached the new shape by
+    // breaking the old one would pass a self-test that only pinned the new one.
+    [`error: { code: 'verify_domain_failed', message }`, 1, 'direct spelling (the pair half that must not regress)'],
+    [`error: { code: parsed?.code || 'verify_domain_failed', message }`, 1, 'our default behind an || fallback'],
+    [`error: { code: parsed?.code ?? 'lookup_failed', message }`, 1, 'our default behind a ?? fallback'],
+    [`const err = new Error(msg); (err as any).code = e?.code || 'lookup_failed';`, 1, 'fallback in the assignment position'],
+    [`error: { code: a?.code || b?.code || 'chained_failed', message }`, 1, 'fallback at the end of a chain'],
+
+    // Reject side. A vendor code PASSING THROUGH is a runtime value, so it has
+    // no literal to capture — that is the line, and it is why widening here
+    // cannot start flagging one.
+    [`return { status: resp.status, body: { error: { code: parsed?.code, message } } };`, 0, 'vendor code passing through has no literal'],
+    [`error: { code: parsed?.code || 'VERIFY_DOMAIN_FAILED', message }`, 0, 'a SCREAMING default is compliant'],
+    [`{ code: a.code, message: m || 'lower_thing' }`, 0, "a neighbour's fallback is not this code's value"],
+    [`issues.push({ field: 'email', code: e?.code || 'invalid_email' });`, 0, 'D6 still wins through the fallback shape'],
+    [`{ code: row.code || 'ok', message: 'x' }`, 0, 'NOT_CODES still applies through the fallback shape'],
+    [`error: { code: e?.code || 'item_locked', message } // adr0112-ok: D6b persisted audit column`, 0, 'opt-out still applies through the fallback shape'],
+    [
+      `error: { code: a.b.c.${'d'.repeat(90)} || 'far_away_failed', message }`,
+      0,
+      'the gap is bounded: a runaway expression is a declared miss, not a leap',
+    ],
   ];
   let failed = 0;
   for (const [src, want, label] of cases) {
@@ -199,31 +299,76 @@ function selfTest() {
       failed++;
     }
   }
+  // [#10658] The shrink-only registry, in both directions. The second one is
+  // the load-bearing half: when the owning card's rename lands, a stale line
+  // must FAIL rather than sit there as a quiet allowlist entry.
+  const SSO = 'packages/plugins/plugin-auth/src/register-sso-provider.ts';
+  const row = (literal) => ({ file: SSO, line: 1, literal, form: 'fallback' });
+  const partitionCases = [
+    [[row('request_domain_verification_failed'), row('verify_domain_failed')], { known: 2, fresh: 0, stale: 0 }, 'both known rows still present'],
+    [
+      [row('request_domain_verification_failed'), row('verify_domain_failed'), row('brand_new_failure')],
+      { known: 2, fresh: 1, stale: 0 },
+      'a NEW lowercase code is fresh, never absorbed by the list',
+    ],
+    [[row('verify_domain_failed')], { known: 1, fresh: 0, stale: 1 }, 'a landed rename goes STALE and must fail'],
+    [[], { known: 0, fresh: 0, stale: 2 }, 'an empty tree makes every entry stale'],
+  ];
+  for (const [input, want, label] of partitionCases) {
+    const got = partitionKnown(input);
+    const shape = { known: got.known.length, fresh: got.fresh.length, stale: got.stale.length };
+    if (shape.known !== want.known || shape.fresh !== want.fresh || shape.stale !== want.stale) {
+      console.error(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(shape)}`);
+      failed++;
+    }
+  }
+
   if (failed) {
     console.error(`\n✗ check-error-code-casing self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`✓ check-error-code-casing self-test: ${cases.length} cases pass.`);
+  console.log(
+    `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length} registry case(s) pass.`,
+  );
 }
 
 function main() {
   if (process.argv.includes('--self-test')) return selfTest();
 
   const files = SCAN_ROOTS.flatMap((r) => walk(join(ROOT, r)));
+  const stats = { optOuts: 0, exempt: 0 };
   const violations = [];
   for (const full of files) {
     const rel = relative(ROOT, full).split(sep).join('/');
-    if (EXEMPT_FILES.has(rel)) continue;
-    violations.push(...findViolations(readFileSync(full, 'utf8'), rel));
+    if (EXEMPT_FILES.has(rel)) {
+      stats.exempt++;
+      continue;
+    }
+    violations.push(...findViolations(readFileSync(full, 'utf8'), rel, stats));
   }
 
-  if (violations.length === 0) {
-    console.log(`✓ no lowercase error codes in ${files.length} scanned file(s) (ADR-0112).`);
+  const { known, fresh, stale } = partitionKnown(violations);
+
+  if (fresh.length === 0 && stale.length === 0) {
+    console.log(`✓ no unlisted lowercase error codes in ${files.length} scanned file(s) (ADR-0112).`);
+    console.log(unreadable(stats, known));
     return;
   }
 
+  if (stale.length) {
+    console.error(`\n✗ ${stale.length} stale KNOWN_LOWERCASE_CODES entry/entries:\n`);
+    for (const key of stale) console.error(`  ${key.replace('::', "  '")}'  — no longer present`);
+    console.error(`
+Good news, and the list has to say so out loud: the rename landed, so DELETE
+each line above from KNOWN_LOWERCASE_CODES in this script. That list only ever
+shrinks, and a stale line is how it would have started drifting into an
+allowlist nobody re-reads.
+`);
+    if (fresh.length === 0) process.exit(1);
+  }
+
   console.error(`\n✗ lowercase error-code literal(s) in a code position (ADR-0112 D1):\n`);
-  for (const v of violations) {
+  for (const v of fresh) {
     console.error(`  ${v.file}:${v.line}  '${v.literal}'  (${v.form})`);
   }
   console.error(`
@@ -238,8 +383,33 @@ error.code is a closed set of SCREAMING_SNAKE values — StandardErrorCode
 If this literal is NOT an error.code — a field/param-addressed validator code
 (D6), a persisted column (D6b), or a diagnostics record shipped inside a 200
 (D6c) — add the file to EXEMPT_FILES in this script WITH its reason.
+
+KNOWN_LOWERCASE_CODES is not a way out and this gate does not offer it: that
+registry only ever shrinks, it is closed to a code found here, and no new line
+is admitted to it. It holds codes that were already on the wire when this gate
+was still blind to their shape, each owned by the card that renames it.
 `);
+  console.error(unreadable(stats, known));
   process.exit(1);
+}
+
+/**
+ * The other half of the fraction (#10501): a scan that reports only what it
+ * FOUND renders a bounded read exactly like a complete one, and that is the
+ * defect this gate shipped — an unqualified "no lowercase error codes" over a
+ * tree carrying two. Every blindness below is deliberate and this run can count
+ * it, so the verdict states it rather than implying none exists.
+ */
+function unreadable(stats, known) {
+  return [
+    `  what this run did NOT read — the line above is a bounded claim, not a clean bill:`,
+    `    · ${stats.exempt} file(s) skipped whole (EXEMPT_FILES: D6/D6b/D6c and foreign vocabularies)`,
+    `    · ${stats.optOuts} literal(s) suppressed by an adr0112-ok: reason`,
+    `    · ${known.length} known lowercase code(s) deferred to their owning card (KNOWN_LOWERCASE_CODES)`,
+    `    · a code value with NO literal at the position — a constant, a template, a ternary,`,
+    `      a helper parameter — is out of reach for every pattern here by construction; that`,
+    `      half belongs to check:dispatcher-error-vocabulary, which reports its own scope.`,
+  ].join('\n');
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
