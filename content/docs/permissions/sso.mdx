@@ -125,6 +125,20 @@ packages that prefer wiring providers in code, or contributing them through
 > below). The `oidcProviders` extension shown here remains the in-process path
 > for framework/enterprise packages that prefer wiring providers in code.
 
+**Setup → SSO Providers → Register Provider** posts to the env-side bridge at
+`POST /api/v1/auth/admin/sso/register`, the OIDC counterpart of the SAML bridge
+[below](#enterprise-sso-saml-20). It takes the flat form fields of the
+[OIDC provider fields](#oidc-provider-fields) table, reshapes them for
+`@better-auth/sso`, and is gated on a **platform admin** (ADR-0068 D4) before it
+delegates — an organization owner or admin is not sufficient, because registering
+an identity provider decides how the whole environment authenticates.
+
+<Callout type="info">
+This is an ObjectStack mount, distinct from `@better-auth/sso`'s own
+`POST /api/v1/auth/sso/register`. The bridge exists so the no-code Setup form can
+post flat fields; both doors apply the platform-admin rule.
+</Callout>
+
 ### Quick start — Okta
 
 {/* os:check */}
@@ -211,6 +225,68 @@ const oidcProviders = [
 | `pkce` | — | Enable PKCE — recommended for public clients |
 
 *Either `discoveryUrl` or `authorizationUrl` + `tokenUrl` must be provided.
+
+### Domain verification (opt-in)
+
+A provider can claim an email **domain**, so that anyone signing in with an
+address at that domain is routed to it. Proving the claim is opt-in per
+environment (ADR-0024 ②) and off by default:
+
+```bash
+# Off by default. Turn on to require a DNS proof before a domain claim counts.
+OS_SSO_DOMAIN_VERIFICATION=true
+```
+
+With it on, **Setup → SSO Providers** exposes a two-step flow, one route per
+step. Both are platform-admin gated (ADR-0068 D4) and both take the provider the
+domain is being claimed for:
+
+1. `POST /api/v1/auth/admin/sso/request-domain-verification` — returns a DNS
+   **TXT** record to publish on the domain. Copy it into your DNS zone.
+2. `POST /api/v1/auth/admin/sso/verify-domain` — call once the record has
+   propagated. It re-checks DNS and marks the domain verified, or reports why it
+   could not.
+
+```typescript
+// Step 1 — ask for the TXT record to publish.
+// Body: { providerId, domain? }. `domain` only shapes the record NAME shown back
+// to you; omit it and you get the bare label to place on the zone yourself.
+const req = await fetch('http://localhost:3000/api/v1/auth/admin/sso/request-domain-verification', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({ providerId: 'okta', domain: 'acme.example' })
+});
+// → { success: true, data: { providerId, domain, token,
+//                            dnsRecordType: 'TXT', dnsRecordName, dnsRecordValue } }
+
+// …publish dnsRecordName / dnsRecordValue, wait for DNS to propagate, then:
+
+// Step 2 — verify the claim. Body: { providerId }.
+const done = await fetch('http://localhost:3000/api/v1/auth/admin/sso/verify-domain', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({ providerId: 'okta' })
+});
+// → { success: true, data: { providerId, verified: true, message } }
+```
+
+Both take `providerId` and refuse with **400 `INVALID_REQUEST`** when it is
+missing. Step 2 reports `NO_PENDING_VERIFICATION` if you call it before step 1,
+and `DOMAIN_VERIFICATION_FAILED` when the TXT record is not visible yet — retry
+after DNS propagates.
+
+<Callout type="info">
+**The mounts are unconditional; the switch controls the endpoint behind them.**
+Both routes exist whether or not `OS_SSO_DOMAIN_VERIFICATION` is set — and with
+it unset the two halves report that differently, so match on the code rather than
+the status: step 1 answers **400 `DOMAIN_VERIFICATION_DISABLED`**, step 2 passes
+the inner **404** through with an explanatory message. Either way an anonymous
+caller gets **401 `UNAUTHENTICATED`** and a signed-in non-platform-admin **403
+`PERMISSION_DENIED`** — identity is answered before capability, so a stranger
+cannot use these routes to probe which features an environment has enabled.
+</Callout>
 
 ---
 

@@ -178,6 +178,54 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'GET /api/v1/auth/oauth2/public-client', family: 'oauth-provider', source: 'better-auth', disposition: 'sdk', client: 'oauth.applications.getPublic', requires: 'oidcProvider' },
   { route: 'GET /api/v1/auth/bootstrap-status', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.bootstrapStatus' },
   { route: 'GET /api/v1/auth/config', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.getConfig' },
+  // ─────────────────────────────────────────────────────────────────────
+  // #10534 — the remaining ObjectStack raw-app mounts, ledgered.
+  //
+  // A census of `auth-plugin.ts` found 17 routes mounted directly on the raw
+  // Hono app ahead of the catch-all, and NINE of them appeared in neither half
+  // of this file: not in the reviewed rows, and not in
+  // BETTER_AUTH_MOUNTED_SURFACE either (correctly — the vendor does not serve
+  // these paths, so an exact-equality inventory of the vendor's table cannot
+  // and must not carry them). Unaccounted-for is the state that let #9941 and
+  // #10050 ship a mount and its documentation gap separately with nothing
+  // objecting, so the rows are written here rather than left implied.
+  //
+  // WHY `server-only` FOR ALL OF THEM, and how that was decided rather than
+  // defaulted. `server-only` means "deliberately not SDK surface", so it is a
+  // claim about intent and not a leftover bucket. It was tested per route by
+  // asking who actually builds the URL — measured, with a positive control
+  // proving the search fires (`bootstrap-status` → 2 hits, `sign-in/email` →
+  // 2, `get-session` → 6 in `packages/client/src`). Every route below came
+  // back with ZERO `ObjectStackClient` callers and exactly one real caller
+  // that is a DECLARATIVE metadata action target or a Console wizard — the
+  // `organization/add-member` precedent directly above. Their peer routes
+  // (`/admin/create-user`, `/admin/ban-user`, `/admin/set-user-password`) are
+  // uniformly SDK-absent too, so "the SDK deliberately does not cover
+  // platform-operator user administration" is the surface's actual shape, not
+  // an accommodation written to make a row fit.
+  //
+  // ⚠️ `POST /api/v1/auth/set-initial-password` is the ninth mount and is
+  // DELIBERATELY NOT LEDGERED HERE. It fails the test above in a way none of
+  // these do: its caller is `@object-ui/auth`'s `createAuthClient`, whose
+  // three other auth URLs (`/config`, `/get-session`, `/list-accounts`) are
+  // ALL expressed on `ObjectStackClient` — and its own sibling branch in the
+  // same Console password card, `changePassword`, is ledgered `sdk`. That
+  // shape reads as `gap` ("should be in the SDK and is not"), not as
+  // `server-only`, and `gap` is ratcheted to zero by this file's conformance
+  // suite. Writing `server-only` there would be a false declaration of intent
+  // to dodge a ratchet. It is escalated on #10534 instead.
+  //
+  // `requires` follows the add-member precedent: it names the better-auth
+  // plugin the route's WORK needs, not whether the mount is conditional —
+  // every one of these is mounted unconditionally on the raw app.
+  { route: 'POST /api/v1/auth/admin/import-users', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — objectui app-shell\'s identity-import wizard (views/identityImport.ts) posts it directly from the Users list; platform-admin gated (ADR-0068), #2766 V2' },
+  { route: 'POST /api/v1/auth/admin/oauth2/toggle-disabled', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_oauth_application disable/enable actions post it directly; ObjectStack mount closing a vendor gap (better-auth\'s /admin/oauth2/update-client strips `disabled` from its body schema), platform-admin gated (ADR-0068)' },
+  { route: 'POST /api/v1/auth/admin/sso/register', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', requires: 'sso', note: 'no SDK method builds this URL — the sys_sso_provider register action posts flat form fields; ObjectStack bridge re-dispatching into @better-auth/sso /sso/register, platform-admin gated ahead of the delegation (ADR-0068 D4, #9653). Distinct path from the vendor\'s own /sso/register, which the catch-all serves' },
+  { route: 'POST /api/v1/auth/admin/sso/register-saml', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', requires: 'sso', note: 'no SDK method builds this URL — the sys_sso_provider register_saml_provider action posts flat fields the bridge reshapes into better-auth\'s nested samlConfig; platform-admin gated (ADR-0068 D4, #9653), ADR-0069 P3' },
+  { route: 'POST /api/v1/auth/admin/sso/request-domain-verification', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', requires: 'sso', note: 'no SDK method builds this URL — the sys_sso_provider action posts it and renders the returned DNS TXT record; ObjectStack bridge over @better-auth/sso, additionally gated on the opt-in ssoDomainVerification switch (OS_SSO_DOMAIN_VERIFICATION) — off means the inner endpoint 404s, the mount itself is unconditional; platform-admin gated (ADR-0068 D4), ADR-0024 ②' },
+  { route: 'POST /api/v1/auth/admin/sso/verify-domain', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', requires: 'sso', note: 'no SDK method builds this URL — the sys_sso_provider action posts it after the DNS TXT record is published; same opt-in ssoDomainVerification switch and platform-admin gate as request-domain-verification (ADR-0068 D4), ADR-0024 ②' },
+  { route: 'POST /api/v1/auth/admin/unlock-user', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_user unlock_user action posts it directly; clears a brute-force lockout (sys_user.locked_until / failed_login_count), a custom per-identity mechanism with no better-auth endpoint; platform-admin gated (ADR-0068), ADR-0069 D2' },
+  { route: 'POST /api/v1/auth/sys-oauth-application/register', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_oauth_application create action posts it directly; session-required self-service wrapper over better-auth /oauth2/create-client that splits the Console\'s newline-separated redirect-URL textarea into the redirect_uris array the vendor schema requires' },
   { route: 'POST /api/v1/auth/organization/accept-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.accept', requires: 'organization' },
   // #9941 — better-auth declares `addMember` with NO HTTP path (server-only
   // `auth.api.addMember`; measured on the installed 1.7.1), so the catch-all

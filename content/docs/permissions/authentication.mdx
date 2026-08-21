@@ -245,6 +245,33 @@ const session = await client.auth.me();
 console.log('Current user:', session.data.user);
 ```
 
+### First-run bootstrap status
+
+`GET /api/v1/auth/bootstrap-status` answers one question — does this environment
+have any user yet?
+
+```typescript
+const res = await fetch('http://localhost:3000/api/v1/auth/bootstrap-status');
+const { hasOwner } = await res.json();   // → { "hasOwner": true }
+```
+
+It is **public and unauthenticated** by design: a client has to be able to ask it
+*before* anyone has credentials. That is also why it returns nothing but the
+boolean — it is a routing signal, not an information endpoint. The Console's root
+route uses it to choose between `/login` (normal) and `/setup` (first-run owner
+creation); `client.auth.bootstrapStatus()` is the SDK method that builds it.
+
+It **fails open**: if no data engine is wired, or the count query throws, it
+answers `{ "hasOwner": true }` so a client falls through to the ordinary login
+flow rather than offering to create an owner on an environment that may already
+have one.
+
+<Callout type="warn">
+This route is unauthenticated, so treat `hasOwner: false` as a hint to render a
+setup screen — never as authorization. First-run owner creation is enforced
+server-side by the sign-up path, not by this probe.
+</Callout>
+
 ### Password Management
 
 #### Request Password Reset
@@ -274,6 +301,35 @@ const response = await fetch('http://localhost:3000/api/v1/auth/reset-password',
   })
 });
 ```
+
+#### Setting a first local password
+
+`POST /api/v1/auth/set-initial-password` sets an **initial** local password for a
+signed-in user who has no credential account yet — the account was onboarded
+through SSO, through the cloud OAuth provider, or imported with
+`passwordPolicy: 'none'`. It gives that user an email/password way in to this
+environment without the SSO round-trip.
+
+```typescript
+const response = await fetch('http://localhost:3000/api/v1/auth/set-initial-password', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',        // a valid session identifies WHO is asking
+  body: JSON.stringify({ newPassword: 'firstLocalPassword123' })
+});
+```
+
+Two refusals are deliberate and are what separate this from a password reset:
+
+- **No session → refused.** The route never takes a user id from the body; the
+  session is the only thing that says whose password is being set.
+- **A credential already exists → refused.** Use
+  `POST /api/v1/auth/change-password` in that case, so the *current* password is
+  verified first. This endpoint is only for the no-password-yet state, which is
+  why it can accept a new password without one.
+
+The Console reaches it from **Profile → Password** when `hasLocalPassword()`
+reports no credential.
 
 ### Email Verification
 
@@ -899,7 +955,8 @@ every row through better-auth so the accounts are login-capable:
 - `passwordPolicy: 'none'` — identity only: accounts are created without a
   credential record. Users first sign in through a channel (phone OTP, magic
   link, or a password-reset link) and the Console detects the missing password
-  (`hasLocalPassword()`) and offers set-initial-password.
+  (`hasLocalPassword()`) and offers
+  [`POST /api/v1/auth/set-initial-password`](#setting-a-first-local-password).
 - `mode: 'insert' | 'upsert'` with `matchBy: 'email' | 'phone'`. Upsert
   updates only touch profile fields (`name`, `image`, `phone_number`, `role`)
   — a re-imported file can never modify an existing user's email or reset
@@ -1002,11 +1059,13 @@ All endpoints are available under `/api/v1/auth/*`:
 #### Session
 
 - `GET /api/v1/auth/get-session` - Get current user session
+- `GET /api/v1/auth/bootstrap-status` - Public, unauthenticated first-run probe: `{ "hasOwner": boolean }`, telling a client whether this environment has any user yet ([details](#first-run-bootstrap-status))
 
 #### Password Management
 
 - `POST /api/v1/auth/request-password-reset` - Request password reset email
 - `POST /api/v1/auth/reset-password` - Reset password with token
+- `POST /api/v1/auth/set-initial-password` - Set a **first** local password for a signed-in user who has no credential yet (SSO-onboarded accounts). Session required; refuses when a password already exists ([details](#setting-a-first-local-password))
 
 #### Email Verification
 
@@ -1042,6 +1101,8 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
 - `POST /api/v1/auth/admin/import-users` - Bulk import users (CSV/JSON/XLSX; `auto` (default, per-row invite-or-temporary) / `invite` / `temporary` / `none` password policy; ≤500 rows, dry-run supported)
 - `POST /api/v1/auth/admin/unlock-user` - Clear a brute-force lockout early
+- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions)
+- `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in
 
 #### Organization Membership (requires `plugins.organization`; platform-admin gated)
 
