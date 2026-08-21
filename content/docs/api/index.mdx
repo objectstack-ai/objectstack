@@ -16,7 +16,6 @@ ObjectStack exposes a fully typed REST API. All endpoints use JSON request/respo
 | **REST** | ✅ Auto-generated from the protocol (`@objectstack/rest`) — CRUD, query, batch, metadata, packages |
 | **Realtime** | ⚠️ In-process pub/sub service (`@objectstack/service-realtime`, single-instance); the `/realtime/*` REST routes and WebSocket/SSE transport are plugin-provided — none ships in the open framework |
 | **MCP** | ✅ Non-system objects exposed automatically as Model Context Protocol tools; actions additionally require the author's `ai.exposed` opt-in — every call is gated by the caller's permissions/RLS ([AI module](/docs/ai)) |
-| **GraphQL** | ⚠️ Route is wired but **bring-your-own service**: `/graphql` returns 501 unless an implementation of the `IGraphQLService` contract is registered — none ships in the open framework |
 | **OData** | ⚠️ Vocabulary only: REST list endpoints accept OData-style operators (e.g. `$top`), but there is no standalone OData endpoint |
 
 <Callout type="info">
@@ -25,7 +24,7 @@ ObjectStack exposes a fully typed REST API. All endpoints use JSON request/respo
 
 ## Your app as an MCP server
 
-REST and GraphQL are how *code* consumes your app. **MCP is how *AI* consumes it.**
+REST is how *code* consumes your app. **MCP is how *AI* consumes it.**
 Because every object and action is typed metadata, ObjectStack can expose the whole app
 as a [Model Context Protocol](https://modelcontextprotocol.io) server — so an AI client
 (Claude Code, Claude Desktop, Cursor, a local model) can inspect and *operate* the app
@@ -169,7 +168,7 @@ Discovery never advertises a route for a service it reports `unavailable`. If yo
 | You get | Meaning | Example |
 | :--- | :--- | :--- |
 | **404** | The route is not mounted. The server does not expose this path at all. | `/analytics/*` without an analytics service — the mount itself is gated; `/mcp` when the MCP server is disabled for the environment |
-| **501** | The route is mounted; nothing implements it. The request reached a handler that had nothing to delegate to. | `/automation`, `/notifications`, `/ui/*`, `/ai/*`, `/auth/*`, `/i18n/*`, `/graphql` without their backing service |
+| **501** | The route is mounted; nothing implements it. The request reached a handler that had nothing to delegate to. | `/automation`, `/notifications`, `/ui/*`, `/ai/*`, `/auth/*`, `/i18n/*` without their backing service |
 
 A 501 body names the package that would provide the capability — the same sentence `services.<slot>.message` carries in discovery, so the wall and the discovery entry always agree. A 404 here means what 404 always means: check the path.
 
