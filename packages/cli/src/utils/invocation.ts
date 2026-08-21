@@ -30,8 +30,11 @@
  * budget is one small module and no side effects. Pulling `./format.js` for
  * {@link CLI_NAME} would drag chalk, zod and `@objectstack/spec` into a shim
  * whose whole job is to print one line and get out of the way, so the prefix is
- * spelled locally and `invocation.cli-name-parity.test.ts` fails if the two
- * spellings ever disagree.
+ * spelled locally and the parity case in `invocation.test.ts` (`INVOCATION_PREFIX`
+ * vs `CLI_NAME`) fails if the two spellings ever disagree. ⚠️ That case lives in
+ * `invocation.test.ts`, NOT in an `invocation.cli-name-parity.test.ts` — this
+ * header named the latter until #10269 and no such file is in the tree, so a
+ * reader grepping for it finds nothing and could read the parity as unguarded.
  */
 
 import { realpathSync } from 'node:fs';
