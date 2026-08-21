@@ -148,9 +148,10 @@
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -1882,6 +1883,31 @@ function selfTest() {
   ok(
     'and each one still names a real directory once resolved against the repo root',
     unioned.length > 0 && unioned.every((i) => existsSync(resolve(REPO_ROOT, i.path))),
+  );
+
+  // ── the entry guard, driven for real ────────────────────────────────────
+  //
+  // This module EXPORTS helpers, and the dispatch below used to run on IMPORT:
+  // `await import(...)` printed this gate's verdict into the importer's stdout
+  // and, on an unhappy tree, called `process.exit(1)` -- handing a consumer that
+  // asked for `globToRegExp` this gate's verdict as its own exit status.
+  // `check-examples-live-imports.mjs` hand-copied the helper rather than pay it.
+  //
+  // A spawned child is the only honest witness: the guard's answer depends on
+  // what node puts in `process.argv[1]`, which cannot be modelled in-process.
+  // Without this case the guard can be deleted as quietly as it was missing.
+  const importProbe = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(fileURLToPath(import.meta.url)).href)});\nconsole.log('ALIVE');`],
+    { encoding: 'utf8' },
+  );
+  ok(
+    'importing this module prints NOTHING -- the dispatch is behind the entry guard',
+    (importProbe.stdout || '').trim() === 'ALIVE' && (importProbe.stderr || '').trim() === '',
+  );
+  ok(
+    'importing this module does not exit the importer -- it survives to run its own code',
+    importProbe.status === 0 && (importProbe.stdout || '').includes('ALIVE'),
   );
 
   const failed = cases.filter((c) => !c.cond);
