@@ -7,7 +7,7 @@
 #     my-app
 #
 # Or run the full app + Postgres stack: see docker-compose.yml.
-# Docs: https://objectstack.ai/docs/deployment/self-hosting
+# Docs: https://docs.objectstack.ai/docs/deployment/self-hosting
 
 # ── Build stage: compile TypeScript metadata to the artifact ─────────
 FROM node:22-slim AS build

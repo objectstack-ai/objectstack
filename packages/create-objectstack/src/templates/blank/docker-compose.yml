@@ -4,7 +4,7 @@
 # POSTGRES_PASSWORD / OS_AUTH_SECRET / OS_SECRET_KEY (generate secrets with
 # `openssl rand -hex 32`), then `docker compose up -d`.
 #
-# Docs: https://objectstack.ai/docs/deployment/self-hosting
+# Docs: https://docs.objectstack.ai/docs/deployment/self-hosting
 
 services:
   app:
