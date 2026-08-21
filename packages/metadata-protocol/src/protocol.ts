@@ -8881,7 +8881,8 @@ export class ObjectStackProtocolImplementation implements
         //   ride the spread into the engine AST and OVERRIDE the resolved
         //   object, splitting `ast.object` from the table actually queried —
         //   a mismatch is refused, never resolved by picking a winner.
-        // - `count`: a response-shape flag this method consumed above.
+        // - `count`: a response-shape flag this method consumed above (and,
+        //   since #10757, one it actually HONOURS — see `countOptOut` below).
         // - QueryAST tombstones (`cursor`/`joins`/`windowFunctions`/
         //   `distinct`): reserved at the wire gate so they are not read as
         //   field filters; on the wire they stay ignored-with-tombstone-docs
@@ -8899,6 +8900,22 @@ export class ObjectStackProtocolImplementation implements
             err.code = 'QUERY_OBJECT_MISMATCH';
             throw err;
         }
+        // [#10757] `$count=false` — read the flag BEFORE the strip below deletes
+        // it, because the strip is what kept it from ever being honoured: the
+        // parameter has been declared (`ODataQuerySchema.$count`,
+        // `packages/spec/src/api/odata.zod.ts`), aliased (`$count` → `count`,
+        // {@link WIRE_DOLLAR_ALIASES}), reserved from the implicit-field-filter
+        // bucket ({@link RESERVED_LIST_QUERY_PARAMS}), arity-checked and boolean-
+        // coerced — and then deleted unread, so every list request paid for the
+        // COUNT query below whether or not the caller wanted a `total`.
+        //
+        // Only an EXPLICIT `false` opts out. An absent `$count` keeps today's
+        // behaviour (count runs, `total` is reported) rather than taking OData's
+        // "absent means omit" reading: every existing caller sends nothing and
+        // reads `total`, so the OData default would silently break all of them.
+        // The parameter is therefore an opt-OUT here, and that asymmetry is
+        // deliberate — see the changeset for the wording that ships to consumers.
+        const countOptOut = options.count === false;
         for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
             delete options[k];
         }
@@ -8915,7 +8932,7 @@ export class ObjectStackProtocolImplementation implements
         // reporting a wrong total.
         const pageLimit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
-        let total = records.length;
+        let total: number | undefined = records.length;
         let hasMore = false;
         if (pageLimit !== undefined) {
             // `distinct` used to suppress the count here too — #4286 finding 2:
@@ -8923,18 +8940,47 @@ export class ObjectStackProtocolImplementation implements
             // that never deduplicated a row. Removed with `query.distinct`
             // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
             const countable = options.search == null;
-            if (countable) {
+            if (countOptOut) {
+                // [#10757] The caller said it does not need `total`, so the
+                // COUNT query is not issued at all — that is the whole point of
+                // the parameter, and on a remote database it is a full round
+                // trip saved per list request.
+                //
+                // `total` is OMITTED rather than estimated. `FindDataResponse`
+                // declares it optional ("Total number of records matching the
+                // filter (IF REQUESTED)",
+                // `packages/spec/src/api/protocol.zod.ts`), so absent is the
+                // declared shape for "not requested" — and it is the only
+                // honest one: the `search` branch below reports an estimate
+                // because it has no better number to give, while here a real
+                // number was available and the caller declined it. Handing back
+                // a plausible-looking guess under those circumstances is how a
+                // page-local estimate ends up rendered as a record count.
+                //
+                // `hasMore` is still answered, from the page alone: a FULL page
+                // means there may be more. Same page-local rule the search
+                // branch uses, and it never over-reports the data — it can only
+                // say "maybe more" on an exactly-full last page.
+                hasMore = records.length === pageLimit;
+                total = undefined;
+            } else if (countable) {
+                // [#10757] `counted` is a separate, always-assigned local so
+                // `hasMore` below compares against a `number`: `total` became
+                // optional when `$count=false` gained the right to omit it, and
+                // TypeScript cannot narrow it back across the try/catch.
+                let counted: number;
                 try {
-                    total = await this.engine.count(request.object, {
+                    counted = await this.engine.count(request.object, {
                         where: options.where,
                         context: options.context,
                     } as any);
                 } catch {
                     // engine.count() has its own find().length fallback; if it still
                     // throws, degrade to a page-local total rather than failing the list.
-                    total = pageOffset + records.length;
+                    counted = pageOffset + records.length;
                 }
-                hasMore = pageOffset + records.length < total;
+                total = counted;
+                hasMore = pageOffset + records.length < counted;
             } else {
                 hasMore = records.length === pageLimit;
                 total = pageOffset + records.length + (hasMore ? 1 : 0);
@@ -8943,7 +8989,11 @@ export class ObjectStackProtocolImplementation implements
         return {
             object: request.object,
             records,
-            total,
+            // [#10757] Omitted, not `undefined`-valued: a JSON body carrying
+            // `"total": null` (or a key some serializers keep) reads as "the
+            // total is nothing", which is a different claim from "no total was
+            // requested". The key is simply absent.
+            ...(total === undefined ? {} : { total }),
             hasMore,
         };
     }
