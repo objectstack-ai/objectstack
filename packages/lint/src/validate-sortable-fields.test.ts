@@ -7,8 +7,10 @@ import {
   checkSortDeclaration,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
+  SORT_FIELD_UNPROVISIONED,
 } from './validate-sortable-fields.js';
 import { indexObjectSearchTargets } from './validate-searchable-fields.js';
+import { indexUnprovisionedAnchors } from './system-fields.js';
 
 /**
  * The object the whole file judges against. It carries one field of each of the
@@ -487,5 +489,200 @@ describe('checkSortDeclaration — the shared core', () => {
         'sort',
       ),
     ).toEqual([]);
+  });
+});
+
+// ── [#10474] PROVENANCE — the SORT twin of #8404's SEARCH wiring ────────────
+//
+// The census (#8999) recorded this rule as not asking the #8116 provenance
+// question, on the reason that an ADR-0015 external object never reaches the
+// union branch (skip ② was believed to catch it). That reason was measured
+// wrong: `declaredFieldTarget` keys on "declares no field map", never on
+// `external`, so the SHIPPED shape — an external object with a mapped field
+// map — is indexed like any other and lands in skip ③.
+//
+// ⚠️ The LOCAL twin is asserted in every case below, and it is the load-bearing
+// half. A wiring that warned on `created_at` for EVERY object would satisfy the
+// positive direction alone while flagging the single most common list-view
+// ordering in the platform's own objects — the ADR-0072 D1 false finding this
+// package's whole system-fields indirection exists to prevent. Only the
+// negative direction can catch that, so it is asserted every time.
+
+/** The showcase's own federated object: `external` + a mapped field map. */
+const externalObject = {
+  name: 'showcase_ext_customer',
+  datasource: 'showcase_external',
+  external: { remoteName: 'customers' },
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    email: { type: 'text', label: 'Email' },
+    region: { type: 'text', label: 'Region' },
+  },
+};
+
+/** Its local twin — identical in every way EXCEPT `external`. */
+const localTwin = {
+  name: 'showcase_customer',
+  fields: {
+    name: { type: 'text', label: 'Name' },
+    email: { type: 'text', label: 'Email' },
+    region: { type: 'text', label: 'Region' },
+  },
+};
+
+/** Both objects, each with a list view ordering by the same injected anchor. */
+const twinStack = (sort: unknown) => ({
+  objects: [
+    { ...externalObject, listViews: { recent: { type: 'grid', sort } } },
+    { ...localTwin, listViews: { recent: { type: 'grid', sort } } },
+  ],
+});
+
+describe('validateSortableFields — the provenance verdict (#10474)', () => {
+  it('warns on a list-view sort ordering by an unprovisioned injected anchor', () => {
+    const findings = validateSortableFields(twinStack([{ field: 'created_at', order: 'desc' }]));
+
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.rule).toBe(SORT_FIELD_UNPROVISIONED);
+    // WARNING, not error: no runtime door refuses this, and the remote schema
+    // is invisible to this pass. The runtime publish gate sorts on severity —
+    // `error` would turn an unprovable suspicion into a refused write.
+    expect(f.severity).toBe('warning');
+    expect(f.where).toBe('object "showcase_ext_customer" › listViews.recent');
+    expect(f.path).toBe('objects[0].listViews.recent.sort[0]');
+    expect(f.message).toContain('created_at');
+    // The CAUSE clause is the package-shared sentence, not a re-typed one:
+    // a rule that re-words it drifts from the runtime guards whose verdict it
+    // reports (`unprovisionedAnchorCause`).
+    expect(f.message).toContain('injected system column with NO storage behind it');
+    expect(f.message).toContain('ADR-0015');
+    // The SORT-axis consequence, which is this rule's own half of the sentence.
+    expect(f.message).toContain('ORDER BY');
+    expect(f.hint).toContain('columnMap');
+  });
+
+  it('THE NEGATIVE DIRECTION: says nothing about the identical sort on the LOCAL twin', () => {
+    // `objects[1]` is the local twin and carries the identical declaration.
+    // The single finding above is proof enough only alongside this.
+    const findings = validateSortableFields(twinStack([{ field: 'created_at', order: 'desc' }]));
+    expect(findings.map((x) => x.path)).not.toContain('objects[1].listViews.recent.sort[0]');
+    expect(
+      validateSortableFields({
+        objects: [{ ...localTwin, listViews: { recent: { type: 'grid', sort: 'created_at desc' } } }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('covers every anchor the injection registers, not just the audit family', () => {
+    // `owner_id` is the one no managed DDL ever creates either, so it is the
+    // clearest case; asserting the set keeps a narrowing of the derivation
+    // visible here rather than only in the spec's own test.
+    for (const anchor of ['created_at', 'created_by', 'updated_at', 'owner_id', 'organization_id']) {
+      const findings = validateSortableFields(twinStack([{ field: anchor, order: 'asc' }]));
+      expect(findings.map((x) => x.rule), anchor).toEqual([SORT_FIELD_UNPROVISIONED]);
+      expect(findings[0].message, anchor).toContain(anchor);
+    }
+  });
+
+  it('reads the legacy string sort form too, not only the structured array', () => {
+    const findings = validateSortableFields(twinStack('created_at desc'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNPROVISIONED);
+    // The string form has no index suffix.
+    expect(findings[0].path).toBe('objects[0].listViews.recent.sort');
+  });
+
+  it("SECURITY DIRECTION: an author-DECLARED anchor on the federated object is silent", () => {
+    // #7859's recorded reasoning — a federated object may expose a REAL remote
+    // `created_at`, which the author vouches for through the binding's
+    // columnMap. `unprovisionedInjectedColumnsFor` excludes it, so declaring
+    // the column is the first remedy the shared hint prescribes AND the thing
+    // that silences the finding.
+    const declared = {
+      ...externalObject,
+      fields: { ...externalObject.fields, created_at: { type: 'datetime', label: 'Remote Created' } },
+      listViews: { recent: { type: 'grid', sort: [{ field: 'created_at', order: 'desc' }] } },
+    };
+    expect(validateSortableFields({ objects: [declared] })).toEqual([]);
+  });
+
+  it('respects the injection opt-outs — `systemFields: false` leaves no anchor to warn about', () => {
+    const optedOut = {
+      ...externalObject,
+      systemFields: false,
+      listViews: { recent: { type: 'grid', sort: [{ field: 'created_at', order: 'desc' }] } },
+    };
+    expect(validateSortableFields({ objects: [optedOut] })).toEqual([]);
+  });
+
+  it('DOTTED heads are NOT asked — the ingress gate already refuses them loudly', () => {
+    // The one place this axis departs from the SEARCH twin, deliberately: a
+    // dotted SORT name is a `400 INVALID_SORT` on every fetch, so the silent
+    // degradation this finding reports cannot happen there, and answering
+    // would give the SORT axis its own dotted verdict (the posture the module
+    // note records as shared with FILTER/PROJECTION).
+    const findings = validateSortableFields(twinStack([{ field: 'created_at.year', order: 'asc' }]));
+    expect(findings).toEqual([]);
+  });
+
+  it('is additive: the existence verdict on a real typo still fires beside it', () => {
+    const findings = validateSortableFields(
+      twinStack([{ field: 'created_at', order: 'desc' }, { field: 'nope', order: 'asc' }]),
+    );
+    const external = findings.filter((x) => x.path.startsWith('objects[0]'));
+    expect(external.map((x) => x.rule)).toEqual([SORT_FIELD_UNPROVISIONED, SORT_FIELD_UNKNOWN]);
+    // …and the local twin still gets the typo, and ONLY the typo.
+    const local = findings.filter((x) => x.path.startsWith('objects[1]'));
+    expect(local.map((x) => x.rule)).toEqual([SORT_FIELD_UNKNOWN]);
+  });
+
+  it('reaches the `defineView` aggregate and standalone list-view rungs too', () => {
+    const base = { objects: [externalObject] };
+    const sort = [{ field: 'created_at', order: 'desc' }];
+    for (const [label, views] of [
+      ['aggregate list', [{ name: 'v', objectName: 'showcase_ext_customer', list: { sort } }]],
+      ['aggregate listViews', [{ name: 'v', objectName: 'showcase_ext_customer', listViews: { a: { sort } } }]],
+      ['flattened overlay', [{ name: 'v', object: 'showcase_ext_customer', viewKind: 'list', sort }]],
+      ['ViewItem record', [{ name: 'v', object: 'showcase_ext_customer', viewKind: 'list', config: { sort } }]],
+    ] as const) {
+      const findings = validateSortableFields({ ...base, views: views as unknown[] });
+      expect(findings.map((x) => x.rule), label).toEqual([SORT_FIELD_UNPROVISIONED]);
+    }
+  });
+});
+
+describe('checkSortDeclaration — the provenance parameter is OPTIONAL (#10474)', () => {
+  const stack = { objects: [externalObject] };
+
+  it('asks nothing when the caller does not build the index (pre-#10474 behaviour)', () => {
+    // The exported core is public surface; an out-of-repo caller that never
+    // built the index must keep the answers it had.
+    expect(
+      checkSortDeclaration(
+        [{ field: 'created_at', order: 'desc' }],
+        'showcase_ext_customer',
+        indexObjectSearchTargets(stack),
+        'page "customers"',
+        'pages[0].sort',
+        'page sort',
+      ),
+    ).toEqual([]);
+  });
+
+  it('asks once the caller passes it', () => {
+    const findings = checkSortDeclaration(
+      [{ field: 'created_at', order: 'desc' }],
+      'showcase_ext_customer',
+      indexObjectSearchTargets(stack),
+      'page "customers"',
+      'pages[0].sort',
+      'page sort',
+      indexUnprovisionedAnchors(stack),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNPROVISIONED);
+    expect(findings[0].where).toBe('page "customers"');
+    expect(findings[0].message).toContain('page sort');
   });
 });

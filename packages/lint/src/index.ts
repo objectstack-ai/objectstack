@@ -383,6 +383,7 @@ export {
   checkSortDeclaration,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
+  SORT_FIELD_UNPROVISIONED,
 } from './validate-sortable-fields.js';
 export type {
   SortableFieldFinding,
