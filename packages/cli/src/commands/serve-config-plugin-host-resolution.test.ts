@@ -81,6 +81,23 @@ describe('os serve → an app-declared `plugins: [...]` package resolves from th
     expect(mod.default).toEqual({ name: 'app-copy' });
   });
 
+  it("prefers the APP's copy over the CLI's own when BOTH can resolve the name", async () => {
+    // The resolution-policy question the card names: which copy wins when the
+    // CLI also ships the package. `chalk` is declared by packages/cli and
+    // resolves from this file, so a fixture app that declares its OWN `chalk`
+    // is the only way to tell the two apart — and the app's declaration is the
+    // contract (#4719), so the app's copy must win.
+    const root = makeApp('chalk', { declare: true, install: true, marker: 'app-owned-chalk' });
+
+    const mod = await Serve.importConfigPlugin('chalk', root);
+
+    expect(mod.default).toEqual({ name: 'app-owned-chalk' });
+    // Not a tautology: the CLI's own resolution of the same name finds the real
+    // package, which is what this line would have loaded before the fix.
+    const cliCopy: any = await import('chalk');
+    expect(cliCopy.default).not.toEqual({ name: 'app-owned-chalk' });
+  });
+
   it('a package the app DECLARES but never installed reports the INSTALL remedy, not an absence', async () => {
     const root = makeApp(APP_ONLY, { declare: true, install: false });
 
