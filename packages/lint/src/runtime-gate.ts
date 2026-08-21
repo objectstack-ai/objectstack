@@ -523,7 +523,11 @@ export function runRuntimeAuthoringRules(args: {
   });
   if (!snapshots) return empty;
 
-  const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest };
+  // [#9313] `runtimeWriteType` tells a registry-of-registries entry (the
+  // reference-integrity suite) which per-write snapshot it is judging, so it
+  // can dispatch its MEMBERS as this gate dispatches entries. CLI callers
+  // never set it; see `AuthoringRuleContext`.
+  const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest, runtimeWriteType: args.type };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
   const added = runRules(rules, snapshots.candidate, ctx)
     .filter((f) => !before.has(fingerprint(f)))

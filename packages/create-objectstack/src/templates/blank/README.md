@@ -21,6 +21,23 @@ curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
 curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
 ```
 
+## The Console — this starter ships no app
+
+`pnpm dev` also serves the admin Console at `http://localhost:3000/_console/`,
+and prints the link on boot. Open it and you will see the platform's own apps
+(Setup, Account) and **not** the object in `src/objects/` — this starter ships
+objects only, with no app and no views.
+
+That is the intended starting point, not a broken install. The object is live
+the whole time — the `curl` above returns it, and an MCP client can read and
+write it. What it has no route into is the Console's navigation.
+
+**An object appears in Console navigation only when an app lists it.** Add an
+`*.app.ts` under `src/apps/` (plus the views it points at), and the Console
+renders it after the next `pnpm dev` rebuild. The `objectstack-ui` skill covers
+the shape; describing the app you want to your coding agent is the intended
+path.
+
 ## Your app is an MCP server
 
 Every ObjectStack app is itself a

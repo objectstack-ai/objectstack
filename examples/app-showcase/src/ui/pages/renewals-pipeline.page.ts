@@ -13,7 +13,9 @@ import { definePage } from '@objectstack/spec/ui';
  *
  * The 360 panel deliberately shows BOTH rollup styles side by side:
  *   • hand-rolled — a `useAdapter()` effect counts related projects/invoices
- *     into a KPI strip (full control, you own loading/refresh), vs
+ *     into a KPI strip (full control, you own loading/refresh, and you own the
+ *     adapter's `$`-prefixed option contract and its `QueryResult` shape — see
+ *     the numbered note on the effect), vs
  *   • framework blocks — `<ObjectChart>`/`<ListView>` do the same cross-object
  *     reads declaratively (zero data code).
  * (This comparison absorbed the former Account Cockpit page.)
@@ -56,19 +58,43 @@ function Page() {
   const [editing, setEditing] = React.useState(false);
   const [reload, setReload] = React.useState(0);
   const [stage, setStage] = React.useState('active');
-  const [related, setRelated] = React.useState({ projects: 0, invoices: 0, openInvoices: 0 });
+  const [related, setRelated] = React.useState({ projects: 0, invoices: 0, openInvoices: 0, capped: false });
 
   // Hand-rolled rollup: the imperative counterpart of the framework blocks
-  // below. You own the queries, loading, and refresh (reload bumps re-run it).
+  // below. You own the queries, loading, and refresh (reload bumps re-run it) --
+  // and, because you own them, you own the two adapter contracts the blocks hide:
+  //
+  //  1. QUERY OPTIONS ARE $-PREFIXED. QueryParams declares $select, $filter,
+  //     $orderby, $skip, $top, $expand, $search, $count, and the adapter copies
+  //     ONLY those. A bare 'top:' / 'limit:' reaches no branch and is dropped
+  //     with no error, so the cap you wrote is never applied -- and the list
+  //     route has no default page size, so the query comes back carrying EVERY
+  //     matching row.
+  //  2. THE RESULT IS A QueryResult, NOT THE REST ENVELOPE. Rows arrive under
+  //     'data' (never 'records'), beside 'total' -- which, whenever $top was
+  //     applied, is the server's real count over the same $filter rather than
+  //     the page length. Counting data.length under a cap is how a KPI starts
+  //     under-reporting in silence; count 'total' and the cap stays a fetch
+  //     bound instead of a lie about the business.
   React.useEffect(() => {
     let alive = true;
     (async () => {
-      if (!adapter || !sel) { setRelated({ projects: 0, invoices: 0, openInvoices: 0 }); return; }
-      const pr = await adapter.find('showcase_project', { $filter: ['account', '=', sel], top: 500 });
-      const iv = await adapter.find('showcase_invoice', { $filter: ['account', '=', sel], top: 500 });
-      const projects = Array.isArray(pr) ? pr : (pr && pr.records) || [];
-      const invoices = Array.isArray(iv) ? iv : (iv && iv.records) || [];
-      if (alive) setRelated({ projects: projects.length, invoices: invoices.length, openInvoices: invoices.filter((r) => r.status !== 'paid' && r.status !== 'void').length });
+      if (!adapter || !sel) { setRelated({ projects: 0, invoices: 0, openInvoices: 0, capped: false }); return; }
+      const pr = await adapter.find('showcase_project', { $filter: ['account', '=', sel], $top: 500 });
+      const iv = await adapter.find('showcase_invoice', { $filter: ['account', '=', sel], $top: 500 });
+      const rows = (res) => (Array.isArray(res) ? res : (res && res.data) || []);
+      const count = (res, list) => (typeof (res && res.total) === 'number' ? res.total : list.length);
+      const projects = rows(pr);
+      const invoices = rows(iv);
+      // Open AR is a per-row verdict, so it can only be read off the rows we
+      // actually fetched -- the one number here the cap genuinely bounds. The
+      // 'capped' flag says so on screen instead of letting it pass for a total.
+      if (alive) setRelated({
+        projects: count(pr, projects),
+        invoices: count(iv, invoices),
+        openInvoices: invoices.filter((r) => r.status !== 'paid' && r.status !== 'void').length,
+        capped: invoices.length < count(iv, invoices),
+      });
     })();
     return () => { alive = false; };
   }, [adapter, sel, reload]);
@@ -132,7 +158,7 @@ function Page() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               <Stat label="Projects" value={related.projects} />
               <Stat label="Invoices" value={related.invoices} />
-              <Stat label="Open AR" value={related.openInvoices} accent="hsl(38 92% 50%)" />
+              <Stat label="Open AR" value={related.capped ? related.openInvoices + '+' : related.openInvoices} accent="hsl(38 92% 50%)" />
             </div>
 
             <ObjectChart objectName="showcase_invoice" type="bar" aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }} xAxis={{ field: 'status' }} yAxis={[{ field: 'total', format: '$0,0' }]} series={[{ name: 'total', label: 'Invoice value' }]} title="Invoice value by status" showLegend={true} />

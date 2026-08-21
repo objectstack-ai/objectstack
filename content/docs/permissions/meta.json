@@ -16,6 +16,7 @@
     "field-level-security",
     "attachments-access",
     "permission-metadata",
+    "capabilities",
     "permissions-matrix",
     "access-matrix",
     "explain",

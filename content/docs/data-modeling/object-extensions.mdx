@@ -1,0 +1,192 @@
+---
+title: Object Extensions
+description: Add fields, validations and indexes to an object another package owns, without forking it — declaration, merge order, and what an extension may not contribute.
+---
+
+# Object Extensions
+
+Every object has exactly **one owning package**. That package defines the table, the
+primary key and the core fields, and no second package may claim the same name — the
+registry refuses it outright.
+
+An **object extension** is how a package contributes to an object it does not own. It
+declares fields, validations and indexes that are merged into the target at boot, and
+the result is indistinguishable from fields the owner had authored inline: the same
+DDL, the same forms and list views, the same API.
+
+## When to reach for one
+
+| Situation | Do this |
+|:---|:---|
+| You need extra data on an object another package ships (`sys_user`, a CRM package's `account`) | **Object extension** |
+| You need a new business entity of your own | Define your own [object](/docs/data-modeling/objects) |
+| A single tenant needs a field only they use | Tenant customization, not a package extension — an extension ships in code with the package |
+| You need an action, hook, view or page on someone else's object | Declare that artifact at the top level and bind it to the target object — [see below](#what-an-extension-may-not-contribute) |
+
+---
+
+## Declaring one
+
+Extensions are declared on the **package**, in the `objectExtensions` collection — never
+on the object schema. There is no `extends:` key on an object and no mixin mechanism.
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension, Field } from '@objectstack/spec/data';
+
+export const AccountSuccessExtension = defineObjectExtension({
+  extend: 'showcase_account',                  // the target object, owned elsewhere
+  fields: {
+    loyalty_tier: Field.select(['bronze', 'silver', 'gold'], { label: 'Loyalty Tier' }),
+    csat_score: Field.number({ label: 'CSAT Score', min: 0, max: 100 }),
+  },
+  priority: 210,
+});
+```
+
+```typescript
+export default defineStack({
+  manifest: { /* … */ },
+  objectExtensions: [AccountSuccessExtension],
+});
+```
+
+The target object is owned by someone else, so `defineStack()` cannot verify it exists —
+there is nothing in your package to check the name against. A typo therefore survives
+the build and surfaces at boot instead, as a warning that the name has extenders but no
+owner; the object is then skipped entirely. If an extension's fields never appear,
+check that spelling first.
+
+---
+
+## What an extension may contribute
+
+| Key | Merge behaviour |
+|:---|:---|
+| `fields` | **Additive.** Merged into the target's field map. A name the target already has is **replaced**, not merged. |
+| `validations` | **Concatenated.** Your rules run alongside the owner's; neither replaces the other. |
+| `indexes` | **Concatenated**, same as validations. |
+| `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). |
+| `pluralLabel` | Same as `label`. |
+| `description` | Same as `label`. |
+| `priority` | Not merged — it *orders* the merge. `0`–`999`, default `200`. |
+
+Added fields are ordinary fields, so everything on the
+[field reference](/docs/data-modeling/fields) applies: types, validation, `required`,
+`group`, formulas, and lookups back to your own objects.
+
+### What an extension may **not** contribute
+
+The merge carries the seven keys above and nothing else. These four are not
+"unsupported yet" — there is no slot for them to arrive through, and the schema rejects
+each one by name with the alternative to use instead:
+
+| Key you might reach for | Declare this instead |
+|:---|:---|
+| `actions` | A top-level action with `objectName: '<target>'` — `defineStack()` attaches it to the object |
+| `hooks` | A top-level hook bound to the target object |
+| `listViews` | A top-level `view` bound to the target object |
+| `fieldGroups` | Add the fields here and declare the groups on the owning object, or assign a Page for the layout |
+
+The same holds for any other key: the extension schema is strict, so an unknown key
+fails at authoring time with a prescription rather than being dropped in silence.
+
+---
+
+## Naming the fields you add
+
+Field names in an extension are **not** namespace-prefixed by the platform. The
+namespace rule (`<namespace>_<name>`) governs the names of objects a package *defines*;
+it does not walk `objectExtensions`, and it could not — the target's name belongs to
+its owner, not to you.
+
+Nothing therefore stops two packages from contributing the same field name to the same
+object, and nothing warns when they do: the merge is last-writer-wins by `priority`, so
+one of the two silently disappears. Name defensively — prefix added fields with
+something specific to your package when the name is at all generic.
+
+---
+
+## Merge order and conflicts
+
+1. The registry picks the **base layer** for the object.
+2. Every `extend` contribution is folded onto that base, in ascending `priority` order.
+3. Within a fold, the rules in the table above apply: fields and scalars are
+   last-writer-wins, validations and indexes accumulate.
+
+So a **higher `priority` is applied later and wins** a conflict. Two extensions with the
+same priority are folded in registration order, which is not a guarantee to build on —
+give competing extensions distinct priorities.
+
+Merging is idempotent: re-registering a package (a metadata rebuild, a dev-server
+reload) replaces that package's previous contribution rather than stacking a second copy.
+
+---
+
+## Extensions and tenant customization
+
+Object contributions come in three kinds, and only the first two can be authored:
+
+| Kind | Who writes it | What it is |
+|:---|:---|:---|
+| `own` | The owning package | The base definition. Exactly one per object, always. |
+| `extend` | Any other package | This page. Folded on top of the base. |
+| `overlay` | Nobody, directly | A tenant customization layer, hydrated from stored metadata by the loader. It replaces the base at resolution time and owns nothing. |
+
+The overlay is the seam where a package extension meets a tenant's own edits: when an
+overlay exists it *becomes* the base the extensions fold onto, so extension fields
+survive a customized object rather than being dropped by it.
+
+<Callout type="warn">
+  One deliberate asymmetry, ruled 2026-08-13: an extension's `label`, `pluralLabel` and
+  `description` apply only while the base still carries the **packaged owner's** value.
+  Once a tenant has renamed the object, the extension's packaged default yields and the
+  tenant's name stands. Fields, validations and indexes are unaffected — they merge
+  either way. There is no escape hatch: a package cannot relabel an object a tenant has
+  deliberately renamed.
+</Callout>
+
+---
+
+## Worked example
+
+A customer-success package adds churn tracking to an account object owned by a CRM
+package — fields, a rule and an index, without touching the CRM package's source:
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension, Field } from '@objectstack/spec/data';
+
+export const AccountChurnExtension = defineObjectExtension({
+  extend: 'crm_account',
+  fields: {
+    cs_health_score: Field.number({ label: 'Health Score', min: 0, max: 100 }),
+    cs_renewal_date: Field.date({ label: 'Renewal Date' }),
+    cs_owner: Field.text({ label: 'Success Manager' }),
+  },
+  validations: [
+    {
+      name: 'cs_renewal_date_required_for_at_risk',
+      type: 'script',
+      severity: 'error',
+      message: 'An at-risk account needs a renewal date.',
+      // CEL predicate — TRUE means the record is invalid.
+      condition: '!isBlank(record.cs_health_score) && record.cs_health_score < 40 && isBlank(record.cs_renewal_date)',
+    },
+  ],
+  indexes: [{ name: 'idx_crm_account_cs_renewal', fields: ['cs_renewal_date'] }],
+  priority: 300,
+});
+```
+
+Every added name carries the `cs_` prefix, so this package cannot collide with the CRM
+package's own fields or with another extension's. `priority: 300` puts it after the
+default `200`, so it wins against a lower-priority extension of the same object.
+
+---
+
+## Related
+
+- **Spec:** [ObjectQL — Schema, Object Extensions](/docs/protocol/objectql/schema#object-extensions) — the normative protocol text
+- **Schema reference:** [Object](/docs/references/data/object) — every property, generated from the spec
+- **Neighbors:** [Objects](/docs/data-modeling/objects) · [Fields](/docs/data-modeling/fields) · [Validation](/docs/data-modeling/validation) · [Database Indexing](/docs/data-modeling/indexing)

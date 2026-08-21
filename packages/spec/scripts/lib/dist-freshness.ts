@@ -97,7 +97,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { distIsStale } from '../../../../scripts/check-regen-pending.mjs';
+import { bundlesAreStale, distIsStale } from '../../../../scripts/check-regen-pending.mjs';
 
 /** What the generator is about to do, so the refusal can name the real damage. */
 export type DistReadMode = 'generate' | 'check';
@@ -116,16 +116,20 @@ export type DistFreshness =
  * A dist with JS and no `.d.ts` is the `OS_SKIP_DTS=1`-on-a-virgin-tree shape,
  * and it reads as missing rather than stale because that is what it is.
  */
-function hasDeclarations(dir: string, depth = 0): boolean {
+function hasFileMatching(dir: string, pred: (name: string) => boolean, depth = 0): boolean {
   if (depth > 12 || !existsSync(dir)) return false;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
     const child = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (hasDeclarations(child, depth + 1)) return true;
-    } else if (entry.name.endsWith('.d.ts')) return true;
+      if (hasFileMatching(child, pred, depth + 1)) return true;
+    } else if (pred(entry.name)) return true;
   }
   return false;
+}
+
+function hasDeclarations(dir: string): boolean {
+  return hasFileMatching(dir, (name) => name.endsWith('.d.ts'));
 }
 
 /**
@@ -178,5 +182,81 @@ export function inspectDistFreshness(
       `     ${rerun}\n\n` +
       `   (Do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as the flag that emits JS\n` +
       `   and skips exactly the declarations this reads.)`,
+  };
+}
+
+/**
+ * The same precondition for the OTHER half of `dist` — the emitted JS bundles.
+ *
+ * ## Why this is a second axis and not a second copy
+ *
+ * `inspectDistFreshness` above measures `dist/**\/*.d.ts`. `dist/<entry>/index.mjs`
+ * is a different artifact produced by a different pass, and the two can disagree
+ * in BOTH directions (the rule's own docblock in
+ * `scripts/check-regen-pending.mjs` has the measurement):
+ *
+ *   - `BUILD_DTS=true tsup` refreshes declarations and re-emits no bundle, so a
+ *     `.d.ts`-fresh tree can hold bundles older than the edit under test;
+ *   - `OS_SKIP_DTS=1` emits fresh bundles and skips declarations, so a
+ *     `.d.ts`-stale tree can hold bundles that are exactly current.
+ *
+ * A bundle reader that asked the `.d.ts` question would therefore be capable of
+ * believing a stale bundle (direction one) while refusing a current one
+ * (direction two). So the axes are separate — but they live in ONE home, this
+ * file, so the next bundle-reading gate finds them together rather than
+ * inventing a third notion of "is packages/spec/dist current".
+ *
+ * ## Why the refusal, and not a skip
+ *
+ * #10199's gate asserts that a declared browser-reachable entry links no zod. On
+ * an unbuilt or stale tree the honest answer is NOT MEASURED, and the two
+ * failure shapes are the ones #4690 named: a missing `dist` makes "no zod link
+ * found" and "no bundle read" the same green, and a stale `dist` makes the
+ * verdict describe a build that predates the import someone just added — a false
+ * green on precisely the change the gate exists to catch. Both are refusals.
+ *
+ * @param mode  what this run would do with the bundles — see `DistReadMode`.
+ * @param rerun the exact command that re-runs THIS caller after the build.
+ */
+export function inspectBundleFreshness(
+  pkgDir: string,
+  mode: DistReadMode,
+  rerun: string,
+): DistFreshness {
+  if (!bundlesAreStale(pkgDir)) return { fresh: true };
+
+  const state: 'missing' | 'stale' = hasFileMatching(
+    join(pkgDir, 'dist'),
+    (name) => name.endsWith('.mjs') || name.endsWith('.js'),
+  )
+    ? 'stale'
+    : 'missing';
+
+  const damage =
+    mode === 'generate'
+      ? `Regenerating now would WRITE a ledger describing bundles that no longer match src.`
+      : `A verdict now would be computed against bundles that no longer match src, so this\n` +
+        `   check would reach its conclusion without ever reading the module graph under test —\n` +
+        `   NOT MEASURED reported as if it were measured and clean (#4690).`;
+
+  const cause =
+    state === 'missing'
+      ? `packages/spec/dist holds no .mjs/.js bundles — the package is not built. This gate reads\n` +
+        `   the module a consumer's import actually loads, so there is nothing here to read.`
+      : `packages/spec/dist's .mjs/.js bundles are OLDER than packages/spec/src (or than\n` +
+        `   tsup.config.ts, which decides the entries, the externals and whether entries are\n` +
+        `   self-contained). The bundles on disk predate the sources.`;
+
+  return {
+    fresh: false,
+    state,
+    message:
+      `\n❌ ${cause}\n\n` +
+      `   ${damage}\n\n` +
+      `   Build first, then re-run:\n\n` +
+      `     pnpm --filter @objectstack/spec build\n` +
+      `     ${rerun}\n\n` +
+      `   (OS_SKIP_DTS=1 is fine for THIS gate — it still emits every bundle this reads. It is\n` +
+      `   the .d.ts-reading gates next door that it blinds.)`,
   };
 }

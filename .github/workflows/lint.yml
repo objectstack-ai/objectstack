@@ -1081,9 +1081,12 @@ jobs:
       # — one card per silent exit — and each fix lands as more unexercised
       # code. This step is the exercise: the shipped script is extracted from
       # the YAML with a real parser (never retyped) and run under doubles the
-      # way actions/github-script runs it, as one AsyncFunction body. Ten
+      # way actions/github-script runs it, as one AsyncFunction body. Its
       # scenarios pin the target parse and the outcome of EVERY exit — which of
       # setFailed / warning / job summary fires, and which API calls were made.
+      # How many of them there are is deliberately NOT written here (#9917):
+      # the check names the total on its own OK line, and `--list` prints the
+      # whole table. This comment used to say "ten" against a real eighteen.
       #
       # Assertion 0 is the compile, and it is not theoretical: this job failed
       # twice on 2026-08-02 with `SyntaxError: Identifier 'octokit' has already
@@ -1091,14 +1094,26 @@ jobs:
       # workflow whose red nothing else in CI can see.
       #
       # Its --self-test runs first and is the half that stops the battery
-      # rotting into decoration: it mutates the shipped script seven ways —
-      # downgrade the verdict to a warning, stop collecting failed keys, break
-      # out of the loop instead of isolating, drop the same-repo skip, narrow
-      # the keyword set, drop the already-closed skip, downgrade the notice
-      # path's verdict — and requires the battery to go RED for each, naming the
-      # scenario that catches it. A mutation whose anchor no longer exists is a
-      # failure too, so a rewrite of the workflow cannot leave the mutations
-      # silently matching nothing.
+      # rotting into decoration: it mutates the shipped script along every
+      # CLASS the contract is made of — a verdict downgraded (red becomes a
+      # warning, or an info line nothing annotates), the loop's bookkeeping
+      # deleted (which keys failed, which half was lost, which target was
+      # refused), isolation abandoned mid-loop, the target parse narrowed (the
+      # keyword set, the optional colon, the same-repo skip), a guard removed
+      # (already-closed, triage, pull-request), idempotency eroded (the
+      # backlink marker dropped, or a blind post where a skip belongs) — and
+      # requires the battery to go RED for each, naming the scenario that
+      # catches it. A mutation whose anchor no longer exists is a failure too,
+      # so a rewrite of the workflow cannot leave the mutations silently
+      # matching nothing.
+      #
+      # Classes rather than a count, and rather than the enumeration that used
+      # to sit here, because BOTH hand-maintained numbers in this comment had
+      # gone stale unnoticed — measured 2026-08-20 from the check's own output,
+      # eighteen scenarios and fifteen mutations against a comment claiming ten
+      # and seven (#9917). A stale enumeration reads exactly as authoritative
+      # as a fresh one, and this comment is what the next reader checks the
+      # harness against. Prose classes survive an M16; a count does not.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
       # belongs in root package.json, declared territory of the @changesets/cli
@@ -1554,8 +1569,20 @@ jobs:
       - name: Read-side tenant chokepoint gate
         run: pnpm check:tenant-chokepoint
 
-  typecheck:
-    name: TypeScript Type Check
+  # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
+  # aggregator job at the bottom of this file explains the split, holds the
+  # contract, and is the thing the merge queue actually requires — read it
+  # before moving a step between lanes.
+  #
+  # THIS LANE BUILDS NOTHING, and that is the point: every gate in it already
+  # ran BEFORE the build step in the old serial job, so each one is known to
+  # read `src/` (via tsx) or a package.json and need no `dist/`. Pulling them
+  # out means the ~78s of cheap, high-signal gates no longer sit behind a
+  # 5½-minute build they never needed — they now report in about two minutes.
+  # ⚠️ Do not add a step here that reads a built `dist/`: it would find a
+  # missing or stale one. Build-dependent gates belong in the lanes below.
+  typecheck-source-gates:
+    name: Type Check · source gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1630,15 +1657,30 @@ jobs:
       #
       # Partial by construction, and that is the honest expectation: it warms
       # the `build` tasks, not the `typecheck` tasks (build-core never runs
-      # those, so nothing seeds them outside this job's own namespace).
+      # those, so nothing seeds them outside this namespace).
+      #
+      # ⚠️ THE NAMESPACE IS THE LITERAL `typecheck`, NOT `${{ github.job }}`.
+      # It used to be the expression, back when one job carried this whole
+      # family and the two spellings happened to agree. They no longer do: the
+      # family is four parallel lanes (`typecheck-source-gates`,
+      # `typecheck-workspace`, `typecheck-debt`, `typecheck-consumers`) plus
+      # the `typecheck` aggregator, so `github.job` would give each lane its
+      # OWN namespace — four prefixes nothing has ever written, and every one
+      # of main's seeds unreachable. That failure is silent and expensive in
+      # exactly one direction: the restore reports "Cache not found", the lane
+      # cold-builds, and the run is still GREEN — you only see it as a job that
+      # got slower, which is the thing this card exists to fix. The lanes share
+      # one namespace on purpose, and it is spelled the same as the key main's
+      # save writes below, so the seeding relationship survives the split
+      # unchanged.
       - name: Restore Turbo cache
         uses: actions/cache/restore@v6
         with:
           path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+          key: ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-
-            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-typecheck-
             ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
             ${{ runner.os }}-turbo-build-core-
 
@@ -2019,6 +2061,31 @@ jobs:
       - name: Ratchet-remedy authority convention (#8435) across the gate farm
         run: pnpm check:ratchet-remedy-authority
 
+      # The published `skills/**` bundle is loaded WHOLE into customer agent context
+      # windows, so its length is a per-token cost paid again in every customer
+      # session — and until #10473 nothing priced it. The maintainer ruling that
+      # established the principle (2026-08-21, on PR #10402) had no mechanism behind
+      # it, leaving a reviewer's memory as the only control; the `.claude/**` line
+      # ratchet had proven by then that a prose-only length rule gets rediscovered
+      # the expensive way.
+      #
+      # Runs its own --self-test FIRST, then the scan. The self-test is the half that
+      # keeps the scan meaningful: it drives the verdict paths over fixtures, so a
+      # counting or enumeration regression fails here rather than reporting a clean
+      # bundle while measuring nothing. The scan prints the bundle price tag on
+      # SUCCESS as well as failure, which is the visibility half of #10473 — every
+      # PR's log carries each file's distance from its ceiling.
+      #
+      # Invoked as `node`, NOT through an npm script: root package.json is fenced
+      # (#9465), and this gate needs no wiring there — same shape as the two
+      # `node scripts/…` steps earlier in this lane. Static text only, no build, so
+      # it belongs in this pre-build group. No paths filter, for the standard reason:
+      # a filter on skills/** would go dormant on the PR that edits the ceilings.
+      - name: Published skills token ratchet (#10473) + its self-test
+        run: |
+          node scripts/check-skills-token-ratchet.mjs --self-test
+          node scripts/check-skills-token-ratchet.mjs
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 
@@ -2035,6 +2102,121 @@ jobs:
       # dormant on exactly the PR that tightens the schema instead.
       - name: Check every shipped template manifest satisfies TemplateManifestSchema
         run: pnpm --filter @objectstack/spec check:template-manifests
+
+  # Lane 2 of 4 behind the required `TypeScript Type Check` context. The
+  # aggregator job at the bottom of this file explains the split, holds the
+  # contract, and is the thing the merge queue actually requires — read it
+  # before moving a step between lanes.
+  #
+  # Build + `turbo run typecheck` — the per-package `typecheck` scripts the
+  # coverage gate requires. This is also the lane that SAVES the shared turbo
+  # cache on main pushes (see that step), because it is the only lane that
+  # runs the `typecheck` task family and so the only one that can seed it.
+  typecheck-workspace:
+    name: Type Check · workspace
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The authorable-surface deletion gate (#4650) below anchors on the
+          # MERGE BASE of HEAD with origin/main — that is the only anchor under
+          # which "a key this PR deleted" and "a key main gained since the fork
+          # point" are different facts. A shallow clone has no walkable
+          # ancestry, so `merge-base` fails and the gate falls back to
+          # origin/main's TIP, where those two facts collapse into one and the
+          # SECOND one is reported as the first: #6359 had PR #6356 (which
+          # touches no spec file at all) go red for "deleting"
+          # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
+          #
+          # Same line as the ESLint job above, opposite failure mode, and that
+          # is why it is spelled out here rather than cross-referenced: shallow
+          # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
+          # and degrades this gate to a false RED on an innocent PR.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # This job runs the full workspace build below ("Build workspace
+      # packages"); without a restored turbo cache that step rebuilt every
+      # package from scratch on every run (~4½ min) while ci.yml's jobs — which
+      # do carry this cache — finished the same build in under a minute. Same
+      # key scheme as ci.yml so the fallback prefix can also hit main's caches.
+      # Restore-only on PRs (same policy as ci.yml): PR-side saves churned the
+      # 10 GB Actions cache pool and evicted the main seeds; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      #
+      # The build-core fallbacks are #5401. Only main writes, so a merge_group
+      # entry always restores by PREFIX — and this job's own namespace has a
+      # window where that prefix matches nothing: the previous main generation
+      # is already gone while the current one is still being written (measured
+      # 2026-08-05, run 30985524210 — all three keys reported "Cache not found"
+      # at 07:34:18Z and the workspace build went 4s -> 4m54s, while the very
+      # same queue entry's ci.yml jobs hit `-main-f417863f` in that same
+      # minute). build-core's entry is the one that survives that window: its
+      # main-push save had completed at 07:32:50Z, 88s earlier, and `pnpm
+      # build` (turbo run build --filter=!@objectstack/docs) is a SUPERSET of
+      # this job's build step, so the entries it carries are the ones this
+      # build needs — same reasoning as the fallbacks the Temporal
+      # Conformance / Dogfood Verify / Console Pin jobs already carry in
+      # ci.yml, whose spelling these two lines match exactly.
+      #
+      # Partial by construction, and that is the honest expectation: it warms
+      # the `build` tasks, not the `typecheck` tasks (build-core never runs
+      # those, so nothing seeds them outside this namespace).
+      #
+      # ⚠️ THE NAMESPACE IS THE LITERAL `typecheck`, NOT `${{ github.job }}`.
+      # It used to be the expression, back when one job carried this whole
+      # family and the two spellings happened to agree. They no longer do: the
+      # family is four parallel lanes (`typecheck-source-gates`,
+      # `typecheck-workspace`, `typecheck-debt`, `typecheck-consumers`) plus
+      # the `typecheck` aggregator, so `github.job` would give each lane its
+      # OWN namespace — four prefixes nothing has ever written, and every one
+      # of main's seeds unreachable. That failure is silent and expensive in
+      # exactly one direction: the restore reports "Cache not found", the lane
+      # cold-builds, and the run is still GREEN — you only see it as a job that
+      # got slower, which is the thing this card exists to fix. The lanes share
+      # one namespace on purpose, and it is spelled the same as the key main's
+      # save writes below, so the seeding relationship survives the split
+      # unchanged.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-typecheck-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       # Example apps are AI-authoring reference templates; a red typecheck is a
       # bad signal to copy from. tsup transpiles them without a full typecheck,
@@ -2063,6 +2245,169 @@ jobs:
       # they are distinct gates, not bulk coverage.
       - name: Type check workspace packages
         run: pnpm exec turbo run typecheck --filter='./packages/*' --filter='./packages/*/*' --filter='./apps/*'
+
+      # Seed the shared Turbo cache from main only (see the restore step above).
+      #
+      # ⚠️ EXACTLY ONE LANE SAVES, and this is it. Three of the four lanes run
+      # the workspace build, so three could plausibly write here — but they
+      # would all compute the SAME key (the namespace is a literal and the sha
+      # is the run's), and `actions/cache` refuses a duplicate with "Unable to
+      # reserve cache with key …, another job may be creating this cache". That
+      # is a warning, not a failure, so the losers would go green having saved
+      # nothing and the winner would be whichever lane finished first — a
+      # non-deterministic seed. This lane is the designated writer because its
+      # tree carries the most: it runs the workspace build AND `turbo run
+      # typecheck`, so it is the only lane that seeds the `typecheck` task
+      # family at all (the restore comment above explains why nothing else
+      # does). Moving the save to another lane silently narrows what main
+      # seeds; if that is ever wanted, move it deliberately and say so here.
+      #
+      # merge_group is deliberately NOT added to this condition — see the
+      # "why queue-branch saves are not the win they look like" note on the
+      # `typecheck` aggregator at the bottom of this file.
+      - name: Save Turbo cache (main only)
+        if: always() && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-${{ github.sha }}
+
+  # Lane 3 of 4 behind the required `TypeScript Type Check` context. The
+  # aggregator job at the bottom of this file explains the split, holds the
+  # contract, and is the thing the merge queue actually requires — read it
+  # before moving a step between lanes.
+  #
+  # The ledger re-measure, alone in its own lane because it was ~4 min of the
+  # old critical path. ⚠️ It is NOT duplicated work with the `turbo run
+  # typecheck` in the lane above, which is what it looks like from the step
+  # names: the DEBT ledger's entries are by definition the packages that have
+  # NO `typecheck` script (measured on this tree — 0 of 13 DEBT entries
+  # resolve to a package declaring one), so the turbo task never compiles a
+  # single one of them, and the TEST_DEBT entries are measured against a
+  # GENERATED project that includes the test files each package's own
+  # tsconfig excludes — a different program from the one its `typecheck`
+  # script runs. Two disjoint bodies of tsc work; there is nothing to dedupe,
+  # only something to run in parallel. The ledger's shrink-only verdict
+  # semantics are untouched: same script, same flags, same command.
+  typecheck-debt:
+    name: Type Check · debt ledger
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The authorable-surface deletion gate (#4650) below anchors on the
+          # MERGE BASE of HEAD with origin/main — that is the only anchor under
+          # which "a key this PR deleted" and "a key main gained since the fork
+          # point" are different facts. A shallow clone has no walkable
+          # ancestry, so `merge-base` fails and the gate falls back to
+          # origin/main's TIP, where those two facts collapse into one and the
+          # SECOND one is reported as the first: #6359 had PR #6356 (which
+          # touches no spec file at all) go red for "deleting"
+          # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
+          #
+          # Same line as the ESLint job above, opposite failure mode, and that
+          # is why it is spelled out here rather than cross-referenced: shallow
+          # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
+          # and degrades this gate to a false RED on an innocent PR.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # This job runs the full workspace build below ("Build workspace
+      # packages"); without a restored turbo cache that step rebuilt every
+      # package from scratch on every run (~4½ min) while ci.yml's jobs — which
+      # do carry this cache — finished the same build in under a minute. Same
+      # key scheme as ci.yml so the fallback prefix can also hit main's caches.
+      # Restore-only on PRs (same policy as ci.yml): PR-side saves churned the
+      # 10 GB Actions cache pool and evicted the main seeds; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      #
+      # The build-core fallbacks are #5401. Only main writes, so a merge_group
+      # entry always restores by PREFIX — and this job's own namespace has a
+      # window where that prefix matches nothing: the previous main generation
+      # is already gone while the current one is still being written (measured
+      # 2026-08-05, run 30985524210 — all three keys reported "Cache not found"
+      # at 07:34:18Z and the workspace build went 4s -> 4m54s, while the very
+      # same queue entry's ci.yml jobs hit `-main-f417863f` in that same
+      # minute). build-core's entry is the one that survives that window: its
+      # main-push save had completed at 07:32:50Z, 88s earlier, and `pnpm
+      # build` (turbo run build --filter=!@objectstack/docs) is a SUPERSET of
+      # this job's build step, so the entries it carries are the ones this
+      # build needs — same reasoning as the fallbacks the Temporal
+      # Conformance / Dogfood Verify / Console Pin jobs already carry in
+      # ci.yml, whose spelling these two lines match exactly.
+      #
+      # Partial by construction, and that is the honest expectation: it warms
+      # the `build` tasks, not the `typecheck` tasks (build-core never runs
+      # those, so nothing seeds them outside this namespace).
+      #
+      # ⚠️ THE NAMESPACE IS THE LITERAL `typecheck`, NOT `${{ github.job }}`.
+      # It used to be the expression, back when one job carried this whole
+      # family and the two spellings happened to agree. They no longer do: the
+      # family is four parallel lanes (`typecheck-source-gates`,
+      # `typecheck-workspace`, `typecheck-debt`, `typecheck-consumers`) plus
+      # the `typecheck` aggregator, so `github.job` would give each lane its
+      # OWN namespace — four prefixes nothing has ever written, and every one
+      # of main's seeds unreachable. That failure is silent and expensive in
+      # exactly one direction: the restore reports "Cache not found", the lane
+      # cold-builds, and the run is still GREEN — you only see it as a job that
+      # got slower, which is the thing this card exists to fix. The lanes share
+      # one namespace on purpose, and it is spelled the same as the key main's
+      # save writes below, so the seeding relationship survives the split
+      # unchanged.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-typecheck-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Example apps are AI-authoring reference templates; a red typecheck is a
+      # bad signal to copy from. tsup transpiles them without a full typecheck,
+      # so build alone will not catch type drift — typecheck them explicitly.
+      # They import from built workspace packages, so the packages must be built
+      # first for cross-package type resolution to succeed. The examples'
+      # dependency closure is requested EXPLICITLY (`./examples/*^...` = deps
+      # of the examples, not the examples themselves): the bare `./packages/*`
+      # glob only matches direct children, and the connector packages the
+      # showcase imports were previously built only by accident — through
+      # dogfood's dependency chain, which broke when dogfood moved to
+      # packages/qa/ (#3037).
+      - name: Build workspace packages
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
       # The MEASURED half of the coverage gate (#5278). The cheap structural
       # check near the top of this job asserts that a package without a
@@ -2099,6 +2444,155 @@ jobs:
 
       - name: Re-measure the type-check DEBT / TEST_DEBT ledger
         run: pnpm check:type-check-debt
+
+  # Lane 4 of 4 behind the required `TypeScript Type Check` context. The
+  # aggregator job at the bottom of this file explains the split, holds the
+  # contract, and is the thing the merge queue actually requires — read it
+  # before moving a step between lanes.
+  #
+  # The post-build gates that read the BUILT `dist/` a consumer's import
+  # actually resolves to — examples, the frozen downstream contract, the
+  # api-surface family, the skill/docs example compilers and the i18n gates.
+  typecheck-consumers:
+    name: Type Check · consumer gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # The authorable-surface deletion gate (#4650) below anchors on the
+          # MERGE BASE of HEAD with origin/main — that is the only anchor under
+          # which "a key this PR deleted" and "a key main gained since the fork
+          # point" are different facts. A shallow clone has no walkable
+          # ancestry, so `merge-base` fails and the gate falls back to
+          # origin/main's TIP, where those two facts collapse into one and the
+          # SECOND one is reported as the first: #6359 had PR #6356 (which
+          # touches no spec file at all) go red for "deleting"
+          # ui/BulkActionDef:requiredPermissions — a key main had just ADDED.
+          #
+          # Same line as the ESLint job above, opposite failure mode, and that
+          # is why it is spelled out here rather than cross-referenced: shallow
+          # degrades the slot-lookup ratchet to "not verified" (a false GREEN),
+          # and degrades this gate to a false RED on an innocent PR.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Verify pnpm version
+        run: pnpm --version
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # This job runs the full workspace build below ("Build workspace
+      # packages"); without a restored turbo cache that step rebuilt every
+      # package from scratch on every run (~4½ min) while ci.yml's jobs — which
+      # do carry this cache — finished the same build in under a minute. Same
+      # key scheme as ci.yml so the fallback prefix can also hit main's caches.
+      # Restore-only on PRs (same policy as ci.yml): PR-side saves churned the
+      # 10 GB Actions cache pool and evicted the main seeds; only main pushes
+      # save (the "Save Turbo cache" step at the end of the job).
+      #
+      # The build-core fallbacks are #5401. Only main writes, so a merge_group
+      # entry always restores by PREFIX — and this job's own namespace has a
+      # window where that prefix matches nothing: the previous main generation
+      # is already gone while the current one is still being written (measured
+      # 2026-08-05, run 30985524210 — all three keys reported "Cache not found"
+      # at 07:34:18Z and the workspace build went 4s -> 4m54s, while the very
+      # same queue entry's ci.yml jobs hit `-main-f417863f` in that same
+      # minute). build-core's entry is the one that survives that window: its
+      # main-push save had completed at 07:32:50Z, 88s earlier, and `pnpm
+      # build` (turbo run build --filter=!@objectstack/docs) is a SUPERSET of
+      # this job's build step, so the entries it carries are the ones this
+      # build needs — same reasoning as the fallbacks the Temporal
+      # Conformance / Dogfood Verify / Console Pin jobs already carry in
+      # ci.yml, whose spelling these two lines match exactly.
+      #
+      # Partial by construction, and that is the honest expectation: it warms
+      # the `build` tasks, not the `typecheck` tasks (build-core never runs
+      # those, so nothing seeds them outside this namespace).
+      #
+      # ⚠️ THE NAMESPACE IS THE LITERAL `typecheck`, NOT `${{ github.job }}`.
+      # It used to be the expression, back when one job carried this whole
+      # family and the two spellings happened to agree. They no longer do: the
+      # family is four parallel lanes (`typecheck-source-gates`,
+      # `typecheck-workspace`, `typecheck-debt`, `typecheck-consumers`) plus
+      # the `typecheck` aggregator, so `github.job` would give each lane its
+      # OWN namespace — four prefixes nothing has ever written, and every one
+      # of main's seeds unreachable. That failure is silent and expensive in
+      # exactly one direction: the restore reports "Cache not found", the lane
+      # cold-builds, and the run is still GREEN — you only see it as a job that
+      # got slower, which is the thing this card exists to fix. The lanes share
+      # one namespace on purpose, and it is spelled the same as the key main's
+      # save writes below, so the seeding relationship survives the split
+      # unchanged.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-typecheck-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-typecheck-
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Example apps are AI-authoring reference templates; a red typecheck is a
+      # bad signal to copy from. tsup transpiles them without a full typecheck,
+      # so build alone will not catch type drift — typecheck them explicitly.
+      # They import from built workspace packages, so the packages must be built
+      # first for cross-package type resolution to succeed. The examples'
+      # dependency closure is requested EXPLICITLY (`./examples/*^...` = deps
+      # of the examples, not the examples themselves): the bare `./packages/*`
+      # glob only matches direct children, and the connector packages the
+      # showcase imports were previously built only by accident — through
+      # dogfood's dependency chain, which broke when dogfood moved to
+      # packages/qa/ (#3037).
+      - name: Build workspace packages
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
+
+      # The nested-package build. ⚠️ NOT redundant with "Build workspace
+      # packages" above, and the reason is the glob: the bare `./packages/*`
+      # matches only DIRECT children, so `packages/plugins/*`,
+      # `packages/services/*`, `packages/drivers/*` and friends arrive only via
+      # `./examples/*^...` — the examples' dependency closure — which reaches
+      # most of them by accident of what the showcase happens to import.
+      # Measured on this tree: the step above builds 68 packages, this filter
+      # builds 74, and the 8 it adds include `@objectstack/downstream-contract`
+      # and `@objectstack/studio`.
+      #
+      # In the old 45-step serial job the consumer gates below inherited this
+      # build for free: it ran earlier in the same job, for the debt ledger's
+      # sake, and everything after it saw the fuller tree. Splitting the ledger
+      # into its own lane takes that inheritance away, so this lane has to ask
+      # for it explicitly or the gates below would read a `dist/` that is
+      # missing exactly those 8 — a build-dependent gate reading nothing and
+      # reporting "measured and clean" (#4690). It is a superset of the step
+      # above, so in practice it is cache hits plus the remainder (~13s in CI).
+      - name: Build the nested packages the consumer gates resolve through
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck
@@ -2178,6 +2672,40 @@ jobs:
       # Self-tests first, like exported-any.
       - name: Check no new same-name dual-source spec exports
         run: pnpm --filter @objectstack/spec run check:dual-source-exports
+
+      # [#10199] The mechanized form of the 2026-08-20 ruling on #10096:
+      # 「浏览器可达的 spec 导出面必须 schema-free」. Walks the built module graph
+      # behind every subpath the exports map publishes and fails if one DECLARED
+      # browser-reachable (browser-reachable-entries.json — today `./meta-spelling`)
+      # links zod, directly or through a relative hop, or links an external it has
+      # not declared.
+      #
+      # WHY IT NEEDS A GATE AT ALL. The principle bound as prose until now, and
+      # the failure it guards was invisible to every check this repo had: one
+      # string fold reached through `/shared` cost +246.9 KB minified / +69.7 KB
+      # gzipped, one pure predicate through `/security` cost +261.5 KB, and
+      # objectui#5324 records the CONSUMER's own bundle-budget check reporting
+      # PASS on the PR that added the bytes. A budget cannot attribute a delta
+      # that arrives inside a dependency it already imports; a module graph can.
+      #
+      # WHY THIS JOB AND THIS POSITION. It reads the BUILT `.mjs`/`.js` bundles a
+      # consumer's import resolves to — not the source, and not the `.d.ts` — so
+      # it belongs after the build step with the other dist-reading consumer
+      # gates (`check:exported-any`, `check:dual-source-exports` above), not with
+      # the tsx-only artifact gates near the top. On an unbuilt or stale tree it
+      # is a HARD REFUSAL naming the build command, never a skip: a
+      # build-dependent gate that reads nothing reports NOT MEASURED as if it
+      # were measured and clean (#4690).
+      #
+      # It adds no required context — a step in an existing job, so no open PR
+      # waits on a check whose name no head has ever reported (#9325). Reads 34
+      # bundles in ~1.5s. Self-tests first, like its two neighbours, and that
+      # self-test is load-bearing here for a specific reason: this tree has ZERO
+      # relative hops between bundles (every entry is self-contained), so the
+      # transitive walk that keeps the gate honest the day `splitting` is turned
+      # on can only be exercised against fixtures.
+      - name: Check declared browser-reachable spec entries link no zod
+        run: pnpm --filter @objectstack/spec run check:browser-reachable-entries
 
       # Anti-drift for the skill EXAMPLES, not just the skill reference indexes
       # (#3094). The TypeScript in skills/ is the first thing an AI copies when
@@ -2276,10 +2804,137 @@ jobs:
       - name: Check runtime-merged app navigation is translated in every locale
         run: pnpm check:app-nav-i18n
 
-      # Seed the shared Turbo cache from main only (see the restore step above).
-      - name: Save Turbo cache (main only)
-        if: always() && github.event_name == 'push'
-        uses: actions/cache/save@v6
-        with:
-          path: .turbo/cache
-          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.ref_name }}-${{ github.sha }}
+  # ────────────────────────────────────────────────────────────────────────
+  # The required context `TypeScript Type Check`, as an AGGREGATOR (#10471).
+  # ────────────────────────────────────────────────────────────────────────
+  #
+  # ⚠️ `typecheck` (the job id) and `TypeScript Type Check` (the `name:`) are
+  # BOTH contract, pinned by `scripts/check-required-contexts.mjs`: the id is
+  # what its registry looks up, the name is what the merge queue's ruleset
+  # requires. Renaming either half is the #5617 outage — the old context never
+  # reports again and sits permanently pending, wedging every open PR and the
+  # queue; removing it from Settings to unwedge things drops the whole gate
+  # family to advisory with no signal anywhere. That is why this split is an
+  # aggregator and not a rename: the 45 steps moved into the four lanes below,
+  # the CONTEXT NAME did not move at all, and no ruleset edit is needed (which
+  # matters — a ruleset edit is an admin action, not something a PR can carry).
+  #
+  # WHY THE SPLIT. This job was 45 steps run strictly serially, and it was the
+  # merge queue's global long pole: every candidate waits for it, so its wall
+  # clock IS the queue's per-candidate cost. Measured on real queue builds
+  # 2026-08-20 23:12–23:30Z (runs 32427686961 / 32428033244 / 32428961050):
+  # 17.9 / 17.8 / 17.1 min, against ~6 min for its sibling `Lint & Repo Gates`.
+  # Step timings from run 32428033244 (job 96613907655, 17m45s wall):
+  #
+  #     41s   checkout + setup + install
+  #     78s   the source-only gates      -> lane `typecheck-source-gates`
+  #    332s   Build workspace packages   -> lanes workspace / debt / consumers
+  #    226s   Type check workspace       -> lane `typecheck-workspace`
+  #    249s   build ledgered + re-measure-> lane `typecheck-debt`
+  #    123s   the post-build gates       -> lane `typecheck-consumers`
+  #
+  # The four lanes are independent — no lane reads an artifact another lane
+  # writes — so the critical path becomes the LONGEST lane rather than the sum,
+  # and the build is paid three times in parallel instead of once in series.
+  # That trade is deliberate: runner-minutes are cheap and horizontally
+  # scalable, queue wall clock is neither (it is serialized across every
+  # candidate). Predicted ~10.5 min; the real number is this PR's own CI run.
+  #
+  # ⛔ NO GATE MOVED, WEAKENED OR CHANGED ITS COMMAND. Every step below is the
+  # same `run:` it was, in the same relative order, with the same comment. The
+  # two order-dependent pairs stayed together inside ONE lane rather than being
+  # split across lanes that cannot see each other's disks:
+  #   - `check:authorable-surface` must stay ABOVE `check:docs` (it writes the
+  #     gitignored json-schema/ tree that check:docs renders from) — both are
+  #     in `typecheck-source-gates`, still adjacent, still in that order;
+  #   - `Build the ledgered packages' dependencies` must stay immediately above
+  #     the re-measure — both are in `typecheck-debt`.
+  #
+  # WHY QUEUE-BRANCH CACHE SAVES ARE NOT THE WIN THEY LOOK LIKE (the third
+  # direction on #10471's card, recorded here because the next reader will have
+  # the same idea). The proposal was to extend the turbo cache save to
+  # `merge_group` so successive queue candidates chain-hit. They cannot:
+  # Actions scopes a cache to the ref that created it, and a run may read its
+  # OWN ref plus the default branch (plus a PR's base) — never a sibling. Every
+  # queue candidate gets a fresh, ephemeral `gh-readonly-queue/main/pr-N-<sha>`
+  # branch, so candidate N+1 is a sibling of candidate N and cannot read what it
+  # wrote. The saves would be write-only. Worse, they would not be free: this
+  # repo has already measured what non-main saves cost — the restore comment in
+  # each lane records that "PR-side saves churned the 10 GB Actions cache pool
+  # and evicted the main seeds", which is the one thing that DOES make queue
+  # builds cold. So queue-branch saves buy nothing and actively damage the seed
+  # that main writes. Not done, on purpose. What the cache direction DID yield
+  # is the namespace pin in the restore step — see its comment.
+  typecheck:
+    name: TypeScript Type Check
+    needs:
+      - typecheck-source-gates
+      - typecheck-workspace
+      - typecheck-debt
+      - typecheck-consumers
+    # `always()` is load-bearing and must not become `success()` or the implicit
+    # bare condition: with those, a failed lane SKIPS this job, and a skipped
+    # required context is not a red — it is an absence, which reads as green in
+    # every checks list and never blocks the queue. The same contract
+    # ci.yml's `test-gate` documents. With `always()` the job runs on every
+    # outcome and the verdict below is what decides.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      # Fail-closed, and deliberately NOT a hand-written list of the four lane
+      # names. The verdict iterates `toJSON(needs)`, so every job wired into
+      # `needs:` above is enforced automatically and none can be forgotten in
+      # the logic here. The lane COUNT is asserted separately as the tripwire
+      # for the other half of that drift: a fifth lane added to the workflow but
+      # never wired into `needs:` would otherwise ride green, unwatched, behind
+      # a required context — the dormant-gate shape this repo keeps paying for.
+      # Anything that is not exactly `success` fails, `skipped` and `cancelled`
+      # included: a lane that never ran has not proved anything.
+      - name: Verify every type-check lane succeeded
+        env:
+          OS_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$OS_NEEDS" > "$RUNNER_TEMP/needs.json"
+          cat > "$RUNNER_TEMP/verify-lanes.mjs" <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          // Every lane this aggregator is expected to carry. Adding a lane to
+          // `needs:` without bumping this is red on purpose, and so is the
+          // reverse -- the number and the roster have to be changed together.
+          const EXPECTED_LANES = 4;
+
+          const needs = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/needs.json`, 'utf8'));
+          const ids = Object.keys(needs).sort();
+          let bad = 0;
+
+          for (const id of ids) {
+            const result = needs[id]?.result ?? '(no result reported)';
+            if (result === 'success') {
+              console.log(`  ok       ${id}`);
+              continue;
+            }
+            console.log(`::error::type-check lane \`${id}\` concluded \`${result}\` -- expected \`success\`.`);
+            bad++;
+          }
+
+          if (ids.length !== EXPECTED_LANES) {
+            console.log(
+              `::error::this gate aggregates ${ids.length} lane(s) but expects ${EXPECTED_LANES}: ${ids.join(', ')}. ` +
+                `A lane was added or removed -- update EXPECTED_LANES here AND make sure every lane is listed in ` +
+                `this job's \`needs:\`, or the unlisted one rides green behind a required context.`,
+            );
+            bad++;
+          }
+
+          if (bad > 0) {
+            console.log(`check-typecheck-lanes: FAILED (${bad} problem(s) above).`);
+            process.exit(1);
+          }
+          console.log(`check-typecheck-lanes: OK (${ids.length}/${EXPECTED_LANES} lanes succeeded).`);
+          NODE
+          node "$RUNNER_TEMP/verify-lanes.mjs"

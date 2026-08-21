@@ -587,6 +587,16 @@ function validateOne(
     // Maintainer ruling 2026-08-11: an over-scale value is refused the way an
     // out-of-range one is; silent rounding is silently altering data. Applies
     // to NEW writes only — already-stored values are read back untouched.
+    // ⛔ The boundary, because this is the package's only other `.scale` reader
+    // and therefore the tempting place to put a rounding (#10280): this branch
+    // governs CALLER-SUPPLIED values, which are refusable because there is
+    // somebody to refuse. A formula's output is PLATFORM-COMPUTED — nobody to
+    // refuse — so its `scale` is applied by rounding at the producer, in
+    // `applyFormulaPlan`. Rounding here instead would convert #7501's rejection
+    // into the silent alteration the ruling forbids. Nothing was carved out of
+    // #7501 to make that work: the type door below already excludes formula /
+    // summary / autonumber outputs from this function's reach, so the formula
+    // rounding fills a hole #7501 never covered.
     // Only a well-formed declaration (integer ≥ 0) is enforced: `scale: 2.5`
     // has no defined meaning, and inventing one here (floor? round?) would be
     // the consumer-side guessing PD #12 forbids — a malformed declaration

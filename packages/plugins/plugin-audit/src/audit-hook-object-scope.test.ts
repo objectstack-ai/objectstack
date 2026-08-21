@@ -437,7 +437,7 @@ function makeRecordingEngine() {
 const AUDIT_WRITER_EVENTS = ['afterInsert', 'afterUpdate', 'afterDelete'];
 
 describe('[#5860] the skip list is declared on the registration face', () => {
-  it('plugin-audit declares NO `beforeUpdate` / `beforeDelete` hook (#6656)', () => {
+  it('plugin-audit declares NO GLOBAL `beforeUpdate` / `beforeDelete` hook (#6656)', () => {
     const { engine, registrations } = makeRecordingEngine();
     installAuditWriters(engine);
 
@@ -445,16 +445,60 @@ describe('[#5860] the skip list is declared on the registration face', () => {
     // from a read count — this is the face `hasHooksFor` reads, so it is what
     // decides whether the engine's per-row bulk dispatch runs at all.
     //
-    // Scoped to the two events `captureBefore` held. The plugin's OTHER
-    // before-phase registrations are unrelated capability gates on a single
-    // named object each (`beforeInsert` on `sys_comment` for `enable.feeds`,
-    // on `sys_attachment` for `enable.files`); they read no prior row, and
-    // asserting "no before-phase hook at all" would fail on them while
-    // measuring nothing about this card.
-    const preImageEvents = registrations
-      .map((r) => r.event)
-      .filter((e) => e === 'beforeUpdate' || e === 'beforeDelete');
-    expect(preImageEvents).toEqual([]);
+    // [#10170] The filter is on GLOBAL registrations, not on the event names.
+    // It used to be on the event names, and the case above already recorded
+    // why that was only ever a PROXY: the plugin's capability gates are
+    // "unrelated … on a single named object each", they "read no prior row",
+    // and an assertion that caught them "would fail on them while measuring
+    // nothing about this card". While those gates were insert-only, filtering
+    // by event name expressed that carve-out exactly. #10170 registers them on
+    // `beforeUpdate` too — `enable.files`/`enable.feeds` are properties of the
+    // TARGET object, so a re-point via update is inside the declaration — and
+    // the proxy stopped tracking the property.
+    //
+    // What #6656 retired was `captureBefore`: an UNSCOPED pre-image reader
+    // that made `hasHooksFor(<any object>, 'beforeUpdate')` true system-wide
+    // and bought a prior-row read on every update in the stack. That is the
+    // invariant, and it is what this now asserts. An object-SCOPED gate costs
+    // the demand gate nothing beyond its own object — and on these two
+    // objects nothing at all: `comment-access-hooks.ts` (#4630) and
+    // service-storage's `attachment-access-hooks.ts` (#10091) already declare
+    // `beforeUpdate` scoped to `sys_comment` / `sys_attachment`, so
+    // `hasHooksFor` is already true for both wherever the access kits install.
+    const globalPreImage = registrations
+      .filter((r) => r.event === 'beforeUpdate' || r.event === 'beforeDelete')
+      .filter((r) => r.options?.object === undefined)
+      .map((r) => r.event);
+    expect(globalPreImage).toEqual([]);
+  });
+
+  it('[#10170] the two capability gates are declared on insert AND update, each scoped to one object', () => {
+    // The other half of the case above: the reason a `beforeUpdate`
+    // registration is admissible here is that it names ONE object. Assert that
+    // rather than leaving it to the negative filter — a future gate that
+    // forgot its `object` scope would otherwise only be caught by the absence
+    // test above, which reads as "nothing was retired", not "a gate went
+    // global".
+    const { engine, registrations } = makeRecordingEngine();
+    installAuditWriters(engine);
+
+    // BEFORE-phase only: `sys_comment` also carries the M10.8 @mention
+    // notification hook on `afterInsert`, which is not a capability gate.
+    const gateEvents = (object: string) =>
+      registrations
+        .filter((r) => r.options?.object === object && r.event.startsWith('before'))
+        .map((r) => r.event)
+        .sort();
+
+    expect(gateEvents('sys_comment')).toEqual(['beforeInsert', 'beforeUpdate']);
+    expect(gateEvents('sys_attachment')).toEqual(['beforeInsert', 'beforeUpdate']);
+
+    // …and neither of them widened into the global allow half.
+    for (const r of registrations) {
+      if (r.options?.object === 'sys_comment' || r.options?.object === 'sys_attachment') {
+        expect(r.options?.excludeObjects).toBeUndefined();
+      }
+    }
   });
 
   it('all writer registrations carry `excludeObjects` and stay global otherwise', () => {
