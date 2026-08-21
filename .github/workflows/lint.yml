@@ -2483,6 +2483,36 @@ jobs:
       # Measured cost of the re-measure itself: ~4 min, sequential by design
       # (parallel tsc processes trade wall clock for an OOM risk on a job that
       # has just built the whole workspace).
+      #
+      # ⚠️ NOT a duplicate of the closure build the gate below runs itself
+      # (#8331). `check:type-check-debt` calls `refreshBuiltClosure()` in
+      # scripts/check-type-check-coverage.mjs, which runs this exact command
+      # with these exact filters — but it runs it AFTER the `unbuiltClosure()`
+      # refusal, never before, and that order is deliberate and documented
+      # there: the refusal owns the NOTHING-IS-BUILT case (one ledgered
+      # package's 7-task closure built cold measured 3m2s, on a gate people run
+      # before pushing), the refresh owns only the PRESENT-BUT-STALE case
+      # (#8271). So the gate cannot rescue a closure member no earlier step
+      # built — it refuses, naming the command this step runs.
+      #
+      # What that leaves is measured, not assumed. Of the 55 workspace packages
+      # in the ledgered dependency closure (the gate's own enumeration, on an
+      # unbuilt worktree), `Build workspace packages` above already covers 54
+      # through `./packages/*`. The 55th is `@objectstack/service-knowledge`
+      # (packages/services/, pulled in by the ledgered `knowledge-ragflow`), and
+      # it arrives here only through `./examples/*^...` — because
+      # `examples/app-todo` happens to depend on it, the same accident #3037
+      # records one step above. Delete this step and the lane's green starts
+      # depending on that one manifest: drop the dependency there and
+      # `check:type-check-debt` refuses in CI, with a remedy message naming the
+      # command this step no longer runs.
+      #
+      # The drift #8331 was filed on — one precondition owned in two places — is
+      # LOUD in both directions now that the gate refreshes with its OWN
+      # filters: a narrower filter here ends in that refusal, a wider one in
+      # extra cache hits. Neither can make CI measure a different world than a
+      # local run, which is what #8271 was. Cost of keeping it: 9.5s of turbo
+      # cache hits (70/70) against this lane's ~249s.
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
