@@ -29,11 +29,11 @@
 #
 # The `#sha256=` fragment is an optional SRI-style integrity pin, verified
 # before boot; a mismatch refuses to boot. Docs:
-# https://docs.objectstack.ai/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url
+# https://objectstack.ai/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url
 #
 # Published by .github/workflows/docker-publish.yml on every framework
 # release; the image tag always matches the @objectstack/cli version inside.
-# Docs: https://docs.objectstack.ai/docs/deployment/self-hosting
+# Docs: https://objectstack.ai/docs/deployment/self-hosting
 
 FROM node:22-slim
 
