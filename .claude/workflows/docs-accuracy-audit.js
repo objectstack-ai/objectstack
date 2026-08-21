@@ -41,6 +41,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/ai/natural-language-queries.mdx",
   "content/docs/ai/skills-reference.mdx",
   "content/docs/ai/skills.mdx",
+  "content/docs/ai/tools.mdx",
   "content/docs/api/client-sdk.mdx",
   "content/docs/api/data-api.mdx",
   "content/docs/api/data-flow.mdx",

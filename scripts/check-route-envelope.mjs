@@ -511,7 +511,7 @@ const DISPATCHER_DOMAINS = {
  *
  * A discovered file absent from the table is an ERROR, never a default.
  *
- * ## Two ways to be held here: tracked drift, or a RULED boundary
+ * ## Three ways to be held here: tracked drift, or one of two RULED boundaries
  *
  * `ratchet` is the first. It is a measured count of bodies that depart from the
  * envelope plus the issue that will drive it to zero, and it says nothing about
@@ -549,6 +549,78 @@ const DISPATCHER_DOMAINS = {
  *
  * The reason is the deliverable. The entry is only where it is written down.
  *
+ * `vendorWire` is the third state, and it arrived with its own maintainer
+ * ruling: 2026-08-21, on #10554 — option A of the escalation recorded on
+ * PR #10352. **A body this repo BUILDS whose shape is a VENDOR's wire format —
+ * required by that vendor's own client library — is outside
+ * `BaseResponseSchema` because the vendor owns the shape.** Surface 2 already
+ * names this class kind 3 ("a foreign wire format a client library requires")
+ * and treats RELAYED instances as by-design invisible to the counters;
+ * `vendorWire` is kind 3's counterpart for the case where such a body becomes
+ * VISIBLE because the handler was reimplemented in-repo, turning a relay into
+ * a built literal. The adjudicated instance is better-auth's
+ * `{ session, user }`: the endpoint passes through the vendor's published
+ * OpenAPI schema declaring exactly that body, the vendor client
+ * (`authClient.admin.impersonateUser`) parses that shape, and the contract
+ * partner (`/admin/stop-impersonating`) — entirely vendor-side, unreachable
+ * from this repo — answers the same bare shape. Enveloping such a body is not
+ * progress: it contradicts the endpoint's own published schema, breaks the
+ * vendor reader, and forks from a partner endpoint this repo cannot convert.
+ * That is also why `vendorWire` is exclusive with `ratchet`: a ratchet asserts
+ * a conversion that is coming, and here the conversion can never honestly
+ * happen.
+ *
+ * Keep the three ruled directions distinct, because each was decided on its
+ * own facts and none is a precedent for the others:
+ *
+ *   #9389 `exempt`   — pre-auth bootstrap, read by OUR OWN SHELLS before any
+ *                      credential exists. The vendor-wire population is the
+ *                      opposite — the adjudicated body serves authenticated
+ *                      platform admins — which is exactly why #9389's closed
+ *                      class could not honestly cover it.
+ *   #9436 (envelope) — discovery bodies READ BY SDKs and codegen, where THIS
+ *                      repo owns the shape and the migration is one additive
+ *                      key. Ruled INTO the envelope. A vendor-wire body fails
+ *                      both conditions: the vendor owns the shape, and no
+ *                      one-key migration exists that the vendor's reader
+ *                      would survive.
+ *   `vendorWire`     — the VENDOR owns the shape and the vendor's client
+ *                      reads it. WHO owns and WHO reads the body decide, the
+ *                      same axis the other two rulings turned on; age and
+ *                      taste decide nothing.
+ *
+ * A `vendorWire` entry is held exactly the way an `exempt` one is: the same
+ * counters, asserted the same way — the boundary is closed at exactly N bodies
+ * in exactly these files, a new vendor-shaped body fails the gate until it is
+ * declared, and adding or widening an entry in this state is ⛔ MAINTAINER-ONLY
+ * (#8435), because it amends a ruling rather than applies one. The `note` is
+ * mandatory and structured, not decoration: it must carry the labelled fields
+ * `vendor:` (whose wire format this is), `reader:` (the vendor client code
+ * that requires the shape) and `partner:` (the vendor-side contract-partner
+ * endpoint(s) that answer the same shape). Labels rather than free prose, so
+ * every claim names something a later reader can go and re-verify still
+ * exists — a vendor-wire entry whose vendor stopped reading the shape is an
+ * entry to delete, and the note is what makes that checkable.
+ *
+ * ## The `const` hoist is the named forbidden move, not a fix
+ *
+ * Every counter on this surface reads the OBJECT LITERAL at the call site, so
+ * hoisting a built body into a `const` and passing the identifier —
+ *
+ *     const BODY = { session, user };   // the same wire bytes
+ *     return c.json(BODY);              // now invisible to every counter
+ *
+ * — turns the gate green with ZERO wire change. For a body this repo only
+ * relays, that invisibility is the design (see above). For a body this repo
+ * BUILDS it is the exact state this gate exists to prevent: the repo still
+ * owns the shape, and the hoist's only effect is to hide it from the auditor.
+ * The move was found, named and refused on PR #10352 (2026-08-21), and the
+ * #10554 ruling writes it down here so the next author who hits this class of
+ * red finds the prohibition before rediscovering the evasion as a fix: when
+ * the red body is a vendor's wire format, the honest paths are the
+ * `vendorWire` state (⛔ MAINTAINER-ONLY — stop and escalate, never
+ * self-serve) or a byte-clean stop-and-report. The hoist is neither.
+ *
  * ## An `exempt` on THIS surface stays COUNTED — unlike surface 1's
  *
  * `hmr-routes.ts` (surface 1) is a whole file that is one dev-only endpoint, so
@@ -571,14 +643,18 @@ const DISPATCHER_DOMAINS = {
  * second path widens a ruled boundary and is therefore not an author's to take;
  * the diagnostics mark it `⛔ MAINTAINER-ONLY` (#8435).
  *
- * `ratchet` and `exempt` are mutually exclusive. A count is either tracked drift
- * heading for zero or a boundary somebody ruled; declaring both says neither.
+ * `ratchet`, `exempt` and `vendorWire` are pairwise exclusive. A count is
+ * tracked drift heading for zero, a pre-auth boundary somebody ruled, or a
+ * vendor-owned shape somebody ruled; an entry declaring two of them at once
+ * says neither, and one body sits on exactly one ruled boundary.
  *
- * Where the ruling is recorded: HERE. This gate names no doc location of its own
- * — the `hmr-routes.ts` precedent's reasoning lives in this file's prose and
- * nowhere else, `content/docs/references/` is generated and must not be
- * hand-edited, and the ruling governs this table rather than the wire format
- * docs. #9389 carries the four-prism analysis and the maintainer's acceptance.
+ * Where the rulings are recorded: HERE. This gate names no doc location of its
+ * own — the `hmr-routes.ts` precedent's reasoning lives in this file's prose
+ * and nowhere else, `content/docs/references/` is generated and must not be
+ * hand-edited, and the rulings govern this table rather than the wire format
+ * docs. #9389 carries the pre-auth four-prism analysis and the maintainer's
+ * acceptance; #10554 and the escalation comment on PR #10352 carry the
+ * vendor-wire ruling's.
  */
 const HONO_CONTEXT_RECEIVERS = new Set(['c', 'ctx']);
 
@@ -679,6 +755,17 @@ const PLUGIN_ROUTE_MODULES = {
     exempt:
       'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
   },
+
+  // ── Ruled vendor wire format (2026-08-21, #10554): no entries yet ────────
+  //
+  // The state exists ahead of its first entry, deliberately: this machinery
+  // landed from `main` while the adjudicated body (better-auth's
+  // `{ session, user }` in plugin-auth's reimplemented impersonation handler)
+  // exists only on PR #10352's branch — and an entry for a file the walk
+  // cannot find is an ERROR here (the declared-but-not-found reconciliation
+  // in `audit()`), so the entry lands WITH the file, on that PR, under the
+  // ruling that authorized exactly that one entry. Adding any entry to this
+  // state is ⛔ MAINTAINER-ONLY (#8435) — see the header.
 };
 
 const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
@@ -747,9 +834,9 @@ const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
  * `rest-server.ts` (137 of the write calls), `error-response.ts` and
  * `response-envelope.ts` are absent below rather than unaudited.
  *
- * Entries carry the same counters, `ratchet`/`exempt`/`note` grammar and audit
- * (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one grammar, two receiver
- * dialects. As on every other discovered surface, a file the walk finds and the
+ * Entries carry the same counters, `ratchet`/`exempt`/`vendorWire`/`note`
+ * grammar and audit (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one
+ * grammar, two receiver dialects. As on every other discovered surface, a file the walk finds and the
  * table does not name is an ERROR, never a default.
  */
 const EXPRESS_RESPONSE_MODULES = {
@@ -1040,6 +1127,19 @@ const EXPRESS_SURFACE = {
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
 
 /**
+ * The three labelled fields a `vendorWire` note must carry (2026-08-21 ruling,
+ * #10554): whose wire format this is, which vendor client code requires the
+ * shape, and which vendor-side endpoint(s) answer the same shape. Labels
+ * rather than free prose, so each claim names something a later reader can go
+ * and re-verify still exists — see the surface-3 header.
+ */
+const VENDOR_WIRE_NOTE_FIELDS = ['vendor:', 'reader:', 'partner:'];
+
+/** Does a `vendorWire` note name all three parties the ruling requires? */
+const vendorWireNoteConforms = (note) =>
+  VENDOR_WIRE_NOTE_FIELDS.every((label) => note.toLowerCase().includes(label));
+
+/**
  * Classify one plugin-route module against its declaration.
  *
  * Pure on purpose — it takes the declaration and the scan result rather than
@@ -1074,19 +1174,47 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
       `    does not inherit the ruling by resembling it: declaring the counts plus an\n` +
       `    \`exempt\` reason is how it joins, and that is ${RATCHET_AUTHORITY_MARKER} —\n` +
       `    a maintainer widens a ruled boundary, an author enveloping the body does not\n` +
-      `    need anyone's leave.`,
+      `    need anyone's leave.\n` +
+      `    A body this repo BUILDS whose shape is a VENDOR's wire format — required by\n` +
+      `    that vendor's own client library — is the other ruled class (2026-08-21,\n` +
+      `    #10554): it joins by declaring the counts plus a \`vendorWire\` reason and a\n` +
+      `    \`note\` naming \`vendor:\` / \`reader:\` / \`partner:\`, and that too is\n` +
+      `    ${RATCHET_AUTHORITY_MARKER}. Hoisting the body literal into a \`const\` so\n` +
+      `    these counters read it as relayed is the named forbidden move, not a third\n` +
+      `    path — see the header of scripts/check-route-envelope.mjs.`,
     );
     return problems;
   }
 
   // Tracked drift and a ruled boundary are different claims about the same
-  // number, and an entry asserting both asserts neither.
+  // number, and an entry asserting both asserts neither. The three states are
+  // pairwise exclusive — see the header.
   if (declared.ratchet && declared.exempt) {
     problems.push(
       `${file}\n    declares both \`ratchet\` and \`exempt\` — those are exclusive.\n` +
       `    A ratchet says "this is drift and it is heading for zero"; an exempt says\n` +
       `    "this was ruled outside the envelope and is staying". Pick the one that is\n` +
       `    true. See the header of scripts/check-route-envelope.mjs.`,
+    );
+  }
+  if (declared.vendorWire && declared.ratchet) {
+    problems.push(
+      `${file}\n    declares both \`vendorWire\` and \`ratchet\` — those are exclusive.\n` +
+      `    A ratchet asserts a conversion that is coming; a vendor-wire declaration\n` +
+      `    (2026-08-21, #10554) asserts the vendor owns the shape and a conversion can\n` +
+      `    never honestly happen — enveloping it would break the vendor client that\n` +
+      `    reads it. Pick the one that is true. See the header of\n` +
+      `    scripts/check-route-envelope.mjs.`,
+    );
+  }
+  if (declared.vendorWire && declared.exempt) {
+    problems.push(
+      `${file}\n    declares both \`vendorWire\` and \`exempt\` — those are exclusive.\n` +
+      `    They are different rulings over different populations: \`exempt\` is #9389's\n` +
+      `    pre-auth bootstrap boundary (2026-08-17, our own shells before any credential\n` +
+      `    exists), \`vendorWire\` is the vendor wire-format boundary (2026-08-21,\n` +
+      `    #10554, a vendor-owned shape a vendor client requires). One body sits on\n` +
+      `    exactly one ruled boundary — cite the ruling that actually covers it.`,
     );
   }
 
@@ -1097,7 +1225,25 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
 
     if (got[key] > want) {
       problems.push(
-        declared.exempt
+        declared.vendorWire
+          ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW body outside the envelope\n` +
+            `    in a module whose departures are RULED vendor wire format.\n` +
+            `    ${what}.\n` +
+            `    A vendor-wire declaration is a CLOSED list of the bodies that were measured\n` +
+            `    when the ruling was made (2026-08-21, #10554), not a standing waiver over\n` +
+            `    this file. If this body is NOT a shape a vendor's client library requires,\n` +
+            `    the ruling does not reach it: emit\n` +
+            `    { success: false, error: { code, message } } with an ADR-0112 code, and no\n` +
+            `    number here moves. If it IS one, widening the boundary to cover it is\n` +
+            `    ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option — raising this count\n` +
+            `    amends a maintainer ruling, so it is a decision to take to the maintainer\n` +
+            `    rather than a fix to apply. And hoisting the body literal into a \`const\`\n` +
+            `    so these counters read it as relayed is not a third path: it turns the\n` +
+            `    gate green with zero wire change, and it is the named forbidden move —\n` +
+            `    see the header of scripts/check-route-envelope.mjs.\n` +
+            `    (vendorWire: ${declared.vendorWire})\n` +
+            `    Lines: ${sites}`
+          : declared.exempt
           ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW body outside the envelope\n` +
             `    in a module whose departures are RULED rather than tracked.\n` +
             `    ${what}.\n` +
@@ -1123,7 +1269,16 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
     }
 
     problems.push(
-      declared.exempt
+      declared.vendorWire
+        ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+          `    A vendor-wire declaration is an exact enumeration, so this is a body the\n` +
+          `    reason still describes and the file no longer emits. Lower the count to\n` +
+          `    ${got[key]} and amend the \`vendorWire\` reason and \`note\` to match what is left` +
+          (got[key] === 0 ? `, or drop the entry entirely — nothing departs from the envelope here any more` : '') + `.\n` +
+          `    Shrinking a ruled boundary needs nobody's leave; it is the widening\n` +
+          `    direction that is ${RATCHET_AUTHORITY_MARKER}.\n` +
+          `    Lines: ${sites}`
+        : declared.exempt
         ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
           `    A ruled exemption is an exact enumeration, so this is a body the reason still\n` +
           `    describes and the file no longer emits. Lower the count to ${got[key]} and amend\n` +
@@ -1143,10 +1298,10 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
 
   const pinned = Object.keys(PLUGIN_ROUTE_COUNTERS).reduce((n, k) => n + (declared[k] ?? 0), 0);
 
-  if (pinned > 0 && !declared.ratchet && !declared.exempt) {
+  if (pinned > 0 && !declared.ratchet && !declared.exempt && !declared.vendorWire) {
     problems.push(
-      `${file}\n    pins ${pinned} non-conforming body/bodies with neither a \`ratchet\` nor an\n` +
-      `    \`exempt\` reason.\n` +
+      `${file}\n    pins ${pinned} non-conforming body/bodies with neither a \`ratchet\` nor a\n` +
+      `    ruled \`exempt\`/\`vendorWire\` reason.\n` +
       `    A pinned count is tracked drift or a ruled boundary — never a blessing that\n` +
       `    arrived by itself. Name the issue that will drive it to zero, or write the\n` +
       `    reason it is outside the envelope.`,
@@ -1159,6 +1314,29 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
       `    somebody decided was fine.`,
     );
   }
+  // The vendor-wire note is the ruling's own mandate (2026-08-21, #10554), and
+  // it is structured so the claim stays re-checkable: each labelled party is
+  // something a later reader can go and verify still exists.
+  if (declared.vendorWire && !declared.note) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` with no \`note\`.\n` +
+      `    The ruling (2026-08-21, #10554) makes the note mandatory: it must name the\n` +
+      `    vendor, the vendor client reader that requires the shape, and the\n` +
+      `    contract-partner endpoint(s), as \`vendor: …; reader: …; partner: …\`.\n` +
+      `    A vendor-wire body with none of the three named is unverifiable — nobody\n` +
+      `    can re-check that the vendor's client still reads this shape.`,
+    );
+  } else if (declared.vendorWire && !vendorWireNoteConforms(declared.note)) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` with a \`note\` that does not name all three parties.\n` +
+      `    The note must carry the labelled fields \`vendor:\` (whose wire format this\n` +
+      `    is), \`reader:\` (the vendor client code that requires the shape) and\n` +
+      `    \`partner:\` (the vendor-side contract-partner endpoint(s) answering the same\n` +
+      `    shape). Labels, not free prose, so the triple stays greppable and\n` +
+      `    re-checkable.\n` +
+      `    (note: ${declared.note})`,
+    );
+  }
   // An exemption with nothing to exempt reads as a standing waiver over whatever
   // this file emits next — which is the file-level shape the #9389 ruling was
   // deliberately not given (see the header).
@@ -1169,6 +1347,16 @@ export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFA
       `    counters would stop meaning anything here the moment a bare body appeared. A\n` +
       `    module that departs from the envelope in no way these counters can see is\n` +
       `    conformant — declare {}.`,
+    );
+  }
+  // The same standing-waiver shape, spelled with the other ruled state.
+  if (declared.vendorWire && pinned === 0) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` but pins no non-conforming body.\n` +
+      `    A vendor-wire declaration over nothing is a waiver over whatever this file\n` +
+      `    emits next: the counters would stop meaning anything here the moment a bare\n` +
+      `    body appeared. A module that departs from the envelope in no way these\n` +
+      `    counters can see is conformant — declare {}.`,
     );
   }
 
@@ -1742,14 +1930,15 @@ function audit() {
   const pEntries = Object.entries(PLUGIN_ROUTE_MODULES);
   const pRatcheted = pEntries.filter(([, m]) => m.ratchet);
   const pExempt = pEntries.filter(([, m]) => m.exempt);
+  const pVendor = pEntries.filter(([, m]) => m.vendorWire);
   const totalBodies = honoRoutes.reduce(
     (n, f) => n + scanHonoRouteSource(readFileSync(join(ROOT, f), 'utf8'), f).bodies, 0,
   );
   console.log(
     `✓ Plugin-mounted Hono routes — ${honoRoutes.length} module(s) audited, ` +
     `${totalBodies} hand-built body/bodies (count reported, NOT pinned): ` +
-    `${honoRoutes.length - pRatcheted.length - pExempt.length} conformant, ` +
-    `${pRatcheted.length} ratcheted, ${pExempt.length} exempt`,
+    `${honoRoutes.length - pRatcheted.length - pExempt.length - pVendor.length} conformant, ` +
+    `${pRatcheted.length} ratcheted, ${pExempt.length} exempt, ${pVendor.length} vendor-wire`,
   );
   const pCounts = (m) => Object.keys(PLUGIN_ROUTE_COUNTERS)
     .filter((k) => m[k]).map((k) => `${k} ${m[k]}`).join(', ');
@@ -1758,27 +1947,34 @@ function audit() {
   }
   // The counts belong in the exempt line too: an exemption here is a closed
   // enumeration, and printing it without its number would report the ruling as
-  // the file-level waiver it deliberately is not.
+  // the file-level waiver it deliberately is not. Same for vendor-wire below.
   for (const [file, m] of pExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
+  }
+  for (const [file, m] of pVendor) {
+    console.log(`  – vendor wire, closed at ${pCounts(m)}: ${file} — ${m.vendorWire} (${m.note})`);
   }
 
   const iEntries = Object.entries(EXPRESS_RESPONSE_MODULES);
   const iRatcheted = iEntries.filter(([, m]) => m.ratchet);
   const iExempt = iEntries.filter(([, m]) => m.exempt);
+  const iVendor = iEntries.filter(([, m]) => m.vendorWire);
   const iBodies = Object.values(expressScans).reduce((n, s) => n + s.bodies, 0);
   console.log(
     `✓ Express-style response modules — ${expressRoutes.length} module(s) discovered and audited ` +
     `(walked, not enumerated — #9937), ` +
     `${iBodies} hand-built body/bodies (count reported, NOT pinned): ` +
-    `${iEntries.length - iRatcheted.length - iExempt.length} conformant, ` +
-    `${iRatcheted.length} ratcheted, ${iExempt.length} exempt`,
+    `${iEntries.length - iRatcheted.length - iExempt.length - iVendor.length} conformant, ` +
+    `${iRatcheted.length} ratcheted, ${iExempt.length} exempt, ${iVendor.length} vendor-wire`,
   );
   for (const [file, m] of iRatcheted) {
     console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${pCounts(m)}; ticks down only) — ${m.note}`);
   }
   for (const [file, m] of iExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
+  }
+  for (const [file, m] of iVendor) {
+    console.log(`  – vendor wire, closed at ${pCounts(m)}: ${file} — ${m.vendorWire} (${m.note})`);
   }
   // The reject side of the discriminator, printed because a walk can otherwise
   // only ever show what it swept IN — see `discoverResponseWriters`.
@@ -2143,6 +2339,98 @@ function selfTest() {
     `a ratchet must keep its own diagnostic → ${JSON.stringify(probs)}`,
   );
 
+  // ── The vendor-wire state (maintainer ruling 2026-08-21, #10554) ──────────
+  //
+  // Surface 2 names this class kind 3 ("a foreign wire format a client library
+  // requires") and treats RELAYED instances as by-design invisible; this state
+  // is kind 3's counterpart for a vendor-shaped body the repo BUILDS. It has
+  // the same closed-list property as the #9389 cases above and is driven
+  // through the same pure function; the fixture is the adjudicated body itself
+  // (better-auth's `{ session, user }`, escalated on PR #10352).
+  const vendorBody = `rawApp.post('/admin/impersonate-user', async (ctx) => ctx.json({ session, user }));`;
+  const vendorRuled = {
+    unenveloped: 1,
+    vendorWire: "better-auth's wire format, ruled outside BaseResponseSchema (2026-08-21, #10554 option A)",
+    note: 'vendor: better-auth; reader: authClient.admin.impersonateUser; partner: /admin/stop-impersonating',
+  };
+  assert(scanOf(vendorBody).unenveloped === 1, 'the fixture must be a bare vendor-shaped body');
+
+  // (1) Accepted at the pinned count, with the conforming three-part note.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(vendorBody));
+  assert(probs.length === 0, `a vendor-wire module at its pinned count must pass → ${JSON.stringify(probs)}`);
+
+  // (2) REJECTED without a note — the ruling makes the note mandatory.
+  probs = auditPluginRouteModule('x.ts', { unenveloped: 1, vendorWire: vendorRuled.vendorWire }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('no `note`'),
+    `vendorWire without a note must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (3) REJECTED with a note that does not name all three parties — free prose
+  // naming nobody re-checkable is the empty gesture the labels exist to refuse.
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, note: 'better-auth needs this shape' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('all three parties'),
+    `a label-less vendorWire note must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (4) REJECTED beside `ratchet` — a conversion that can never happen is not
+  // tracked drift, and an entry claiming both claims neither.
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, ratchet: '#9559' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('vendorWire'),
+    `vendorWire + ratchet must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (5) REJECTED beside `exempt` — one body sits on exactly ONE ruled boundary
+  // (#9389's pre-auth class and this one were ruled on opposite populations).
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, exempt: 'pre-auth' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('exempt'),
+    `vendorWire + exempt must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (6) WIDENING carries the authority marker (#8435): a second vendor-shaped
+  // body on a ruled entry is a decision for the maintainer, never a number to
+  // raise — and the diagnostic must name the const-hoist as the forbidden move
+  // rather than leave the next author to rediscover it as a fix.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`${vendorBody}\n${vendorBody}`));
+  assert(
+    probs.length === 1 && probs[0].includes('CLOSED list') && probs[0].includes(RATCHET_AUTHORITY_MARKER),
+    `widening a vendor-wire boundary must be ${RATCHET_AUTHORITY_MARKER} → ${JSON.stringify(probs)}`,
+  );
+  assert(
+    probs[0].includes('hoisting'),
+    `the widening diagnostic must name the const-hoist evasion → ${JSON.stringify(probs)}`,
+  );
+
+  // (7) BELOW the count is red in the shrink direction, and shrinking needs
+  // nobody's leave — the marker guards only the widening direction.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`c.json({ success: true, data });`));
+  assert(
+    probs.length === 1 && probs[0].includes('fewer than pinned'),
+    `a vendor-wire module below its pinned count must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (8) A vendor-wire declaration over NOTHING is the standing-waiver shape,
+  // refused the same way an empty exempt is.
+  probs = auditPluginRouteModule(
+    'x.ts',
+    { vendorWire: vendorRuled.vendorWire, note: vendorRuled.note },
+    scanOf(`c.json({ success: true, data });`),
+  );
+  assert(
+    probs.length === 1 && probs[0].includes('pins no non-conforming body'),
+    `a vendor-wire declaration over nothing must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (9) NEGATIVE: the #9389 exempt diagnostics are untouched by the new state —
+  // an exempt widening still speaks the pre-auth ruling's text, not this one's.
+  probs = auditPluginRouteModule('x.ts', ruled, scanOf(`${preAuth}\n${preAuth}`));
+  assert(
+    probs.length === 1 && probs[0].includes('#9389') && !probs[0].includes('vendorWire'),
+    `the exempt diagnostic must be unchanged by vendorWire → ${JSON.stringify(probs)}`,
+  );
 
   // ── The read/write discriminator (#9937) — BOTH directions ────────────────
   //
