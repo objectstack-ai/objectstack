@@ -1203,8 +1203,8 @@ export class LifecycleService {
     // which the spec pins equal to `retention.maxAge`) no longer separately
     // bounds the hot store for that triple. Whether the Archiver should union
     // the two windows, or the triple be refused at parse time (a
-    // `packages/spec` accept-set question, outside this card's fence), is filed
-    // rather than chosen by this diff.
+    // `packages/spec` accept-set question, outside this card's fence), is
+    // #10527 rather than a choice this diff makes silently.
     const dueField = lc.ttl ? lc.ttl.field : 'created_at';
     const dueWindow = lc.ttl ? lc.ttl.expireAfter : archive.after;
     const cutoff = new Date(this.now() - parseLifecycleDuration(dueWindow)).toISOString();
