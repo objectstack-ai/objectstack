@@ -184,8 +184,15 @@ const REPO_ROOT = resolve(HERE, '..');
  * than prose: the named test must still be one of this package's escaping
  * tests, so a glob whose only holder stops reading outside the package fails BY
  * NAME instead of sitting declared and unheld.
+ *
+ * EXPORTED for Layer C (#10379). `scripts/check-ci-filter-parity.mjs` asserts
+ * that every glob declared here is reachable by ci.yml's `filter` job, and it
+ * reads THIS table rather than a copy of it -- a second copy of the
+ * declarations would be the very defect that gate exists to close, one file
+ * further out. Importing this module runs nothing: the dispatch at the bottom
+ * is behind `isEntrypoint`, and `--self-test` spawns a real child to pin that.
  */
-const CROSS_PACKAGE_TEST_INPUTS = {
+export const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/spec': {
     globs: [
       // api-methods-batch-conformance.test.ts + system/constants/platform-object-names.test.ts

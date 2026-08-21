@@ -1510,6 +1510,41 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # LAYER C of the gate above (#10379). That gate verifies two of the three
+      # layers a cross-package declaration has: it finds the escaping tests
+      # itself, and `--verify` makes turbo.json hash every declared glob so the
+      # task hash moves. Neither can see the third — the SCHEDULER has to start
+      # the ci.yml `test` job that Layer A's `--union-into` step lives inside,
+      # and it decides that from `crosspkg:`, a hand-kept list in ci.yml
+      # mirroring the roots those declarations name. Nothing held the two in
+      # step: a declaration landing in a root no entry covers (`docker/`,
+      # `paseo.json`, a second `skills/*` bundle, another `docs/…` file) left
+      # the gate above GREEN and the turbo hash moving while the test still did
+      # not run at PR time, with the merge queue as the first signal — #7802's
+      # shape one layer up, and the failure #10015 was filed for after #9829
+      # fixed one root.
+      # The rule is PURE STRING — a declared glob is covered iff a scheduling
+      # list contains it verbatim or contains `<prefix>/**` for a directory
+      # prefix of its leading literal segments. Deliberately not a
+      # file-instantiating matcher: `core:` carries the extglob
+      # `apps/!(docs)/**`, so matching would need a picomatch-compatible
+      # engine — a THIRD recognizer of the same declarations, which is the
+      # defect this gate is about. Sound (it never reports covered for a path
+      # the scheduler would miss) and knowingly incomplete in the cheap
+      # direction (an entry with a wildcard of its own covers nothing, costing
+      # one line of YAML). It also reads the `test` job's `if:` and refuses if
+      # either filter has left the OR, and reports a `crosspkg` entry that
+      # covers no declaration any more.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the
+      # same reason as the steps below: that alias belongs in root package.json,
+      # declared territory of the @changesets/cli v3 lane (#9465) while it runs.
+      # dispatch-gates.mjs derives gate families from either spelling. Two YAML
+      # parses and a string comparison; milliseconds.
+      - name: CI filter parity (cross-package Layer C)
+        run: |
+          node scripts/check-ci-filter-parity.mjs --self-test
+          node scripts/check-ci-filter-parity.mjs
+
       # The READING half of the gate above (#10046). `--union-into` appends the
       # cross-package scans to the `turbo ls` document ci.yml is about to shard,
       # and `scripts/partition-test-shards.mjs` is the only thing that reads it.
