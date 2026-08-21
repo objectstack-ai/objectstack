@@ -111,7 +111,14 @@ function sweepEngine(driver: SqlDriver, objects: LifecycleObjectLike[]): Lifecyc
     },
     async delete(object: string, options: any) {
       const dispatch = assertEngineDeleteDispatch(options);
-      if (dispatch.kind === 'by-id') return (await driver.delete(object, dispatch.id)) ? 1 : 0;
+      if (dispatch.kind === 'by-id') {
+        // `EngineDeleteDispatch.id` admits `bigint`; the driver's by-id delete
+        // takes `string | number`. Narrowed by stringifying — the same reason
+        // `LifecycleService`'s own `idKey` stringifies — rather than cast away,
+        // which is what hid the mismatch here in the first place.
+        const id = typeof dispatch.id === 'bigint' ? dispatch.id.toString() : dispatch.id;
+        return (await driver.delete(object, id)) ? 1 : 0;
+      }
       const query: DriverQuery = { where: options?.where };
       return driver.deleteMany(object, query);
     },
