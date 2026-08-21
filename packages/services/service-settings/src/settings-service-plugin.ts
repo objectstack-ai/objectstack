@@ -112,6 +112,12 @@ export class SettingsServicePlugin implements Plugin {
     this.service = new SettingsService({
       crypto: this.opts.crypto,
       env: this.opts.env,
+      // The engine arrives later, from this plugin's own `kernel:ready` hook
+      // below. Declaring the pending bind here is what lets the service REFUSE
+      // a write in that window instead of resolving it into the in-memory
+      // fallback while nothing reaches `sys_setting` — see
+      // `SettingsEngineNotBoundError`. Both branches of that hook clear it.
+      engineBindPending: true,
       // #5204 — the service reports a rejected `OS_*` override at `error`, and
       // it must land in the deployment's real log pipeline rather than raw
       // stdout. Passed before `registerManifest` below, because that call is
@@ -216,6 +222,17 @@ export class SettingsServicePlugin implements Plugin {
             auditWriter: this.buildAuditWriter(ctx, engine),
             cryptoProvider: this.opts.cryptoProvider ?? new LocalCryptoProvider(),
           },
+        );
+      } else {
+        // No `objectql` on this kernel — the OPTIONAL dependency this plugin
+        // declares is genuinely absent, so no engine is ever coming and the
+        // in-memory fallback IS this deployment's store. Settle the window the
+        // other way rather than leaving writes refused forever: from here on the
+        // service behaves exactly as it did before the guard existed.
+        this.service!.settleWithoutEngine();
+        ctx.logger?.warn?.(
+          'SettingsServicePlugin: no objectql engine — settings persist to the in-process ' +
+            'memory fallback only and are lost on restart.',
         );
       }
 

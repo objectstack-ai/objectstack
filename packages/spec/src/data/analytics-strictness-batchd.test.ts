@@ -145,10 +145,16 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     ).toContain('drillMembers');
   });
 
-  it('`Metric.filters[]` — the nested filter item', () => {
+  // Batch D also closed the nested `Metric.filters[]` item ("this metric
+  // filter"), pinned here as `{ sql: 'x', field: 'y' }` → rejection naming
+  // `field`. #10414 removed `Metric.filters` outright (ADR-0049
+  // enforce-or-remove: no strategy ever read it), so the nested surface no
+  // longer exists — the batch-D verdict for it is SUPERSEDED, not reopened.
+  // The key itself now rejects with the retirement prescription:
+  it('`Metric.filters` — REMOVED (#10414); the key rejects with the prescription, not as a bare unknown', () => {
     expect(
-      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x', field: 'y' }] }),
-    ).toContain('field');
+      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
+    ).toContain('was removed in @objectstack/spec 17 (#10414');
   });
 
   it('`Dimension` — through the cube `dimensions` record', () => {

@@ -946,6 +946,169 @@ describe('LifecycleService.sweep — Archiver (P3)', () => {
     expect(hot.bulkDeleted).toEqual([]);
     expect(report.skipped).toEqual([{ object: 'sys_audit_log', reason: 'archive-pending' }]);
   });
+
+  /* ------------------------------------------------------------------ *
+   * [#10347] The Archiver honours a declared `ttl`.
+   *
+   * The property under test is "the declared ttl cutoff GOVERNED which rows
+   * moved", and it is invisible to a suite that only asserts rows were
+   * archived — such a suite passes identically against the `created_at`-only
+   * behaviour this card changes. Two things make the cases below able to fail:
+   *
+   *   1. `filteringHotStore` really evaluates the `where` the Archiver sends.
+   *      `hotStore()` above deliberately ignores it (its subjects are batching
+   *      and teardown, not selection), so a control built on that fake returns
+   *      every row under either policy and can never distinguish them.
+   *   2. The rows are chosen so the two policies DISAGREE about which are due,
+   *      in both directions — one row `created_at` age would move and the ttl
+   *      would not, and one the reverse.
+   * ------------------------------------------------------------------ */
+
+  /** The card's own example. Both windows are '90d' ON PURPOSE: the cutoff
+   * INSTANT is then identical under either policy, so the only thing that can
+   * separate them is which COLUMN is read. */
+  const TTL_ARCHIVE_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      ttl: { field: 'expires_at', expireAfter: '90d' },
+      archive: { after: '90d', to: 'archive', keep: '7y' },
+    } as any,
+  };
+
+  const DAY = 86_400_000;
+  const at = (deltaMs: number) => new Date(FIXED_NOW + deltaMs).toISOString();
+
+  /**
+   * Four rows. `created_at` age and the `expires_at` ttl disagree on the first
+   * two in opposite directions; the last two carry no expiry stamp at all
+   * (null, then the key absent) while being old enough for the age policy.
+   */
+  const disagreeingRows = () => [
+    // Age says move it — 400 days old. The ttl says it has not expired yet.
+    { id: 'old-unexpired', created_at: at(-400 * DAY), expires_at: at(+30 * DAY) },
+    // The reverse: one day old, so age keeps it — but its stamp expired 400
+    // days ago, so the declared ttl says it is due.
+    { id: 'young-expired', created_at: at(-DAY), expires_at: at(-400 * DAY) },
+    // No expiry stamp: old by age, undecided by ttl.
+    { id: 'null-stamp', created_at: at(-400 * DAY), expires_at: null },
+    { id: 'absent-stamp', created_at: at(-400 * DAY) },
+  ];
+
+  /**
+   * A hot store that EVALUATES the archiver's `where` and records it. `$lt` is
+   * applied with the platform's settled null answer — a value that is not
+   * there satisfies no positive comparison (#5298/#5299, every backend's
+   * `nullValueSatisfiesOperator` ends `default: return false`) — so the
+   * null/absent rows are decided by that contract, not by a JS accident.
+   */
+  function filteringHotStore(rows: Array<Record<string, unknown>>) {
+    const wheres: Array<Record<string, any>> = [];
+    const bulkDeleted: Array<Array<string | number>> = [];
+    let remaining = [...rows];
+    const matches = (row: Record<string, unknown>, where: Record<string, any>) =>
+      Object.entries(where).every(([field, cond]) => {
+        const value = row[field];
+        if (value === null || value === undefined) return false;
+        return String(value) < String(cond.$lt);
+      });
+    return {
+      wheres,
+      bulkDeleted,
+      remaining: () => remaining.map((r) => r.id),
+      driver: {
+        name: 'default',
+        find: async (_object: string, query: any) => {
+          wheres.push(query.where);
+          return remaining.filter((r) => matches(r, query.where)).slice(0, query.limit ?? remaining.length);
+        },
+        upsert: async () => ({}),
+        bulkDelete: async (_object: string, ids: Array<string | number>) => {
+          bulkDeleted.push(ids);
+          remaining = remaining.filter((r) => !ids.includes(r.id as string));
+        },
+        deleteMany: async () => 0,
+      },
+    };
+  }
+
+  it('DISCRIMINATING CONTROL: a declared ttl decides which rows move — not created_at age', async () => {
+    const cold = coldStore();
+    const hot = filteringHotStore(disagreeingRows());
+    const { engine } = captureEngine([TTL_ARCHIVE_OBJ], {
+      driver: hot.driver,
+      datasources: { archive: cold.driver },
+    });
+
+    const report = await service(engine).sweep();
+
+    // The candidate read is issued against the DECLARED ttl field.
+    expect(hot.wheres).toEqual([{ expires_at: { $lt: isoCutoff('90d') } }]);
+    // Only the expired row moves. `old-unexpired` is what makes this a control:
+    // the `created_at`-only Archiver copies it, and the ttl the author declared
+    // says it is not due for another 30 days.
+    expect(cold.upserts.map((r) => r.id)).toEqual(['young-expired']);
+    expect(hot.bulkDeleted).toEqual([['young-expired']]);
+    expect(hot.remaining()).toEqual(['old-unexpired', 'null-stamp', 'absent-stamp']);
+
+    const entry = report.swept.find((e) => e.policy === 'archive');
+    expect(entry?.archived).toBe(1);
+    expect(entry?.cutoff).toBe(isoCutoff('90d'));
+    expect(report.skipped).toEqual([]);
+  });
+
+  it('a row whose ttl.field is null or absent is NOT due at the epoch — it is retained', async () => {
+    // Stated as its own case because it is a DECISION, not a side effect: a row
+    // with no expiry stamp has not been given one, and archiving it would move
+    // exactly the rows whose expiry the author has not decided yet. The three
+    // rows here are all past `archive.after` by age, so a fix that reached for
+    // `created_at` — or read a missing stamp as 0 — would copy all three.
+    const cold = coldStore();
+    const hot = filteringHotStore([
+      { id: 'null-stamp', created_at: at(-400 * DAY), expires_at: null },
+      { id: 'absent-stamp', created_at: at(-400 * DAY) },
+      { id: 'expired', created_at: at(-400 * DAY), expires_at: at(-91 * DAY) },
+    ]);
+    const { engine } = captureEngine([TTL_ARCHIVE_OBJ], {
+      driver: hot.driver,
+      datasources: { archive: cold.driver },
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(cold.upserts.map((r) => r.id)).toEqual(['expired']);
+    expect(hot.remaining()).toEqual(['null-stamp', 'absent-stamp']);
+    expect(report.swept.find((e) => e.policy === 'archive')?.archived).toBe(1);
+  });
+
+  it('POSITIVE CONTROL: archive WITHOUT ttl still moves rows by created_at age', async () => {
+    // Every archive-declaring object shipped today is this shape (`sys_audit_log`,
+    // `sys_metadata_audit`: retention + archive, no ttl). It is fed the SAME
+    // rows as the discriminating control, so the two cases answer differently
+    // on the same input: a fix leaking into this path would copy
+    // `young-expired` (which has an expired stamp) and skip the two stampless
+    // rows, and this expectation would fail.
+    const cold = coldStore();
+    const hot = filteringHotStore(disagreeingRows());
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: hot.driver,
+      datasources: { archive: cold.driver },
+    });
+
+    const report = await service(engine).sweep();
+
+    expect(hot.wheres).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+    expect(cold.upserts.map((r) => r.id)).toEqual(['old-unexpired', 'null-stamp', 'absent-stamp']);
+    expect(hot.bulkDeleted).toEqual([['old-unexpired', 'null-stamp', 'absent-stamp']]);
+    expect(hot.remaining()).toEqual(['young-expired']);
+
+    const entry = report.swept.find((e) => e.policy === 'archive');
+    expect(entry?.archived).toBe(3);
+    expect(entry?.cutoff).toBe(isoCutoff('90d'));
+    // The cold-side `keep` prune is a bound on the ARCHIVE, not on which hot
+    // rows are due: it stays on `created_at` under either policy.
+    expect(cold.coldDeletes).toEqual([{ where: { created_at: { $lt: isoCutoff('7y') } } }]);
+  });
 });
 
 describe('LifecycleService.sweep — space reclaim', () => {
