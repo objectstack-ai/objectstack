@@ -637,27 +637,159 @@ const LIVE_READ_FLAG = '--verify-required-set';
  */
 function liveWorkflowText(doc) {
   const parts = [];
-  const visit = (node) => {
-    if (typeof node === 'string') {
-      parts.push(node);
-      return;
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) visit(item);
-      return;
-    }
-    if (!node || typeof node !== 'object') return;
-    for (const [key, value] of Object.entries(node)) {
-      // Two different keys are spelled `run`. A step's is a COMMAND string and
-      // goes through the shell lexer; `defaults.run` is a mapping (`shell:`,
-      // `working-directory:`) and is ordinary structure. The typeof test is
-      // what tells them apart.
-      if (key === 'run' && typeof value === 'string') parts.push(...shellCommands(value));
-      else visit(value);
-    }
-  };
-  visit(doc);
+  visitLive(doc, { onScalar: (scalar) => parts.push(scalar), onCommand: (command) => parts.push(command) });
   return parts.join('\n');
+}
+
+/**
+ * Walk a workflow document the way a RUNNER reads it, once.
+ *
+ * Two questions in this file need this same walk and need DIFFERENT answers out
+ * of it (see `invokesLiveRead` for why the two must not be merged), so the
+ * traversal is shared and the reading is not:
+ *
+ *   - `onScalar` receives every string a runner would act on — an `env:` value,
+ *     a `with:` input, a matrix entry, a step `name:`;
+ *   - `onCommand` receives every shell COMMAND inside a step's `run:`, lexed by
+ *     `shellCommands()` so comments and separators are already gone.
+ *
+ * Sharing the walk is the point: a `run:` key that one reading understood and
+ * the other did not is precisely the drift that gave this file two `/^\s*#/`
+ * filters answering in opposite directions in the first place.
+ *
+ * @param {unknown} node a parsed workflow document, or any node of one
+ * @param {{ onScalar?: (scalar: string) => void, onCommand?: (command: string) => void }} visitors
+ */
+function visitLive(node, { onScalar = () => {}, onCommand = () => {} } = {}) {
+  if (typeof node === 'string') {
+    onScalar(node);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) visitLive(item, { onScalar, onCommand });
+    return;
+  }
+  if (!node || typeof node !== 'object') return;
+  for (const [key, value] of Object.entries(node)) {
+    // Two different keys are spelled `run`. A step's is a COMMAND string and
+    // goes through the shell lexer; `defaults.run` is a mapping (`shell:`,
+    // `working-directory:`) and is ordinary structure. The typeof test is
+    // what tells them apart.
+    if (key === 'run' && typeof value === 'string') for (const command of shellCommands(value)) onCommand(command);
+    else visitLive(value, { onScalar, onCommand });
+  }
+}
+
+/**
+ * Every shell command the steps under `node` would actually EXECUTE.
+ *
+ * The `onCommand` half of the walk on its own — scalars deliberately dropped.
+ * A step `name:` that spells an invocation is a LABEL, and the whole point of
+ * the narrow readings below is that a label is not a command.
+ *
+ * @param {unknown} node a parsed workflow document, a job, or a step
+ * @returns {string[]} the commands, in order, comments already removed
+ */
+function runCommands(node) {
+  const commands = [];
+  visitLive(node, { onCommand: (command) => commands.push(command) });
+  return commands;
+}
+
+/**
+ * One shell command, split into words, each marked as QUOTED or not.
+ *
+ * ⚠️ Not a third comment stripper — it handles no `#` at all. It runs on
+ * `shellCommands()` OUTPUT, where comments are already gone, and recovers the
+ * one thing that function does not expose: where the words are, and which of
+ * them came out of a quoted region. Shell word-splitting does not happen inside
+ * quotes, so `echo "pnpm check:required-contexts is below"` is TWO words — the
+ * program `echo`, and one quoted blob — and no amount of splitting on
+ * whitespace will make the blob look like a program being run.
+ *
+ * That distinction is the whole narrow recognizer. `invokesScript()` in
+ * check-shard-attestation splits on `/\s+/` and strips the quotes off each
+ * piece, which is right for the question IT asks and cannot answer this one:
+ * it would read the `echo` above as running `pnpm`.
+ *
+ * @param {string} command one command from `shellCommands()`
+ * @returns {{ word: string, quoted: boolean }[]}
+ */
+function commandWords(command) {
+  const words = [];
+  let word = '';
+  let quoted = false;
+  let started = false;
+  let quote = '';
+  const flush = () => {
+    if (started) words.push({ word, quoted });
+    word = '';
+    quoted = false;
+    started = false;
+  };
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      // Inside double quotes a backslash escapes the next character; inside
+      // single quotes it is literal. Either way the result stays in this word.
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        word += command[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        quote = '';
+        continue;
+      }
+      word += ch;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < command.length) {
+      word += command[i + 1];
+      i += 1;
+      started = true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      quoted = true;
+      started = true;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      flush();
+      continue;
+    }
+    word += ch;
+    started = true;
+  }
+  flush();
+  return words;
+}
+
+/**
+ * Does this command RUN `program`, with `arg` among the arguments it passes?
+ *
+ * Adjacency, as check-shard-attestation's `invokesScript()` reads it (#6589):
+ * the argument must belong to a command that runs the program, not merely
+ * appear near it. Plus one condition that function does not impose — the
+ * PROGRAM word must be UNQUOTED. A quoted word is a string being passed to
+ * something else, and the something else is usually `echo`.
+ *
+ * Arguments may be quoted freely: `--verify-required-set` and
+ * `"--verify-required-set"` are the same argument to the same invocation, and
+ * refusing the quoted spelling would narrow a PRESENCE assertion into a false
+ * red — the failure mode that gets a pin loosened rather than fixed.
+ *
+ * @param {string} command one command from `shellCommands()`
+ * @param {string} program an executable or script basename, e.g. `pnpm`
+ * @param {string} arg the argument that makes it THE invocation
+ */
+function invokes(command, program, arg) {
+  const words = commandWords(command);
+  const at = words.findIndex(({ word, quoted }) => !quoted && (word === program || word.endsWith(`/${program}`)));
+  if (at === -1) return false;
+  return words.slice(at + 1).some(({ word }) => word === arg || word.startsWith(`${arg}=`));
 }
 
 /**
@@ -672,6 +804,82 @@ function liveWorkflowText(doc) {
  */
 function wiresLiveRead(doc) {
   return liveWorkflowText(doc).includes(LIVE_READ_FLAG);
+}
+
+/**
+ * The script this file is, as its own basename — the thing an invocation of the
+ * live read has to actually name.
+ */
+const LIVE_READ_SCRIPT = 'check-required-contexts.mjs';
+
+/**
+ * The package script that carries the pin into `Lint & Repo Gates`.
+ */
+const PIN_SCRIPT = 'check:required-contexts';
+
+/**
+ * Does this workflow actually INVOKE the live required-set read?
+ *
+ * ## ⭐ Why this is not `wiresLiveRead`, and must not become it
+ *
+ * These two ask about the same flag and are deliberately DIFFERENT WIDTHS,
+ * because they are consumed in opposite directions and a recognizer's error
+ * direction is only safe with respect to one of them:
+ *
+ * | question | recognizer | a mention in live prose costs |
+ * | --- | --- | --- |
+ * | may this workflow wire the read? (ABSENCE) | `wiresLiveRead`, WIDE | a false RED — loud, names a file, fixed in a minute |
+ * | does the patrol still run it? (PRESENCE) | `invokesLiveRead`, NARROW | a false GREEN — the patrol reads nothing and this gate says it does |
+ *
+ * So width is not a quality one of them has more of. For the absence half,
+ * reading an `echo` as wiring is the SAFE mistake, which is why
+ * `wiresLiveRead` keeps whole scalars (#9642's `env:`/`with:`/matrix routes)
+ * and why widening it further would still be defensible. For the presence
+ * half it is the ONLY mistake that matters: anything that widens what counts
+ * as "present" makes it easier for prose to satisfy the assertion, and the
+ * symptom is a green line over a patrol that stopped reading.
+ *
+ * ⛔ Do not tidy these onto one recognizer. One recognizer serving both
+ * directions is what this file already had — a `/^\s*#/` line filter, written
+ * twice, feeding an absence assertion and a presence assertion — and it was
+ * wrong in both directions at once for exactly this reason. Merging them again
+ * needs an argument that the merged width is correct for BOTH, not that it is
+ * tidier. The shared TRAVERSAL (`visitLive`) is the part that should be shared;
+ * the reading is the part that must not be.
+ *
+ * @param {unknown} node a parsed workflow document
+ */
+function invokesLiveRead(node) {
+  return runCommands(node).some((command) => invokes(command, LIVE_READ_SCRIPT, LIVE_READ_FLAG));
+}
+
+/**
+ * The steps of one job that INVOKE the required-context pin.
+ *
+ * Structure, not text shapes. What this replaced sliced lint.yml between
+ * `'\n  lint:'` and `'\n  typecheck:'` and matched `/run: pnpm
+ * check:required-contexts\b/` over the slice, which was wrong three ways at
+ * once and all three were false GREENS on the wiring of a required context:
+ *
+ *   - it kept trailing comments (the `/^\s*#/` filter drops a line only when
+ *     its FIRST non-space character is `#`), so `- uses: actions/checkout@v7  #
+ *     run: pnpm check:required-contexts is below` satisfied it;
+ *   - it matched any live text, so a step `name:` naming the invocation
+ *     satisfied it too — prose that survives even a correct comment stripper;
+ *   - `'\n  typecheck:'` is not the job after `lint:`. Measured on the
+ *     checked-in file: the slice ran from `lint` through `typecheck-consumers`,
+ *     FIVE jobs, so the pin could migrate out of the required job entirely and
+ *     this assertion would not notice.
+ *
+ * Reading `jobs.<id>.steps` closes all three, because none of them is a fact
+ * about the job at all.
+ *
+ * @param {unknown} job a parsed job
+ * @returns {unknown[]} the steps that run the pin
+ */
+function pinSteps(job) {
+  const steps = job && typeof job === 'object' && Array.isArray(job.steps) ? job.steps : [];
+  return steps.filter((step) => runCommands(step).some((command) => invokes(command, 'pnpm', PIN_SCRIPT)));
 }
 
 /**
@@ -2277,9 +2485,27 @@ async function selfTest() {
       unreadable.length === 0,
       `wiring: every .github/workflows document must PARSE before this sweep can classify it — ${JSON.stringify(unreadable)} did not (#4690)`,
     );
+    // ⭐ This was ONE equality — `callers.join(',') === PATROL_WORKFLOW` — and
+    // one equality is the wrong shape, because it is two assertions pointing in
+    // opposite directions sharing a single WIDE recognizer:
+    //
+    //   - "no OTHER workflow wires the read" is an ABSENCE. Wide is correct:
+    //     over-reporting a caller costs a false red that names the file.
+    //   - "…and the patrol is one of them" is a PRESENCE. Wide is WRONG, and
+    //     measured on the checked-in patrol: of its 7 mentions of the flag, 4
+    //     are whole-line YAML comments and 3 survive as live text — the genuine
+    //     `node scripts/check-required-contexts.mjs --verify-required-set`, and
+    //     TWO `echo` steps that only report on its exit code. Delete the genuine
+    //     invocation and either `echo` keeps the patrol classified as the
+    //     standing caller, so this half stays green over a patrol that reads
+    //     nothing (#4690).
+    //
+    // So the halves are separated and each gets the recognizer its direction
+    // needs. See `invokesLiveRead` for why they must not be merged back.
+    const strangers = callers.filter((f) => f !== PATROL_WORKFLOW);
     assert(
-      callers.join(',') === PATROL_WORKFLOW,
-      `wiring: exactly one workflow runs the live read and it is ${PATROL_WORKFLOW} — found [${callers.join(', ')}] (#9678)`,
+      strangers.length === 0,
+      `wiring: no workflow other than ${PATROL_WORKFLOW} may wire the live read — found [${strangers.join(', ')}] (#9642/#9678)`,
     );
 
     // Read defensively and turn "missing" into a NAMED assertion rather than an
@@ -2305,6 +2531,18 @@ async function selfTest() {
       }
     }
     const patrolReadable = patrolDoc !== undefined;
+    // ⭐ The PRESENCE half of the sweep above, on the narrow recognizer its
+    // direction needs: the patrol must INVOKE the live read, not merely name
+    // the flag somewhere a runner would act on. `wiresLiveRead` cannot answer
+    // this — its width is deliberate and correct for the absence half, and it
+    // reads the patrol's own `echo "::error::… --verify-required-set …"` as a
+    // caller. This is the assertion that #9678 actually wanted: the mode's
+    // whole first life was a sweep whose only scheduled caller was its own
+    // offline self-test, and an `echo` about the flag is that same nothing.
+    assert(
+      patrolReadable && invokesLiveRead(patrolDoc),
+      `wiring: ${PATROL_WORKFLOW} must INVOKE the live read (\`${LIVE_READ_SCRIPT} ${LIVE_READ_FLAG}\`), not merely mention the flag — a step that only reports on it leaves the mode wired nowhere (#9678/#4690)`,
+    );
     // The mechanical proxy for "never required". Assertion 6 of this pin is
     // that every required context's workflow carries `merge_group:` — without
     // one, the queue build never produces the context and the whole queue
@@ -2491,21 +2729,186 @@ async function selfTest() {
       ),
       'recognizer: `defaults.run` is structure, not a command — its scalars are still read',
     );
+
+    // ── …and the NARROW recognizer beside it, in both directions ─────────────
+    //
+    // ⭐ `invokesLiveRead` answers the PRESENCE half of the caller sweep, and
+    // the two recognizers are pinned TOGETHER here because the point is that
+    // they deliberately disagree. Reading these cases as "one of them is wrong"
+    // is the mistake this block exists to prevent; see `invokesLiveRead`.
+    const invoked = (source) => invokesLiveRead(parse(source));
+
+    // (j′) the measured defect: the patrol's own `echo` about the flag. Spelled
+    // WITH the `.mjs` basename, so it would also satisfy a plain adjacency test
+    // — it is the quoting that makes it prose, not the spelling.
+    const echoOnly = stepFixture(`echo "${LIVE_READ_SCRIPT} ${LIVE_READ_FLAG} exited $code"`);
+    assert(
+      !invoked(echoOnly),
+      `recognizer: a step that only ECHOES ${LIVE_READ_FLAG} does not INVOKE it — the presence half must not go green on a patrol that reads nothing (#10877)`,
+    );
+    assert(
+      wired(echoOnly),
+      'recognizer: …and the WIDE reading still calls that same echo wiring — the absence half wants it that way, which is exactly why one recognizer cannot serve both (#10877)',
+    );
+    // (k′) the genuine article, spelled the way the patrol spells it: the flag
+    // ahead of a backslash continuation, redirected.
+    assert(
+      invoked(stepFixture(`node scripts/${LIVE_READ_SCRIPT} ${LIVE_READ_FLAG} \\`, '  > "$RUNNER_TEMP/required-set.md"')),
+      'recognizer: the patrol’s own spelling IS an invocation',
+    );
+    // (l′) a QUOTED argument to a genuine invocation is still that invocation.
+    // Refusing it would narrow a presence assertion into a false red.
+    assert(
+      invoked(stepFixture(`node scripts/${LIVE_READ_SCRIPT} "${LIVE_READ_FLAG}"`)),
+      'recognizer: quoting the ARGUMENT does not un-invoke the script — only the PROGRAM word has to be unquoted',
+    );
+    // (m′) ⭐ the disagreement stated as a fact. A flag reaching the runner
+    // through `env:` is wiring for the absence half (pinned as (h) above) and
+    // is NOT an invocation for the presence half — no command names the script
+    // with the flag. That asymmetry is the cost of the narrow half, and it is
+    // the LOUD direction: if the patrol is ever rewritten to pass the flag this
+    // way, this assertion reddens and names itself rather than going quiet.
+    const viaEnv = workflowFixture(
+      'name: fixture',
+      'on:',
+      '  push: {}',
+      'jobs:',
+      '  j:',
+      '    runs-on: ubuntu-latest',
+      '    env:',
+      `      FLAG: ${LIVE_READ_FLAG}`,
+      '    steps:',
+      '      - name: step',
+      `        run: node scripts/${LIVE_READ_SCRIPT} $FLAG`,
+    );
+    assert(wired(viaEnv), 'recognizer: the env: route is WIRING for the absence half (restating (h) from the other side)');
+    assert(
+      !invoked(viaEnv),
+      'recognizer: …and is NOT an invocation for the presence half — the two widths disagree BY DESIGN, and this is the pin that says so (#10877)',
+    );
   }
 
   {
-    const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-    const lintJobStart = sources['lint.yml'].indexOf('\n  lint:');
-    const lintJobEnd = sources['lint.yml'].indexOf('\n  typecheck:');
-    const lintJob = uncommented(lintJobStart === -1 ? '' : sources['lint.yml'].slice(lintJobStart, lintJobEnd === -1 ? undefined : lintJobEnd));
+    // ── is the pin WIRED into the required job? ──────────────────────────────
+    //
+    // A PRESENCE assertion about a required context's own wiring, which makes
+    // its error direction a silent GREEN: whatever satisfies it wrongly leaves
+    // this gate reporting that the pin runs while it does not. `pinSteps` reads
+    // `jobs.lint.steps` and asks each step's `run:` whether it INVOKES the
+    // script; the three text shapes that used to satisfy this are catalogued
+    // there and pinned below in both directions.
+    const lintDoc = parse(sources['lint.yml']);
+    const lintJob = lintDoc?.jobs?.lint;
+    // #4690: "no readable `lint` job" must be a NAMED failure, not a zero that
+    // reads like a clean answer. Every assertion after this one degrades to
+    // vacuously-something on an empty step list.
     assert(
-      /run: pnpm check:required-contexts\b/.test(lintJob),
+      lintJob !== undefined && lintJob !== null && typeof lintJob === 'object',
+      'wiring: lint.yml must declare a readable `lint` job — this pin cannot say anything about a job it could not read (#4690)',
+    );
+    /** The seam the fixtures below pin: lint.yml SOURCE in, "is the pin wired" out. */
+    const pinWiredIn = (source) => pinSteps(parse(source)?.jobs?.lint).length > 0;
+    assert(
+      pinWiredIn(sources['lint.yml']),
       'wiring: lint.yml\'s `lint` job (the "Lint & Repo Gates" context) must run `pnpm check:required-contexts` — an unwired pin verifies nothing (#4690)',
     );
-    const step = lintJob.split(/\n(?=      - name: )/).find((s) => /run: pnpm check:required-contexts\b/.test(s)) ?? '';
+    // Unchanged in intent (#10877 left this one alone deliberately: it is an
+    // ABSENCE assertion and was never satisfiable by prose), but it consumed
+    // the text slice above, so it is re-homed onto the same structural read.
+    // `every` over the steps rather than the first match: two steps running the
+    // pin and only one of them conditional is still a way to arrange that a PR
+    // does not get pinned. Non-vacuous because the presence assertion above
+    // establishes there is at least one.
     assert(
-      !/^\s*if:/m.test(step),
+      pinSteps(lintJob).every((step) => !Object.prototype.hasOwnProperty.call(step, 'if')),
       'wiring: the required-context pin step must carry NO `if:` — whatever a condition reads is a way for a PR to arrange that this pin does not run on it',
+    );
+
+    // ── the wiring recognizer, in BOTH directions ────────────────────────────
+    //
+    // ⭐ Both limbs, always. A presence test tightened until nothing satisfies
+    // it is a WORSE defect than the prose it was tightened to exclude: it shows
+    // up as a permanently red self-test, and the thing a permanently red
+    // self-test gets is loosened. So every "prose" case below is paired with the
+    // same wiring made REAL and asserted as wiring, and the checked-in lint.yml
+    // is asserted above as the sixth live limb.
+    const lintFixture = (...jobLines) => ['name: Lint', 'on:', '  push: {}', 'jobs:', ...jobLines].join('\n');
+    const lintJobFixture = (...stepLines) => lintFixture('  lint:', '    runs-on: ubuntu-latest', '    steps:', ...stepLines);
+
+    // (j) the reported defect: a TRAILING YAML comment supplying the wiring
+    // text. The `/^\s*#/` filter this replaced drops a line only when its FIRST
+    // non-space character is `#`, so this line survived whole and satisfied the
+    // presence regex — a green line over a job that runs no pin at all.
+    assert(
+      !pinWiredIn(lintJobFixture(`      - name: checkout  # run: pnpm ${PIN_SCRIPT} is below`, '        uses: actions/checkout@v7')),
+      `wiring: a TRAILING YAML comment naming \`run: pnpm ${PIN_SCRIPT}\` is prose, not wiring (#10877)`,
+    );
+    // (k) prose that survives even a CORRECT comment stripper: the invocation
+    // spelled in a step `name:`. A label is not a command, and this is why the
+    // recognizer reads `run:` blocks rather than the job's live text.
+    assert(
+      !pinWiredIn(lintJobFixture(`      - name: "run: pnpm ${PIN_SCRIPT}"`, '        run: echo hi')),
+      `wiring: the pin spelled in a step \`name:\` is a LABEL, not an invocation (#10877)`,
+    );
+    // (l) the same thing one grammar down: a quoted string being handed to
+    // `echo`. Splitting the command on whitespace and stripping quotes off each
+    // piece — which is what the sibling's `invokesScript()` does — would read
+    // this as running `pnpm`, so `commandWords` tracks quoting instead.
+    assert(
+      !pinWiredIn(
+        lintJobFixture('      - name: talk about it', '        run: |', `          echo "run: pnpm ${PIN_SCRIPT} is wired below"`),
+      ),
+      `wiring: an \`echo\` QUOTING the invocation is prose — the quoted blob is one argument, not a program being run (#10877)`,
+    );
+    // (p) a TRAILING SHELL comment inside a `run:` block scalar. `#` opens a
+    // shell comment at a word boundary, which no per-line YAML test can see.
+    assert(
+      !pinWiredIn(
+        lintJobFixture('      - name: gates', '        run: |', `          echo x  # run: pnpm ${PIN_SCRIPT} is elsewhere`),
+      ),
+      `wiring: a TRAILING SHELL comment inside a run: block is prose (#10877)`,
+    );
+    // (m) ⭐ genuinely wired — into the WRONG JOB. The text slice this replaced
+    // ran from `'\n  lint:'` to `'\n  typecheck:'`, and `typecheck-debt:` does
+    // not match `typecheck:`, so on the checked-in file the slice covered FIVE
+    // jobs. The pin could migrate out of the required job and this assertion
+    // would not notice — a false green about which job publishes the context.
+    assert(
+      !pinWiredIn(
+        lintFixture(
+          '  lint:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - name: something else',
+          '        run: pnpm lint',
+          '  typecheck-debt:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - name: Required-context name pin',
+          `        run: pnpm ${PIN_SCRIPT}`,
+          '  typecheck:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - name: tsc',
+          '        run: pnpm typecheck',
+        ),
+      ),
+      `wiring: the pin running in a job that is NOT \`lint\` does not wire \`Lint & Repo Gates\` (#10877)`,
+    );
+    // (n) the genuine article, spelled the way lint.yml spells it.
+    assert(
+      pinWiredIn(lintJobFixture('      - name: Required-context name pin', `        run: pnpm ${PIN_SCRIPT}`)),
+      `wiring: the real spelling \`run: pnpm ${PIN_SCRIPT}\` IS wiring`,
+    );
+    // (o) ⭐ the live limb the OLD matcher got wrong in the loud direction: a
+    // block scalar. `/run: pnpm check:required-contexts\b/` needs that literal
+    // run of characters, which a `run: |` block never contains — so genuinely
+    // wiring the pin as one of several commands would have reddened this gate.
+    // A presence pin that rejects a legitimate spelling is how a pin gets
+    // loosened, so it is pinned as wiring rather than left to the docblock.
+    assert(
+      pinWiredIn(lintJobFixture('      - name: gates', '        run: |', '          pnpm check:nul-bytes', `          pnpm ${PIN_SCRIPT}`)),
+      `wiring: the pin as one command of a \`run: |\` block IS wiring — the matcher this replaced could not see it`,
     );
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const wiring = pkg.scripts?.['check:required-contexts'] ?? '';
