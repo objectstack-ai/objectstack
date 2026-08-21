@@ -127,6 +127,107 @@ import { isEntrypoint } from './invoked-as.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
+const EXAMPLES_ROOT = 'examples';
+const PACKAGES_ROOT = 'packages';
+
+/**
+ * The two trees this gate walks, and WHICH PART of each is its population.
+ *
+ * The asymmetry is the whole content of this table, and it is why the roots are
+ * written as records rather than as a flat list of directory names:
+ *
+ *   `subtree`  -- read WHOLESALE. Every file under an example app is something
+ *                 a coupling can target, and `couplingTarget()` resolves to
+ *                 arbitrary paths beneath it, so an edit anywhere in the tree
+ *                 can move this gate's verdict. 239 tracked files, effectively
+ *                 all of them in the population.
+ *
+ *   `filtered` -- walked, then narrowed twice: to test files
+ *                 (`TEST_FILE_RE` / `TEST_DIR_RE`), and then to the handful of
+ *                 those that actually live-import an example app. Measured on
+ *                 this tree: 76 coupled files across 3 packages
+ *                 (`@objectstack/dogfood` 72, `@objectstack/cli` 2,
+ *                 `@objectstack/lint` 2) out of 4861 tracked files under
+ *                 `packages/`, of which 2507 are test files.
+ *
+ * `population` is not decoration: `--self-test` reads it to decide which roots
+ * MUST appear in ROOT_DIR_WATCH_HINTS below and which must NOT. Both directions
+ * are derived from this table rather than re-spelled, so renaming a root or
+ * re-scoping what it contributes cannot leave the declaration describing a
+ * population the gate stopped walking.
+ */
+const SCAN_ROOTS = [
+  { dir: EXAMPLES_ROOT, population: 'subtree' },
+  { dir: PACKAGES_ROOT, population: 'filtered' },
+];
+
+/**
+ * The half of SCAN_ROOTS that `scripts/pm/dispatch-gates.mjs` cannot see,
+ * written in the syntax that derivation CAN read.
+ *
+ * ── The defect this repairs ─────────────────────────────────────────────────
+ *
+ * The dispatch derivation scans a gate's module body for path-ish string
+ * literals. The only literal describing this gate's example-app population was
+ * the bare single-segment word `examples` (from `'examples/'`, whose trailing
+ * slash the extractor trims), and `hintCovers` refuses a separator-less literal
+ * as too generic. So this gate scored, for EVERY card in the tree:
+ *
+ *   pnpm check:examples-live-imports  [lint.yml]  dead: 'examples' -- the tree
+ *   HAS it; the covering rule refuses the literal as too generic (no path
+ *   separator)
+ *
+ * A gate in that state is named by no dispatch brief -- including a brief for
+ * the one edit most likely to break it. That is the exact cost shape #8754
+ * records: an examples-only diff runs neither of CI's scoping layers, and the
+ * shared merge queue is the first signal.
+ *
+ * ── Why the subtree spelling, and not a wider extractor ─────────────────────
+ *
+ * The refusal is measured, not incidental, and it is not this file's to relax:
+ * `hintCovers`' docblock prices teaching the extractor to accept bare top-level
+ * directory words at +139084 fabricated (gate, file) pairs, precisely because
+ * `packages`, `apps` and `examples` are path COMPONENTS in dozens of gates that
+ * never read those roots. A declared subtree is a different claim -- an author
+ * stating what this gate reads -- and the glob collapse reduces `examples/**`
+ * back to this root and to nothing else. One gate pays for its own precision
+ * instead of every gate paying for one gate's.
+ *
+ * ── Why `packages/**` is deliberately NOT declared ──────────────────────────
+ *
+ * The `packages/**` test-inventory side is unreachable too, and by a wider
+ * margin: `'packages'` carries no separator either, so `extractWatchHints`
+ * drops it BEFORE `hintCovers` is ever consulted -- it is not even a dead hint.
+ * It is also not reached by the test-file convention trigger
+ * (`CHANGE_KIND_GATES`), which this gate is not listed in. Measured: a
+ * dispatch derivation for `packages/cli/test/i18n-section-coverage.test.ts`
+ * -- the very file #8754 went red on -- names this gate nowhere.
+ *
+ * It stays undeclared anyway, because the instrument cannot express this side's
+ * population. A root hint covers a whole subtree, so `packages/**` would name
+ * this gate for all 4861 tracked files under `packages/` in order to reach the
+ * 76 that carry a coupling: 1.6% precision, pasted into every `packages/**`
+ * dispatch prompt. That is the "22 leads is the same as none" failure the
+ * derivation's header prices a fabricated lead against, bought at a worse ratio
+ * than the wholesale admission it already refuses. The two sides are also not
+ * symmetric in what they cost a dev: a `packages/**` test that couples to an
+ * example app spells `examples/` in its own diff and gets a failure text naming
+ * itself and what to write, while an example-app edit gets no signal at all.
+ *
+ * The refusal is pinned below rather than left in this paragraph, so a later
+ * author who adds `packages/**` meets an assertion instead of prose.
+ *
+ * ── Provenance, never a lookup key ──────────────────────────────────────────
+ *
+ * Nothing in this gate reads this array. The glob form appearing in SCAN_ROOTS
+ * would send `walk()` at a directory that does not exist -- and both walks here
+ * fail SOFT (`existsSync` guard in `exampleApps`/`testFiles`, a swallowed
+ * `readdirSync` throw in `walk`), so the mistake would quietly shrink the
+ * population to nothing while every gate stayed green. The self-test pins that
+ * apart too.
+ */
+const ROOT_DIR_WATCH_HINTS = ['examples/**'];
+
 /**
  * Every `packages/**` test coupling to `examples/**` that CI's scoping layers
  * CANNOT see -- the #8754 population.
@@ -252,7 +353,7 @@ function walk(dir, out = []) {
 
 /** Test files (and the helpers under a test dir that carry couplings into them). */
 function testFiles() {
-  const pkgRoot = join(REPO_ROOT, 'packages');
+  const pkgRoot = join(REPO_ROOT, PACKAGES_ROOT);
   if (!existsSync(pkgRoot)) return [];
   return walk(pkgRoot).filter((abs) => {
     if (!/\.[mc]?[jt]sx?$/.test(abs)) return false;
@@ -263,7 +364,7 @@ function testFiles() {
 
 /** The example apps, by directory and by published package name. */
 function exampleApps() {
-  const root = join(REPO_ROOT, 'examples');
+  const root = join(REPO_ROOT, EXAMPLES_ROOT);
   const apps = [];
   if (!existsSync(root)) return apps;
   for (const e of readdirSync(root, { withFileTypes: true })) {
@@ -740,6 +841,36 @@ function selfTest() {
     [
       '* does not span segments',
       !globCoversTarget('examples/app-showcase/src/*.ts', 'examples/app-showcase/src/ui/x.ts', false),
+    ],
+
+    // ── the dispatch-gates declaration (#9964's pattern, #10114's coupling) ──
+    //
+    // Enforcement cannot hold any of these: ROOT_DIR_WATCH_HINTS is read by
+    // another tool entirely, so a wrong or stale one runs green here forever and
+    // pays itself out as a dev dispatched on an examples card with this gate
+    // missing from the brief. Both directions are derived from SCAN_ROOTS rather
+    // than re-spelled, so widening or renaming a root cannot leave the
+    // declaration describing the old population.
+    [
+      'every WHOLESALE root is declared (a root with no path separator is refused as too generic, so it needs the subtree spelling)',
+      SCAN_ROOTS.filter((r) => r.population === 'subtree' && !r.dir.includes('/')).every((r) =>
+        ROOT_DIR_WATCH_HINTS.includes(`${r.dir}/**`),
+      ),
+    ],
+    [
+      'and it declares no root this gate does not walk (a declaration that can drift from the scan is worse than none -- it replaces a silent gate with a lying one)',
+      ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.some((r) => r.dir === h.replace(/\/\*+$/, ''))),
+    ],
+    [
+      'a FILTERED root stays undeclared (packages/** would name this gate for 4861 files to reach 76; the measurement is in the docblock)',
+      SCAN_ROOTS.filter((r) => r.population !== 'subtree').every(
+        (r) => !ROOT_DIR_WATCH_HINTS.some((h) => h.replace(/\/\*+$/, '') === r.dir),
+      ),
+    ],
+    ['examples is the root it declares (the #8754 population)', ROOT_DIR_WATCH_HINTS.includes('examples/**')],
+    [
+      'the declared form is NOT a SCAN_ROOTS dir (provenance, never a lookup key: the glob form would send the walk at a directory that does not exist)',
+      !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r.dir)),
     ],
   ];
 
