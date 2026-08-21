@@ -60,9 +60,11 @@
  * ## The one reconciliation, and why it is stated rather than discovered
  *
  * A `#!` line is a comment to node, and `scanSource` flags it as one. The
- * parser does not report it in `comments` at all. Measured on this tree: 131
- * files carry a shebang, so without this reconciliation the sweep opens with
- * 131 disagreements of 18-19 bytes each -- none of them defects. A verifier
+ * parser does not report it in `comments` at all. Measured on this tree: 132
+ * files carry a shebang (this one included), so without this reconciliation
+ * the sweep opens with one bogus disagreement per shebang file, 18-19 bytes
+ * each -- measured as 131 an hour before this script joined the corpus it
+ * walks, which is its own small lesson about a count in prose. A verifier
  * that cries wolf on its first run is a verifier someone turns off, so the
  * oracle adds the shebang line back explicitly, here, where a reader can see
  * the claim and check it.
