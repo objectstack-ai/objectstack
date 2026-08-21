@@ -27,7 +27,7 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { RealtimeEventHandler } from '@objectstack/spec/contracts';
-import { KnowledgeServicePlugin } from '../knowledge-service-plugin';
+import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
 
 interface RealtimeLog {
   subscribed: string[];
