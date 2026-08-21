@@ -1787,7 +1787,11 @@ async function selfTest() {
   t('...while every `##[error]` line is still returned, none dropped', extractLogAssertion(anchoredLog).errors.length, 3);
   t(
     '...and the assertion carries the log line number, so a reader can find it in the raw log',
-    extractLogAssertion(anchoredLog).assertions[0].logLine,
+    // `?.` deliberately: a regression that stops anchoring must be REPORTED by
+    // this harness, not crash it. Measured while ablating the anchor recogniser
+    // — the bare index threw a TypeError, node exited 1 before printing any
+    // verdict, and every pin after this line never ran. One break hid the rest.
+    extractLogAssertion(anchoredLog).assertions[0]?.logLine ?? null,
     2,
   );
 
