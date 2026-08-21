@@ -34,7 +34,6 @@ import type { Hono } from 'hono';
 const mockDispatcher = {
   getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', routes: {} }),
   handleAuth: vi.fn(),
-  handleGraphQL: vi.fn(),
   dispatch: vi.fn(),
 };
 
