@@ -55,6 +55,13 @@
 // it is checked in the same pass: a declaration whose package no longer has an
 // escaping test fails as stale.
 //
+// Staleness has a SECOND grain, one level below that (#10566). Both limbs above
+// are PACKAGE-scoped, so a package that keeps ONE escaping test can carry a
+// declared GLOB held by nothing indefinitely and nothing says so -- the glob
+// simply stops being checked against the code, which is the property a narrow
+// radius rests on. `globHolderVerdict()` asks the per-GLOB question, and why it
+// cannot be answered from the roster alone is written there.
+//
 // What the list buys over "just always run those packages" is the radius. A
 // declared glob of `packages/**/*.object.ts` keeps spec's 5-minute suite off
 // every PR that does not touch an object; `always-run` would put it on all of
@@ -167,6 +174,16 @@ const REPO_ROOT = resolve(HERE, '..');
  *
  * Every entry names the test that justifies it, so the next person can check
  * the radius against the code rather than trusting the glob.
+ *
+ * `heldBy` is that sentence made CHECKABLE for the globs the roster cannot see
+ * (#10566). Most globs are held mechanically: some path the tests name lands
+ * inside them, and `globHolderVerdict()` finds it. A read whose path this
+ * detector cannot NAME -- a loop variable, a `git ls-files` result, an argument
+ * it cannot fold -- holds a live radius while naming nothing, so those globs
+ * name the escaping test that reads them instead. The witness is checked rather
+ * than prose: the named test must still be one of this package's escaping
+ * tests, so a glob whose only holder stops reading outside the package fails BY
+ * NAME instead of sitting declared and unheld.
  */
 const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/spec': {
@@ -212,6 +229,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/api/error-catalog.mdx',
       'docs/audits/2026-07-unknown-key-strictness-ledger.md',
     ],
+    heldBy: {
+      // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
+      // expression and then descends with `readdirSync(dir)` on a LOOP
+      // VARIABLE, so the escape verdict resolves and the NAME does not -- the
+      // trade `pathExpression` documents. Measured: no path on this package's
+      // roster matches this glob, so these two tests are all that hold it.
+      'packages/**/*.object.ts': [
+        'packages/spec/src/data/api-methods-batch-conformance.test.ts',
+        'packages/spec/src/system/constants/platform-object-names.test.ts',
+      ],
+    },
   },
   '@objectstack/core': {
     // src/security/operation-private-keys.pin.test.ts walks `git ls-files` over
@@ -415,6 +443,13 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/system/translations/index.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
     ],
+    heldBy: {
+      // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`
+      // resolves, but every read off it is `readFileSync(join(commandsDir,
+      // file))` with `file` a variable: the roster gets the DIRECTORY, which a
+      // file-position read cannot put on it, and never one of the files.
+      'packages/cli/src/commands/**': ['packages/lint/src/authoring-rule-wiring.test.ts'],
+    },
   },
   '@objectstack/platform-objects': {
     // src/managed-api-method-affordance-sweep.test.ts (#7934) imports every
@@ -453,6 +488,15 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/check-cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',
     ],
+    heldBy: {
+      // The pair #10566 was measured on. That test's walk of `PACKAGES_DIR`
+      // descends on a loop variable, so no `*.object.ts` path reaches this
+      // package's roster and this glob has no mechanical holder. Since #10161
+      // gave plugin-auth a SECOND escaping test, losing the walk no longer
+      // empties the package either -- the entry stays, the glob goes unheld,
+      // and before this witness existed nothing reported it.
+      'packages/**/*.object.ts': ['packages/plugins/plugin-auth/src/managed-extension-fields.test.ts'],
+    },
   },
   '@objectstack/plugin-security': {
     // src/audience-anchor-set-claims.pin.test.ts pins against spec's
@@ -519,6 +563,13 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // downstream consumer can import, against spec's real source tree and the
     // `exports` map in its package.json.
     globs: ['packages/spec/src/**', 'packages/spec/package.json'],
+    heldBy: {
+      // `SPEC_SRC` resolves, but the files under it are reached as
+      // `existsSync(target)` where `target` was computed out of the `exports`
+      // map, so the roster holds `packages/spec/package.json` and nothing at
+      // all under `src`.
+      'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
+    },
   },
   'create-objectstack': {
     // src/template-consistency.test.ts reads doc frontmatter by repo-relative
@@ -584,6 +635,19 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/gen-sdui-manifest.sh',
       'scripts/publish-smoke.sh',
     ],
+    heldBy: {
+      // Read through `git grep -- content/docs` and `git ls-files`, so the
+      // paths are process OUTPUT rather than literals: the pathspec itself is
+      // the only quoted thing, and a directory in file position never reaches
+      // the roster.
+      'content/**': ['packages/create-objectstack/src/template-consistency.test.ts'],
+      // The glob whose own rationale above already states the shape this
+      // witness records: the fixture derives the stamper's import closure
+      // instead of naming it, so this path "appears in NO quoted string the
+      // flat literal collector can see" while a change to it really does break
+      // that test (measured there).
+      'scripts/invoked-as.mjs': ['packages/create-objectstack/src/template-version-stamps.test.ts'],
+    },
   },
 };
 
@@ -916,7 +980,12 @@ const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.u
  */
 function pathExpression(expr, hereDepth, known, fileSegs = null) {
   expr = expr.trim();
-  // The two seeds NAME the directory; `fileSegs` names the FILE inside it.
+  // The directory-naming seeds below NAME the directory; `fileSegs` names the
+  // FILE inside it. Named rather than counted: the recognised set has been
+  // widened twice (#8995, #9763), and these comments went on saying "the two
+  // seeds" long after it reached four. A count copied into prose goes stale
+  // silently -- RECOGNISED_PATH_SPELLINGS, printed verbatim in the failure
+  // text, cannot (#10565).
   const dirSegs = fileSegs ? fileSegs.slice(0, -1) : null;
   const at = (depth, segs) => ({ end: depth, min: depth, vendored: false, segs });
 
@@ -935,7 +1004,7 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
   if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*\)$/.test(expr)) {
     return at(hereDepth, dirSegs);
   }
-  // The two seeds above NAME the directory. `import.meta.url` and
+  // The directory-naming seeds above NAME the directory. `import.meta.url` and
   // `import.meta.filename` name the FILE, which sits one level below it, and an
   // author reaches that same directory by WALKING instead — most often
   // `resolve(fileURLToPath(import.meta.url), '..')`. Modelling the file at
@@ -951,10 +1020,10 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
   }
 
   // A `new URL(rel, import.meta.url)` resolves against the importing FILE, so
-  // its base is the file's directory — the same base as the two seeds above.
-  // This is the ASCENT-RELATIVE spelling of #9763: one string, but it starts at
-  // `..`, so the flat literal regex below never saw it while the walk here has
-  // always resolved it — the name was thrown away, not the path.
+  // its base is the file's directory — the same base as the directory-naming
+  // seeds above. This is the ASCENT-RELATIVE spelling of #9763: one string, but
+  // it starts at `..`, so the flat literal regex below never saw it while the
+  // walk here has always resolved it — the name was thrown away, not the path.
   const url = expr.match(NEW_URL_LITERAL);
   if (url) return walkLiteral(hereDepth, url[2], dirSegs);
 
@@ -1101,12 +1170,13 @@ function scanPathExpressions(src, hereDepth, fileSegs = null) {
   }
 
   // The RESOLVER half (#10452). A relative specifier resolves against the
-  // importing FILE's directory — the same base as the two seeds and as
-  // `new URL(rel, import.meta.url)` — so it is the same `walkLiteral` walk in
-  // the same two coordinates, and the escape verdict is the same shallowest
-  // point. What differs is only that the name it produces is a MODULE
-  // specifier, so it goes in its own bucket for `findEscapingPackages()` to map
-  // back onto a file (`resolveImportTarget`); everything else here is shared.
+  // importing FILE's directory — the same base as the directory-naming seeds
+  // and as `new URL(rel, import.meta.url)` — so it is the same `walkLiteral`
+  // walk in the same two coordinates, and the escape verdict is the same
+  // shallowest point. What differs is only that the name it produces is a
+  // MODULE specifier, so it goes in its own bucket for
+  // `findEscapingPackages()` to map back onto a file (`resolveImportTarget`);
+  // everything else here is shared.
   for (const spec of importSpecifiers(src)) {
     // ⚠️ The boundary. Anything not starting `.` is a bare specifier: an
     // installed dependency, which no declared glob can name.
@@ -1233,6 +1303,66 @@ export function findEscapingPackages() {
   return found;
 }
 
+/**
+ * Which of a package's declared globs no longer hold anything, and which of its
+ * `heldBy` witnesses key a glob the entry does not declare.
+ *
+ * The INVERSE of the roster-coverage limb in `verify()`, and the half that was
+ * missing until #10566. That limb asks whether every path the tests NAME sits
+ * inside a declared glob; this one asks whether every declared GLOB still holds
+ * one of those paths. Both staleness limbs beside it are package-scoped -- a
+ * package with an escaping test and no entry, an entry whose package has no
+ * escaping test any more -- so the question was never asked at the grain the
+ * radius is actually written at. It stayed invisible while most declaring
+ * packages had exactly one escaping test; `@objectstack/plugin-auth` has had two
+ * since #10161, which is what made an unheld glob reachable rather than
+ * theoretical.
+ *
+ * ⚠️ Why the roster cannot answer this on its own, and why an fs walk cannot
+ * either. The roster is a LOWER bound on what the tests read: an argument this
+ * scan cannot fold costs the NAME and keeps the depth (`pathExpression`), so a
+ * read whose path is a loop variable, a `git ls-files` result or a computed
+ * target holds a live radius while naming nothing. Measured on this tree: 6 of
+ * the 60 declared globs are held by exactly such reads -- `create-objectstack`'s
+ * `scripts/invoked-as.mjs` among them, a glob whose own rationale already says
+ * it "appears in NO quoted string the flat literal collector can see". A limb
+ * that failed every roster-invisible glob would fail all six on a healthy tree.
+ * Asking the filesystem instead answers a different question entirely: it would
+ * fail the globs declared for a path a test only NAMES in prose (`serve.ts`,
+ * `check-nul-bytes.mjs`, `realtime-protocol.mdx` today), which the flat literal
+ * collector holds precisely because it takes quoted paths without parsing.
+ *
+ * So a glob is held either MECHANICALLY, by a roster path, or by DECLARATION:
+ * `heldBy` names the escaping test that reads it, and that witness is checked --
+ * the named test must still be one of this package's escaping tests. Which is
+ * what makes the ablation this limb exists for fail: reseed
+ * `managed-extension-fields.test.ts` from `process.cwd()` (a root walk this
+ * detector deliberately does not resolve) and it stops being an escaping test at
+ * all, so plugin-auth keeps its entry through its second test while
+ * `packages/**\/*.object.ts` loses its only witness and is named here.
+ *
+ * A rostered DIRECTORY is asked with `coversDirectory` against this glob ALONE,
+ * the same predicate the coverage limb uses -- so two globs that only jointly
+ * cover one directory would both read as unheld. There is no such pair on this
+ * tree, and `heldBy` is the declared way out if one is ever written.
+ *
+ * What this still does not see, stated rather than discovered later: a witness
+ * that stays escaping through some OTHER read while dropping the one that held
+ * the glob. The witness is a weaker claim than a roster path, and it is the
+ * strongest one available for a read this detector cannot name.
+ */
+export function globHolderVerdict({ globs, heldBy = {} }, info) {
+  const rostered = (glob) =>
+    [...info.literals.keys()].some((lit) =>
+      info.dirEntries.has(lit) ? coversDirectory(lit, [glob]) : matchesAny(lit, [glob]),
+    );
+  const witnessed = (glob) => (heldBy[glob] ?? []).some((t) => info.tests.includes(t));
+  return {
+    unheld: globs.filter((g) => !rostered(g) && !witnessed(g)),
+    stray: Object.keys(heldBy).filter((g) => !globs.includes(g)),
+  };
+}
+
 // ── modes ────────────────────────────────────────────────────────────────────
 
 function verify() {
@@ -1277,6 +1407,44 @@ function verify() {
             .map(([lit, test]) => `      ${lit}${info.dirEntries.has(lit) ? '/   (listed in ' : '   (named in '}${test})`)
             .join('\n') +
           `\n    Widen the package's globs to cover them.`,
+      );
+    }
+  }
+
+  // The same question the other way round: a declared glob that holds nothing
+  // any more (#10566). See `globHolderVerdict()` for why a roster miss alone
+  // cannot decide it, and what `heldBy` is for.
+  for (const [name, entry] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
+    const info = escaping.get(name);
+    // A package with no escaping test at all is already reported whole by the
+    // limb above; listing each of its globs again would only bury that.
+    if (!info) continue;
+    const { unheld, stray } = globHolderVerdict(entry, info);
+    if (unheld.length) {
+      problems.push(
+        `${name} declares glob(s) nothing holds any more \u2014 no path its escaping tests\n` +
+          `    name lands inside them, and no \`heldBy\` witness reads outside the package\n` +
+          `    any more:\n` +
+          unheld
+            .map((g) => {
+              const gone = entry.heldBy?.[g] ?? [];
+              return `      ${g}${gone.length ? `   (witness no longer escaping: ${gone.join(', ')})` : ''}`;
+            })
+            .join('\n') +
+          `\n    Delete the glob (and its turbo.json input) if the read is gone. If the read\n` +
+          `    is real but its path is one this detector cannot NAME \u2014 a loop variable, a\n` +
+          `    \`git ls-files\` result, an argument it cannot fold \u2014 name the test that reads\n` +
+          `    it in the entry's \`heldBy\` instead. A glob held by nothing is a declaration\n` +
+          `    that has stopped being checked against the code, which is the whole reason a\n` +
+          `    radius is allowed to be narrow.`,
+      );
+    }
+    if (stray.length) {
+      problems.push(
+        `${name} has heldBy witness(es) keyed to glob(s) it does not declare:\n` +
+          stray.map((g) => `      ${g}`).join('\n') +
+          `\n    Fix the key or drop the witness \u2014 keyed to a glob that is not in \`globs\`, it\n` +
+          `    holds nothing and hides nothing.`,
       );
     }
   }
@@ -1846,6 +2014,68 @@ function selfTest() {
   ok('but it DOES cover that directory as a listing', coversDirectory('packages/lint/src', ['packages/lint/src/**']));
   ok('a single-file glob does not cover the directory it sits in', !coversDirectory('scripts', ['scripts/check-nul-bytes.mjs']));
   ok('a directory that does not exist is covered by nothing', !coversDirectory('scripts/no-such-dir-9763', ['**']));
+
+  // The per-GLOB holder limb (#10566), the inverse of the coverage cases above
+  // and driven on synthetic rosters. The witness half is pinned in BOTH
+  // directions on purpose: the whole value of `heldBy` is that it STOPS
+  // holding, and a case asserting only "a witness makes it green" would pass
+  // just as happily on a witness nothing checks.
+  const rosterOf = (literals, dirs = [], tests = []) => ({
+    literals: new Map(literals.map((l) => [l, 'packages/x/src/some.test.ts'])),
+    dirEntries: new Set(dirs),
+    tests,
+  });
+  ok(
+    'a glob a rostered path lands inside is held',
+    globHolderVerdict({ globs: ['packages/lint/src/**'] }, rosterOf(['packages/lint/src/a.ts'])).unheld.length === 0,
+  );
+  ok(
+    'a glob no rostered path lands inside is UNHELD (the gap #10566 measured)',
+    globHolderVerdict({ globs: ['packages/**/*.object.ts'] }, rosterOf(['packages/lint/src/a.ts'])).unheld[0] ===
+      'packages/**/*.object.ts',
+  );
+  ok(
+    'a rostered DIRECTORY holds the subtree glob covering it (matchesAny alone would not)',
+    globHolderVerdict({ globs: ['packages/lint/src/**'] }, rosterOf(['packages/lint/src'], ['packages/lint/src']))
+      .unheld.length === 0,
+  );
+  ok(
+    'a heldBy witness holds a roster-invisible glob while that test still escapes',
+    globHolderVerdict(
+      { globs: ['packages/**/*.object.ts'], heldBy: { 'packages/**/*.object.ts': ['packages/x/src/walk.test.ts'] } },
+      rosterOf([], [], ['packages/x/src/walk.test.ts']),
+    ).unheld.length === 0,
+  );
+  ok(
+    'and stops holding it the moment that test stops reading outside the package',
+    globHolderVerdict(
+      { globs: ['packages/**/*.object.ts'], heldBy: { 'packages/**/*.object.ts': ['packages/x/src/walk.test.ts'] } },
+      rosterOf([], [], ['packages/x/src/other.test.ts']),
+    ).unheld[0] === 'packages/**/*.object.ts',
+  );
+  ok(
+    'one live witness out of two is enough -- losing one holder is not losing the glob',
+    globHolderVerdict(
+      {
+        globs: ['packages/**/*.object.ts'],
+        heldBy: { 'packages/**/*.object.ts': ['packages/x/src/gone.test.ts', 'packages/x/src/walk.test.ts'] },
+      },
+      rosterOf([], [], ['packages/x/src/walk.test.ts']),
+    ).unheld.length === 0,
+  );
+  ok(
+    'a witness keyed to a glob the entry does not declare is reported stray',
+    globHolderVerdict(
+      {
+        globs: ['packages/lint/src/**'],
+        heldBy: { 'packages/lint/src/**/*.object.ts': ['packages/x/src/walk.test.ts'] },
+      },
+      rosterOf(['packages/lint/src/a.ts'], [], ['packages/x/src/walk.test.ts']),
+    ).stray[0] === 'packages/lint/src/**/*.object.ts',
+  );
+  const noWitness = globHolderVerdict({ globs: ['packages/**/*.object.ts'] }, rosterOf(['packages/lint/src/a.ts']));
+  ok('a glob declared with no witness at all is unheld', noWitness.unheld.length === 1);
+  ok('-- and not stray: stray is only about keys `globs` does not contain', noWitness.stray.length === 0);
 
   // `--union-into`'s output document. `packages.count` is turbo's field and the
   // append changes the size it describes, so the two are one operation -- these
