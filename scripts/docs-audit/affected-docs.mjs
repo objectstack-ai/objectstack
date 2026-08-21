@@ -543,6 +543,14 @@ if (args.includes('--bridge-coverage')) {
     // difference visible without anyone having to know the number by heart.
     console.log(`  ledger rows read ........... ${coverage.rowsParsed} of ${coverage.routesDeclared} declared`);
     console.log(`  client-bound ledger rows ... ${coverage.clientRows} of ${coverage.clientsDeclared} declared`);
+    // #10683, and normally 0. A lead spelled the way the recognizer reads, sitting where
+    // the mask says code is not — a comment, or a string payload. Printed on every run
+    // rather than only when non-zero, for the reason the fraction above is printed whole:
+    // a number nobody ever sees at rest is a number nobody notices moving.
+    console.log(`  prose-quoted leads (no row) . ${coverage.leadsOutsideCode}`);
+    for (const l of coverage.ledgers) {
+      for (const d of l.outsideCode) console.log(`      ${l.file}:${d.line}  ${d.text}`);
+    }
     console.log(`    reachable ................ ${coverage.reachable}`);
     console.log(`    UNREACHABLE .............. ${coverage.unreachable}`);
     for (const l of coverage.ledgers) {
@@ -1122,11 +1130,12 @@ function parseRegistrarSource(text) {
  * recognizer narrower than the repo must report "unrecognised" rather than render as a
  * verdict, and this is that report for this bridge.
  *
- * @param {Array<{file: string, rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number}>} ledgers
+ * @param {Array<{file: string, rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number, outsideCode: Array<{key: string, line: number, text: string}>}>} ledgers
  *   as `parseLedgerSource` returns them. ⛔ No `?? []` / `?? rows.length` defaults are
  *   applied to the declared counts below: an ABSENT report of what a ledger declared must
  *   never render as "it declared exactly what we read", which is the one reading this
- *   whole verdict exists to prevent. A caller that omits them throws here instead.
+ *   whole verdict exists to prevent. A caller that omits them throws here instead — and
+ *   `outsideCode` (#10683) is read on the same terms, for the same reason.
  * @param {Iterable<string>} tails  every route tail the registrar scan produced
  */
 function bridgeCoverageFrom(ledgers, tails) {
@@ -1141,7 +1150,8 @@ function bridgeCoverageFrom(ledgers, tails) {
   let rowsParsed = 0;
   let routesDeclaredAll = 0;
   let clientsDeclaredAll = 0;
-  for (const { file, rows, declined, routesDeclared, clientsDeclared } of ledgers) {
+  let leadsOutsideCode = 0;
+  for (const { file, rows, declined, routesDeclared, clientsDeclared, outsideCode } of ledgers) {
     const bound = rows.filter((r) => r.client);
     const hit = bound.filter((r) => selects(r.route));
     clientRows += bound.length;
@@ -1149,7 +1159,8 @@ function bridgeCoverageFrom(ledgers, tails) {
     rowsParsed += rows.length;
     routesDeclaredAll += routesDeclared;
     clientsDeclaredAll += clientsDeclared;
-    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined });
+    leadsOutsideCode += outsideCode.length;
+    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined, outsideCode });
   }
   // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN — `check-engine-double-contract`'s
   // invariant, applied to this population (#9747 quotes it as the germ worth
@@ -1193,7 +1204,11 @@ function bridgeCoverageFrom(ledgers, tails) {
           : ''));
     }
   }
-  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, ledgers: byLedger, brokenScan };
+  // ⛔ `leadsOutsideCode` is deliberately NOT pushed to `brokenScan` above. It is the one
+  // number here that describes the ledger's PROSE rather than its route surface, and a
+  // comment that quotes a retired path is not a broken scan — before #10683 it was a
+  // phantom ROW, which is what makes counting it worth doing and gating it wrong.
+  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, leadsOutsideCode, ledgers: byLedger, brokenScan };
 }
 
 /**
@@ -1225,8 +1240,8 @@ function scanRouteSurface() {
     let text;
     try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
     if (LEDGER_FILE_RE.test(rel)) {
-      const { rows, declined, routesDeclared, clientsDeclared } = parseLedgerSource(text);
-      ledgers.push({ file: rel, rows, declined, routesDeclared, clientsDeclared });
+      const { rows, declined, routesDeclared, clientsDeclared, outsideCode } = parseLedgerSource(text);
+      ledgers.push({ file: rel, rows, declined, routesDeclared, clientsDeclared, outsideCode });
       ledgerRows.push(...rows);
     }
     if (REGISTRAR_FILE_RE.test(rel)) {
@@ -1454,7 +1469,15 @@ function declinedIn(s) {
  * row never does. The denominator below is therefore every declared `route:` value, in any
  * spelling, and the partition `rows + declined === routesDeclared` is pinned in `--self-test`.
  *
- * @returns {{rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number}}
+ * THE RECOGNIZER NOW READS CODE, NOT PROSE (#10683). It used to scan the RAW text while
+ * every other scan here read `codeOnly`, so a `route:` quoted in a comment or inside a
+ * string payload became a ROW — silently, because the partial-read verdict is keyed on the
+ * gap between `rows` and `routesDeclared` and both terms read raw. The population move that
+ * closing it implies was priced on the tree that had no instance of the shape: delta 0 on
+ * all seven ledgers. `outsideCode` is what keeps the fix from trading a phantom row for a
+ * new silence — it NAMES every lead the mask dropped, and carries no verdict.
+ *
+ * @returns {{rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number, outsideCode: Array<{key: string, line: number, text: string}>}}
  */
 function parseLedgerSource(text) {
   const rows = [];
@@ -1464,21 +1487,67 @@ function parseLedgerSource(text) {
   // same file, is what #10636 was: declared, unread, and uncounted.
   const claimed = new Set();
   const lineAt = (i) => 1 + (text.slice(0, i).match(/\n/g) || []).length;
+  // THE LENS (#10683). Every other scan in this file reads the source through `codeOnly`;
+  // this one read RAW TEXT, and that asymmetry WAS the defect. A `route:` followed by a
+  // single-quoted literal inside a COMMENT or a string PAYLOAD did not merely mis-count —
+  // it became a ROW, and no verdict could fire, because the partial-read guard is keyed on
+  // the gap between `rows` and `routesDeclared` and BOTH terms read raw text, so both moved
+  // together. A prose line quoting a `client:` too minted a fully client-bound phantom,
+  // which then joined the UNREACHABLE population (no registrar tail can match a route
+  // nobody mounts). Measured before the mask, on a file declaring ONE row:
+  //
+  //     // A row we removed used to read route: 'GET /api/v1/gone' before #1234.
+  //     export const L = [
+  //       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+  //     ];
+  //   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined []
+  //
+  // Byte offsets survive the mask untouched (`blank` writes spaces and keeps newlines), so
+  // every index below indexes BOTH strings: leads are found in `code`, values are read back
+  // out of `text` at the same offsets. Moving the recognizer MOVES THE MEASURED POPULATION,
+  // which the header of `--bridge-coverage` attaches a standard to — so it was done on the
+  // one tree where the move is provably free: no ledger quotes a `route:` in prose today,
+  // and `rows`, `routesDeclared`, `clientsDeclared` and the 176 UNREACHABLE rows are
+  // byte-identical across the change (all seven ledgers, delta 0).
+  // ⛔ ONE of #10500's two discriminators, not both. `typeDeclRegions` is still NOT applied
+  // here, so a literal-union `route: 'GET /a' | 'GET /b'` TYPE member is still read as a row
+  // — the same silent shape, through the other discriminator. Measured on this tree: 0 such
+  // members across all seven ledgers (every one declares `route: string;`). Applying it is a
+  // SECOND population move and wants its own before/after, which is why it is #10793 and not
+  // a rider here.
+  const code = codeOnly(text);
+  // The value as WRITTEN. `codeOnly` blanks string CONTENTS, so a capture group taken off
+  // `code` is a run of spaces of the right length and never the route. Blanking preserves
+  // LENGTH, so cutting the raw text by the masked match's offsets is exact for any content
+  // — including one carrying an escaped quote, which re-running the regex over the raw text
+  // would cut short at the `\'` instead of at the literal's real end.
+  const valueAt = (end, len) => text.slice(end - 1 - len, end - 1);
   const routeRe = /route\s*:\s*'([^']+)'/g;
   let m;
-  while ((m = routeRe.exec(text)) !== null) {
-    const rest = text.slice(m.index, routeRe.lastIndex + 1200);
+  while ((m = routeRe.exec(code)) !== null) {
+    const rest = code.slice(m.index, routeRe.lastIndex + 1200);
     const nextRoute = rest.slice(1).search(/route\s*:\s*'/);
     const window = nextRoute === -1 ? rest : rest.slice(0, nextRoute + 1);
     const client = window.match(/client\s*:\s*'([^']+)'/);
-    rows.push({ route: m[1], client: client ? client[1] : null });
+    rows.push({
+      route: valueAt(routeRe.lastIndex, m[1].length),
+      client: client ? valueAt(m.index + client.index + client[0].length, client[1].length) : null,
+    });
     if (client) claimed.add(m.index + client.index);
     // A `client:` is BOUND inside THIS row's window — the same window the line above reads
     // — and never file-wide: a `client:` written in prose elsewhere would otherwise be
     // billed to a row that never declared it, and a false red costs the same trust a false
     // green does. That is a rule about ATTRIBUTION and it still holds; the denominator's
     // file-wide sweep at the bottom bills its findings to no row at all (#10636).
-    for (const d of declinedIn(window)) {
+    // …over the RAW bytes of that same window. `declinedIn`'s whole job is to NAME an
+    // unread spelling, and the masked window would name `client: ""` for every one of them.
+    // The BYTE RANGE is the code-derived window's, so this is the same span, read for its
+    // text. ⛔ That leaves `declinedIn` itself still reading prose — a `route: "GET /x"`
+    // written in a comment is still billed as a declined row. It is the SAME asymmetry one
+    // scan over, but it fails in the opposite direction (a declined entry is NAMED and
+    // carries a verdict, so it is a false RED, not a phantom row), which makes it a
+    // separate call with its own before/after rather than a rider here. Filed as #10794.
+    for (const d of declinedIn(text.slice(m.index, m.index + window.length))) {
       if (d.key !== 'client') continue;
       claimed.add(m.index + d.index);
       declined.push({ key: 'client', line: lineAt(m.index + d.index), text: d.text });
@@ -1516,10 +1585,41 @@ function parseLedgerSource(text) {
   // ⛔ The two sides must move together. A denominator widened past what its numerator can
   // ever count trades an undercount for a permanently red ratio — which is why the sweep
   // pushes to `declined` (a value NAMED as unread) instead of only bumping a number.
-  const routesDeclared = [...text.matchAll(/route\s*:\s*'/g)].length + declined.filter((d) => d.key === 'route').length;
+  //
+  // The first term reads `code`, not `text`, for the recognizer's reason (#10683): a
+  // denominator that counted prose-quoted leads while the numerator no longer read them
+  // would turn this migration into a permanently red ratio on the very files it fixed.
+  // Both terms move together, which is the invariant the block above insists on.
+  const routesDeclared = [...code.matchAll(/route\s*:\s*'/g)].length + declined.filter((d) => d.key === 'route').length;
   const clientsDeclared = rows.filter((r) => r.client).length + declined.filter((d) => d.key === 'client').length;
   declined.sort((a, b) => a.line - b.line || a.key.localeCompare(b.key));
-  return { rows, declined, routesDeclared, clientsDeclared };
+  // THE REPORTING HALF (#10683). The mask closes the phantom-row hole by making a
+  // prose-quoted lead produce NOTHING — and "produces nothing" is the silence every other
+  // report in this file exists to break. So the DIFFERENCE THE MASK MADE is itself named:
+  // a lead spelled exactly the way the recognizer reads, sitting where the mask says code
+  // is not. That is the card's own third direction, kept as the cheap half of the second.
+  //
+  // ⛔ A REPORT, NEVER A VERDICT, and it enters NEITHER ratio — it is not pushed to
+  // `declined`, so it moves no denominator and fires no `brokenScan`. A comment explaining
+  // a retired row by quoting its old path is legitimate prose, and reddening CI over it
+  // would be exactly the false red the #9747 family's ruling declines, the same reason the
+  // 45-of-221 reach ratio is reported rather than gated. It is here so the NEXT hole of
+  // this shape is loud instead of silent. Measured across all seven live ledgers: 0.
+  const codeLeads = new Set([...code.matchAll(/(?:route|client)\s*:\s*'/g)].map((d) => d.index));
+  const outsideCode = [...text.matchAll(/(route|client)\s*:\s*'/g)]
+    .filter((d) => !codeLeads.has(d.index))
+    .map((d) => {
+      // The LEAD and its VALUE are matched in two passes, not one. A single expression that
+      // swallowed the value would consume the rest of the line with it, and one prose line
+      // mentioning BOTH keys — the exact shape that mints a client-bound phantom — would
+      // report as one finding instead of two (measured: it did, until this was split).
+      // Trimmed back to the closing quote in JS rather than matched to it, for `declinedIn`'s
+      // reason: an unterminated literal must still NAME itself instead of dropping out.
+      const body = text.slice(d.index + d[0].length).split('\n')[0];
+      const end = body.indexOf("'");
+      return { key: d[1], line: lineAt(d.index), text: `${d[1]}: '${end === -1 ? body.slice(0, 60) : body.slice(0, end)}'` };
+    });
+  return { rows, declined, routesDeclared, clientsDeclared, outsideCode };
 }
 
 /**
@@ -2122,6 +2222,74 @@ function selfTest() {
     '];',
   ].join('\n'));
   check('parseLedgerSource', 'prose and string payloads are not unread rows', 'declined', 0, prose.declined.length);
+  check('parseLedgerSource', 'and a sentence that never quotes a value names nothing either', 'outsideCode',
+    0, prose.outsideCode.length);
+
+  // …AND THEY ARE NOT READ ROWS EITHER (#10683). The check above is one-sided: it pins what
+  // the DECLINED report says about prose and says nothing at all about `rows`. The
+  // recognizer read RAW text, so a comment one quote further along than the live near-miss
+  // in `runtime/src/route-ledger.ts` did not mis-count — it became a ROW, and the
+  // partial-read verdict could not see it, because that verdict is keyed on the gap between
+  // `rows` and `routesDeclared` and both terms read raw, so both moved together.
+  //
+  // ⚠️ PINNED IN BOTH DIRECTIONS, deliberately. A mask that reached the comment case by
+  // breaking the CODE case — reading the blanked span as the row's value, say — would pass
+  // a test that only asserted the phantom is gone, and would trade a phantom row for 259
+  // corrupted ones. So every case below asserts what the mask DROPPED and what it KEPT,
+  // value included.
+  const phantom = parseLedgerSource([
+    "// A row we removed used to read route: 'GET /api/v1/gone' before #1234.",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `route:` quoted in a COMMENT is not a row', 'row count', 1, phantom.rows.length);
+  check('parseLedgerSource', 'and the row in CODE still is — carrying its VALUE, not the mask\'s blanks', 'row',
+    'GET /api/v1/meta → meta.getTypes', `${phantom.rows[0]?.route} → ${phantom.rows[0]?.client}`);
+  check('parseLedgerSource', 'the denominator drops it too, so no phantom gap opens', 'declared',
+    '1 route / 1 client', `${phantom.routesDeclared} route / ${phantom.clientsDeclared} client`);
+  check('parseLedgerSource', 'and nothing is billed as declined for it', 'declined', 0, phantom.declined.length);
+  check('parseLedgerSource', 'the dropped lead is NAMED, with its line — dropped is not silent', 'outsideCode',
+    "1 route: 'GET /api/v1/gone'", phantom.outsideCode.map((d) => `${d.line} ${d.text}`).join('; '));
+
+  // The shape the card called the expensive one: prose that quotes a `client:` as well used
+  // to mint a FULLY CLIENT-BOUND phantom, which then joined the UNREACHABLE population — no
+  // registrar tail can ever match a route nobody mounts — and inflated it with no verdict.
+  const phantomClient = parseLedgerSource([
+    "// The retired row read route: 'GET /api/v1/gone' bound to client: 'meta.getGone'.",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a prose lead quoting a `client:` too mints no client-bound phantom', 'client rows',
+    1, phantomClient.rows.filter((r) => r.client).length);
+  check('parseLedgerSource', 'and the surviving row keeps its OWN binding, never the comment\'s', 'client',
+    'meta.getTypes', phantomClient.rows[0]?.client);
+  check('parseLedgerSource', 'both prose leads are named', 'outsideCode', 2, phantomClient.outsideCode.length);
+
+  // A string PAYLOAD is the other half of the mask, and the half an allowlist of comment
+  // shapes would miss: the bytes are code position by any line-based test.
+  const payload = parseLedgerSource([
+    'export const NOTE = "the retired row read route: \'GET /api/v1/gone\'";',
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `route:` inside a string PAYLOAD is not a row', 'row count', 1, payload.rows.length);
+  check('parseLedgerSource', 'and it is named, not silently dropped', 'outsideCode', 1, payload.outsideCode.length);
+
+  // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
+  // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
+  const phantomCov = bridgeCoverageFrom([{ file: 'h-route-ledger.ts', ...phantom }], ['/api/v1/meta']);
+  check('bridgeCoverageFrom', 'a prose-quoted lead carries NO broken-scan verdict', 'brokenScan',
+    0, phantomCov.brokenScan.length);
+  check('bridgeCoverageFrom', 'and the ratios it must not move are whole', 'read',
+    '1 of 1 route / 1 of 1 client',
+    `${phantomCov.rowsParsed} of ${phantomCov.routesDeclared} route / ${phantomCov.clientRows} of ${phantomCov.clientsDeclared} client`);
+  check('bridgeCoverageFrom', 'yet it is counted where a reader will see it', 'leadsOutsideCode',
+    1, phantomCov.leadsOutsideCode);
+  check('bridgeCoverageFrom', 'and an accurate ledger reports none', 'leadsOutsideCode', 0,
+    bridgeCoverageFrom([{ file: 'h-route-ledger.ts', ...prose }], ['/api/v1/meta']).leadsOutsideCode);
 
   // End to end over those three fixtures: the #9192 recall miss must come back.
   // `auditMetaItem` (changed) → `/:type/:name/audit` (registrar) → `meta.getAudit`
@@ -2653,6 +2821,7 @@ function selfTest() {
     declined: [],
     routesDeclared: rows.length,
     clientsDeclared: rows.filter((r) => r.client).length,
+    outsideCode: [],
   });
   const covLedgers = [
     covLedger('a-route-ledger.ts', [
