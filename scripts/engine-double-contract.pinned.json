@@ -1192,6 +1192,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-email/src/attachment-reclaim.test.ts",
       "verb": "delete",
       "pinned": 1

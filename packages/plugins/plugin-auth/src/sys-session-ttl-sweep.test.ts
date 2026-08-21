@@ -46,6 +46,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { LifecycleService, assertEngineDeleteDispatch } from '@objectstack/objectql';
 import type { LifecycleEngineLike, LifecycleObjectLike } from '@objectstack/objectql';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { runWithEndpointContext } from '@better-auth/core/context';
 import { SysSession } from '@objectstack/platform-objects/identity';
 import { reconcileSessionDelete } from './session-tombstone';
@@ -102,12 +103,17 @@ function sweepEngine(driver: SqlDriver, objects: LifecycleObjectLike[]): Lifecyc
     registry: { getAllObjects: () => objects },
     getDriverForObject: () => driver,
     async find(object: string, options: any) {
-      return driver.find(object, { where: options?.where, limit: options?.limit } as any);
+      // Typed rather than erased to `any`: the driver silently DROPS an
+      // unrecognised query key, so `tsc` is the only channel that can reject a
+      // misspelt one here (#4918).
+      const query: DriverQuery = { where: options?.where, limit: options?.limit };
+      return driver.find(object, query);
     },
     async delete(object: string, options: any) {
       const dispatch = assertEngineDeleteDispatch(options);
-      if (dispatch.kind === 'by-id') return (await driver.delete(object, dispatch.id as any)) ? 1 : 0;
-      return driver.deleteMany(object, { where: options?.where } as any);
+      if (dispatch.kind === 'by-id') return (await driver.delete(object, dispatch.id)) ? 1 : 0;
+      const query: DriverQuery = { where: options?.where };
+      return driver.deleteMany(object, query);
     },
   };
 }
@@ -173,8 +179,9 @@ async function seeded(override?: any) {
   return { driver, service, patch, tombstoneExpiry };
 }
 
+const ALL_ROWS: DriverQuery = {};
 const survivors = async (driver: SqlDriver) =>
-  (await driver.find('sys_session', {} as any)).map((r: any) => r.id).sort();
+  (await driver.find('sys_session', ALL_ROWS)).map((r: any) => r.id).sort();
 
 describe('[#7826] sys_session TTL sweep — real declaration, real Reaper, live SQL', () => {
   it('the hazard is real: the tombstone writer backdates expires_at below the revocation instant', async () => {
@@ -192,7 +199,8 @@ describe('[#7826] sys_session TTL sweep — real declaration, real Reaper, live 
     const report = await service.sweep();
 
     expect(await survivors(driver)).toContain('sess_tombstone');
-    const row: any = await driver.findOne('sys_session', { where: { id: 'sess_tombstone' } } as any);
+    const tombstoneById: DriverQuery = { where: { id: 'sess_tombstone' } };
+    const row: any = await driver.findOne('sys_session', tombstoneById);
     expect(row).toBeTruthy();
     expect(row.revoke_reason).toBeTruthy();      // the audit content is intact
     expect(report.errors).toEqual([]);
