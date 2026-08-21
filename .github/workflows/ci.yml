@@ -177,8 +177,9 @@ jobs:
     # and at 2 shards the slower shard still ran ~10 min, keeping merge-queue
     # builds at ~11 min end-to-end (#4859).
     # scripts/partition-test-shards.mjs splits the package list into six
-    # deterministic, test-file-count-balanced bins and each shard runs its
-    # slice through turbo. NOT the dogfood
+    # deterministic bins balanced on MEASURED per-package test duration
+    # (scripts/test-shard-timings.json, generated — see #10472 below) and each
+    # shard runs its slice through turbo. NOT the dogfood
     # job's vitest --shard passthrough, deliberately: that works for dogfood
     # because it is ONE package with ~60 files, but applied workspace-wide,
     # vitest 4 hard-fails every package with fewer test files than the shard
@@ -205,13 +206,37 @@ jobs:
     # shard, because every shard gets its own runner.
     #
     # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
-    # shard can finish faster than its single heaviest package, and the
-    # weight function is test-file count. `@objectstack/spec` carries 415 of
-    # the ~2360 test files in the workspace — at five shards or fewer the
-    # partitioner must co-schedule it with other packages, and at six it is
-    # the only package in its bin (bins 415/389/389/389/389/388). Six is
-    # therefore the smallest count that isolates the heaviest indivisible
-    # suite; past six, spec's shard cannot improve, only the others can.
+    # shard can finish faster than its single heaviest package.
+    # `@objectstack/spec` is that package — at five shards or fewer the
+    # partitioner must co-schedule it with others, and at six it very nearly
+    # fills a bin on its own. Six is therefore the smallest count that
+    # isolates the heaviest indivisible suite; past six, spec's shard cannot
+    # improve, only the others can.
+    #
+    # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS (bins
+    # 415/389/389/389/389/388, spec carrying 415 of ~2360 files). It is now
+    # made in measured seconds, because #10472 replaced the weight input: the
+    # file count was a proxy that ran ~2.8x off on @objectstack/cli, and the
+    # six perfectly count-balanced bins it produced ran 5.0/6.2/6.3/13.6/6.3/
+    # 9.0 min in run 32428961038. The conclusion (six) survived the re-
+    # measurement; only the units it is argued in changed. Weights now come
+    # from scripts/test-shard-timings.json — see partition-test-shards.mjs.
+    #
+    # AND WHY NOT MORE THAN SIX, measured on that dataset (#10472 asked for
+    # 6 -> 8 to be considered). The floor is the heaviest single package, and
+    # it does not move when shards are added, while the mean falls with every
+    # shard — so max/mean, which is what the acceptance bound is written in,
+    # gets WORSE past the point where the floor becomes the max:
+    #
+    #   6 shards -> max 650s  mean 649s  ratio 1.00x
+    #   7 shards -> max 571s  mean 556s  ratio 1.03x
+    #   8 shards -> max 571s  mean 487s  ratio 1.17x
+    #  10 shards -> max 571s  mean 389s  ratio 1.46x
+    #
+    # Eight shards would buy ~79s off the critical path for two more runners'
+    # fixed overhead and a worse balance ratio. The partitioner's self-test
+    # pins this arithmetic so the next person gets the answer from a failing
+    # assertion rather than from a CI run.
     #
     # ⚠ THE COST, stated because it is real: per-shard fixed overhead
     # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
@@ -490,7 +515,34 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4
+            pnpm turbo run test $FILTERS --concurrency=4 --summarize
+
+      # --summarize above costs nothing at runtime and writes
+      # `.turbo/runs/<id>.json`: one per-task record with the execution window
+      # turbo actually observed. That file IS the balancing input for the next
+      # shard split (scripts/test-shard-timings.json is generated from it), and
+      # publishing it here is what keeps the dataset re-measurable instead of
+      # hand-frozen — refreshing it becomes "download these six artifacts from
+      # any green run and re-run the generator", with no special measurement
+      # run and no CI time spent measuring.
+      #
+      # `if: always()` so a shard that went red still publishes what it timed;
+      # the generator refuses failed and cache-replayed tasks on its own side,
+      # so a partial upload contributes nothing rather than something wrong.
+      #
+      # ⛔ This step must stay ABOVE the attestation pair at the bottom of the
+      # job. check-shard-attestation.mjs requires `--emit` + upload-artifact to
+      # be the job's LAST TWO steps, because anything after them can fail the
+      # job while the credential already counts as a pass (#6082). Adding an
+      # upload here is fine; moving it below them is not.
+      - name: Publish this shard's turbo run summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-run-summary-${{ matrix.shard }}-of-6
+          path: .turbo/runs/
+          if-no-files-found: ignore
+          retention-days: 1
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
