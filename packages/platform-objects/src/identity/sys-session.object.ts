@@ -21,6 +21,37 @@ export const SysSession = ObjectSchema.create({
   icon: 'key',
   isSystem: true,
   managedBy: 'better-auth',
+
+  // [#7826] ADR-0057 lifecycle — ordinary expired sessions are swept by the
+  // Reaper; revoked TOMBSTONES are spared ENTIRELY.
+  //
+  // `onlyWhen` here is load-bearing, not defensive. The #7732 tombstone write
+  // (`plugin-auth`'s `reconcileSessionDelete`) BACKDATES `expires_at` to
+  // `now - 1000` and clears nothing, so a tombstone is a strict SUPERSET of an
+  // ordinary row that looks MAXIMALLY expired. A `ttl` keyed on `expires_at`
+  // without this filter would therefore reap the ADR-0069 D4 audit records
+  // FIRST AND HARDEST — the very rows it exists to preserve — and no existing
+  // test would go red. The canonical null predicate (`{$null: true}`, #10165)
+  // is what lets that exclusion be declared HERE, in the object file, instead
+  // of hiding in a plugin registration one package away.
+  //
+  // ⚠️ Deliberate consequence, stated rather than left implicit: tombstones are
+  // never swept, so `sys_session` still grows without bound on that arm. How
+  // long a revoked-session tombstone is retained is compliance / audit-trail
+  // policy and is the maintainer's to settle (#7826's hard fence) — this
+  // declaration picks no window for it.
+  //
+  // `1d` (a grace day AFTER `expires_at` passes) matches `sys_device_code`,
+  // the only other `managedBy: 'better-auth'` transient object.
+  lifecycle: {
+    class: 'transient',
+    ttl: {
+      field: 'expires_at',
+      expireAfter: '1d',
+      onlyWhen: { revoked_at: { $null: true } },
+    },
+  },
+
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
   // but may add overlay row-level config. Use `no-overlay` if you need to
   // forbid sys_metadata overlays entirely.
