@@ -523,7 +523,15 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
   path: z.string().describe(
     'Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), '
     + 'so an editor can jump to the offending key. May be empty when the '
-    + 'finding is about the item as a whole.',
+    + 'finding is about the item as a whole. For the collection-resident '
+    + 'write types (`object` / `permission` / `book`) the TOP-LEVEL collection '
+    + 'entry is keyed by NAME (`objects.acme_invoice.sharingModel`), never by '
+    + 'an array index — the gate evaluates against a private per-write '
+    + 'snapshot whose indexes no caller can resolve (#10064). Every other '
+    + 'write type is the sole member of its own collection, so its `[0]` is '
+    + 'trivially stable and stays positional (`flows[0]...`), as do nested '
+    + 'positions inside one named item (`objects.acme_invoice.indexes[1]`), '
+    + 'which index the author\'s own document.',
   ),
   where: z.string().describe(
     'Human-readable location — `flow "leave_approval" · node "approve"`. Prose '

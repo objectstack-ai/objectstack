@@ -228,6 +228,60 @@ describe('SolutionBlueprintSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('carries an explicit sharingModel (OWD) through the parse — user visibility intent must survive to apply', () => {
+    // cloud#1466: the ADR-0090 publish gate refuses a custom object without a
+    // sharingModel, and cloud stamps a deterministic default in every authoring
+    // path. Before this slot existed, z.object STRIPPED the key at this waist,
+    // so a propose-stage "this is personal data → private" was silently replaced
+    // by the default (public_read_write) — the most expensive silence on the
+    // privacy axis. Cloud's `objectBody` cast-read picks the key up from here.
+    const owds = ['private', 'public_read', 'public_read_write', 'controlled_by_parent'] as const;
+    for (const owd of owds) {
+      const parsed = SolutionBlueprintSchema.parse({
+        summary: 'hr',
+        objects: [{ name: 'performance_review', sharingModel: owd, fields: [{ name: 'score', type: 'number' }] }],
+      });
+      expect(parsed.objects[0].sharingModel).toBe(owd);
+    }
+  });
+
+  it('sharingModel is optional — omitting it defers to the platform default', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{ name: 'thing', fields: [{ name: 'name', type: 'text' }] }],
+    });
+    expect(parsed.objects[0].sharingModel).toBeUndefined();
+  });
+
+  it('does NOT carry an undeclared sibling key — the sharingModel accept is not pass-through', () => {
+    // The pin that keeps the accept above non-vacuous: this schema strips
+    // undeclared keys, so "sharingModel survives the parse" is evidence the key
+    // is DECLARED, only as long as an undeclared sibling provably does not
+    // survive. `externalSharingModel` is a real key on the full ObjectSchema
+    // (ADR-0090 D11) that the blueprint deliberately does not author.
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{
+        name: 'review',
+        sharingModel: 'private',
+        externalSharingModel: 'private',
+        fields: [{ name: 'name', type: 'text' }],
+      }],
+    });
+    expect(parsed.objects[0].sharingModel).toBe('private');
+    expect('externalSharingModel' in parsed.objects[0]).toBe(false);
+  });
+
+  it('rejects a non-canonical sharingModel value (legacy aliases are not part of the vocabulary)', () => {
+    // ADR-0090 D4: canonical four only. A legacy alias must fail loudly here,
+    // not be carried through to fail (or worse, pass) at publish time.
+    const result = SolutionBlueprintSchema.safeParse({
+      summary: 's',
+      objects: [{ name: 'review', sharingModel: 'read_write', fields: [{ name: 'name', type: 'text' }] }],
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 // The strict mirror is what `generateObject` sends to OpenAI: every property
@@ -244,6 +298,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         name: 'project',
         label: null,
         description: null,
+        sharingModel: null,
         fields: [
           { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
         ],
@@ -284,7 +339,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
+        { name: 'x', label: null, description: null, sharingModel: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -305,6 +360,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           name: 'project',
           label: null,
           description: null,
+          sharingModel: null,
           fields: [
             {
               name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
@@ -330,6 +386,30 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   it('drops the un-strict-able seedData record (OpenAI strict cannot represent open key/value maps)', () => {
     expect('seedData' in SolutionBlueprintStrictSchema.shape).toBe(false);
+  });
+
+  it('carries sharingModel on a strict object — nullable, and REQUIRED to be present (OpenAI strict)', () => {
+    // Shape pin: the strict mirror is the structured-output contract the design
+    // model emits against — without the key here, the propose-stage LLM can
+    // never author an OWD choice, whatever the lenient schema accepts.
+    const objectShape = (SolutionBlueprintStrictSchema as any).shape.objects.element.shape;
+    expect('sharingModel' in objectShape).toBe(true);
+
+    // null is accepted (defer to the platform default)…
+    const parsed = SolutionBlueprintStrictSchema.parse(strictBp);
+    expect(parsed.objects[0].sharingModel).toBeNull();
+
+    // …an explicit OWD choice is carried…
+    const explicit = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      objects: [{ ...strictBp.objects[0], sharingModel: 'private' }],
+    });
+    expect(explicit.objects[0].sharingModel).toBe('private');
+
+    // …and OMITTING the key throws (strict mode: every key in `required`).
+    const missingKey = { ...strictBp, objects: [{ ...strictBp.objects[0] }] };
+    delete (missingKey.objects[0] as { sharingModel?: unknown }).sharingModel;
+    expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
   });
 
   it('accepts a dashboard widget carrying the (nullable) measure + groupBy + condition keys', () => {

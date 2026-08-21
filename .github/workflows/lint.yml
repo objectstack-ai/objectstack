@@ -152,6 +152,26 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # Every `scripts/**` entry guard goes through ONE predicate (#10086).
+      # The hand-typed forms of "did node run me, or did someone import me?"
+      # had drifted into ELEVEN spellings across 33 files, and NINE were wrong
+      # in the same invisible direction: node resolves symlinks for the module
+      # graph but leaves `process.argv[1]` as the caller typed it, so a script
+      # reached through a symlink compared two different paths, answered false,
+      # and did NOTHING — exit 0, no output. The CI wrappers here hold the
+      # child's exit STATUS only, so an inert child read as a green gate; the
+      # governed-surface register (`scripts/pm/check-governed-merges.mjs`) was
+      # among the affected, where the inert run and its "NOT governed, ordinary
+      # queue landing applies" verdict are the SAME exit code.
+      # The sweep alone would not have held — nothing stopped a twelfth
+      # spelling. This gate is the part that closes the class: only
+      # `scripts/invoked-as.mjs` may read `process.argv[1]`, and that module's
+      # own self-test drives a real probe through a real symlink. Rationale and
+      # the rejected behavioural-sweep alternative: the gate script's header.
+      # Scans ~115 files, no spawns; ~0.2s.
+      - name: scripts/ entry guards go through one predicate
+        run: pnpm check:entry-guard
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the
@@ -1089,6 +1109,34 @@ jobs:
         run: |
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
           node scripts/check-cross-repo-closer-outcome.mjs
+
+      # Closing-keyword parser parity (#9755). THREE files parse GitHub's
+      # closing-keyword grammar out of user-authored markdown — the cross-repo
+      # closer, the duplicate-fix guard, and H7's `closingKeywordRe()` behind
+      # partof-closing-keyword-guard.yml — and they had drifted: the guard
+      # accepted `Fixes: <ref>` and the closer silently did not, so a merged PR
+      # written with the colon took the closer's quiet green exit and lost its
+      # foreign issue.
+      #
+      # A shared module is the right shape and is unavailable: neither workflow
+      # checks the repo out (the closer deliberately, on `pull_request_target`;
+      # the guard because its whole job is one github-script step), so
+      # `require()` resolves to nothing in either. This gate is what stands in
+      # for the import — it extracts all three parsers from the shipped bytes
+      # and asserts they agree BEHAVIOURALLY on the keyword set and the
+      # separator, while still refusing what each is scoped to refuse. It also
+      # sweeps all tracked files for a FOURTH parser, because "fix these two"
+      # is exactly the change that would miss one.
+      #
+      # Invoked as `node` rather than a `pnpm check:*` alias for the same reason
+      # as the step above: that alias belongs in root package.json, declared
+      # territory of the @changesets/cli v3 migration lane (#9465) while it
+      # runs. dispatch-gates.mjs derives gate families from either spelling.
+      # No network, no build; ~1 s, most of it the tracked-file sweep.
+      - name: Closing-keyword parser parity
+        run: |
+          node scripts/check-closing-keyword-parity.mjs --self-test
+          node scripts/check-closing-keyword-parity.mjs
 
       # Merge-queue triage outcome contract (#10128, over the #4859 bot).
       # merge-queue-triage.yml carries ~450 lines of inline github-script that

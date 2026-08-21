@@ -77,6 +77,7 @@ import {
   readSpecBlob,
   readStamp,
 } from './console-spec-probes.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -474,7 +475,7 @@ function selfTest() {
 // evaluate() from a script exited 0 with "no console dist" and never reached the
 // caller's code.
 const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose evaluate() and do nothing else

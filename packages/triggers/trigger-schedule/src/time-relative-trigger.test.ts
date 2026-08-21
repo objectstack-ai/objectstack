@@ -5,7 +5,9 @@ import type { AutomationContext, JobSchedule, JobHandler } from '@objectstack/sp
 import {
     TimeRelativeTrigger,
     computeDateWindows,
+    computeWindowClaimScopes,
     buildWindowWhere,
+    type FlowDispatchClaimSurface,
     type TimeRelativeDataEngine,
     type FlowTriggerBinding,
     type JobServiceSurface,
@@ -425,6 +427,227 @@ describe('TimeRelativeTrigger', () => {
     });
 });
 
+// ─── Dispatch idempotency (#10220) ──────────────────────────────────
+
+/**
+ * Fake persisted claim ledger: a Set that OUTLIVES trigger instances, so
+ * sharing one across two triggers simulates a kernel rebuild against a
+ * surviving `sys_flow_dispatch` table.
+ */
+function fakeClaimLedger() {
+    const keys = new Set<string>();
+    const claims: string[] = [];
+    const surface: FlowDispatchClaimSurface = {
+        async claim(key) {
+            claims.push(key);
+            if (keys.has(key)) return false;
+            keys.add(key);
+            return true;
+        },
+    };
+    return { surface, keys, claims };
+}
+
+describe('TimeRelativeTrigger dispatch idempotency (#10220)', () => {
+    const JOB = 'flow-time-relative:renewal_alert';
+
+    it('offset mode: two sweeps over the same window dispatch once', async () => {
+        const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }]; // T+7 from NOW
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const ledger = fakeClaimLedger();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine, silentLogger(), NOW, () => ledger.surface,
+        );
+        const launched: string[] = [];
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', offsetDays: [7] }), async (ctx) => {
+            launched.push((ctx.record as Row).id as string);
+        });
+        await flush();
+        await job.fire(JOB);
+        await job.fire(JOB);
+
+        expect(launched).toEqual(['c1']);
+        // The key names the MATCHED WINDOW's identity (windowDay + offset + record).
+        expect(ledger.claims[0]).toBe('time-relative:renewal_alert:2026-07-25:offset7:c1');
+        expect(ledger.claims).toHaveLength(2); // second sweep asked and was refused
+    });
+
+    it('kernel rebuild (fresh trigger instance, same persisted ledger): still once', async () => {
+        const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }];
+        const ledger = fakeClaimLedger();
+        const launched: string[] = [];
+        const desc = { object: 'contracts', dateField: 'end_date', offsetDays: [7] };
+
+        for (let boot = 0; boot < 2; boot++) {
+            const job = fakeJobService();
+            const { engine } = fakeDataEngine(rows);
+            // A NEW trigger instance per boot — only the ledger survives.
+            const trigger = new TimeRelativeTrigger(
+                () => job.service, () => engine, silentLogger(), NOW, () => ledger.surface,
+            );
+            trigger.start(binding(desc), async (ctx) => {
+                launched.push((ctx.record as Row).id as string);
+            });
+            await flush();
+            await job.fire(JOB);
+        }
+
+        expect(launched).toEqual(['c1']); // the rebuild did not re-mint
+    });
+
+    it('range mode: twice in one day → once; the next day → fires again (withinDays prose preserved)', async () => {
+        const rows: Row[] = [{ id: 'c1', end_date: '2026-08-10T09:00:00.000Z' }]; // in [today, +30d]
+        let current = new Date('2026-07-18T12:00:00.000Z');
+        const clock = () => current;
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const ledger = fakeClaimLedger();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine, silentLogger(), clock, () => ledger.surface,
+        );
+        const launched: string[] = [];
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 30 }), async (ctx) => {
+            launched.push((ctx.record as Row).id as string);
+        });
+        await flush();
+        await job.fire(JOB);
+        await job.fire(JOB); // same sweep day — deduped
+        expect(launched).toEqual(['c1']);
+        expect(ledger.claims[0]).toBe('time-relative:renewal_alert:2026-07-18:within30:c1');
+
+        current = new Date('2026-07-19T12:00:00.000Z'); // next day — new sweepDay, new key
+        await job.fire(JOB);
+        expect(launched).toEqual(['c1', 'c1']);
+        expect(ledger.claims[ledger.claims.length - 1]).toBe('time-relative:renewal_alert:2026-07-19:within30:c1');
+    });
+
+    it('offset mode: a dateField edit that moves the window fires again for the NEW window', async () => {
+        const row: Row = { id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }; // T+7 from 07-18
+        let current = new Date('2026-07-18T12:00:00.000Z');
+        const clock = () => current;
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine([row]);
+        const ledger = fakeClaimLedger();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine, silentLogger(), clock, () => ledger.surface,
+        );
+        const launched: string[] = [];
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', offsetDays: [7] }), async (ctx) => {
+            launched.push((ctx.record as Row).id as string);
+        });
+        await flush();
+        await job.fire(JOB);
+        expect(launched).toEqual(['c1']);
+
+        // The due date is postponed → the record leaves the old window and,
+        // three days later, matches a NEW window day (07-28 = 07-21 + 7).
+        row.end_date = '2026-07-28T09:00:00.000Z';
+        current = new Date('2026-07-21T12:00:00.000Z');
+        await job.fire(JOB);
+        expect(launched).toEqual(['c1', 'c1']); // re-fired for the new window
+        expect(ledger.claims[ledger.claims.length - 1]).toBe('time-relative:renewal_alert:2026-07-28:offset7:c1');
+    });
+
+    it('a claim-store failure never blocks the dispatch (availability over strict-once)', async () => {
+        const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }];
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const warn = vi.fn();
+        const surface: FlowDispatchClaimSurface = {
+            async claim() { throw new Error('ledger table unreachable'); },
+        };
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine,
+            { info: () => {}, warn, debug: () => {} },
+            NOW, () => surface,
+        );
+        const launched: string[] = [];
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', offsetDays: [7] }), async (ctx) => {
+            launched.push((ctx.record as Row).id as string);
+        });
+        await flush();
+        await job.fire(JOB);
+
+        expect(launched).toEqual(['c1']); // dispatched despite the failing claim
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('dispatch-claim failed'));
+    });
+
+    it('no claim surface: in-process dedup still holds within one process, and the degradation is warned once', async () => {
+        const rows: Row[] = [{ id: 'c1', end_date: '2026-07-25T09:00:00.000Z' }];
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const warn = vi.fn();
+        // Four-arg construction — the pre-#10220 shape every host without an
+        // automation claim() surface effectively uses.
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine,
+            { info: () => {}, warn, debug: () => {} },
+            NOW,
+        );
+        const launched: string[] = [];
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', offsetDays: [7] }), async (ctx) => {
+            launched.push((ctx.record as Row).id as string);
+        });
+        await flush();
+        await job.fire(JOB);
+        await job.fire(JOB);
+
+        expect(launched).toEqual(['c1']); // deduped in-process
+        const degradations = warn.mock.calls.filter(
+            (c) => typeof c[0] === 'string' && (c[0] as string).includes('IN-PROCESS ONLY'),
+        );
+        expect(degradations).toHaveLength(1); // said once, not per tick
+    });
+
+    it('records without an id are dispatched unconditionally (never claimed)', async () => {
+        const rows: Row[] = [{ end_date: '2026-07-25T09:00:00.000Z' }]; // no id
+        const job = fakeJobService();
+        const { engine } = fakeDataEngine(rows);
+        const ledger = fakeClaimLedger();
+        const trigger = new TimeRelativeTrigger(
+            () => job.service, () => engine, silentLogger(), NOW, () => ledger.surface,
+        );
+        let launched = 0;
+
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', offsetDays: [7] }), async () => {
+            launched++;
+        });
+        await flush();
+        await job.fire(JOB);
+        await job.fire(JOB);
+
+        expect(launched).toBe(2); // not dedupable — unchanged pre-#10220 behaviour
+        expect(ledger.claims).toHaveLength(0);
+    });
+});
+
+describe('computeWindowClaimScopes', () => {
+    const now = new Date('2026-07-18T12:00:00.000Z');
+
+    it('offset mode scopes on the window day + offset', () => {
+        const scopes = computeWindowClaimScopes({ object: 'c', dateField: 'd', offsetDays: [7, 30] }, now);
+        expect(scopes.map((s) => s.scope)).toEqual(['2026-07-25:offset7', '2026-08-17:offset30']);
+    });
+
+    it('range mode scopes on the SWEEP day + range spec (fires daily, never twice a day)', () => {
+        expect(computeWindowClaimScopes({ object: 'c', dateField: 'd', withinDays: 30 }, now)[0].scope)
+            .toBe('2026-07-18:within30');
+        expect(computeWindowClaimScopes({ object: 'c', dateField: 'd', withinDays: -14 }, now)[0].scope)
+            .toBe('2026-07-18:within-14');
+    });
+
+    it('windows are exactly computeDateWindows (one derivation, no drift)', () => {
+        const desc = { object: 'c', dateField: 'd', offsetDays: [60, 30, 7] };
+        expect(computeWindowClaimScopes(desc, now).map((s) => s.window)).toEqual(computeDateWindows(desc, now));
+    });
+});
+
 // ─── TimeRelativeTriggerPlugin ──────────────────────────────────────
 
 describe('TimeRelativeTriggerPlugin', () => {
@@ -468,6 +691,31 @@ describe('TimeRelativeTriggerPlugin', () => {
         await fake.readyHandlers[0]();
 
         expect(registerTrigger).toHaveBeenCalledTimes(1);
+    });
+
+    it('wires the automation service claim() as the dispatch-idempotency surface (#10220)', async () => {
+        const registerTrigger = vi.fn();
+        const claim = vi.fn(async () => true);
+        const job = fakeJobService();
+        // Far-future date: the plugin wires the real wall clock, so the row
+        // must sit inside [real-today, +36500d] whenever this suite runs.
+        const { engine } = fakeDataEngine([{ id: 'c1', end_date: '2099-01-01T00:00:00.000Z' }]);
+        const fake = fakePluginCtx({ automation: { registerTrigger, claim }, job: job.service, objectql: engine });
+
+        const plugin = new TimeRelativeTriggerPlugin();
+        await plugin.start(fake.ctx as never);
+        await fake.readyHandlers[0]();
+
+        const trigger = registerTrigger.mock.calls[0][0] as TimeRelativeTrigger;
+        // Deterministic clock is a constructor-only injection, so drive the
+        // sweep through a descriptor whose window is computed from real "now":
+        // withinDays 36500 always includes the row's date.
+        trigger.start(binding({ object: 'contracts', dateField: 'end_date', withinDays: 36_500 }), async () => {});
+        await flush();
+        await job.fire('flow-time-relative:renewal_alert');
+
+        expect(claim).toHaveBeenCalledTimes(1);
+        expect(claim).toHaveBeenCalledWith(expect.stringMatching(/^time-relative:renewal_alert:\d{4}-\d{2}-\d{2}:within36500:c1$/));
     });
 
     it('skips gracefully when the automation service is absent', async () => {

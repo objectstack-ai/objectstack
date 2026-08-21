@@ -185,6 +185,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * The package whose `version` every concrete pin below must equal.
@@ -1205,7 +1206,7 @@ function main() {
 // check-kernel-hook-pairs). Nothing about what this gate ASSERTS changes: both
 // `check:docs-image-tag` invocations run this file directly, where argv[1] is this
 // file and the branch is taken exactly as before.
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     await selfTest();
   } else {

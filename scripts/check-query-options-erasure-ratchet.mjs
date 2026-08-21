@@ -98,6 +98,25 @@ import eslintConfig, {
   QUERY_OPTIONS_ANY_MESSAGE,
 } from '../eslint.config.mjs';
 import { checkGuardAdoption, collectFatalMessages, lintFilesStrict } from './eslint-fatal-guard.mjs';
+import {
+  HEADROOM_CANARY_FILE,
+  PARSER_STACK_SIZE_KB,
+  STACK_FLAG,
+  STACK_REARM_GUARD,
+  canaryParseFailures,
+  checkHeadroomAdoption,
+  ensureStackHeadroom,
+  formatCanaryFailure,
+  osThreadStackKb,
+  stackRearmPlan,
+} from './eslint-stack-headroom.mjs';
+
+// This gate lints IN-PROCESS, so it does not inherit the `--stack-size` the
+// root `lint` script puts on ESLint's CLI entry, and this repo's deepest file
+// does not parse without it (#10449). Re-exec once, before any linting --
+// including before `--self-test`, whose headroom assertion below is only a fact
+// about the gate if the self-test runs on the same stack the gate does.
+ensureStackHeadroom(fileURLToPath(import.meta.url));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -443,6 +462,77 @@ async function selfTest() {
     for (const problem of checkGuardAdoption(repoRoot)) assert(false, problem);
   }
 
+  // -- 5. Parser headroom: the population's deepest file must actually PARSE. --
+  //
+  // The fatal guard above makes an unparseable file LOUD. This makes it not
+  // happen. Both gates lint in-process, so neither inherits the `--stack-size`
+  // the root `lint` script puts on ESLint's CLI entry, and #10449 is what that
+  // gap costs: `packages/spec/src/migrations/registry.ts` stopped parsing on
+  // the default V8 stack, so both gates started failing on a file the author
+  // never touched -- INTERMITTENTLY, because the verdict depends on the other
+  // files in the same run, which is what let every red be re-run away as a
+  // flake for a day.
+  //
+  // ⭐ Why this asserts a PARSE and not a number. `registry.ts` is an ADR-0087
+  // D3 forever artifact that gains a step per breaking protocol major, so its
+  // AST depth only ever rises. A pinned depth or a pinned minimum stack would
+  // be true today and quietly wrong at the next major -- the same defect
+  // arriving a fourth time. Asking "does the file the gate must read still read
+  // at the headroom the gate actually has" re-measures the real question every
+  // run and cannot expire.
+  //
+  // And it is an EARLY warning, not a restatement of the gate: measured on the
+  // tree that filed #10449, this single-file parse failed 10/10 runs at the
+  // default stack while the gates' own whole-population runs failed 2/14. The
+  // narrow scope is the worst case, so this trips a full margin before the
+  // population run starts reddening other people's PRs.
+  {
+    assert(
+      stackRearmPlan({ execArgv: [], env: {}, flagSupported: true }).rearm === true,
+      'a plain run must re-exec itself with parser headroom',
+    );
+    assert(
+      stackRearmPlan({ execArgv: [STACK_FLAG], env: {}, flagSupported: true }).rearm === false,
+      'a run that already carries --stack-size must not re-exec again',
+    );
+    assert(
+      stackRearmPlan({ execArgv: [], env: { [STACK_REARM_GUARD]: '1' }, flagSupported: true }).rearm === false,
+      'the guard variable must stop a second re-exec -- otherwise a rearm is a spawn loop',
+    );
+    assert(
+      stackRearmPlan({ execArgv: [], env: {}, flagSupported: false }).rearm === false,
+      'a node that rejects the flag must degrade, not spawn a child that cannot start',
+    );
+
+    // The flag is on THIS process, so what follows is measured with the
+    // headroom rather than merely alongside a flag on some command line.
+    assert(
+      process.execArgv.some((a) => a.startsWith('--stack-size')),
+      `this self-test is running without --stack-size (execArgv: ${JSON.stringify(process.execArgv)}). ` +
+      'ensureStackHeadroom() did not re-exec, so the parse proved below is not the one the gate gets.',
+    );
+
+    // Above the OS thread stack V8 runs off the real stack and SIGSEGVs instead
+    // of throwing a clean RangeError, so headroom that crosses it converts a
+    // loud gate into a crash. Read the real limit rather than pinning one.
+    const osStackKb = osThreadStackKb();
+    if (osStackKb !== null) {
+      assert(
+        PARSER_STACK_SIZE_KB < osStackKb,
+        `PARSER_STACK_SIZE_KB (${PARSER_STACK_SIZE_KB}) is not below this machine's ` +
+        `thread stack (ulimit -s = ${osStackKb} KB). At or above it V8 SIGSEGVs instead of ` +
+        'throwing, which turns every parse failure into an unexplained crash.',
+      );
+    }
+
+    const canaryFatals = await canaryParseFailures(eslint, { repoRoot });
+    assert(canaryFatals.length === 0, formatCanaryFailure(canaryFatals));
+
+    // Importing the headroom module is not arming it, and a gate that quietly
+    // stopped arming it looks exactly like one that never lost the flag.
+    for (const problem of checkHeadroomAdoption(repoRoot)) assert(false, problem);
+  }
+
   // A missing config block must ABORT, never report clean.
   assert(eslintConfig.some(carriesRule), 'the config must carry the query-options rule');
 
@@ -454,7 +544,8 @@ async function selfTest() {
   console.log(
     `✓ self-test: ${reports.length} reporting shape(s), ${silent.length} silent counterpart(s), ` +
     `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s), ` +
-    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it.`,
+    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it, ` +
+    `and ${HEADROOM_CANARY_FILE} parses at --stack-size=${PARSER_STACK_SIZE_KB} through this gate's own channel.`,
   );
 }
 

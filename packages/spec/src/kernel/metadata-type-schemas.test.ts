@@ -62,6 +62,7 @@ import {
   listUnregisteredKindSchemaTypes,
   getMetadataTypeSchema,
 } from './metadata-type-schemas';
+import { ObjectStackSchema } from '../stack.zod';
 
 /** The ADR-0010 stamp the loader puts on every registered item. */
 const STAMP = { _packageId: 'pkg_probe', _provenance: 'package' as const };
@@ -149,6 +150,7 @@ interface Def {
   out?: unknown;
   options?: unknown[];
   innerType?: unknown;
+  element?: unknown;
 }
 
 /** `_`-prefixed keys the schema reported as unrecognized, if any. */
@@ -352,6 +354,102 @@ describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS
         `'${type}' now declares the envelope — remove it from `
         + 'UNDECLARED_ENVELOPE_UNREGISTERED.',
       ).toBe(false);
+    },
+  );
+});
+
+/**
+ * [#10194] The map's own closing invariant, pinned instead of trusted.
+ *
+ * `UNREGISTERED_KIND_SCHEMAS` closes with: "Each entry binds the SAME schema
+ * its stack collection is validated against in `stack.zod.ts`, so no body can
+ * be legal in a stack and illegal through `/meta` or the reverse." That
+ * sentence was prose until #10194 found its converse failure mode — two stack
+ * collections (`themes`, `analyticsCubes`) with strict schemas and NO map
+ * entry, so the divergence the sentence forbids simply lived outside the map.
+ *
+ * Two halves, both load-bearing:
+ *
+ *   1. IDENTITY, not equivalence: the map entry must be the very same schema
+ *      object the stack collection's `z.array(...)` element is. A re-built
+ *      "equal" schema would drift the day either side gains a rule.
+ *   2. The mapping table below must cover exactly the bound set, so a sixth
+ *      entry added to the map without a row here fails loudly instead of
+ *      escaping the invariant.
+ *
+ * What this deliberately does NOT assert: that every stack collection has a
+ * map entry. `rag_pipeline` has no stack collection at all (#6242 row 2), and
+ * whether more collections should bind is #2657's B/C decision — this pin
+ * holds the invariant for the entries that exist, nothing more.
+ */
+const STACK_COLLECTION_OF: Record<string, string> = {
+  webhook: 'webhooks',
+  connector: 'connectors',
+  sharing_rule: 'sharingRules',
+  theme: 'themes',
+  analytics_cube: 'analyticsCubes',
+};
+
+/** Unwrap `optional`/`default`/`lazy`… down to an array's element schema. */
+function arrayElementOf(schema: unknown, depth = 0): unknown {
+  if (!schema || depth > 12) return undefined;
+  const s = schema as { _zod?: { def?: Def }; def?: Def };
+  const def = s._zod?.def ?? s.def;
+  switch (def?.type) {
+    case 'array':
+      return def.element;
+    case 'lazy':
+      try {
+        return arrayElementOf(def.getter?.(), depth + 1);
+      } catch {
+        return undefined;
+      }
+    case 'optional':
+    case 'nullable':
+    case 'default':
+    case 'prefault':
+    case 'readonly':
+    case 'nonoptional':
+    case 'catch':
+      return arrayElementOf(def.innerType, depth + 1);
+    default:
+      return undefined;
+  }
+}
+
+describe('#10194 — each bound entry IS its stack collection\'s schema', () => {
+  it('the mapping table covers exactly the bound set', () => {
+    expect(Object.keys(STACK_COLLECTION_OF).sort()).toEqual(listUnregisteredKindSchemaTypes());
+  });
+
+  it.each(Object.entries(STACK_COLLECTION_OF))(
+    '`%s` binds the same schema `stack.zod.ts` validates `%s` with',
+    (kind, collection) => {
+      const stackShapes = objectShapes(ObjectStackSchema);
+      expect(
+        stackShapes.length,
+        'the walker cannot resolve ObjectStackSchema to an object shape',
+      ).toBeGreaterThan(0);
+
+      const collectionSchema = stackShapes
+        .map((shape) => shape[collection])
+        .find((v) => v !== undefined);
+      expect(
+        collectionSchema,
+        `stack.zod.ts no longer declares a \`${collection}\` collection — if it was `
+        + 'renamed, update STACK_COLLECTION_OF; if it was removed, the map entry it '
+        + 'validated needs a decision, not a silent unpin.',
+      ).toBeDefined();
+
+      const element = arrayElementOf(collectionSchema);
+      expect(
+        element,
+        `\`${collection}\` no longer unwraps to z.array(<schema>) — teach arrayElementOf `
+        + 'the new wrapper.',
+      ).toBeDefined();
+
+      // Identity, not structural equality — see the docblock.
+      expect(element).toBe(getMetadataTypeSchema(kind));
     },
   );
 });

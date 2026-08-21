@@ -63,7 +63,9 @@ const homePage = {
 | `type` | `enum` | optional | Page type (see below; default `'record'`) |
 | `object` | `string` | optional | Associated object (for `record` type) |
 | `template` | `string` | optional | Layout template name (default: `'default'`) |
+| `kind` | `enum` | optional | Page override mode (default `'full'`). `full` \| `slotted` = structured authoring; `html` = author-written constrained JSX/HTML compiled (parsed, never executed) to the tree (ADR-0080; the legacy value `'jsx'` is a deprecated alias); `react` = real-React source executed at render by the runtime (ADR-0081) — it runs author JS, so it is gated by a host capability that defaults ON and is disabled server-side via `OS_PAGE_REACT=off`. See [Authoring modes](#authoring-modes) |
 | `regions` | `PageRegion[]` | optional | Layout regions with components (default `[]` — `list` pages render via `interfaceConfig`, and an empty `record`/`home`/`app` page falls back to the synthesized default layout) |
+| `source` | `string` | optional | Page source text — required (and authoritative over `regions`) when `kind` is `'html'` or `'react'`. For `kind: 'html'` it is constrained JSX/HTML compiled to the tree by `@objectstack/sdui-parser` at save time (parse, never execute). For `kind: 'react'` it is real React/JSX executed at render by `@object-ui/react-runtime` (trusted tier). See [React Pages](/docs/ui/react-pages) |
 | `variables` | `PageVariable[]` | optional | Local state variables |
 | `isDefault` | `boolean` | optional | Is default page for its type |
 | `assignedProfiles` | `string[]` | optional | Profiles that can access this page |
@@ -79,6 +81,42 @@ const homePage = {
 | `list` | Record list/interface surface | Data-driven interface pages |
 
 Earlier roadmap types (`dashboard`, `form`, `record_detail`, `record_review`, `overview`, `blank`) were **removed from the schema** because they never shipped a renderer (ADR-0049 enforce-or-remove); only the five types above are valid.
+
+## Authoring modes [#authoring-modes]
+
+A page's `kind` selects **how the body is authored**. Three modes ship, and the rest of
+this page describes the first one:
+
+| `kind` | You write | Executed? | Reach for it when |
+| :--- | :--- | :--- | :--- |
+| `full` (default) / `slotted` | Structured `regions` / `slots` of components — *the rest of this page* | — | Record, home and app layouts assembled from the component catalogue |
+| `html` | A `source` string of constrained JSX: registered components plus safe native HTML | **No** — parsed into the same component tree at save time by `@objectstack/sdui-parser` | Free-form layout, landing pages and composed dashboards, including author- or AI-generated ones you have not reviewed |
+| `react` | A `source` string of real React — hooks, handlers, arbitrary JS | **Yes** — in the app's own React tree, no sandbox | Interactive business UIs — master/detail, wizards, state-driven filters — written by authors you trust |
+
+The two source tiers set `source` instead of `regions`. **`source` is authoritative over
+`regions`**: when both are present the source wins, and `regions` holds at most a derived
+cache of it. A page whose `kind` is `html`, `react` or `jsx` with no non-empty `source`
+is rejected by the schema rather than rendering empty.
+
+`'jsx'` is a deprecated alias for `'html'`, still accepted and converted at load time.
+
+Because `kind: 'react'` executes author JavaScript, it is gated by a host capability that
+defaults **ON** and is disabled server-side per deployment with `OS_PAGE_REACT=off`. The
+`html` tier is unaffected by that switch — it is never executed.
+
+<Callout type="warn">
+Neither source tier is styled with Tailwind utility classes. A page's `source` is
+*runtime metadata*, and the console's build-time Tailwind scans only the console's own
+source — so a utility class name in page source silently produces no CSS, with no error
+(ADR-0065). Style an `html` page with its components' structured props and a JSON `style`
+object; style a `react` page with inline `style={{ … }}` and `hsl(var(--token))` theme
+colors.
+</Callout>
+
+Both tiers are checked at author time — block props, field bindings and source syntax —
+by `os validate`, `os lint` and `os build` alike. See
+[React Pages](/docs/ui/react-pages) for the full authoring guide and
+[Validating metadata](/docs/deployment/validating-metadata) for the rules.
 
 ## Regions
 
@@ -256,3 +294,5 @@ const accountRecordPage = {
 - [View Metadata](/docs/ui/views) — List views and form views for record display
 - [Dashboard Metadata](/docs/ui/dashboards) — Analytics-focused page layout
 - [App Metadata](/docs/ui/apps) — Organize pages into applications
+- [React Pages](/docs/ui/react-pages) — The `html` and `react` source-authoring tiers in full
+- [Validating metadata](/docs/deployment/validating-metadata) — Every author-time rule a page is held to

@@ -139,7 +139,22 @@ function makeDispatcher(options?: { registerFlow?: (name: string, definition: un
     return { dispatcher: new HttpDispatcher(kernel), spies, registered };
 }
 
-const CTX = { request: {}, executionContext: { userId: 'user_1' } } as any;
+/**
+ * [#10145] The caller carries `manage_metadata` — the ADR-0066 D1 authoring
+ * capability the `/automation` definition writes (`POST /`, `PUT /:name`,
+ * `DELETE /:name`) now demand, the same gate the sibling `/meta` and
+ * `/packages` writes already carry.
+ *
+ * The cases below are about the ERROR CLASS a rejected definition is served as
+ * (400 vs 500) and the unknown-flow 404. They were written when any
+ * authenticated session could register a flow, i.e. their `{ userId: 'user_1' }`
+ * stub encoded exactly the premise the gate destroys, so without a capability
+ * they would now stop at the 403 before reaching the behaviour each one is named
+ * after. Only the CALLER changes here; every mechanism, assertion and expected
+ * value is untouched. The gate itself is pinned in
+ * `automation-write-capability-gate.test.ts`.
+ */
+const CTX = { request: {}, executionContext: { userId: 'user_1', systemPermissions: ['manage_metadata'] } } as any;
 
 /** A definition that is legal at every gate the fake runs. */
 const WELL_FORMED = {

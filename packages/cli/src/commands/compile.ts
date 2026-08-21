@@ -257,7 +257,7 @@ export default class Compile extends Command {
       //     artifact with the key quietly gone. Advisory, never fatal.
       const unknownKeyFindings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
-        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>),
+        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ];
       if (unknownKeyFindings.length > 0 && !flags.json) {
         printWarning(`Undeclared authoring keys (${unknownKeyFindings.length}) — dropped at load (#3786)`);

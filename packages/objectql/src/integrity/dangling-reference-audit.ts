@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { referenceTargetOf } from '@objectstack/spec/data';
+import { referenceTargetOf, unprovisionedInjectedColumns } from '@objectstack/spec/data';
 import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
 
 /**
@@ -255,7 +255,13 @@ export interface DanglingReferenceReport {
    *
    * - **Objects with no reference field at all.** Nothing referential can
    *   break on them, so their absence from `dangling` is proven rather than
-   *   assumed — `prioritise` drops them before the loop ever sees them.
+   *   assumed — `prioritise` drops them before the loop ever sees them. Since
+   *   #8414 a federated object can reach that state by having had only
+   *   PHANTOM reference columns (see `auditableReferenceFields`), and the
+   *   proof is the same one: a column the platform never provisioned stores
+   *   no reference, so there is none to dangle. It is the object's REAL
+   *   reference columns that decide whether it is read — a federated object
+   *   that declares one is audited on it like any other.
    * - **Objects the caller excluded** via
    *   {@link DanglingReferenceAuditOptions.objects}. Those were never asked
    *   for; filing them would report the caller's own narrowing back to it as
@@ -275,10 +281,27 @@ export interface DanglingReferenceReport {
   unscannedObjects?: string[];
 }
 
-/** Minimal object shape the audit reads — duck-typed so tests need no registry. */
+/**
+ * Minimal object shape the audit reads — duck-typed so tests need no registry.
+ *
+ * The two named keys are what the audit itself reads. The index signature is
+ * not laxity: the port is handed the WHOLE registered document (the engine
+ * passes `SchemaRegistry.getAllObjects()` straight through), and
+ * {@link unprovisionedInjectedColumns} derives its verdict from the injection
+ * plan's own inputs on that document — `external`, `systemFields`,
+ * `managedBy`, `tenancy`, `ownership`. Those are deliberately NOT restated as
+ * keys here: the list belongs to the derivation in `@objectstack/spec/data`,
+ * and a copy of it in this file would be free to fall behind it silently.
+ *
+ * A hand-written double carrying only `name` and `fields` still satisfies the
+ * type and still gets the right answer — with no `external` key the platform
+ * provisions the storage, so nothing is withheld and the double behaves
+ * exactly as it did before the provenance filter existed.
+ */
 export interface AuditableObject {
   name: string;
   fields?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 /**
@@ -371,19 +394,69 @@ interface AuditableField {
 
 /**
  * Reference fields worth auditing on one object: everything with a declared
- * target, each tagged with the bucket its findings belong in. Returns `[]` for
- * an object with none, which is how the audit avoids reading a single row of
- * the tables that have nothing referential on them at all.
+ * target that the object actually STORES, each tagged with the bucket its
+ * findings belong in. Returns `[]` for an object with none, which is how the
+ * audit avoids reading a single row of the tables that have nothing
+ * referential on them at all.
  *
  * `readonly` is no longer a reason to drop a field (#4743) — it is the reason
  * to file its findings separately. See the provenance section in the module
  * header for why the skip's second ground stopped existing at #4556.
+ *
+ * ## Why a registered reference column can still be nothing to audit (#8414)
+ *
+ * `applySystemFields` injects `organization_id`, `owner_id`,
+ * `owning_business_unit_id` and the audit `*_by` lookups into every object it
+ * registers — ADR-0015 `external` ones included, because that derivation has no
+ * `external` branch. But `Engine.syncObjectSchema` returns early for a federated
+ * object and issues no DDL: the remote database owns the schema. So on a
+ * federated object those five reference columns exist in the registered schema
+ * and **nowhere else**, and an enumerator that reads `fields` alone is answered
+ * YES about a column no query can ever find.
+ *
+ * Measured on a real boot of `examples/app-showcase`, this sweep asked the
+ * remote `customers` table (physically `id, name, email, region,
+ * lifetime_value`) for:
+ *
+ * ```
+ *   select `id`, `organization_id`, `created_by`, `updated_by`, `owner_id`,
+ *          `owning_business_unit_id` from `customers` limit ?
+ * ```
+ *
+ * which the backend refuses (`no such column`; backtick-quoted identifiers do
+ * NOT take SQLite's double-quote literal fallback) and `SqlDriver.find`'s
+ * unknown-column recovery then absorbs by retrying `select *` — up to 500 full
+ * rows fetched, every lifecycle sweep interval, to audit columns that cannot
+ * exist. Nothing answered wrongly; the entire pass was waste.
+ *
+ * The fix is to stop asking, at the enumerator, and NOT to lean harder on that
+ * recovery: consumer-side tolerance of a read that should never have been
+ * issued is the direction Prime Directive #12 rules against.
+ *
+ * ## Why PROVENANCE and not `external != null`
+ *
+ * A federated object MAY declare a real remote `organization_id` (or any other
+ * anchor name) — the author vouches for that column, it is genuinely there, and
+ * a reference stored in it can genuinely dangle. Skipping every injected-anchor
+ * NAME on every external object would stop auditing a column that is real.
+ * {@link unprovisionedInjectedColumns} answers the narrower question the audit
+ * actually has — "is this column the PLATFORM's injected anchor on an object the
+ * platform provisions no storage for?" — by identity against the shipped
+ * definition tables, so an author-declared column of the same name keeps its
+ * audit. It returns `[]` for every platform-provisioned object, which is why
+ * the ordinary path is not merely unchanged but untouched.
  */
 function auditableReferenceFields(obj: AuditableObject): AuditableField[] {
   const fields = obj?.fields;
   if (!fields || typeof fields !== 'object') return [];
+  // Empty for every object the platform provisions storage for — the common
+  // case pays one `external == null` test per object and nothing else.
+  const phantom = new Set(unprovisionedInjectedColumns(obj));
   const out: AuditableField[] = [];
   for (const [name, def] of Object.entries(fields)) {
+    // Registered but never provisioned: there is no column, so there is no
+    // stored reference, so there is nothing this audit could find in it.
+    if (phantom.has(name)) continue;
     const target = referenceTargetOf(def);
     if (!target) continue;
     out.push({ name, target, provenance: (def as { readonly?: unknown })?.readonly === true });
@@ -414,6 +487,11 @@ interface AuditTarget {
  * order is what decides which question actually gets answered.
  */
 function prioritise(objects: AuditableObject[]): AuditTarget[] {
+  // `auditableReferenceFields` is the single seam that decides both WHICH
+  // objects are opened and WHICH columns are projected off them, so the #8414
+  // phantom-column filter reaches the row read and the object skip at once —
+  // a federated object left with no real reference column is dropped here and
+  // costs zero statements.
   const security: AuditTarget[] = [];
   const business: AuditTarget[] = [];
   const provenanceOnly: AuditTarget[] = [];

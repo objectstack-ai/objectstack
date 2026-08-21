@@ -252,6 +252,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -645,7 +646,7 @@ export function renderReport({ sinceIso, repos, scanned, entries, lookups }) {
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 function runTestMode(args) {
   const i = args.indexOf('--test');

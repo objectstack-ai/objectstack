@@ -684,26 +684,77 @@ const PLUGIN_ROUTE_MODULES = {
 const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
 
 /**
- * Surface 4 (#9813): modules that write express-style `res.json(…)` responses
- * on an `IHttpServer` — the dialect none of the other three surfaces can see.
- * `dispatcher-plugin.ts` served the exact `{ data }` discovery shape #9436 was
- * ruled on for a day with no counter anywhere, because it writes through `res`
- * rather than a Hono context and returns nothing to a central sender.
+ * Surface 4 (#9813, discovered by #9937): modules that write express-style
+ * `res.json(…)` responses — the dialect none of the other three surfaces can
+ * see. `dispatcher-plugin.ts` served the exact `{ data }` discovery shape #9436
+ * was ruled on for a day with no counter anywhere, because it writes through
+ * `res` rather than a Hono context and returns nothing to a central sender.
  *
- * ⚠ ENUMERATED, not discovered. The other populations refuse an undeclared
- * response-writing module; this one audits only the files named here, because
- * a discovery walk for this dialect first needs a read/write discriminator —
- * fetch's `Response.json()` is a zero-argument READ on the same receiver name
- * (`const res = await fetch(…); await res.json()`), and 20 non-test files
- * under packages/ carry the `res.json(` spelling today, most of them fetch
- * readers. Growing the walk is #9937; adding a NEW express-style route module
- * to this table is part of adding the module.
+ * ## Discovered, not enumerated — and what that took
  *
- * Entries carry the same counters, `ratchet`/`exempt`/`note` grammar and
- * audit (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one grammar, two
- * receiver dialects.
+ * #9813 shipped this population ENUMERATED, one file named by hand, because a
+ * discovery walk needs something the other three surfaces never did: a
+ * read/write discriminator. `res.json` is the same spelling in two opposite
+ * roles, and the reading one is the majority of it in this repo —
+ *
+ *     res.json({ success: true, data })      // express WRITE, one argument
+ *     const body = await res.json();         // fetch READ, zero arguments
+ *
+ * — so `discoverExpressRoutes()` keys on TWO facts. The false-positive surface
+ * of each was MEASURED on `origin/main` (736cfb14) before this population was
+ * widened, because the cost of being wrong here is a gate that reddens on
+ * innocent files:
+ *
+ *   argument count ≥ 1   83 of the 301 `res` `.json(…)` calls under `packages/`
+ *                        take no argument, and every one of them is a fetch
+ *                        read (`@objectstack/client` alone carries 68). Dropping
+ *                        this half sweeps in 13 pure-reader files — 65% of the
+ *                        20 files that touch the spelling at all.
+ *   receiver `res`       argument count alone is no better: 11 further files
+ *                        call `Field.json({ … })`, `t.json(c.name)` or
+ *                        `table.json(name)` — object and column DSLs that answer
+ *                        no HTTP request, 15 calls of pure noise.
+ *
+ * Together the two partition the repo cleanly: 218 write calls in 7 files, 83
+ * read calls in 13 others, and NOT ONE file mixes them. Zero false positives,
+ * measured rather than assumed — which is what made widening this population
+ * affordable at all, and what the enumerated table was holding the place for.
+ *
+ * BOTH express spellings are writes, because the second is where the refusals
+ * live: `res.json(body)` (81 calls) and the chained `res.status(400).json(body)`
+ * (137). A walk seeing only the bare form would leave the majority of the
+ * express ERROR surface invisible while reporting itself green — this gate's own
+ * recurring failure, one dialect at a time (#7295, #8884, #9267).
+ *
+ * ## One population, not two
+ *
+ * #9937 asked whether `IHttpServer` route modules and generic express-style
+ * writers are one population or two. ONE — and not as a preference. This is a
+ * source scan, and the repo types its handlers `any` at exactly the seam that
+ * would tell the two apart; `query-allowlist.ts` says so in its own signature
+ * ("`IHttpRequest`-shaped; `any` because `rest-server.ts` types its handlers
+ * that way"). A split by mounting mechanism is not decidable from the source, so
+ * a table claiming it would be claiming something nobody checked. The DIALECT is
+ * the population instead: whoever writes `res.json(…)` is audited, whether that
+ * is a route module, a middleware, or a refusal helper the routes delegate to —
+ * and the first walk found one of each. The table is named for the dialect for
+ * that reason; it was `IHTTP_ROUTE_MODULES` while it held one hand-named
+ * IHttpServer module (#9813).
+ *
+ * Files already audited as surface 1 are excluded, and so is `SHARED_BUILDER`:
+ * both are held there by write-site counts that see these same calls, and no
+ * module is governed by two tables at once. That exclusion is why
+ * `rest-server.ts` (137 of the write calls), `error-response.ts` and
+ * `response-envelope.ts` are absent below rather than unaudited.
+ *
+ * Entries carry the same counters, `ratchet`/`exempt`/`note` grammar and audit
+ * (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one grammar, two receiver
+ * dialects. As on every other discovered surface, a file the walk finds and the
+ * table does not name is an ERROR, never a default.
  */
-const IHTTP_ROUTE_MODULES = {
+const EXPRESS_RESPONSE_MODULES = {
+  // ── Conformant ──────────────────────────────────────────────────────────
+
   // Nine bodies. The two discovery bodies (`/.well-known/objectstack`,
   // unconditional, and the REST-less `${prefix}/discovery` fallback) were
   // enveloped by #9813 under the #9436 maintainer ruling (2026-08-18, option
@@ -716,7 +767,7 @@ const IHTTP_ROUTE_MODULES = {
   //
   // The tenth body — the SSE-fallback `res.json({ events })` this entry
   // ratcheted at `unenveloped: 1` — was resolved by #9936 (2026-08-19, option
-  // B): the count goes to 0 because the JSON literal CEASED TO EXIST, not
+  // B): the count went to 0 because the JSON literal CEASED TO EXIST, not
   // because it moved to a spelling this scanner cannot count. The fallback
   // now implements the IHttpResponse contract's own prescription (#3607,
   // ADR-0076 OQ#10): the same SSE frames, buffered and delivered through
@@ -726,6 +777,45 @@ const IHTTP_ROUTE_MODULES = {
   // result writer's write-less fallback (#9961) took the same shape; its old
   // body was a RELAYED `res.json(result.result)` and thus never counted here.
   'packages/runtime/src/dispatcher-plugin.ts': {},
+
+  // [#9937] FIRST AUDIT — swept in by the walk, verdict conformant. Not a route
+  // module at all: the inbound rate-limit MIDDLEWARE, which answers 429 itself
+  // rather than calling `next()`. Its one hand-built body is
+  // `{ success: false, error: buildApiError({ … }) }` — the same door
+  // `dispatcher-plugin.ts`'s two conformant exits use, so `error` carries the
+  // ADR-0112 `code`/`message` pair by construction. That the counters cannot see
+  // INSIDE `buildApiError(…)` (a call, not a literal) is the deliberate
+  // relayed-body blindness, so read this `{}` for what it is: nothing this file
+  // BUILDS departs from the envelope. It is also the entry that proves the
+  // population is a dialect rather than a mounting mechanism — a name-based or
+  // route-module-based walk would never have reached a middleware.
+  'packages/runtime/src/security/inbound-rate-limit.ts': {},
+
+  // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
+  //
+  // [#9937] FIRST AUDIT, both entries. The two shared query-parameter refusal
+  // helpers `rest-server.ts` delegates to. They are the reason this surface had
+  // to grow a walk rather than a longer hand-written list: neither is a route
+  // module, neither follows the `*-routes.ts` convention, both were invisible to
+  // every one of this gate's four surfaces, and both write a REST body a client
+  // reads. Nobody would have thought to enumerate them — which is the whole
+  // argument of #9267 and #7295, arriving a third time.
+  //
+  // What is counted is one body each, and it is one key from conformant: the
+  // 400 they write is ADR-0112-NESTED already (`error: { code, message }`, the
+  // reference shape `security-suggested-bindings-envelope.test.ts` pins the rest
+  // of the family onto) but carries no `success`, so `unwrapResponse` hands it
+  // to callers raw. Measured at first audit, not chosen, and it ticks DOWN only.
+  'packages/rest/src/query-allowlist.ts': {
+    unenveloped: 1,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    note: 'the one 400 `refuseUnknownQueryParams` writes — `{ error: { code: VALIDATION_ERROR, message } }`, nested per ADR-0112 but with no `success` flag above it',
+  },
+  'packages/rest/src/query-multiplicity.ts': {
+    unenveloped: 1,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    note: 'the one 400 `refuseRepeatedQueryParams` writes — `{ error: { code: VALIDATION_ERROR, message } }`, nested per ADR-0112 but with no `success` flag above it',
+  },
 };
 
 /**
@@ -740,33 +830,94 @@ const IHTTP_ROUTE_MODULES = {
  * express-style `res.json(…)` dialect instead (#9813) — same body grammar,
  * different receiver, so the counters and their meanings are shared.
  *
+ * A zero-argument call on one of those receivers is a READ (`await res.json()`),
+ * counted as `reads` and judged as nothing — the discriminator that let surface
+ * 4 become a walk (#9937). See it inline below for what the argument count buys
+ * and why nothing else can decide it.
+ *
  * @param {string} source TypeScript source text.
  * @param {string} fileName reported in sites.
  * @param {Set<string>} receivers identifiers judged as response receivers.
- * @returns {{bodies: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>}}
+ * @returns {{bodies: number, reads: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>, readSites: string[]}}
  */
 export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = HONO_CONTEXT_RECEIVERS) {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const found = {
     bodies: 0,
+    // Zero-argument `.json()` calls on the SAME receivers: reads, never writes.
+    // Reported so the discriminator's REJECT direction is positively observable
+    // — `bodies: 0` alone cannot tell "this file only reads" from "this receiver
+    // never appears", and a discriminator only ever checked in the accept
+    // direction is the vacuity this gate keeps finding in others (#9937).
+    reads: 0,
     unenveloped: 0, errorWithoutMessage: 0, errorCodeNotString: 0,
     strayKeys: 0, stringError: 0, siblingCode: 0,
     sites: {
       unenveloped: [], errorWithoutMessage: [], errorCodeNotString: [],
       strayKeys: [], stringError: [], siblingCode: [],
     },
+    readSites: [],
   };
   const line = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
   const hit = (key, node) => { found[key] += 1; found.sites[key].push(`${fileName}:${line(node)}`); };
+
+  /**
+   * The receiver identifier a `.json(…)` call is written on, or `undefined`.
+   *
+   * Two spellings, and the second is not optional: `res.status(400).json(body)`
+   * is where the express refusals live (137 of the 218 express write calls under
+   * `packages/` — see the surface-4 header), so a scanner that saw only the bare
+   * receiver would count the successes and miss the errors.
+   *
+   *   `res.json(body)`              — the receiver IS the identifier
+   *   `res.status(400).json(body)`  — one chained setter stands between them
+   *
+   * The chained form is matched on shape rather than on a list of setter names:
+   * over-matching here can only add a call on a receiver this dialect already
+   * claims, and under-matching is the failure this whole surface exists to end.
+   */
+  const receiverName = (expr) => {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (
+      ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+      ts.isIdentifier(expr.expression.expression)
+    ) return expr.expression.expression.text;
+    return undefined;
+  };
+
+  /** `res.status(404).json(body)` names its status in the chain, not as arg 2. */
+  const chainedStatusArg = (expr) => (
+    ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+    expr.expression.name.text === 'status'
+  ) ? expr.arguments[0] : undefined;
 
   const visit = (node) => {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === 'json' &&
-      ts.isIdentifier(node.expression.expression) &&
-      receivers.has(node.expression.expression.text)
+      receivers.has(receiverName(node.expression.expression))
     ) {
+      // ── The read/write discriminator (#9937) ──────────────────────────────
+      //
+      // `res.json` is one spelling for two opposite acts, and the identifiers
+      // are byte-identical:
+      //
+      //     res.json({ success: true, data })   // express WRITE, one argument
+      //     const body = await res.json();      // fetch READ, zero arguments
+      //
+      // ARGUMENT COUNT decides, and nothing else can: the receiver name is the
+      // same, `await` is optional on the read (14 of the repo's reads are not
+      // awaited in place), and a type-directed answer is not available to a
+      // source scan whose subjects are typed `any`. Measured across `packages/`
+      // before this surface was widened to a walk: 83 zero-argument calls, every
+      // one of them a fetch read, and no file mixing the two.
+      if (node.arguments.length === 0) {
+        found.reads += 1;
+        found.readSites.push(`${fileName}:${line(node)}`);
+        ts.forEachChild(node, visit);
+        return;
+      }
       found.bodies += 1;
       const arg = node.arguments[0];
       // A relayed body (an identifier, a call, a member access) is not one this
@@ -827,7 +978,9 @@ export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = 
             //      one is the shape `packages/adapters/hono` ships, and the
             //      shorthand is why a value-blind scan sees nothing wrong.
             const codeInit = errKeys.get('code');
-            const statusArg = node.arguments[1];
+            // `c.json(body, code)` puts the status second; the express chain
+            // puts it in `res.status(code)`. Same defect, two spellings.
+            const statusArg = node.arguments[1] ?? chainedStatusArg(node.expression.expression);
             if (codeInit && ts.isNumericLiteral(codeInit)) {
               hit('errorCodeNotString', node);
             } else if (
@@ -858,6 +1011,25 @@ const PLUGIN_ROUTE_COUNTERS = {
 };
 
 /**
+ * What a diagnostic has to say differently per receiver dialect: the table the
+ * author must edit, and the write the walk saw. Everything else about the audit
+ * — the counters, the ratchet/exempt grammar, the #8435 authority rule — is one
+ * mechanism over both, which is why `auditPluginRouteModule` takes this rather
+ * than being copied per surface (#9937).
+ */
+const HONO_SURFACE = {
+  table: 'PLUGIN_ROUTE_MODULES',
+  writes: 'Hono responses (`c.json(…)`)',
+  kind: 'plugin-route module',
+};
+
+const EXPRESS_SURFACE = {
+  table: 'EXPRESS_RESPONSE_MODULES',
+  writes: 'express-style responses (`res.json(…)` / `res.status(…).json(…)`)',
+  kind: 'express-style response module',
+};
+
+/**
  * The #8435 authority token. Byte-identical to every instrumented gate's const.
  *
  * Widening a `ratchet` and widening an `exempt` are both remedies that EXPAND a
@@ -880,17 +1052,19 @@ const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
  * scanner would be asserting the easy half.
  *
  * @param {string} file      repo-relative path
- * @param {object|undefined} declared its `PLUGIN_ROUTE_MODULES` entry, if any
+ * @param {object|undefined} declared its declaring table's entry, if any
  * @param {object} got       `scanHonoRouteSource` output for it
+ * @param {{table: string, writes: string, kind: string}} surface which receiver
+ *        dialect's table is speaking — see `HONO_SURFACE` / `EXPRESS_SURFACE`.
  * @returns {string[]} problems, empty when the module is in order
  */
-export function auditPluginRouteModule(file, declared, got) {
+export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFACE) {
   const problems = [];
 
   if (!declared) {
     problems.push(
-      `${file}\n    NOT DECLARED. This file writes Hono responses (\`c.json(…)\`), so it is a\n` +
-      `    plugin-route module — add it to PLUGIN_ROUTE_MODULES in\n` +
+      `${file}\n    NOT DECLARED. This file writes ${surface.writes}, so it is a\n` +
+      `    ${surface.kind} — add it to ${surface.table} in\n` +
       `    scripts/check-route-envelope.mjs. If every body it BUILDS is the declared\n` +
       `    envelope, declare {}. If some are not, declare the CURRENT counts plus a\n` +
       `    \`ratchet\` naming the issue that will fix them, and a \`note\` saying what they\n` +
@@ -960,7 +1134,7 @@ export function auditPluginRouteModule(file, declared, got) {
           `    Lines: ${sites}`
         : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
           `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
-          `    declared number to ${got[key]} in PLUGIN_ROUTE_MODULES so the ground cannot be\n` +
+          `    declared number to ${got[key]} in ${surface.table} so the ground cannot be\n` +
           `    given back` + (got[key] === 0 ? ` (and drop the \`ratchet\`/\`note\` if this was the last one)` : ``) + `.\n` +
           (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
           `    Lines: ${sites}`,
@@ -1002,14 +1176,35 @@ export function auditPluginRouteModule(file, declared, got) {
 }
 
 /**
- * Files that write a Hono context response, found by parsing rather than by
- * name — see the header on why.
+ * Files that write a response in one receiver dialect, found by PARSING rather
+ * than by name — see the header on why.
  *
- * Files already audited as surface 1 are excluded so no module is governed by
- * two tables at once.
+ * One walk serves surfaces 3 and 4 (#9937). That is not tidiness: the express
+ * population spent #9813 enumerated, and the argument for widening it was that
+ * it should be protected the way the Hono one already was. Two copies of the
+ * walk would let those two claims drift apart silently — the first divergence
+ * being a blind spot in whichever copy nobody edited.
+ *
+ * `governedElsewhere` names the files another table already holds, so no module
+ * is governed by two tables at once.
+ *
+ * `readers` is the discriminator's REJECT side, reported rather than discarded.
+ * A walk can only ever show its accept side in a green run — the files it swept
+ * in — and a discriminator seen from one side is the vacuity this gate exists to
+ * refuse. These are the files where the same receiver calls `.json()` with NO
+ * argument: fetch readers, deliberately not swept in. If the discriminator ever
+ * stopped telling the two apart, they would arrive as undeclared modules and the
+ * gate would go red naming them, so the number is a live control and not a
+ * decoration.
+ *
+ * @param {Set<string>} receivers the receiver identifiers this dialect writes on
+ * @param {(rel: string) => boolean} governedElsewhere files to leave out
+ * @returns {{writers: string[], readers: string[], readCalls: number}}
  */
-function discoverHonoRoutes() {
-  const out = [];
+function discoverResponseWriters(receivers, governedElsewhere) {
+  const writers = [];
+  const readers = [];
+  let readCalls = 0;
   const skip = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
   const walk = (dir) => {
     for (const entry of readdirSync(dir)) {
@@ -1019,16 +1214,36 @@ function discoverHonoRoutes() {
       if (!entry.endsWith('.ts') || entry.endsWith('.d.ts')) continue;
       if (entry.includes('.test.') || entry.includes('.conformance.')) continue;
       const rel = relative(ROOT, full).split(sep).join('/');
-      if (MODULES[rel]) continue;
+      if (governedElsewhere(rel)) continue;
       const source = readFileSync(full, 'utf8');
       // Cheap text pre-filter, then the AST decides. The pre-filter can only
       // over-select (a mention in a comment), never under-select a real call.
       if (!source.includes('.json(')) continue;
-      if (scanHonoRouteSource(source, rel).bodies > 0) out.push(rel);
+      const got = scanHonoRouteSource(source, rel, receivers);
+      if (got.bodies > 0) writers.push(rel);
+      else if (got.reads > 0) { readers.push(rel); readCalls += got.reads; }
     }
   };
   walk(join(ROOT, 'packages'));
-  return out.sort();
+  return { writers: writers.sort(), readers: readers.sort(), readCalls };
+}
+
+/** Surface 3: the plugin-mounted Hono routes (#9267). */
+function discoverHonoRoutes() {
+  return discoverResponseWriters(HONO_CONTEXT_RECEIVERS, (rel) => Boolean(MODULES[rel])).writers;
+}
+
+/**
+ * Surface 4: the express-style `res.json(…)` writers (#9813 enumerated, #9937
+ * walked). `SHARED_BUILDER` is excluded alongside surface 1's modules — its two
+ * write sites are pinned there exactly, and they are `res.status(…).json(…)`
+ * calls this dialect would otherwise claim a second time.
+ */
+function discoverExpressRoutes() {
+  return discoverResponseWriters(
+    EXPRESS_RESPONSE_RECEIVERS,
+    (rel) => Boolean(MODULES[rel]) || rel === SHARED_BUILDER.file,
+  );
 }
 
 /**
@@ -1451,29 +1666,29 @@ function audit() {
     }
   }
 
-  // ── The IHttpServer express-style modules (#9813) — enumerated, see table ──
-  const ihttpScans = {};
-  for (const [file, declared] of Object.entries(IHTTP_ROUTE_MODULES)) {
-    let source;
-    try {
-      source = readFileSync(join(ROOT, file), 'utf8');
-    } catch {
+  // ── The express-style `res.json(…)` writers (#9813, walked by #9937) ──────
+  const expressWalk = discoverExpressRoutes();
+  const expressRoutes = expressWalk.writers;
+  const expressScans = {};
+
+  for (const file of expressRoutes) {
+    const declared = EXPRESS_RESPONSE_MODULES[file];
+    const got = declared
+      ? scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file, EXPRESS_RESPONSE_RECEIVERS)
+      : null;
+    if (got) expressScans[file] = got;
+    problems.push(...auditPluginRouteModule(file, declared, got, EXPRESS_SURFACE));
+  }
+
+  for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
+    if (!expressRoutes.includes(file)) {
       problems.push(
-        `${file}\n    declared in IHTTP_ROUTE_MODULES but not found — moved or deleted?\n` +
-        `    Update the table.`,
+        `${file}\n    declared in EXPRESS_RESPONSE_MODULES but no longer writes an express-style\n` +
+        `    response (\`res.json(…)\` / \`res.status(…).json(…)\`) — moved, deleted, or\n` +
+        `    converted? Update the table. A zero-argument \`res.json()\` is a fetch READ and\n` +
+        `    never counted, so a file that became a client rather than a server lands here.`,
       );
-      continue;
     }
-    const got = scanHonoRouteSource(source, file, EXPRESS_RESPONSE_RECEIVERS);
-    if (got.bodies === 0) {
-      problems.push(
-        `${file}\n    declared in IHTTP_ROUTE_MODULES but no longer writes an express-style\n` +
-        `    response (\`res.json(…)\`) — moved, deleted, or converted? Update the table.`,
-      );
-      continue;
-    }
-    ihttpScans[file] = got;
-    problems.push(...auditPluginRouteModule(file, declared, got));
   }
 
   if (problems.length) {
@@ -1548,13 +1763,13 @@ function audit() {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
 
-  const iEntries = Object.entries(IHTTP_ROUTE_MODULES);
+  const iEntries = Object.entries(EXPRESS_RESPONSE_MODULES);
   const iRatcheted = iEntries.filter(([, m]) => m.ratchet);
   const iExempt = iEntries.filter(([, m]) => m.exempt);
-  const iBodies = Object.values(ihttpScans).reduce((n, s) => n + s.bodies, 0);
+  const iBodies = Object.values(expressScans).reduce((n, s) => n + s.bodies, 0);
   console.log(
-    `✓ IHttpServer express-style modules — ${iEntries.length} module(s) audited ` +
-    `(ENUMERATED, not discovered — the walk is #9937), ` +
+    `✓ Express-style response modules — ${expressRoutes.length} module(s) discovered and audited ` +
+    `(walked, not enumerated — #9937), ` +
     `${iBodies} hand-built body/bodies (count reported, NOT pinned): ` +
     `${iEntries.length - iRatcheted.length - iExempt.length} conformant, ` +
     `${iRatcheted.length} ratcheted, ${iExempt.length} exempt`,
@@ -1565,6 +1780,12 @@ function audit() {
   for (const [file, m] of iExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
+  // The reject side of the discriminator, printed because a walk can otherwise
+  // only ever show what it swept IN — see `discoverResponseWriters`.
+  console.log(
+    `  read/write discriminator: ${expressWalk.readers.length} file(s) skipped as fetch readers ` +
+    `(${expressWalk.readCalls} zero-argument \`res.json()\` call(s), none swept in)`,
+  );
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -1920,6 +2141,132 @@ function selfTest() {
     probs.length === 1 && probs[0].includes('Raising the declared number is not the fix') &&
     !probs[0].includes('CLOSED list'),
     `a ratchet must keep its own diagnostic → ${JSON.stringify(probs)}`,
+  );
+
+
+  // ── The read/write discriminator (#9937) — BOTH directions ────────────────
+  //
+  // `res.json` is one spelling for two opposite acts. A discriminator checked
+  // only in the accept direction is a discriminator nobody has tested: it would
+  // pass identically if it accepted EVERYTHING, and this surface's population is
+  // 83 fetch reads to 218 writes, so "accepts everything" means a gate that
+  // reddens on `@objectstack/client`. Both directions, and the reject direction
+  // asserted POSITIVELY — `reads: 1`, not merely `bodies: 0`, which a scanner
+  // that had simply stopped matching the receiver would also produce.
+
+  // ACCEPT — the bare express write.
+  p = scanHonoRouteSource(`res.json({ success: true, data });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 1 && p.reads === 0,
+    `a one-argument res.json must read as a WRITE → ${JSON.stringify(p)}`,
+  );
+
+  // ACCEPT — the chained express write. 137 of the repo's 218 express write
+  // calls are spelled this way, and every refusal among them; a scanner that saw
+  // only the bare form would count the successes and miss the errors.
+  p = scanHonoRouteSource(
+    `res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: m } });`,
+    'x.ts', EXPRESS_RESPONSE_RECEIVERS,
+  );
+  assert(
+    p.bodies === 1 && p.unenveloped === 1 && p.reads === 0,
+    `res.status(n).json(body) must read as a WRITE and be judged → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — the fetch read, in the shape the repo actually writes it. Asserted
+  // as `reads: 1`: the call was SEEN and classified, not missed.
+  p = scanHonoRouteSource(
+    `const r = await fetch(url); const body = await res.json();`,
+    'x.ts', EXPRESS_RESPONSE_RECEIVERS,
+  );
+  assert(
+    p.bodies === 0 && p.reads === 1,
+    `a zero-argument res.json() must read as a READ, seen and skipped → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — and not because of `await`: the unawaited read (14 of the repo's
+  // 83 are written this way, `res.json().then(…)` and friends) is the same call.
+  p = scanHonoRouteSource(`const p2 = res.json().then((b) => b.data);`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 1,
+    `an unawaited zero-argument res.json() is still a READ → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — the OTHER half of the discriminator, measured to be load-bearing:
+  // 11 files call `Field.json({ … })` / `t.json(c.name)` / `table.json(name)`,
+  // object and column DSLs answering no HTTP request. Argument count alone would
+  // sweep every one of them in. The positive control is the same body one line
+  // down: identical source, express receiver, counted.
+  p = scanHonoRouteSource(`Field.json({ label: 'Config', required: true });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 0,
+    `a non-response receiver must not enter this surface → ${JSON.stringify(p)}`,
+  );
+  p = scanHonoRouteSource(`res.json({ label: 'Config', required: true });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(p.bodies === 1, 'the same body on `res` MUST be counted — otherwise the case above proves nothing');
+
+  // REJECT — a chained zero-argument read (`req.clone().json()`) is neither a
+  // write nor this receiver's read.
+  p = scanHonoRouteSource(`const b = await req.clone().json();`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 0,
+    `a chained request read must stay outside this surface → ${JSON.stringify(p)}`,
+  );
+
+  // The discriminator is dialect-wide, not express-only: a Hono context never
+  // spells a zero-argument write either, and surface 3's counts are unmoved by
+  // it (measured: no `c.json()` takes zero arguments anywhere under packages/).
+  p = scanHonoRouteSource(`const b = await c.json();`);
+  assert(p.bodies === 0 && p.reads === 1, `zero-argument c.json() must not be a body → ${JSON.stringify(p)}`);
+
+  // ── The walk (#9937): reproduce before believing ──────────────────────────
+  //
+  // The enumerated table is now the DECLARED side of a walk, so the first thing
+  // to prove is that the walk still finds what the hand-written list named — on
+  // the real tree, not a fixture. Everything the walk adds beyond that rests on
+  // this: a walk that could not re-find the file somebody had already audited is
+  // not one to trust on the files nobody has.
+  const walked = discoverExpressRoutes();
+  for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
+    assert(
+      walked.writers.includes(file),
+      `the walk must re-find every declared express module — missed ${file} (found: ${walked.writers.join(', ')})`,
+    );
+  }
+  // …and the reject side on the real tree too: the walk must be SKIPPING fetch
+  // readers, not merely failing to find them. Zero here would mean the reject
+  // direction is untested against anything real.
+  assert(
+    walked.readers.length > 0 && walked.readCalls > 0,
+    `the walk must classify real fetch readers, not just miss them → ${JSON.stringify({ readers: walked.readers.length, calls: walked.readCalls })}`,
+  );
+  // The two sets are disjoint by construction — assert it, because the whole
+  // population argument is that no file is both.
+  assert(
+    walked.writers.every((f) => !walked.readers.includes(f)),
+    'no file may be both an express writer and a skipped fetch reader',
+  );
+
+  // An undeclared express writer fails, and the diagnostic must name THIS
+  // surface's table — surface 3's text would send an author to edit the wrong
+  // one, and "the failure text mirrors surface 3's" is the acceptance shape.
+  probs = auditPluginRouteModule(
+    'packages/plugins/plugin-new/src/http.ts',
+    undefined,
+    scanHonoRouteSource(`res.json({ data });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS),
+    EXPRESS_SURFACE,
+  );
+  assert(
+    probs.length === 1 && probs[0].includes('NOT DECLARED') &&
+    probs[0].includes('EXPRESS_RESPONSE_MODULES') && !probs[0].includes('PLUGIN_ROUTE_MODULES'),
+    `an undeclared express writer must fail naming its own table → ${JSON.stringify(probs)}`,
+  );
+  // NEGATIVE: the Hono surface keeps its own text, unchanged by the parameter.
+  probs = auditPluginRouteModule('x.ts', undefined, scanOf(preAuth));
+  assert(
+    probs.length === 1 && probs[0].includes('PLUGIN_ROUTE_MODULES') &&
+    !probs[0].includes('EXPRESS_RESPONSE_MODULES'),
+    `the Hono surface's diagnostic must be unchanged → ${JSON.stringify(probs)}`,
   );
 
   console.log('✓ check-route-envelope self-test passed');

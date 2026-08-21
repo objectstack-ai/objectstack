@@ -130,6 +130,29 @@ describe('LifecycleService.sweep — Reaper', () => {
     expect(report.swept[0].policy).toBe('retention');
   });
 
+  it('merges ttl.onlyWhen into the reap filter on the no-find fallback path too (#10165)', async () => {
+    // The two-method engine keeps the single bulk DELETE; the scope must ride
+    // that where exactly as it rides the candidate read on the batched path.
+    const { engine, deletes } = captureEngine([
+      {
+        name: 'sys_session',
+        lifecycle: {
+          class: 'transient',
+          ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } },
+        } as any,
+      },
+    ]);
+
+    const report = await service(engine).sweep();
+
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].where).toEqual({
+      expires_at: { $lt: isoCutoff('1d') },
+      revoked_at: { $null: true },
+    });
+    expect(report.swept[0].policy).toBe('ttl');
+  });
+
   it('never touches record-class or undeclared objects', async () => {
     const { engine, deletes } = captureEngine([
       { name: 'crm_account' },
@@ -738,6 +761,69 @@ describe('LifecycleService.sweep — unguarded reap batching (#5194)', () => {
       status: { $in: ['completed', 'failed'] },
     });
     expect(deletes.map((d) => d.where)).toEqual([{ id: 'r0' }, { id: 'r1' }]);
+  });
+
+  it('ttl.onlyWhen {$null: true} spares tombstones and still reaps ordinary expired rows (#10165)', async () => {
+    // The #10165 acceptance criterion, both halves, against rows that really
+    // disappear. A sys_session tombstone BACKDATES expires_at (#7732 stamps
+    // `now - 1000`), so it looks maximally expired — without the filter it is
+    // reaped first and hardest. Predicate-honouring store: the exclusion below
+    // is the emitted where at work, not a harness that returns nothing.
+    const sessionObjects: LifecycleObjectLike[] = [
+      {
+        name: 'sys_session',
+        lifecycle: {
+          class: 'transient',
+          ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } },
+        } as unknown as LifecycleObjectLike['lifecycle'],
+      },
+    ];
+    const store = new Map<string, Record<string, unknown>>([
+      // ordinary expired session — the positive control: MUST be reaped
+      ['expired', { id: 'expired', expires_at: '2020-01-01T00:00:00.000Z', revoked_at: null }],
+      // tombstone: backdated expiry, revoked_at stamped — MUST survive
+      ['tombstone', { id: 'tombstone', expires_at: '2019-01-01T00:00:00.000Z', revoked_at: '2019-01-01T00:00:00.000Z' }],
+      // live session: not yet expired
+      ['live', { id: 'live', expires_at: '2999-01-01T00:00:00.000Z', revoked_at: null }],
+    ]);
+    /** Honour scalar equality plus the operators the Reaper composes here
+     *  ($lt, $null) — and REFUSE combinators and unknown operators by
+     *  throwing rather than guessing, per the where-matcher convention
+     *  (`scripts/check-where-matcher-conformance.mjs`). */
+    const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+      Object.entries(where).every(([field, pred]) => {
+        if (field.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${field}`);
+        if (typeof pred !== 'object' || pred === null) return row[field] === pred;
+        const p = pred as Record<string, unknown>;
+        if ('$lt' in p) return typeof row[field] === 'string' && (row[field] as string) < (p.$lt as string);
+        if ('$null' in p) return p.$null === true ? row[field] == null : row[field] != null;
+        throw new Error(`fake engine: unsupported operator in ${JSON.stringify(pred)}`);
+      });
+    const { engine, finds, deletes } = captureEngine(sessionObjects, {
+      findImpl: (_object, options) =>
+        [...store.values()].filter((row) => matches(row, options?.where ?? {})).slice(0, options?.limit ?? store.size),
+      deleteImpl: (_object, options) => {
+        const id = options?.where?.id as string | undefined;
+        return { deletedCount: id !== undefined && store.delete(id) ? 1 : 0 };
+      },
+    });
+
+    const report = await service(engine).sweep();
+
+    // The emitted where: ttl cutoff AND the declared null predicate.
+    expect(finds[0].where).toEqual({
+      expires_at: { $lt: isoCutoff('1d') },
+      revoked_at: { $null: true },
+    });
+    // Exclusion half: the tombstone — non-null revoked_at, maximally expired —
+    // was never a candidate and never deleted. Positive-control half: the
+    // ordinary expired row IS deleted by the same sweep.
+    expect(deletes.map((d) => d.where)).toEqual([{ id: 'expired' }]);
+    expect([...store.keys()].sort()).toEqual(['live', 'tombstone']);
+    expect(report.swept).toEqual([
+      { object: 'sys_session', class: 'transient', policy: 'ttl', cutoff: isoCutoff('1d'), deleted: 1 },
+    ]);
+    expect(report.errors).toEqual([]);
   });
 
   it('an engine that cannot read rows keeps the single bulk DELETE — retention never just stops', async () => {

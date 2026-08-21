@@ -126,6 +126,19 @@ const TOOL = 'scripts/pm/dispatch-gates.mjs';
  */
 const SURFACE_MODULE = 'scripts/i18n-bundle-surface.mjs';
 
+/**
+ * The frame-sync gate whose COPIES table the tool's self-test pins the tier
+ * mandate against, declared for the same reason as SURFACE_MODULE above
+ * (#9116): since the 2026-08-20 clause-① narrowing, part of the
+ * fable-mandatory surface is DEFINED as "every file carrying an enforced copy
+ * of the decision frame", and the tool's self-test reaches that table through
+ * a spawned import — which is not a discoverable watch hint. Without this
+ * constant, a change to that gate's COPIES would move this gate's verdict
+ * while deriving nothing, which is the blind-spot shape the tool exists to
+ * remove. Pinned live in the tool's own self-test.
+ */
+const FRAME_MODULE = 'scripts/check-skill-frame-sync.mjs';
+
 const result = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });
 
 if (result.error) {

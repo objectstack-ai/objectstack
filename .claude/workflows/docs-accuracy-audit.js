@@ -210,6 +210,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/ui/index.mdx",
   "content/docs/ui/pages.mdx",
   "content/docs/ui/public-data-collection.mdx",
+  "content/docs/ui/react-pages.mdx",
   "content/docs/ui/setup-app.mdx",
   "content/docs/ui/translations.mdx",
   "content/docs/ui/views.mdx",

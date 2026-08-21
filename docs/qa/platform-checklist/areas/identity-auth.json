@@ -150,7 +150,7 @@
       "title": "Every supported auth method signs in when enabled, is absent when disabled, and is advertised exactly as configured",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous visitor", "provisioned user per method", "admin (for env configuration)"],
@@ -219,8 +219,8 @@
         {
           "clause": "2FA is a server-driven gate: with 2FA enabled for the user, password sign-in alone does NOT yield a usable session until the challenge completes",
           "oracle": "api",
-          "verify": "the sign-in response demands the challenge; get-session before completing it does not return an authenticated user",
-          "evidence": "the challenge-flow trace"
+          "verify": "the sign-in response demands the challenge; get-session before completing it does not return an authenticated user. Cookie-lane completion is pinned END-TO-END by packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (password sign-in answers twoFactorRedirect:true with a two-factor cookie; verify-totp through that cookie completes into a session) — cite the pin per rule 6 rather than hand-re-deriving the interrupt. The enrollment lifecycle AROUND this gate (reveal, verify-to-activate, backup codes, disable) is deep-tested by the identity-auth.two-factor-* items, not here",
+          "evidence": "the challenge-flow trace (or the cited pin output)"
         },
         {
           "clause": "the OIDC authorization-code flow is pinned by automation — run the pin and cite its output rather than re-deriving the round trip by hand",
@@ -255,7 +255,7 @@
         "enterprise SSO / generic OIDC (oidcProviders[] via genericOAuth; login button gated on usable providers)",
         "social OAuth (socialProviders map, per-provider enabled)",
         "device authorization grant (RFC 8628 — CLI/TV login)",
-        "two-factor (server-driven challenge, ADR-0069)",
+        "two-factor (server-driven challenge, ADR-0069; cookie-lane completion pinned end-to-end by two-factor-lockout.dogfood.test.ts — arm with OS_AUTH_TWO_FACTOR=true BEFORE boot, the plugin list is resolved once at auth-manager construction; enrollment lifecycle owned by identity-auth.two-factor-*)",
         "magic link (server endpoints live; no login UI and no advertised flag since #7481 — blocked, objectui#4179)",
         "passkeys (plugin flag accepted but nothing wired; no advertised flag since #7481 — blocked, objectui#4179)"
       ],
@@ -266,11 +266,13 @@
         "packages/spec/src/api/auth-endpoints.zod.ts (AuthEndpointPaths; AuthFeaturesConfigSchema; device-flow response schemas)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: the live change-email/delete-user + /.well-known/* rows; auth-plugin.ts mounts the two discovery docs at app root)",
         "packages/spec/src/kernel/public-auth-features.ts (flag semantics, gated inputs, the objectui#2513 known gap, and PUBLIC_AUTH_FEATURES_NOT_ADVERTISED — the reserved-but-unserved record for magicLink/passkeys)",
-        "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts"
+        "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (cookie-lane 2FA completion pinned end-to-end — sign-in → twoFactorRedirect + two-factor cookie → verify-totp → session — plus lockout counting/reset/lock-at-threshold/lazy-expiry/admin-unlock; also the arming precedent: OS_AUTH_TWO_FACTOR=true must precede bootStack)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new matrix item: per-method sign-in proof with both-sides gate checks and advertisement parity, grounded in the spec's plugin config + public feature registry", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-08", "change": "added the .well-known/openid-configuration + oauth-authorization-server discovery-document clause (issuer/endpoints match the mounted base, jwks cross-check) and self-service change-email + delete-user clauses; recorded the live-route divergences (device flow, password reset) from the spec paths (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-20", "change": "scoped scan-functionality (扫描功能) sweep: the 2FA clause asserted the interrupt but cited no pin — added packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts to source and noted in the clause verify + variant row that cookie-lane completion is pinned end-to-end by that test (cite per rule 6 instead of re-deriving). Enrollment lifecycle around the gate now owned by the four new identity-auth.two-factor-* items. No restructuring", "ref": "claude/new-session-0pv25p" }
       ]
     },
     {
@@ -1228,6 +1230,348 @@
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "from run #7663: recorded the fixture note that the `auto` policy's temporary-fallback branch cannot occur on `objectstack dev` — both transports always register (log fallback) and dev pins NODE_ENV='development', so neither deliverability gate can be made false and every row takes the invite path. The clause now says score the invite half and record the fallback half as not-exercised-by-fixture rather than as a defect, and names the boot that WOULD exercise it. Recorded so the next sweep does not re-derive it", "ref": "#7740" }
+      ]
+    },
+    {
+      "id": "identity-auth.two-factor-enrollment-reveal",
+      "title": "TOTP enrollment reveal: /two-factor/enable returns a parseable otpauth:// URI + backup codes, the declared reveal dialog's paths resolve against that exact shape, and the live re-reveal endpoint's behavior is recorded",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["a signed-in user with a known password enrolling their own second factor"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "ARMING, decided BEFORE boot: twoFactor defaults FALSE (`twoFactorFromEnv ?? pluginConfig.twoFactor ?? false`, packages/plugins/plugin-auth/src/auth-manager.ts:2143 and again at the features block ~:4086) and nothing in examples/ turns it on — set OS_AUTH_TWO_FACTOR=true before bootStack/the server starts (the plugin list is resolved ONCE at auth-manager construction; setting it after boot does nothing — packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts:122-128 is the precedent), or flip the Setup mfa_required toggle, which forces plugins.twoFactor on so gated users can comply (packages/plugins/plugin-auth/src/auth-plugin.ts:1302-1315, ADR-0069 D3)",
+          "a signed-in user with a known password (the lockout pin enrolls the seeded dev admin, password admin123)",
+          "TOTP codes: copy the hand-rolled RFC 6238 helper (base32Decode + totp, node:crypto only) from two-factor-lockout.dogfood.test.ts:74-106 — no otplib/speakeasy dependency exists anywhere in this repo and none may be added; better-auth's defaults are the RFC's (SHA-1, 6 digits, 30s)"
+        ],
+        "knownGaps": [
+          "BROWSER LANE BLOCKED(dependency): the QR-bearing reveal lives on sys_two_factor.enable_two_factor (resultDialog {path:'totpURI',format:'qrcode'} + {path:'backupCodes',format:'code-list'} + acknowledge gate — packages/platform-objects/src/identity/sys-two-factor.object.ts:61-83), but sys_two_factor is mounted in NO app (account.app.ts's tab list stops at sys_oauth_application), so there is no navigable surface that opens that dialog. The navigable variant, sys_user.enable_two_factor (sys-user.object.ts:401-416), declares NO resultDialog — only a static successMessage telling the user to scan a QR that is never rendered, and the source comment at :395-400 says outright the generic action engine can't render it yet. The resultDialog renderer contract itself is a SHOULD addressed to objectui with zero in-repo consumer (packages/spec/src/ui/action.zod.ts:1089-1145). Until an app mounts sys_two_factor or objectui ships the renderer, drive this item over the API and score the browser lane blocked(dependency) — never pass a QR clause on the strength of the successMessage text"
+        ]
+      },
+      "steps": [
+        "arm 2FA BEFORE boot (OS_AUTH_TWO_FACTOR=true exported first, or the Setup mfa_required path) — see fixtures; the in-process bootStack harness the lockout pin uses is the workable API-lane rig, since sys_two_factor's REST surface is get-by-id only",
+        "GUARD (assert-armed, first clause): GET /api/v1/auth/config and require features.twoFactor true; probe POST /api/v1/auth/two-factor/enable with an empty body and require a non-404 answer (400/401 is armed; 404 means the catch-all never mounted the two-factor family and NOTHING below may be scored)",
+        "sign in as the enrolling user and POST /api/v1/auth/two-factor/enable with { password }; capture the full response body",
+        "parse the returned totpURI: it must be an otpauth://totp/ URI whose label identifies the issuer + account (the app/user), whose secret query param base32-decodes cleanly (use the copied helper), and whose algorithm/digits/period params — where present — are the sane RFC defaults (SHA1/6/30)",
+        "assert backupCodes is a non-empty array of strings and record its size/format",
+        "cross-check the declared reveal contract against the live shape: sys_two_factor.enable_two_factor's resultDialog.fields[].path values ('totpURI', 'backupCodes' — sys-two-factor.object.ts:78-81) are dot paths into result.data (action.zod.ts resultDialog contract); confirm each resolves against the response the API actually returned",
+        "probe the re-reveal endpoint: POST /api/v1/auth/two-factor/get-totp-uri (POST — auth-route-ledger.ts:374; the mounted-surface list is publication-not-liveness per #7735, so drive it, don't infer) with { password }, and record the actual behavior: status, whether it demands the password, and whether it returns the SAME secret as enable did — the 'shown only once' promise in the enable dialog copy (sys-two-factor.object.ts:76) does not account for this endpoint existing",
+        "observe-and-flag the navigable surface: read the sys_user action metadata (meta surface) and record that enable_two_factor there carries no resultDialog — the toast-only reveal is a recorded product gap, not a clause to pass or fail this run on",
+        "negative lane: POST /two-factor/enable with a WRONG password (refused, no sys_two_factor row created) and as an anonymous caller (401)"
+      ],
+      "acceptance": [
+        {
+          "clause": "ASSERT-ARMED GUARD — the surface exists before anything is scored: /api/v1/auth/config advertises features.twoFactor true and POST /two-factor/enable answers non-404. Without OS_AUTH_TWO_FACTOR=true (or the mfa_required forcing path) set BEFORE boot, the two-factor family is simply absent from the catch-all, and every clause below would pass green against a 404 surface",
+          "oracle": "api",
+          "verify": "GET /api/v1/auth/config features.twoFactor === true, plus a probe POST to /api/v1/auth/two-factor/enable returning 400/401 (not 404). If this clause fails the run stops here: the remaining clauses are blocked(environment), never pass",
+          "evidence": "the /auth/config read + the probe status"
+        },
+        {
+          "clause": "enable returns a parseable enrollment: the response carries totpURI as an otpauth://totp/ URI whose label names issuer + account, whose secret base32-decodes (the copied RFC 6238 helper accepts it), and whose algorithm/digits/period are absent-or-sane (better-auth defaults SHA-1/6 digits/30s)",
+          "oracle": "api",
+          "verify": "parse the URI (the lockout pin's URL trick at two-factor-lockout.dogfood.test.ts:183 — rewrite otpauth:// to https:// and read searchParams); base32Decode(secret) throws on any invalid character, so a clean decode is the assertion",
+          "evidence": "the enable response + the parsed URI components (secret value redacted to its length)"
+        },
+        {
+          "clause": "backupCodes is a non-empty array of strings in the SAME response — the one-shot reveal has something to reveal",
+          "oracle": "api",
+          "verify": "the enable response's backupCodes array is non-empty; record count and shape (never the codes themselves in the run issue)",
+          "evidence": "the response shape (codes redacted, count recorded)"
+        },
+        {
+          "clause": "the declared reveal dialog points at paths the API actually returns: both resultDialog.fields[].path values on sys_two_factor.enable_two_factor ('totpURI', 'backupCodes') resolve as dot paths against the live enable response — a reveal dialog aimed at a path the API doesn't return renders an empty box, and because the reveal is one-shot the user silently loses their only copy of the secret and codes",
+          "oracle": "api",
+          "verify": "for each declared path, response[path] is defined and of the format-appropriate type (string for qrcode, string[] for code-list). The contract that paths address result.data is packages/spec/src/ui/action.zod.ts (resultDialog block, :1089-1145)",
+          "evidence": "the path-by-path resolution table against the captured response"
+        },
+        {
+          "clause": "OBSERVE-AND-FLAG — the live re-reveal endpoint is recorded, not assumed: POST /api/v1/auth/two-factor/get-totp-uri is a mounted route that can hand the totpURI back AFTER enrollment, which the dialog's 'shown only once' copy does not account for. The run records its actual behavior (password-gated? same secret re-revealed? works before and after verification?) — this clause is satisfied by an accurate record, not by any particular outcome",
+          "oracle": "api",
+          "verify": "drive POST /two-factor/get-totp-uri with and without the correct password, before and after the enrollment is verified; record each status and whether the returned URI carries the same secret. If it re-reveals with NO password gate, that is an authentication finding — RUNNER rule 2's carve-out applies (existence published, recipe withheld)",
+          "evidence": "the recorded behavior table (secrets redacted)"
+        },
+        {
+          "clause": "OBSERVE-AND-FLAG — the only navigable enrollment surface renders no QR: sys_user.enable_two_factor declares no resultDialog, only a successMessage instructing the user to scan a QR the engine never draws (the source's own admission, sys-user.object.ts:395-400). Recorded as the standing product gap that keeps the browser lane blocked — never scored as a pass",
+          "oracle": "api",
+          "verify": "the meta read of sys_user's actions shows enable_two_factor with successMessage and no resultDialog, while sys_two_factor (mounted nowhere) carries the real reveal dialog",
+          "evidence": "the two action-metadata reads"
+        }
+      ],
+      "negative": [
+        "enable with a wrong password succeeding — or an anonymous enable answering 2xx — is a FAIL: the password check is the proof-of-presence that stops a stolen cookie from enrolling an attacker's authenticator",
+        "scoring ANY clause with the guard clause unmet is the false positive this item was authored against: an unarmed boot 404s the whole family, and a runner who skips the guard ticks green boxes on an absent surface (absence-inference, both directions)",
+        "if get-totp-uri re-reveals the secret with no password gate, do NOT publish the reproduction — authentication carve-out, RUNNER rule 2: item + clause + 'detail withheld pending maintainer'"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-manager.ts:2143 (twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false — resolved once at construction) + ~:4086 (features.twoFactor, same resolution)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts:214 (POST /two-factor/enable, SDK row) + :374 (POST /two-factor/get-totp-uri in BETTER_AUTH_MOUNTED_SURFACE — publication, not liveness, #7735)",
+        "packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts (endpoint EXISTENCE is already pinned at LEDGERED_PLUGIN_CONFIG twoFactor:true — behavior is this item's gap, not existence)",
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts:61-83 (enable_two_factor resultDialog: totpURI qrcode + backupCodes code-list + acknowledge; :76 the 'shown only once' copy)",
+        "packages/platform-objects/src/identity/sys-user.object.ts:395-416 (the navigable variant: no resultDialog, successMessage only; :395-400 the engine-can't-render-it-yet admission)",
+        "packages/spec/src/ui/action.zod.ts:1089-1145 (resultDialog: dot paths into result.data; renderer contract is a SHOULD to objectui, no in-repo consumer)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts:74-106 (the hand-rolled RFC 6238 helper to copy — no OTP dependency exists or may be added) + :122-128 (arming must precede bootStack) + :178-185 (enable → totpURI → secret extraction precedent)",
+        "packages/platform-objects/src/apps/account.app.ts (mounts sys_inbox_message/sys_member/sys_account/sys_session/sys_api_key/sys_oauth_application — sys_two_factor absent, which is why the browser lane is blocked)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the TOTP 'scan the QR' enrollment lifecycle had only its challenge gate covered (one clause of identity-auth.auth-method-matrix). This item takes the reveal half: enable's { totpURI, backupCodes } shape, the resultDialog path contract, the get-totp-uri re-reveal probe, and the recorded no-QR gap on the only navigable surface", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "identity-auth.two-factor-verify-to-activate",
+      "title": "Enrollment is inert until one correct TOTP verifies on the session lane — and the run records what sys_two_factor.verified actually carries in between",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["a signed-in user mid-enrollment (session lane)", "the same user at the sign-in challenge (cookie lane)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "2FA armed BEFORE boot (OS_AUTH_TWO_FACTOR=true precedes bootStack, or the Setup mfa_required toggle forces plugins.twoFactor on — see identity-auth.two-factor-enrollment-reveal's fixtures for the full arming note; every clause here sits behind the same assert-armed guard)",
+          "an in-process harness (bootStack + an ObjectQL system read, exactly the lockout pin's rig) — sys_two_factor's REST surface is get-by-id only (apiMethods ['get']), so reading the enrollment row's verified flag needs the system-context read, not a REST list",
+          "TOTP codes from the copied RFC 6238 helper (two-factor-lockout.dogfood.test.ts:74-106); no OTP dependency may be added"
+        ],
+        "knownGaps": [
+          "browser lane blocked(dependency) — same standing gap as identity-auth.two-factor-enrollment-reveal: no app mounts sys_two_factor and the sys_user surface renders no QR, so the verify-to-activate walk is API-lane only until objectui ships the reveal/verify UI"
+        ]
+      },
+      "steps": [
+        "arm, boot, run the assert-armed guard (features.twoFactor true, /two-factor/enable non-404) — nothing below is scored without it",
+        "sign in, POST /two-factor/enable { password }, decode the secret from the totpURI (the copied helper)",
+        "IMMEDIATELY read the sys_two_factor row via the system-context ObjectQL read and record the literal value of `verified` — this is the latent-default probe (see the clause), captured before anything else touches the row",
+        "before any verification, drive the cookie lane: POST /auth/sign-in/email with the password, record whether twoFactorRedirect interposes, then attempt POST /two-factor/verify-totp through the two-factor cookie with a CORRECT code from the new secret — better-auth's documented posture is that the sign-in path refuses an unverified enrolment (TOTP_NOT_ENABLED) before any lockout bookkeeping (the lockout pin's own comment, two-factor-lockout.dogfood.test.ts:187-190); record the actual status/code",
+        "complete enrollment on the SESSION lane: with the live session (no two-factor cookie), POST /two-factor/verify-totp { code } — this call is isSignIn:false, deliberately touches no lockout counter (test :23-30), and 200s (the setup precedent at :191-194, until now cited by no checklist item)",
+        "re-read the row: verified must now be true; sys_user.two_factor_enabled true",
+        "prove activation on the cookie lane: a fresh password sign-in stops at the challenge (twoFactorRedirect: true + two-factor cookie, test :223-230) and a correct code through that cookie completes into a session — NOTE completing enrollment/sign-in rotates the session token (test :375-377), so refresh your bearer before any follow-up calls or a stale-token 401 will read like a defect",
+        "negative: a wrong code on the session lane does not activate (row stays unverified; enable can be re-driven)"
+      ],
+      "acceptance": [
+        {
+          "clause": "ASSERT-ARMED GUARD — identical to identity-auth.two-factor-enrollment-reveal clause 0 and binding for the same reason: unarmed boots 404 the family and would green-tick every clause below",
+          "oracle": "api",
+          "verify": "features.twoFactor true in /auth/config + non-404 probe; on failure everything below is blocked(environment)",
+          "evidence": "the config read + probe status"
+        },
+        {
+          "clause": "a fresh enrollment is INERT at sign-in: between enable and the first successful verify, the new factor cannot complete a sign-in — the cookie-lane verify-totp with a correct code from the just-enabled secret is refused (better-auth's posture: an unverified enrolment draws TOTP_NOT_ENABLED before any lockout bookkeeping). The run records the exact status and error code observed, including whether the password stage even interposed a challenge for the unverified enrollment",
+          "oracle": "api",
+          "verify": "the pre-verification cookie-lane attempt with a CORRECT code returns non-2xx; record status + body error code and whether sign-in answered twoFactorRedirect at that point. The expectation's source is the lockout pin's setup comment (two-factor-lockout.dogfood.test.ts:187-190) — if the live behavior diverges, record what actually happened rather than forcing the wording",
+          "evidence": "the sign-in + refused-verify trace"
+        },
+        {
+          "clause": "LATENT-DEFAULT PROBE (observe-and-flag, auth-integrity — NOT a confirmed defect): record which value sys_two_factor.verified actually carries immediately post-enable. The suspicion it encodes: the object declares verified with defaultValue: true (sys-two-factor.object.ts:166-170) while better-auth enrolls verified:false, and AUTH_TWO_FACTOR_SCHEMA maps only the four RENAMED fields (backupCodes/userId/failedVerificationCount/lockedUntil — auth-schema-config.ts:366-374; `verified` needs no rename, so its absence from the map is not itself the defect). IF better-auth ever omits the column on insert, the ObjectQL default would mark an unverified enrollment active. The clause is satisfied by the accurate record; verified===false post-enable is the healthy reading",
+          "oracle": "api",
+          "verify": "the system-context ObjectQL read of the row between enable and verify: capture `verified` verbatim. If it reads TRUE pre-confirmation AND clause 2's sign-in lane accepts the factor, that is an authentication-integrity finding — RUNNER rule 2's carve-out governs its publication (item + clause + detail withheld pending maintainer)",
+          "evidence": "the row read (timestamped between enable and verify)"
+        },
+        {
+          "clause": "one correct TOTP on the SESSION lane activates: verify-totp with the live session (isSignIn:false — no lockout counter touched) returns 200, and the row now reads verified true with sys_user.two_factor_enabled true",
+          "oracle": "api",
+          "verify": "the 200 on the session-lane verify + the post-verify row read + the sys_user read (two_factor_enabled is the AUTH_TWO_FACTOR_USER_FIELDS mapping)",
+          "evidence": "the verify response + both row reads"
+        },
+        {
+          "clause": "activation makes the challenge real: a fresh password sign-in now answers twoFactorRedirect: true with a two-factor cookie and does NOT hand out a usable session; a correct code through that cookie completes into one",
+          "oracle": "api",
+          "verify": "the post-activation sign-in trace (twoFactorRedirect + Set-Cookie) followed by the cookie-lane verify 200 returning a session token — the same shape the lockout pin's beginChallenge/verifyWithCookie drive",
+          "evidence": "the challenge + completion trace"
+        }
+      ],
+      "negative": [
+        "a fresh, never-verified enrollment satisfying a sign-in challenge is an authentication FAIL of the highest class — publish under RUNNER rule 2's carve-out only (no reproduction anywhere on GitHub), and apply rule 7's independent re-derivation before acting",
+        "a session-lane verify that increments the lockout counter is a FAIL — the isSignIn:false path deliberately touches no budget (a user fat-fingering enrollment must not burn their sign-in lockout allowance)",
+        "scoring any clause on an unarmed boot — see the guard"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts:217 (POST /two-factor/verify-totp, SDK row)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts:187-195 (the verify-to-activate SETUP precedent this item promotes to a tested contract: enrolment confirmed through the session path, TOTP_NOT_ENABLED posture for unverified enrolments) + :23-30 (isSignIn decides lockout bookkeeping) + :375-377 (completing enrolment rotates the session token)",
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts:166-170 (verified: defaultValue TRUE — the declared default the probe interrogates)",
+        "packages/plugins/plugin-auth/src/auth-schema-config.ts:366-374 (AUTH_TWO_FACTOR_SCHEMA: four renamed fields, verified unmapped-because-unrenamed) + AUTH_TWO_FACTOR_USER_FIELDS (twoFactorEnabled → two_factor_enabled)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts:2143 (arming default false, resolved once at construction)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: the enable→verify→active transition existed only as uncited test SETUP in the lockout pin. Encodes the inert-until-verified contract, the session-lane/cookie-lane split, and the verified-defaultValue:true latent-default probe (observe-and-flag, worded as suspicion not fact)", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "identity-auth.two-factor-backup-codes",
+      "title": "Backup codes: revealed once at enable, spendable exactly once at the sign-in challenge, and regeneration kills the prior set — while the only navigable regenerate surface never shows the new codes",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["a user with a VERIFIED enrollment (run identity-auth.two-factor-verify-to-activate's path first)", "the same user at the sign-in challenge spending a code"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "2FA armed BEFORE boot + a VERIFIED enrollment — this item's challenge lane only exists after identity-auth.two-factor-verify-to-activate's walk completes; run the three enrollment items as one sequence on one boot",
+          "the backup codes captured from the enable response (they are never legitimately retrievable later — that unretrievability is itself under test)",
+          "in-process system reads for the storage-shape observation (sys_two_factor REST is get-by-id only)"
+        ],
+        "knownGaps": [
+          "browser lane blocked(dependency) — same standing gap as identity-auth.two-factor-enrollment-reveal: sys_two_factor's one-shot regenerate reveal dialog is mounted in no app, and the navigable sys_user surface has no reveal at all (which this item records as its own observe-and-flag clause)"
+        ]
+      },
+      "steps": [
+        "arm, boot, guard (assert-armed — same clause 0 as the sibling items), enable + verify the enrollment, retaining the enable response's backupCodes",
+        "begin a sign-in challenge (password sign-in → twoFactorRedirect: true + two-factor cookie) and POST /two-factor/verify-backup-code through the cookie with ONE retained code; capture the 200 + session",
+        "begin a FRESH challenge and spend the SAME code again; capture the refusal — single-use",
+        "spend a SECOND retained code at another fresh challenge to prove the refusal above was consumption, not a dead code family",
+        "as the signed-in user, POST /two-factor/generate-backup-codes { password }; capture the NEW set from the response",
+        "begin a fresh challenge and attempt an UNSPENT code from the OLD set; capture the refusal — regeneration invalidated the prior set wholesale",
+        "spend one NEW code to prove the new set is live",
+        "storage-shape observation: read sys_two_factor.backup_codes via the system-context read and record what the column actually carries (the declaration says JSON-serialized — sys-two-factor.object.ts:160-164; record whether the stored form is plaintext codes or an encrypted/hashed blob, without publishing either)",
+        "observe-and-flag the navigable surface: sys_user.generate_backup_codes (sys-user.object.ts:435-452) declares NO resultDialog — a toast only. On the only surface a user can actually reach, regenerating kills the old set and never shows the new one: a self-inflicted lockout path. The sys_two_factor variant with the one-shot reveal (sys-two-factor.object.ts:104-126) is mounted nowhere",
+        "negative: generate-backup-codes with a wrong password refused (old set must survive the refused attempt); anonymous call 401"
+      ],
+      "acceptance": [
+        {
+          "clause": "ASSERT-ARMED GUARD + verified-enrollment precondition: features.twoFactor advertised, the two-factor family mounted, and the enrollment VERIFIED (an unverified enrollment never reaches a challenge, so every spend clause below would be unreachable, not passed)",
+          "oracle": "api",
+          "verify": "the /auth/config read + the sibling item's activation walk completing on this boot",
+          "evidence": "the config read + the activation trace reference"
+        },
+        {
+          "clause": "a backup code completes the sign-in challenge: verify-backup-code through the two-factor cookie returns 200 and a usable session — the codes are a real second factor, not decoration on the enable response",
+          "oracle": "api",
+          "verify": "the challenge trace: sign-in (twoFactorRedirect) → verify-backup-code 200 → the session answers an authed call",
+          "evidence": "the spend trace (code value redacted)"
+        },
+        {
+          "clause": "single-use: the SAME code at a fresh challenge is refused, while a different retained code still works — consumption is per-code, and the positive control proves the refusal is consumption rather than a globally dead set",
+          "oracle": "api",
+          "verify": "the same-code re-spend non-2xx + the sibling code's 200 at the next challenge",
+          "evidence": "the two traces"
+        },
+        {
+          "clause": "regeneration invalidates the prior set wholesale: after generate-backup-codes, an UNSPENT code from the old set is refused and a code from the new set works — exactly what the regenerate dialog's own copy promises ('Previous backup codes are now invalid', sys-two-factor.object.ts:113,120)",
+          "oracle": "api",
+          "verify": "the old-unspent-code refusal + the new-code 200, both at fresh challenges after the regenerate 200",
+          "evidence": "the regenerate response shape + the two spend traces"
+        },
+        {
+          "clause": "OBSERVE-AND-RECORD — the storage shape: what sys_two_factor.backup_codes actually holds (declared 'JSON-serialized backup recovery codes'). Plaintext codes at rest would be an authentication finding (publishable only under RUNNER rule 2's carve-out); an encrypted/hashed blob is the healthy reading. The clause is satisfied by the accurate record",
+          "oracle": "api",
+          "verify": "the system-context row read; describe the stored form (length/shape), never the value",
+          "evidence": "the described (not quoted) column content"
+        },
+        {
+          "clause": "OBSERVE-AND-FLAG — the navigable regenerate is a lockout path: sys_user.generate_backup_codes has no resultDialog (successMessage toast only, refreshAfter:false), so the console user who regenerates has their old codes killed and the new ones never displayed. Recorded as the standing product gap (paired with the unmounted sys_two_factor reveal variant); never scored as a pass",
+          "oracle": "api",
+          "verify": "the meta read of sys_user.generate_backup_codes (no resultDialog) vs sys_two_factor.regenerate_backup_codes (one-shot reveal declared, surface unmounted)",
+          "evidence": "the two action-metadata reads"
+        }
+      ],
+      "negative": [
+        "a code spendable twice is an authentication FAIL — carve-out publication only (RUNNER rule 2), reproduce twice per rule 2 before recording",
+        "old-set codes surviving a regeneration is a FAIL of the same class — the regenerate dialog's own copy states the invalidation",
+        "generate-backup-codes succeeding with a wrong password — or anonymously — is a FAIL: regeneration destroys the recovery path, so it demands the same proof-of-presence as enable/disable",
+        "a refused wrong-password regenerate that STILL rotated the set is a FAIL (the refusal must be a no-op — verify an old code still spends after it)"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts:215-216 (POST /two-factor/generate-backup-codes, POST /two-factor/verify-backup-code — SDK rows)",
+        "packages/platform-objects/src/identity/sys-two-factor.object.ts:104-126 (regenerate_backup_codes: password param, one-shot resultDialog, 'previous codes stop working immediately') + :160-164 (backup_codes storage declaration)",
+        "packages/platform-objects/src/identity/sys-user.object.ts:435-452 (generate_backup_codes on the navigable surface: successMessage only, NO resultDialog — the recorded lockout path)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (the arming + challenge-cookie rig this item reuses: beginChallenge/cookieHeader; TOTP helper :74-106)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: backup codes had zero coverage — spend/single-use/regenerate-invalidates were asserted nowhere, and the no-reveal regenerate on the navigable sys_user surface (a self-lockout path) was unrecorded", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "identity-auth.two-factor-disable-lifecycle",
+      "title": "Disable tears the factor down completely — row gone, flag off, next sign-in unchallenged, stale backup codes dead — is password-gated server-side, and under mfa_required re-gates through the grace-clock machinery",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["a user with an ACTIVE (verified) enrollment disabling it", "the same user post-disable at a fresh sign-in", "for the mfa_required clause: the same user under an enforced-MFA boot"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "2FA armed BEFORE boot + an ACTIVE enrollment with retained backup codes (run the enrollment items' sequence first on the same boot)",
+          "for the re-gate clause: a boot (or Setup patch) with mfa_required on — the toggle itself forces plugins.twoFactor on (auth-plugin.ts:1302-1315), so this variant needs no separate env arming",
+          "in-process system reads (sys_two_factor REST is get-by-id only; post-disable the row's ABSENCE is the assertion, which needs the system-context find)"
+        ],
+        "knownGaps": [
+          "browser lane blocked(dependency) — same standing gap as the sibling two-factor items (no app mounts sys_two_factor; the sys_user disable action is navigable but the item's teardown proofs are all API/row assertions anyway)"
+        ]
+      },
+      "steps": [
+        "arm, boot, guard (assert-armed), establish an ACTIVE enrollment (enable → session-lane verify), retain unspent backup codes, and confirm the challenge interposes (twoFactorRedirect: true) — the BEFORE state every teardown clause diffs against",
+        "NEGATIVE FIRST (while the enrollment still exists to protect): POST /two-factor/disable with a WRONG password; capture the refusal, then re-prove the enrollment is intact — the row still present, a fresh sign-in still challenged",
+        "POST /two-factor/disable with the CORRECT password; capture the 200",
+        "assert teardown: the system-context find on sys_two_factor for this user returns NO row; sys_user.two_factor_enabled reads false",
+        "fresh password sign-in: the response is a full session with NO twoFactorRedirect and no two-factor cookie — the challenge is gone, not just the row",
+        "fire POST /two-factor/verify-backup-code with a retained unspent code anyway (no challenge cookie exists to carry it) and capture the refusal — stale codes are dead, not dormant",
+        "re-enable + verify to confirm the lifecycle is repeatable (a fresh secret, fresh codes — the old secret's TOTP codes must not verify the new enrollment)",
+        "mfa_required variant (separate boot or Setup patch): with enforced MFA on, disable the active enrollment and record what ACTUALLY happens next, against the source's machinery (auth-manager.ts computeAuthGate ~:5084-5160): the disable itself is NOT refused anywhere in the source; on the next request the gate sees required-but-unenrolled and answers 403 MFA_REQUIRED only once mfa_grace_period_days (default 7) have elapsed from sys_user.mfa_required_at — a stamp written LAZILY the first time the user is seen unenrolled and, as far as the source shows, never cleared on enrollment. So the post-disable posture depends on that stamp: an old elapsed stamp gates immediately; no stamp opens a fresh grace window. Record the stamp value and the observed branch",
+        "while gated (if the gate engaged), confirm the /two-factor/* enrollment endpoints still answer — the re-gate must leave the compliance path open (the mfa_required toggle forces the plugin on for exactly this reason, per its own comment)"
+      ],
+      "acceptance": [
+        {
+          "clause": "ASSERT-ARMED GUARD + active-enrollment precondition, same as the sibling items — a disable 'passing' against an absent surface or an inert enrollment proves nothing",
+          "oracle": "api",
+          "verify": "features.twoFactor advertised; the pre-disable challenge trace shows twoFactorRedirect: true",
+          "evidence": "the config read + the BEFORE challenge trace"
+        },
+        {
+          "clause": "wrong-password disable is refused SERVER-SIDE and is a no-op: the refusal is not a client-only confirm (a stolen session cookie must not be able to strip the account's second factor), and after it the row still exists and a fresh sign-in still challenges",
+          "oracle": "api",
+          "verify": "the wrong-password disable non-2xx + the intact row read + a still-challenged sign-in trace",
+          "evidence": "the refusal + the two intact-state proofs"
+        },
+        {
+          "clause": "correct-password disable tears down completely: the sys_two_factor row for the user is GONE (not merely flagged) and sys_user.two_factor_enabled is false",
+          "oracle": "api",
+          "verify": "the disable 200 + the empty system-context find on sys_two_factor + the sys_user read",
+          "evidence": "the response + both reads"
+        },
+        {
+          "clause": "the next password sign-in is unchallenged: a full session comes back with NO twoFactorRedirect and no two-factor cookie — the factor is removed from the sign-in path, not just from storage",
+          "oracle": "api",
+          "verify": "the post-disable sign-in response body (no twoFactorRedirect key or false) and Set-Cookie set; the session answers an authed call",
+          "evidence": "the sign-in trace"
+        },
+        {
+          "clause": "stale backup codes are dead: a retained unspent code is refused post-disable (and after a re-enable, neither the old secret's TOTP codes nor the old backup codes verify the NEW enrollment)",
+          "oracle": "api",
+          "verify": "the post-disable verify-backup-code refusal + (post re-enroll) an old-secret TOTP and old backup code each refused at the new enrollment's challenge",
+          "evidence": "the refusal traces"
+        },
+        {
+          "clause": "OBSERVE-AND-RECORD — the mfa_required re-gate follows the grace-clock machinery, not a hard block on disable: the source refuses the disable nowhere; re-gating is computeAuthGate answering 403 MFA_REQUIRED for a required-but-unenrolled user once the grace window from sys_user.mfa_required_at elapses, and that stamp is written lazily on first sight of non-enrollment and (per the source) never cleared afterward — so whether the gate bites immediately after a disable or opens a fresh grace window depends on the stamp the user already carries. The run records the stamp, the branch observed, and — the 'not stranded' half — that the /two-factor/* enrollment endpoints remain reachable while gated (mfa_required forces plugins.twoFactor on so gated users can comply). An accurate record satisfies the clause; a gated user whose enrollment endpoints 404 is the FAIL",
+          "oracle": "api",
+          "verify": "under an mfa_required boot: disable 200 → read sys_user.mfa_required_at → drive an authed request and record 2xx-in-grace vs 403 MFA_REQUIRED → while gated (or with the grace shrunk via mfa_grace_period_days=0), POST /two-factor/enable answers non-404. Source: auth-manager.ts computeAuthGate ~:5084-5160 (lazy stamp :5139-5152, fail-open catch) + auth-plugin.ts:1302-1315 (the forcing)",
+          "evidence": "the recorded branch + stamp + the enrollment-endpoint reachability probe"
+        }
+      ],
+      "negative": [
+        "a disable that succeeds with a wrong password — or leaves the challenge alive while reporting the factor off (row gone but sign-in still demands a code, or the reverse) — is a FAIL; the wrong-password case is an account-downgrade hole and rides RUNNER rule 2's carve-out if found",
+        "stale backup codes (or the old secret's TOTPs) verifying anything after the disable/re-enable is an authentication FAIL — carve-out publication",
+        "under mfa_required, a gated user whose /two-factor/* endpoints are unreachable is stranded-not-re-gated — FAIL against the forcing comment's own contract",
+        "do NOT file the immediately-biting gate (old elapsed mfa_required_at stamp) as 'no grace period' — the lazy, never-cleared stamp is the mechanism the source actually implements; record it, and if the never-cleared stamp is judged wrong that is a design finding for the anchor card, not a clause fail"
+      ],
+      "traps": ["dispatcher-vs-hono-route", "absence-inference"],
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-route-ledger.ts:213 (POST /two-factor/disable, SDK row)",
+        "packages/platform-objects/src/identity/sys-user.object.ts:417-434 (disable_two_factor: password param, visible only while two_factor_enabled) + packages/platform-objects/src/identity/sys-two-factor.object.ts:84-102 (the sys_two_factor variant, same endpoint)",
+        "packages/plugins/plugin-auth/src/auth-manager.ts ~:5084-5160 (computeAuthGate: MFA_REQUIRED after the grace window; mfa_required_at stamped lazily at :5141-5147, no clearing write anywhere in the source; fail-open) + :4960 (isAuthGateActive)",
+        "packages/plugins/plugin-auth/src/auth-plugin.ts:1302-1315 (mfa_required forces plugins.twoFactor on — 'otherwise gated users would have no way to comply' — the not-stranded contract the last clause tests)",
+        "packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts (arming + challenge rig + TOTP helper precedent, as on the sibling items)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "authored in the scoped scan-functionality (扫描功能) coverage sweep: disable had zero coverage. Encodes full teardown (row/flag/challenge/stale codes), the server-side password gate with negative-first ordering, and the mfa_required re-gate clause worded against the ACTUAL source machinery (lazy never-cleared grace stamp, computeAuthGate) rather than an assumed hard block", "ref": "claude/new-session-0pv25p" }
       ]
     }
   ]

@@ -129,6 +129,9 @@ describe('ADR-0105 D9 — cross-org approver targeting through ApprovalService',
     // This is the whole point of the split: targeting must not relocate the
     // request into the approver's organization, or the plant would lose its own
     // audit trail to the group.
+    // (#10331 has since declared `organization_id` on the contract row types,
+    // so returned rows carry it typed; these persisted-row reads stay because
+    // storage placement across all three tables is exactly what's pinned here.)
     expect(engine._tables['sys_approval_request'][0].organization_id).toBe('o_plant');
     expect(engine._tables['sys_approval_approver'][0].organization_id).toBe('o_plant');
     expect(engine._tables['sys_approval_action'][0].organization_id).toBe('o_plant');

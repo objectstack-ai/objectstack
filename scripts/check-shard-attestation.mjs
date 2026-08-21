@@ -844,8 +844,13 @@ async function selfTest() {
     };
     const baseline = await withWorkflow(good);
     assert(baseline.problems.length === 0, 'the checked-in ci.yml passes the static drift guard');
-    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3]', 'shard: [1, 2, 3, 4]'))).problems.some((p) => p.includes('declares 4 shard')), 'growing the matrix without the gate ⇒ red');
-    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/3', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
+    // The anchor carries the FULL test matrix, closing bracket included, on
+    // purpose: the dogfood job below also spells `shard: [1, 2, 3]`, and
+    // `String.replace` takes the first match. A short anchor would silently
+    // start mutating dogfood's matrix instead — still red, still for a
+    // plausible-looking reason, and no longer the assertion written here.
+    assert((await fixture('grow the matrix', (s) => s.replace('shard: [1, 2, 3, 4, 5, 6]', 'shard: [1, 2, 3, 4, 5, 6, 7]'))).problems.some((p) => p.includes('declares 7 shard')), 'growing the matrix without the gate ⇒ red');
+    assert((await fixture('shrink the roster', (s) => s.replace('--leg "test/6', '--leg "test/2'))).problems.some((p) => p.includes('expects 2 attestation')), 'shrinking the gate roster without the matrix ⇒ red');
     assert((await fixture('uncounted intruder', (s) => s.replace(/^jobs:$/m, 'jobs:\n  intruder:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-shard-attestation.mjs --emit'))).problems.some((p) => p.includes('no gate counts')), 'an attestation no gate counts ⇒ red');
     assert((await fixture('rename test-gate', (s) => s.replace('  test-gate:', '  test-gate-renamed:'))).problems.some((p) => p.includes("'test-gate'")), 'losing a required-context gate ⇒ red');
     assert((await fixture('typo the artifact name', (s) => s.replace('name: shard-attest-test-', 'name: shard-attest-typo-'))).problems.some((p) => p.includes('cannot count')), 'an artifact name the gate cannot match ⇒ red');

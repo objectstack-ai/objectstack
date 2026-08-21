@@ -396,10 +396,14 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // `getMetaTypes()` synthesises those with allowRuntimeCreate:true;
             // the write gate must keep agreeing with what it advertises.
             const { protocol, rows } = makeProtocol(undefined);
+            // [#10194] `theme` resolves a schema through UNREGISTERED_KIND_SCHEMAS
+            // now, so the probe body must be spec-valid — the door under test
+            // (authorization) is unchanged, but a malformed body would 422
+            // before proving anything about it.
             const result = await protocol.saveMetaItem({
                 type: 'theme',
                 name: 'rc3_probe_theme',
-                item: { name: 'rc3_probe_theme', label: 'Probe', tokens: {} },
+                item: { name: 'rc3_probe_theme', label: 'Probe', colors: { primary: '#3b82f6' } },
             });
             expect(result.success).toBe(true);
             expect(metaRows(rows).length).toBe(1);
@@ -493,7 +497,8 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             },
             {
                 type: 'theme', // no static registry entry (plugin-registered)
-                item: { name: 'rc3_receipt_view', label: 'Receipt', tokens: {} },
+                // [#10194] spec-valid body — theme resolves a schema now.
+                item: { name: 'rc3_receipt_view', label: 'Receipt', colors: { primary: '#3b82f6' } },
             },
         ];
 

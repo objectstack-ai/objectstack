@@ -54,6 +54,8 @@
  */
 
 /** A character that can end an identifier -- i.e. a value, so `/` is division. */
+import { isEntrypoint } from './invoked-as.mjs';
+
 const IDENT_CHAR = /[\w$]/;
 
 /**
@@ -301,7 +303,7 @@ export function selfTest() {
 // Executed only as a CLI. Importing this module must have NO side effect: the
 // gates below it are the callers, and a shared module that exits on import is
 // a shared module nobody can share.
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) selfTest();
   else {
     console.error('usage: node scripts/js-comment-mask.mjs --self-test');

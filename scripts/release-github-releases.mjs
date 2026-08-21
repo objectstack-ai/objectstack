@@ -77,6 +77,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -1009,7 +1010,7 @@ async function selfTest() {
   );
 }
 
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isEntrypoint(import.meta.url);
 if (invokedDirectly) {
   try {
     if (process.argv.includes('--self-test')) {

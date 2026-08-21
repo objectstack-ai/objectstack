@@ -105,6 +105,13 @@ const result = BorderRadiusSchema.parse(data);
 | **zIndex** | `never` | optional | [REMOVED] `theme.zIndex` was removed in @objectstack/spec 17.0.0 (#5021, ADR-0049 D2) — the engine emitted `--z-base` … `--z-tooltip` and nothing read one, so an overlay you "lifted" still stacked by document order. Delete the key; if your own CSS reads those variables, declare them under `customVars` (`{ "z-modal": "1050" }` emits exactly the same `--z-modal`). Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
 | **customVars** | `Record<string, string>` | optional | Custom CSS variables (key-value pairs) |
 | **extends** | `string` | optional | Base theme to extend from |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
 
 
 ---
