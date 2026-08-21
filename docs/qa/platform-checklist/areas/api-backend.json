@@ -441,7 +441,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -453,7 +453,7 @@
         "app": "showcase",
         "requires": [
           "showcase_invoice.name is required:true — the cheapest deterministic VALIDATION_FAILED",
-          "a member persona lacking showcase_announcement create (member_default: create false) — the deterministic 403"
+          "a member persona lacking showcase_announcement create (member_default: create false) — the deterministic 403. Stock showcase SEEDS two loginable non-admin personas for exactly this: Mei Phone (phone.demo@example.com) and Ada Auditor (auditor.demo@example.com), both with DEMO_PERSONA_PASSWORD = 'showcase123' (examples/app-showcase/src/security/demo-personas.ts, provisioned by seed-approval-demo.ts on every dev boot). Driven as Mei, POST /api/v1/data/showcase_announcement answers 403 PERMISSION_DENIED — a ledgered code — so the 403 family is reachable with no provisioning at all. POST /api/v1/auth/sign-up/email also works on a stock dev boot if a THIRD identity is wanted"
         ]
       },
       "steps": [
@@ -533,7 +533,13 @@
           "change": "new — error-envelope conformance sampling grounded in the two-tier code ledger, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 1 and steps 8/9 at ErrorCode, the canonical ADR-0112 D4 union export. The item asked the runner to hand-union StandardErrorCode with ERROR_CODE_LEDGER, but the latter is a Record of package name to code array rather than a flat code list, and three of the item's own sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are not in StandardErrorCode at all — they resolve only through REGISTERED_ERROR_CODES. error-code-ledger.zod.ts already exports ErrorCode as exactly that union, so the clause now names one export instead of prescribing a union the runner has to rebuild (#9417)", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 1 and steps 8/9 at ErrorCode, the canonical ADR-0112 D4 union export. The item asked the runner to hand-union StandardErrorCode with ERROR_CODE_LEDGER, but the latter is a Record of package name to code array rather than a flat code list, and three of the item's own sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are not in StandardErrorCode at all — they resolve only through REGISTERED_ERROR_CODES. error-code-ledger.zod.ts already exports ErrorCode as exactly that union, so the clause now names one export instead of prescribing a union the runner has to rebuild (#9417)", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-08-21",
+          "change": "named the seeded demo personas in fixtures.requires. The 17.1.0 sweep recorded this item's 403 family as unreachable on stock fixtures and scored the item partial, having assumed a runner gets only the dev admin; the filer withdrew that in the same wave after driving Mei to a real 403 PERMISSION_DENIED (6/6 families, superseding #10233 on that point). The personas were always there — the item just never said so, which is what made the wrong assumption cheap. Requirement text now carries both persona emails, the well-known password constant and its source file, so the next runner does not repeat it (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {
@@ -1046,7 +1052,7 @@
       "title": "Filter comparand conformance: only the accepted comparand TYPES pass the where-door, a bigint past the exact-integer limit is refused, and a dotted head is classified rather than guessed",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin"],
@@ -1056,14 +1062,15 @@
           "an object with a scalar field, a relation (lookup/master-detail) field, and — if the showcase ships one — a formula/virtual field, so all three dotted-head classes are reachable"
         ],
         "knownGaps": [
-          "If no formula/virtual field exists on a filterable object in the stock seeds, the `virtual` head class is blocked(fixture) — record it rather than scoring the class from the relation case."
+          "If no formula/virtual field exists on a filterable object in the stock seeds, the `virtual` head class is blocked(fixture) — record it rather than scoring the class from the relation case.",
+          "The bigint past-limit refusal (clause 2) has NO REST arm at all — it is not a thin fixture, it is a door property. `normalizeFilterComparandTypes` refuses on `typeof value === 'bigint'`, and JSON.parse produces `number` for every numeric literal, so the arm is unreachable through any JSON transport regardless of magnitude. Score clause 2 at the engine/driver door and record the REST verdict as not-applicable; a REST 200 there is neither evidence of enforcement nor of a leak."
         ]
       },
       "steps": [
         "read ACCEPTED_FILTER_COMPARAND_TYPES in packages/spec/src/data/filter-comparand-type.ts and enumerate the current members — the variants matrix below is pinned to that export, so a mismatch is a validator failure, not a judgement call",
         "for EACH accepted comparand type, issue a data-API read whose `where` carries a comparand of that type against a compatible field, and record the answer set",
         "issue a read whose comparand is a type NOT in the accepted set (e.g. a plain object, an array where the operator takes a scalar, undefined, a function-shaped value) and capture the refusal",
-        "probe the bigint boundary: a bigint comparand at FILTER_COMPARAND_BIGINT_EXACT_LIMIT (2n**53n) and one past it",
+        "probe the bigint boundary AT AN IN-PROCESS DOOR: pass a real JS bigint at FILTER_COMPARAND_BIGINT_EXACT_LIMIT (2n**53n) and one past it through objectql/engine (or replay FILTER_COMPARAND_TYPE_CASES against a driver) — not over REST, where JSON.parse has already turned the literal into a number before the door is consulted",
         "issue reads with dotted filter heads of each class — a relation head, a virtual/formula head, and a scalar head (a dot on a field that is not traversable) — and record how each is classified",
         "cross-check the SAME filters through a second door (the engine/objectql path or a view filter) so the refusal is proven at the contract, not at one transport"
       ],
@@ -1081,10 +1088,10 @@
           "evidence": "status + message + the returned row count vs the unfiltered count"
         },
         {
-          "clause": "the bigint exact-integer limit is enforced at the boundary: a value inside the limit is accepted, one past it is refused rather than silently losing precision",
-          "oracle": "api",
-          "verify": "both requests; the past-limit case must refuse — a 200 whose comparand was rounded is a silent-wrong-answer FAIL",
-          "evidence": "both responses"
+          "clause": "the bigint exact-integer limit is enforced at the boundary — a value inside the limit narrows and is accepted, one past it is refused rather than silently losing precision. ⚠️ DOOR-SPECIFIC: assertable only at an IN-PROCESS door (objectql/engine, or a driver replaying the conformance table); it is structurally unreachable over REST",
+          "oracle": "test",
+          "verify": "run packages/objectql/src/engine-comparand-type-door.test.ts (the engine door) plus the driver suites that replay FILTER_COMPARAND_TYPE_CASES (driver-memory / driver-sql / driver-sqlite-wasm / driver-mongodb / driver-turso, each `*-comparand-type-conformance.test.ts`), and cite the past-limit case by its name in the table: 'a bigint beyond ±2^53 is refused — precision loss must not answer silently' (packages/spec/src/data/filter-comparand-type-conformance.ts). ⛔ Do NOT score this over HTTP, and do NOT read a REST 200 as either a pass or a FAIL: the refusal arm is guarded by `typeof value === 'bigint'` (judgeLiteralComparand in filter-comparand-type.ts) and JSON.parse never yields a bigint at any magnitude, so no JSON body can reach it. Measured: the literal 9007199254740993 (2^53 + 1) parses to 9007199254740992, which IS FILTER_COMPARAND_BIGINT_EXACT_LIMIT and therefore also inside the inclusive `<=` bound — two independent reasons the REST arm cannot fail. The REST door's honest verdict for this clause is not-applicable, recorded as such",
+          "evidence": "the engine-door + driver-conformance output naming the past-limit case; if a REST probe was issued at all, the parsed comparand value showing why its status proves nothing"
         },
         {
           "clause": "a dotted filter head is CLASSIFIED (relation | virtual | scalar | null) and each class is handled per contract — a scalar head with a dot is refused rather than treated as a relation traversal",
@@ -1135,6 +1142,12 @@
           "date": "2026-08-17",
           "change": "new — the comparand-typing contract landed as a cluster of seven spec modules plus three semantic migrations at 17.0.0-rc.6 and had no item. api-backend.query-contract-matrix covers OPERATORS ('every filter operator gives known answers') but says nothing about the TYPE of the right-hand side, which is where the silent-widening failure lives. Variants pinned to ACCEPTED_FILTER_COMPARAND_TYPES so a seventh accepted type flags the matrix stale",
           "ref": "#9299"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-21",
+          "change": "made clause 2 (the bigint exact-integer boundary) name the door it is actually assertable at, and marked it door-specific. As written it prescribed 'both requests' against the api oracle, but the refusal arm is guarded by `typeof value === 'bigint'` and JSON.parse never yields a bigint, so the clause was unreachable over REST at any magnitude — a runner following it collected a 200 that proves nothing in either direction. Re-derived rather than assumed: 9007199254740993 parses to 9007199254740992, which is exactly the limit and so also inside the inclusive bound, giving two independent reasons the REST arm cannot fail. Clause 2 now points at engine-comparand-type-door.test.ts and the five driver conformance suites with oracle: test, step 3 says to pass a real bigint in-process, and a knownGap records that the REST verdict is not-applicable rather than blocked (#10236 A3)",
+          "ref": "#10236"
         }
       ]
     },

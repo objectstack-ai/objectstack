@@ -279,7 +279,7 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -293,7 +293,7 @@
           "a scratch draft dashboard for the period-over-period compareTo probe (via PUT /api/v1/meta/dashboard/qa_compareto_probe?mode=draft) — NO showcase widget authors compareTo, so this is authored fresh exactly like the strict-widget probes; bind a metric/line widget to showcase_task_metrics with a time dimension (a month-bucketed created_at) and carry compareTo: { kind: 'previousPeriod' }"
         ],
         "knownGaps": [
-          "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — they render the same single value as `metric` (chart.zod.ts NOTE: 'honest single-value synonyms … gain a dial when a gauge renderer lands'; coverage.test.ts SAME_AS_METRIC). For these four the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — a run must not tick a dial that does not exist"
+          "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — all four route to the SAME single-value renderer as `metric` (chart.zod.ts NOTE: '`metric`/`kpi` are kept as honest single-value synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial when a gauge renderer lands'; examples/app-showcase/test/coverage.test.ts SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}). Two consequences a run must hold BOTH of: (a) the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — do not tick a dial that does not exist; and (b) ⚠️ the four scratch tiles are expected to be VISUALLY IDENTICAL to each other and to the metric tile. Four indistinguishable tiles is the CORRECT observation, not evidence that the renderer ignored the declared type and not a per-variant FAIL — re-confirmed on 17.1.0 (#10560). The type IS being honoured; there is simply one renderer behind five names, which is what makes them synonyms rather than families"
         ]
       },
       "steps": [
@@ -337,7 +337,7 @@
         {
           "clause": "the four single-value synonyms (kpi, gauge, solid-gauge, bullet) render the SAME value as metric — a number, never a blank or an error",
           "oracle": "screenshot",
-          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE",
+          "verify": "scratch-dashboard tiles each show the task_count value; evidence must note these are value-only renders (no dial) per the spec's own NOTE, and that the four tiles are EXPECTED to look identical to one another and to the metric tile — one renderer, five names. ⛔ Do not score 'the four tiles are indistinguishable' against the negative below: that negative is about a variant rendering as a DIFFERENT FAMILY (sankey drawn as a bar), which is the opposite failure",
           "evidence": "scratch-dashboard screenshot annotated with the honest-synonym caveat"
         },
         {
@@ -366,7 +366,7 @@
         }
       ],
       "negative": [
-        "any variant rendering as a DIFFERENT family than named (e.g. sankey falling back to a bar) is a FAIL — advertising a type that renders as something else is the exact failure the trimmed enum exists to prevent",
+        "any variant rendering as a DIFFERENT family than named (e.g. sankey falling back to a bar) is a FAIL — advertising a type that renders as something else is the exact failure the trimmed enum exists to prevent. ⚠️ EXPLICITLY EXEMPT: the four single-value synonyms (kpi/gauge/solid-gauge/bullet) rendering as `metric` is DECLARED, not a fallback — it is written into the spec NOTE and waived by name in coverage.test.ts. Filing it under this negative is a false FAIL",
         "a blank widget with no error for any variant is a FAIL",
         "a compareTo widget rendering its base numbers with the comparison silently absent (the pre-#5011 dropped-string-arm bug) is a FAIL, not a thin-data caveat"
       ],
@@ -423,6 +423,12 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 4,
+          "date": "2026-08-21",
+          "change": "made the single-value-synonym carve-out say what a runner will actually SEE. The item already recorded that kpi/gauge/solid-gauge/bullet render 'the same single value as metric', which stops the wrong tick (a dial) but not the wrong FAIL: a runner putting the four scratch tiles side by side sees four indistinguishable tiles and can read that as the renderer ignoring the declared type — i.e. as the wrong-family negative two lines down. Re-confirmed at source (chart.zod.ts's synonym NOTE; coverage.test.ts's SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}): there is ONE renderer behind five names. The knownGap now states that identical tiles are the expected observation, clause 4's verify says so at the point of scoring, and the wrong-family negative carries an explicit exemption so the two failures cannot be confused (#10236 A5, observed #10560)",
+          "ref": "#10236"
         }
       ],
       "enumSource": {
