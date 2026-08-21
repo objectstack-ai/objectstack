@@ -85,7 +85,12 @@ export default defineConfig({
     // `silent: 'passed-only'`, so today this app's console output from passing
     // tests is discarded AFTER paying the round-trip. Written straight to the
     // worker's stdout it is visible for the first time. Measured on this suite:
-    // 72 `onUserConsoleLog` calls per run, all currently discarded.
+    // 72 `onUserConsoleLog` calls per run — each carrying a batched buffer, so
+    // 285 lines — every one of them discarded before this change. That is the
+    // honest cost too: this app's share of a Test Core log grows by those 285
+    // lines (~0.9% of a 31,839-line shard log), most of it `[Registry]`
+    // registration chatter. Quieting THAT is a separate question about
+    // `@objectstack/objectql`'s own default log level, not about this setting.
     //
     // WHAT IT COSTS. Console output loses vitest's `stdout | file > test`
     // attribution header and its per-task buffering, so it interleaves in

@@ -57,16 +57,19 @@
 
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
+// `process.cwd()` is this package's established seed for its own files
+// (`test/coverage.test.ts`, `test/inert-wirings.test.ts`) and the one the
+// `types/node-shim.d.ts` surface is cut for. `import.meta.url` is NOT available
+// here: this package compiles as CommonJS under `module: NodeNext`, so
+// `tsc --noEmit` rejects it with TS1470.
+const PACKAGE_ROOT = process.cwd();
 
-const VITEST_BIN = resolve(HERE, '../node_modules/.bin/vitest');
-const APP_CONFIG = resolve(HERE, '../vitest.config.ts');
-const FIXTURE_ROOT = resolve(HERE, 'fixtures/late-console-teardown');
-const ABLATION_CONFIG = resolve(FIXTURE_ROOT, 'vitest.unguarded.config.ts');
+const VITEST_BIN = `${PACKAGE_ROOT}/node_modules/.bin/vitest`;
+const APP_CONFIG = `${PACKAGE_ROOT}/vitest.config.ts`;
+const FIXTURE_ROOT = `${PACKAGE_ROOT}/test/fixtures/late-console-teardown`;
+const ABLATION_CONFIG = `${FIXTURE_ROOT}/vitest.unguarded.config.ts`;
 
 /** The exact message vitest 4.1.10 rejects a pending console RPC with. */
 const TEARDOWN_ERROR = 'Closing rpc while "onUserConsoleLog" was pending';
@@ -93,7 +96,7 @@ interface Leg {
  * nested run makes the child believe it was spawned by a pool.
  */
 function runFixture(config: string): Leg {
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  const env: Record<string, string | undefined> = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITEST')) delete env[key];
   }
@@ -117,7 +120,7 @@ function runFixture(config: string): Leg {
 describe('[#10293] vitest console-forwarding teardown race', () => {
   it('has a fixture and an ablation config to measure against', () => {
     expect(existsSync(VITEST_BIN), `vitest binary missing at ${VITEST_BIN}`).toBe(true);
-    expect(existsSync(resolve(FIXTURE_ROOT, 'leaked-console.test.ts'))).toBe(true);
+    expect(existsSync(`${FIXTURE_ROOT}/leaked-console.test.ts`)).toBe(true);
     expect(existsSync(ABLATION_CONFIG)).toBe(true);
   });
 
