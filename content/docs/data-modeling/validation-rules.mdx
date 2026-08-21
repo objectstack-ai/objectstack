@@ -144,7 +144,7 @@ These properties apply to **all** field types and are validated by the base `Fie
 | `currencyConfig.currencyMode` | `enum` | `dynamic` | `dynamic` (user-selectable) or `fixed` (single currency) |
 | `currencyConfig.defaultCurrency` | `string` | `CNY` | 3-character currency code (ISO 4217 or crypto) |
 
-**Default constraints:** Stored as `{ value, currency }` pair. Precision defaults to 2 decimal places.
+**Default constraints:** Stored as a **bare number** (a finite numeric scalar — `valueSchemaFor` routes `currency` to `z.number().finite()`); there is no `{ value, currency }` envelope on the value path. The per-record currency **code** is a separate concern, carried by `currencyConfig` above. Precision defaults to 2 decimal places.
 
 ### `percent`
 
@@ -370,7 +370,7 @@ application-level emptiness check is needed.
 
 ### `location`
 
-**Default constraints:** Stored as `{ latitude, longitude, altitude?, accuracy? }`. Latitude: -90 to 90. Longitude: -180 to 180. No per-type config properties.
+**Default constraints:** Stored as `{ lat, lng, altitude?, accuracy? }` — the keys are `lat`/`lng`, not `latitude`/`longitude` (`LocationValueSchema`, ADR-0104 D1). `lat`: -90 to 90. `lng`: -180 to 180. No per-type config properties.
 
 ### `address`
 

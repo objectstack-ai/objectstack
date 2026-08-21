@@ -530,7 +530,7 @@ Name-keyed map of embedded sub-objects (`Record<string, SubObject>`). Insertion 
 ## Enhanced Types
 
 ### `location`
-Geographic coordinates. Stored as `{ latitude, longitude, altitude?, accuracy? }` (latitude −90..90, longitude −180..180). No per-type config properties.
+Geographic coordinates. Stored as `{ lat, lng, altitude?, accuracy? }` (`lat` −90..90, `lng` −180..180). No per-type config properties. The key names are `lat`/`lng`, not `latitude`/`longitude` — see `LocationValueSchema` in `field-value.zod.ts` (ADR-0104 D1).
 
 ```typescript
 { name: 'headquarters', label: 'Location', type: 'location' }
