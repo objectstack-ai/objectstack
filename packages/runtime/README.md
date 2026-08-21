@@ -613,9 +613,10 @@ if (!decision.allowed) reply.code(429).send({ retryAfterMs: decision.retryAfterM
 ### Observability (opt-in adapters)
 
 `createDispatcherPlugin` instruments every route with request-id propagation,
-`http_requests_total{method,route,status}`, `http_request_duration_ms`,
-`http_request_errors_total`, and 5xx error reporting. Plug your own
-`MetricsRegistry` (Prometheus / OTel) and `ErrorReporter` (Sentry / Datadog).
+`http_requests_total{method,route,status}`, `http_request_duration_ms`, and 5xx
+error reporting. Plug your own `MetricsRegistry` (Prometheus / OTel) and
+`ErrorReporter` (Sentry / Datadog). (`http_request_errors_total` was retired in
+17.2.0, #9834 — read the 5xx rate from `http_requests_total{status=~"5.."}`.)
 Adapter recipes + go-live checklist in
 [`docs/OBSERVABILITY.md`](../../docs/OBSERVABILITY.md).
 

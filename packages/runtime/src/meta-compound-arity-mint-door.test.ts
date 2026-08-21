@@ -254,8 +254,12 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
     it('CONTROL — a recognised type at the simple arity is unaffected', async () => {
         const { engine, dispatcher } = makeStack();
 
+        // [#10194] spec-valid body — `theme` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS now, and this control measures the ARITY
+        // door, so a malformed body would 422 and misread it.
         const res = responseOf(await dispatcher.handleMetadata(
-            '/theme/midnight', ctx(), 'PUT', { name: 'midnight', label: 'Midnight' },
+            '/theme/midnight', ctx(), 'PUT',
+            { name: 'midnight', label: 'Midnight', colors: { primary: '#3b82f6' } },
         ));
 
         expect(res.status).toBe(200);

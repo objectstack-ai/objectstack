@@ -13,6 +13,7 @@ import {
   rebuildSearchCompanion,
   PINYIN_SEARCH_HOOK_PACKAGE,
 } from './companion-projection.js';
+import { provisionSearchCompanion } from '@objectstack/objectql';
 
 interface Row { [k: string]: any }
 
@@ -33,6 +34,11 @@ const plainSchema = {
 
 function makeEngine(schemas: any[]) {
   const tables: Record<string, Row[]> = {};
+  // [#10290] Every object the backfill actually WALKS, in call order. The card
+  // is about work that runs and can never pay off, so "did the walk happen at
+  // all" is the measurement — a result counter alone cannot distinguish
+  // "scanned and found nothing" from "never scanned".
+  const finds: string[] = [];
   const hooks: Record<string, Array<{ handler: (ctx: any) => any; opts: any }>> = {};
   const byName = new Map(schemas.map((s) => [s.name, s]));
   const engine = {
@@ -61,6 +67,7 @@ function makeEngine(schemas: any[]) {
     // this walk updates the rows it is reading, so an offset counts into a set
     // its own writes are changing and rows slide past the cursor unconverted.
     async find(o: string, opts?: any) {
+      finds.push(o);
       if (opts?.offset !== undefined) {
         throw new Error('offset paging skips rows a mutating walk must visit — expected a keyset seek (#4363)');
       }
@@ -88,6 +95,7 @@ function makeEngine(schemas: any[]) {
       return t[i];
     },
     _hooks: hooks,
+    _finds: finds,
   };
   return engine;
 }
@@ -176,5 +184,108 @@ describe('backfillSearchCompanion / rebuildSearchCompanion', () => {
     expect(result.updated).toBe(2);
     expect(engine._tables.crm_contact[0].__search).toBe(null);
     expect(engine._tables.crm_contact[1].__search).toBe('wangfang wf');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#10290] The per-boot backfill does not walk an object whose only companion
+// source is the primary key.
+//
+// The schemas here are built by `provisionSearchCompanion` itself rather than
+// hand-written, so this suite measures the REAL pipeline: what the registry
+// declares at compile time is what the backfill is then handed. (That import
+// resolves through `@objectstack/objectql`'s package exports — i.e. its
+// `dist/` — so objectql must be rebuilt for a change in it to be visible
+// here.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A platform table whose only title-eligible column IS its primary key. */
+const jwksSchema = provisionSearchCompanion({
+  name: 'sys_jwks',
+  fields: {
+    id: { type: 'text', label: 'ID', readonly: true },
+    created_at: { type: 'datetime' },
+    expires_at: { type: 'datetime' },
+  },
+} as any) as any;
+
+/** The same table as an ALREADY-MIGRATED deployment carries it: the permanent-
+ *  NULL `__search` column is still declared (ADR-0045 migrations are additive,
+ *  so nothing drops it), which is why the walk needs stopping on the SOURCE
+ *  resolution too and not only on the column's absence. */
+const jwksLegacySchema = {
+  ...jwksSchema,
+  fields: {
+    ...jwksSchema.fields,
+    __search: { type: 'text', hidden: true, readonly: true, system: true },
+  },
+};
+
+/** An ordinary business object with a real title field. */
+const provisionedContactSchema = provisionSearchCompanion({
+  name: 'crm_contact',
+  fields: {
+    id: { type: 'text', label: 'ID', readonly: true },
+    name: { type: 'text', label: 'Name' },
+    email: { type: 'email' },
+  },
+} as any) as any;
+
+describe('[#10290] negative control — a primary-key-only object is never walked', () => {
+  it('provisions no companion column on it in the first place', () => {
+    expect(jwksSchema.fields.__search).toBeUndefined();
+  });
+
+  it('the backfill enumerates it, counts it out, and issues no query', async () => {
+    const engine = makeEngine([jwksSchema]);
+    engine._tables.sys_jwks = [
+      { id: 'jwk_1', created_at: '2026-01-01' },
+      { id: 'jwk_2', created_at: '2026-01-02' },
+    ];
+    const result = await backfillSearchCompanion(engine as any);
+    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0 });
+    expect(engine._finds).toEqual([]);
+  });
+
+  it('…and still issues no query when an already-migrated deployment declares the column', async () => {
+    const engine = makeEngine([jwksLegacySchema]);
+    engine._tables.sys_jwks = [{ id: 'jwk_1', __search: null }];
+    const result = await backfillSearchCompanion(engine as any);
+    expect(result).toEqual({ objects: 0, scanned: 0, updated: 0 });
+    expect(engine._finds).toEqual([]);
+  });
+
+  it('does not stamp a companion on writes to it either', async () => {
+    const engine = makeEngine([jwksLegacySchema]);
+    bindSearchCompanionHooks(engine as any);
+    const row = await engine.insert('sys_jwks', { id: 'jwk_3' });
+    expect('__search' in row).toBe(false);
+  });
+});
+
+describe('[#10290] positive control — titled objects are still backfilled', () => {
+  it('provisions the companion column as before', () => {
+    expect(provisionedContactSchema.fields.__search).toBeDefined();
+  });
+
+  it('walks the object and fills the CJK rows', async () => {
+    const engine = makeEngine([provisionedContactSchema, jwksSchema]);
+    engine._tables.crm_contact = [
+      { id: 'a', name: '张伟', __search: null },
+      { id: 'b', name: 'Ada', __search: null },
+    ];
+    engine._tables.sys_jwks = [{ id: 'jwk_1' }];
+    const result = await backfillSearchCompanion(engine as any);
+    expect(result).toEqual({ objects: 1, scanned: 2, updated: 1 });
+    // Only the titled object was queried — the doomed one was never touched.
+    expect(new Set(engine._finds)).toEqual(new Set(['crm_contact']));
+    expect(engine._tables.crm_contact.find((r) => r.id === 'a')!.__search).toBe('zhangwei zw');
+  });
+
+  it('still stamps the companion on writes carrying a CJK title', async () => {
+    const engine = makeEngine([provisionedContactSchema]);
+    bindSearchCompanionHooks(engine as any);
+    const row = await engine.insert('crm_contact', { id: 'c9', name: '王芳' });
+    expect(row.__search).toBe('wangfang wf');
   });
 });

@@ -67,6 +67,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1039,6 +1049,16 @@
     {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

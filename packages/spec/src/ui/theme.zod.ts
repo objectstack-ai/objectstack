@@ -30,10 +30,14 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 //      on every `objectstack build`, so a theme key is judged on the path an
 //      author actually runs.
 //
-// `theme` is deliberately NOT in `BUILTIN_METADATA_TYPE_SCHEMAS`, so the
-// runtime metadata REST door does not validate a stored theme row. The gate
-// this file provides is therefore the AUTHORING one (`defineStack` /
-// `defineTheme`), and this comment does not claim more than that.
+// `theme` is deliberately NOT in `BUILTIN_METADATA_TYPE_SCHEMAS` — it is not
+// a metadata KIND (#2657's B/C decision stays open). Since #10194 it IS bound
+// in `UNREGISTERED_KIND_SCHEMAS` (the #6245 map), so the runtime metadata
+// write door (`PUT /meta/theme/:name`) applies the SAME shape check
+// `defineStack` / `defineTheme` do, instead of storing any JSON with
+// `success: true`. That is a SHAPE check only — no registry entry, no
+// capability or authorization change — and this comment does not claim more
+// than that.
 //
 // WHY EVERY SUB-BLOCK IS `strict` AND NOT `passthrough` — the #4909 question,
 // asked per block rather than per file, because the theme engine reads the two
@@ -100,6 +104,7 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 // Competing vocabulary, MEASURED not guessed: objectui's `COLOR_TO_CSS_MAP`
 // renames every one of these on the way out (`surface` → `--card`, `text` →
@@ -460,6 +465,20 @@ export const ThemeSchema = lazySchema(() => strictObject(
 
     /** Extends another theme */
     extends: z.string().optional().describe('Base theme to extend from'),
+
+    // ADR-0010 — runtime protection envelope (internal — set by loader).
+    //
+    // [#10194] Declared for the reason `sharing.zod.ts` states for its own
+    // spread: BOTH metadata load paths call `applyProtection` on EVERY type,
+    // so a package-loaded theme already carries these keys by the time
+    // anything re-parses it. This shape is `.strict()`, so until now that
+    // stamped envelope was not merely dropped — it was REJECTED, which stayed
+    // invisible only because `theme` resolved no schema at the overlay door
+    // and nothing parsed it there. #10194 binds that door
+    // (`UNREGISTERED_KIND_SCHEMAS`), so declaring the envelope is what keeps
+    // the new 422 aimed at malformed AUTHOR input instead of at the runtime's
+    // own stamp. `metadata-type-schemas.test.ts` enforces exactly this.
+    ...MetadataProtectionFields,
   },
 ));
 

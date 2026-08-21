@@ -216,6 +216,7 @@
     "check:export-origins": "tsx scripts/build-export-origins.ts --self-test && tsx scripts/build-export-origins.ts --check",
     "check:exported-any": "tsx scripts/check-exported-any.ts --self-test && tsx scripts/check-exported-any.ts",
     "check:dual-source-exports": "tsx scripts/check-dual-source-exports.ts --self-test && tsx scripts/check-dual-source-exports.ts",
+    "check:browser-reachable-entries": "tsx scripts/check-browser-reachable-entries.ts --self-test && tsx scripts/check-browser-reachable-entries.ts",
     "check:objectui-pin-citations": "tsx scripts/check-objectui-pin-citations.ts --self-test && tsx scripts/check-objectui-pin-citations.ts",
     "check:authorable-surface": "OS_EAGER_SCHEMAS=1 tsx scripts/build-schemas.ts --check",
     "gen:migration-registry": "tsx scripts/build-migration-registry.ts",

@@ -6,6 +6,10 @@
 
 ## 队列成员资格与 auto-merge
 
+- **「本仓是否强制队列」是仓库 ruleset 事实**:`grep merge_group` 答的是另一个问题
+  (队列内是否重跑 CI),两者独立、缺席不构成反证(实测:某仓 ruleset 强制而无
+  trigger,队列照收 PR、由 PR 上下文的 check run 满足);权威读数 = 合并尝试本身(回
+  405 `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一致(objectos 2026-08-18 起有队列,hotcrm 只有 ruleset)⇒ 新仓落地约定靠实测确立,⛔ 不由缺席推断(2026-08-20 实测)。
 - 判「在不在合并队列」看 timeline 事件 `added_to_merge_queue`(REST
   `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 ——
   入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支读法
@@ -50,8 +54,7 @@
   重置前没有任何 list 通道**,降级读法 = 下文 git 先行与 WebFetch 两行;只有无
   REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额红时认领类动作排队,评论(REST 池)先行把结论发出去。
 - **`fields` 瘦身省载荷不省池**:MCP list/search 服务器端无条件抓 Project
-  field_values —— 池枯竭时**最小字段请求同样全体失败**,报错串
-  `failed to fetch issue field values: API rate limit already exceeded`。
+  field_values —— 池枯竭时**最小字段请求同样全体失败**,报错串 `failed to fetch issue field values: API rate limit already exceeded`。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查
   照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);开轮先读配额
   (免装 gh CLI:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`),graphql
@@ -61,6 +64,7 @@
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
 - **查重先 `search_issues`**(2026-08-18 23:3xZ 实测:单次调用按 issue body 内文本命中且 `total_count` 精确 ——「search API 对本会话不可用/回错误对象」的继承说法实测为**假**;继承说法不是读数,复述必须带实测日期):body 文本匹配是 repo-scoped `list` 做不到的(全量抓取再 grep 才等价),`list` + 对照组降为回退。
+- **`search_issues` 不可靠地返回分钟级新卡**:同轮发现的东西查重,搜索之外必须按创建时间列近期 issue(`list_issues` + `orderBy: CREATED_AT`)—— 实测一张 ~7 分钟大的同实例卡被关键词与语义搜索双双漏掉,靠按日期列表才逮到;边界:两次观察、索引延迟未实测,断言只到「search 可能漏掉分钟级 issue」,更硬的窗口要另测(2026-08-20 实测)。
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*`
   回 `Streamable HTTP error: invalid session`(含几分钟前还好的工具),只有新会话
   重绑 —— 轮换前提醒维护者:在飞席位丢的是整条 GitHub 通道;配额池按身份计,换身份即清零燃烧,共享身份结构不变。
@@ -71,8 +75,7 @@
   次读全 + 本地对 labels 求交**。`issue_write` 的 `labels` 是**整组替换**不是追加
   —— 同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST `POST /issues/{n}/labels`;写后照标签纪律回读。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已
-  认领卡与空闲卡响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整
-  `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
+  认领卡与空闲卡响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
 - **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;
   comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)——
   腐蚀 body 的恰是把转义读数原样回写;可逆的只有读侧,写侧剥除(HTML 注释、tag
@@ -92,11 +95,9 @@
   (`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
   (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上
-  缺一个已合修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合
-  并时间晚于 run 创建时间即是。
+  缺一个已合修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即是。
 - **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的
-  预期签名,不是选择性失败**(cancel-in-progress 窗口只罩得住跑得慢的载体):先
-  比对 run `head_sha` 与 PR 当前 head(取代必有新 head),不开「为何只取消它」调查。
+  预期签名,不是选择性失败**(cancel-in-progress 窗口只罩得住跑得慢的载体):先比对 run `head_sha` 与 PR 当前 head(取代必有新 head),不开「为何只取消它」调查。
 - **CI 红了先取完整日志归档再下结论 —— 断言文本只在归档里,直读工具拿不到**
   (2026-08-18 实测):`get_check_run` 对本仓 CI job 回空 `output.text`,`get_job_logs` 无论 `tail_lines` 只回占满日志尾部的 post-step service-container teardown ⇒ 两者都答不了「到底挂在哪」;失败 step 名免下载即得(`actions_get method=get_workflow_job`),真实断言文本走 run 日志归档:`actions_get method=get_workflow_run_logs_url` → 下载解压,分步文件在 `{Job name}/{step number}_{step name}.txt`。
   「completeness check 绿」只断言没有 worker 静默死 ≠ 测试通过;并发输出的「相邻」≠「因果」(先查 `turbo.json` 依赖边),⛔ 不只看 tail;
@@ -107,8 +108,7 @@
 - 写侧另一半:sanitizer 在**写入时按 tag 形状删,不按尖括号**(2026-08-18 issue body 实测):行内反引号里的 tag 形状 token(读作未知 HTML 标签者 —— 注释标记、`<n>` 类占位符、泛型)整个被删;孤立 less-than / greater-than 在行内代码**存活**;⛔ **围栏不防护 tag 形状 token**(2026-08-20 issue body 三写实测,推翻旧「围栏块整体存活」读数):HTML 注释形状标记裸写被整删留空行,入围栏照删留空围栏;非 tag 形状的带尖括号正则在围栏中实测存活(2026-08-18,上一条删感叹号仍另计);同日实测同类标记在**评论**里存活 —— 损耗是 body 独有的不对称;裸标识符(无尖括号)存活 ⇒ SKILL 提取契约(字面文本 grep + 裸标识符回退)仍有效;写返回 200,损耗只在回读可见。
   作者规则一条管三坑:必须字面携带 tag/script/markup-declaration 形状的文本进围栏并把危险字符用词拼出,或改花括号占位符(`{n}`)/整句用词描述;要字面尖括号写实体 `&lt;` / `&gt;`;含尖括号的任何写后回读逐个确认(失效完全静默;评论名义上是不受影响通道,2026-08-18/19 实测 4 次评论写入 1 次标记缺席、未归因 —— 回读不豁免评论)。
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲
-  突两侧收据都保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不
-  是历史),⛔ 不从两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
+  突两侧收据都保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不是历史),⛔ 不从两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
 - **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重
   跑 + 复核,不动代码);② 死在 regen 中途(未提交全是生成物、merge commit 已在)
   ⇒ PM 直接续作 —— build → 整链 regen → 生成物门禁全绿 → 提交推送,恢复 commit 带

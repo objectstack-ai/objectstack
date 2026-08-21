@@ -48,6 +48,50 @@
  * the stamped detector is STILL ABSENT from this tree's spec. Once the published
  * spec catches up, the stamp is expired and says so instead of passing.
  *
+ * ## Why packages/spec is NOT in ci.yml's console filter (objectstack#9710)
+ *
+ * That filter lists the pin, the build script and this gate's own sources — not
+ * packages/spec — so a spec-only PR never schedules Console Pin Gate and never
+ * reaches this check. Adding it is the obvious next thought; it was measured and
+ * DECLINED, and the reason is not cost, which is why it is recorded here rather
+ * than left on a card: the job it would schedule is vacuous, not expensive.
+ *
+ * Count what this gate can fail on. Of its six failure verdicts, FIVE are pure
+ * functions of the RESTORED DIST and its stamp — a missing dist, unreadable
+ * assets or a malformed stamp, a missing stamp, the published-only detector
+ * present in the bundle, the stamp's own fresh witness missing from it. A
+ * spec-only diff cannot move any of those: the cache key is the one spelled at
+ * the top of this header — the pin and the build script, nothing else — and
+ * entries under it are IMMUTABLE, so all five replay what the last
+ * console-filtered run already saw. Exactly ONE verdict reads this tree, the
+ * expiry re-check, and it needs packages/spec/dist because readSpecBlob resolves
+ * the package's exports map. So the restore-only job proposed there — no
+ * install, no turbo build — would start the gate 15 more times per 100 commits
+ * (6/100 today, 21/100 with packages/spec added, measured over real first-parent
+ * history) and skip the only tree-sensitive assertion on every one of them.
+ *
+ * Paying for the build instead does not rescue it, because the headline scenario
+ * is one this gate deliberately does not test. With the dist and stamp held
+ * fixed and only the tree varying: spec unbuilt PASSES (expiry not re-checked),
+ * spec unchanged PASSES, spec MOVED FORWARD PASSES, and only a spec that has
+ * caught up to the published text FAILS. "Spec moved forward since the dist was
+ * built" is precisely what a spec trigger would be bought for, and PR
+ * objectstack#9706 already ruled it "not a failure — the ruled cache design
+ * accepts lag". The lag is the trade-off objectstack#9667 accepted when it
+ * rejected the cache-key option, not a defect a trigger change can catch. What
+ * remains has a low ceiling: only 5 of those 15 commits add any `describe()`
+ * text under packages/spec — the only text the probes read — and expiry is a
+ * tree STATE, not an event, so once it is true today's 6/100 console runs still
+ * catch it. Widening the filter buys latency, not coverage.
+ *
+ * The exit, for whoever asks a third time: objectstack#10428 proposes deriving
+ * the expiry probe from packages/spec SOURCE text — `describe()` arguments are
+ * plain string literals — which would make that one assertion BUILDLESS. The
+ * light job is worthless only because its single meaningful assertion needs a
+ * build; remove the build and this question reopens on entirely different terms.
+ * Full working — the paths-filter replay under both picomatch versions, the
+ * per-commit attribution — is on objectstack#9710's ruling comment.
+ *
  * ## Failure response: FAIL, deliberately, rather than rebuild
  *
  * GitHub Actions cache keys are IMMUTABLE. A gate that reacted to a bad restore

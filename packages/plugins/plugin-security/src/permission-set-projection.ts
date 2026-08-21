@@ -1064,13 +1064,20 @@ export async function reconcilePermissionSetProjection(
     // The summary carries the same level as the degradation it summarizes —
     // an `info` "reconciled" line over a failed backfill is the reassuring
     // half-truth this rule exists to remove.
-    logger?.error?.(
+    const summary =
       `[security] sys_permission_set projection reconciled with ${out.backfillFailed} FAILED backfill(s) ` +
       '(ADR-0094 D4) — those records have no metadata definition and will not survive a re-provision. ' +
-      'See the first-failure error above for the offending key and the fix.',
-      undefined,
-      { ...out, failedNames: failedNames.slice(0, 10) },
-    );
+      'See the first-failure error above for the offending key and the fix.';
+    const summaryMeta = { ...out, failedNames: failedNames.slice(0, 10) };
+    // Same defect as the first-failure report above, one scope out (#9748). No
+    // `catch` guards this line, so `check:durability-log-level` could not see
+    // it and #9657 left it spelled `logger?.error?.(…)` — which printed NOTHING
+    // against a sink that has only `warn`. Worse here than a plain omission:
+    // the `else` below is skipped too, so such a sink heard neither the count
+    // nor the reassuring "reconciled" line, while the first-failure report
+    // (repaired by #9657) still arrived. Fall back to `warn`, not silence.
+    if (logger?.error) logger.error(summary, undefined, summaryMeta);
+    else logger?.warn?.(summary, summaryMeta);
   } else {
     logger?.info?.('[security] sys_permission_set projection reconciled (ADR-0094 D4)', { ...out });
   }

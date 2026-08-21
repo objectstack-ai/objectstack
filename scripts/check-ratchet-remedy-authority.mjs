@@ -601,6 +601,17 @@ const CONTROL = {
     expect: 'marked',
     why: 'PR #8549, the sixth instance and the reason the glob covers .mts.',
   },
+  // The seventh, and the first to join the convention as a NEW gate rather than
+  // by retrofit (#10473). It carries two remedy paths and treats them
+  // differently on purpose: the ceiling-loosening one it turns down in the same
+  // breath, while registering a genuinely new published skill is a real path
+  // that simply belongs to a maintainer, because it prices a whole file into the
+  // bundle every customer project loads. Marking is therefore the honest shape
+  // here, not refusal — there IS a legitimate act, with an owner.
+  'check-skills-token-ratchet.mjs': {
+    expect: 'marked',
+    why: 'PR for #10473. Its published-catalog ceilings only ever ratchet down, and registering a new published skill prices the whole shipped bundle — a maintainer\'s call, not the landing author\'s.',
+  },
 
   'check-adr-links.mjs': {
     expect: 'refused',

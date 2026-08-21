@@ -5,6 +5,7 @@
     "data-api",
     "metadata-api",
     "plugin-endpoints",
+    "declarative-endpoints",
     "client-sdk",
     "environment-routing",
     "data-flow",

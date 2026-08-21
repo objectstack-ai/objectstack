@@ -21,11 +21,22 @@
 import { describe, it, expect } from 'vitest';
 import { AggregationFunction } from '@objectstack/spec/data';
 import { UNSUPPORTED_AGGREGATES, SUPPORTED_AGGREGATES } from './dataset-compiler.js';
-import { SUPPORTED_AGGREGATE_SQL_KEYS } from './strategies/native-sql-strategy.js';
+import { SUPPORTED_AGGREGATE_SQL_KEYS, CONDITIONAL_AGGREGATE_SQL_KEYS } from './strategies/native-sql-strategy.js';
 
 describe('aggregate vocabulary lockstep', () => {
   it('the strategy lowers exactly the aggregates the compiler admits', () => {
     expect([...SUPPORTED_AGGREGATE_SQL_KEYS].sort()).toEqual([...SUPPORTED_AGGREGATES].sort());
+  });
+
+  it('every lowered aggregate also has a measure-FILTERED form (#10298)', () => {
+    // Two tables in the strategy: the plain wrapper and the conditional one a
+    // measure's own `filter` selects. An aggregate present in the first only
+    // does not fail — it silently DROPS the author's filter and answers the
+    // unfiltered number under the filtered measure's name, which is the defect
+    // #10298 closed on the whole vocabulary at once. Pinned as set equality so
+    // the next aggregate added to one table and not the other fails here.
+    expect([...CONDITIONAL_AGGREGATE_SQL_KEYS].sort())
+      .toEqual([...SUPPORTED_AGGREGATE_SQL_KEYS].sort());
   });
 
   it('every spec aggregate is either lowered or explicitly rejected', () => {

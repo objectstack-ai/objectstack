@@ -8,6 +8,8 @@
     "workflows",
     "approvals",
     "webhooks",
-    "connectors"
+    "connectors",
+    "jobs",
+    "email-templates"
   ]
 }

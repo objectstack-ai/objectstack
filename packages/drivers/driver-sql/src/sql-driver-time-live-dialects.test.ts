@@ -23,9 +23,14 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { MYSQL_CELL, PG_CELL, type DialectCell } from './live-dialect-matrix.testkit.js';
 
-const PG_URL = process.env.OS_TEST_POSTGRES_URL;
-const MY_URL = process.env.OS_TEST_MYSQL_URL;
+// The cells, not `process.env.OS_TEST_*_URL`: an env var is one value for the
+// whole process, so a config built from it puts this file in the same
+// schema/database as every other live file. `cell.config()` derives a per-FILE
+// one from vitest's own `testPath` (#9350).
+const PG_URL = PG_CELL.url;
+const MY_URL = MYSQL_CELL.url;
 const TABLE = 'os3994_probe';
 
 const SHAPE = {
@@ -64,16 +69,12 @@ function minutesOffUtc(presented: string): number {
   return Math.min(diff, 1440 - diff);
 }
 
-function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
-  describe.skipIf(!url)(`Field.time on live ${dialect} (#3994)`, () => {
+function suite(cell: DialectCell) {
+  describe.skipIf(!cell.available)(`Field.time on live ${cell.id} (#3994)`, () => {
     let driver: SqlDriver;
 
     beforeEach(async () => {
-      driver = new SqlDriver(
-        dialect === 'pg'
-          ? { client: 'pg', connection: url }
-          : { client: 'mysql2', connection: url },
-      );
+      driver = new SqlDriver(cell.config());
       await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
       await driver.initObjects([SHAPE]);
     });
@@ -143,8 +144,8 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
   });
 }
 
-suite('pg', PG_URL);
-suite('mysql', MY_URL);
+suite(PG_CELL);
+suite(MYSQL_CELL);
 
 describe.skipIf(!MY_URL)('MySQL TIME → TIME(3) widening (#3994)', () => {
   const LEGACY = 'os3994_legacy';
@@ -152,7 +153,7 @@ describe.skipIf(!MY_URL)('MySQL TIME → TIME(3) widening (#3994)', () => {
 
   beforeEach(async () => {
     // Build the table the way a pre-#3994 build did: a bare TIME column.
-    const legacy = new SqlDriver({ client: 'mysql2', connection: MY_URL });
+    const legacy = new SqlDriver(MYSQL_CELL.config());
     await legacy.execute(`drop table if exists ${LEGACY}`);
     await legacy.execute(
       `create table ${LEGACY} (
@@ -166,7 +167,7 @@ describe.skipIf(!MY_URL)('MySQL TIME → TIME(3) widening (#3994)', () => {
     ]);
     await legacy.disconnect();
 
-    driver = new SqlDriver({ client: 'mysql2', connection: MY_URL });
+    driver = new SqlDriver(MYSQL_CELL.config());
   });
 
   afterEach(async () => {

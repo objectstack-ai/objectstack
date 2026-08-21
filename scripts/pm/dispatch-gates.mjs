@@ -1950,6 +1950,125 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
   return lines;
 }
 
+// ---------------------------------------------------------------------------
+// The families a changeset will add — derived, not listed (#10309)
+// ---------------------------------------------------------------------------
+
+/**
+ * The hypothetical changeset file the pending section is derived against.
+ *
+ * Assembled from halves for the reason DEFAULT_BASE_REF is: a module-body
+ * constant spelling it whole would enter THIS file's own watch-hint set as a
+ * path, which is the fabrication its header argues against. Only the joined
+ * value is pathy, and it exists at runtime alone.
+ *
+ * The dot is on the TEMPLATE rather than on the directory constant, and that is
+ * load-bearing here in a way it is not for the base ref. `looksPathy` is not
+ * "contains a slash" alone — `extractWatchHints` also admits a literal naming a
+ * top-level dotted dir with no separator in it at all, and the changeset
+ * directory is one of the four it names. Measured on this file: written the
+ * obvious way, as one `.changeset` constant, this tool's own source grew a
+ * ninth hint reaching the changeset directory — inert for gate matching today
+ * only because no family resolves to this file, and the broadest possible
+ * fabrication on the day one does. Spelled below, it grows none.
+ *
+ * The filename is deliberately not a plausible one. It is printed in the
+ * provenance column of every row below, and a reader who takes it for a file on
+ * disk has been told something false by a tool whose whole contract is that its
+ * leads are real.
+ */
+const CHANGESET_DIR_NAME = 'changeset';
+const CHANGESET_PROBE_NAME = 'the-one-you-have-not-written-yet.md';
+export const CHANGESET_PROBE_PATH = `.${CHANGESET_DIR_NAME}/${CHANGESET_PROBE_NAME}`;
+
+/**
+ * The families that will apply once this card's changeset exists — the ones the
+ * derivation is structurally short by at the moment it is USED (#10309).
+ *
+ * ## The defect this answers
+ *
+ * The PM derives the gate list at DISPATCH time, over the card's declared file
+ * surface, and pastes it into the brief. The dev then re-derives from the real
+ * diff. Measured over one round of five independent dispatches, every single
+ * dev reported the same delta and it was always the same five families:
+ * `check:changeset-gate-self-tests`, `check:objectui-changeset`,
+ * `check-adr-0087-registration.mjs`, `check-changeset-no-major.mjs`,
+ * `check-empty-changeset.mjs`. On two of the five cards those five were the
+ * WHOLE delta.
+ *
+ * They are triggered by the changeset directory, they are perfectly
+ * path-derivable, and the path is simply not there yet: the dev writes the
+ * changeset after the derivation runs. So the derivation is correct at the
+ * moment it runs and short by these families by the time anyone acts on it —
+ * and short the same way every time, which is the part that costs something. A
+ * delta that is constant trains a reader to skip the whole comparison, and a
+ * real delta then hides inside five rows of noise. The property worth having is
+ * that the difference between the PM's list and the dev's re-derivation is
+ * INFORMATION.
+ *
+ * ## Why this is a probe and not a list
+ *
+ * ⛔ There is no table of changeset gates in this file and there must not be.
+ * This re-runs the SAME classifier the matched list is built from, against one
+ * hypothetical path, over the families the live discovery pass already found —
+ * so it reads CI's declared trigger and the gates' own watch hints exactly as
+ * every other row does. A sixth changeset-triggered family appears here the day
+ * it lands, with nothing to edit. That is the same contract as the rest of the
+ * script ("this script names no gate from memory"), applied to a question about
+ * a file that does not exist yet.
+ *
+ * ## Why already-matched families are subtracted
+ *
+ * `matchedChecks` is the set the matched list already printed. When the input
+ * really does carry a changeset — the dev's re-derivation after writing one —
+ * these families match on their own and belong in that list; printing them here
+ * as well would be the same lead twice, in two sections that make different
+ * claims about time. Subtraction is also why no predicate over the input paths
+ * is needed: a path set that reaches these families for ANY reason removes them
+ * from this section, and a partial overlap leaves exactly the remainder.
+ *
+ * Pure over its inputs — `entries` is `[check, entry]` pairs — so the self-test
+ * drives it offline on fixtures.
+ */
+export function pendingChangesetFamilies(entries, matchedChecks, probe = CHANGESET_PROBE_PATH) {
+  const pending = [];
+  for (const [check, entry] of entries) {
+    if (matchedChecks.has(check)) continue;
+    const { verdict, hits } = classifyEntry(entry, [probe]);
+    if (verdict === 'matched') pending.push({ check, entry, hits });
+  }
+  return pending;
+}
+
+/**
+ * Render the pending-changeset section. Empty array when there is nothing
+ * pending, so the section vanishes rather than printing a zero — a card whose
+ * diff already carries a changeset has no temporal gap left to disclose, and a
+ * "0 families" heading would invite the reader to look for one.
+ */
+export function pendingChangesetLines(pending, probe = CHANGESET_PROBE_PATH) {
+  if (pending.length === 0) return [];
+  const lines = [
+    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card is docs-only:`,
+  ];
+  for (const { entry, hits } of [...pending].sort((a, b) => a.check.localeCompare(b.check))) {
+    const via = hits.map((h) => `${h.via} '${h.hint}'`).join('; ');
+    lines.push(
+      `  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   would match ${probe} via ${via}`,
+    );
+  }
+  lines.push(
+    `  Derived by re-running this same discovery pass against ${probe} — a path that does not exist. Nothing here is`,
+    '    listed in this script, so a changeset-triggered family added tomorrow prints itself with nothing to update.',
+    '  ⛔ NOT a fourth bucket, and NOT a second copy of the matched list: for the paths as they stand these families',
+    '    earn an ordinary verdict in the residue below and are counted there. They are lifted out here because the',
+    '    changeset is written by the DEV, after this derivation runs — so a list that is right when it is derived is',
+    '    short by exactly these rows by the time it is used. Once the diff really carries one they move into the',
+    '    matched list above and this section stops printing.',
+  );
+  return lines;
+}
+
 /**
  * The closing accounting: every discovered family placed, with runtime counts
  * and NOT ONE GATE NAMED.
@@ -2507,6 +2626,19 @@ function derive(paths, { showResidue = false } = {}) {
   if (kindLines.length) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
+  }
+
+  // The pending-changeset section prints in BOTH input modes and is gated on
+  // nothing but the answer itself: the PM's paths are a hypothesis with no
+  // changeset in it, and a dev's real diff has none either until the changeset
+  // is written. Where one already exists, the families are in `matched` above
+  // and this comes back empty. See pendingChangesetFamilies for the round of
+  // five dispatches that measured the gap.
+  const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+  const pendingOut = pendingChangesetLines(pending);
+  if (pendingOut.length) {
+    console.log('');
+    for (const line of pendingOut) console.log(line);
   }
 
   if (showResidue) {
@@ -4010,6 +4142,76 @@ function selfTest() {
     !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000 }),
   );
 
+  // ── The families a changeset will add (#10309) ────────────────────────────
+  //
+  // The measured defect: over one round of five dispatches, every dev's
+  // re-derivation was longer than the PM's list by the SAME five families, and
+  // on two of the five cards those five were the whole delta. They are
+  // changeset-triggered, and the changeset does not exist when the PM derives.
+  //
+  // These cases pin the property rather than the five names. The fixtures below
+  // invent gates this repo does not have — including a SIXTH changeset-
+  // triggered family — because the one thing this section must never become is
+  // a table: a hand-maintained list would pass a test written against today's
+  // five and go quietly wrong on the day a sixth lands, which is the failure
+  // mode the whole file is built against. A fixture family the script has never
+  // heard of appearing in the output is the only assertion that can tell a
+  // probe from a list.
+  const csFam = (check, hints, extra = {}) => [
+    check,
+    { check, filter: null, direct: false, workflows: new Set(['lint.yml']), files: [], hints, triggers: [], ...extra },
+  ];
+  const csEntries = [
+    csFam('check:invented-changeset-gate', ['.changeset']),
+    csFam('check:invented-sixth-changeset-gate', ['.changeset/**']),
+    csFam('check:invented-pre-mode-gate', ['.changeset/pre.json']),
+    csFam('check:invented-unrelated-gate', ['packages/objectql/src']),
+    csFam('check:invented-undetermined-gate', []),
+  ];
+  const pending = pendingChangesetFamilies(csEntries, new Set());
+  const pendingNames = pending.map((p) => p.check);
+  t('a family whose source names the changeset dir is pending for a card that has none yet', pendingNames.includes('check:invented-changeset-gate'));
+  t(
+    'a SIXTH changeset-triggered family the script has never heard of is pending too — the section is a probe, not a list',
+    pendingNames.includes('check:invented-sixth-changeset-gate'),
+  );
+  // Coverage, not a name match: a gate that reads only the pre-mode file lives
+  // in the changeset directory and is NOT moved by a new changeset. Widening
+  // the probe to "mentions the changeset dir" would fabricate this lead in the
+  // section a dispatch prompt pastes.
+  t('a family naming only the pre-mode file is NOT pending — a new changeset is not that file', !pendingNames.includes('check:invented-pre-mode-gate'));
+  t('a family naming an unrelated tree is NOT pending', !pendingNames.includes('check:invented-unrelated-gate'));
+  t('nor is one whose source names no path at all — undetermined is not pending', !pendingNames.includes('check:invented-undetermined-gate'));
+  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(join(ROOT, CHANGESET_PROBE_PATH)));
+  // The subtraction: when the input really carries a changeset these families
+  // are in the matched list already, and printing them twice would make two
+  // sections claim different things about the same lead.
+  const pendingAfterMatch = pendingChangesetFamilies(csEntries, new Set(['check:invented-changeset-gate']));
+  t(
+    'a family the matched list already printed is subtracted, never printed twice',
+    !pendingAfterMatch.map((p) => p.check).includes('check:invented-changeset-gate'),
+  );
+  t('and subtraction leaves exactly the remainder, not the whole section', pendingAfterMatch.map((p) => p.check).includes('check:invented-sixth-changeset-gate'));
+  // CI's own trigger reaches the probe too — the section asks the same question
+  // of both authorities the matched list does, not of watch hints alone.
+  const csTriggered = pendingChangesetFamilies(
+    [csFam('check:invented-trigger-gate', [], { triggers: [{ workflow: 'invented.yml', paths: ['.changeset/**'] }] })],
+    new Set(),
+  );
+  t('a family CI SCHEDULES for a changeset is pending on the trigger alone, with no watch hint', csTriggered.length === 1);
+  // Optional-chained on purpose: an implementation that stops finding this
+  // family must REDDEN this case, not throw out of the harness before the rest
+  // of the suite runs (measured while ablating the probe into a hand list).
+  t('and its provenance says so, rather than claiming a source literal', csTriggered[0]?.hits?.[0]?.via?.startsWith('CI trigger in') === true);
+  // Rendering.
+  const pendingOut = pendingChangesetLines(pending);
+  t('the section heading counts the families and carries the docs-only escape', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card is docs-only:$/.test(pendingOut[0]));
+  t('every row is a RUNNABLE invocation, the same as the matched list', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.startsWith('  - pnpm ') || l.startsWith('  - node ')));
+  t('every row prints the hypothetical path it would match, so the lead cannot read as a real one', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.includes(CHANGESET_PROBE_PATH)));
+  t('the section says out loud that it is not a fourth bucket', pendingOut.some((l) => l.includes('NOT a fourth bucket')));
+  t('and that the dev writes the changeset AFTER this derivation runs — the temporal gap is the point', pendingOut.some((l) => l.includes('written by the DEV, after this derivation runs')));
+  t('an empty pending set renders NOTHING — no zero heading to send a reader looking', pendingChangesetLines([]).length === 0);
+
   // ── The model-tier derivation (#8640) ─────────────────────────────────────
   //
   // The incident these originally pinned: a surface containing a pm-dispatch
@@ -4305,6 +4507,40 @@ function selfTest() {
     t('a real default run no longer reports check:release-body as unreachable', !unreachableBlock.includes('check:release-body'));
     t('nor check-skill-frame-freshness.mjs', !unreachableBlock.includes('check-skill-frame-freshness.mjs'));
     t('and no phantom namespace literal survives into the printed reasons', !/'application\/json'|'refs\/remotes\/|'origin\/main'/.test(unreachableBlock));
+
+    // #10309, pinned END TO END for the same reason #10097 is: every case above
+    // drives `pendingChangesetFamilies`/`pendingChangesetLines` in isolation and
+    // all of them stay green if the call site is dropped from `derive`, or hidden
+    // behind a flag no dispatch brief tells anyone to pass. Only a real DEFAULT
+    // run over a real non-changeset surface can tell those apart — and this is
+    // also the one case that proves the LIVE tree still has such families at all,
+    // so a probe that silently stopped reaching them cannot pass as "none
+    // pending".
+    t('the DEFAULT run names the families a changeset will add', /^Once a changeset exists, \d+ more famil\(ies\) apply/m.test(plainOut));
+    const pendingBlock = plainOut.slice(plainOut.indexOf('Once a changeset exists,'), plainOut.indexOf('Unreachable — the'));
+    t('and the live tree really has some — the probe reaching nothing must not read as "none pending"', /^ {2}- (pnpm|node) \S/m.test(pendingBlock));
+    // `every` over an empty list is true, so the row count is asserted BESIDE
+    // it: without that, dropping the call site leaves this case green on a slice
+    // containing nothing at all (measured — it was the one live case ablating
+    // the call site did not redden).
+    const pendingRows = pendingBlock.split('\n').filter((l) => l.startsWith('  - '));
+    t('every live row is runnable and carries the hypothetical path', pendingRows.length > 0 && pendingRows.every((l) => /^ {2}- (pnpm|node) /.test(l) && l.includes(CHANGESET_PROBE_PATH)));
+    // The negative half: hand the SAME run a diff that already carries a
+    // changeset. Those families must move into the matched list and the section
+    // must stop printing — the double-print is the shape this section would be
+    // worst as, since the two headings make different claims about time.
+    const withChangeset = spawnSync(
+      process.execPath,
+      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`],
+      { encoding: 'utf8', cwd: ROOT },
+    );
+    const withOut = withChangeset.stdout ?? '';
+    t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
+    t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
+    t(
+      'because those families are in the MATCHED list instead, each one exactly once',
+      withOut.split('\n').filter((l) => l.startsWith('  - ') && l.includes('check-empty-changeset')).length === 1,
+    );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
     // Node resolves the link for the module graph, so `import.meta.url` names

@@ -297,6 +297,77 @@ describe('validateSearchableFields — list views that narrow the set', () => {
     expect(findings).toEqual([]);
   });
 
+  // ── [#9313] the SELF rung: a flattened standalone list overlay ──
+  //
+  // The `PUT /api/v1/meta/view` shape — a raw ListView config at the TOP of
+  // the `views[]` entry (`object` + `viewKind: 'list'` required, #7741). The
+  // runtime publish gate snapshots a `view` write as `views: [item]`; without
+  // this rung the #9313 dispatch widening would be a silent no-op.
+
+  it('flags a stale entry on a flattened list overlay\'s top-level set (#9313)', () => {
+    const findings = validateSearchableFields({
+      objects: [objectWithFields],
+      views: [
+        {
+          name: 'crm_account.custom',
+          object: 'crm_account',
+          viewKind: 'list',
+          type: 'grid',
+          columns: ['name'],
+          searchableFields: ['name', 'email'],
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    expect(findings[0].path).toBe('views[0].searchableFields[1]');
+    expect(findings[0].where).toBe('view "crm_account.custom" (flattened list overlay)');
+  });
+
+  it('judges an overlay\'s set as a NARROWING — the #4830 admissibility applies (#9313)', () => {
+    // A lookup-typed entry in an overlay's set is echoed as the
+    // `$searchFields` override and refused by the #4254 ingress gate on every
+    // toolbar search — the same runtime judgment every list-view surface gets.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_case',
+          fields: { name: { type: 'text' }, account_id: { type: 'lookup' } },
+        },
+      ],
+      views: [
+        {
+          name: 'crm_case.mine',
+          object: 'crm_case',
+          viewKind: 'list',
+          searchableFields: ['name', 'account_id'],
+        },
+      ],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].path).toBe('views[0].searchableFields[1]');
+  });
+
+  it('does NOT read a ViewItem record\'s top level as an overlay (#9313)', () => {
+    // The record shape carries its set in `config` — a different rung,
+    // deliberately not walked (recorded scope; see the sort twin's module note).
+    const findings = validateSearchableFields({
+      objects: [objectWithFields],
+      views: [
+        {
+          name: 'crm_account.pipeline',
+          object: 'crm_account',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['name'], searchableFields: ['email'] },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
   it('flags a lookup entry the runtime would refuse — the #4830 defect', () => {
     // The issue's repro verbatim: `searchableFields: ['name', '<lookup>']` on a
     // view, validate all green, first keystroke in the toolbar search → the

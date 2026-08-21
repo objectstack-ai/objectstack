@@ -224,14 +224,22 @@ export async function sweepStrandedOutbox(
   );
 
   if (result.failed > 0) {
-    logger?.error?.(
+    const summary =
       `EmailServicePlugin: ${result.failed} stranded sys_email row(s) could NOT be delivered by the boot `
       + 'sweep. Those messages were accepted by the platform and have still never reached a recipient; '
       + 'nothing retries them in this process. Fix: read the failures with '
       + "`SELECT id, error FROM sys_email WHERE status = 'failed'`, fix the transport (Settings → Mail), and "
       + 'turn on Settings → Mail → "Durable queue delivery" so future failures are retried and dead-lettered '
-      + 'instead of depending on the next restart.',
-    );
+      + 'instead of depending on the next restart.';
+    // Same defect as the per-row report above, one scope out (#9748). No
+    // `catch` guards this line, so `check:durability-log-level` could not see
+    // it and #9657 left it spelled `logger?.error?.(…)` — which printed
+    // NOTHING against a sink that has only `warn`. Because the per-row line WAS
+    // repaired, such a sink then heard every individual failure and never the
+    // COUNT of accepted mail that reached nobody: the detail and the total
+    // reported through different channels. Fall back to `warn`, not silence.
+    if (logger?.error) logger.error(summary);
+    else logger?.warn?.(summary);
   }
 
   return result;
