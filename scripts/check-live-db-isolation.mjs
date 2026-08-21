@@ -58,6 +58,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOTS = ['packages', 'apps', 'examples'];
@@ -314,5 +315,12 @@ function selfTest() {
   console.log(`\ncheck-live-db-isolation --self-test: PASS (${cases.length} cases)`);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
-else main();
+// This file exports its detector so `--self-test` drives the real functions
+// rather than a paraphrase of them, which means it can be imported FOR those
+// exports — and an unguarded top-level dispatch would then run the whole scan,
+// and its `process.exit`, inside the importer. `check:entry-guard` enforces this
+// (and caught exactly that here on the first run).
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) selfTest();
+  else main();
+}
