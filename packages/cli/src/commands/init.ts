@@ -113,6 +113,69 @@ export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
 };
 
 /**
+ * Lowest pnpm that can actually install this scaffold, declared as
+ * `engines.pnpm` in the generated `package.json`.
+ *
+ * The rendered `pnpm-workspace.yaml` is a settings-only file with no
+ * `packages:` key (see `renderPnpmWorkspaceYaml` below). Early pnpm 10 refuses
+ * that file outright: `pnpm install` exits 1 with "ERROR packages field
+ * missing or empty" before it resolves a single dependency, so a brand-new
+ * project cannot be installed at all. pnpm 10.15.0 and everything above accept
+ * the keyless file.
+ *
+ * Declaring the floor does not repair those pnpm versions — it makes them
+ * report a cause the user can act on instead of a workspace error about a file
+ * they did not write. Measured on the rendered shape, one clean install per
+ * pnpm version, each with its own store:
+ *
+ *   pnpm 10.0.0 – 10.4.0    pnpm parses `pnpm-workspace.yaml` BEFORE it reads
+ *                           `engines`, so these still print the raw "packages
+ *                           field missing or empty". The floor cannot reach
+ *                           this sliver; only a decision about the `packages:`
+ *                           key itself closes it.
+ *   pnpm 10.5.0 – 10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
+ *                           pnpm version is incompatible with <project>.
+ *                           Expected version: >=10.15".
+ *   pnpm >= 10.15.0         installs; unchanged by this declaration.
+ *
+ * `engines.pnpm` rather than a `packageManager` stamp, on purpose. npm, yarn
+ * and bun ignore `engines.pnpm` entirely, so the scaffold keeps working for all
+ * four package managers `objectstack init` can hand off to (see
+ * `detectPackageManager`). `packageManager: "pnpm@x.y.z"` would instead declare
+ * the project pnpm-only — corepack-driven yarn refuses to run in such a project
+ * — and pin one exact version that goes stale on every pnpm release. It also
+ * buys nothing on 10.0–10.4, which reach the workspace error before they read
+ * that field either.
+ */
+export const SCAFFOLD_PNPM_RANGE = '>=10.15';
+
+/**
+ * Render the `package.json` written into a freshly scaffolded project.
+ *
+ * Exported so the shape is asserted directly rather than re-declared by a test
+ * that only claims to mirror it — a hand-copied mirror silently stops tracking
+ * this function the moment a field is added here.
+ */
+export function renderScaffoldPackageJson(
+  projectName: string,
+  template: { scripts: Record<string, string>; dependencies: Record<string, string>; devDependencies: Record<string, string> },
+): Record<string, unknown> {
+  return {
+    name: projectName,
+    version: '0.1.0',
+    private: true,
+    type: 'module',
+    // Not a build-script allowlist (that lives in pnpm-workspace.yaml, which
+    // current pnpm reads instead of the package.json `pnpm` field) — this is
+    // the minimum pnpm that accepts that file at all.
+    engines: { pnpm: SCAFFOLD_PNPM_RANGE },
+    scripts: template.scripts,
+    dependencies: template.dependencies,
+    devDependencies: template.devDependencies,
+  };
+}
+
+/**
  * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
  * declares the two known-benign peer skews.
  * Kept minimal (no `packages:` key) so it acts purely as a settings file for
@@ -582,15 +645,7 @@ export default class Init extends Command {
       // 1. Create package.json if missing
       const pkgPath = path.join(targetDir, 'package.json');
       if (!fs.existsSync(pkgPath)) {
-        const pkg = {
-          name: projectName,
-          version: '0.1.0',
-          private: true,
-          type: 'module',
-          scripts: template.scripts,
-          dependencies: template.dependencies,
-          devDependencies: template.devDependencies,
-        };
+        const pkg = renderScaffoldPackageJson(projectName, template);
         fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
         createdFiles.push('package.json');
       } else {

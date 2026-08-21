@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "pnpm": ">=10.15"
+  },
   "scripts": {
     "dev": "objectstack dev",
     "start": "objectstack start",
