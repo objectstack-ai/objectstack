@@ -22,6 +22,11 @@
 # a fresh full clone and REFUSES to cut (#9450). Three answers, never two — a
 # checkout that cannot answer the question says so rather than guessing (#10495).
 #
+# It DOES refuse — before writing anything — when the commit object cannot be
+# read in the objectui checkout at all. There is nothing meaningful to pin, and a
+# failed run must leave no half-applied state: `.objectui-sha` is byte-identical
+# to what it was before the run (#10797).
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -71,6 +76,14 @@
 # changesets' own "release-nothing". So `objectui-changeset-digest.mjs` reads the
 # changesets added over the range — package names decide inclusion, the declared
 # level decides the bump. Nothing is inferred from a subject line.
+#
+# SELF-TEST: `scripts/bump-objectui.selftest.sh` (`pnpm check:objectui-bump`,
+# run unconditionally by the lint job). It drives this file's real bytes over
+# throwaway git repos and pins the write-ordering invariant of #10797 — an
+# unreadable commit object refuses and leaves `.objectui-sha` byte-identical —
+# plus two readable-commit cases, so a guard that refused everything would fail
+# it. Offline, no node, ~1s. Reordering anything between the reads above the
+# first mutation and that mutation is what it exists to catch.
 
 set -euo pipefail
 
@@ -130,6 +143,62 @@ else
   NEW_SHA="$(git -C "$OBJECTUI_ROOT" rev-parse HEAD)"
 fi
 
+# --- READ THE COMMIT BEFORE TOUCHING ANYTHING (#10797) -----------------------
+# Everything this bump reads OUT of the objectui commit is read here, ahead of
+# the first mutation of `.objectui-sha`. The ordering is the whole point. The pin
+# write used to come first and `git log -1 --format=%s` second, so an unreadable
+# commit object killed the run under `set -e` with the pin file ALREADY
+# REWRITTEN: no changeset, no commit, a bare `fatal: bad object` as the entire
+# explanation, and a working tree the operator had to clean up by hand. Nor did
+# re-running self-correct — the pin file now held the bad SHA, so the next run
+# compared against it. Measured, git 2.43.0, on a throwaway objectui whose HEAD
+# commit object was deleted: `SCRIPT EXIT=128`, `.objectui-sha` modified. The
+# invariant restored here is "a failed run leaves no half-applied state".
+#
+# THE GUARD IS THE READ ITSELF, not a probe standing in for it. `cat-file -e`
+# answers "is the object present", which is one failure short of the question
+# that matters: a present-but-unreadable object (corrupt zlib, truncated pack)
+# passes it and still kills `git log`. Performing the real read means anything
+# that would have failed later has already failed HERE, with the tree untouched.
+# One implementation of the rule, and it is the rule — the same reason the range
+# walk is asked inside the digest rather than copied into this shell (#9408).
+#
+# AND IT REFUSES RATHER THAN WARNS. The #10495 warning-not-gate ruling below is
+# about a pin that is not on `origin/main` — a real commit you can still
+# meaningfully pin, where `origin/main` may simply be stale and the judgement is
+# the operator's. This is a pin whose object cannot be read AT ALL: there is
+# nothing to pin, nothing for the operator to weigh, and neither the changeset
+# entry nor the commit message can be derived from it. Warning here would only
+# reinstate the half-applied write. (#10797 triage ruling, 2026-08-21.)
+#
+# Reachable from the DEFAULT path, not just from an explicit argument. Measured,
+# git 2.43.0: `git rev-parse HEAD` exits **0** and prints the sha even when that
+# commit object is missing from the object store — it resolves the ref, it does
+# not read the object. A partial clone with the object not fetched, or an
+# interrupted object store, gets here with no argument at all.
+#
+# git's own `fatal:` is left on stderr deliberately: it names WHICH failure this
+# was, and the block below is the explanation it was missing — not a replacement
+# for it.
+SHORT="${NEW_SHA:0:12}"
+if ! SUBJECT_LINE="$(git -C "$OBJECTUI_ROOT" log -1 --format=%s "$NEW_SHA")"; then
+  {
+    echo "✗ REFUSING to bump: the objectui commit object ${SHORT} cannot be read in"
+    echo "  ${OBJECTUI_ROOT}."
+    echo "  'git log -1 --format=%s ${SHORT}' fails there, so this bump can derive neither"
+    echo "  the @objectstack/console changeset nor the commit message from it — there is"
+    echo "  nothing meaningful to pin."
+    echo "  A ref can name a commit whose object is missing: 'git rev-parse' resolves the"
+    echo "  ref WITHOUT reading the object, so a plain HEAD bump reaches this too, not just"
+    echo "  an explicit argument."
+    echo "  NOTHING WAS WRITTEN — .objectui-sha is untouched and still holds the old pin."
+    echo "  Fetch or repair the objectui object store, then re-run this bump:"
+    echo "      git -C ${OBJECTUI_ROOT} fetch origin"
+    echo "      git -C ${OBJECTUI_ROOT} cat-file -e ${SHORT}^{commit} && echo present"
+  } >&2
+  exit 1
+fi
+
 # --- Is the revision we are about to pin actually ON objectui main? (#10495) --
 # `rev-parse HEAD` answers "what is checked out", never "is it on main". Bump
 # with a feature branch checked out — or pass a branch name — and the pin names
@@ -164,8 +233,9 @@ fi
 # The absent-object case is reachable from the DEFAULT path, not just from an
 # explicit argument. Measured, git 2.43.0: `git rev-parse HEAD` exits **0** and
 # prints the sha even when that commit object is missing from the object store —
-# it resolves the ref, it does not read the object. So NEW_SHA arriving here is
-# not proof the object is present, and presence is asked as its own question.
+# it resolves the ref, it does not read the object. So a resolved NEW_SHA is not
+# proof the object is present; that question is settled ABOVE, before anything is
+# written, as a refusal rather than as a report (#10797).
 REACH_TAG=""      # parenthetical for the one line that is printed anyway
 REACH_RECALL=""   # tail recall, so a warning cannot scroll out of the run
 
@@ -209,26 +279,15 @@ report_objectui_reachability() {
     return 0
   fi
 
-  # Q2 — is the object even present? `--is-ancestor` cannot return a verdict for
-  # an object it cannot read; it exits 128 there, and 128 must not be read as
-  # "no". Asked separately so the report can name WHICH failure this was.
-  if ! git -C "$OBJECTUI_ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null; then
-    REACH_TAG=" (reachability UNKNOWN)"
-    REACH_RECALL=" — ⚠️ pin reachability UNKNOWN, see above"
-    {
-      echo
-      echo "⚠️  COULD NOT DETERMINE whether ${short} is on objectui main."
-      echo "    The commit object is NOT PRESENT in ${OBJECTUI_ROOT}"
-      echo "    ('git cat-file -e ${short}^{commit}' exits 128). A ref can name a commit"
-      echo "    whose object is missing — 'git rev-parse' resolves the ref without reading"
-      echo "    the object — so this is reachable even from a plain HEAD bump."
-      echo "    'merge-base --is-ancestor' exits 128 here too: an error, not a verdict."
-      echo "    This is NOT 'the pin is fine' and NOT 'the pin left main'. It is unanswered."
-      echo "    Fetch or repair the objectui object store, then re-run this bump."
-      echo
-    } >&2
-    return 0
-  fi
+  # Q2 — whether the object can be READ is deliberately NOT asked here. It is
+  # settled up front, by the read this bump actually needs (`git log -1
+  # --format=%s`), and an unreadable object REFUSES there with the working tree
+  # untouched (#10797) — so `--is-ancestor` below cannot meet an absent object on
+  # any path that reaches this function. Asking it a second time with a weaker
+  # probe (`cat-file -e` tests presence, not readability) would be a second
+  # implementation of one rule, free to drift from the thing it guards. If that
+  # ordering is ever broken, the rc-is-not-1 branch below is the backstop: it
+  # reports 128 as the error it is and never as a verdict.
 
   # Q3 — the verdict. 0 / 1 / anything else, distinguished on purpose.
   git -C "$OBJECTUI_ROOT" merge-base --is-ancestor "$sha" origin/main 2>/dev/null || rc=$?
@@ -310,11 +369,13 @@ if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
   exit 0
 fi
 
+# FIRST MUTATION OF THE WORKING TREE. Everything read out of the objectui commit
+# was read above, and an unreadable commit already refused — nothing below this
+# line can fail on a read of `$NEW_SHA` that has not already been attempted
+# (#10797). Keep it that way: a new `git -C "$OBJECTUI_ROOT" …` added after this
+# point re-opens exactly the half-applied write this ordering exists to prevent.
 echo "$NEW_SHA" > "${FRAMEWORK_ROOT}/.objectui-sha"
 echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
-
-SHORT="${NEW_SHA:0:12}"
-SUBJECT_LINE="$(git -C "$OBJECTUI_ROOT" log -1 --format=%s "$NEW_SHA")"
 
 # --- Emit the @objectstack/console changeset for the frontend delta ----------
 CS_FILE=""
