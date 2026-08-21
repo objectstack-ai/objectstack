@@ -443,7 +443,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-tenant-chokepoint.mjs',
   'scripts/checklist-select.mjs',
   'scripts/docs-audit/check-audit-scope.mjs',
-  'scripts/measure-test-shard-timings.mjs',
   'scripts/objectui-range.mjs',
   'scripts/pm/check-governed-prose.mjs',
   'scripts/qa/qa-rollup.mjs',
