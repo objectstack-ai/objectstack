@@ -1357,9 +1357,19 @@ export interface HookEntry {
    * generated code makes most often. So the LESS guarded verb was the one
    * whose failure is LESS recoverable. One flag now covers both, rather than a
    * `dispatchUnscopedMultiUpdate` sibling: the flag is already per-REGISTRATION
-   * and per-EVENT, so "delete only" (#4757's `sys_attachment` guard, which
-   * declares no update refusal) is still said exactly — by declaring it on the
-   * `beforeDelete` registration and not on an update one.
+   * and per-EVENT, so "delete only" is still said exactly — declare the flag on
+   * the `beforeDelete` registration and omit it from the update one, and the
+   * whole-operation call is then dispatched for the declared verb alone (the
+   * dispatcher reads the entries of ONE event, then filters those on the flag).
+   *
+   * ⚠️ That idiom is deliberately stated WITHOUT naming a live registration.
+   * It used to name one: `sys_attachment` declared #4757's delete refusal on
+   * `beforeDelete` and on no update registration — true when this paragraph was
+   * written (#9974), false since #10091 gave that guard's update verb a refusal
+   * of its own. A replacement exemplar would only be the next referent free to
+   * move, so none is named: the past-tense sentence cannot be falsified by the
+   * tree moving on, because it is a claim about what those two cards did rather
+   * than about today's registrations.
    *
    * Deliberately a REGISTRATION declaration, not an engine-wide rule: the
    * engine stays neutral (no behaviour change for objects whose guards do not

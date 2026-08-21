@@ -514,14 +514,39 @@ jobs:
       # (2/3) failed naming @objectstack/example-showcase#test while this guard
       # printed OK, because the failing package was the one that printed
       # nothing — its complete 5083-line job log mentions that package twice,
-      # both times in the error summary, with no vitest output anywhere. The
-      # dichotomy is true again only because green now covers both questions.
+      # both times in the error summary, with no vitest output anywhere.
+      #
+      # ⛔ AND THE REPLACEMENT WAS STILL BLIND, FOR A SECOND REASON — measured
+      # on run 32391924279 (`Test Core (3/3)`, job 96499888763, complete 31839-
+      # line log). Under grouped log order turbo folds each task into a
+      # collapsible `::group::` EXCEPT the one it surfaces as the run's failure,
+      # which gets a bare `<pkg>:test` header instead. The guard read groups and
+      # prefixes but not that third shape, so the FAILING package — the one it
+      # exists to grade — was the one package whose summary it could not
+      # attribute, and its "refuse to guess" backstop then withheld judgement on
+      # every candidate and exited 0. It printed `OK (24 of 29 …)` under a note
+      # naming @objectstack/example-showcase as ungraded: the same green-that-
+      # reads-like-a-clearance, one turn of the screw further out.
+      # ⇒ The guard now knows all three header shapes, a package named in
+      # turbo's `Failed:` roster is judged even when the log holds strays it
+      # cannot place, and an ungraded package downgrades the verdict word from
+      # OK to PARTIAL and raises a ::warning:: annotation. Only with all three
+      # does green cover both questions — which is what makes the dichotomy
+      # above true. ⚠ A red HERE can never turn a green shard red: it needs
+      # turbo to have named a failed task, and that already failed the run.
       #
       # ⚠ The guard does NOT charge a silent package to this shard when turbo
       # simply never reached it — turbo stops scheduling on the first failure,
       # so an ordinary red suite leaves later packages unrun. Those are printed
       # as notes. See the script header for the two exemptions and the two
       # rules that decide red.
+      #
+      # ⚠ NOT diagnosed, by either pass: the original zero-output event itself.
+      # It has never been reproduced. The 2026-08-20 recurrence was NOT one —
+      # that failing suite streamed ~940 lines and a complete summary
+      # (`Test Files 21 passed (21)` / `Tests 342 passed (342)`), and failed on
+      # a vitest teardown error, not on silence. Read a "zero output" claim as
+      # a hypothesis until someone has grepped the WHOLE log for it.
       - name: Test completeness guard
         if: always()
         run: |

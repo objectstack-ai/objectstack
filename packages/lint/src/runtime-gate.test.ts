@@ -326,6 +326,11 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       // family and dispatched for `view` because list-view filter rules are
       // one of the three shapes it judges.
       'validatePresetComparands',
+      // #9313 — the reference-integrity suite's entry dispatches for `view`;
+      // the suite then runs only its two list-view field members
+      // (`validateSearchableFields` / `validateSortableFields`) on the
+      // per-write snapshot — see `runtime-gate.view-writes.test.ts`.
+      'validateReferenceIntegrity',
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -485,6 +490,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
+      'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -578,6 +584,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
+      'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);

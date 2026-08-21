@@ -112,6 +112,70 @@
  * file) but share no vocabulary, no baseline and no verdict: a seam red under
  * one is untouched by the other.
  *
+ * ## THE SUMMARY LIMB — judged OUTSIDE the catch (#9748)
+ *
+ * Everything above judges a call inside a `catch`. #9748 measured the cost of
+ * that boundary. #9657 repaired six seams — every one this gate can reach — and
+ * two reports spelled identically were left standing because no `catch` guards
+ * them: the BATCH SUMMARY of the failures the catch just counted.
+ *
+ *   packages/plugins/plugin-email/src/outbox-sweep.ts             "N stranded sys_email row(s) could NOT be delivered"
+ *   packages/plugins/plugin-security/src/permission-set-projection.ts  "N FAILED backfill(s)"
+ *
+ * The repair made the split WORSE, not better: against an `error`-less sink the
+ * per-row line now lands at `warn` while the total stays silent, so the detail
+ * and the count report through different channels. That is the argument for
+ * extending the population rather than repairing two lines by hand.
+ *
+ * ## What this limb asks — and, more importantly, what it does NOT
+ *
+ * It does NOT ask "should this summary be `error`?". Choosing the level of a
+ * line outside a catch is exactly the semantic judgement this file refuses to
+ * make by heuristic, and a criterion that made it would redden correct code on
+ * its first run (measured: four sites, below). This limb takes the author's own
+ * level choice at face value and asks ONE question, the same one #9657 asked:
+ *
+ *   > You reached for `error`. Against a sink that has no `error`, does
+ *   > anything print?
+ *
+ * So it is a NARROWING of the question, applied to a wider population. A branch
+ * that logs `info`/`warn` is discovered, COUNTED and deliberately not judged.
+ * The only way to trip this limb is `logger.error?.(…)` with no fallback, which
+ * is never correct — that is #9657's ruling, unchanged and not weakened.
+ *
+ * ## The population, measured before it was proposed
+ *
+ * Criterion: a call in an `if` whose condition reads a counter that a
+ * durability-critical `catch` ACCUMULATED into (`n++` / `n += 1`), outside any
+ * catch. On the tree this landed in:
+ *
+ *   | population                                             | count |
+ *   |--------------------------------------------------------|------:|
+ *   | judged — the branch reaches `error`/`fatal`             |     2 |  ← both #9748 sites
+ *   | discovered, NOT judged — the branch logs only info/warn |     1 |  (objectql/plugin.ts "Schema sync complete")
+ *   | dropped before the level filter — boolean latch, not a counter | 3 |
+ *
+ * The two narrowings are both load-bearing, and each was measured:
+ *
+ *   1. ACCUMULATOR, not any mutation. `flag = true` in a catch is a
+ *      say-it-once latch, not a failure count; the branch it guards is usually
+ *      a RECOVERY line that is correctly `info` (`database-loader.ts`'s "DDL
+ *      succeeded on retry", `protocol.ts`'s commit-store note). Keying on
+ *      `++`/`+=` drops all three.
+ *   2. LEVEL, never second-guessed. `objectql/plugin.ts` increments `synced` in
+ *      a catch (its sequential fallback loop) and reports `synced > 0` with
+ *      `info` — correct, and judged by nobody here. It is counted in the census
+ *      line instead, so "the matcher stopped matching" cannot masquerade as
+ *      "nothing to report": that number is asserted positively in the
+ *      self-test, not merely observed to be zero.
+ *
+ * Stated limitation, in the spirit of the two above: the accumulator is read
+ * from the catch's own subtree only. `objectql/plugin.ts` increments `failed`
+ * inside a same-file helper the catch calls, so its (correct, unconditional)
+ * `failed > 0` summary is not in the population. Following helpers here would
+ * grow the PASSING population and is a deliberate non-goal for now — this limb
+ * exists to stop a spelling, not to enumerate every summary in the repo.
+ *
  * ## THE THIRD VERDICT (#9747, maintainer ruling of 2026-08-18)
  *
  * Both rules above end in one of two states: a finding, or `clean`. #9747
@@ -1116,6 +1180,105 @@ function loggerLevels(node, ctx) {
 }
 
 /**
+ * ── THE SUMMARY LIMB (#9748) ────────────────────────────────────────────────
+ *
+ * The normalized source text of an lvalue, used as the identity of a counter.
+ * Source text, not a resolved symbol: `result.failed` in the catch and
+ * `result.failed` in the `if` below it are the same words, and a summary that
+ * counts one thing while testing another is not a shape worth chasing.
+ * Anything that is not a plain name / property / index read has no identity
+ * here and is skipped — the safe direction, since a counter this cannot name
+ * simply leaves its branch out of the population.
+ */
+function accumulatorKey(expr, sf) {
+    if (!expr) return undefined;
+    if (
+        !ts.isIdentifier(expr) &&
+        !ts.isPropertyAccessExpression(expr) &&
+        !ts.isElementAccessExpression(expr)
+    ) {
+        return undefined;
+    }
+    try {
+        return expr.getText(sf).replace(/\s+/g, '');
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The counters a `catch` ACCUMULATES into — `n++`, `n += 1`, `out.failed += 1`.
+ *
+ * ⛔ Deliberately NOT `flag = true` and NOT `list.push(x)`. A boolean assigned
+ * in a catch is a say-it-once latch, and the branch it guards is as often a
+ * RECOVERY line ("succeeded on retry") that is correctly `info`. Measured: the
+ * three latch sites in this repo are all such lines, and keying on assignment
+ * would have put every one of them in the population. A counter that only ever
+ * goes UP is the thing a failure summary is built from.
+ */
+function catchAccumulators(catchClause, sf) {
+    const names = new Set();
+    const visit = (n) => {
+        if (
+            (ts.isPostfixUnaryExpression(n) || ts.isPrefixUnaryExpression(n)) &&
+            n.operator === ts.SyntaxKind.PlusPlusToken
+        ) {
+            const key = accumulatorKey(n.operand, sf);
+            if (key) names.add(key);
+            return;
+        }
+        if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken) {
+            const key = accumulatorKey(n.left, sf);
+            if (key) names.add(key);
+        }
+    };
+    visit(catchClause);
+    walkAll(catchClause, visit);
+    return names;
+}
+
+/** Which accumulator, if any, this `if` condition reads. */
+function conditionReadsAccumulator(cond, accumulators, sf) {
+    let hit;
+    const consider = (n) => {
+        if (hit) return;
+        if (!ts.isIdentifier(n) && !ts.isPropertyAccessExpression(n) && !ts.isElementAccessExpression(n)) {
+            return;
+        }
+        const key = accumulatorKey(n, sf);
+        if (key && accumulators.has(key)) hit = key;
+    };
+    consider(cond);
+    walkAll(cond, consider);
+    return hit;
+}
+
+/**
+ * Is this node inside ANY `catch` clause?
+ *
+ * The summary limb judges only what lies OUTSIDE every catch — which is
+ * precisely the gap it was added for. Everything inside a catch belongs to the
+ * catch rule: if that catch guards a declared callee it is judged there, and if
+ * it does not, the vocabulary boundary is deliberate and this limb must not
+ * reach around it. Without this test the two rules would both report the same
+ * call, and #4754 is the standing lesson on what duplicate reports cost.
+ */
+function insideAnyCatch(node) {
+    for (let n = node.parent; n; n = n.parent) {
+        if (ts.isCatchClause(n)) return true;
+    }
+    return false;
+}
+
+/** The nearest function-like (or the file) enclosing `node`. */
+function enclosingFunctionNode(node) {
+    for (let n = node.parent; n; n = n.parent) {
+        if (runsLater(n) || ts.isSourceFile(n)) return n;
+    }
+    return undefined;
+}
+
+/**
  * Same-file `const <name> = <expression that resolves to a log>` bindings.
  *
  * Two shapes in the repo, both in `catch` blocks that reason explicitly about
@@ -1850,6 +2013,10 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
     const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
     const functionBodies = indexFunctionBodies(sf);
     const logAliases = indexLogAliases(sf, functionBodies);
+    // #9748: the summary-limb census. Collected even when the caller does not
+    // ask for it, so the limb's code path is identical in every run.
+    const summaryBranches = options.summaryBranches ?? [];
+    const seenSummaryRegions = new Set();
 
     const globalPropagation = [...FAILURE_PROPAGATION_CALLEES].map(([name, d]) => ({
         name,
@@ -1999,6 +2166,81 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         return guarded;
     };
 
+    /**
+     * Judge the SUMMARY reports a durability catch feeds (#9748).
+     *
+     * See "THE SUMMARY LIMB" in the header for the criterion and the measured
+     * population. In one sentence: the branch is found through the counter the
+     * catch accumulated into, and only the SPELLING of a loud call there is
+     * judged — never whether the author should have chosen a loud level.
+     */
+    const judgeSummaryReports = (tryNode, callee) => {
+        const accumulators = catchAccumulators(tryNode.catchClause, sf);
+        if (accumulators.size === 0) return;
+        const fn = enclosingFunctionNode(tryNode);
+        if (!fn) return;
+        walkAll(fn, (n) => {
+            if (!ts.isIfStatement(n)) return;
+            // Inside a catch is the catch rule's business, never this limb's.
+            if (insideAnyCatch(n)) return;
+            const counter = conditionReadsAccumulator(n.expression, accumulators, sf);
+            if (!counter) return;
+            const regionKey = `${relPath}:${n.getStart(sf)}`;
+            if (seenSummaryRegions.has(regionKey)) return;
+            seenSummaryRegions.add(regionKey);
+
+            // Both branches: `if (failed === 0) info(…); else error?.(…)` is the
+            // same report, spelled inside out. Quiet levels are collected and
+            // then ignored, so including the `else` costs nothing.
+            const levels = [];
+            for (const branch of [n.thenStatement, n.elseStatement]) {
+                if (!branch) continue;
+                levels.push(...collectLoggedLevels(branch, { functionBodies, logAliases }, lineOf));
+            }
+            // Nothing to grade. An `if (failed > 0) return;` is not a report,
+            // and counting it would inflate the census with non-reports.
+            if (levels.length === 0) return;
+
+            const loudHere = levels.filter((l) => LOUD_LEVELS.has(l.level) && !l.conditional);
+            const conditionalHere = levels.filter((l) => LOUD_LEVELS.has(l.level) && l.conditional);
+            const line = lineOf(n);
+            const describe = (l) => `${l.level}${l.conditional ? '?.' : ''}@${l.line}${l.viaHelper ? ` via ${l.viaHelper}()` : ''}`;
+
+            if (loudHere.length === 0 && conditionalHere.length === 0) {
+                // ⭐ The REJECT side, recorded as a positive fact rather than as
+                // an absence. This branch reports at a level the author chose
+                // and this limb does not second-guess levels — see the header.
+                summaryBranches.push({
+                    file: relPath, line, counter, callee, verdict: 'not-judged-quiet',
+                    levels: levels.map(describe),
+                });
+                return;
+            }
+
+            summaryBranches.push({
+                file: relPath, line, counter, callee,
+                verdict: loudHere.length > 0 ? 'loud' : 'conditional',
+                levels: levels.map(describe),
+            });
+            if (loudHere.length > 0) return;
+
+            findings.push({
+                file: relPath,
+                callee,
+                calleeLine: lineOf(tryNode),
+                catchLine: line,
+                summaryOfCatchLine: lineOf(tryNode.catchClause),
+                counter,
+                loud: [],
+                quiet: levels.filter((l) => QUIET_LEVELS.has(l.level)).map(describe),
+                conditional: conditionalHere.map(describe),
+                unreadable: [],
+                why: DURABILITY_CRITICAL_CALLEES.get(callee),
+                kind: 'conditional-summary',
+            });
+        });
+    };
+
     walkAll(sf, (node) => {
         if (!ts.isTryStatement(node) || !node.catchClause) return;
 
@@ -2047,6 +2289,14 @@ function analyzeSourceFile(sf, relPath, findings, seams, options = {}) {
         };
         seams.push(seam);
 
+        // ── The SUMMARY limb (#9748) ─────────────────────────────────────────
+        //
+        // Runs whatever the catch's own verdict was, and that is the point: at
+        // BOTH #9748 sites the catch is loud (it was repaired by #9657) and the
+        // summary it feeds was not. Judging the summary only when the catch is
+        // already red would have found neither.
+        judgeSummaryReports(node, guarded[0].callee);
+
         if (propagatesAlways || delivery || loud.length > 0) return;
 
         findings.push({
@@ -2075,7 +2325,18 @@ function loadBaseline() {
 }
 
 function baselineKey(f) {
-    return `${f.file}::${f.callee}`;
+    // #9748: the summary limb gets its OWN key space. A `<file>::<callee>`
+    // entry was reviewed against the CATCH at that callee; letting it also
+    // excuse a summary report elsewhere in the file would license a site
+    // nobody read. An entry for the summary limb spells `"limb": "summary"`.
+    return f.kind === 'conditional-summary'
+        ? `${f.file}::${f.callee}::summary`
+        : `${f.file}::${f.callee}`;
+}
+
+/** The same key, computed from a BASELINE ENTRY rather than from a finding. */
+function baselineEntryKey(e) {
+    return e.limb === 'summary' ? `${e.file}::${e.callee}::summary` : `${e.file}::${e.callee}`;
 }
 
 /**
@@ -2364,6 +2625,13 @@ function runReadSeamRule({ list = false } = {}) {
  */
 function describeFinding(v) {
     switch (v.kind) {
+        case 'conditional-summary':
+            return (
+                `the SUMMARY of the failures counted by the catch at line ${v.summaryOfCatchLine} ` +
+                `(counter \`${v.counter}\`) reaches \`error\` only CONDITIONALLY (${v.conditional.join(', ')}) — ` +
+                'no catch guards this line, so the `?.(` means an `error`-less sink hears every individual ' +
+                'failure and never the TOTAL: the detail and the count report through different channels'
+            );
         case 'conditional-log':
             return (
                 `catch reaches \`error\` only CONDITIONALLY (${v.conditional.join(', ')}) — the \`?.(\` ` +
@@ -2387,6 +2655,19 @@ function remedyFor(v) {
     const propagationOption =
         '    OR      : if this catch already HANDS THE FAILURE TO THE CALLER on every path (an error envelope, a per-item outcome report), do NOT bolt on a log — declare how it delivers, in FAILURE_PROPAGATION_CALLEES or FAILURE_PROPAGATION_SITES in this script (#5241). Adding a redundant `logger.error` to a path whose common case is a rejected request is the mirror-image failure AGENTS.md warns about.\n';
 
+    if (v.kind === 'conditional-summary') {
+        return (
+            '    fix     : give the optional call the FALLBACK it is missing, exactly as the catch this\n' +
+            '              summary counts already does:\n' +
+            '                  if (logger?.error) logger.error(summary, meta); else logger?.warn?.(summary, meta);\n' +
+            '                  or (logger.error ?? logger.warn)(summary, meta)\n' +
+            '    ⛔ NOT   : dropping the summary, or demoting it to `warn` unconditionally — the reach for\n' +
+            '              `error` was right, only its fallback was missing. And do NOT delete the `?.`:\n' +
+            '              that throws on a sink without the method.\n' +
+            '    note    : this limb never judges your LEVEL. A summary that reports at `info`/`warn` is\n' +
+            '              counted in the SUMMARY-LIMB census line and not judged at all (#9748).\n'
+        );
+    }
     if (v.kind === 'conditional-log') {
         return (
             '    fix     : give the optional call the FALLBACK it is missing, so something always prints:\n' +
@@ -2429,6 +2710,7 @@ function run({ list = false } = {}) {
     const files = collectSourceFiles(packagesDir);
     const findings = [];
     const seams = [];
+    const summaryBranches = [];
     const usedPropagationSites = new Set();
 
     for (const file of files) {
@@ -2437,6 +2719,7 @@ function run({ list = false } = {}) {
         const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
         analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
             usedPropagationSites,
+            summaryBranches,
         });
     }
 
@@ -2498,8 +2781,33 @@ function run({ list = false } = {}) {
         );
     }
 
+    // ── The SUMMARY-LIMB census (#9748) ──────────────────────────────────────
+    //
+    // Printed on EVERY run, for the same reason as the UNRECOGNISED verdict
+    // above: a number that only appeared on a clean run would be invisible
+    // exactly when someone is looking hardest. The `not judged` count is the
+    // REJECT side stated positively — a matcher that quietly stopped matching
+    // also prints zero findings, and only this number tells the two apart. It
+    // is asserted in the self-test, not merely observed.
+    const judgedSummaries = summaryBranches.filter((s) => s.verdict !== 'not-judged-quiet');
+    const notJudgedSummaries = summaryBranches.filter((s) => s.verdict === 'not-judged-quiet');
+    console.log(
+        `SUMMARY LIMB [durability-degradation-log-level] (#9748): ${judgedSummaries.length} counter-guarded ` +
+            'summary report(s) OUTSIDE any catch reach `error`/`fatal` and are judged on SPELLING alone ' +
+            `(${judgedSummaries.filter((s) => s.verdict === 'conditional').length} reach it only through an ` +
+            `optional call); ${notJudgedSummaries.length} further branch(es) report at a level this limb ` +
+            'never second-guesses (info/warn) and are counted here instead of judged.',
+    );
+    for (const s of summaryBranches) {
+        console.log(
+            `  summary  ${s.file}:${s.line}  counter \`${s.counter}\` from ${s.callee}()  ` +
+                `→ ${s.verdict === 'not-judged-quiet' ? 'not judged (author-chosen level)' : s.verdict}` +
+                `  [${s.levels.join(', ')}]`,
+        );
+    }
+
     const baseline = loadBaseline();
-    const allowed = new Map((baseline.entries ?? []).map((e) => [`${e.file}::${e.callee}`, e]));
+    const allowed = new Map((baseline.entries ?? []).map((e) => [baselineEntryKey(e), e]));
     const violations = [];
     const usedBaselineKeys = new Set();
 
@@ -2520,12 +2828,24 @@ function run({ list = false } = {}) {
 
     if (violations.length > 0) {
         failed = true;
+        const summaryViolations = violations.filter((v) => v.kind === 'conditional-summary');
         console.error(
-            `\n✗ ${violations.length} durability-critical catch(es) degrade quietly (AGENTS.md → "Degradation log levels", #4632):\n`,
+            `\n✗ ${violations.length} durability report(s) degrade quietly (AGENTS.md → "Degradation log levels", #4632)` +
+                (summaryViolations.length > 0
+                    ? ` — ${violations.length - summaryViolations.length} inside a catch, ` +
+                      `${summaryViolations.length} in a SUMMARY the catch feeds (#9748)`
+                    : '') +
+                ':\n',
         );
         for (const v of violations) {
             console.error(`  ${v.file}:${v.catchLine}`);
-            console.error(`    guards  : ${v.callee}() at line ${v.calleeLine}`);
+            if (v.kind === 'conditional-summary') {
+                console.error(
+                    `    summarises: ${v.callee}() failures counted by the catch at line ${v.summaryOfCatchLine}`,
+                );
+            } else {
+                console.error(`    guards  : ${v.callee}() at line ${v.calleeLine}`);
+            }
             console.error(`    consequence: ${v.why}`);
             console.error(`    found   : ${describeFinding(v)}`);
             // The FIX line is per-verdict on purpose. One generic remedy is what
@@ -2573,7 +2893,8 @@ function run({ list = false } = {}) {
             `✓ durability-degradation log levels: ${seams.length} durability-critical catch seam(s), all loud, rethrowing or propagating to the caller` +
                 (propagating > 0 ? ` (${propagating} propagating, declared)` : '') +
                 (allowed.size > 0 ? ` (${allowed.size} baselined)` : '') +
-                '.',
+                `; ${judgedSummaries.length} counter-guarded summary report(s) outside a catch, all of them ` +
+                'able to print against a sink with no `error` (#9748).',
         );
     }
 
@@ -3317,6 +3638,166 @@ function selfTest() {
             expectSeams: 1,
             expectUnrecognised: 0,
         },
+        // ── THE SUMMARY LIMB (#9748) ─────────────────────────────────────────
+        //
+        // Both directions, and the REJECT side as a positive number. A limb
+        // that quietly stopped matching would report zero findings AND zero
+        // judged branches — which is why `expectSummarySkipped` exists and why
+        // the fixture below pins it at 1 rather than asserting "no findings".
+        {
+            name: 'summary limb: flags a counter-guarded summary spelled logger.error?.(…) outside the catch',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; logger.error('per-object CONSEQUENCE + FIX', e); }
+                    }
+                    if (failed > 0) {
+                        logger.error?.('N FAILED object(s) — CONSEQUENCE + FIX');
+                    }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['conditional-summary'],
+            expectSummaryJudged: 1,
+            expectSummarySkipped: 0,
+        },
+        {
+            name: 'summary limb: passes the same summary repaired with the if/else fallback',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; logger.error('per-object CONSEQUENCE + FIX', e); }
+                    }
+                    if (failed > 0) {
+                        const msg = 'N FAILED object(s) — CONSEQUENCE + FIX';
+                        if (logger?.error) logger.error(msg);
+                        else logger?.warn?.(msg);
+                    }
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 1,
+            expectSummarySkipped: 0,
+        },
+        {
+            name: 'summary limb: passes the same summary repaired with the ?? fallback',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; logger.error('per-object CONSEQUENCE + FIX', e); }
+                    }
+                    if (failed > 0) (logger.error ?? logger.warn)('N FAILED object(s) — CONSEQUENCE + FIX');
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 1,
+            expectSummarySkipped: 0,
+        },
+        {
+            // ⭐ THE REJECT SIDE. This limb never second-guesses a LEVEL, so a
+            // counter-guarded branch that reports at `info` is discovered,
+            // COUNTED, and not judged. Pinning the count is what distinguishes
+            // "deliberately skipped" from "the matcher broke": both print zero
+            // findings, and only this number tells them apart.
+            name: 'summary limb: a counter-guarded branch that reports at info is COUNTED, never judged',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let recovered = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { recovered++; logger.error('CONSEQUENCE + FIX', e); }
+                    }
+                    if (recovered > 0) logger.info('recovered N object(s)');
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 0,
+            expectSummarySkipped: 1,
+        },
+        {
+            // Narrowing #1, pinned: a boolean LATCH is not a counter. Every
+            // latch site measured in this repo guards a RECOVERY line that is
+            // correctly `info`, so keying on assignment would have reddened
+            // correct code on the limb's first run.
+            name: 'summary limb: a boolean latch is not an accumulator — the branch is not in the population',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let reported = false;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { reported = true; logger.error('CONSEQUENCE + FIX', e); }
+                    }
+                    if (reported) logger.error?.('summary over a latch');
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 0,
+            expectSummarySkipped: 0,
+        },
+        {
+            // The COUNTER is the criterion, not proximity: an unrelated
+            // condition next to the same catch is not a summary of it.
+            name: 'summary limb: an unrelated condition is not a summary of the catch',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; logger.error('CONSEQUENCE + FIX', e); }
+                    }
+                    if (objs.length > 0) logger.error?.('unrelated line');
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 0,
+            expectSummarySkipped: 0,
+        },
+        {
+            // No double reporting: a counter-guarded `if` INSIDE the catch is
+            // the catch rule's business. It must be judged there (as
+            // `conditional-log`) and must not also appear as a summary.
+            name: 'summary limb: a counter-guarded if INSIDE the catch stays the catch rule\'s finding',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; if (failed > 0) logger.error?.('CONSEQUENCE + FIX'); }
+                    }
+                } }`,
+            expectViolation: true,
+            expectSeams: 1,
+            expectCount: 1,
+            expectKinds: ['conditional-log'],
+            expectSummaryJudged: 0,
+            expectSummarySkipped: 0,
+        },
+        {
+            // An `if (failed > 0)` that does not REPORT is not a summary, and
+            // counting it would inflate the census with non-reports.
+            name: 'summary limb: a counter-guarded branch that logs nothing is not a report',
+            code: `
+                class P { async f(logger: any, driver: any, objs: any[]) {
+                    let failed = 0;
+                    for (const o of objs) {
+                        try { await driver.syncSchema('t', o); }
+                        catch (e) { failed++; logger.error('CONSEQUENCE + FIX', e); }
+                    }
+                    if (failed > 0) return failed;
+                    return 0;
+                } }`,
+            expectViolation: false,
+            expectSeams: 1,
+            expectSummaryJudged: 0,
+            expectSummarySkipped: 0,
+        },
         {
             // A propagating catch is still a SEAM — it is reported by `--list`
             // and it must not vanish from the census. #4754's whole precision
@@ -3337,8 +3818,10 @@ function selfTest() {
         const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
+        const summaryBranches = [];
         const usedPropagationSites = new Set();
         analyzeSourceFile(sf, 't.ts', findings, seams, {
+            summaryBranches,
             // A case may declare its OWN site vocabulary, so the fixtures can
             // exercise `FAILURE_PROPAGATION_SITES` without depending on the real
             // repo paths (which would rot the moment a function is renamed).
@@ -3377,8 +3860,20 @@ function selfTest() {
         const unrecognised = seams.filter((x) => x.unreadable.length > 0).length;
         const unrecognisedMismatch =
             c.expectUnrecognised !== undefined && unrecognised !== c.expectUnrecognised;
+        // `expectSummaryJudged` / `expectSummarySkipped` pin the SUMMARY limb's
+        // population (#9748) — how many counter-guarded reports outside a catch
+        // it judged, and how many it deliberately did NOT because their level
+        // is the author's own. The second number is the reject side stated
+        // positively: a limb that stopped matching prints zero findings and
+        // zero of both, so only pinning the skip count can tell "correctly
+        // skipped" from "silently broken".
+        const summaryJudged = summaryBranches.filter((s) => s.verdict !== 'not-judged-quiet').length;
+        const summarySkipped = summaryBranches.filter((s) => s.verdict === 'not-judged-quiet').length;
+        const summaryMismatch =
+            (c.expectSummaryJudged !== undefined && summaryJudged !== c.expectSummaryJudged) ||
+            (c.expectSummarySkipped !== undefined && summarySkipped !== c.expectSummarySkipped);
         if (got !== c.expectViolation || countMismatch || seamMismatch || sitesMismatch || kindsMismatch
-            || unrecognisedMismatch) {
+            || unrecognisedMismatch || summaryMismatch) {
             failures++;
             console.error(
                 `  ✗ ${c.name}: expected violation=${c.expectViolation}` +
@@ -3387,7 +3882,10 @@ function selfTest() {
                     (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(c.expectSitesUsed)}` : '') +
                     (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(c.expectKinds)}` : '') +
                     (c.expectUnrecognised !== undefined ? ` unrecognised=${c.expectUnrecognised}` : '') +
+                    (c.expectSummaryJudged !== undefined ? ` summaryJudged=${c.expectSummaryJudged}` : '') +
+                    (c.expectSummarySkipped !== undefined ? ` summarySkipped=${c.expectSummarySkipped}` : '') +
                     `, got violation=${got} count=${findings.length} seams=${seams.length}` +
+                    ` summaryJudged=${summaryJudged} summarySkipped=${summarySkipped}` +
                     (c.expectUnrecognised !== undefined ? ` unrecognised=${unrecognised}` : '') +
                     (c.expectSitesUsed !== undefined ? ` sitesUsed=${JSON.stringify(usedList)}` : '') +
                     (c.expectKinds !== undefined ? ` kinds=${JSON.stringify(kinds)}` : ''),

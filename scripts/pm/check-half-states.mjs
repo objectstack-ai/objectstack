@@ -3006,7 +3006,7 @@ function classifyRepoRead(tok, primary, repo) {
   return {
     kind: 'repo-scope-refused',
     headline:
-      'the transport authenticates but repo-scoped reads are refused — the sweep cannot list one page',
+      'the transport authenticates but repo-scoped reads are refused — this container cannot make one repo-scoped request',
     detail: [
       `\`GET /rate_limit\` -> ${describeProbe(primary)}.`,
       `\`GET /repos/${OWNER_REPO}\` -> HTTP ${repo.status}${
@@ -3024,12 +3024,13 @@ function classifyRepoRead(tok, primary, repo) {
       ``,
       `This is reported instead of a green precisely because the stage-1 reading here`,
       `is INDISTINGUISHABLE from the healthy Routine runner's. Before this stage`,
-      `existed the probe said the prerequisite was met and the sweep then 403'd on its`,
-      `first page — the #4690 inversion, inside the mechanism built to prevent it.`,
+      `existed the probe said the prerequisite was met and the first repo-scoped`,
+      `request then 403'd — the #4690 inversion, inside the mechanism built to`,
+      `prevent it.`,
     ],
     fix: [
-      'run the sweep from a container whose egress allows repo-scoped reads (CI, or',
-      'the Routine seat class); in a proxy-mediated seat the board read stays on the',
+      'run this from a container whose egress allows repo-scoped reads (CI, or the',
+      'Routine seat class); in a proxy-mediated seat, repo-scoped reads stay on the',
       '`mcp__github__*` tools, which take a different path and do work here.',
     ],
   };
@@ -3086,8 +3087,9 @@ export function classifyTransportProbe(obs) {
         `script's transport.`,
       ],
       fix: [
-        'run the sweep from a container with direct egress to api.github.com (CI, or',
-        'the Routine seat class); in an MCP-only seat the board read stays manual.',
+        'run this from a container with direct egress to api.github.com (CI, or the',
+        'Routine seat class); in an MCP-only seat this stays manual — the',
+        '`mcp__github__*` tools take a different path and may still work.',
       ],
     };
   }
@@ -3183,8 +3185,9 @@ export function classifyTransportProbe(obs) {
         `\`curl\` and the \`mcp__github__*\` tools take a different path and may still work.`,
       ],
       fix: [
-        'run the sweep from a container with direct egress to api.github.com (CI, or',
-        'the Routine seat class); in an MCP-only seat the board read stays manual.',
+        'run this from a container with direct egress to api.github.com (CI, or the',
+        'Routine seat class); in an MCP-only seat this stays manual — the',
+        '`mcp__github__*` tools take a different path and may still work.',
       ],
     };
   }
@@ -5386,6 +5389,22 @@ function selfTest() {
     kind({ token: 'prox_placeholder', authed: { status: 403, rateLimitRemaining: 59 }, anon: { status: 403, rateLimitRemaining: 59 } }),
     'host-unreachable',
   );
+  // #10156: the shared classifier is imported by ci-failure.mjs (#9966), a
+  // caller that runs no "sweep" and reads no "board" — so `host-unreachable`'s
+  // fix text must not name either, in EITHER branch that returns this kind
+  // (network error, and the 403-in-both-directions case pinned just above).
+  t(
+    "…and host-unreachable's fix (403-both-ways branch) names neither the sweep nor the board read",
+    /the sweep|the board read/.test(
+      classifyTransportProbe({ token: 'prox_placeholder', authed: { status: 403, rateLimitRemaining: 59 }, anon: { status: 403, rateLimitRemaining: 59 } }).fix.join(' '),
+    ),
+    false,
+  );
+  t(
+    "…and host-unreachable's fix (network-error branch) names neither the sweep nor the board read",
+    /the sweep|the board read/.test(classifyTransportProbe({ token: '', anon: { networkError: 'ENOTFOUND' } }).fix.join(' ')),
+    false,
+  );
   // Class 2 — triage Routine container: reachable with a real credential.
   t(
     '#7412 class 2 (Routine): authed 200 -> reachable',
@@ -5446,6 +5465,22 @@ function selfTest() {
   t(
     '…and its evidence names the contradiction between the two stages',
     classifyTransportProbe(class4).detail.join(' ').includes('contradict'),
+    true,
+  );
+  // #10156: repo-scope-refused is shared with ci-failure.mjs (#9966), a caller
+  // that runs no "sweep" and reads no "board" — its headline/detail/fix must
+  // describe what the CONTAINER cannot do, not what a caller-specific "sweep"
+  // or "board read" cannot do.
+  t(
+    "…and none of its prose (headline, detail, fix) names the sweep or the board read",
+    /the sweep|the board read/.test(
+      [classifyTransportProbe(class4).headline, ...classifyTransportProbe(class4).detail, ...classifyTransportProbe(class4).fix].join(' '),
+    ),
+    false,
+  );
+  t(
+    '…and its headline instead speaks caller-neutrally about the container',
+    classifyTransportProbe(class4).headline.includes('this container cannot make one repo-scoped request'),
     true,
   );
   // Direction B, refused on the card: no vendor string is matched. The fixture
