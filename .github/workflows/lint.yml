@@ -2533,6 +2533,27 @@ jobs:
       - name: Build workspace packages
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
+      # The nested-package build. ⚠️ NOT redundant with "Build workspace
+      # packages" above, and the reason is the glob: the bare `./packages/*`
+      # matches only DIRECT children, so `packages/plugins/*`,
+      # `packages/services/*`, `packages/drivers/*` and friends arrive only via
+      # `./examples/*^...` — the examples' dependency closure — which reaches
+      # most of them by accident of what the showcase happens to import.
+      # Measured on this tree: the step above builds 68 packages, this filter
+      # builds 74, and the 8 it adds include `@objectstack/downstream-contract`
+      # and `@objectstack/studio`.
+      #
+      # In the old 45-step serial job the consumer gates below inherited this
+      # build for free: it ran earlier in the same job, for the debt ledger's
+      # sake, and everything after it saw the fuller tree. Splitting the ledger
+      # into its own lane takes that inheritance away, so this lane has to ask
+      # for it explicitly or the gates below would read a `dist/` that is
+      # missing exactly those 8 — a build-dependent gate reading nothing and
+      # reporting "measured and clean" (#4690). It is a superset of the step
+      # above, so in practice it is cache hits plus the remainder (~13s in CI).
+      - name: Build the nested packages the consumer gates resolve through
+        run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
+
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck
 
