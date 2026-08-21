@@ -2046,8 +2046,10 @@ function clientFacingFailureCode(err: unknown): string | undefined {
  *
  * The author is also strictly better off: the old path stringified a whole
  * `ZodError`, so `seedApplied.error` was a multi-line JSON dump of raw zod
- * internals. This is the curated summary {@link zodIssuesToMetadataIssues}
- * already produces for every other authoring surface.
+ * internals. The curated findings {@link zodIssuesToMetadataIssues} produces
+ * for every other authoring surface ride this error's `issues` — surfaced on
+ * `seedApplied.issues` by the catches (#10524) — and the message is their
+ * one-sentence headline.
  *
  * [#8443] EXPORTED alongside {@link clientFacingFailureText}: the runtime
  * package-publish door parses the SAME `SeedLoaderRequestSchema` in its own
@@ -2059,17 +2061,38 @@ function clientFacingFailureCode(err: unknown): string | undefined {
  */
 export function seedRequestValidationError(zodIssues: unknown): Error {
     const issues = zodIssuesToMetadataIssues(zodIssues);
-    const summary = issues.slice(0, 3)
-        .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
-        .join('; ');
+    // [#10524] `message` is a HEADLINE — count plus `path [zod code]`
+    // locators — never a restatement of the issue prose: the same `issues`
+    // array rides the error structurally, and the catches that surface this
+    // refusal thread it onto `seedApplied.issues` beside the headline, so
+    // the author's curated per-key prose still arrives exactly once.
     const err = new Error(
-        `[invalid_metadata] the published seed bodies failed spec validation: ${summary}`
-        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : ''),
+        `[invalid_metadata] the published seed bodies failed spec validation: `
+        + metadataIssueHeadline(issues),
     );
     (err as any).code = 'INVALID_METADATA';
     (err as any).status = 422;
     (err as any).issues = issues;
     return err;
+}
+
+/**
+ * [#10524] The one-sentence headline for a refusal whose per-path detail
+ * rides `issues[]` structurally: total count plus up to three
+ * `path [zod code]` locators. Restating the issue MESSAGES here is exactly
+ * the duplication #10524 removed — every console rendering both channels
+ * showed each finding twice — so the message names WHERE and HOW MANY and
+ * leaves the prose to the structured channel. The leading count subsumes the
+ * old `(+N more)` tail. The author-time gate composes its own analogue with
+ * `[rule]` locators (`runtime-authoring-gate.ts`), deliberately: rule ids
+ * and zod codes are different vocabularies and folding them into one helper
+ * would blur which one a reader is looking at.
+ */
+function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
+    const locators = issues.slice(0, 3)
+        .map((i) => `${i.path || '<root>'}${i.code ? ` [${i.code}]` : ''}`)
+        .join('; ');
+    return `${issues.length} issue${issues.length === 1 ? '' : 's'} — ${locators}`;
 }
 
 /**
@@ -13304,6 +13327,19 @@ export class ObjectStackProtocolImplementation implements
                 const parsed = schema.safeParse(request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
+                    // [#10524] Deliberately NOT trimmed to the headline the
+                    // author-time gate and `seedRequestValidationError` now
+                    // compose, although this is the same duplication shape on
+                    // the 422 envelope face (message prose + `details.issues`).
+                    // Measured during that card: this message is quoted on
+                    // faces where it is the SOLE carrier — `duplicatePackage`'s
+                    // `failed[].error` threads no `issues`, and three #8333
+                    // GUARD pins hold the author's prescription ("Unrecognized
+                    // key(s) …", the `defineView(` spelling) to it. Trimming
+                    // here without first declaring a structured channel on
+                    // those faces deletes the prescription from the wire —
+                    // the declare-then-trim order, violated. Filed as its own
+                    // card; see the #10524 PR for the measurement.
                     const summary = issues.slice(0, 3)
                         .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                         .join('; ');
@@ -14838,7 +14874,10 @@ export class ObjectStackProtocolImplementation implements
     private async applySeedBodies(
         bodies: unknown[],
         organizationId: string | null,
-    ): Promise<{ success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] }> {
+    ): Promise<{
+        success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
+        issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+    }> {
         try {
             const seeds = bodies.filter(
                 (b: any) => b && typeof b.object === 'string' && Array.isArray(b.records),
@@ -14905,6 +14944,17 @@ export class ObjectStackProtocolImplementation implements
             return {
                 success: false, inserted: 0, updated: 0,
                 error: clientFacingFailureText(e, 'seed apply failed'),
+                // [#10524] A DECLARED refusal's structured findings ride the
+                // receipt beside the headline `error` — the message is a
+                // one-sentence headline now, so this is where the per-key
+                // prose reaches the author. Guarded by the same declaration
+                // test as the text above: only the declared 422
+                // (`seedRequestValidationError`) attaches `issues`; no driver
+                // error carries them (the #8441 measurement), so nothing
+                // undeclared is routed around the withhold.
+                ...(declaresClientRefusal(e) && Array.isArray(e?.issues)
+                    ? { issues: e.issues }
+                    : {}),
             };
         }
     }

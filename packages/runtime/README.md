@@ -256,11 +256,18 @@ interface PluginContext {
 
 ## Examples
 
-See the `examples/` directory for complete examples:
-- `examples/host/` - Full server setup with Hono
-- `examples/msw-react-crud/` - Browser-based setup with MSW
-- `test-mini-kernel.ts` - Comprehensive kernel test suite
-- `packages/runtime/src/
+Complete, CI-exercised examples live in the repo's [`examples/`](../../examples)
+catalog. The three that build on this package:
+
+- [`app-todo`](../../examples/app-todo) — the smallest complete app; the fastest read of the `AppPlugin` conventions.
+- [`app-crm`](../../examples/app-crm) — relational modeling driven through the metadata loading pipeline.
+- [`app-showcase`](../../examples/app-showcase) — the kitchen-sink conformance fixture.
+
+To put an HTTP server in front of one, see [`@objectstack/plugin-hono-server`](../plugins/plugin-hono-server)
+(boots the kernel behind Hono) and [`@objectstack/hono`](../adapters/hono) (the adapter itself).
+
+This package's own behaviour is pinned by the test suite under [`src/`](./src) —
+`pnpm --filter @objectstack/runtime test`.
 
 ## Benefits of MiniKernel
 
@@ -640,9 +647,10 @@ Defaults are noop — zero overhead until you plug an adapter.
 
 ## Documentation
 
-- [MiniKernel Guide](../../MINI_KERNEL_GUIDE.md) - Complete API documentation and patterns
-- [MiniKernel Architecture](../../MINI_KERNEL_ARCHITECTURE.md) - Architecture diagrams and flows
-- [MiniKernel Implementation](../../MINI_KERNEL_IMPLEMENTATION.md) - Implementation details
+- 📖 Docs: <https://objectstack.ai/docs>
+- 📚 API Reference: <https://objectstack.ai/docs/references/kernel>
+- 🛡️ Hardening: [`docs/HARDENING.md`](../../docs/HARDENING.md)
+- 📈 Observability: [`docs/OBSERVABILITY.md`](../../docs/OBSERVABILITY.md)
 
 ## License
 

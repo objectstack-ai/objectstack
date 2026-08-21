@@ -94,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_packages_latest
 
 ## Requirements
 
-- A driver plugin that registers an `IDataEngine` under the service name `'objectql'` with `execute()` support — typically [`@objectstack/driver-sql`](../../plugins/driver-sql). `@objectstack/driver-memory` can be used for tests but does not persist across restarts. (ObjectStack Cloud additionally ships `@objectstack/driver-turso` for edge/multi-tenant.)
+- A driver plugin that registers an `IDataEngine` under the service name `'objectql'` with `execute()` support — typically [`@objectstack/driver-sql`](../../drivers/driver-sql). `@objectstack/driver-memory` can be used for tests but does not persist across restarts. (ObjectStack Cloud additionally ships `@objectstack/driver-turso` for edge/multi-tenant.)
 
 ## When to use
 
@@ -105,13 +105,13 @@ CREATE INDEX IF NOT EXISTS idx_packages_latest
 ## When not to use
 
 - ❌ Not a package manager for npm/TypeScript source packages — use npm.
-- ❌ Not a runtime plugin loader — pair with [`@objectstack/service-marketplace`](../service-marketplace) or a custom loader for that.
+- ❌ Not a runtime plugin loader — pair with `@objectstack/service-marketplace` or a custom loader for that.
 
 ## Related Packages
 
 - [`@objectstack/core`](../../core) — kernel hosting this plugin.
 - [`@objectstack/spec`](../../spec) — provides `ObjectStackManifest` and `IDataEngine` contracts.
-- [`@objectstack/driver-sql`](../../plugins/driver-sql) — supplies the `'objectql'` service. (ObjectStack Cloud also ships `@objectstack/driver-turso`.)
+- [`@objectstack/driver-sql`](../../drivers/driver-sql) — supplies the `'objectql'` service. (ObjectStack Cloud also ships `@objectstack/driver-turso`.)
 
 ## Links
 

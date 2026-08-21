@@ -594,9 +594,16 @@ describe('[#8333] [GUARD] a spec-validation failure on the publish path still na
         // WHICH DRAFT.
         expect(failure.type).toBe('flow');
         expect(failure.name).toBe('leave_approval');
-        // WHICH FIELD — the located path, in the human sentence.
+        // WHICH FIELD — the located path, in the human sentence. [#10524]
+        // The sentence is a HEADLINE now: it keeps the path and the rule id
+        // (this pin's guarded property — the withhold must not blank WHICH
+        // FIELD of WHICH DRAFT) while the message prose lives once, in
+        // `issues[]` below, instead of being restated here — every console
+        // rendering both channels was showing each finding twice.
         expect(failure.error).toContain('flows[0].nodes[1].config.approvers[0].value');
-        expect(failure.error).toContain('does not parse as CEL');
+        expect(failure.error).toContain('[approval-expression-invalid]');
+        expect(failure.error).not.toContain('does not parse as CEL');
+        expect(failure.issues[0].message).toMatch(/does not parse as CEL/);
         // …and the machine-readable halves the Studio form highlights with.
         expect(failure.code).toBe('INVALID_METADATA');
         expect(Array.isArray(failure.issues)).toBe(true);
@@ -632,6 +639,19 @@ describe('[#8333] the seed request’s schema rejection DECLARES itself, so the 
         // multi-line stringified `ZodError`, which is why this is evidence.
         expect(r.error).toContain('seeds.0.mode');
         expect(r.error).not.toContain('"code":');
+
+        // [#10524] The message is a HEADLINE (count + `path [zod code]`
+        // locators); the curated per-key prose rides the receipt ONCE,
+        // structurally, on `issues[]` — which is what lets the sentence stop
+        // restating it without the author losing anything. Only the declared
+        // 422 threads this key; the driver-fault cases below stay issue-less.
+        expect(Array.isArray(r.issues)).toBe(true);
+        const modeIssue = r.issues!.find((i: any) => i.path === 'seeds.0.mode');
+        expect(modeIssue).toBeDefined();
+        expect(typeof modeIssue!.message).toBe('string');
+        for (const i of r.issues!) {
+            expect(r.error).not.toContain(i.message);
+        }
     });
 
     it('the unreadable-bodies guard is untouched — a different fact, a different sentence', async () => {

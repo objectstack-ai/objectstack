@@ -426,6 +426,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (result as any).seedApplied = {
                                 success: false,
                                 error: clientFacingFailureText(e, 'seed apply failed'),
+                                // [#10524] The declared 422's structured
+                                // findings ride beside the headline `error` —
+                                // `seedRequestValidationError`'s message is a
+                                // one-sentence headline now, and `issues` is
+                                // where the per-key prose reaches the author.
+                                // `issues` is structured authoring feedback
+                                // only the declared refusal attaches; no
+                                // driver error carries it (the #8441
+                                // measurement), so this routes nothing
+                                // undeclared around the withhold above.
+                                ...(Array.isArray((e as any)?.issues)
+                                    ? { issues: (e as any).issues }
+                                    : {}),
                             };
                         }
                     }

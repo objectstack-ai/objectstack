@@ -37,7 +37,7 @@ await kernel.bootstrap();
 
 `SecurityPlugin` is single-tenant by default. It enforces RBAC, owner-based RLS, and Field-Level Security regardless of mode.
 
-For **multi-tenant** (logical row-level Organization scoping) install [`@objectstack/plugin-org-scoping`](../plugin-org-scoping/README.md) *before* SecurityPlugin:
+For **multi-tenant** (logical row-level Organization scoping) install `@objectstack/plugin-org-scoping` *before* SecurityPlugin:
 
 ```typescript
 import { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';
@@ -92,7 +92,7 @@ Compilation output is a filter AST merged into every query's `where` clause, so 
 ## When to use
 
 - ✅ Any multi-user deployment.
-- ✅ Enforcing tenant isolation (combine with [`@objectstack/service-tenant`](../../services/service-tenant)).
+- ✅ Enforcing tenant isolation (combine with `@objectstack/service-tenant`).
 
 ## When not to use
 
