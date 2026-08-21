@@ -806,7 +806,24 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
 }
 
 export function printMetadataStats(stats: MetadataStats) {
-  const sections: Array<{ label: string; items: Array<[string, number]> }> = [
+  const sections: Array<{
+    label: string;
+    items: Array<[string, number]>;
+    /**
+     * #10504 — a section whose every item is `0` used to vanish from the
+     * summary entirely, and that reads as "this summary does not report on
+     * this section" rather than "this project has none of it" — exactly the
+     * same output for a newcomer's freshly scaffolded project (intentionally
+     * zero apps) and for a summary that simply never covers UI. Triage ruled
+     * this narrowly for `UI:` — the newcomer-facing "is there a navigable
+     * app" signal — not as a blanket rule for every section, so this is an
+     * opt-in per section naming the one item to force-print at zero, not a
+     * change to the drop behavior of `Data:`/`Logic:`/`Security:` (those
+     * still omit the whole row when every item in them is zero — see #10952
+     * for whether that should change too).
+     */
+    zeroFallback?: string;
+  }> = [
     {
       label: 'Data',
       items: [
@@ -826,6 +843,7 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Reports', stats.reports],
         ['Actions', stats.actions],
       ],
+      zeroFallback: 'Apps',
     },
     {
       label: 'Logic',
@@ -846,10 +864,15 @@ export function printMetadataStats(stats: MetadataStats) {
   ];
 
   for (const section of sections) {
-    const nonZero = section.items.filter(([, v]) => v > 0);
-    if (nonZero.length === 0) continue;
-    
-    const line = nonZero.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
+    let shown = section.items.filter(([, v]) => v > 0);
+    if (shown.length === 0) {
+      if (!section.zeroFallback) continue;
+      const fallback = section.items.find(([k]) => k === section.zeroFallback);
+      if (!fallback) continue; // defensive — zeroFallback must name a real item
+      shown = [fallback];
+    }
+
+    const line = shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
     console.log(`  ${chalk.bold(section.label + ':')} ${line}`);
   }
 
