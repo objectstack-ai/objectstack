@@ -47,6 +47,10 @@ import { DatasetSchema } from '../ui/dataset.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 
+import { ThemeSchema } from '../ui/theme.zod';
+
+import { CubeSchema } from '../data/analytics.zod';
+
 import { DeclarativeConnectorEntrySchema } from '../integration/connector.zod';
 
 import { SharingRuleSchema } from '../security/sharing.zod';
@@ -200,8 +204,19 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
  * `success: true`. Enforced but undeclared — the mirror of declared-but-
  * unenforced, and the same hole, three more doors.
  *
+ * [#10194, the same shape again] `theme` and `analytics_cube` sat in the very
+ * position this docblock describes — declared, authorable stack collections
+ * with `.strict()` schemas (`defineStack({ themes, analyticsCubes })`), named
+ * by the URL-spelling contract as legal, addressable kinds — yet neither was
+ * bound here, so `PUT /meta/theme/:name` stored ANY JSON with `success: true`
+ * while the stack door strictly refused the same body. They are bound now, the
+ * same SHAPE-check-only way. `rag_pipeline` is deliberately NOT bound: it has
+ * no stack collection to take a schema from — that drift is recorded as #6242
+ * row 2 (`scripts/check-stack-collection-maps.mjs`), not solved by inventing a
+ * schema here.
+ *
  * This map is separate from `BUILTIN_METADATA_TYPE_SCHEMAS` above because that
- * one is keyed by `MetadataType`, and these three are deliberately NOT that.
+ * one is keyed by `MetadataType`, and these entries are deliberately NOT that.
  * Binding a schema here is a SHAPE check and nothing else:
  *   - no `MetadataTypeSchema` enum member;
  *   - no `DEFAULT_METADATA_TYPE_REGISTRY` entry — so every authorization
@@ -245,6 +260,25 @@ const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
   // DECORATES a document with `_diagnostics` (`computeMetadataDiagnostics`) and
   // never refuses one. Same treatment #5271/#5312 gave their strict surfaces.
   sharing_rule: SharingRuleSchema,
+
+  // [#10194] `stack.zod.ts`: `themes: z.array(ThemeSchema)`.
+  //
+  // The console's own styling surface: a malformed theme stored through this
+  // door used to fail at RENDER, with nothing at the write point to say so.
+  // `ThemeSchema` declares the ADR-0010 envelope for the reason
+  // `sharing.zod.ts` states for its own spread — the schema is `.strict()`,
+  // and binding the door without the spread would aim the new 422 at the
+  // runtime's own `applyProtection` stamp instead of at malformed author
+  // input.
+  theme: ThemeSchema,
+
+  // [#10194] `stack.zod.ts`: `analyticsCubes: z.array(CubeSchema)`.
+  //
+  // Same class, same treatment. Note what this binding does NOT say: whether
+  // `analytics_cube` authoring is LIVE end-to-end is a separate measurement
+  // (#10238) — this entry only makes the already-open write door validate the
+  // shape it already accepts, whatever that measurement concludes.
+  analytics_cube: CubeSchema,
 };
 
 /** Runtime-extensible overlay populated via `registerMetadataTypeSchema`. */
@@ -310,14 +344,15 @@ export function listMetadataTypeSchemaTypes(): string[] {
 // walks it to enforce the #4001 unknown-key closure campaign and the ADR-0010
 // protection-envelope declaration on every member, `metadata-create-seeds`
 // requires a create seed per member, and the campaign count is asserted against
-// it. Those are obligations of being a KIND. webhook/connector/sharing_rule are
-// bound above for SHAPE VALIDATION precisely because they are not kinds, so
-// enrolling them here would claim a status this change is careful not to grant
-// (and #2657's B/C decision is exactly the one left open).
+// it. Those are obligations of being a KIND. The `UNREGISTERED_KIND_SCHEMAS`
+// entries are bound above for SHAPE VALIDATION precisely because they are not
+// kinds, so enrolling them here would claim a status this change is careful not
+// to grant (and #2657's B/C decision is exactly the one left open).
 
 /**
  * Snapshot of the non-KIND stack collections bound in
- * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`.
+ * `UNREGISTERED_KIND_SCHEMAS` — today `webhook` / `connector` / `sharing_rule`
+ * / `theme` / `analytics_cube` (#6245 the first three, #10194 the last two).
  *
  * [#6931] This exists so a check can ENUMERATE that map, and for nothing else.
  * The exclusion documented directly above is about {@link

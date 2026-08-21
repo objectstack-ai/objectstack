@@ -19,6 +19,7 @@ import { FilterConditionSchema } from './filter.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const AggregationMetricType = z.enum([
   'count', 
   'sum', 
@@ -162,12 +163,19 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
  * Strict as of #4001 batch D. Doors, measured: `defineCube()` (the factory the
  * showcase example authors through) and `defineStack({ analyticsCubes })` /
  * artifact ingest, both of which parse `StackSchema` → `analyticsCubes[]`.
- * The ADR-0010 protection envelope is deliberately NOT declared here: no
- * protected item re-parses through this schema — `CubeRegistry.register` takes
- * typed objects without a parse, `analytics_cube` resolves no
- * `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s it), and
- * artifact ingest parses the compiled definition BEFORE `applyProtection`
- * stamps `_packageId`/`_provenance` at registration.
+ *
+ * [#10194] This docblock used to say the ADR-0010 protection envelope is
+ * deliberately NOT declared here, on the premise that `analytics_cube`
+ * resolves no `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s
+ * it). #10194 retired that premise: `analytics_cube` is now bound in
+ * `UNREGISTERED_KIND_SCHEMAS`, so `PUT /meta/analytics_cube/:name` parses a
+ * body through THIS schema — and the `getMetaItemLayered` → `saveMetaItem`
+ * round-trip carries the `applyProtection` stamp. The shape is `.strict()`,
+ * so without the envelope spread below the new 422 would fire at the
+ * runtime's own stamp instead of at malformed author input. The other two
+ * observations stand: `CubeRegistry.register` takes typed objects without a
+ * parse, and artifact ingest parses the compiled definition BEFORE
+ * `applyProtection` stamps `_packageId`/`_provenance` at registration.
  */
 export const CubeSchema = lazySchema(() => strictObject(
   {
@@ -212,6 +220,11 @@ export const CubeSchema = lazySchema(() => strictObject(
 
     /** Access Control */
     public: z.boolean().default(false),
+
+    // ADR-0010 — runtime protection envelope (internal — set by loader).
+    // [#10194] See the docblock above for why this spread became load-bearing
+    // the day the `/meta` write door started parsing bodies with this schema.
+    ...MetadataProtectionFields,
   },
 ));
 

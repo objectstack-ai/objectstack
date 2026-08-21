@@ -697,8 +697,12 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         const { engine, dispatcher } = makeStack();
 
         // `theme` has no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all.
+        // [#10194] spec-valid bodies — `theme` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS now, and this control measures the #7894
+        // PERMISSION verdict, so a malformed body would 422 and misread it.
         const singular = responseOf(await dispatcher.handleMetadata(
-            '/theme/midnight', ctx(), 'PUT', { name: 'midnight', label: 'Midnight' },
+            '/theme/midnight', ctx(), 'PUT',
+            { name: 'midnight', label: 'Midnight', colors: { primary: '#3b82f6' } },
         ));
         expect(singular.status).toBe(200);
         expect(metaRow(engine, 'theme', 'midnight')).toBeDefined();
@@ -706,7 +710,8 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         // …and via its plural spelling, which the URL map carries from the
         // manifest map's limb — still one namespace, the singular one.
         const plural = responseOf(await dispatcher.handleMetadata(
-            '/themes/twilight', ctx(), 'PUT', { name: 'twilight', label: 'Twilight' },
+            '/themes/twilight', ctx(), 'PUT',
+            { name: 'twilight', label: 'Twilight', colors: { primary: '#3b82f6' } },
         ));
         expect(plural.status).toBe(200);
         expect(metaRow(engine, 'theme', 'twilight')).toBeDefined();

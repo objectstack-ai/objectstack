@@ -13,8 +13,10 @@
  *   2. A deliberately broken payload (missing required field) →
  *      expect `invalid_metadata` + status 422 + structured `issues[]`.
  *
- * Types without a Zod schema in the central registry (plugin-only types like
- * `theme`/`webhook`) are still expected to pass through unvalidated — that is
+ * Types without a Zod schema in the central registry (today only
+ * `rag_pipeline` among the URL-map kinds — `theme`/`webhook` and their
+ * siblings all resolve schemas via `UNREGISTERED_KIND_SCHEMAS` since
+ * #6245/#10194) are still expected to pass through unvalidated — that is
  * the documented fall-through, not a regression. We pin it explicitly so any
  * future coverage gap is visible in the report.
  *
