@@ -32,7 +32,7 @@ import {
 
 const ORG = 'org_alpha';
 
-const REGISTRY_FLAG = new Map(
+const REGISTRY_FLAG = new Map<string, boolean>(
     DEFAULT_METADATA_TYPE_REGISTRY.map((e) => [e.type, e.allowOrgOverride === true]),
 );
 
