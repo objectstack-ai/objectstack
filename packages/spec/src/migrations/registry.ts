@@ -5078,6 +5078,17 @@ const step18: MigrationStep = {
     '(pure lossless deletes) and leaves the bare node, inert as it always was. List ' +
     'surfaces own their filtering: a view\'s `userFilters` quick-filter bar / the list ' +
     'toolbar\'s filter builder. ' +
+    'It also retires the whole `element:form` element (#9249, ADR-0049 enforce-or-remove ' +
+    'at ELEMENT grain — the #9220 shape one element over, recorded by that card\'s own ' +
+    'verdict sweep): no renderer for the element ever shipped in any repo — objectui ' +
+    'registers none, Studio\'s designer palette lists it as a no-renderer exclusion ' +
+    'naming the live replacement, and the 2026-06 page-liveness audit recorded it ' +
+    'rendering "Unknown component type" — so every one of its six authorable keys was a ' +
+    'capability claim nothing kept. All six are retiredKey tombstones; the mechanical ' +
+    'conversion strips them from old sources (pure lossless deletes) and leaves the bare ' +
+    'node, inert as it always was. Use the object-bound `object-form` block instead ' +
+    '(#7751) — rendered, designer-publishable, and carrying the same intent ' +
+    '(`objectName`, `fields`, `mode`, `submitText`). ' +
     'It also closes the two explicit column lists on relationship fields (#9227): ' +
     '`field.inlineColumns` entries are now the strict, name-keyed InlineGridColumnSchema ' +
     '(mirroring the objectui grid renderer\'s measured reads — objectui#3951 aligned the ' +
@@ -5128,6 +5139,7 @@ const step18: MigrationStep = {
     'record-chatter-position-vocabulary',
     'element-input-target-variable-removed',
     'element-filter-removed',
+    'element-form-removed',
     'field-column-lists-canonicalized',
     'metric-filters-removed',
     'record-highlights-field-icon-removed',
@@ -6706,6 +6718,138 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // Sources are rewritten by the D2 conversion `element-filter-removed`, which
     // strips all six keys and leaves the bare node — inert as it always was.
     'ui/ElementFilterProps:targetVariable',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:aria',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:fields',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:mode',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:object',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:onSubmit',
+    // #9249 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:form` never
+    // had a renderer or reader anywhere — the #9220 shape one element over,
+    // recorded by that card's own verdict sweep. objectui registers none (its
+    // renderers/basic/elements.tsx header deferred the element to "owning plugins"
+    // that never materialized), Studio's designer palette carries it as a
+    // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
+    // renderer — use the object-bound `object-form` block"), and the 2026-06
+    // page-liveness audit recorded it rendering "Unknown component type". Measured
+    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // the card's two recorded readings @5f1bf23f / @a11458b): zero production
+    // readers of any `element:form` key — so every key, this one included, was a
+    // capability claim nothing kept. Per-key retirement would have been the wrong
+    // grain (the #9198 lesson, two elements over); all six authorable keys are
+    // tombstoned together.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstones ship on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `element-form-removed`, which
+    // strips all six keys and leaves the bare node — inert as it always was.
+    'ui/ElementFormProps:submitLabel',
     // #9198 — ADR-0049 enforce-or-remove. `targetVariable` on
     // `element:record_picker` was a declarative hint with zero readers: the picker
     // writes the selected record id through the reverse binding — the page

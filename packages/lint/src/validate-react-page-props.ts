@@ -608,7 +608,7 @@ function checkObjectChart(
 //
 // `REACT_FIELD_SPECS` below describes the blocks whose metadata twin lives
 // under different prop names — `<ListView>` (twin: a list page's
-// `interfaceConfig`) and `<ObjectForm>` (twin: `element:form` + the
+// `interfaceConfig`) and `<ObjectForm>` (twin: the `object-form` block + the
 // form-layout rule) — plus `<ObjectChart>`'s `filter`.
 //
 // `COMPONENT_FIELD_SPECS`, the table `validate-page-field-bindings` walks on
@@ -883,9 +883,9 @@ function checkBlockFieldProps(
     );
   }
 
-  // `<Block type="element:form">` renders the registered component the author
-  // names; every other block's type is fixed by its tag. A `record:*` type
-  // never arrives here — `recordContextFinding` rejected it upstream.
+  // `<Block type="element:number">` renders the registered component the
+  // author names; every other block's type is fixed by its tag. A `record:*`
+  // type never arrives here — `recordContextFinding` rejected it upstream.
   const schemaType = tag === 'Block' ? strOf(values.get('type')) : SCHEMA_TYPE_BY_TAG.get(tag);
   if (schemaType && COMPONENT_FIELD_SPECS[schemaType]) {
     out.push(

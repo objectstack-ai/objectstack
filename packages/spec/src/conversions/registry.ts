@@ -5187,7 +5187,10 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
                 // `displayField` is a live LOOKUP-FIELD key elsewhere on the
                 // surface — a different component's business, untouched here.
-                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                // (The neighbor was `element:form` until #9249 retired that
+                // element whole; its strip conversion would now touch the node,
+                // so the overlap rides on a type no conversion dispatches on.)
+                { type: 'element:text', properties: { displayField: 'title' } },
                 // Nested one container down (#6775) — a picker inside a card is
                 // where a form-shaped page actually puts one.
                 {
@@ -5227,7 +5230,7 @@ const recordPickerDisplayFieldToLabelField: MetadataConversion = {
                 { type: 'element:record_picker', properties: { object: 'showcase_project', labelField: 'title' } },
                 { type: 'element:record_picker', properties: { object: 'a', labelField: 'name' } },
                 { type: 'element:record_picker', properties: { object: 'b', labelField: 'name', displayField: 'title' } },
-                { type: 'element:form', properties: { object: 'c', displayField: 'title' } },
+                { type: 'element:text', properties: { displayField: 'title' } },
                 {
                   type: 'page:card',
                   properties: {
@@ -5301,8 +5304,11 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
                   properties: { object: 'showcase_project', searchFields: ['name', 'code'], multiple: true },
                 },
                 // `multiple` is a live FIELD key (lookup fields) — a different
-                // surface entirely, and not this entry's business.
-                { type: 'element:form', properties: { object: 'a', multiple: true } },
+                // surface entirely, and not this entry's business. (The
+                // neighbor was `element:form` until #9249 retired that element
+                // whole; the overlap now rides on a type no conversion
+                // dispatches on.)
+                { type: 'element:text', properties: { multiple: true } },
                 // Inside a tab panel (#6775): `page:tabs` hangs its sub-tree off
                 // `properties.items[].children`, which the walk now descends.
                 {
@@ -5343,7 +5349,7 @@ const recordPickerInertKeysRemoved: MetadataConversion = {
               name: 'main',
               components: [
                 { type: 'element:record_picker', properties: { object: 'showcase_project' } },
-                { type: 'element:form', properties: { object: 'a', multiple: true } },
+                { type: 'element:text', properties: { multiple: true } },
                 {
                   type: 'page:tabs',
                   properties: {
@@ -6946,9 +6952,11 @@ const elementFilterRemoved: MetadataConversion = {
                   },
                 },
                 // Key overlap on a DIFFERENT type rides through untouched —
-                // `object` is also an `element:form` prop, and the strip
-                // dispatches on the component type, not the key name.
-                { type: 'element:form', properties: { object: 'order' } },
+                // `object` is also a live `element:record_picker` prop, and
+                // the strip dispatches on the component type, not the key
+                // name. (The neighbor was `element:form` until #9249 retired
+                // that element whole; its own strip would now touch the node.)
+                { type: 'element:record_picker', properties: { object: 'order' } },
                 // Nested one container down (#6775) — the walk descends.
                 {
                   type: 'page:card',
@@ -6988,7 +6996,7 @@ const elementFilterRemoved: MetadataConversion = {
               name: 'main',
               components: [
                 { type: 'element:filter', properties: {} },
-                { type: 'element:form', properties: { object: 'order' } },
+                { type: 'element:record_picker', properties: { object: 'order' } },
                 {
                   type: 'page:card',
                   properties: {
@@ -7015,7 +7023,155 @@ const elementFilterRemoved: MetadataConversion = {
       ],
     },
     // One per stripped key: 5 on the top-level node, 2 on the nested one,
-    // 3 on the slotted one. The `element:form` neighbor is untouched.
+    // 3 on the slotted one. The `element:record_picker` neighbor is untouched.
+    expectedNotices: 10,
+  },
+};
+
+/**
+ * `element:form` — the whole element retired (protocol 18, #9249, ADR-0049
+ * enforce-or-remove at ELEMENT grain).
+ *
+ * The #9220 shape one element over, recorded by that card's own verdict sweep
+ * and re-measured at retirement time (objectstack @c684d00cfc, objectui
+ * @76ceb1e; cloud per the card's two recorded readings @5f1bf23f / @a11458b):
+ * NO renderer or behavior reader of `element:form` exists anywhere. objectui
+ * registers no renderer (its `renderers/basic/elements.tsx` header deferred
+ * the element to "owning plugins" that never materialized), Studio's designer
+ * palette carries it as a no-renderer PALETTE_EXCLUSIONS entry naming the live
+ * replacement ("no renderer — use the object-bound `object-form` block"), and
+ * the 2026-06 page-liveness audit recorded it rendering "Unknown component
+ * type". Every key was a capability claim nothing kept — per-key retirement
+ * would have been the wrong grain, so all six authorable keys are tombstoned
+ * together and this conversion strips them together.
+ *
+ * Pure lossless deletes — no key ever had an effect to lose. The component
+ * node itself is NOT removed: the open `type` union tolerates a bare inert
+ * node (nothing rendered it before either), and deleting authored page nodes
+ * is a layout decision a mechanical conversion must not make. The
+ * prescription tells the author to delete the component and use the
+ * object-bound `object-form` block (#7751) instead — rendered,
+ * designer-publishable, and carrying the same intent (`objectName`, `fields`,
+ * `mode`, `submitText`).
+ */
+const elementFormRemoved: MetadataConversion = {
+  id: 'element-form-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface:
+    'page.component.element:form.object / page.component.element:form.fields / '
+    + 'page.component.element:form.mode / page.component.element:form.submitLabel / '
+    + 'page.component.element:form.onSubmit / page.component.element:form.aria',
+  summary:
+    "the whole 'element:form' element retired (#9249 — no renderer for it ever shipped in "
+    + 'any repo, so every key was a capability claim nothing kept; use the object-bound '
+    + "'object-form' block instead — rendered and designer-publishable). All six props are "
+    + 'stripped; the bare node stays, inert as it always was',
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'element:form') return component;
+      const properties = component.properties;
+      if (!isDict(properties)) return component;
+      const stripped = stripKeys(
+        properties,
+        ['object', 'fields', 'mode', 'submitLabel', 'onSubmit', 'aria'],
+        emit,
+        `${path}.properties`,
+      );
+      if (stripped === properties) return component;
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'lead_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'element:form',
+                  properties: {
+                    object: 'lead',
+                    fields: ['name', 'email'],
+                    mode: 'edit',
+                    submitLabel: 'Update Lead',
+                    onSubmit: 'navigate_to("lead_detail")',
+                  },
+                },
+                // Key overlap on a DIFFERENT type rides through untouched —
+                // `object` is also a live `element:record_picker` prop, and
+                // the strip dispatches on the component type, not the key name.
+                { type: 'element:record_picker', properties: { object: 'lead' } },
+                // Nested one container down (#6775) — the walk descends.
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'New lead',
+                    children: [
+                      { type: 'element:form', properties: { object: 'lead', fields: ['name'] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape, on a slotted record page.
+        {
+          name: 'lead_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: [
+              {
+                type: 'element:form',
+                properties: { object: 'lead', mode: 'create', aria: { label: 'Quick create' } },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'lead_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:form', properties: {} },
+                { type: 'element:record_picker', properties: { object: 'lead' } },
+                {
+                  type: 'page:card',
+                  properties: {
+                    title: 'New lead',
+                    children: [
+                      { type: 'element:form', properties: {} },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'lead_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            side: [
+              { type: 'element:form', properties: {} },
+            ],
+          },
+        },
+      ],
+    },
+    // One per stripped key: 5 on the top-level node, 2 on the nested one,
+    // 3 on the slotted one. The `element:record_picker` neighbor is untouched.
     expectedNotices: 10,
   },
 };
@@ -7477,6 +7633,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     recordChatterPositionVocabulary,
     elementInputTargetVariableRemoved,
     elementFilterRemoved,
+    elementFormRemoved,
     fieldColumnListsCanonicalized,
     metricFiltersRemoved,
     recordHighlightsFieldIconRemoved,

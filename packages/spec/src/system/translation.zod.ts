@@ -573,7 +573,7 @@ const translationDataShape = () => ({
      * | `description` | `element:text_input` |
      * | `placeholder` | `element:record_picker`, `element:text_input` |
      * | `emptyText` | `element:record_picker` |
-     * | `submitLabel` | `element:form` |
+     * | `submitLabel` | none since #9249 retired `element:form`, its only declarer — kept pending the #10926 decision (retire vs re-anchor); the bespoke-component route below still speaks it |
      *
      * Two deliberate exclusions, both of which a mirror of the issue's proposed
      * shape would have got wrong:
@@ -615,7 +615,7 @@ const translationDataShape = () => ({
       label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
       placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
       emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
-      submitLabel: z.string().optional().describe('Translated submit button label (`element:form`)'),
+      submitLabel: z.string().optional().describe('Translated submit button label — no spec-declared carrier since `element:form` retired (#9249); still the route for a bespoke component speaking the same vocabulary, pending #10926'),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 

@@ -1105,35 +1105,45 @@ describe('Interactive Elements — element:filter (retired, #9220)', () => {
 // ---------------------------------------------------------------------------
 // Interactive Elements — element:form
 // ---------------------------------------------------------------------------
-describe('Interactive Elements — element:form', () => {
-  it('should accept element:form component', () => {
+describe('Interactive Elements — element:form (retired, #9249)', () => {
+  // The node itself stays parseable: the open `type` union accepts any string,
+  // and the migration leaves a bare inert node behind.
+  it('accepts a bare element:form node (the migrated shape)', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:form',
-      properties: { object: 'contact' },
+      properties: {},
     })).not.toThrow();
   });
 
-  it('should parse form props with defaults', () => {
-    const props = ElementFormPropsSchema.parse({ object: 'contact' });
-    expect(props.object).toBe('contact');
-    expect(props.mode).toBe('create');
+  // Refusal pins — the ELEMENT retired at element grain (#9249): no renderer
+  // for `element:form` ever shipped anywhere, so every authorable key is a
+  // retiredKey tombstone whose prescription names the live replacement (the
+  // object-bound `object-form` block).
+  it('refuses every retired key with the element-retirement prescription', () => {
+    expect(() => ElementFormPropsSchema.parse({ object: 'contact' }))
+      .toThrow(/`element:form` property `object`.*removed.*`element:form` element is retired.*use the object-bound `object-form` block/s);
+    expect(() => ElementFormPropsSchema.parse({ fields: ['name', 'email'] }))
+      .toThrow(/`element:form` property `fields`.*removed.*Delete the `element:form` component/s);
+    expect(() => ElementFormPropsSchema.parse({ mode: 'edit' }))
+      .toThrow(/`element:form` property `mode`.*removed/s);
+    expect(() => ElementFormPropsSchema.parse({ submitLabel: 'Update' }))
+      .toThrow(/`element:form` property `submitLabel`.*removed/s);
+    expect(() => ElementFormPropsSchema.parse({ onSubmit: 'navigate_to("page_detail")' }))
+      .toThrow(/`element:form` property `onSubmit`.*removed/s);
+    expect(() => ElementFormPropsSchema.parse({ aria: { label: 'Form' } }))
+      .toThrow(/`element:form` property `aria`.*removed.*Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand/s);
   });
 
-  it('should accept full form props', () => {
-    const props = ElementFormPropsSchema.parse({
-      object: 'contact',
-      fields: ['name', 'email', 'phone'],
-      mode: 'edit',
-      submitLabel: 'Update Contact',
-      onSubmit: 'navigate_to("page_detail")',
-    });
-    expect(props.mode).toBe('edit');
-    expect(props.fields).toHaveLength(3);
-    expect(props.submitLabel).toBe('Update Contact');
-  });
-
-  it('should reject form without object', () => {
-    expect(() => ElementFormPropsSchema.parse({})).toThrow();
+  // The migrated shape — `element-form-removed` strips all six keys and
+  // leaves the bare node — parses clean and materializes nothing. (The
+  // pre-retirement schema REQUIRED `object` and defaulted `mode`, so `{}`
+  // used to throw and a parse used to materialize `mode: 'create'`; both
+  // died with the element.)
+  it('parses a bare (migrated) node clean and materializes nothing', () => {
+    const props = ElementFormPropsSchema.parse({});
+    for (const key of ['object', 'fields', 'mode', 'submitLabel', 'onSubmit', 'aria']) {
+      expect(props).not.toHaveProperty(key);
+    }
   });
 });
 
@@ -1406,9 +1416,12 @@ describe('ComponentPropsMap interactive elements', () => {
     })).toThrow(/`element:filter` element is retired/s);
   });
 
-  it('should parse element:form props', () => {
-    const result = ComponentPropsMap['element:form'].parse({ object: 'contact' });
-    expect(result.object).toBe('contact');
+  // Flip of "should parse element:form props" (#9249): same shape as
+  // element:filter above — the kept row dispatches to tombstones.
+  it('refuses element:form props through the kept map row (retired, #9249)', () => {
+    expect(() => ComponentPropsMap['element:form'].parse({
+      object: 'contact',
+    })).toThrow(/`element:form` element is retired/s);
   });
 
   it('should parse element:record_picker props', () => {

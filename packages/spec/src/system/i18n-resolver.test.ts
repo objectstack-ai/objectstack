@@ -1103,7 +1103,12 @@ describe('translatePage', () => {
           { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
           { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
-          { type: 'element:form', id: 'new_lead_form', properties: { object: 'lead', submitLabel: 'Create' } },
+          // Was `element:form` until #9249 retired that element whole; the
+          // resolver is id-addressed and type-agnostic, and the copy-key face
+          // documents bespoke component types as a legal route for the same
+          // vocabulary — so the `submitLabel` pin rides one of those, pending
+          // the #10926 carrier decision.
+          { type: 'hotcrm:quick_form', id: 'new_lead_form', properties: { object: 'lead', submitLabel: 'Create' } },
           { type: 'page:card', id: 'untranslated_card', properties: { title: 'Still English' } },
         ],
       }],

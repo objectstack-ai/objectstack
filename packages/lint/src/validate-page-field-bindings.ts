@@ -197,7 +197,10 @@ export const COMPONENT_FIELD_SPECS: Readonly<Record<string, ComponentFieldSpec>>
   // spec-conformant page carries `fields` on it, and the #5068 props gate
   // reports an authored one by name with the element-retirement prescription —
   // the same #5775/#6629 residue class as the record-picker entries below.
-  'element:form': { props: ['fields'] },
+  // `element:form` had the same `{ props: ['fields'] }` entry until #9249
+  // retired that element the same way (ADR-0049, the #9220 shape one element
+  // over); its tombstones' prescription names the live replacement, the
+  // object-bound `object-form` block.
   // `labelField` is the one field-bearing prop this element declares. Its former
   // companions `displayField` (renamed to `labelField`, ADR-0087 D2) and
   // `searchFields` (deleted, ADR-0049) were retired in #5775 and are

@@ -75,7 +75,10 @@ export const PageComponentType = z.enum([
   // only (the `type` union's open string arm still accepts any string); the
   // LOUD half of the retirement is `ElementFilterPropsSchema`'s retiredKey
   // tombstones, dispatched through the kept `ComponentPropsMap` row.
-  'element:button', 'element:form', 'element:record_picker', 'element:text_input'
+  // `element:form` REMOVED (#9249, ADR-0049): the same shape one element over
+  // — retired at element grain, same mechanism; the tombstones' prescription
+  // names the live replacement, the object-bound `object-form` block (#7751).
+  'element:button', 'element:record_picker', 'element:text_input'
 ]);
 
 /**

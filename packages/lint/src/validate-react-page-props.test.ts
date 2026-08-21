@@ -721,14 +721,16 @@ describe('validateReactPageProps — record:* blocks need a context this surface
 
 describe('validateReactPageProps — <Block> escape hatch (#4340)', () => {
   it('checks the props bag by the registered type the author names', () => {
+    // `element:number` carries the pin since #9249 retired `element:form`
+    // (whose `fields` entry left COMPONENT_FIELD_SPECS with the element).
     const f = unknownFields(
       validateReactPageProps(
-        propsPage(jsx('Block', `type="element:form" objectName="crm_account" fields={['nope']}`)),
+        propsPage(jsx('Block', `type="element:number" objectName="crm_account" field="nope"`)),
       ),
     );
     expect(f).toHaveLength(1);
     expect(f[0].where).toBe('page "p" › <Block>');
-    expect(f[0].path).toBe('pages[0].source › fields[0]');
+    expect(f[0].path).toBe('pages[0].source › field');
   });
 
   it('skips a type with no descriptor, and a non-static type', () => {
@@ -1332,15 +1334,17 @@ describe('validateReactPageProps — unprovisioned injected anchors (#8340)', ()
     // The shared table `validate-page-field-bindings` walks; on this surface
     // it is reachable only by the type the author spells out, which is what
     // makes the escape hatch checked rather than a hole.
+    // `element:number` carries the pin since #9249 retired `element:form`
+    // (whose `fields` entry left COMPONENT_FIELD_SPECS with the element).
     const f = validateReactPageProps(
-      extPage(`function Page(){ return <Block type="element:form" objectName="ext_customer" fields={['owner_id']} />; }`),
+      extPage(`function Page(){ return <Block type="element:number" objectName="ext_customer" field="owner_id" />; }`),
     );
     expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
     const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
     expect(warned).toHaveLength(1);
     expect(warned[0].severity).toBe('warning');
     expect(warned[0].where).toBe('page "p" › <Block>');
-    expect(warned[0].path).toBe('pages[0].source › fields[0]');
+    expect(warned[0].path).toBe('pages[0].source › field');
     expect(warned[0].message).toContain('external object (ADR-0015)');
   });
 });

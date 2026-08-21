@@ -1792,18 +1792,54 @@ export const ElementFilterPropsSchema = lazySchema(() => strictObject({
   aria: retiredKey(elementFilterRetired('aria')),
 }));
 
+/**
+ * One prescription for every retired `element:form` key — the retirement is
+ * ELEMENT-grain (#9249), so all six keys carry the same story and differ only
+ * in the fully-qualified key that heads the string (house style, rule 1).
+ */
+const elementFormRetired = (key: string): string =>
+  '`element:form` property `' + key + '` was removed in @objectstack/spec 17 '
+  + '(#9249, ADR-0049) — the whole `element:form` element is retired: no renderer for it '
+  + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
+  + 'no-renderer exclusion — "use the object-bound `object-form` block"), so every key on '
+  + 'this element was a capability claim nothing kept. Delete the `element:form` component '
+  + 'and use the object-bound `object-form` block instead (#7751) — it is rendered, '
+  + 'designer-publishable, and carries the same intent (`objectName`, `fields`, `mode`, '
+  + '`submitText`). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+/**
+ * RETIRED at element grain (#9249, ADR-0049 enforce-or-remove). `element:form`
+ * never had a renderer anywhere: objectui registers none (its
+ * `renderers/basic/elements.tsx` header deferred it to "owning plugins" that
+ * never materialized — the same sentence whose `element:filter` half #9220
+ * falsified), Studio's designer palette lists it as a no-renderer exclusion
+ * naming the live replacement ("no renderer — use the object-bound
+ * `object-form` block"), and the 2026-06 page-liveness audit already recorded
+ * it rendering "Unknown component type". Every key was therefore a capability
+ * claim nothing kept — the #9220 shape, one element over, exactly as the
+ * origin card measured it.
+ *
+ * The schema (and its `ComponentPropsMap` row) stays exported so the #5068
+ * props gate keeps DISPATCHING on `type: 'element:form'` and refusing every
+ * authored key with the prescription — deleting the row would demote the type
+ * to an unregistered custom string the gate deliberately skips, turning a loud
+ * retirement back into a silent no-op. A bare node with empty `properties`
+ * parses clean (the open `type` union accepts any string, so a node-level
+ * refusal is not expressible here); the migration strips the keys and leaves
+ * exactly that bare, inert node.
+ */
 export const ElementFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:form`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  object: z.string().describe('Object for the form'),
-  fields: z.array(z.string()).optional().describe('Fields to display (defaults to all editable fields)'),
-  mode: z.enum(['create', 'edit']).optional().default('create').describe('Form mode'),
-  submitLabel: I18nLabelSchema.optional().describe('Submit button label'),
-  onSubmit: ExpressionInputSchema.optional().describe('Action expression on form submit (CEL)'),
-  /** ARIA accessibility */
-  aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+  object: retiredKey(elementFormRetired('object')),
+  fields: retiredKey(elementFormRetired('fields')),
+  mode: retiredKey(elementFormRetired('mode')),
+  submitLabel: retiredKey(elementFormRetired('submitLabel')),
+  onSubmit: retiredKey(elementFormRetired('onSubmit')),
+  aria: retiredKey(elementFormRetired('aria')),
 }));
 
 /**
@@ -1848,9 +1884,12 @@ export const ElementFormPropsSchema = lazySchema(() => strictObject({
  * ruling (2026-08-08, direction A) declares the other two, so all four flat
  * shorthands are contract. Direction B — retiring the whole flat family and
  * making `dataSource` the single data-binding door — was NOT dropped: it is a
- * cross-element decision (`element:form` / `element:filter` carry the same flat
- * `object`), tracked as #6590 for v18, and A does not block it. When B lands
- * these two retire alongside `object` / `filter` under ADR-0087, together.
+ * cross-element decision (`element:form` / `element:filter` carried the same
+ * flat `object` when it was recorded), tracked as #6590 for v18, and A does
+ * not block it. Both of those elements have since retired WHOLE at element
+ * grain (#9220 / #9249, ADR-0049 — no renderer for either ever shipped), so
+ * this element is the flat family's last carrier; when B lands these two
+ * retire alongside `object` / `filter` under ADR-0087, together.
  *
  * Both keys are declared in the shape `ElementDataSourceSchema` already uses
  * for its own `sort` / `limit`, deliberately: they are the SAME contract read
@@ -2499,6 +2538,10 @@ export const ComponentPropsMap = {
   // prescription; deleting it would demote `element:filter` to an unregistered
   // custom string the gate deliberately skips. See the schema's own header.
   'element:filter': ElementFilterPropsSchema,
+  // RETIRED at element grain (#9249) — the row STAYS for the same reason as
+  // `element:filter` above: the #5068 props gate must keep dispatching on the
+  // type and refusing every authored key with the prescription (which names
+  // the live replacement, the object-bound `object-form` block below).
   'element:form': ElementFormPropsSchema,
   'element:record_picker': ElementRecordPickerPropsSchema,
   'element:text_input': ElementTextInputPropsSchema,
