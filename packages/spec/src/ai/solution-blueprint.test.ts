@@ -299,6 +299,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         label: null,
         description: null,
         sharingModel: null,
+        nameField: null,
         fields: [
           { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
         ],
@@ -339,7 +340,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
+        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -361,6 +362,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           label: null,
           description: null,
           sharingModel: null,
+          nameField: null,
           fields: [
             {
               name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
@@ -409,6 +411,31 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     // …and OMITTING the key throws (strict mode: every key in `required`).
     const missingKey = { ...strictBp, objects: [{ ...strictBp.objects[0] }] };
     delete (missingKey.objects[0] as { sharingModel?: unknown }).sharingModel;
+    expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
+  });
+
+  it('carries nameField on a strict object — nullable, and REQUIRED to be present (OpenAI strict)', () => {
+    // Shape pin: the strict mirror is the structured-output contract the design
+    // model emits against — without the key here, the propose-stage LLM can
+    // never author an ADR-0079 record-title choice, whatever the lenient schema
+    // accepts, and the platform auto-pick always wins.
+    const objectShape = (SolutionBlueprintStrictSchema as any).shape.objects.element.shape;
+    expect('nameField' in objectShape).toBe(true);
+
+    // null is accepted (defer to the platform auto-pick)…
+    const parsed = SolutionBlueprintStrictSchema.parse(strictBp);
+    expect(parsed.objects[0].nameField).toBeNull();
+
+    // …an explicit record-title choice is carried…
+    const explicit = SolutionBlueprintStrictSchema.parse({
+      ...strictBp,
+      objects: [{ ...strictBp.objects[0], nameField: 'name' }],
+    });
+    expect(explicit.objects[0].nameField).toBe('name');
+
+    // …and OMITTING the key throws (strict mode: every key in `required`).
+    const missingKey = { ...strictBp, objects: [{ ...strictBp.objects[0] }] };
+    delete (missingKey.objects[0] as { nameField?: unknown }).nameField;
     expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
   });
 
@@ -465,6 +492,23 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
 
   it('the field schemas carry exactly the same keys', () => {
     expect(strictFieldKeys()).toEqual(lenientFieldKeys());
+  });
+
+  it('the OBJECT schemas carry exactly the same keys', () => {
+    // The `nameField` gap proved the field-level pin alone is not enough: the
+    // lenient object schema carried the ADR-0079 record-title key while the
+    // strict mirror did not, so the design-stage model could never author it —
+    // detected by cloud lint, unfixable on the surface that produced it. There
+    // are NO deliberate object-level exclusions (measured: both sides carry
+    // name/label/description/fields/sharingModel/nameField); if one ever
+    // becomes deliberate, list it explicitly here with its reason.
+    const lenientObjectKeys = Object.keys(
+      (SolutionBlueprintSchema as any).shape.objects.element.shape,
+    ).sort();
+    const strictObjectKeys = Object.keys(
+      (SolutionBlueprintStrictSchema as any).shape.objects.element.shape,
+    ).sort();
+    expect(strictObjectKeys).toEqual(lenientObjectKeys);
   });
 
   it('carries `expression`, so a formula field can state what it computes', () => {
