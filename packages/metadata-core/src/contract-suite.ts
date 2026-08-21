@@ -20,21 +20,35 @@
 
 import { describe, it, expect } from 'vitest';
 import type { MetadataRepository } from './repository.js';
-import type { MetaRef, MetadataEvent } from './types.js';
+import type { MetaRef, MetadataEvent, MetadataType } from './types.js';
 import { hashSpec } from './canonicalize.js';
 import { ConflictError } from './errors.js';
 
 export interface ContractSuiteOptions {
   /** If the implementation supports `version`-pinned reads, set true. */
   supportsVersionedReads?: boolean;
+  /**
+   * The metadata type nearly every clause writes under. Defaults to `'view'`.
+   *
+   * A FIXTURE knob, deliberately not an invariant knob: no clause below is
+   * added, removed or weakened by moving it, because none of the seven
+   * invariants is a statement about a particular type. It exists because an
+   * implementation may sit behind a **write-authorization door** keyed on the
+   * type — `SysMetadataRepository.assertAllowed()` refuses any type whose
+   * registry entry lacks `allowOrgOverride` — so a hard-coded fixture type
+   * decides which implementations can be held to the table at all. Naming the
+   * two types here is what keeps that ONE table, instead of carving a second
+   * one for the engine-backed implementation to be measured against.
+   */
+  primaryType?: MetadataType;
+  /**
+   * A second, DISTINCT type, used only where a clause must prove a type filter
+   * discriminates (`list`'s `type` filter, `watch`'s). Defaults to `'object'`.
+   * Same fixture-knob argument as {@link primaryType}; it must differ from it
+   * or those two clauses assert nothing.
+   */
+  secondaryType?: MetadataType;
 }
-
-const refOf = (overrides: Partial<MetaRef> = {}): MetaRef => ({
-  org: 'system',
-  type: 'view',
-  name: 'sample_view',
-  ...overrides,
-});
 
 const spec = (label: string) => ({ label, columns: ['a', 'b'] });
 
@@ -123,6 +137,21 @@ export function runRepositoryContractTests(
   factory: () => MetadataRepository | Promise<MetadataRepository>,
   opts: ContractSuiteOptions = {},
 ): void {
+  const primaryType: MetadataType = opts.primaryType ?? 'view';
+  const secondaryType: MetadataType = opts.secondaryType ?? 'object';
+  if (primaryType === secondaryType) {
+    throw new Error(
+      `runRepositoryContractTests(${label}): primaryType and secondaryType must differ — ` +
+        `both are '${primaryType}', which makes the list/watch type-filter clauses vacuous.`,
+    );
+  }
+  const refOf = (overrides: Partial<MetaRef> = {}): MetaRef => ({
+    org: 'system',
+    type: primaryType,
+    name: 'sample_view',
+    ...overrides,
+  });
+
   describe(`MetadataRepository contract — ${label}`, () => {
     // ── 1. Atomic put + canonical hash ──────────────────────────────
     describe('put / get', () => {
@@ -402,7 +431,7 @@ export function runRepositoryContractTests(
         await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
         await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
         const events = await take(
-          repo.watch({ org: 'system', type: 'view', name: 'a' }),
+          repo.watch({ org: 'system', type: primaryType, name: 'a' }),
           5,
           200,
         );
@@ -417,12 +446,12 @@ export function runRepositoryContractTests(
         const repo = await factory();
         await repo.put(refOf({ name: 'alpha' }), spec('a'), { parentVersion: null, actor: 't' });
         await repo.put(refOf({ name: 'beta' }), spec('b'), { parentVersion: null, actor: 't' });
-        await repo.put(refOf({ type: 'object', name: 'thing' }), spec('o'), {
+        await repo.put(refOf({ type: secondaryType, name: 'thing' }), spec('o'), {
           parentVersion: null,
           actor: 't',
         });
         const headers: unknown[] = [];
-        for await (const h of repo.list({ type: 'view' })) headers.push(h);
+        for await (const h of repo.list({ type: primaryType })) headers.push(h);
         expect(headers.length).toBe(2);
         for (const h of headers) {
           expect((h as { body?: unknown }).body).toBeUndefined();
@@ -435,7 +464,7 @@ export function runRepositoryContractTests(
           await repo.put(refOf({ name: `v_${i}` }), spec(`v${i}`), { parentVersion: null, actor: 't' });
         }
         const headers: unknown[] = [];
-        for await (const h of repo.list({ type: 'view', limit: 3 })) headers.push(h);
+        for await (const h of repo.list({ type: primaryType, limit: 3 })) headers.push(h);
         expect(headers.length).toBe(3);
       });
     });
