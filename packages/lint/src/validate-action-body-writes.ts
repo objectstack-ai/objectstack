@@ -77,6 +77,8 @@
 // match either shape and never pays the TypeScript load.
 
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
+
+import { describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
 import {
   indexUnprovisionedAnchors,
   unprovisionedAnchorCause,
@@ -110,6 +112,18 @@ export interface ActionBodyWriteFinding {
 // Rule ids (registry entries). Two, from one walk — see the header.
 export const ACTION_BODY_WRITE_UNKNOWN_FIELD = 'action-body-write-unknown-field';
 export const ACTION_RECORD_WRITE_DISCARDED = 'action-record-write-discarded';
+
+/**
+ * [#10653] The action-surface twin of `hook-body-source-unparseable`. Same
+ * extractor, same synthesised wrapper, same parse — so the body that came back
+ * silently unread on the hook surface came back silently unread here too.
+ *
+ * Wiring only the hook rule would have left the blind half standing at the call
+ * site next door, which this rule's own division of labour forbids: an action
+ * body runs through the same `HookBodySchema` and the same sandbox, so it gets
+ * the same treatment.
+ */
+export const ACTION_BODY_SOURCE_UNPARSEABLE = 'action-body-source-unparseable';
 
 /**
  * [#8663] The action-surface twin of `hook-body-write-unprovisioned-anchor`.
@@ -304,12 +318,29 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
     if (!/\bapi\b/.test(site.source) && !/\brecord\b/.test(site.source)) continue;
 
     // ONE parse per body, both checks read from it.
-    const { writes: allWrites, ctxRecordEscapes } = extractHookBodyWriteSet(site.source);
+    const { writes: allWrites, ctxRecordEscapes, parseFailure } = extractHookBodyWriteSet(site.source);
     const writes = allWrites.filter((w) => APPLICABLE_IDS.has(w.patternId));
     const recordWrites = allWrites.filter((w) => RECORD_WRITE_IDS.has(w.patternId));
-    if (writes.length === 0 && recordWrites.length === 0) continue;
 
     const where = `action "${site.name}" › body`;
+
+    // [#10653] Read BEFORE the empty-write-set return below: an unparseable body
+    // is the one case where an empty write set means "not read" rather than
+    // "nothing written".
+    if (parseFailure) {
+      findings.push({
+        severity: 'warning',
+        rule: ACTION_BODY_SOURCE_UNPARSEABLE,
+        where,
+        path: site.path,
+        message:
+          `L2 body did not parse (${describeParseFailure(parseFailure)}), so its write set was read from a ` +
+          `partially recovered tree — an undeclared field write in the unread part is not reported.`,
+        hint: PARSE_FAILURE_HINT,
+      });
+    }
+
+    if (writes.length === 0 && recordWrites.length === 0) continue;
 
     // ── Discarded record writes (#4345) ──────────────────────────────────
     // Reported only when the write is PROVABLY dead: `ctx.record` never

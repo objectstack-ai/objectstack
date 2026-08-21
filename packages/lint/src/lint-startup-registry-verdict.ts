@@ -117,6 +117,8 @@
 import { createRequire } from 'node:module';
 import type ts from 'typescript';
 
+import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
+
 // The TypeScript compiler must NOT be imported at module top level: it is ~9 MB
 // of CJS and @objectstack/lint sits on the kernel boot path, while this rule
 // only parses when a caller actually hands it source. Same lazy-load contract as
@@ -163,6 +165,17 @@ export const STARTUP_OPEN_VOCABULARY_VERDICT = 'startup-open-vocabulary-verdict'
  * {@link STARTUP_OPEN_VOCABULARY_VERDICT} already fired.
  */
 export const STARTUP_VERDICT_ASSERTIVE_WORDING = 'startup-verdict-assertive-wording';
+
+/**
+ * The source could not be parsed, so this rule's verdict about it covers only
+ * what error recovery left standing (#10653).
+ *
+ * This rule's own subject matter, turned on the rule: a terminal conclusion
+ * drawn about a world that had not finished forming. "No findings" about a
+ * source the parser could not read is exactly that, and it is what this module
+ * used to return — silently, with a `catch` above it that never ran.
+ */
+export const STARTUP_SOURCE_UNPARSEABLE = 'startup-source-unparseable';
 
 // ── The vocabulary (词表) ────────────────────────────────────────────────────
 
@@ -590,8 +603,10 @@ interface VerdictRecord {
  * Find startup open-vocabulary verdicts in one TypeScript/JavaScript source.
  *
  * Pure: parses, never executes, never type-checks, touches no filesystem. An
- * unparseable source yields no findings rather than throwing — this advises on
- * source someone else owns, and refusing to parse is not a verdict about them.
+ * unparseable source is REPORTED ({@link STARTUP_SOURCE_UNPARSEABLE}) rather
+ * than thrown on — this advises on source someone else owns, so refusing to
+ * parse is not a verdict about them, but going silent about it was a verdict
+ * too, and the wrong one (#10653).
  */
 export function findStartupRegistryVerdicts(
   source: string,
@@ -612,14 +627,31 @@ export function findStartupRegistryVerdicts(
 
   const t = loadTypeScript();
   const fileLabel = options.file ?? 'source';
-  let sf: ts.SourceFile;
-  try {
-    sf = t.createSourceFile(fileLabel, source, t.ScriptTarget.Latest, true, t.ScriptKind.TS);
-  } catch {
-    return [];
-  }
+  // [#10653] The parse used to sit in a `try/catch` returning `[]`. The catch
+  // never ran — `createSourceFile` cannot throw (measured; see checked-parse.ts)
+  // — so the live path was the unread `parseDiagnostics`: a recovered partial
+  // tree walked and reported clean. The tree is still walked, so every finding
+  // this rule produces today it still produces; what is added is the signal that
+  // the reading was partial.
+  const { sourceFile: sf, failure } = createSourceFileChecked(t, fileLabel, source, {
+    target: t.ScriptTarget.Latest,
+    setParentNodes: true,
+    scriptKind: t.ScriptKind.TS,
+  });
 
   const findings: StartupRegistryVerdictFinding[] = [];
+  if (failure) {
+    findings.push({
+      severity: 'warning',
+      rule: STARTUP_SOURCE_UNPARSEABLE,
+      where: fileLabel,
+      path: `${fileLabel}:${failure.line}`,
+      message:
+        `source did not parse (${describeParseFailure(failure)}), so this rule read a partially recovered ` +
+        `tree — a startup verdict in the unread part is not reported.`,
+      hint: PARSE_FAILURE_HINT,
+    });
+  }
   const moduleBindings = moduleLevelMutableBindings(t, sf);
   const functionBodies = indexFunctionBodies(t, sf);
   const lineOf = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;

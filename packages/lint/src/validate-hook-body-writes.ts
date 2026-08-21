@@ -66,6 +66,13 @@ import type ts from 'typescript';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
 import {
+  createSourceFileChecked,
+  describeParseFailure,
+  PARSE_FAILURE_HINT,
+  type SourceParseFailure,
+} from './checked-parse.js';
+
+import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
   unprovisionedAnchorCause,
@@ -121,6 +128,19 @@ export interface HookBodyWriteFinding {
 
 // Rule id (registry entry).
 export const HOOK_BODY_WRITE_UNKNOWN_FIELD = 'hook-body-write-unknown-field';
+
+/**
+ * [#10653] The body did not parse, so its write set is whatever error recovery
+ * left readable.
+ *
+ * Reported rather than skipped for the reason this rule exists at all: a
+ * mistake must be visible where it is MADE. An unparseable body reached the
+ * extractor, produced fewer matches, and came back as a hook with nothing to
+ * report — the same silence the undeclared write itself has at run time, this
+ * time wearing the checker's badge. `warning` because the whole rule is
+ * advisory and never gates (the severity type admits nothing else).
+ */
+export const HOOK_BODY_SOURCE_UNPARSEABLE = 'hook-body-source-unparseable';
 
 /**
  * [#8663] The write-axis twin of `flow-template-field-unprovisioned` (#8340):
@@ -438,6 +458,31 @@ export interface ExtractedHookBodyWriteSet {
    * escape too, which is the safe direction: it suppresses findings.)
    */
   ctxRecordEscapes: boolean;
+  /**
+   * [#10653] Set when the body did not parse, so `writes` is whatever error
+   * recovery left readable rather than the body's actual write set.
+   *
+   * Absent means one of two things, and they are not the same: the body parsed,
+   * or the cheap pre-filter above rejected it before any parse. The filter is a
+   * raw-text scan for `ctx` / `Object`, and a body containing neither cannot
+   * match any pattern however it parses — so a skipped parse claims nothing and
+   * hides nothing.
+   *
+   * ## Whose fault an unparseable body is — asked, not assumed
+   *
+   * The body is parsed inside a synthesised wrapper (`async function __body(ctx)
+   * { … }`) because that is the shape the runtime compiles it into
+   * (`new AsyncFunction('ctx', source)`). So a parse failure here could in
+   * principle be the WRAPPER's fault rather than the author's, and blaming the
+   * author for the checker's own bug is the failure this whole change is about.
+   * It cannot be: the wrapper is a constant, and `validate-hook-body-writes.
+   * test.ts` pins that it parses clean around an empty body and around every
+   * example in the pattern ledger. Any diagnostic therefore comes from the
+   * body — and its position is reported in the BODY's own coordinates (the
+   * wrapper's line is subtracted, and the result is clamped so it can never
+   * point at a line the author did not write).
+   */
+  parseFailure?: SourceParseFailure;
 }
 
 /**
@@ -465,12 +510,23 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
   // The runtime wraps a hook body as `new AsyncFunction('ctx', source)` — a
   // FUNCTION BODY, not a module. Parse it in the same context so bare
   // `return` / `await` mean what they mean at run time.
-  const sf = tsc.createSourceFile(
+  //
+  // [#10653] Checked: this call cannot throw, so an unparseable body used to
+  // reach the walk below as a partially recovered tree and come back as "fewer
+  // matches" — indistinguishable from a body that genuinely writes nothing. The
+  // walk is unchanged; the verdict on the parse now rides out with the set.
+  // The wrapper adds exactly one line ahead of the author's source, which
+  // `synthesizedLinesBefore` takes back off the reported position.
+  const { sourceFile: sf, failure: parseFailure } = createSourceFileChecked(
+    tsc,
     'hook-body.ts',
     `async function __body(ctx) {\n${source}\n}`,
-    tsc.ScriptTarget.Latest,
-    /* setParentNodes */ false,
-    tsc.ScriptKind.TS,
+    {
+      target: tsc.ScriptTarget.Latest,
+      setParentNodes: false,
+      scriptKind: tsc.ScriptKind.TS,
+      synthesizedLinesBefore: 1,
+    },
   );
 
   const writes: ExtractedHookBodyWrite[] = [];
@@ -642,6 +698,7 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
   return {
     writes,
     ctxRecordEscapes: recordRefs.some((ref) => !consumedRecordRefs.has(ref)),
+    ...(parseFailure ? { parseFailure } : {}),
   };
 }
 
@@ -667,12 +724,30 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
     const source = body.source;
     if (typeof source !== 'string' || source.trim() === '') return;
 
-    const writes = extractHookBodyWrites(source).filter((w) => HOOK_APPLICABLE_IDS.has(w.patternId));
+    // [#10653] The SET, not the thin projection: the parse verdict rides with it,
+    // and it must be read BEFORE the `writes.length === 0` return below — an
+    // unparseable body is the one case where an empty write set means "not
+    // read" rather than "nothing written".
+    const extracted = extractHookBodyWriteSet(source);
+    const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
+    if (extracted.parseFailure) {
+      findings.push({
+        severity: 'warning',
+        rule: HOOK_BODY_SOURCE_UNPARSEABLE,
+        where: `hook "${hookName}" › body`,
+        path: `hooks[${hookIndex}].body.source`,
+        message:
+          `L2 body did not parse (${describeParseFailure(extracted.parseFailure)}), so its write set was ` +
+          `read from a partially recovered tree — an undeclared field write in the unread part is not reported.`,
+        hint: PARSE_FAILURE_HINT,
+      });
+    }
+
+    const writes = extracted.writes.filter((w) => HOOK_APPLICABLE_IDS.has(w.patternId));
     if (writes.length === 0) return;
 
     objectFields ??= indexObjectFields(stack);
     anchors ??= indexUnprovisionedAnchors(stack);
-    const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
 
     // The hook's own target set, for `ctx.input` writes. A wildcard target has
     // no single object to check against; a target whose fields cannot be judged

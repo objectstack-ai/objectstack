@@ -487,3 +487,112 @@ describe('[#8663] validateHookBodyWrites — unprovisioned anchor writes', () =>
     expect(validateHookBodyWrites(stackOver(federatedObject, "ctx.input._id = 'x'; ctx.input.record_type = 'y';"))).toEqual([]);
   });
 });
+
+// ── [#10653] The body that could not be READ ─────────────────────────────────
+//
+// This extractor's contract said "error-tolerant (a body with syntax errors
+// simply yields fewer matches)". Fewer matches is indistinguishable, at the call
+// site, from a body that writes nothing — so an unparseable body came back as a
+// hook with nothing to report. It is the same silence the undeclared write has
+// at run time, this time wearing the checker's badge.
+//
+// This site is the delicate one of the three, because it parses a SYNTHESISED
+// wrapper: `async function __body(ctx) { … }`, the shape the runtime compiles a
+// hook body into. So "unparseable" here could in principle mean the wrapper is
+// wrong rather than the author's source, and blaming an author for the checker's
+// own bug would be a worse defect than the one being fixed. `the wrapper is not
+// what fails` below is the mechanical proof that it cannot be.
+describe('an unparseable hook body is reported, not scored clean (#10653)', () => {
+  // Same write in both halves; the only difference is the `/*` that eats it.
+  const wrecked = "const x = 1;\n/* TODO\nctx.input.amout = 0;\n";
+  const repaired = "const x = 1;\nctx.input.amout = 0;\n";
+
+  it('POSITIVE CONTROL — the repaired body yields the write, so the wreck had something to lose', () => {
+    expect(extractHookBodyWriteSet(repaired).writes).toEqual([{ patternId: 'input-property-assign', field: 'amout' }]);
+    expect(extractHookBodyWriteSet(repaired).parseFailure).toBeUndefined();
+  });
+
+  it('the wrecked body loses the write — the harm, reproduced', () => {
+    expect(extractHookBodyWriteSet(wrecked).writes).toEqual([]);
+  });
+
+  it('…and the set now carries the parse verdict instead of returning an empty write list', () => {
+    const failure = extractHookBodyWriteSet(wrecked).parseFailure;
+    expect(failure).toBeDefined();
+    expect(failure!.count).toBeGreaterThan(0);
+    expect(failure!.message.length).toBeGreaterThan(0);
+  });
+
+  it('reports the position in the BODY’s coordinates, never the wrapper’s', () => {
+    // The author wrote the wreck on line 2 of their own body. The wrapper puts
+    // it on line 3 of what is actually parsed.
+    //
+    // The `ctx` on line 1 is load-bearing, not scenery: without it the raw-text
+    // pre-filter returns before any parse happens and there is no position to
+    // report at all. (This fixture was first written without it, and this test
+    // failed — the pre-filter contract holding, not a bug.)
+    const failure = extractHookBodyWriteSet('ctx.input.a = 1;\nconst y = ;\n').parseFailure!;
+    expect(failure.line).toBe(2);
+  });
+
+  it('the wrapper is not what fails — a parse failure is always the BODY’s (attribution proof)', () => {
+    // The wrapper is a constant. If it were ill-formed, it would fail around a
+    // trivially valid body too — and around every example the pattern ledger
+    // declares. It does not, so a diagnostic can only come from the body.
+    expect(extractHookBodyWriteSet('ctx.input.stage = 1;').parseFailure).toBeUndefined();
+    expect(extractHookBodyWriteSet('Object.assign(ctx.input, {});').parseFailure).toBeUndefined();
+    for (const pattern of HOOK_BODY_WRITE_PATTERNS) {
+      expect(
+        extractHookBodyWriteSet(pattern.example.source).parseFailure,
+        `the wrapper fails around a declared ledger example (${pattern.id}) — the synthesis is what is broken, ` +
+          `not the body, and this rule would be blaming the author for it`,
+      ).toBeUndefined();
+    }
+  });
+
+  it('a body the runtime itself could not compile is the author’s, and is reported', () => {
+    // A hook body runs as `new AsyncFunction('ctx', source)`. `return`/`await`
+    // are legal there and must stay legal here (they parse inside the wrapper),
+    // while a body that is not a function body at all is a real author error.
+    expect(extractHookBodyWriteSet('await ctx.api.object("a").insert({});\nreturn 1;').parseFailure).toBeUndefined();
+    expect(extractHookBodyWriteSet('ctx.input.a = 1;\n}\n').parseFailure, 'a stray brace closes the wrapper early')
+      .toBeDefined();
+  });
+
+  it('the rule surfaces it as a finding on the hook', () => {
+    const findings = validateHookBodyWrites(stackOver(federatedObject, wrecked));
+    const parseFindings = findings.filter((f) => f.rule === 'hook-body-source-unparseable');
+    expect(parseFindings).toHaveLength(1);
+    expect(parseFindings[0].severity).toBe('warning');
+    expect(parseFindings[0].where).toBe('hook "stamp" › body');
+    expect(parseFindings[0].path).toBe('hooks[0].body.source');
+    expect(parseFindings[0].message).toContain('did not parse');
+  });
+
+  it('a body with no `ctx` and no `Object` is skipped WITHOUT a parse claim', () => {
+    // The pre-filter is a raw-text scan and is sound whether or not the body
+    // parses: no `ctx`/`Object` identifier means no pattern can match, however
+    // it parses. So the skipped parse hides nothing and must claim nothing.
+    expect(extractHookBodyWriteSet('const a = ;\n').parseFailure).toBeUndefined();
+    expect(extractHookBodyWriteSet('const a = ;\n').writes).toEqual([]);
+  });
+
+  it('FALSE-POSITIVE CONTROL — no body that parses gains a parse finding', () => {
+    const parseable = [
+      "ctx.input.stage = 'won';",
+      "await ctx.api.object('crm_deal').update({ stage: 'won' });",
+      "const r = ctx.record; r.stage = 'won';",
+      "if (ctx.input.amount > 0) { ctx.input.stage = 'won'; } else { ctx.input.stage = 'lost'; }",
+      "for (const k of Object.keys(ctx.input)) { ctx.input[k] = ctx.input[k]; }",
+      "try { await ctx.api.object('crm_deal').insert({ stage: 'x' }); } catch (e) { ctx.logger.warn(e); }",
+      "ctx.input.stage = `won-${ctx.user.id}`;",
+      ...HOOK_BODY_WRITE_PATTERNS.map((p) => p.example.source),
+    ];
+    for (const source of parseable) {
+      expect(
+        extractHookBodyWriteSet(source).parseFailure,
+        `parseable body gained a parse failure:\n${source}`,
+      ).toBeUndefined();
+    }
+  });
+});
