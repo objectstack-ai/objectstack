@@ -1,43 +1,64 @@
 ---
-"@objectstack/cloud-connection": patch
-"@objectstack/metadata-protocol": patch
-"@objectstack/plugin-approvals": patch
-"@objectstack/plugin-audit": patch
-"@objectstack/plugin-auth": patch
-"@objectstack/plugin-email": patch
-"@objectstack/plugin-reports": patch
-"@objectstack/plugin-sharing": patch
-"@objectstack/plugin-webhooks": patch
-"@objectstack/service-knowledge": patch
+"@objectstack/cloud-connection": minor
+"@objectstack/metadata-protocol": minor
+"@objectstack/plugin-approvals": minor
+"@objectstack/plugin-audit": minor
+"@objectstack/plugin-auth": minor
+"@objectstack/plugin-email": minor
+"@objectstack/plugin-reports": minor
+"@objectstack/plugin-sharing": minor
+"@objectstack/plugin-webhooks": minor
+"@objectstack/service-knowledge": minor
 ---
 
-**Contract tightening (types only, no runtime behaviour change):** twelve logger
-sink types that declared an optional `error` now declare a **non-optional**
-`warn`, so a durability report always has somewhere to land (#9754, #10556).
+**BREAKING** (compile-time only): twelve logger sink types that declared an
+optional `error` now declare a **non-optional** `warn`, so a durability report
+always has somewhere to land (#9754, #10556).
 
-`error` stays optional on every one of them — hosts legitimately inject reduced
-sinks, and requiring `error` was measured and rejected as #9754 option C. What
-changes is that its *absence* now has a declared, guaranteed destination. Call
-sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the type
-cannot reach.
+`minor`, not `major`: during the launch window this stack ships breaking changes
+as `minor` — every publishable package versions in lockstep, so a `major` would
+promote the whole release. `patch` would be wrong in the other direction, because
+this *can* break a consumer's build.
 
-Who has to change: a caller that hands one of these sinks an object with **no
-`warn` method**. Every construction site in this repo already supplies one, so
-the in-tree cost was zero; an external embedder passing a reduced `{ info }` or
-`{ error }` sink will now see a compile error, which is the point — that caller
-was silently discarding the reports.
+`error` stays optional on every one of these types — hosts legitimately inject
+reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+What changes is that its *absence* now has a declared, guaranteed destination.
+Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+type cannot reach, so **no runtime behaviour changes**: nothing that printed
+before stops printing, and nothing silent starts printing.
 
-The sinks: `PluginContext['logger']` (cloud-connection), `IndexMigrationLogger`
-(metadata-protocol), `MinimalLogger` (plugin-approvals lifecycle-hooks),
-`AuthEventAuditLogger` and `ReadAuditLogger` (plugin-audit), `LoggerLike` and
-`ReconcileMembershipDeps['logger']` (plugin-auth), `ReclaimLogger`
-(plugin-email), `ReportServiceOptions['logger']` (plugin-reports),
-`MinimalLogger` (plugin-sharing bulk-recompute), `OptionalLogger`
-(plugin-webhooks) and `KnowledgeLogger` (service-knowledge).
+### Who has to change, and what to do
 
-Three forwarding seams were tightened with them, because `tsc` reported that
-they would otherwise re-open the silence one module downstream of where it was
-closed: `MinimalLogger` in plugin-sharing's `rule-hooks.ts` and
-`record-share-cascade.ts`, and `AuthManagerConfig['logger']` in plugin-auth.
-The last of those is the only externally visible one: `AuthManager`'s `logger`
-option stays optional, but a logger that *is* supplied must now carry `warn`.
+Only a caller that hands one of these sinks an object with **no `warn` method** —
+for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+rename, no removal, and no stored value or metadata key to rewrite. Every
+construction site inside this repo already supplied one, so the in-repo cost was
+zero; the compile error is reserved for the callers that were silently discarding
+these reports.
+
+The affected types, by package:
+
+- `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+- `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+- `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+- `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+- `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+  `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+- `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+- `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+- `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+  `rule-hooks` and `record-share-cascade`
+- `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+- `@objectstack/service-knowledge` — `KnowledgeLogger`
+
+`AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+`AuthManager` is public surface, its `logger` option stays optional, and a logger
+that *is* supplied must now carry `warn`. The only non-test construction site in
+this repo passes the kernel `Logger`, whose `warn` is already required.
+
+`ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+field to `{}`. The field is now honestly optional rather than holding an empty
+object that declared it could report and discarded everything. Behaviour is
+unchanged in both directions.
+
+<!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
