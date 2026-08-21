@@ -66,7 +66,7 @@ app.use('/api/*', objectStackMiddleware(kernel));
 ## Edge runtime notes
 
 - Hono adapter is the **preferred** adapter for Cloudflare Workers, Deno Deploy, Bun, and Vercel Edge.
-- Drivers differ by runtime: use [`@objectstack/driver-sql`](../../plugins/driver-sql) on Node. (Edge/multi-tenant turso driver ships in ObjectStack Cloud.)
+- Drivers differ by runtime: use [`@objectstack/driver-sql`](../../drivers/driver-sql) on Node. (Edge/multi-tenant turso driver ships in ObjectStack Cloud.)
 - Persist no long-lived state in module scope beyond the `kernel` instance.
 
 ## When to use

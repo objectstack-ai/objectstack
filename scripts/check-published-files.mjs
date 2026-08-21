@@ -117,8 +117,31 @@ const FORBIDDEN = [
     // The arm #4206 leans on: scripts/ is build-time tooling by convention,
     // never runtime code. If that ever stops being true it must stop being true
     // loudly here, rather than silently in the docs-drift classifier.
+    //
+    // Spelled as an anchored REGEX, like the three entries above, and that is
+    // load-bearing rather than stylistic (#10875). `rel` is package-relative,
+    // over the contents of a would-be tarball: this asks whether THIS package
+    // ships a scripts/ directory of its own, and says nothing whatever about
+    // the repo root of the same name. Written as the quoted literal it used to
+    // be -- `rel.startsWith('scripts/')` -- the dispatch derivation
+    // (scripts/pm/dispatch-gates.mjs, `extractWatchHints`) reads it as this
+    // gate DECLARING the repo's own scripts/ tree as its population. That
+    // declaration is false, and it collapses to a bare top-level word
+    // `hintCovers` refuses as too generic, so the gate scored `silent` for
+    // every card in the tree while appearing to name a root it never opens.
+    //
+    // Two things not to do here, both of which look like the fix and are not:
+    //   - do NOT respell this as a quoted `'scripts/'`. check:pm-dispatch-gates
+    //     fails if this gate declares that bare root again, and it decides with
+    //     the derivation's own extractor rather than a copy of it;
+    //   - do NOT reach for the ROOT_DIR_WATCH_HINTS escape (`['scripts/**']`,
+    //     as check-parse-guard and check-role-word legitimately use). For THIS
+    //     gate that declaration would be a lie, and a load-bearing one: the
+    //     derivation would name this gate for every repo-root scripts/ edit,
+    //     which it does not read. A fabricated lead costs more than a missing
+    //     one -- see the +139084 measurement in `hintCovers`' docblock.
     label: 'build-time script',
-    test: (rel) => rel.startsWith('scripts/'),
+    test: (rel) => /^scripts\//.test(rel),
   },
 ];
 
@@ -285,6 +308,10 @@ function selfTest() {
     ['tsup.config.ts', 'build tooling'],
     ['tsconfig.build.json', 'build tooling'],
     ['scripts/i18n-extract.config.ts', 'build-time script'],
+    // Anchored at the PACKAGE root, which is the whole content of the
+    // package-relative claim above: a scripts/ directory nested anywhere else
+    // is ordinary source and must not be classified as build tooling.
+    ['src/scripts/helper.ts', null],
     ['src/index.ts', null],
     ['src/latest.ts', null],
     ['dist/index.js', null],
