@@ -6,29 +6,32 @@
  *
  * ## Why this suite is structural, and what it is a control FOR
  *
- * There is no defect run to reproduce, and that is a measurement rather than an
- * assumption. Before this change, both live files named their database with a
- * hard-coded constant; pointing BOTH constants at one name and running the
- * suite on a live MariaDB 10.11.14 produced four green runs, 10/10 — the
- * server's general query log shows the two files never overlap (file A's `drop
- * database` completes about a second before file B's first `Connect`, with
- * default settings and with `--maxWorkers=2 --fileParallelism` alike). See
- * `live-mysql-database.testkit.ts` for the log excerpt.
+ * A green live run is not evidence here, and that is a measurement rather than
+ * an assumption. Before this change both live files named their database with a
+ * hard-coded constant; pointing BOTH at one name that is not the connection
+ * URL's own database and running the suite on a live MariaDB 10.11.14 produced
+ * four GREEN runs, 10/10. The server's general query log shows why — the two
+ * files never overlap, with default settings and with `--maxWorkers=2
+ * --fileParallelism` alike. See `live-mysql-database.testkit.ts` for the log
+ * excerpt and for the second form of the hazard, which is not dormant.
  *
- * So a green live run is not evidence here, in either direction: it was green
- * with the property present and green with the property deliberately broken.
- * What this suite asserts instead is the property that makes the collision
- * impossible — **two files resolve two different databases, and each file's
- * database derives from the file rather than from a shared constant** — which
- * needs no server at all.
+ * So the live suite was green with the property present and green with the
+ * property deliberately broken. What this file asserts instead is the property
+ * that makes the collision impossible — **two files resolve two different
+ * databases, and each file's database derives from the file rather than from a
+ * shared constant** — which needs no server at all.
  *
  * ⚠️ Which kind of control this is, stated plainly: it is an ABLATION control,
  * not a defect control. Its subject — the derivation — does not exist before
- * the change, so no pre-fix red run can exist. It is falsified by removing the
- * derivation (replace `currentLiveMysqlDatabase()` with a literal and this file
- * goes red), never by a pre-fix measurement. The one control that DOES red on
- * the pre-fix tree is `scripts/check-live-db-isolation.mjs`, which is a source
- * scan and therefore sees the constants that were there.
+ * the change, so no pre-fix red run can exist for it. It is falsified by
+ * removing the derivation, and was: replacing both calls with the literal
+ * `'conformance'` takes the first assertion below red with
+ * `expected 1 to be greater than or equal to 3`, because the two live files
+ * drop out of the population it measures over. Never by a pre-fix measurement.
+ *
+ * The one control that DOES red on the real pre-fix tree is
+ * `scripts/check-live-db-isolation.mjs` — a source scan, so it sees the
+ * constants that were actually there.
  *
  * ## Division of labour with the repo-wide gate
  *

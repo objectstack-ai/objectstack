@@ -16,43 +16,57 @@
  * file, not from a shared constant* — held here only by the authors having
  * remembered to type two different strings.
  *
- * ## The hazard is LATENT, measured — which is the reason to fix it structurally
+ * ## The hazard has TWO forms, and only one of them is dormant
  *
- * The obvious way to justify this change is to show the collision happening, so
- * that was tried first, on a live MariaDB 10.11.14 in an agent container: both
- * constants pointed at ONE name, the suite run four times. All four runs were
- * GREEN, 10/10.
+ * Both were measured on a live MariaDB 10.11.14 raised in an agent container
+ * (`sql_mode` set to MySQL 8's default set), by pointing both constants at one
+ * name and running the suite.
  *
- * The server's own general query log says why, and the answer is worth keeping.
- * The two files did not overlap at all — file A's `drop database` completed
- * before file B's first `Connect`, both under the default settings and under an
- * explicit `--maxWorkers=2 --fileParallelism`:
+ * **Form 1 — a shared name that is NOT the URL's database: dormant.** With both
+ * files on `os_shared_hazard_probe`, four runs, all GREEN 10/10. The server's
+ * general query log says why: the two files never overlap. File A's `drop
+ * database` completes before file B's first `Connect`, under the default
+ * settings and under an explicit `--maxWorkers=2 --fileParallelism` alike —
  *
- *     16:32:34  40 Connect  …    40 Query  CREATE DATABASE IF NOT EXISTS `…`
- *               41 Connect  …    41 Query  USE `…`  →  DROP DATABASE IF EXISTS `…`
- *     16:32:35  42 Connect  …    42 Query  CREATE DATABASE IF NOT EXISTS `…`
- *               43 Connect  …    43 Query  USE `…`  →  DROP DATABASE IF EXISTS `…`
+ *     16:32:34  40 Connect …  40 Query CREATE DATABASE IF NOT EXISTS `…`
+ *               41 Connect …  41 Query USE `…` → DROP DATABASE IF EXISTS `…`
+ *     16:32:35  42 Connect …  42 Query CREATE DATABASE IF NOT EXISTS `…`
+ *               43 Connect …  43 Query USE `…` → DROP DATABASE IF EXISTS `…`
  *
- * Each file's whole run is ~150 ms while a second fork takes ~1 s to come up, so
- * the destructive window never opens with exactly two small files. So the shared
- * name is a loaded gun that is not currently pointed anywhere: nothing observable
- * distinguishes the broken configuration from the correct one.
+ * — because each file's whole run is ~150 ms while a second fork takes ~1 s to
+ * boot, so with exactly two small files the destructive window never opens.
  *
- * That is an argument FOR deriving the name rather than against it. What makes
- * the shared constant dangerous is not today's schedule, it is that every input
- * to that schedule is incidental — the file count in the `live-mysql` filter,
- * the runner's CPU count, vitest's `fileParallelism` default, how long a fork
- * takes to boot. And the blast radius is larger here than in driver-sql: both
- * files `DROP DATABASE` in `afterAll` and both `CREATE`/`DROP` fixed platform
- * table names (`_objectstack_sequences`, `sys_organization`, `sys_setting`), so
- * an overlap does not merely contend, it drops the database another file is
- * mid-test in.
+ * **Form 2 — a shared name that IS the URL's database: a hard, deterministic
+ * red.** With both files on `conformance` (the name CI's `OS_TEST_MYSQL_URL`
+ * carries, and the one the card claimed they already shared), the run fails at
+ * `mysql.createConnection(MYSQL_URL)` in the second file's `beforeAll`:
  *
- * The consequence for how this change is verified: there is no defect control
- * available — no pre-fix red run exists to point at, because the pre-fix tree is
- * green even when deliberately broken. The controls are the structural test
- * (which ablates the derivation) and the repo-wide gate (which DOES red on the
- * pre-fix tree). See `live-mysql-database.isolation.test.ts`.
+ *     Error: Unknown database 'conformance'
+ *
+ * The first file's `afterAll` dropped the database the URL itself points at, so
+ * the next connection cannot complete its handshake. Sequential execution is no
+ * protection here — being sequential is exactly how it happens.
+ *
+ * The two forms together are the argument for deriving the name rather than
+ * hand-typing it. Form 1 says nothing observable distinguishes the broken
+ * configuration from the correct one, so the property cannot be left to a green
+ * run to defend; Form 2 says the blast radius when it does fire is the whole
+ * leg, not one flaky assertion. And every input that decides which form you get
+ * is incidental — the file count in the `live-mysql` filter, the runner's CPU
+ * count, vitest's `fileParallelism` default, and which string an author typed.
+ *
+ * ## What each control in this change actually proves
+ *
+ *  - `live-mysql-database.isolation.test.ts` is an ABLATION control. Its
+ *    subject — the derivation — does not exist before this change, so no
+ *    pre-fix red run can exist for it. Measured: replacing both calls with a
+ *    literal takes it red (`expected 1 to be greater than or equal to 3`).
+ *  - Form 2 above is a DEFECT control for the hazard, deterministic and
+ *    reproducible, but it is a control on a deliberately broken tree, not on
+ *    the tree as it was: the pre-fix files carried two DISTINCT constants.
+ *  - `scripts/check-live-db-isolation.mjs` is the only control that reds on the
+ *    real pre-fix tree, because it reads source rather than behaviour, and the
+ *    constants were there to read.
  *
  * ## Why this is a sibling of driver-sql's resolver rather than an import of it
  *

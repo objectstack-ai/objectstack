@@ -1559,6 +1559,30 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # Live-server database isolation (#10382). CI provisions ONE Postgres and
+      # ONE MySQL for the whole temporal-conformance job and points every live
+      # leg at them, and every live suite in the repo issues a `drop` when it
+      # finishes — so two suites naming the same database do not contend, they
+      # destroy each other's fixture. When the shared name is the one the
+      # connection URL itself carries, the next suite cannot even complete its
+      # handshake: measured on a live MariaDB 10.11, `Error: Unknown database
+      # 'conformance'`, deterministically, without any concurrency needed.
+      #
+      # #9350 fixed this and enforced it — inside `packages/drivers/driver-sql`
+      # only. That scan was correctly green while two live suites in
+      # `packages/metadata-protocol` named their databases with hand-typed
+      # constants, distinct from each other only because two authors typed two
+      # different strings. A per-package scan cannot see the package that has
+      # not been written yet, and the next live suite will be in a third one.
+      #
+      # This gate is the repo-wide half and nothing has to opt in: it finds the
+      # live files itself (they are the ones reading OS_TEST_*_URL) and fails
+      # any whose database name reaches its DDL from a literal. It does NOT
+      # check distinctness — that needs the derivation actually run, and lives
+      # in the two packages' own isolation suites. Reads ~4 files; sub-second.
+      - name: Live-server database isolation
+        run: pnpm check:live-db-isolation
+
       # LAYER C of the gate above (#10379). That gate verifies two of the three
       # layers a cross-package declaration has: it finds the escaping tests
       # itself, and `--verify` makes turbo.json hash every declared glob so the
