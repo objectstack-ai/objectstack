@@ -517,9 +517,10 @@ if (args.includes('--self-test')) {
 // EXIT CODE. The 45-of-221 ratio is REPORTED, never a verdict — the #9747 family's
 // ruling is that a narrow recognizer should say "unrecognised", and turning today's
 // shortfall into a red would be widening-by-CI, which that card declines. What DOES
-// exit non-zero is `brokenScan`: a scan that found no ledger, no tail, or a ledger it
-// could no longer parse is broken rather than clean, and that verdict cannot fire on a
-// tree where the scan works at all.
+// exit non-zero is `brokenScan`: a scan that found no ledger, no tail, a ledger it could
+// no longer parse, or a ledger it read only PARTIALLY (#9896 — the shape that renders like
+// a complete read) is broken rather than clean, and no such verdict can fire on a tree
+// where the scan works at all.
 if (args.includes('--bridge-coverage')) {
   const { registrarFiles, ledgers, registrarByTail } = scanRouteSurface();
   const coverage = bridgeCoverageFrom(ledgers, registrarByTail.keys());
@@ -536,7 +537,12 @@ if (args.includes('--bridge-coverage')) {
     console.log(`  registrar files scanned .... ${registrarFiles.filter((f) => !LEDGER_FILE_RE.test(f)).length}`);
     console.log(`  route tails produced ....... ${coverage.tails}`);
     console.log(`  ledger files ............... ${coverage.ledgers.length}`);
-    console.log(`  client-bound ledger rows ... ${coverage.clientRows}`);
+    // BOTH HALVES OF THE FRACTION, ALWAYS. A bare "221" cannot be told apart from a 221
+    // that used to be 222 before one row was respelled into a quote the recognizer
+    // declines; printing what the ledgers DECLARED beside what was READ is what makes the
+    // difference visible without anyone having to know the number by heart.
+    console.log(`  ledger rows read ........... ${coverage.rowsParsed} of ${coverage.routesDeclared} declared`);
+    console.log(`  client-bound ledger rows ... ${coverage.clientRows} of ${coverage.clientsDeclared} declared`);
     console.log(`    reachable ................ ${coverage.reachable}`);
     console.log(`    UNREACHABLE .............. ${coverage.unreachable}`);
     for (const l of coverage.ledgers) {
@@ -1116,7 +1122,11 @@ function parseRegistrarSource(text) {
  * recognizer narrower than the repo must report "unrecognised" rather than render as a
  * verdict, and this is that report for this bridge.
  *
- * @param {Array<{file: string, rows: Array<{route: string, client: string|null}>}>} ledgers
+ * @param {Array<{file: string, rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number}>} ledgers
+ *   as `parseLedgerSource` returns them. ⛔ No `?? []` / `?? rows.length` defaults are
+ *   applied to the declared counts below: an ABSENT report of what a ledger declared must
+ *   never render as "it declared exactly what we read", which is the one reading this
+ *   whole verdict exists to prevent. A caller that omits them throws here instead.
  * @param {Iterable<string>} tails  every route tail the registrar scan produced
  */
 function bridgeCoverageFrom(ledgers, tails) {
@@ -1128,12 +1138,18 @@ function bridgeCoverageFrom(ledgers, tails) {
   const byLedger = [];
   let clientRows = 0;
   let reachable = 0;
-  for (const { file, rows } of ledgers) {
+  let rowsParsed = 0;
+  let routesDeclaredAll = 0;
+  let clientsDeclaredAll = 0;
+  for (const { file, rows, declined, routesDeclared, clientsDeclared } of ledgers) {
     const bound = rows.filter((r) => r.client);
     const hit = bound.filter((r) => selects(r.route));
     clientRows += bound.length;
     reachable += hit.length;
-    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length });
+    rowsParsed += rows.length;
+    routesDeclaredAll += routesDeclared;
+    clientsDeclaredAll += clientsDeclared;
+    byLedger.push({ file, clientRows: bound.length, reachable: hit.length, unreachable: bound.length - hit.length, rowsParsed: rows.length, routesDeclared, clientsDeclared, declined });
   }
   // ZERO IS NOT A CLEAN REPO, IT IS A BROKEN SCAN — `check-engine-double-contract`'s
   // invariant, applied to this population (#9747 quotes it as the germ worth
@@ -1150,8 +1166,34 @@ function bridgeCoverageFrom(ledgers, tails) {
   if (!tailList.length) brokenScan.push('the registrar scan produced no route tail at all — the symbol → route → sdk bridge cannot fire for any change');
   for (const l of byLedger) {
     if (l.rowsParsed === 0) brokenScan.push(`${l.file} matched the ledger convention but parsed 0 rows — the row recognizer no longer reads this file's shape`);
+    // ONE LEVEL DOWN, AND THE LIKELIER SHAPE: a PARTIAL read. The guard above is the
+    // all-or-nothing case; a ledger where SOME rows are spelled in a quote the recognizer
+    // declines parses fine, and the population it reports is simply smaller — or silently
+    // mis-bound — than what the file declares. Keyed on the DECLINED SPELLING as well as on
+    // the shortfall, because the window-inheritance case leaves the COUNT intact and only
+    // the spelling betrays it (measured; see `parseLedgerSource`).
+    //
+    // A VERDICT rather than a report, on the same test the block above uses: this cannot
+    // fire on a tree whose ledgers are spelled the way the recognizer reads (today: 259 of
+    // 259, delta 0). It is a break in the SCAN, not a property of the route surface — unlike
+    // the 45-of-221 reach ratio, which is a fact about the repo and stays reported.
+    const unreadRows = l.routesDeclared - l.rowsParsed;
+    if (l.declined.length || unreadRows > 0) {
+      const declinedRoutes = l.declined.filter((d) => d.key === 'route').length;
+      const named = l.declined.slice(0, 3).map((d) => `line ${d.line}: ${d.text}`).join(', ');
+      brokenScan.push(
+        `${l.file} is a PARTIAL read of that ledger, not its shape — the row recognizer reads single-quoted values only`
+        + ` and read ${l.rowsParsed} of ${l.routesDeclared} declared string-literal \`route:\` value(s)`
+        + ` and ${l.clientRows} of ${l.clientsDeclared} declared string-literal \`client:\` value(s)`
+        + (l.declined.length
+          ? `; declined ${l.declined.length}: ${named}${l.declined.length > 3 ? `, +${l.declined.length - 3} more` : ''}`
+          : '')
+        + (unreadRows > declinedRoutes
+          ? `; and ${unreadRows - declinedRoutes} single-quoted \`route:\` value(s) the recognizer did not read either`
+          : ''));
+    }
   }
-  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, ledgers: byLedger, brokenScan };
+  return { measured: true, clientRows, reachable, unreachable: clientRows - reachable, tails: tailList.length, rowsParsed, routesDeclared: routesDeclaredAll, clientsDeclared: clientsDeclaredAll, ledgers: byLedger, brokenScan };
 }
 
 /**
@@ -1183,8 +1225,8 @@ function scanRouteSurface() {
     let text;
     try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
     if (LEDGER_FILE_RE.test(rel)) {
-      const rows = parseLedgerSource(text);
-      ledgers.push({ file: rel, rows });
+      const { rows, declined, routesDeclared, clientsDeclared } = parseLedgerSource(text);
+      ledgers.push({ file: rel, rows, declined, routesDeclared, clientsDeclared });
       ledgerRows.push(...rows);
     }
     if (REGISTRAR_FILE_RE.test(rel)) {
@@ -1198,9 +1240,70 @@ function scanRouteSurface() {
   return { registrarFiles, ledgers, ledgerRows, registrarByTail };
 }
 
-/** `{ route, client }` rows out of a route ledger — the declared cross-surface table. */
+/**
+ * Every `route:` / `client:` declaration in a ledger whose value opens with a quote the row
+ * recognizer below does NOT read. Written once, here, so the recognizer and its complement
+ * cannot drift into agreeing while both are wrong; `--self-test` pins the partition
+ * (every declaration is read or declined, never neither, never both).
+ *
+ * The snippet runs to the end of the line and is trimmed back to the closing quote in JS
+ * rather than matched to it: an interpolated or unterminated literal must still NAME
+ * itself, and a regex that requires the closing quote would drop exactly those out of the
+ * report — the same silence one level up.
+ *
+ * A FUNCTION DECLARATION rather than a `const` arrow, deliberately: `--self-test`
+ * short-circuits near the top of this file, before any `const` down here has initialized,
+ * and a TDZ error there takes the whole self-test down instead of failing one check.
+ */
+function declinedIn(s) {
+  return [...s.matchAll(/(route|client)\s*:\s*(["`])([^\n]{0,120})/g)].map((d) => {
+    const end = d[3].indexOf(d[2]);
+    return { index: d.index, key: d[1], text: `${d[1]}: ${d[2]}${end === -1 ? d[3].slice(0, 60) : d[3].slice(0, end)}${d[2]}` };
+  });
+}
+
+/**
+ * `{ route, client }` rows out of a route ledger — the declared cross-surface table — and,
+ * beside them, the declarations this recognizer DECLINED to read. That second half used to
+ * be silent, and silence is the defect: a PARTIAL read renders exactly like a complete one.
+ *
+ * WHAT WAS MEASURED (a718ee3dd, all seven of today's ledgers are wholly single-quoted —
+ * 259 `route:` and 221 `client:` values, delta 0, so none of the verdicts below can fire on
+ * today's tree). Rewriting ONE row of `i18n-route-ledger.ts`:
+ *
+ *   • backtick-quoted `route:` → the client-bound population goes 221 → 220, no verdict,
+ *     exit 0. The pre-existing `rowsParsed === 0` guard is the ALL-or-nothing case and
+ *     cannot see this by construction.
+ *   • single-quoted `route:` beside a backtick-quoted `client:` → 221 → 220 again, while
+ *     `rowsParsed` stays 3: the row keeps its seat and loses its binding.
+ *   • worst, and the reason the verdict keys on the SPELLING rather than on a shortfall:
+ *     the row window is delimited by this same single-quote-only lead, so a declined row
+ *     does not close the PREVIOUS row's window. Backtick-quoting `GET /api/v1/meta` in
+ *     `rest-route-ledger.ts` moved `meta.getTypes` onto the server-only `GET /api/v1/docs`
+ *     — a WRONG binding, with `clientRows` still 221. A count comparison alone is blind
+ *     to that one.
+ *
+ * A template literal is the realistic spelling: the repo's formatter rewrites double quotes
+ * back to single, but leaves `` route: `${base}/locales` `` alone, and that is the natural
+ * shape the moment anyone interpolates a base path into a row.
+ *
+ * ⛔ This does NOT widen the recognizer. `rows` comes out of the loop it always did, byte
+ * for byte; everything else here is a report about what that loop could not read. Widening
+ * would move the measured population, which is a separate decision with a before/after
+ * standard attached — see the header of `--bridge-coverage`.
+ *
+ * ⚠️ KNOWN BOUNDARY, pinned in `--self-test` rather than left to be discovered: a `route:`
+ * whose value is not a string literal at all (`route: ROUTES.health`) is invisible to the
+ * recognizer AND to this counter, because the only exact discriminator against the
+ * `route: string;` member every ledger's own entry interface declares is the quote. The
+ * numerator below therefore says "string-literal declaration(s)" and claims nothing wider.
+ *
+ * @returns {{rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number}}
+ */
 function parseLedgerSource(text) {
   const rows = [];
+  const declined = [];
+  const lineAt = (i) => 1 + (text.slice(0, i).match(/\n/g) || []).length;
   const routeRe = /route\s*:\s*'([^']+)'/g;
   let m;
   while ((m = routeRe.exec(text)) !== null) {
@@ -1209,8 +1312,27 @@ function parseLedgerSource(text) {
     const window = nextRoute === -1 ? rest : rest.slice(0, nextRoute + 1);
     const client = window.match(/client\s*:\s*'([^']+)'/);
     rows.push({ route: m[1], client: client ? client[1] : null });
+    // `client:` is counted inside THIS row's window — the same window the line above reads
+    // — and never file-wide: a `client:` written in prose elsewhere would otherwise be
+    // billed to a row that never declared it, and a false red costs the same trust a false
+    // green does.
+    for (const d of declinedIn(window)) {
+      if (d.key === 'client') declined.push({ key: 'client', line: lineAt(m.index + d.index), text: d.text });
+    }
   }
-  return rows;
+  // `route:` is counted file-wide, because a declined row has no window to be found in —
+  // which is precisely why it was invisible.
+  for (const d of declinedIn(text)) {
+    if (d.key === 'route') declined.push({ key: 'route', line: lineAt(d.index), text: d.text });
+  }
+  // THE DENOMINATOR. Leads the recognizer's own regex would start on, plus the ones it
+  // declined — so `routesDeclared - rows.length` is every declared row value this parse did
+  // not turn into a row, whatever the reason: a declined quote, or the `route: ''` that its
+  // `[^']+` also drops without a word.
+  const routesDeclared = [...text.matchAll(/route\s*:\s*'/g)].length + declined.filter((d) => d.key === 'route').length;
+  const clientsDeclared = rows.filter((r) => r.client).length + declined.filter((d) => d.key === 'client').length;
+  declined.sort((a, b) => a.line - b.line || a.key.localeCompare(b.key));
+  return { rows, declined, routesDeclared, clientsDeclared };
 }
 
 /**
@@ -1541,11 +1663,110 @@ function selfTest() {
     "  { route: 'GET /api/v1/health', family: 'ops', disposition: 'server-only' },",
     '];',
   ].join('\n');
-  const ledger = parseLedgerSource(ledgerSource);
+  const { rows: ledger, ...ledgerRead } = parseLedgerSource(ledgerSource);
   check('parseLedgerSource', 'every row is read', 'row count', 3, ledger.length);
   check('parseLedgerSource', 'the audit row binds its client method', 'meta.getAudit', 'meta.getAudit', ledger.find((r) => r.route.endsWith('/audit'))?.client);
   check('parseLedgerSource', 'a server-only row claims no client', 'null client', null, ledger.find((r) => r.route.endsWith('/health'))?.client);
   check('parseLedgerSource', 'a row never inherits the NEXT row\'s client', 'references', 'meta.getReferences', ledger[0].client);
+  // THE POSITIVE CONTROL for every zero below (#9896). A fixture spelled the way the
+  // recognizer reads must report NOTHING declined AND a denominator equal to what it read —
+  // a zero from a counter that cannot fire is not evidence, and the partial fixture further
+  // down is the other half of the pair that makes this zero mean something.
+  check('parseLedgerSource', 'an all-single-quoted ledger declines nothing', 'declined', 0, ledgerRead.declined.length);
+  check('parseLedgerSource', 'and its denominator equals what was read', '3 route / 2 client',
+    '3 route / 2 client', `${ledgerRead.routesDeclared} route / ${ledgerRead.clientsDeclared} client`);
+
+  // ---- A PARTIAL LEDGER READ MUST SAY SO (#9896) ----------------------------
+  // The negative half of the pair above: the same recognizer over a ledger carrying one
+  // backtick-quoted `route:`, one double-quoted `route:` and one backtick-quoted `client:`.
+  // Every one of those is ordinary TypeScript; the template-literal spellings are the
+  // realistic ones, because the repo's formatter rewrites double quotes back to single and
+  // leaves a template literal alone.
+  const partialSource = [
+    'export const REST_ROUTE_LEDGER = [',
+    "  { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', disposition: 'sdk', client: 'meta.getReferences' },",
+    '  { route: `GET /api/v1/i18n/locales`, family: \'i18n\', disposition: \'sdk\', client: \'i18n.getLocales\' },',
+    '  { route: "GET /api/v1/health", family: \'ops\', disposition: \'server-only\' },',
+    '  { route: \'GET /api/v1/meta/:type/:name/audit\', family: \'metadata\', disposition: \'sdk\', client: `meta.getAudit` },',
+    '];',
+  ].join('\n');
+  const partial = parseLedgerSource(partialSource);
+  check('parseLedgerSource', 'the narrow population is UNCHANGED — this reports, it does not widen', 'row count', 2, partial.rows.length);
+  check('parseLedgerSource', 'a backtick-quoted `client:` costs the row its binding, not its seat', 'null client',
+    null, partial.rows.find((r) => r.route.endsWith('/audit'))?.client);
+  check('parseLedgerSource', 'every declined spelling is counted — 2 route, 1 client', 'declined', 3, partial.declined.length);
+  check('parseLedgerSource', 'the denominator is what the FILE declared, not what was read', '4 route / 2 client',
+    '4 route / 2 client', `${partial.routesDeclared} route / ${partial.clientsDeclared} client`);
+  // ⚠️ Read that `2` honestly: the backtick row on line 3 declares a `client:` too, and it
+  // is counted in NEITHER column — a declined route takes its client out of the file with
+  // it, and the `route:` arm of the verdict is what reports that row. The client column
+  // answers "of the rows I read, how many bindings did I lose", nothing wider.
+  check('parseLedgerSource', 'each declined entry NAMES itself, with its line', 'line 3 backtick route',
+    true, partial.declined.some((d) => d.key === 'route' && d.line === 3 && d.text.includes('GET /api/v1/i18n/locales')));
+  check('parseLedgerSource', 'the double-quoted route is named too', 'line 4 double-quoted route',
+    true, partial.declined.some((d) => d.key === 'route' && d.line === 4 && d.text.includes('GET /api/v1/health')));
+  check('parseLedgerSource', 'and the declined client, on its own line', 'line 5 backtick client',
+    true, partial.declined.some((d) => d.key === 'client' && d.line === 5 && d.text.includes('meta.getAudit')));
+  // The partition — the reason a shared spelling constant is not needed and would not help.
+  // Every declared string-literal `route:` is either read as a row or declined; a future
+  // edit that lets one fall between the two fails HERE rather than in production silence.
+  check('parseLedgerSource', 'read + declined accounts for every declared `route:`', 'partition',
+    partial.routesDeclared, partial.rows.length + partial.declined.filter((d) => d.key === 'route').length);
+
+  const partialCov = bridgeCoverageFrom([{ file: 'd-route-ledger.ts', ...partial }], ['/:type/:name/references']);
+  check('bridgeCoverageFrom', 'a partial read is a VERDICT, not a smaller number', 'brokenScan',
+    true, partialCov.brokenScan.some((v) => v.includes('PARTIAL read')));
+  check('bridgeCoverageFrom', 'and the verdict carries the numerator', '2 of 4',
+    true, partialCov.brokenScan.some((v) => v.includes('2 of 4 declared string-literal `route:`')));
+  check('bridgeCoverageFrom', 'and NAMES the entry it could not read', 'i18n/locales',
+    true, partialCov.brokenScan.some((v) => v.includes('GET /api/v1/i18n/locales')));
+  // ⛔ THE POINT. The pre-existing guard is `rowsParsed === 0` — all-or-nothing — so it is
+  // silent on exactly this file. If this ever starts passing, the partial case has been
+  // folded into the zero case and the pin above is measuring the wrong thing.
+  check('bridgeCoverageFrom', 'the `parsed 0 rows` guard is blind to this by construction', 'not fired',
+    false, partialCov.brokenScan.some((v) => v.includes('parsed 0 rows')));
+
+  // ---- why the verdict keys on the SPELLING and not on a shortfall ----------
+  // A declined row does not close the PREVIOUS row's window — the window is delimited by
+  // the same single-quote-only lead — so a server-only row INHERITS the declined row's
+  // client. Characterised, not endorsed: `GET /api/v1/docs` is server-only and must not
+  // claim `meta.getTypes`. Measured on the real tree at a718ee3dd, backtick-quoting
+  // `GET /api/v1/meta` in `rest-route-ledger.ts` did exactly this, and `clientRows` stayed
+  // 221 — a count comparison cannot see it, which is why `declined` is what fires.
+  const stealSource = [
+    'export const REST_ROUTE_LEDGER = [',
+    "  { route: 'GET /api/v1/docs', family: 'ops', disposition: 'server-only' },",
+    '  { route: `GET /api/v1/meta`, family: \'metadata\', disposition: \'sdk\', client: \'meta.getTypes\' },',
+    "  { route: 'GET /api/v1/health', family: 'ops', disposition: 'server-only' },",
+    '];',
+  ].join('\n');
+  const steal = parseLedgerSource(stealSource);
+  const clean = parseLedgerSource(stealSource.replace('`GET /api/v1/meta`', "'GET /api/v1/meta'"));
+  check('parseLedgerSource', 'a declined row leaves its client to the row BEFORE it', 'mis-bound',
+    'meta.getTypes', steal.rows.find((r) => r.route.endsWith('/docs'))?.client);
+  const stealCov = bridgeCoverageFrom([{ file: 'e-route-ledger.ts', ...steal }], ['/api/v1/docs']);
+  const cleanCov = bridgeCoverageFrom([{ file: 'e-route-ledger.ts', ...clean }], ['/api/v1/docs']);
+  check('bridgeCoverageFrom', 'the client-bound COUNT is identical either way — the number is blind',
+    'clientRows', cleanCov.clientRows, stealCov.clientRows);
+  check('bridgeCoverageFrom', 'yet the declined spelling still carries the verdict', 'brokenScan',
+    true, stealCov.brokenScan.some((v) => v.includes('PARTIAL read')));
+  check('bridgeCoverageFrom', 'and the correctly spelled twin carries none', 'brokenScan', 0, cleanCov.brokenScan.length);
+
+  // ⚠️ THE COUNTER'S OWN BOUNDARY, declared rather than discovered later. A `route:` whose
+  // value is not a string literal is invisible to the recognizer AND to the counter: the
+  // only exact discriminator against the `route: string;` member that every ledger's entry
+  // interface declares (7 of 7 on this tree, one each) is the opening quote. Filed rather
+  // than absorbed — see the issue linked from this block's PR.
+  const nonLiteral = parseLedgerSource([
+    'export interface Entry { route: string; client?: string }',
+    'export const L = [',
+    '  { route: ROUTES.health, family: \'ops\', disposition: \'server-only\' },',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a non-literal `route:` is out of scope for the counter, and so is `route: string;`',
+    'declared', '1 route / 1 client / 0 declined',
+    `${nonLiteral.routesDeclared} route / ${nonLiteral.clientsDeclared} client / ${nonLiteral.declined.length} declined`);
 
   // End to end over those three fixtures: the #9192 recall miss must come back.
   // `auditMetaItem` (changed) → `/:type/:name/audit` (registrar) → `meta.getAudit`
@@ -2068,8 +2289,18 @@ function selfTest() {
   // What these pin is the honesty of the number, not its value: a reachable row must be
   // counted reachable, an unreachable one must be counted unreachable, and a scan that
   // came back structurally empty must carry a VERDICT rather than a clean-looking zero.
+  // A ledger record as `parseLedgerSource` returns one. Spelled through a helper so a
+  // fixture cannot quietly omit the declared counts — `bridgeCoverageFrom` reads them with
+  // no default on purpose, and a fixture that skipped them would throw rather than pass.
+  const covLedger = (file, rows) => ({
+    file,
+    rows,
+    declined: [],
+    routesDeclared: rows.length,
+    clientsDeclared: rows.filter((r) => r.client).length,
+  });
   const covLedgers = [
-    { file: 'a-route-ledger.ts', rows: [
+    covLedger('a-route-ledger.ts', [
       // selected by the `/:type/:name/audit` tail — the bridge's worked example
       { route: 'GET /api/v1/meta/:type/:name/audit', client: 'meta.getAudit' },
       // a literal whose registrar writes it as `${metaPath}/:type`: the interpolation is
@@ -2080,7 +2311,7 @@ function selfTest() {
       { route: 'POST /api/v1/auth/sign-in/email', client: 'auth.login' },
       // server-only rows are not part of the population at all
       { route: 'GET /health', client: null },
-    ] },
+    ]),
   ];
   const cov = bridgeCoverageFrom(covLedgers, ['/:type/:name/audit', '/:type/:name/history']);
   const covCases = [
@@ -2104,13 +2335,13 @@ function selfTest() {
   check('bridgeCoverageFrom', 'a registrar scan with no tail is a verdict, not "everything unreachable"', 'brokenScan',
     true, noTails.brokenScan.some((v) => v.includes('no route tail')));
   check('bridgeCoverageFrom', 'and it still reports the population it could not reach', 'unreachable', 3, noTails.unreachable);
-  const unreadable = bridgeCoverageFrom([{ file: 'b-route-ledger.ts', rows: [] }], ['/x/:y']);
+  const unreadable = bridgeCoverageFrom([covLedger('b-route-ledger.ts', [])], ['/x/:y']);
   check('bridgeCoverageFrom', 'a ledger that matched the convention but parsed 0 rows is a verdict', 'brokenScan',
     true, unreadable.brokenScan.some((v) => v.includes('parsed 0 rows')));
   // ⛔ The counter-case, and it is the one that keeps the verdict above honest: two of
   // today's seven ledgers are wholly `server-only`, so ZERO CLIENT-BOUND ROWS is a
   // correct answer and must never be a verdict.
-  const serverOnly = bridgeCoverageFrom([{ file: 'c-route-ledger.ts', rows: [{ route: 'GET /api/v1/datasources', client: null }] }], ['/x/:y']);
+  const serverOnly = bridgeCoverageFrom([covLedger('c-route-ledger.ts', [{ route: 'GET /api/v1/datasources', client: null }])], ['/x/:y']);
   check('bridgeCoverageFrom', 'an all-server-only ledger is accurate, not broken', 'brokenScan', 0, serverOnly.brokenScan.length);
 
   // The selection rule itself, pinned once — both the count and the row list read it, so a

@@ -318,6 +318,26 @@ export interface SettingsServiceOptions {
    * environment.
    */
   env?: Record<string, string | undefined>;
+  /**
+   * Declares that a `bindEngine` call is COMING — the caller owns a lifecycle
+   * in which the engine arrives later, and until it does this service has no
+   * durable store.
+   *
+   * Set, a write raises {@link SettingsEngineNotBoundError} instead of landing
+   * in the in-memory fallback and answering "resolved" (see that class for the
+   * measured silent-loss window it closes). Clear it — by binding
+   * (`bindEngine`) or by settling the question the other way
+   * (`settleWithoutEngine`) — as soon as the lifecycle knows the answer.
+   *
+   * ⚠️ Deliberately OPT-IN and defaulted OFF. The in-memory fallback has a
+   * second, legitimate reading — "unit tests, bootstrap, control-plane mock",
+   * where memory IS the intended store and no engine is ever coming — and a
+   * service constructed without this flag keeps that reading byte for byte.
+   * Only a caller that knows a bind is pending can distinguish the two, so only
+   * a caller that knows says so. `SettingsServicePlugin` sets it in `init()`
+   * and clears it on BOTH branches of its `kernel:ready` hook.
+   */
+  engineBindPending?: boolean;
   /** Object name backing the K/V store. Defaults to 'sys_setting'. */
   objectName?: string;
   /**
@@ -405,6 +425,87 @@ export class SettingsCryptoUnavailableError extends Error {
         'not encryption). Wire SettingsServicePluginOptions.cryptoProvider ' +
         '(LocalCryptoProvider in dev, a KMS/Vault provider in production), or inject a real ' +
         '`crypto` adapter. Refusing to store a reversible value (fail-closed).',
+    );
+  }
+}
+
+/**
+ * Thrown when a write reaches `SettingsService` while its data engine binding
+ * is still PENDING — the pre-`bindEngine` window.
+ *
+ * ## What the refusal replaces
+ *
+ * `upsertRow` picks its store on `if (this.engine)`, so before the engine is
+ * bound a write landed in the in-process `memory` array and `setMany`
+ * re-resolved off that same array — the caller got a fully resolved value back
+ * and NOTHING reached `sys_setting`. No log line at any level, because the
+ * write did not fail: it succeeded against the wrong store. Both audit ledgers
+ * were silent for the same reason (`audit` and `auditWriter` are bound by the
+ * same `bindEngine` call), so the usual evidence that a settings write happened
+ * was absent too.
+ *
+ * ## Who was in that window
+ *
+ * `SettingsServicePlugin` binds the engine from a `kernel:ready` hook it
+ * registers in `start()`. Every plugin's `init()` runs before any plugin's
+ * `start()`, and hooks fire in registration order (`hooks.get(name).push(...)`
+ * in `packages/core/src/kernel-base.ts`, dispatched in array order) — so every
+ * `kernel:ready` hook registered from an `init()` runs INSIDE the window. That
+ * is an ordinarily-occupied position, not a hypothetical one:
+ * `assembleMetadataProtocol` registers the three platform migrations' hook from
+ * `ObjectQLPlugin.init()` (`packages/objectql/src/plugin.ts` `init = async` →
+ * `packages/metadata-protocol/src/plugin.ts`).
+ *
+ * ## Why a refusal rather than a buffered replay
+ *
+ * A buffer would have to keep the promise the resolved value makes, and it
+ * cannot:
+ *
+ *  - **Pre-flight is evaluated against the wrong store.** `setMany`'s env-lock
+ *    and upper-scope-lock checks read through `loadRows`, which in the window
+ *    reads `memory` — so an in-window write is validated against a store that
+ *    does not contain the persisted locks. Replaying it would commit a write a
+ *    real pre-flight would have refused with `SETTINGS_LOCKED`.
+ *  - **Encrypted specifiers cannot be buffered safely.** `cryptoProvider` and
+ *    `secretStore` arrive on the SAME `bindEngine` call, so a buffer would have
+ *    to hold plaintext in process memory until bind — the opposite direction
+ *    from {@link SettingsCryptoUnavailableError}, which already refuses this
+ *    exact combination.
+ *  - **A replay has nobody left to report to.** The caller was told "resolved"
+ *    during boot; a replay that then fails at bind time re-creates the silent
+ *    loss this error exists to close, one phase later.
+ *
+ * ## Wire spelling — and why the status lives on the class
+ *
+ * Unreachable from an HTTP door by construction: the window closes at
+ * `kernel:ready`, and HTTP servers open their socket at `kernel:listening`,
+ * strictly after (`packages/spec/src/contracts/plugin-lifecycle-events.ts`).
+ * So there is no `sendError` site to carry the status the way
+ * `settings-routes.ts` carries the others, and it is declared here instead.
+ *
+ * **503, deliberately not 500** — and deliberately not
+ * `SETTINGS_CRYPTO_UNAVAILABLE`'s 500 either. That one is a configuration
+ * fault where no retry ever succeeds until an operator wires a provider; this
+ * one is purely temporal: the identical write succeeds, unchanged, one
+ * lifecycle phase later. 503 is "not yet", which is exactly the caller's
+ * remedy.
+ */
+export class SettingsEngineNotBoundError extends Error {
+  readonly code = 'SETTINGS_ENGINE_NOT_BOUND' as const;
+  readonly status = 503 as const;
+  constructor(
+    readonly namespace: string,
+    readonly keys: string[],
+  ) {
+    super(
+      `Refusing to write settings ${keys.length === 1 ? 'key' : 'keys'} ` +
+        `${keys.map((k) => `'${namespace}.${k}'`).join(', ')}: the SettingsService data ` +
+        'engine is not bound yet, so the write would resolve successfully while nothing ' +
+        'reached `sys_setting`. SettingsServicePlugin binds the engine from a `kernel:ready` ' +
+        'hook registered in its `start()`, and hooks fire in registration order — so every ' +
+        '`kernel:ready` hook registered from a plugin `init()` runs inside this window. ' +
+        'Move the write to `kernel:bootstrapped` (or later), which fires strictly after every ' +
+        '`kernel:ready` handler has settled. Reads are unaffected.',
     );
   }
 }

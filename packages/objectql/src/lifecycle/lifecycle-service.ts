@@ -21,7 +21,9 @@ import type {
  *     oldest shard. Until a driver advertises rotation support, declared
  *     rotation falls back to an age-based reap bounded by `shards × unit`.
  *   - **Archiver** (P3): copies audit-class cold rows to the declared archive
- *     datasource, then deletes them from the hot store. **Safety rule:** an
+ *     datasource, then deletes them from the hot store. Cold is `created_at`
+ *     past `archive.after`, or [#10347] `ttl.field` past `ttl.expireAfter`
+ *     when the object declares a `ttl` beside its `archive`. **Safety rule:** an
  *     object that declares `archive` is never hot-deleted unless the archive
  *     copy succeeded — a compliance ledger must not be dropped unarchived.
  *
@@ -910,6 +912,13 @@ export class LifecycleService {
     // deletion happens ONLY for rows the Archiver has copied to the cold
     // store; when the archive datasource isn't registered, rows are retained
     // (never dropped unarchived) and the object is reported as skipped.
+    //
+    // [#10347] This return is not a policy DROP. A lifecycle may declare `ttl`
+    // beside `archive` — that pair parses — and until this card the ttl branch
+    // below was simply unreachable for it, so the declared per-row expiry never
+    // ran anywhere. {@link archiveObject} now applies that window itself (see
+    // its `dueField` note), so the hand-off carries the policy instead of
+    // discarding it.
     if (lc.archive) {
       return this.archiveObject(engine, obj, lc, report);
     }
@@ -1124,6 +1133,9 @@ export class LifecycleService {
   /**
    * Archiver (ADR-0057 §3.3 / P3): copy rows past `archive.after` from the
    * hot store to the archive datasource, then delete the copied rows hot.
+   * [#10347] When the object ALSO declares `ttl`, the declared per-row expiry
+   * is what selects candidates — `ttl.field` past its `expireAfter` window —
+   * instead of `created_at` past `archive.after`.
    * Batched (500 × 20 per sweep) so a large backlog drains across sweeps
    * without one long-locking pass. Copies are per-row idempotent upserts, so
    * a sweep interrupted between copy and hot-delete re-converges. When
@@ -1158,7 +1170,44 @@ export class LifecycleService {
       await cold.syncSchema(object, obj);
     }
 
-    const cutoff = new Date(this.now() - parseLifecycleDuration(archive.after)).toISOString();
+    // [#10347] WHICH ROWS ARE DUE. `archive` alone moves rows by age from
+    // `created_at`, bounded by `archive.after` — unchanged. But a lifecycle may
+    // also declare `ttl` beside `archive`: ADR-0057 §3.5's refine is satisfied
+    // (`ttl` IS a bounding policy) and the `archive.after === retention.maxAge`
+    // refine only fires when `retention` is present, so the pair parses. It used
+    // to do nothing at all — `reapObject` returns into this method before its
+    // ttl branch — leaving the author with a declared expiry that never ran
+    // while the Archiver moved rows by `created_at` age alone.
+    //
+    // Maintainer ruling 2026-08-20: what the author declared is what executes.
+    // When `ttl` is declared the Archiver selects candidates by the TTL cutoff
+    // on `ttl.field` and hands them to the same copy → hot-delete pair, so the
+    // expiry the author wrote decides which rows move. Nothing else about the
+    // Archiver changes: `archive`-only objects keep selecting by
+    // `created_at`/`archive.after`, and the cold-side `keep` prune below is a
+    // bound on the ARCHIVE (how long cold rows survive), not on which hot rows
+    // are due — it stays on `created_at` either way.
+    //
+    // A row whose `ttl.field` is NULL or absent is NOT due, and is retained.
+    // `$lt` is a positive comparison, and a value that is not there satisfies
+    // none of them — the platform-wide answer settled in #5298/#5299 and
+    // spelled out in every backend's `nullValueSatisfiesOperator`
+    // (`default: return false`). That is also the answer this method wants: a
+    // row with no expiry stamp has not been GIVEN one, so reading "absent" as
+    // "expired at the epoch" would archive exactly the rows whose expiry the
+    // author has not decided yet — against the retain-first posture that makes
+    // this method refuse to hot-delete anything the cold store has not taken.
+    //
+    // ⚠️ Deliberately NOT decided here: `retention` declared beside `ttl` +
+    // `archive`. The ttl cutoff selects, so the age window (`archive.after`,
+    // which the spec pins equal to `retention.maxAge`) no longer separately
+    // bounds the hot store for that triple. Whether the Archiver should union
+    // the two windows, or the triple be refused at parse time (a
+    // `packages/spec` accept-set question, outside this card's fence), is
+    // #10527 rather than a choice this diff makes silently.
+    const dueField = lc.ttl ? lc.ttl.field : 'created_at';
+    const dueWindow = lc.ttl ? lc.ttl.expireAfter : archive.after;
+    const cutoff = new Date(this.now() - parseLifecycleDuration(dueWindow)).toISOString();
     let archived = 0;
     for (let batch = 0; batch < ARCHIVE_MAX_BATCHES_PER_SWEEP; batch++) {
       // [#4747] Leg boundary, per batch — the same check the reap loop makes
@@ -1175,7 +1224,7 @@ export class LifecycleService {
       // store unchanged.
       if (this.abort.aborted) break;
       const rows = await hot.find(object, {
-        where: { created_at: { $lt: cutoff } },
+        where: { [dueField]: { $lt: cutoff } },
         limit: ARCHIVE_BATCH_SIZE,
       });
       if (!rows.length) break;

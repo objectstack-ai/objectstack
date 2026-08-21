@@ -167,6 +167,18 @@ wall and did not get one, and the safe reading of that is "I don't know which or
 this user belongs to", not "everyone belongs to the only org I can see". So
 `defaultOrgId()` returns `null` there too.
 
+<Callout type="info" title="`add-member` is a route — here it is">
+The `add-member` named above is `POST /api/v1/auth/organization/add-member`, an
+ObjectStack mount wrapping better-auth's server-only `addMember`. Under a walled
+posture it is the **only** way to attach an *existing* account to an
+organization: the reconciler declines to guess a target org, generic `sys_member`
+writes are suppressed under the ADR-0010 lock, and invitations need an email
+round-trip that phone-number-only accounts cannot complete. Its admit set is
+**platform admin only** — an organization owner or administrator is refused
+`403 PERMISSION_DENIED`. See [Attaching an existing user to an
+organization](/docs/permissions/authentication#attaching-an-existing-user-to-an-organization).
+</Callout>
+
 ### Membership policy
 
 | Policy | Behavior |

@@ -46,8 +46,8 @@
  * ## Why these rows (measured, not inferred)
  *
  * Rows are a RECORD of what each component renderer already reads back from
- * the node's top level, measured at the objectui pin (`.objectui-sha`
- * `82a9417`, re-verified identical at objectui `origin/main` `6c68b13` on
+ * the node's top level, measured at the `.objectui-sha` pin `82a9417`
+ * (re-verified identical at objectui `origin/main` `6c68b13` on
  * 2026-08-18) — declaring a key a renderer does not read back would recreate
  * the evaluated-but-blank half of the objectui#4795 table:
  *

@@ -756,6 +756,82 @@ more authority than the issuer has.** An issuer below `admin` grade may invite
 as plain `member` only, and no invitation may confer a tier above the issuer's
 own.
 
+#### Attaching an existing user to an organization
+
+`POST /api/v1/auth/organization/add-member` attaches an **existing** account to
+an organization directly — no invitation, no email round-trip.
+
+```http
+POST /api/v1/auth/organization/add-member
+{
+  "userId": "usr_01HZX…",
+  "organizationId": "org_beta"
+}
+```
+
+The body also carries the membership tier, under better-auth's own column name
+for it — the same field the invitation example above sends (see [Membership
+tiers are a closed list](#membership-tiers-are-a-closed-list)). It accepts a
+single tier name or an array of them. `snake_case` spellings are accepted
+alongside camelCase for the identifiers (`user_id`, `organization_id`,
+`team_id`), so a value pasted straight out of the record grid works.
+
+`organizationId` may be omitted, in which case the membership lands in the
+**calling admin's active organization**. `teamId` is optional and has no such
+fallback: omit it and the member simply joins no team.
+
+<Callout type="warn" title="This is an ObjectStack mount, not a better-auth route">
+better-auth declares `addMember` as a **server-only** API with no HTTP path of
+its own — measured on 1.7.1, where `addMember` builds its endpoint with no path
+argument while every sibling in the same module (`/organization/remove-member`,
+`/organization/list-members`, `/organization/leave`, …) passes one. So the
+vendor's documentation does not list this URL, and an audit that enumerates
+better-auth's mounted surface will not find it there either. ObjectStack mounts it ahead of the
+catch-all and wraps the vendor's server-only endpoint; the vendor's own checks
+(already-a-member, membership limit, team resolution, hooks) are not
+reimplemented.
+</Callout>
+
+**The admit set is platform admin only.** An organization owner or organization
+administrator is refused `403 PERMISSION_DENIED`, and that is deliberate under
+ADR-0068: standing inside an organization is not standing on the platform.
+Attaching someone to an organization without their consent is a
+platform-operator action, and the vendor endpoint performs no authorization of
+its own precisely because it was built to be called only from trusted server
+code.
+
+Refusals, with both halves of the ADR-0112 envelope:
+
+| Status | `code` | When |
+|---|---|---|
+| `401` | `UNAUTHENTICATED` | No session. Checked before the body, so an anonymous caller with a malformed body still gets `401`. |
+| `403` | `PERMISSION_DENIED` | Signed in, but not a platform admin — including organization owners and administrators. |
+| `501` | `NOT_IMPLEMENTED` | The organization plugin is off (`auth.plugins.organization`). Checked before the body: a payload nit is not worth reporting for a capability the deployment does not have. |
+| `400` | `INVALID_REQUEST` | Missing `userId`, or a missing/empty membership tier. |
+| `400` | `USER_NOT_FOUND` | No account with that `userId`. |
+| `400` | `USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION` | The account already holds a membership in that organization. |
+| `400` | `NO_ACTIVE_ORGANIZATION` | `organizationId` was omitted and the calling admin has no active organization to fall back to. |
+| `403` | `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED` | The organization is at its membership limit (better-auth's `membershipLimit`, default 100). |
+
+The last five are the vendor's own verdicts, forwarded verbatim rather than
+re-adjudicated.
+
+<Callout type="info" title="On a walled deployment this is the only way to attach an existing user">
+Under a walled tenancy posture the other paths do not reach:
+
+- **Create User** binds a new account to an organization only when there is an
+  unambiguous one to bind to. Under the organization wall there is not, by
+  design, so no membership row is written — see [Membership: how new users join
+  an organization](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization).
+- **Hand-writing the membership row** is not available: `sys_member` is managed
+  by better-auth and generic CRUD on it is suppressed under the ADR-0010 lock.
+- **Invitations** need an email round-trip, which phone-number-only accounts
+  cannot complete.
+
+That leaves this route. An administrator who does not know it exists reasonably
+concludes the platform cannot attach an existing user to an organization at all.
+</Callout>
+
 ### Admin User Management
 
 With `plugins: { admin: true }` (forced on when SCIM is enabled), platform
@@ -966,6 +1042,10 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
 - `POST /api/v1/auth/admin/import-users` - Bulk import users (CSV/JSON/XLSX; `auto` (default, per-row invite-or-temporary) / `invite` / `temporary` / `none` password policy; ≤500 rows, dry-run supported)
 - `POST /api/v1/auth/admin/unlock-user` - Clear a brute-force lockout early
+
+#### Organization Membership (requires `plugins.organization`; platform-admin gated)
+
+- `POST /api/v1/auth/organization/add-member` - Attach an **existing** account to an organization with no invitation ([details](#attaching-an-existing-user-to-an-organization)). An ObjectStack mount, not a better-auth route, and the only path that reaches this on a walled deployment.
 
 For complete API documentation, see the [Better-Auth API Reference](https://www.better-auth.com/docs).
 

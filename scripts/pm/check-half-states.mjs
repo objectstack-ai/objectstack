@@ -85,8 +85,8 @@
  *       The line may be DECORATED in either channel — 「`Blocked-by: #9612`」
  *       is the natural markdown for a line meant to be grepped, and reading it
  *       as absent left #10063 permanently blocked in silence (#10102). H9's
- *       `Restart-when:` shares that anchor but NOT this two-channel read; the
- *       asymmetry is stated at H9.
+ *       `Restart-when:` shares that anchor AND, since #10403, this two-channel
+ *       read; the history of the closed asymmetry is stated at H9.
  *   H5  `pm:seat` sticker whose title/assignee pair is out of sync — the
  *       seat-sticker protocol makes 标题、assignee、正文 a same-write triple:
  *       a title claiming 🟢 <login> must have that login as assignee; a title
@@ -117,13 +117,14 @@
  *       accelerator, never an exhaustive audit: a delivery older than the
  *       window is invisible, and the finding clears when the paired write
  *       lands, not when the PR ages out.
- *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` body line —
- *       the state model (post 2026-08-16 ruling) makes the hold state legal
+ *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` line in
+ *       EITHER channel — the state model (post 2026-08-16 ruling) makes the
+ *       hold state legal
  *       ONLY with a machine-readable exit: `Restart-when: closed <owner/repo>#N`
- *       (fired by the same unlock scan as `Blocked-by:`, but over the BODY
- *       channel alone — H4/H14 read body OR comment and this does not, an
- *       asymmetry documented at the predicate and named in the row itself,
- *       #10102) or a one-line executable predicate. A hold nothing can fire
+ *       (fired by the same unlock scan as `Blocked-by:`, and since #10403 over
+ *       the same TWO channels — body OR comment, the H4/H14 contract; a
+ *       comment-parked exit fired and sat unnoticed ~2 days under the old
+ *       body-only read) or a one-line executable predicate. A hold nothing can fire
  *       is indistinguishable from an abandoned card. `Restart-when: manual — …`
  *       counts as MISSING, deliberately: the protocol says a card no mechanism
  *       can revive is closed `not planned` (reason + provenance in the closing
@@ -620,12 +621,12 @@ export function h3QueueAndDispatched(issue) {
 // ---------------------------------------------------------------------------
 // The `Blocked-by:` COMMENT channel — read by H4 and by the H14 index alike.
 //
-// ⚠️ This channel is `Blocked-by:`-only, and nothing else in this file inherits
-// it: H9's `Restart-when:` is read from the BODY alone, on purpose, and the
-// grounds for the difference are written out at H9's section (#10102). The two
-// directives otherwise share one anchor, so "H4 tolerates X" generalises to H9
-// and "H4 reads comments" does not — the distinction worth keeping in view
-// when either predicate is next widened.
+// Since #10403 the comment channel is no longer `Blocked-by:`-only: H9's
+// `Restart-when:` reads it too, through its own gated fallback in the sweep
+// (see the H9 section for the incident that closed the asymmetry). The two
+// directives share one anchor AND one channel contract now, so "H4 tolerates
+// X" and "H4 reads comments" both generalise to H9 — the boundary notes below
+// apply to either directive's comment read.
 //
 // ## Stated boundary: no read-closure cut-off, because REST carries none
 //
@@ -1147,38 +1148,75 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
 }
 
 // ---------------------------------------------------------------------------
-// H9 — `pm:on-hold` without a machine-fireable `Restart-when:` body line.
+// H9 — `pm:on-hold` without a machine-fireable `Restart-when:` line in EITHER
+// channel.
 //
-// Same shape as H4 (the label's machine half is a written line), and it reads
-// the same decorated-directive anchor. It does NOT read the same CHANNELS, and
-// that asymmetry is stated rather than left to be inferred (#10102):
+// Same shape as H4 (the label's machine half is a written line): the same
+// decorated-directive anchor, and — since #10403 — the same channel contract:
 //
 //   H4 / H14  `Blocked-by:`     body OR comment  (since PR #10075)
-//   H9        `Restart-when:`   body only
+//   H9        `Restart-when:`   body OR comment  (since #10403)
 //
-// The difference is deliberate on H9's side. The unlock scan greps issue
-// BODIES for `Restart-when:`, so a condition parked in a comment genuinely
-// does not exist to the machinery, and that population is exactly what this
-// detector exists to surface — widening the read here would hide it. H4's
-// widening rests on a measurement its own line has and this one does not (26
-// of 40 blocked cards body-clean, 2026-08-19), plus a sweep that was taught to
-// read both. Undocumented, the difference was already manufacturing errors:
-// a seat that generalises the comment fallback from H4 to H9 parks a restart
-// condition in a comment and gets an H9 row it cannot explain. The finding
-// sentence says "body only" for the same reason. Closing the asymmetry — if
-// the unlock scan is ever taught the comment channel — belongs to #8941, which
-// owns the LOCATION half of this family; this card owns the DECORATION half,
-// and the two do not close each other.
+// H9 was body-only on purpose while the unlock machinery was: a condition
+// parked in a comment genuinely did not exist to a body-only grep, and this
+// detector surfaced exactly that population rather than hiding it (#10102
+// documented the asymmetry so a seat generalising from H4 would not get an H9
+// row it could not explain). What retired the asymmetry is a measured cost on
+// the machinery side: a machine-fireable exit (`Restart-when: closed #N`)
+// parked in a COMMENT fired when its target closed, and nothing noticed for
+// ~2 days, because no reader consulted that channel. Seats park directives in
+// comments deliberately — the MCP body-escaping hazard (#8813) makes a body
+// rewrite the riskier write, the same measurement that widened `Blocked-by:`
+// (26 of 40 blocked cards body-clean, 2026-08-19). So scan and gauge moved
+// TOGETHER (#10403's one-PR scope): the sweep reads hold comments for
+// `Restart-when:` through the same gated-fallback pattern as `Blocked-by:`,
+// and H9 counts a comment-channel line as a line. Widening H9 alone would
+// have made the gauge claim coverage the machinery lacked — the split #10102
+// existed to prevent, run in the opposite direction.
 // ---------------------------------------------------------------------------
+
+/**
+ * Does this text carry a `Restart-when:` value some mechanism could fire?
+ *
+ * The one fireability test H9 and its comment-fetch gate share, so "the body
+ * already answers this card" means the same thing in both places. `manual…`
+ * counts as NOT fireable, deliberately — see H9's header note.
+ */
+export function hasFireableRestartWhen(text) {
+  return directiveValues(text, 'Restart-when').some((v) => !/^manual\b/i.test(v));
+}
+
+/**
+ * Which cards are worth a `Restart-when:` comment fetch — H9's gathering
+ * policy, exported and pinned for the same reason `needsBlockedByComments`
+ * is: a policy that decides what gets READ AT ALL is where a silent hole
+ * would live. Gated on the body NOT already answering (a fireable body line
+ * clears H9 without the network), then on the one label H9 judges.
+ */
+export function needsRestartWhenComments(issue) {
+  if (hasFireableRestartWhen(issue?.body)) return false;
+  return labelNames(issue ?? {}).includes('pm:on-hold');
+}
 
 /**
  * H9 — null when clean, else the finding sentence.
  *
- * Legal iff SOME `Restart-when:` line carries a value that is not `manual…`.
- * The line may be decorated (see the shared directive reader); the KEY may
- * not. The spelling is case-sensitive and byte-stable like `Blocked-by:` (H4):
- * the scan that fires these lines greps the literal, so a lowercase variant is
- * a line the machinery cannot see and must be flagged, not tolerated.
+ * Legal iff SOME `Restart-when:` line in EITHER channel carries a value that
+ * is not `manual…`. The line may be decorated (see the shared directive
+ * reader) in either channel; the KEY may not. The spelling is case-sensitive
+ * and byte-stable like `Blocked-by:` (H4): the scan that fires these lines
+ * greps the literal, so a lowercase variant is a line the machinery cannot
+ * see and must be flagged, not tolerated.
+ *
+ * ## Three input states, never two (#4690) — the H4 contract, verbatim
+ *
+ *   - `undefined` — the comment channel was not consulted (a caller reading
+ *     bodies only). The sentence claims nothing about comments.
+ *   - `null` — consulted and UNREADABLE. The row still FIRES and says the
+ *     second channel could not be read instead of asserting it is empty:
+ *     H9's remedy is "add or repair a line" — cheap and idempotent — so the
+ *     unreadable reading surfaces on the cheap side, exactly as H4 argues.
+ *   - `string[]` — read. Both channels judged, for real.
  *
  * ## The remedy text is deliberately not "close it" (#10102)
  *
@@ -1193,31 +1231,46 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
  * the remedies: verify, unwrap, add — and only then, for a card that really
  * has no fireable exit, close.
  */
-export function h9OnHoldNoRestartWhen(issue) {
+export function h9OnHoldNoRestartWhen(issue, commentBodies) {
   if (!labelNames(issue).includes('pm:on-hold')) return null;
-  const values = directiveValues(issue.body, 'Restart-when');
-  if (values.some((v) => !/^manual\b/i.test(v))) return null;
+  if (hasFireableRestartWhen(issue.body)) return null;
+  const commentsRead = Array.isArray(commentBodies);
+  if (commentsRead && commentBodies.some((b) => hasFireableRestartWhen(b))) return null;
+  const values = [
+    ...directiveValues(issue.body, 'Restart-when'),
+    ...(commentsRead ? commentBodies : []).flatMap((b) => directiveValues(b, 'Restart-when')),
+  ];
   const shape =
-    values.length === 0
-      ? 'no `Restart-when:` body line this scan could read'
-      : 'its only `Restart-when:` is `manual`, which no mechanism can fire';
+    values.length > 0
+      ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
+      : commentsRead
+        ? 'no `Restart-when:` line in EITHER channel — not in the body, and not in any comment ' +
+          'on the thread (both were read)'
+        : 'no `Restart-when:` body line this scan could read';
+  const unreadable =
+    commentBodies === null
+      ? ' And this card\'s comment thread could NOT be read this sweep — the second channel (a ' +
+        '`Restart-when:` line parked in a comment, which the unlock scan reads too) is unjudged, ' +
+        'not empty. Read the thread by hand before acting: an unreadable channel is not an ' +
+        'absent one (#4690).'
+      : '';
   const unparsed =
     values.length === 0
-      ? ` ⚠️ READ THE BODY BEFORE ACTING: a line that IS there but which this scan cannot parse ` +
-        `looks exactly like an absent one. Decoration is tolerated (backticks, a \`-\`/\`*\` bullet, ` +
-        `\`**\` bold), but a mis-spelled or lowercased key is not — the unlock scan greps the ` +
-        `literal. If the line is there, unwrap or re-spell it; that is the whole fix, and no state ` +
-        `change is due.`
+      ? ` ⚠️ READ THE ${commentsRead ? 'BODY AND THE THREAD' : 'BODY'} BEFORE ACTING: a line ` +
+        `that IS there but which this scan cannot parse looks exactly like an absent one. ` +
+        `Decoration is tolerated (backticks, a \`-\`/\`*\` bullet, \`**\` bold), but a ` +
+        `mis-spelled or lowercased key is not — the unlock scan greps the literal. If the line ` +
+        `is there, unwrap or re-spell it; that is the whole fix, and no state change is due.`
       : '';
   return (
     `\`pm:on-hold\` with ${shape} — the hold state is legal only with a machine-fireable exit ` +
-    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate).${unparsed} ` +
+    `(\`Restart-when: closed <owner/repo>#N\`, or a one-line executable predicate).${unreadable}${unparsed} ` +
     `Add or repair the line first. Closing is the LAST resort and applies only to a card that ` +
     `genuinely has no fireable exit: such a card is closed \`not planned\` with reason + ` +
     `provenance in the closing comment (type:Bug holds re-route instead — see the state model's ` +
-    `Bug branch). Channel: H9 reads the BODY only, unlike H4/H14, which take a \`Blocked-by:\` ` +
-    `line from the body OR a comment — a \`Restart-when:\` parked in a comment is invisible to the ` +
-    `unlock scan, so it is reported here by design (#8941 owns that gap).`
+    `Bug branch). Channel: like \`Blocked-by:\` (H4/H14), a \`Restart-when:\` line counts from ` +
+    `the body OR a comment — either channel discharges the duty, and the unlock scan reads both ` +
+    `(#10403 closed the old body-only gap).`
   );
 }
 
@@ -2917,7 +2970,8 @@ export function isLoudFinding(message) {
  * @param {{ repo: string, issues: number, unscoped: number, prs: number,
  *   merged: number, conflictProbed?: number, conflictCandidates?: number,
  *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
- *   fallbackCandidates?: number, blockerResolved?: number,
+ *   fallbackCandidates?: number, restartProbed?: number,
+ *   restartCandidates?: number, blockerResolved?: number,
  *   blockerTargets?: number }} counts
  * @param {number} findingCount
  */
@@ -2933,6 +2987,13 @@ export function summaryLine(counts, findingCount) {
   // declined to judge it".
   const fbProbed = counts.fallbackProbed ?? 0;
   const fbCandidates = counts.fallbackCandidates ?? 0;
+  // H9's pair (#10403), same shape as H17's over the same fetches but for the
+  // candidate set H9 judges. A shortfall here is not silent — an unreadable
+  // thread fires its own card's H9 row — so like H19/H20 this is a total, owed
+  // because a pass that read no thread must not print as a board whose holds
+  // all answered from the body (#4690).
+  const rwProbed = counts.restartProbed ?? 0;
+  const rwCandidates = counts.restartCandidates ?? 0;
   // The fourth pair, and the one whose shortfall is NOT silent: an unresolved
   // `Blocked-by:` target fires its own H19 row on the card that names it, so
   // this number is a total rather than the only place the gap is visible. It
@@ -2955,6 +3016,8 @@ export function summaryLine(counts, findingCount) {
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
+    `\`Restart-when:\` hold comments read on ${rwProbed} of ${rwCandidates} H9 candidate(s)` +
+    `${rwProbed < rwCandidates ? " — each unread thread fires its own card's H9 row, never dropped" : ''}. ` +
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${btResolved < btTargets ? ' — each unresolved target is named on its own card\'s row, never dropped' : ''}. ` +
@@ -3736,6 +3799,10 @@ async function sweep(options = {}) {
     conflictProbed: 0,
     fallbackCandidates: 0,
     fallbackProbed: 0,
+    // H9's coverage pair — `pm:on-hold` cards whose verdict the comment
+    // channel could change, and how many threads were actually read (#10403).
+    restartCandidates: 0,
+    restartProbed: 0,
     // H19's coverage pair — distinct `Blocked-by:` targets seen, and how many
     // got a definite open/closed answer.
     blockerTargets: 0,
@@ -3765,6 +3832,8 @@ async function sweep(options = {}) {
     holdProbed: hold.probed,
     fallbackCandidates: stats.fallbackCandidates,
     fallbackProbed: stats.fallbackProbed,
+    restartCandidates: stats.restartCandidates,
+    restartProbed: stats.restartProbed,
     blockerTargets: stats.blockerTargets,
     blockerResolved: stats.blockerResolved,
   };
@@ -3883,6 +3952,30 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   const fallbackFor = (issue) =>
     fallback.unreadable.has(issue.number) ? null : fallback.comments.get(issue.number);
 
+  // The `Restart-when:` comment fallback (#10403) — the same pattern, gated by
+  // `needsRestartWhenComments` and riding the same shared comment cache, so an
+  // on-hold card H17 fetches below costs no second request here. Its stats
+  // pair is separate because it answers for a different candidate set. No
+  // total-shortfall rethrow of its own, on H19/H20's grounds rather than the
+  // `Blocked-by:` fallback's: nothing goes QUIET on a failure here — every
+  // unreadable thread fires its own card's H9 row — and the all-holds-dark
+  // case is already fatal via H17's rethrow over the same fetches.
+  const restart = { comments: new Map(), unreadable: new Set() };
+  const gatherRestartWhenComments = async (issue) => {
+    if (restart.comments.has(issue.number) || restart.unreadable.has(issue.number)) return;
+    stats.restartCandidates = (stats.restartCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.restartProbed = (stats.restartProbed ?? 0) + 1;
+      restart.comments.set(issue.number, bodies);
+    } catch {
+      restart.unreadable.add(issue.number);
+    }
+  };
+  /** What H9 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const restartFor = (issue) =>
+    restart.unreadable.has(issue.number) ? null : restart.comments.get(issue.number);
+
   for (const issue of seen.values()) {
     const labels = labelNames(issue);
     if (h1DispatchedNoAssignee(issue)) {
@@ -3899,7 +3992,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
     if (needsBlockedByComments(issue)) await gatherBlockedByComments(issue);
     const unblockedByNothing = h4BlockedNoBlockedBy(issue, fallbackFor(issue));
     if (unblockedByNothing) findings.push([issue, 'H4', unblockedByNothing]);
-    const restartless = h9OnHoldNoRestartWhen(issue);
+    // H9 — judged across BOTH channels since #10403, on the same gated-fetch
+    // trade as H4: a hold whose body already carries a fireable line is
+    // answered without the network; a body-clean one buys (at most) the one
+    // comment fetch H17 is about to make anyway, off the shared cache.
+    if (needsRestartWhenComments(issue)) await gatherRestartWhenComments(issue);
+    const restartless = h9OnHoldNoRestartWhen(issue, restartFor(issue));
     if (restartless) findings.push([issue, 'H9', restartless]);
     const staleP0 = h10StaleUnclaimedP0(issue);
     if (staleP0) findings.push([issue, 'H10', staleP0]);
@@ -4668,12 +4766,54 @@ function selfTest() {
   // "this hold has no exit" starts reading as uncertain.
   t('H9: the manual row carries no unparsed hedge', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('cannot parse'), false);
   t('H9: …but does still demote closing', h9OnHoldNoRestartWhen(hold('Restart-when: manual — reason')).includes('Closing is the LAST resort'), true);
-  // The channel asymmetry, stated in the row itself: H4/H14 read body OR
-  // comment, H9 reads the body only. An undocumented difference between two
-  // adjacent rules is how the last two half-states on that lane were made.
-  t('H9: the row states the body-only channel', h9NoLine.includes('reads the BODY only'), true);
-  t('H9: …and names the predicates that differ', h9NoLine.includes('H4/H14'), true);
-  t('H9: …and the manual row states it too', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x')).includes('reads the BODY only'), true);
+  // The channel contract, stated in the row itself — two channels since
+  // #10403, symmetric with H4/H14. An undocumented difference between two
+  // adjacent rules is how the last two half-states on that lane were made,
+  // and an undocumented SAMENESS would repeat it in mirror image.
+  t('H9: the row states the two-channel contract', h9NoLine.includes('body OR a comment'), true);
+  t('H9: …and names the predicates it now matches', h9NoLine.includes('H4/H14'), true);
+  t('H9: …and the manual row states it too', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x')).includes('body OR a comment'), true);
+
+  // -- H9's COMMENT channel (#10403) -----------------------------------------
+  // The incident fixture: a machine-fireable exit parked in a comment — the
+  // shape that fired unnoticed for ~2 days under the body-only read. A
+  // comment-channel line is a line.
+  t('H9: a comment-channel fireable line -> clean (the 2-day-expired shape)', h9OnHoldNoRestartWhen(hold('parked until upstream ships'), ['triage note', 'Restart-when: closed acme/widgets#123']), null);
+  t('H9: a body-channel line still clears with comments read (unchanged)', h9OnHoldNoRestartWhen(hold('Restart-when: closed acme/widgets#123'), ['just prose']), null);
+  // Composes with the decoration tolerance: the comment channel goes through
+  // the same shared reader, so `stripMatchingDecoration` applies there too.
+  t('H9: a DECORATED comment-channel line -> clean', h9OnHoldNoRestartWhen(hold('parked'), ['- `Restart-when: closed acme/widgets#123`']), null);
+  t('H9: an executable predicate in a comment -> clean', h9OnHoldNoRestartWhen(hold('parked'), ['Restart-when: npm view create-objectstack dist-tags reports >= 17.0.0']), null);
+  // The strictness the widening must not cost, per channel: `manual` opts out
+  // in a comment exactly as it does in the body, and a lowercase key is still
+  // a line the unlock grep cannot see.
+  t('H9: a manual-only comment line is still a finding', typeof h9OnHoldNoRestartWhen(hold('parked'), ['Restart-when: manual — first EE customer asking']), 'string');
+  t('H9: a lowercase key in a comment does not rescue', typeof h9OnHoldNoRestartWhen(hold('parked'), ['restart-when: closed acme/widgets#123']), 'string');
+  t('H9: a mid-sentence mention in a comment is not a line', typeof h9OnHoldNoRestartWhen(hold('parked'), ['someone should add a `Restart-when: closed acme/w#1` line']), 'string');
+  // Both channels read and empty: the sentence says EITHER, so the reader
+  // knows both were judged — and an unconsulted channel is never claimed.
+  t('H9: neither channel -> the sentence names EITHER channel', h9OnHoldNoRestartWhen(hold('parked'), ['no directive here']).includes('EITHER channel'), true);
+  t('H9: an empty comment thread is a real reading', h9OnHoldNoRestartWhen(hold('parked'), []).includes('EITHER channel'), true);
+  t('H9: an unconsulted comment channel is not claimed as read', h9OnHoldNoRestartWhen(hold('parked')).includes('EITHER channel'), false);
+  t('H9: …and the both-channels hedge tells the seat to read the thread too', h9OnHoldNoRestartWhen(hold('parked'), []).includes('BODY AND THE THREAD'), true);
+  // Unreadable is neither read nor absent (#4690): the row fires on the cheap
+  // side, says the thread could not be read, and never claims EITHER.
+  t('H9: an UNREADABLE comment thread still fires', typeof h9OnHoldNoRestartWhen(hold('parked'), null), 'string');
+  t('H9: …but never claims the second channel is empty', h9OnHoldNoRestartWhen(hold('parked'), null).includes('EITHER channel'), false);
+  t('H9: …and says the thread could not be read', h9OnHoldNoRestartWhen(hold('parked'), null).includes('could NOT be read'), true);
+  t('H9: …citing the unreadable-is-not-absent rule', h9OnHoldNoRestartWhen(hold('parked'), null).includes('#4690'), true);
+  t('H9: a fireable BODY line clears even an unreadable thread', h9OnHoldNoRestartWhen(hold('Restart-when: closed acme/widgets#123'), null), null);
+  // Manual across channels: a manual body line plus a fireable comment line is
+  // the mixed shape a seat actually writes when upgrading a hold in place.
+  t('H9: manual body line + fireable comment line -> clean', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x'), ['Restart-when: closed acme/widgets#9']), null);
+  t('H9: manual lines in BOTH channels still name the manual shape', h9OnHoldNoRestartWhen(hold('Restart-when: manual — x'), ['Restart-when: manual — y']).includes('manual'), true);
+
+  // The gathering policy — what gets READ AT ALL (mirrors the H4 gate pins).
+  t('gate: a body-clean pm:on-hold card is an H9 candidate', needsRestartWhenComments(hold('no line here')), true);
+  t('gate: a manual-only body is still a candidate (the body does not answer)', needsRestartWhenComments(hold('Restart-when: manual — x')), true);
+  t('gate: a fireable body line buys no fetch', needsRestartWhenComments(hold('Restart-when: closed acme/widgets#123')), false);
+  t('gate: a non-hold card buys no fetch from THIS item', needsRestartWhenComments(issue(['pm:blocked'], [], 'no line here')), false);
+  t('gate: a missing issue does not crash', needsRestartWhenComments(undefined), false);
 
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
@@ -5975,6 +6115,10 @@ function selfTest() {
   t('summaryLine: reports the H17 hold-comment reads', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 79 }, 0).includes('Hold comments read on 79 of 79 H17 candidate(s)'), true);
   t('summaryLine: …and a partial hold read says so', summaryLine({ ...counts, holdCandidates: 79, holdProbed: 12 }, 0).includes('read on 12 of 79'), true);
   t('summaryLine: absent H17 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('Hold comments read on 0 of 0'), true);
+  // The summary line's H9 half (#10403), same `read X of Y` discipline.
+  t('summaryLine: reports the H9 restart-comment reads', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
+  t('summaryLine: …and a partial restart read says so', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
+  t('summaryLine: absent H9 counts degrade to 0, never to undefined', summaryLine(counts, 0).includes('`Restart-when:` hold comments read on 0 of 0'), true);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.

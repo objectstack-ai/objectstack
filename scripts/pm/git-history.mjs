@@ -247,6 +247,60 @@ export function describeFloor(boundaries) {
   return new Date(Math.max(...boundaries)).toISOString().slice(0, 10);
 }
 
+/**
+ * The READ-ONLY half of this tool, for callers that answer their own windowed
+ * question and only need to know whether they are allowed to (#9902).
+ *
+ * It never fetches, and that is a decision rather than an omission. The three
+ * seat-run adopters either read a checkout they do not own (`check-governed-
+ * merges` sweeps four sibling repos; `collect-release-notes` reads the release
+ * engineer's `cloud` tree) or must not move the ground under an audit
+ * mid-sweep. So deepening stays an operator action with a named command — and
+ * the command is computed by `chooseDeepenSince()`, so the remedy this prints
+ * can only ever ADD history. The naive `--shallow-since=<the window start>` is
+ * measured in this file's header SHORTENING a clone by 1380 commits at exit 0,
+ * and a remedy that does that would be the defect wearing a fix's clothes.
+ * Callers that want the deepen-and-re-prove path keep using
+ * `ensureWindowCovered()`.
+ *
+ * `floor` is the horizon to print BESIDE an answer that was allowed: these
+ * numbers are evidence (a compliance list, an ADR trigger metric, release
+ * notes), and evidence carries its provenance whether or not it is short.
+ *
+ * @returns {{covered: boolean, shallow: boolean, floor: string|null, tip: string,
+ *            reason: string|null, remedy: string|null}}
+ */
+export function historyHorizon({ cwd, ref, sinceMs, marginDays }) {
+  const shallow = isShallow(cwd);
+  const boundaries = boundaryTimes(cwd, ref);
+  if (boundaries === null) {
+    return {
+      covered: false,
+      shallow,
+      floor: null,
+      tip: 'unknown',
+      reason: `ref '${ref}' does not resolve in ${cwd}`,
+      remedy: `git -C ${cwd} fetch origin`,
+    };
+  }
+  const covered = windowIsCovered({ shallow, boundaries, sinceMs });
+  const floor = shallow ? describeFloor(boundaries) : null;
+  const tip = refTip(cwd, ref);
+  if (covered) return { covered: true, shallow, floor, tip, reason: null, remedy: null };
+  const deepenSince = chooseDeepenSince({ sinceMs, boundaries, marginDays }).slice(0, 10);
+  return {
+    covered: false,
+    shallow,
+    floor,
+    tip,
+    reason:
+      boundaries.length === 0
+        ? `${cwd} is shallow and no history boundary could be read on '${ref}'`
+        : `this clone is shallow and its oldest visible commit on '${ref}' is ${floor}, which sits INSIDE the window`,
+    remedy: `git -C ${cwd} fetch --shallow-since=${deepenSince} origin   # or: git -C ${cwd} fetch --unshallow origin`,
+  };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function usage(msg) {
@@ -477,6 +531,36 @@ function selfTest() {
     t('and it says it did not need to fetch', /no fetch/.test(narrow.stderr || ''), narrow.stderr);
     t('the clone is still shallow after that answer — proving the predicate is the floor, '
       + 'not the shallow flag', isShallow(shallowDeep) === true);
+
+    // ── historyHorizon: the read-only reading the #9902 adopters call ───────
+    const hFull = historyHorizon({ cwd: full, ref: 'origin/main', sinceMs: Date.parse('2026-06-20') });
+    t('historyHorizon clears a complete clone and reports no floor',
+      hFull.covered === true && hFull.shallow === false && hFull.floor === null && hFull.remedy === null,
+      JSON.stringify(hFull));
+    t('and it carries the ref tip, so an allowed answer can still be printed with its horizon',
+      /^\d{4}-\d{2}-\d{2}$/.test(hFull.tip), JSON.stringify(hFull));
+
+    const hShort = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse('2026-06-20') });
+    t('historyHorizon REFUSES the window raw git answered with 5 instead of 21',
+      hShort.covered === false, JSON.stringify(hShort));
+    t('and it names the floor rather than only saying "shallow"',
+      hShort.floor === '2026-07-06' && /INSIDE the window/.test(hShort.reason ?? ''), JSON.stringify(hShort));
+    // The measured hazard again, this time in the REMEDY: a printed
+    // `--shallow-since` newer than the floor shortens the clone at exit 0.
+    const remedyDate = /--shallow-since=(\d{4}-\d{2}-\d{2})/.exec(hShort.remedy ?? '')?.[1];
+    t('and the deepen command it prints can only ADD history — its --shallow-since is never '
+      + 'newer than the floor already present',
+      remedyDate !== undefined && Date.parse(remedyDate) <= Date.parse('2026-07-06'), String(hShort.remedy));
+
+    const hNarrow = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse('2026-07-08') });
+    t('a shallow clone whose floor predates the window is CLEARED by historyHorizon too — '
+      + 'the adopters must not refuse answers that are provably right',
+      hNarrow.covered === true && hNarrow.shallow === true, JSON.stringify(hNarrow));
+    t('and a cleared shallow clone still reports its floor, so the number travels with its horizon',
+      hNarrow.floor === '2026-07-06', JSON.stringify(hNarrow));
+
+    t('an unresolvable ref is refused rather than read as covered',
+      historyHorizon({ cwd: shallowDeep, ref: 'origin/nope', sinceMs: Date.parse('2026-07-08') }).covered === false);
 
     // No remote to deepen from: refuse, never answer.
     const orphan = join(root, 'orphan');

@@ -18,7 +18,7 @@ AI in ObjectStack is a **cross-protocol capability layer**: agents, tools, and k
 
 - **Data & actions → `@objectstack/mcp`** (BYO-AI). Point your own AI — Claude, Cursor, any MCP client, or a local model — at the app's objects, queries, and business **actions**, governed by the same RLS. With a local model, data *and* inference stay inside your boundary.
 - **Knowledge & RAG → the Knowledge Protocol + adapter plugins** (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) — permission-aware retrieval over your own objects.
-- **Agents, tools, skills → typed metadata** (`defineAgent` / `defineTool` / `defineSkill`) plus the Model Registry. Author them as source (`*.agent.ts`, `*.tool.ts`, …) with your own AI coding agent (Claude Code, Cursor), aided by the ObjectStack [skills](/docs/ai/skills-reference) and MCP introspection.
+- **Skills → typed metadata** (`defineSkill`) plus the Model Registry. A skill is the third-party extension primitive; agents are platform-owned, and a `defineTool` record is an *optional refinement layer* you will rarely need — see [Tool Records](/docs/ai/tools) for which of the three paths your case wants. Author skills as source (`*.skill.ts`) with your own AI coding agent (Claude Code, Cursor), aided by the ObjectStack [skills](/docs/ai/skills-reference) and MCP introspection.
 
 **ObjectOS** adds an in-product chat *runtime* on top of these same primitives — the `ask` data-query assistant, the `build` Studio authoring assistant, and the `/api/v1/ai/*` chat endpoints. The open-source framework has no built-in in-product chat — that runtime is documented in the [ObjectOS AI & Agents docs](https://docs.objectos.app/docs/ai).
 </Callout>
@@ -27,6 +27,7 @@ AI in ObjectStack is a **cross-protocol capability layer**: agents, tools, and k
 
 - [AI Agents](/docs/ai/agents) — the two platform agents (`ask` / `build`), skills as the extension primitive, and agent anatomy
 - [Actions as Tools](/docs/ai/actions-as-tools) — explicit opt-in exposure of Actions to the LLM, HITL approval, permission-aware execution
+- [Tool Records](/docs/ai/tools) — the three ways a capability reaches an agent, and the narrow case where authoring a `tool` record is the right answer
 - [Knowledge & RAG](/docs/ai/knowledge-rag) — the Knowledge Protocol and its adapter plugins
 - [Natural Language Queries](/docs/ai/natural-language-queries) — the built-in data tools that turn questions into ObjectQL
 - [AI Skills System](/docs/ai/skills) — structured knowledge modules for AI coding assistants

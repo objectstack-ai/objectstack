@@ -207,10 +207,16 @@ jobs:
             if (bridge && bridge.measured && bridge.unreachable > 0) limits.push(`the SDK route bridge reached **${bridge.reachable}** of **${bridge.clientRows}** client-bound route-ledger rows — the other **${bridge.unreachable}** have no registrar \`path:\` tail to select them, so pages documenting THEIR client methods cannot appear above, on this or any run: \`node scripts/docs-audit/affected-docs.mjs --bridge-coverage\``);
             // A broken scan is not a coverage number and must not read like one — see
             // `bridgeCoverageFrom`. Rendered outside the collapsed section below, because
-            // "the bridge found no ledger at all" is not a limit of this run, it is a
+            // "the bridge could not read the ledgers" is not a limit of this run, it is a
             // defect in the tool that every subsequent run will keep reporting as clean.
+            //
+            // ⛔ NOT "structurally empty" any more, which is what this line used to say: the
+            // verdict list also carries PARTIAL reads, where the scan produced a perfectly
+            // ordinary-looking population that is simply smaller — or mis-bound — than what
+            // the ledgers declare. Wording that promises emptiness would let a reader skip
+            // exactly the case that renders like a clean one.
             const bridgeBroken = (bridge && bridge.measured && (bridge.brokenScan || []).length)
-              ? ['', `> ⛔ The SDK route bridge's own scan came back structurally empty: ${bridge.brokenScan.join('; ')}. Treat every \`sdk\` row above as unavailable rather than absent.`]
+              ? ['', `> ⛔ The SDK route bridge's own scan is broken, not clean: ${bridge.brokenScan.join('; ')}. Treat every \`sdk\` row above as unavailable rather than absent.`]
               : [];
             // Rendered whenever there is anything to say, INCLUDING when the only thing to
             // say is "the wide net exists and holds N pages". A short list is the right

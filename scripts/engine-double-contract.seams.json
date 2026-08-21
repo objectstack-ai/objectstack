@@ -1,0 +1,41 @@
+{
+  "$comment": "GENERATED — the consumer-seam population of check-engine-double-contract.mjs (#9708). Regenerate with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one (file, fn, verb) the seam scan discovers: a by-id write on a caller-supplied id, in a function that answers a receipt. It records WHICH seams exist — never that any of them is accepted as looser than the SHARED_ONLY invariant asks, which is what the shrink-only engine-double-contract.baseline.json is for. A row that disappears is a seam that left the population, and while it is outside REFUSES nothing judges it: read a removal in this file's diff as a governance loss and check it was intended.",
+  "entries": [
+    {
+      "file": "packages/mcp/src/stdio-data-bridge.ts",
+      "fn": "remove",
+      "verb": "delete",
+      "seams": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-data-bridge.ts",
+      "fn": "update",
+      "verb": "update",
+      "seams": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "fn": "deleteData",
+      "verb": "delete",
+      "seams": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "fn": "updateData",
+      "verb": "update",
+      "seams": 1
+    },
+    {
+      "file": "packages/runtime/src/action-execution.ts",
+      "fn": "callData",
+      "verb": "delete",
+      "seams": 1
+    },
+    {
+      "file": "packages/runtime/src/action-execution.ts",
+      "fn": "callData",
+      "verb": "update",
+      "seams": 1
+    }
+  ]
+}
