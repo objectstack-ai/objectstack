@@ -343,6 +343,28 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # PM bare-root worklist self-test (#10840). The step above proves the
+      # dispatch derivation still WORKS; this one proves the recorded triage of
+      # the gates that derivation structurally cannot see is still true of the
+      # tree. A gate whose population is spelled as a bare single-segment word
+      # builds no watch hint at all — not a dead hint, not a silent verdict,
+      # nothing — so it is unnameable by any dispatch brief and leaves no residue
+      # saying so. The worklist enumerates that species and carries one recorded
+      # verdict per row; this step fails when a verdict outlives its row (the
+      # shrink) or when a new gate joins the species unjudged.
+      #
+      # ⛔ It runs the SELF-TEST only, never the sweep as a verdict: recognising
+      # this species needs a heuristic over constant NAMES, and #10705 refused to
+      # put one on the path that derives every PR's gate list. Nothing in
+      # `dispatch-gates.mjs` reads the worklist, and no verdict in it reaches a
+      # dispatch prompt.
+      #
+      # Unconditional, for the same reason as the step above: a self-test that
+      # can be skipped is the gap moving rather than closing. Reads the workflow
+      # tree and every gate source once; ~0.5s.
+      - name: PM bare-root worklist self-test
+        run: node scripts/pm/bare-root-worklist.mjs --self-test
+
       # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
       # PR-scoped blocking check in its own workflow — it needs a pull request
       # body to judge, which this job does not have — so what runs HERE is its

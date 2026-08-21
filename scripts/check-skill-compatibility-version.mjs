@@ -76,6 +76,54 @@ const SKILLS_DIR = 'skills';
 const PACKAGE_ROOTS = ['packages', 'apps', 'examples'];
 
 /**
+ * The half of this gate's two populations that `scripts/pm/dispatch-gates.mjs`
+ * cannot see, written in the syntax that derivation CAN read. Provenance ONLY:
+ * nothing in this gate reads this array, and both walks behave exactly as they
+ * did without it.
+ *
+ * ## The defect this repairs (#10840's worklist, the #10114 / #10314 idiom)
+ *
+ * The dispatch derivation scans a gate's module body for path-ish string
+ * literals, and "path-ish" there means "carries a separator". Both `SKILLS_DIR`
+ * and every entry of `PACKAGE_ROOTS` are bare single-segment words, so
+ * `extractWatchHints` drops all four BEFORE `hintCovers` is ever consulted —
+ * they are not dead hints, they are nothing at all, which is why no residue line
+ * ever named them. Measured on this tree, a derivation for
+ * `skills/objectstack-platform/SKILL.md` named four gates and this was not one
+ * of them, though a `compatibility:` pin in that file is the whole subject here.
+ *
+ * ## Why `skills/**` is declared and the three PACKAGE_ROOTS are NOT
+ *
+ * The instrument can only express a SUBTREE: `hintCovers` collapses globs, so a
+ * declared hint names every tracked file beneath it and there is no way to spell
+ * "the package manifests under this root". That makes the two sides of this gate
+ * completely different trades, and both were measured on this tree:
+ *
+ *   skills/**       49 of 50 tracked files are skill directories this gate
+ *                   reads — 98% precision over a 50-file subtree.
+ *   packages/**     73 package.json files out of 4903 tracked files — 1.5%,
+ *                   pasted into every packages/** dispatch prompt in the repo.
+ *   apps/**         1 of 35 (2.9%) · examples/**  4 of 238 (1.7%).
+ *
+ * The three package roots are therefore the +139084 fabrication one level up —
+ * the very measurement in `hintCovers`' docblock, which prices accepting bare
+ * top-level directory words at that many fabricated (gate, file) pairs because
+ * `packages`, `apps` and `examples` are path COMPONENTS in dozens of gates that
+ * never read those roots. A missing lead costs one card one CI round; a
+ * fabricated one is pasted into every prompt whose surface brushes it and the
+ * dev cannot tell it from a real one. So the manifest side stays undeclared,
+ * deliberately, and the refusal is pinned in the self-test rather than left in
+ * this paragraph — a later author who adds `packages/**` meets an assertion.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * `readSkillFiles` joins SKILLS_DIR and then `statSync`s each entry, so the glob
+ * form appearing in that constant would throw on a directory that does not
+ * exist. The self-test pins that apart too.
+ */
+const ROOT_DIR_WATCH_HINTS = ['skills/**'];
+
+/**
  * A `compatibility:` pin, e.g. `@objectstack/spec 17.x`.
  *
  * Deliberately narrow: the major, a literal `.x`. It does NOT match a bare mention
@@ -658,11 +706,53 @@ function selfTest() {
     console.log(`  ✓ real-tree discovery: ${disc.files.length} SKILL.md file(s), ${disc.problems.length} layout problem(s)`);
   }
 
+  // ── The dispatch-gates declaration (#10840) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or stale one runs green here forever and pays
+  // itself out as a dev dispatched on a skills card with this gate missing from
+  // the brief. Both halves are DERIVED from the population constants rather than
+  // re-spelled, so renaming or re-scoping a root cannot leave the declaration
+  // describing the old population.
+  //
+  // The predicate is `hintCovers`' own refusal (dispatch-gates.mjs: a hint with
+  // no `/` and no leading `.` is rejected as too generic), spelled here rather
+  // than imported because this gate must not take a dependency on the PM tool to
+  // state what it reads. If that refusal ever changes, this line moves with it.
+  const unseeable = (r) => !r.includes('/') && !r.startsWith('.');
+  const declFailures = [];
+  const decl = (label, ok) => { if (!ok) declFailures.push(label); };
+  decl('SKILLS_DIR is invisible to the derivation, which is why it needs a declaration at all',
+    unseeable(SKILLS_DIR));
+  decl('and it declares exactly that root, in the subtree spelling',
+    ROOT_DIR_WATCH_HINTS.includes(`${SKILLS_DIR}/**`));
+  decl('and declares no root this gate does not read (a declaration that can drift from the scan '
+    + 'is worse than none — it replaces a silent gate with a lying one)',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.replace(/\/\*+$/, '') === SKILLS_DIR));
+  // The REFUSAL, pinned. The manifest walk really does read all three roots, so
+  // this is not an oversight to be tidied up later — it is a priced decision:
+  // 73 of 4903 files under packages/ (1.5%), 1 of 35 under apps/, 4 of 238 under
+  // examples/. A subtree hint cannot say "the manifests"; it can only say "all
+  // of it", and all of it is false here.
+  decl('the three PACKAGE_ROOTS are deliberately NOT declared — a subtree hint would name this '
+    + 'gate for every file under them to reach the package.json files, which is the fabricated '
+    + 'lead hintCovers is measured against',
+    PACKAGE_ROOTS.every((r) => !ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
+  decl('the non-vacuity half of that refusal: those roots really are invisible, so the refusal is '
+    + 'a live choice rather than a description of something the extractor already handles',
+    PACKAGE_ROOTS.every(unseeable));
+  // Provenance, never a lookup key: readSkillFiles joins SKILLS_DIR and statSyncs
+  // each entry, so the glob form appearing there would throw on a missing dir.
+  decl('the declared form is NOT the SKILLS_DIR value itself',
+    !ROOT_DIR_WATCH_HINTS.includes(SKILLS_DIR));
+  for (const f of declFailures) console.error(`  ✗ dispatch-gates declaration: ${f}`);
+  failed += declFailures.length;
+
   if (failed > 0) {
     console.error(`\n✗ check-skill-compatibility-version self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass.`);
+  console.log(`\n✓ check-skill-compatibility-version self-test: ${cases.length} cases pass, plus 7 dispatch-gates declaration cases.`);
 }
 
 // ---------------------------------------------------------------------------

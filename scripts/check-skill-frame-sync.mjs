@@ -297,6 +297,49 @@ const FINGERPRINTS = [
   /\b[A-Za-z]+-axis\s+(?:analysis|decision\s+frame|frame)/,
 ];
 const SCAN_ROOTS = ['.claude', 'skills'];
+
+/**
+ * The half of SCAN_ROOTS that `scripts/pm/dispatch-gates.mjs` cannot see,
+ * written in the syntax that derivation CAN read. Provenance ONLY: nothing in
+ * this gate reads this array, and the scan behaves exactly as it did without it.
+ *
+ * ## The defect this repairs (#10840's worklist, the #10114 / #10314 idiom)
+ *
+ * That tool builds every dispatch's gate list by scanning each gate's own
+ * source for the path literals it operates on, and "looks like a path" there
+ * means "carries a separator, or starts with a known dotted root". `.claude`
+ * clears that bar on the dot branch and always did. `skills` clears neither:
+ * `extractWatchHints` drops it BEFORE `hintCovers` is ever consulted, so it is
+ * not even a dead hint — it is nothing at all, which is why no residue line
+ * ever named it. Measured on this tree, a derivation for
+ * `skills/objectstack-platform/SKILL.md` named four gates and this was not one
+ * of them, though editing that file is precisely what moves it.
+ *
+ * ## Why the subtree spelling, and not a wider extractor
+ *
+ * `hintCovers` refuses a bare single-segment literal as too generic BY DESIGN,
+ * and the refusal is measured rather than incidental: accepting bare top-level
+ * directory words was priced at +139084 fabricated (gate, file) pairs, because
+ * `packages`, `apps` and `examples` are path COMPONENTS in dozens of gates that
+ * never read those roots. A declared subtree is a different claim — an author
+ * stating what this gate reads — and the glob collapse reduces `skills/**` back
+ * to this root and to nothing else.
+ *
+ * The trade is measured here too, on the tree this gate walks: 48 of the 50
+ * tracked files under `skills/` are markdown this scan actually reads (96%), and
+ * the whole subtree is 50 files. So the declaration is true for very nearly
+ * every card it names, and it names very few — the opposite of the
+ * `packages/**` shape #10314 refused at 1.6% precision over 4861 files.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * `walkMarkdown` runs over SCAN_ROOTS behind a swallowed `readdirSync` throw, so
+ * the glob form appearing there would send the scan at a directory that does not
+ * exist and shrink the population to nothing while every gate stayed green. The
+ * self-test pins both halves of the coupling, derived from SCAN_ROOTS rather
+ * than re-spelled, so re-scoping a root cannot leave this describing the old one.
+ */
+const ROOT_DIR_WATCH_HINTS = ['skills/**'];
 const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
 const SCAN_EXTENSIONS = ['.md', '.mdx'];
 
@@ -819,11 +862,47 @@ function selfTest() {
     console.log(`  ✓ ${c.label}`);
   }
 
+  // ── The dispatch-gates declaration (#10840) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or stale one runs green here forever and pays
+  // itself out as a dev dispatched on a skills card with this gate missing from
+  // the brief. Both halves are DERIVED from SCAN_ROOTS rather than re-spelled,
+  // so widening or renaming a root cannot leave the declaration describing the
+  // old population.
+  //
+  // The predicate is `hintCovers`' own refusal (dispatch-gates.mjs: a hint with
+  // no `/` and no leading `.` is rejected as too generic), spelled here rather
+  // than imported because this gate must not take a dependency on the PM tool
+  // to state what it reads. If that refusal ever changes, this line is the one
+  // that has to move with it.
+  const unseeable = SCAN_ROOTS.filter((r) => !r.includes('/') && !r.startsWith('.'));
+  const declFailures = [];
+  const decl = (label, ok) => { if (!ok) declFailures.push(label); };
+  decl('every SCAN_ROOT the hint extractor cannot see declares the subtree spelling',
+    unseeable.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
+  decl('and it declares no root this gate does not walk (a declaration that can drift from the '
+    + 'scan is worse than none — it replaces a silent gate with a lying one)',
+    ROOT_DIR_WATCH_HINTS.every((h) => SCAN_ROOTS.includes(h.replace(/\/\*+$/, ''))));
+  decl('the non-vacuity half: there IS such a root, so the case above is judging something',
+    unseeable.length > 0);
+  decl('the dotted root is NOT declared — the extractor already sees it, and a second claim on it '
+    + 'would be a hint this gate did not need to buy',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h.startsWith('.')));
+  // Provenance, never a lookup key: `walkMarkdown` runs over SCAN_ROOTS, so the
+  // glob form appearing there would walk a directory that does not exist — and
+  // this gate's readdir failure is SWALLOWED, so it would shrink the scan to
+  // nothing in silence rather than fail.
+  decl('the declared form is NOT a SCAN_ROOTS entry',
+    !SCAN_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)));
+  for (const f of declFailures) console.error(`  ✗ dispatch-gates declaration: ${f}`);
+  failed += declFailures.length;
+
   if (failed > 0) {
     console.error(`\n✗ check-skill-frame-sync self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`✓ check-skill-frame-sync self-test: ${cases.length} cases pass.`);
+  console.log(`✓ check-skill-frame-sync self-test: ${cases.length} cases pass, plus 5 dispatch-gates declaration cases.`);
 }
 
 // ---------------------------------------------------------------------------
