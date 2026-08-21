@@ -86,6 +86,35 @@
  * "120 files covered, N parses outside my scope, here they are" is the same
  * measurement without the borrowed authority -- and the number moves when
  * somebody adds one, which a sentence in a header never does.
+ *
+ * ## The census used to make ONE claim about THREE populations
+ *
+ * The paragraph above is right about a published package. It was printed over
+ * every out-of-tree row, and for most of them it is not true: measured on this
+ * tree, 9 of the 28 sites live in `<pkg>/scripts/**` -- package-local tooling
+ * carried by no `files` entry in its own `package.json`, so it ships in no
+ * tarball and is `scripts/**` in everything but its path. "They cannot import
+ * scripts/ts-parse.mjs" is a statement about a constraint those 9 do not have:
+ * `packages/spec/scripts/check-browser-reachable-entries.ts` already imports
+ * `scanSource` from `../../../scripts/js-comment-mask.mjs`, and the hand-written
+ * `.d.mts` mirrors that make such an import typecheck from a `.ts` tool are
+ * already a governed corpus (`check-declaration-mirrors.mjs`).
+ *
+ * A census that reports a real measurement under a reason that does not apply
+ * to most of what it counted is this file's own subject matter, one block down
+ * from where it is argued -- so the rows are TIERED by a property read off the
+ * owning `package.json` rather than assumed, and each tier is printed under the
+ * sentence that is true of it. `shipped` keeps the paragraph above. `tooling`
+ * gets the capability fact and nothing more: these CAN import the helper today.
+ * Whether each SHOULD is still per-row and still not this gate's to answer --
+ * three of those 9 parse an extracted prose snippet speculatively (a doc block
+ * re-read as a parenthesized expression; a skill example whose syntax verdict
+ * is owned by a real `tsc` that follows), and for those a refusal that exits
+ * would end the process on ordinary input.
+ *
+ * The tier is DERIVED, never listed: a hand-kept list of tooling directories
+ * fails by quietly leaving a new one in the wrong tier, which is the same
+ * silence `walkOutside` refuses for the same reason.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -224,6 +253,69 @@ export function scanFile(rel, source, { isParserHome = false } = {}) {
 }
 
 /**
+ * Does `files` (a `package.json` `files` array) pack `scripts/`?
+ *
+ * Read rather than assumed: the whole point of the `tooling` tier is that those
+ * files reach no tarball, and the only authority on that is the manifest. A
+ * package that starts publishing its tooling flips to `shipped` on the next run
+ * with nothing to edit here.
+ */
+function packsScripts(files) {
+  return files.some((entry) => {
+    const n = String(entry).replace(/^\.\//, '');
+    // `*` / `**` pack the whole directory; anything rooted at scripts/ packs it.
+    return n === '*' || n.startsWith('**') || n === 'scripts' || n.startsWith('scripts/');
+  });
+}
+
+/**
+ * Which of the three populations a row belongs to.
+ *
+ * `test` first, because a test under `<pkg>/scripts/**` is a test before it is
+ * tooling and the existing tier is what its self-test pins.
+ *
+ * Then: walk UP to the nearest `package.json` -- the owning package -- and ask
+ * whether the file sits in that package's `scripts/` while the manifest packs
+ * no such path. Walking up rather than matching `packages/<name>/scripts/`
+ * keeps the rule true for `apps/**`, `examples/**` and any tree added later,
+ * which a depth-2 pattern silently would not.
+ *
+ * Every unresolved case answers `shipped`: no manifest found, no `files` field
+ * (npm then packs the whole directory), or a `files` array that does pack
+ * `scripts/`. `shipped` is the tier that keeps the strong "cannot import"
+ * claim, so an unproven row keeps the cautious sentence rather than acquiring a
+ * capability nobody demonstrated.
+ *
+ * @param {string} rel  Repo-relative path.
+ * @param {boolean} isTest
+ * @param {(dir: string) => { files?: unknown } | null} packageAt  The owning
+ *   manifest, or null when there is none. Injected so the self-test drives real
+ *   classification over fixtures instead of over today's tree.
+ * @returns {'test' | 'tooling' | 'shipped'}
+ */
+export function tierOf(rel, isTest, packageAt) {
+  if (isTest) return 'test';
+  const parts = rel.split('/');
+  for (let i = parts.length - 1; i > 0; i--) {
+    const dir = parts.slice(0, i).join('/');
+    const pkg = packageAt(dir);
+    if (!pkg) continue;
+    if (!`${rel.slice(dir.length + 1)}/`.startsWith('scripts/')) return 'shipped';
+    return Array.isArray(pkg.files) && !packsScripts(pkg.files) ? 'tooling' : 'shipped';
+  }
+  return 'shipped';
+}
+
+/** The owning `package.json` at `dir`, or null. Parse failures answer null. */
+function readPackageAt(dir) {
+  try {
+    return JSON.parse(readFileSync(join(REPO_ROOT, dir, 'package.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The out-of-tree census: the same scanner, a different verdict.
  *
  * Deliberately the SAME `scanFile` the governed half runs. A second scanner for
@@ -233,13 +325,27 @@ export function scanFile(rel, source, { isParserHome = false } = {}) {
  *
  * @param {(abs: string) => string} read  Injected so the self-test can drive
  *   this over fixtures rather than over whatever today's tree happens to hold.
+ * @param {(dir: string) => { files?: unknown } | null} [packageAt]  Injected for
+ *   the same reason, and memoized here: a census row's tier costs one manifest
+ *   read per directory, not one per row.
  */
-export function censusOutside(files, read, rootFor = (abs) => relative(REPO_ROOT, abs)) {
+export function censusOutside(
+  files,
+  read,
+  rootFor = (abs) => relative(REPO_ROOT, abs),
+  packageAt = readPackageAt,
+) {
+  const manifests = new Map();
+  const lookup = (dir) => {
+    if (!manifests.has(dir)) manifests.set(dir, packageAt(dir));
+    return manifests.get(dir);
+  };
   const rows = [];
   for (const abs of files) {
     const rel = rootFor(abs);
     for (const f of scanFile(rel, read(abs))) {
-      rows.push({ ...f, isTest: /\.(?:test|spec|pin\.test)\.[cm]?[jt]sx?$/.test(rel) });
+      const isTest = /\.(?:test|spec|pin\.test)\.[cm]?[jt]sx?$/.test(rel);
+      rows.push({ ...f, isTest, tier: tierOf(rel, isTest, lookup) });
     }
   }
   rows.sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line);
@@ -302,22 +408,60 @@ function main() {
  * be is absent — the green line above is a claim about `scripts/**`, and
  * without this block it reads as a claim about the repository.
  */
+export const TIERS = [
+  {
+    tier: 'shipped',
+    label: 'shipped package source',
+    why: [
+      'A published package cannot answer "did this parse?" through repo tooling —',
+      '`scripts/` runs as plain .mjs against a possibly unbuilt tree, so importing it',
+      'from shipped source trades this bug for a worse one. These need their own',
+      'shape, and it may not be a refusal at all: a validator handed metadata by',
+      'someone else may owe its caller a FINDING rather than an exit.',
+    ],
+  },
+  {
+    tier: 'tooling',
+    label: 'unpublished package tooling',
+    why: [
+      'These sit in `<pkg>/scripts/**` and their own package.json packs no such path,',
+      'so they reach no tarball — `scripts/**` in everything but their path. The',
+      'constraint above is not theirs: they CAN import scripts/ts-parse.mjs today, the',
+      'way packages/spec/scripts/check-browser-reachable-entries.ts already imports',
+      'scripts/js-comment-mask.mjs. Whether each SHOULD is still per-row — a parse that',
+      'speculatively re-reads an extracted prose snippet is meant to fail sometimes,',
+      'and an exiting refusal would end the process on ordinary input.',
+    ],
+  },
+  {
+    tier: 'test',
+    label: 'tests',
+    why: [
+      'A test that parses TypeScript to assert something about a parse is doing its',
+      'job. Listed for the count, not as work.',
+    ],
+  },
+];
+
 export function reportOutside(rows) {
-  const prod = rows.filter((r) => !r.isTest);
-  const tests = rows.filter((r) => r.isTest);
   const files = new Set(rows.map((r) => r.rel));
+  const byTier = TIERS.map((t) => ({ ...t, rows: rows.filter((r) => r.tier === t.tier) }));
   console.log(
     `   … and ${rows.length} parse(s) OUTSIDE scripts/ in ${files.size} file(s) that this gate does`
-      + ` NOT govern — ${prod.length} in shipped/gate code, ${tests.length} in tests:`,
+      + ` NOT govern — ${byTier.map((t) => `${t.rows.length} in ${t.label}`).join(', ')}:`,
   );
-  for (const r of [...prod, ...tests]) {
-    console.log(`     ${r.rel}:${r.line}  ${r.what}${r.isTest ? '  [test]' : ''}`);
+  for (const t of byTier) {
+    if (t.rows.length === 0) continue;
+    console.log(`\n   ${t.label} — ${t.rows.length} parse(s) in ${new Set(t.rows.map((r) => r.rel)).size} file(s):`);
+    for (const r of t.rows) console.log(`     ${r.rel}:${r.line}  ${r.what}`);
+    for (const line of t.why) console.log(`     ${line}`);
   }
   console.log(
-    `   They cannot import scripts/ts-parse.mjs — a published package answering`
-      + `\n   "did this parse?" through repo tooling trades this bug for a worse one.`
-      + `\n   Counted and named so the line above is read as what it is: a statement`
-      + `\n   about scripts/, not about the repository. Shape decision: see the header.`,
+    `\n   Counted, named and TIERED so each line is read as what it is: the green line`
+      + `\n   above is a statement about scripts/, and the reason a published package`
+      + `\n   cannot import the helper is a statement about ${byTier[0].rows.length} of these ${rows.length}, not all`
+      + `\n   of them. Tier is read off the owning package.json, never listed here.`
+      + `\n   Shape decision: see the header.`,
   );
 }
 
@@ -414,7 +558,14 @@ export function selfTest() {
     ['packages/spec/src/ui/app.test.ts', 'const program = ts.createProgram([entry], {});'],
     ['packages/lint/src/clean.ts', '// nothing to see here\nexport const a = 1;'],
   ]);
-  const census = censusOutside([...OUTSIDE.keys()], (k) => OUTSIDE.get(k), (k) => k);
+  // Manifests injected, so the tiering is driven over fixtures rather than over
+  // whatever today's tree happens to publish — the same reason `read` is.
+  const MANIFESTS = new Map([
+    ['packages/lint', { files: ['dist', 'README.md'] }],
+    ['packages/spec', { files: ['dist', 'src/**/*.zod.ts'] }],
+  ]);
+  const pkgAt = (dir) => MANIFESTS.get(dir) ?? null;
+  const census = censusOutside([...OUTSIDE.keys()], (k) => OUTSIDE.get(k), (k) => k, pkgAt);
   t('the census counts every out-of-tree parse, whatever the api',
     census.length === 3, JSON.stringify(census.map((r) => `${r.rel}:${r.what}`)));
   t('the census marks a test-file site as a test and a shipped one as not',
@@ -426,6 +577,56 @@ export function selfTest() {
   t('the census is sorted, so its printed block is diffable run to run',
     census.map((r) => r.rel).join('|')
       === [...census].sort((a, b) => a.rel.localeCompare(b.rel)).map((r) => r.rel).join('|'));
+
+  // -- the TIER: which of the three sentences the row is printed under. The
+  //    census reported a real number under a reason that was false for most of
+  //    what it counted, so every branch is asserted, both ways. --------------
+  const tierAt = (rel, isTest = false) => tierOf(rel, isTest, pkgAt);
+  t('a row in a package\'s unpublished scripts/ is tooling',
+    tierAt('packages/spec/scripts/build-api-surface.ts') === 'tooling',
+    tierAt('packages/spec/scripts/build-api-surface.ts'));
+  t('…and so is one nested deeper inside it',
+    tierAt('packages/spec/scripts/lib/strictness-ledger.ts') === 'tooling');
+  t('a row in the package\'s own src/ is shipped, NOT tooling',
+    tierAt('packages/lint/src/validate-react-page-props.ts') === 'shipped',
+    tierAt('packages/lint/src/validate-react-page-props.ts'));
+  t('the census carries the tier it will be printed under',
+    census.find((r) => r.rel.startsWith('packages/spec/scripts/')).tier === 'tooling'
+      && census.find((r) => r.rel.startsWith('packages/lint/src/')).tier === 'shipped',
+    JSON.stringify(census.map((r) => [r.rel, r.tier])));
+  t('a test wins over its location — a test inside scripts/ is still a test',
+    tierAt('packages/spec/scripts/dist-freshness.test.ts', true) === 'test');
+
+  // The tier is a READ of the manifest, not a guess from the path. A package
+  // that packs its scripts/ must lose the "you can import the helper" sentence,
+  // or the census is back to printing one claim over two populations.
+  const packing = (dir) => (dir === 'packages/spec' ? { files: ['dist', 'scripts'] } : null);
+  t('a package that PACKS scripts/ makes its tooling row shipped again',
+    tierOf('packages/spec/scripts/build-api-surface.ts', false, packing) === 'shipped',
+    tierOf('packages/spec/scripts/build-api-surface.ts', false, packing));
+  t('a glob that packs everything counts as packing scripts/ too',
+    tierOf('packages/x/scripts/t.mjs', false, () => ({ files: ['**/*'] })) === 'shipped');
+  t('no files field at all is shipped — npm packs the whole directory',
+    tierOf('packages/x/scripts/t.mjs', false, () => ({})) === 'shipped');
+  t('no owning package.json anywhere is shipped — the cautious tier',
+    tierOf('some/loose/file.ts', false, () => null) === 'shipped');
+  t('the NEAREST package.json owns the row, not an ancestor that packs differently',
+    tierOf('packages/spec/inner/scripts/t.ts', false,
+      (d) => (d === 'packages/spec/inner' ? { files: ['dist'] }
+        : d === 'packages/spec' ? { files: ['scripts'] } : null)) === 'tooling');
+  t('a path merely CONTAINING scripts in a segment name is not tooling',
+    tierOf('packages/x/src/scripts-util.ts', false, () => ({ files: ['dist'] })) === 'shipped',
+    tierOf('packages/x/src/scripts-util.ts', false, () => ({ files: ['dist'] })));
+
+  // -- the printed block must not put a row under a sentence that is false of
+  //    it. Every tier the census can produce needs somewhere to be printed. --
+  t('every tier a row can carry has a printing tier that claims it',
+    ['test', 'tooling', 'shipped'].every((x) => TIERS.some((r) => r.tier === x)),
+    JSON.stringify(TIERS.map((r) => r.tier)));
+  t('only the shipped tier carries the "cannot import repo tooling" claim',
+    TIERS.filter((r) => r.why.join(' ').includes('cannot answer')).map((r) => r.tier).join()
+      === 'shipped',
+    JSON.stringify(TIERS.filter((r) => r.why.join(' ').includes('cannot answer')).map((r) => r.tier)));
 
   // -- the masker is load-bearing: prove it, rather than trusting it --------
   t('codeOnly blanks a comment but keeps the line count',
@@ -441,7 +642,8 @@ export function selfTest() {
   console.log(
     `✓ check:parse-guard self-test: ${cases.length} cases pass (every spelling of all three parser entry `
       + `points is caught, their checked replacements are not, prose and payloads are not, only ts-parse.mjs `
-      + `is exempt, and the out-of-tree census counts what this gate does not govern).`,
+      + `is exempt, and the out-of-tree census counts what this gate does not govern — TIERED by a read of `
+      + `the owning package.json, so no row is printed under a reason that is false of it).`,
   );
   return 0;
 }
