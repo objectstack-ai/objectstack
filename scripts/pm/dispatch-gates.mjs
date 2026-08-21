@@ -3163,6 +3163,14 @@ function selfTest() {
   // SKIP_PATHS literal.
   t('the doc-authoring gate reaches the live docs corpus it declares', docAuthoringHints.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
   t('and the top-level docs guides, which are files rather than a subtree', docAuthoringHints.some((h) => hintCovers(h, 'docs/protocol-upgrade-guide.md')));
+  // ⚠️ This one case does NOT pin the declaration, and says so rather than
+  // reading as though it does: `.claude` is a top-level DOTTED dir, which
+  // `looksPathy` admits and `hintCovers` does not refuse, so the bare ROOTS
+  // entry reaches this path on its own. Measured — deleting `.claude/**` from
+  // the gate leaves this case green, exactly the way check-nul-bytes survives
+  // the ablation above. What it pins is that `.claude` stays reachable AT ALL;
+  // the declaration itself is pinned in the gate's own self-test, which
+  // requires a subtree spelling for every separator-less ROOT.
   t('and the agent operating manual it took in for the same reason', docAuthoringHints.some((h) => hintCovers(h, '.claude/agents/os-dev.md')));
   t('and the published skills catalog', docAuthoringHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
   t('and the content tree', docAuthoringHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
