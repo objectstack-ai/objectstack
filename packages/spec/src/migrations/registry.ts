@@ -5034,13 +5034,27 @@ const step18: MigrationStep = {
     'column published clean and rendered as blank cells with the right row count. The ' +
     'mechanical conversion respells inline `{ field }` entries as `{ name }` and folds ' +
     'related-list column objects to their identity string; unknown keys are named ' +
-    'rejections at publish from this major.',
+    'rejections at publish from this major. ' +
+    'It also retires `measures.<metric>.filters` on analytics cubes (#10414, ADR-0049 ' +
+    'enforce-or-remove): a declared per-metric raw-SQL filter with zero consumers — both ' +
+    'SQL strategies aggregate the metric\'s `sql` and never read `filters`, so a ' +
+    'hand-authored `filters: [{ sql: "stage = \'closed_won\'" }]` parsed, registered, and ' +
+    'silently returned the UNFILTERED aggregate under the author\'s metric name (the ' +
+    '#10298 dataset shape for a hand-authored cube; the dataset half was repaired through ' +
+    'its own structured channel in #10411). The raw-SQL fragment also ran against the ' +
+    'platform\'s structured-FilterCondition direction — it cannot be parameterized, ' +
+    're-targeted per driver dialect, or walked by the lint filter rules. The mechanical ' +
+    'conversion strips the key from old sources (pure lossless delete — it never had an ' +
+    'effect to lose); filter at query time with `where`, fold the condition into the ' +
+    'metric\'s own `sql` expression, or use an ADR-0021 dataset measure\'s structured ' +
+    '`filter`.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
     'element-input-target-variable-removed',
     'element-filter-removed',
     'field-column-lists-canonicalized',
+    'metric-filters-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5101,8 +5115,13 @@ const step18: MigrationStep = {
     },
     {
       id: 'analytics-authorable-unknown-keys-refused',
+      // Same-major bookkeeping (#10414): batch D also closed the nested
+      // `Metric.filters[]` item, but `Metric.filters` was REMOVED outright later
+      // in this same unpublished major (retired-key entry `data/Metric:filters`,
+      // conversion `metric-filters-removed`), so this entry no longer names a
+      // surface an 18.x author can reach.
       surface: 'analytics cube definitions (`defineCube` / `defineStack({ analyticsCubes })`: the '
-        + 'cube, its `refreshKey`, each metric and its `filters[]` entries, each dimension, each '
+        + 'cube, its `refreshKey`, each metric, each dimension, each '
         + 'join) and the `/analytics/query` body\'s nested `timeDimensions[]` items — undeclared keys',
       replacement: 'the declared key the rejection names. Every rejection carries the surface, the '
         + 'offending key and a rename suggestion (`title` → `label` on a metric/dimension, `label` → '
@@ -5118,10 +5137,11 @@ const step18: MigrationStep = {
         + 'top-level strictness does not recurse — `timeDimensions: [{ dimension, granuarity: '
         + '\'day\' }]` rode through the strict wrapper with the typo stripped, bucketing the whole '
         + 'range as one group under an ordinary 200. Undeclared keys on all eight sites are now '
-        + 'refused at parse time with a prescriptive message.',
+        + 'refused at parse time with a prescriptive message. (One of the eight — the nested metric '
+        + '`filters[]` item — was itself removed later in this major: #10414, `metric-filters-removed`.)',
       acceptanceCriteria:
         'Every cube in `defineStack({ analyticsCubes })` / `defineCube` parses with only declared '
-        + 'keys at every level (cube, refreshKey, measures, metric filters, dimensions, joins); '
+        + 'keys at every level (cube, refreshKey, measures, dimensions, joins); '
         + 'every `/analytics/query` body\'s `timeDimensions[]` items carry only '
         + '`dimension`/`granularity`/`dateRange`. Declared keys parse byte-identically to before.',
     },
@@ -6394,6 +6414,33 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
+    // one level up). `filters` was a declared, authorable per-metric raw-SQL
+    // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
+    // positive control: no `.filters` read in `service-analytics` or any driver's
+    // non-test code while the neighbouring `format` key IS read
+    // (`analytics-service.ts`, `dataset-compiler.ts`).
+    // `NativeSQLStrategy.resolveMeasureSql` and
+    // `ObjectQLStrategy.resolveMeasureAggregation` both wrap the metric's `sql` in
+    // the aggregate and never look at `filters` — so a hand-authored cube's
+    // `filters: [{ sql: "stage = 'closed_won'" }]` parsed, registered, and
+    // silently returned the UNFILTERED aggregate under the author's metric name.
+    // The raw-SQL fragment also ran against the platform's structured
+    // FilterCondition direction (it cannot be parameterized, re-targeted per
+    // driver dialect, or walked by `packages/lint/src/filter-walk.ts`); the
+    // dataset path was repaired separately through its own structured channel
+    // (#10411), which left this key inert with the dataset half fixed around it.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // `MetricSchema` is `strictObject`, so the route is strict deletion + a
+    // `guidance` entry carrying the prescription (no retiredKey tombstone — the
+    // key is out of the walked shape entirely). Sources are rewritten by the D2
+    // conversion `metric-filters-removed`, which strips the key from every metric
+    // in `analyticsCubes[].measures`.
+    'data/Metric:filters',
     // #8586 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-14, ruled
     // REMOVE). `additionalTypes` was declared, authorable, and documented on four
     // docs pages as THE way a plugin registers a custom metadata type — and read

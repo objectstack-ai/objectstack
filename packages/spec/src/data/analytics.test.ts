@@ -72,13 +72,28 @@ describe('MetricSchema', () => {
       description: 'Average revenue per order',
       type: 'avg',
       sql: 'order_total',
-      filters: [{ sql: "status = 'completed'" }],
       format: 'currency',
     });
 
     expect(metric.description).toBe('Average revenue per order');
-    expect(metric.filters).toHaveLength(1);
     expect(metric.format).toBe('currency');
+  });
+
+  // #10414 (ADR-0049 enforce-or-remove): `filters` REMOVED. It was a declared
+  // per-metric raw-SQL filter no strategy ever read — an authored
+  // `filters: [{ sql }]` parsed, registered, and silently returned the
+  // UNFILTERED aggregate (this file used to pin exactly that parse survival,
+  // `expect(metric.filters).toHaveLength(1)`). The pin flips: the refusal must
+  // carry the prescription — the fully-qualified key, the removal, and the
+  // migration channel — not merely throw.
+  it('rejects the removed `filters` key with the retirement prescription (#10414)', () => {
+    expect(() => MetricSchema.parse({
+      name: 'avg_order_value',
+      label: 'Average Order Value',
+      type: 'avg',
+      sql: 'order_total',
+      filters: [{ sql: "status = 'completed'" }],
+    })).toThrow(/`measures\.<metric>\.filters`.*removed in @objectstack\/spec 17 \(#10414.*os migrate meta --from 17/s);
   });
 
   it('should apply defaults for optional fields', () => {
@@ -90,7 +105,6 @@ describe('MetricSchema', () => {
     });
 
     expect(metric.description).toBeUndefined();
-    expect(metric.filters).toBeUndefined();
     expect(metric.format).toBeUndefined();
   });
 
