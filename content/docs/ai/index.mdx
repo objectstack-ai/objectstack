@@ -25,6 +25,11 @@ AI in ObjectStack is a **cross-protocol capability layer**: agents, tools, and k
 
 ## What's in this module
 
+{/* Source of truth for this module's page set AND its order is meta.json in this directory — routing and the sidebar are built from it, and the module rows below mirror it exactly, minus this page. The two trailing rows (Spec / Schema reference) link out of the module and have no meta.json entry. */}
+{/* The list is hand-kept on purpose: meta.json stores slugs only, so the link text and the glosses below exist nowhere else, and a generated list would lose them. */}
+{/* Drift note: nothing checks the two against each other in either direction, so a page added to or removed from meta.json leaves this list silently stale — edit both in the same change. */}
+
+- [Connect an MCP Client](/docs/ai/connect-mcp) — point Claude Code, Claude Desktop, or any MCP client at the `/api/v1/mcp` server every deployment already runs, over OAuth or an API key
 - [AI Agents](/docs/ai/agents) — the two platform agents (`ask` / `build`), skills as the extension primitive, and agent anatomy
 - [Actions as Tools](/docs/ai/actions-as-tools) — explicit opt-in exposure of Actions to the LLM, HITL approval, permission-aware execution
 - [Tool Records](/docs/ai/tools) — the three ways a capability reaches an agent, and the narrow case where authoring a `tool` record is the right answer
