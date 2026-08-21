@@ -162,27 +162,28 @@ const CODE_POSITION_PATTERNS = [
  * an allowlist nobody re-reads. A NEW lowercase code never joins it: the gate
  * refuses that, and the remedy for a fresh finding is a registered SCREAMING
  * code, never a line here.
+ *
+ * [#10716] It is now EMPTY, and that is this list reaching its designed end
+ * rather than a list that never had a use: both entries it was created for
+ * (`request_domain_verification_failed`, `verify_domain_failed`) were renamed
+ * onto the registered ledger code `DOMAIN_VERIFICATION_FAILED` by the services
+ * lane, and the owning PR deleted them here — the coordination #10658 asked
+ * for, so the gate ends up green with zero exceptions. Emptiness costs no
+ * coverage: --self-test drives the shrink-only semantics against a FIXTURE
+ * registry, and pins the live one AT zero so a future exception cannot be
+ * added quietly.
  */
-const KNOWN_LOWERCASE_CODES = new Map([
-  [
-    'packages/plugins/plugin-auth/src/register-sso-provider.ts::request_domain_verification_failed',
-    'wire-visible; rename owned by #10716 (services lane)',
-  ],
-  [
-    'packages/plugins/plugin-auth/src/register-sso-provider.ts::verify_domain_failed',
-    'wire-visible; rename owned by #10716 (services lane); pinned by name in the dogfood suite',
-  ],
-]);
+const KNOWN_LOWERCASE_CODES = new Map([]);
 
 /** Split findings into the two the wire already carries and everything else. */
-export function partitionKnown(violations) {
+export function partitionKnown(violations, registry = KNOWN_LOWERCASE_CODES) {
   const known = [];
   const fresh = [];
   for (const v of violations) {
-    (KNOWN_LOWERCASE_CODES.has(`${v.file}::${v.literal}`) ? known : fresh).push(v);
+    (registry.has(`${v.file}::${v.literal}`) ? known : fresh).push(v);
   }
   const reached = new Set(known.map((v) => `${v.file}::${v.literal}`));
-  const stale = [...KNOWN_LOWERCASE_CODES.keys()].filter((k) => !reached.has(k)).sort();
+  const stale = [...registry.keys()].filter((k) => !reached.has(k)).sort();
   return { known, fresh, stale };
 }
 
@@ -302,8 +303,19 @@ function selfTest() {
   // [#10658] The shrink-only registry, in both directions. The second one is
   // the load-bearing half: when the owning card's rename lands, a stale line
   // must FAIL rather than sit there as a quiet allowlist entry.
+  //
+  // [#10716] These drive a FIXTURE registry rather than the live one, which is
+  // now empty. The semantics being pinned belong to the MECHANISM (an entry
+  // that stops matching is stale and fails; a new code is never absorbed), and
+  // they have to survive the live list reaching zero — otherwise emptying it
+  // would have silently taken the coverage with it. The live list gets its own
+  // assertion below.
   const SSO = 'packages/plugins/plugin-auth/src/register-sso-provider.ts';
   const row = (literal) => ({ file: SSO, line: 1, literal, form: 'fallback' });
+  const fixtureRegistry = new Map([
+    [`${SSO}::request_domain_verification_failed`, 'fixture — the shape the live list had before #10716'],
+    [`${SSO}::verify_domain_failed`, 'fixture — the shape the live list had before #10716'],
+  ]);
   const partitionCases = [
     [[row('request_domain_verification_failed'), row('verify_domain_failed')], { known: 2, fresh: 0, stale: 0 }, 'both known rows still present'],
     [
@@ -315,7 +327,7 @@ function selfTest() {
     [[], { known: 0, fresh: 0, stale: 2 }, 'an empty tree makes every entry stale'],
   ];
   for (const [input, want, label] of partitionCases) {
-    const got = partitionKnown(input);
+    const got = partitionKnown(input, fixtureRegistry);
     const shape = { known: got.known.length, fresh: got.fresh.length, stale: got.stale.length };
     if (shape.known !== want.known || shape.fresh !== want.fresh || shape.stale !== want.stale) {
       console.error(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(shape)}`);
@@ -323,12 +335,24 @@ function selfTest() {
     }
   }
 
+  // [#10716] The live registry, at zero. It is closed to new entries by the rule
+  // above, so "closed" is checked rather than merely written down: a wire-visible
+  // code that genuinely needs deferring is a call for the ADR-0112 owner to make
+  // in the open, not a line someone adds back here on the way past.
+  if (KNOWN_LOWERCASE_CODES.size !== 0) {
+    console.error(
+      `  ✗ self-test "the live registry stays empty": KNOWN_LOWERCASE_CODES holds ${KNOWN_LOWERCASE_CODES.size} entry/entries — ` +
+        `this list is closed (#10658/#10716); a new deferral is an ADR-0112 decision, not a line here.`,
+    );
+    failed++;
+  }
+
   if (failed) {
     console.error(`\n✗ check-error-code-casing self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
   console.log(
-    `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length} registry case(s) pass.`,
+    `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length + 1} registry case(s) pass.`,
   );
 }
 

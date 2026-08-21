@@ -408,7 +408,11 @@ export async function runRequestDomainVerification(
     if (resp.status === 404 && !parsed?.code) {
       return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
     }
-    return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'request_domain_verification_failed', message: parsed?.message || 'Failed to request domain verification' } } };
+    // ADR-0112: `parsed?.code` is better-auth's own code passing through — never
+    // overwritten. The DEFAULT is ours, so it is the registered SCREAMING ledger
+    // entry for this feature (`DOMAIN_VERIFICATION_FAILED`, @objectstack/plugin-auth)
+    // rather than a bespoke lowercase spelling (#10716).
+    return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'DOMAIN_VERIFICATION_FAILED', message: parsed?.message || 'Failed to request domain verification' } } };
   }
 
   const token = str(parsed?.domainVerificationToken);
@@ -462,5 +466,8 @@ export async function runVerifyDomain(
   } else if (parsed?.code === 'DOMAIN_VERIFICATION_FAILED') {
     message = 'DNS TXT record not found yet. Add the record shown when you requested verification, allow time for DNS to propagate, then retry.';
   }
-  return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'verify_domain_failed', message } } };
+  // ADR-0112, as above: the vendor's code passes through untouched; our default
+  // is the registered ledger entry (#10716). The `message` above still carries
+  // the specific diagnosis for each expected failure mode.
+  return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'DOMAIN_VERIFICATION_FAILED', message } } };
 }
