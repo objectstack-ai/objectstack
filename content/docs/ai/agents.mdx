@@ -208,7 +208,7 @@ own `ask` / `build` records use exactly these fields):
 | `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
 | `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
 | `tools` | **Removed in protocol 17 (#3894)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. This is **not** a rename: there is no key the value moves to. Declare each tool on a **skill** instead — a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — and attach that skill through `skills` (ADR-0064) |
-| `knowledge` | RAG access: `{ sources: string[], indexes: string[] }`. `sources` is the only key; the `topics` alias was removed in protocol 17 (#3855) — `os migrate meta --from 16` rewrites it |
+| `knowledge` | **Removed in protocol 17 (#3896)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who “scoped” access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |
 
 There is no `type` field and no fixed agent "type" taxonomy — behaviour comes from
 persona, instructions, skills, and tools. There are no `triggers` / `schedule`
