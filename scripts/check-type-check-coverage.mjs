@@ -440,15 +440,17 @@ const DEBT = {
   },
   '@objectstack/service-automation': {
     errors: 3,
-    note: 'code-tier 5. Two are the TS2741 this note used to describe as the whole debt: '
-      + 'engine.test.ts:2547/2577 build a descriptor literal missing a required field, the #4198 discovery '
-      + 'that opened #4311 (the missing field TS names moved from resumeAuthority to handlerContract in '
-      + '#5561, which made resumeAuthority optional; both literals omit both, and TS reports one at a '
-      + 'time). The other 3 are TS2341 in src/nested-region-parity.test.ts, where the tests dot-read the '
-      + 'private `engine.flows` -- not `engine[\'flows\']`, not `as any`. Re-measured 5 at 5ab08428. This is '
-      + 'the specimen #5278 cites for composition drift: an entry reading "2, two descriptor literals" '
-      + 'looks like a free graduation, while the real residue includes a decision about whether tests may '
-      + 'read private state at all.',
+    note: 'code-tier 3 (TS2341 x3), all in src/nested-region-parity.test.ts at 95/151/180, where the '
+      + 'tests dot-read the private `engine.flows` -- not `engine[\'flows\']`, not `as any` (the casts on '
+      + 'two of those lines sit on `.config`, not on the engine, so they do not suppress it). Re-measured '
+      + '3 at 53a48c93f4, DOWN from 5 at 5ab08428: the two TS2741 in engine.test.ts this note used to '
+      + 'itemise alongside them have graduated -- that file now builds its pausing fixtures through a '
+      + 'single defineActionDescriptor helper that declares resumeAuthority (#5561), and engine.test.ts '
+      + 'still compiles in this project (`--listFiles` lists it) while reporting nothing. The residue is '
+      + 'therefore one decision, not an oversight: whether tests may read private state at all. This '
+      + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
+      + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
+      + 'made of before sizing it, never just the number.',
   },
   '@objectstack/service-cluster': {
     errors: 1,
