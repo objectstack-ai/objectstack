@@ -22,7 +22,7 @@ ObjectStack is composed of seven protocol layers that work together to form a co
 | **System (Kernel)** | `src/kernel/` | Manifest, Datasources, Plugins, Kernel |
 | **Automation** | `src/automation/` | Flows, Workflows, Triggers, Approvals |
 | **AI** | `src/ai/` | Agents, RAG Pipelines, Model Registry |
-| **API** | `src/api/` | REST, GraphQL, WebSocket, Realtime |
+| **API** | `src/api/` | REST, WebSocket, Realtime |
 | **Security** | `src/security/` | Permissions, Roles, Sharing, RLS |
 
 ---
@@ -39,7 +39,6 @@ graph TB
 
     subgraph "API Layer"
         REST[REST Endpoints]
-        GQL[GraphQL]
         WS[WebSocket / Realtime]
     end
 
@@ -92,12 +91,10 @@ graph TB
 
     %% Client to API
     CLIENT --> REST
-    CLIENT --> GQL
     CLIENT --> WS
 
     %% API references Data
     REST --> KERNEL
-    GQL --> KERNEL
     WS --> KERNEL
 
     %% Security enforced at Kernel
@@ -160,7 +157,7 @@ sequenceDiagram
     participant D as Driver
     participant DB as Database
 
-    C->>API: HTTP Request (REST / GraphQL)
+    C->>API: HTTP Request (REST)
     API->>K: Parsed Operation
 
     K->>SEC: Check Permissions
