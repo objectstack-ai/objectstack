@@ -93,6 +93,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 
@@ -592,6 +594,13 @@ function main() {
 // Entry-point guard, not decoration: scripts/measure-test-shard-timings.mjs
 // imports countTestFiles from here, and an unguarded `main()` would run the
 // argument parser (and exit 1 on "no shard given") on that import.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+//
+// Through `isEntrypoint`, never a hand-typed `process.argv[1]` comparison:
+// node resolves symlinks for the module graph but leaves `argv[1]` as typed,
+// so the hand-rolled form answers `false` through a symlink and this script
+// does NOTHING -- exit 0, no output, which here means a shard that printed no
+// package list. `check:entry-guard` enforces the single spelling; see
+// scripts/invoked-as.mjs for the measured failure modes.
+if (isEntrypoint(import.meta.url)) {
   main();
 }
