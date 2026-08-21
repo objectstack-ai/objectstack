@@ -1,4 +1,4 @@
-# @objectstack/plugin-trigger-record-change
+# @objectstack/trigger-record-change
 
 Auto-launch ObjectStack flows on record changes.
 
@@ -74,7 +74,7 @@ update path.
 ```ts
 import { AutomationServicePlugin } from '@objectstack/service-automation';
 import { MessagingServicePlugin } from '@objectstack/service-messaging';
-import { RecordChangeTriggerPlugin } from '@objectstack/plugin-trigger-record-change';
+import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 kernel
   .use(new AutomationServicePlugin())   // engine + flows

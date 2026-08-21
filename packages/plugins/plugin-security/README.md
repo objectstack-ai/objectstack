@@ -37,23 +37,31 @@ await kernel.bootstrap();
 
 `SecurityPlugin` is single-tenant by default. It enforces RBAC, owner-based RLS, and Field-Level Security regardless of mode.
 
-For **multi-tenant** (logical row-level Organization scoping) install `@objectstack/plugin-org-scoping` *before* SecurityPlugin:
+For **multi-tenant** (logical row-level Organization scoping) the organization wall itself
+is **not in this package and not in this repository**. It ships as the enterprise
+`@objectstack/organizations` runtime, whose `OrganizationsPlugin` registers the
+`org-scoping` service; a host app declares and installs it in its own `package.json`, and
+`objectstack serve` resolves it from the app rather than from the framework. It must be
+registered **before** `SecurityPlugin`, so the posture probe below finds it.
 
-```typescript
-import { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';
+Asking for the wall without the package is not a silent downgrade: `objectstack serve`
+prints `FATAL: tenancy posture '<posture>' was requested but @objectstack/organizations
+could not be loaded` and **refuses to boot** (ADR-0093 D5), unless the operator explicitly
+sets `OS_ALLOW_DEGRADED_TENANCY=1`. `objectstack doctor` reports the same missing runtime.
 
-await kernel.use(new OrgScopingPlugin());  // MUST be BEFORE SecurityPlugin
-await kernel.use(new SecurityPlugin());
-```
+> ⚠️ Earlier revisions of this page told readers to install `@objectstack/plugin-org-scoping`
+> and register an `OrgScopingPlugin` from it. No such package exists — not on npm, and in no
+> directory of this repo. The open edition ships no organization wall; there is nothing to
+> install *here* to get one.
 
 SecurityPlugin resolves the tenancy **posture** (`single` | `group` | `isolated`) once at start time — preferring the `tenancy` service, and falling back to probing `getService('org-scoping')` (present ⇒ the historical `isolated` posture). Two consequences:
 
 - **Tenant isolation is not an RLS policy.** Since ADR-0095 D1 the organization wall is **Layer 0** (`tenant-layer.ts`): an independent filter AND-composed ahead of business RLS, so a business-RLS change can never weaken it (W1) and the `viewAllRecords` / `modifyAllRecords` superuser bypass can never cross it (W2 — crossing takes a true `PLATFORM_ADMIN`). Under the `single` posture Layer 0 is inert. Accordingly the default `member_default` / `viewer_readonly` sets ship **no** wildcard `tenant_isolation` policy: `member_default` carries the owner-scoped `owner_only_writes` / `owner_only_deletes` plus per-object `_self` carve-outs on the better-auth identity tables, and `viewer_readonly` carries the `_self` carve-outs only.
 - **The platform's own tenant-scoped RLS policies are still stripped when no wall is enforced** (`single`), so single-tenant deployments aren't filtered to zero rows and don't pay the field-existence safety net on every find — e.g. `organization_admin`'s `sys_member_org` / `sys_invitation_org` / `sys_team_org`, and the `sys_organization_self` carve-out. The strip is by **provenance**, not by pattern-matching the predicate: an app-authored tenant policy is never stripped — it reaches the compiler and fails closed there, with a one-time operator warning (ADR-0105 D3).
 
-`organization_id` auto-injection on insert is provided by OrgScopingPlugin; `owner_id` auto-injection always runs in SecurityPlugin regardless.
+`organization_id` auto-injection on insert is provided by that organizations runtime; `owner_id` auto-injection always runs in SecurityPlugin regardless.
 
-In CLI / dev-server mode the `OS_MULTI_ORG_ENABLED` environment variable (default `false`) toggles whether the runtime registers `OrgScopingPlugin` alongside `SecurityPlugin`. Set `OS_MULTI_ORG_ENABLED=true` before `objectstack serve` / `pnpm dev` to enable.
+In CLI / dev-server mode the `OS_MULTI_ORG_ENABLED` environment variable (default `false`) toggles whether the runtime registers `OrganizationsPlugin` alongside `SecurityPlugin`. Set `OS_MULTI_ORG_ENABLED=true` before `objectstack serve` / `pnpm dev` to enable.
 
 ## Key Exports
 
@@ -92,7 +100,7 @@ Compilation output is a filter AST merged into every query's `where` clause, so 
 ## When to use
 
 - ✅ Any multi-user deployment.
-- ✅ Enforcing tenant isolation (combine with `@objectstack/service-tenant`).
+- ✅ Enforcing tenant isolation — the wall itself comes from the enterprise organizations runtime described above, not from this package.
 
 ## When not to use
 
