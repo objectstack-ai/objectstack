@@ -319,6 +319,42 @@
  *       merged-PR timeline, so this row surfaces the candidate and the unlock
  *       sweep releases it — ⛔ never a label written from this script.
  *
+ * ## H20 — the question that says a dispatch actually HAPPENED
+ *
+ *   H20 an open `pm:dispatched` card whose claim comment names a branch for
+ *       which NO REMOTE REF EXISTS AT ALL, older than the lane's
+ *       dispatch→first-commit baseline (`DISPATCHED_NO_REF_STALE_MINUTES`).
+ *       Claiming and dispatching are two acts with a gap between them: the
+ *       claim is an atom the protocol defines carefully (assign + label swap
+ *       in one write, the claim comment, a race re-read) and LAUNCHING the dev
+ *       is a third act outside it that nothing binds to the first two. A seat
+ *       interrupted between them — a maintainer message answered, a tool
+ *       error, lost context — leaves a card that is `pm:dispatched`, assigned,
+ *       carrying a full claim comment naming a branch and a worktree, with no
+ *       agent anywhere working it. ⭐ It is INVISIBLE FROM THE CARD: every
+ *       field is correct, and only the absence of something elsewhere is
+ *       wrong, which is why a skill sentence could not carry it and a row
+ *       must. Measured on #8878 (2026-08-20): claim comment at ~14:05Z, the
+ *       dispatch call never made, 74 minutes `pm:dispatched` with nobody on it
+ *       until a patrol tick compared branch heads. Every adjacent row declines
+ *       it for a reason of its own — H2 wants a MISSING claim comment and this
+ *       one is complete, H4/H14 want `Blocked-by:`, H9 wants a hold, H8 wants
+ *       a merged PR and nothing here ever ran — so the shape had no reader.
+ *       ⛔ The key is NO REF AT ALL and never "no PR yet": a dev inside a long
+ *       build legitimately has a ref and no PR for over an hour (measured
+ *       repeatedly on this lane), so a PR-keyed row would fire hardest on the
+ *       healthiest dev on the board. The guarantee is structural — the
+ *       predicate is handed a ref state and nothing else. Three ref states,
+ *       never two, exactly as H19 landed them: `exists` is healthy, `absent`
+ *       fires, and an UNREADABLE probe fires its own quieter row saying the
+ *       dispatch is unjudged, because a ref read dropped in silence reads as a
+ *       healthy dispatch forever (#4690). ⚠️ The symptom is identical to a dev
+ *       agent that DIED and the remedies are opposite (a dead agent needs a
+ *       probe, an undispatched claim needs a dispatch), so the row names both
+ *       readings rather than diagnosing one. Report-only like everything here:
+ *       the remedy is a dispatch or a withdrawn claim, never a label written
+ *       from this script.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -553,11 +589,27 @@ export function h1DispatchedNoAssignee(issue) {
   return labels.includes('pm:dispatched') && (issue.assignees ?? []).length === 0;
 }
 
+/**
+ * The claim-comment marker, shared by the two items that read it — H2 ("is
+ * there a claim at all") and H20 ("what does the current claim NAME"). One
+ * constant rather than two copies on purpose: a marker that drifts between
+ * readers produces the worst possible pair of answers, where one item calls a
+ * card claimed and the other calls the same comment prose.
+ *
+ * The strictness either side of it is H2's, unchanged and deliberate (#7488):
+ * an OPTIONAL leading blockquote `>` because SKILL.md step 4's own claim
+ * template is a blockquote, and the line must BEGIN with the word so ordinary
+ * prose containing "claim" is not a claim comment. No `g` flag — a shared
+ * regex carrying `lastIndex` between callers is a state bug waiting for its
+ * second reader.
+ */
+export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*[::]/mi;
+
 export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
   const pmTracked = labels.some((l) => l === 'pm:queue' || l === 'pm:dispatched');
   if (!pmTracked || (issue.assignees ?? []).length === 0) return false;
-  return !commentBodies.some((b) => /^\s*>?\s*Claim(?:ed)?\s*[::]/mi.test(b ?? ''));
+  return !commentBodies.some((b) => CLAIM_COMMENT_MARKER.test(b ?? ''));
 }
 
 export function h3QueueAndDispatched(issue) {
@@ -2514,6 +2566,307 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
 }
 
 // ---------------------------------------------------------------------------
+// H20 — a `pm:dispatched` card whose claimed branch has NO REMOTE REF AT ALL.
+//
+// Claiming and dispatching are two acts with a gap between them (#10312).
+// The protocol's CLAIM is a careful atom — assign + label swap in one write,
+// the claim comment, a race re-read — and LAUNCHING the dev is a third act
+// outside that atom which nothing binds to the first two. So a seat can
+// complete a perfectly well-formed claim and then not dispatch: a maintainer
+// message arrives and is answered, a tool errors, context is lost. What is
+// left behind is a card that is `pm:dispatched`, assigned, carrying a full
+// claim comment naming a branch and a worktree — and no agent anywhere is
+// working on it.
+//
+// ⭐ Why this needed a ROW and not a rule: the failure is INVISIBLE FROM THE
+// CARD. Every field on it is correct. Only the absence of something ELSEWHERE
+// is wrong, and no reader of the card can see it — every seat and every gauge
+// reads it as work in progress. A skill sentence ("a claim is not complete
+// until the agent is launched") is a rule, and it fails the same way the first
+// time someone is interrupted; the mechanism has to live where the absence is
+// observable.
+//
+// The adjacent rows each decline it, for a good reason of its own:
+//   H2   assignee with NO claim comment — here the claim comment is present
+//        and complete, which is exactly the point.
+//   H4 / H14  `Blocked-by:` — not a blocked card.
+//   H9   `pm:on-hold` without `Restart-when:` — not held.
+//   H8   a MERGED PR while still dispatched — nothing merged; nothing ran.
+// Nothing asked whether a card labelled `pm:dispatched` is actually BEING
+// WORKED. That is the same missing question H19 asks about a block: a state
+// label asserting an external fact that nothing re-checks.
+//
+// ## Measured — #8878, 2026-08-20
+//
+// The claim comment (`5356927509`) was posted at ~14:05Z. Before the dispatch
+// tool was called a maintainer message arrived and was answered, and the
+// second half never happened. The card sat `pm:dispatched` with nobody on it
+// for 74 MINUTES, until a patrol tick compared branch heads and found no ref.
+//
+// ⚠️ The interruption is the MECHANISM, not an excuse: any seat that answers a
+// message, hits a tool error, or loses context between the claim and the launch
+// produces the same state. And ⚠️ the symptom is IDENTICAL to a dev agent that
+// died (no branch, no PR, no report) while the remedies are OPPOSITE — a dead
+// agent needs a probe, an undispatched claim needs a dispatch. So the row
+// reports the observation and names both readings; it does not diagnose one.
+//
+// ## ⛔ The key is "NO REF AT ALL" — never "no PR yet"
+//
+// This is the one thing the item must not get wrong, and the filing card is
+// explicit: a dev inside a long build legitimately has a ref and no PR for
+// over an hour, which that round measured repeatedly. Keying on the PR would
+// fire hardest on the healthiest dev on the board. The guarantee here is
+// structural rather than a matter of care — `h20DispatchedNoBranchRef` is
+// handed a REF STATE and nothing else, so it cannot see a PR and cannot key on
+// one — and the ref-exists-with-no-PR shape is a regression pin below.
+//
+// ## Three ref states, never two (#4690)
+//
+// `exists` → healthy, no row. `absent` → the finding. `unreadable` (any
+// non-404 failure) → its OWN quieter row saying the dispatch is unjudged. The
+// third is the one the row exists to keep visible: a ref read dropped in
+// silence reads as a healthy dispatch forever, which is this item's own
+// disease wearing a new mask. H19 landed the same three-way shape for the same
+// reason, and this follows it deliberately rather than inventing a second
+// spelling.
+// ---------------------------------------------------------------------------
+
+/**
+ * H20's threshold, and the only one in this file measured in MINUTES — because
+ * the interval it bounds is a minutes-scale quantity and rounding it to hours
+ * would either miss the measured incident or wait three times as long as it
+ * needs to.
+ *
+ * ## The measured basis
+ *
+ * This lane's dispatch→draft-PR latency was measured at 35–50 minutes, and a
+ * dev PUSHES ITS BRANCH well before the PR — the branch is the first thing an
+ * os-dev creates, ahead of the first edit (the branch-push probe is step 1 of
+ * the dev contract), so the observable this row keys on lands minutes into a
+ * run rather than at its end. 60 minutes therefore sits above the whole
+ * measured PR band while keying on a signal that arrives far earlier, which is
+ * why it can be this tight without firing on a slow dev.
+ *
+ * Against the specimen: #8878 sat 74 minutes, so 60 catches it with 14 minutes
+ * to spare. The card's own recommendation was "around 60 minutes with no ref at
+ * all", and this is that number.
+ */
+export const DISPATCHED_NO_REF_STALE_MINUTES = 60;
+
+/**
+ * The protocol's dev-branch shape — `claude/issue-<n>-<slug>`. This row has an
+ * observable at all only because the protocol already writes one: the claim
+ * comment NAMES the thing whose absence is the finding.
+ *
+ * A `Branch:` line naming some OTHER shape (a bare `main`, a hand-cut
+ * `feat/…`) is deliberately left unmatched, which puts the card out of this
+ * row's scope entirely. The alternative — probing whatever text follows the
+ * colon — would spend ref reads on prose and manufacture findings out of
+ * typos. Under-reporting on an unrecognised spelling is the same call H17's
+ * extractor makes, for the same reason: a fabricated row sends a reader to
+ * check something that was never there.
+ *
+ * ⚠️ `g` is load-bearing (`matchAll` requires it) and therefore this constant
+ * is for `matchAll` ONLY — `.test()`/`.exec()` on a shared global regex carry
+ * `lastIndex` between callers and answer differently on alternate calls.
+ */
+export const CLAIM_BRANCH_SHAPE = /claude\/issue-\d+-[A-Za-z0-9][A-Za-z0-9._-]*/g;
+
+/** How many branches one row names before it counts the rest — H19's budget, same grounds. */
+export const H20_BRANCH_LIST_CAP = 5;
+
+/**
+ * Every protocol-shaped branch named by a `Branch:` directive in one comment
+ * body, de-duplicated, in the order written.
+ *
+ * Only the `Branch:` LINE is read, not the whole comment: a claim comment also
+ * quotes worktree paths and sibling branches in prose, and the directive line
+ * is the field the protocol actually fills in. Decoration is expected and
+ * tolerated — 「Branch: `claude/issue-10312-…`」 is the natural markdown for a
+ * line meant to be grepped, and the same decorated-directive lesson H4 paid
+ * for (#10102) applies verbatim here.
+ */
+export function claimedBranches(body) {
+  const out = [];
+  const text = String(body ?? '');
+  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*[::]\s*(.*)$/gim)) {
+    for (const hit of String(line[1] ?? '').matchAll(CLAIM_BRANCH_SHAPE)) {
+      if (!out.includes(hit[0])) out.push(hit[0]);
+    }
+  }
+  return out;
+}
+
+/**
+ * The claim this card is CURRENTLY waiting on — the MOST RECENT claim comment
+ * that names a branch — or null when no comment does.
+ *
+ * ## Why the most recent, and not the first or the union
+ *
+ * The same call H19's release double-check ① makes about conversion comments,
+ * for the same reason: a claim already spent, re-read as current, reinstates
+ * an expired premise. A re-claimed card (the #5925 stale-claim reclaim is the
+ * measured shape) carries two claim comments, and the older one describes work
+ * the board is no longer waiting on — judging it would report a dead branch
+ * that everybody has already agreed is dead.
+ *
+ * An UNPARSEABLE `created_at` does not disqualify a comment: it falls back to
+ * thread order for the recency comparison, and the age it yields is `null`,
+ * which the predicate treats as "must not read as fresh" — H10/H13/H18's
+ * standing call on an unreadable timestamp (#4690).
+ *
+ * @param {{ body?: string, created_at?: string }[]} commentRows — the REST
+ *   comment rows, NOT bodies: this item is the only reader here that needs a
+ *   timestamp, which is why the sweep's cache holds rows.
+ * @returns {{ branches: string[], createdAt: string|null } | null}
+ */
+export function governingClaim(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  let best = null;
+  rows.forEach((row, index) => {
+    const body = String(row?.body ?? '');
+    if (!CLAIM_COMMENT_MARKER.test(body)) return;
+    const branches = claimedBranches(body);
+    if (branches.length === 0) return;
+    const parsed = Date.parse(row?.created_at ?? '');
+    const stamp = Number.isFinite(parsed) ? parsed : null;
+    const candidate = { branches, createdAt: row?.created_at ?? null, stamp, index };
+    if (best === null) {
+      best = candidate;
+      return;
+    }
+    const newer = stamp === null || best.stamp === null ? index > best.index : stamp >= best.stamp;
+    if (newer) best = candidate;
+  });
+  return best === null ? null : { branches: best.branches, createdAt: best.createdAt };
+}
+
+/**
+ * How old the governing claim is, in minutes — `null` when the timestamp is
+ * unreadable, which is NOT the same as young (#4690) and is why this returns
+ * three-valued rather than a number with a sentinel.
+ */
+export function claimAgeMinutes(claim, nowMs = Date.now()) {
+  const posted = Date.parse(claim?.createdAt ?? '');
+  return Number.isFinite(posted) ? (nowMs - posted) / 60_000 : null;
+}
+
+/**
+ * Which cards buy a ref read — exported for the reason every gathering policy
+ * here is: a policy that decides what gets READ AT ALL is where a silent hole
+ * would live.
+ *
+ * `pm:dispatched` (regardless of assignee — an unassigned dispatched card is
+ * H1's finding and can still carry a claim naming a branch), a governing claim
+ * that names at least one protocol-shaped branch, and an age past the
+ * threshold. The age gate is a GATHERING gate as well as a predicate gate on
+ * purpose: a young card is not stuck, so probing it would spend a request to
+ * learn nothing, and the row says nothing about it either way. The predicate
+ * re-checks the age independently so an over-gathering caller still cannot
+ * produce a row about a fresh claim.
+ */
+export function h20NeedsRefProbe(issue, claim, nowMs = Date.now()) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return false;
+  if (!claim || (claim.branches ?? []).length === 0) return false;
+  const age = claimAgeMinutes(claim, nowMs);
+  return age === null || age > DISPATCHED_NO_REF_STALE_MINUTES;
+}
+
+/** `` `branch` `` for each named ref, capped at the render budget, + its note. */
+function namedBranches(rows) {
+  const shown = rows.slice(0, H20_BRANCH_LIST_CAP);
+  const named = shown
+    .map((r) => `\`${r.branch}\`${r.state === 'unreadable' && r.detail ? ` (${r.detail})` : ''}`)
+    .join(', ');
+  return `${named}${rows.length > shown.length ? ` +${rows.length - shown.length} more` : ''}`;
+}
+
+/**
+ * H20 — null when the claimed branch exists (or the card is out of scope),
+ * else the finding sentence.
+ *
+ * ## What it is NOT given, and why that is the design
+ *
+ * It receives the card, the governing claim and a REF STATE per branch. It is
+ * given no PR list, no merge state and no timeline, so ⛔ "no PR yet" is not a
+ * thing this predicate could key on even by accident — the guarantee the
+ * filing card asked for, made structural instead of remembered.
+ *
+ * ## The three-state fold
+ *
+ *   any `exists`      → clean. Something IS on the board for this card, and
+ *                       whether it has a PR yet is none of this row's business.
+ *   all `absent`      → the finding. Nothing was ever pushed for this claim.
+ *   any `unreadable`  → the quieter row. "No ref at all" is an assertion about
+ *                       absence, and an unread probe cannot support it, so the
+ *                       row says the dispatch is UNJUDGED rather than either
+ *                       vouching for it or claiming a finding it did not
+ *                       measure.
+ *
+ * An EMPTY `refStates` means the caller never probed; that is a caller
+ * contract, not a reading, and it yields no row — H19's identical treatment of
+ * absent resolutions.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ branches: string[], createdAt: string|null }|null} claim
+ * @param {{ branch: string, state: 'exists'|'absent'|'unreadable',
+ *   detail?: string|null }[]} refStates
+ */
+export function h20DispatchedNoBranchRef(issue, claim, refStates, nowMs = Date.now()) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return null;
+  if (!claim || (claim.branches ?? []).length === 0) return null;
+  const age = claimAgeMinutes(claim, nowMs);
+  if (age !== null && age <= DISPATCHED_NO_REF_STALE_MINUTES) return null;
+  const rows = refStates ?? [];
+  if (rows.length === 0) return null;
+  if (rows.some((r) => r.state === 'exists')) return null;
+  const unreadable = rows.filter((r) => r.state === 'unreadable');
+  const absent = rows.filter((r) => r.state === 'absent');
+  if (absent.length === 0 && unreadable.length === 0) return null;
+
+  const reading =
+    age === null
+      ? 'an unreadable claim timestamp (which must not read as fresh)'
+      : `~${Math.round(age)} min after the claim was posted (threshold ${DISPATCHED_NO_REF_STALE_MINUTES} min)`;
+
+  const remedy =
+    ' Report-only: the remedy is a DISPATCH or a withdrawn claim, ⛔ never a label written from this ' +
+    'script — the same posture H14 holds for `pm:blocking` and H19 for a released block.';
+
+  if (unreadable.length > 0) {
+    return (
+      `\`pm:dispatched\` and the remote ref for ${unreadable.length} of ${rows.length} claimed branch(es) ` +
+      `could NOT be read this sweep (${namedBranches(unreadable)}) — so whether anything is working this ` +
+      'card is UNJUDGED, not confirmed. Unread is not absent and it is not present either (#4690): a ref ' +
+      'probe dropped in silence reads as a healthy dispatch forever, which is the exact failure this item ' +
+      'exists to end, so it is named here instead. The status is reported and the cause is not guessed at.' +
+      (absent.length > 0
+        ? ` The card's other ${absent.length} claimed branch(es) DID resolve, and have no ref ` +
+          `(${namedBranches(absent)}) — but "no ref at all" is a claim about every branch this card names, ` +
+          'and one unread probe is enough to withhold it.'
+        : '') +
+      remedy
+    );
+  }
+
+  return (
+    `\`pm:dispatched\` with a complete claim comment naming ${namedBranches(absent)} — and NO SUCH REMOTE ` +
+    `REF EXISTS, ${reading}. Claiming and dispatching are two acts with a gap between them: the claim is ` +
+    'an atom (assign + label swap in one write, the claim comment, a race re-read) and LAUNCHING the dev ' +
+    'is a third act outside it, so a seat interrupted between the two leaves exactly this card — every ' +
+    'field correct, every gauge reading "in progress", nobody working it. It is invisible from the card ' +
+    'itself: only the absence of something elsewhere is wrong. The measured specimen sat 74 min before a ' +
+    'patrol tick compared branch heads. ⚠️ This symptom is IDENTICAL to a dev agent that died (no branch, ' +
+    'no PR, no report) and the remedies are OPPOSITE — a dead agent needs a probe, an undispatched claim ' +
+    "needs a dispatch — so read the claiming seat's own action sequence before assuming either. ⛔ This " +
+    'row keys on NO REF AT ALL, never on "no PR yet": a dev inside a long build legitimately has a ref ' +
+    'and no PR for over an hour. One reading to rule out first: if this card\'s delivery already MERGED, ' +
+    'the branch is gone by design and the missing paired write is H8\'s, not this one.' +
+    remedy
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -2588,6 +2941,12 @@ export function summaryLine(counts, findingCount) {
   // still live (#4690).
   const btResolved = counts.blockerResolved ?? 0;
   const btTargets = counts.blockerTargets ?? 0;
+  // The fifth pair, H20's, and the same shape as H19's for the same reason: an
+  // unreadable ref fires its own card's quieter row, so this is a total rather
+  // than the only place the gap shows. Still owed — a pass that read no ref at
+  // all must not read the same as a board where every dispatch is live (#4690).
+  const refRead = counts.dispatchRefRead ?? 0;
+  const refTargets = counts.dispatchRefTargets ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
@@ -2599,6 +2958,9 @@ export function summaryLine(counts, findingCount) {
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${btResolved < btTargets ? ' — each unresolved target is named on its own card\'s row, never dropped' : ''}. ` +
+    `Dispatch liveness (H20): remote ref read on ${refRead} of ${refTargets} distinct claimed branch(es) ` +
+    `named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold` +
+    `${refRead < refTargets ? ' — each unread ref is named on its own card\'s row, never dropped' : ''}. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -3482,14 +3844,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   // the memo a card carrying both `pm:dispatched` (assigned) and `pm:on-hold`
   // — itself an H3-adjacent half-state, so exactly the card most likely to be
   // on the board — would be fetched twice per sweep for no new information.
+  //
+  // The cache holds the REST ROWS rather than the bodies, because H20 is the
+  // one reader here that needs a `created_at` (how old is the claim?) and a
+  // second fetch to get one would defeat the memo this cache exists to be.
+  // Every other reader takes bodies through `commentsFor`, unchanged.
   const commentCache = new Map();
-  const commentsFor = async (issue) => {
+  const commentRowsFor = async (issue) => {
     if (commentCache.has(issue.number)) return commentCache.get(issue.number);
     const rows = await rest(`/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=100`);
-    const bodies = rows.map((c) => c.body ?? '');
-    commentCache.set(issue.number, bodies);
-    return bodies;
+    commentCache.set(issue.number, rows);
+    return rows;
   };
+  const commentsFor = async (issue) => (await commentRowsFor(issue)).map((c) => c.body ?? '');
   let lastHoldError = null;
 
   // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
@@ -3701,6 +4068,64 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
   // exactly like every other row and neither renderer needs a special case.
   const oldestBlocking = h15OldestUnclaimedBlocking(unscoped);
   if (oldestBlocking) findings.push([oldestBlocking.issue, 'H15', oldestBlocking.message]);
+
+  // H20 — the dispatched card nobody is working. Two reads, both bounded by
+  // the `pm:dispatched` population rather than the board:
+  //
+  //   • the comment thread, for the claim's branch and its timestamp. On the
+  //     shared cache, so an assigned dispatched card — which H2 already
+  //     fetched above — costs nothing here. The only new fetches are for
+  //     UNASSIGNED dispatched cards, which are H1 findings in their own right
+  //     and correspondingly rare.
+  //   • ONE ref read per distinct claimed branch, cached, and taken only for
+  //     candidates (`h20NeedsRefProbe`): a claim younger than the threshold is
+  //     not stuck, so it buys no request and the row says nothing about it.
+  //
+  // Unreadable probes are NOT fatal, and that is the one place this pass
+  // deliberately differs from H16/H17/the comment fallback, which rethrow on a
+  // total shortfall. There, "nothing readable" makes the item read as CLEAN,
+  // so the sweep has to stop rather than print a green face on a silence.
+  // Here it is the opposite: every unreadable ref fires its own card's quieter
+  // row, so a pass that read nothing is the loudest possible output rather
+  // than the quietest, and killing an otherwise-gathered sweep would trade a
+  // whole report for a fact the rows already state. H19 makes the same call.
+  const refCache = new Map();
+  const resolveBranchRef = async (branch) => {
+    const cached = refCache.get(branch);
+    if (cached) return cached;
+    // `/git/ref/heads/<branch>` is an EXACT-match lookup and a 404 there is the
+    // healthy-negative this row is built on — not an error. The branch is
+    // segment-encoded rather than whole-encoded because the slashes in
+    // `claude/issue-<n>-<slug>` are path separators to this endpoint.
+    const path = `/repos/${OWNER_REPO}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`;
+    let resolved;
+    try {
+      await rest(path);
+      resolved = { state: 'exists', detail: null };
+    } catch (err) {
+      resolved =
+        err?.status === 404
+          ? { state: 'absent', detail: null }
+          : { state: 'unreadable', detail: err?.status ? `HTTP ${err.status}` : 'unreadable' };
+    }
+    refCache.set(branch, resolved);
+    return resolved;
+  };
+
+  for (const issue of seen.values()) {
+    if (!labelNames(issue).includes('pm:dispatched')) continue;
+    const claim = governingClaim(await commentRowsFor(issue));
+    if (!h20NeedsRefProbe(issue, claim)) continue;
+    const states = [];
+    for (const branch of claim.branches) states.push({ branch, ...(await resolveBranchRef(branch)) });
+    const undispatched = h20DispatchedNoBranchRef(issue, claim, states);
+    if (undispatched) findings.push([issue, 'H20', undispatched]);
+  }
+  // Distinct branches, which is the unit the cache and the request count are
+  // in — and the word is in the summary sentence for the same reason it is in
+  // H19's, so the number cannot be misread as a per-card count.
+  stats.dispatchRefTargets = refCache.size;
+  stats.dispatchRefRead = [...refCache.values()].filter((r) => r.state !== 'unreadable').length;
 
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
@@ -4816,6 +5241,192 @@ function selfTest() {
   t('summary: absent H19 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('resolved on 0 of 0 distinct'), true);
   t('summary: …and the H19 clause never prints the string undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('undefined'), false);
   t('summary: the report-only contract still ends the sentence', summaryLine(btCounts(12, 12), 1).endsWith('not a gate verdict.'), true);
+
+  // -- H20: a `pm:dispatched` card nobody is working (#10312) ----------------
+  //
+  // The specimen is #8878, 2026-08-20: a well-formed claim comment at ~14:05Z,
+  // the dispatch call never made, 74 minutes `pm:dispatched` with nobody on it.
+  // `NOW_20` is set 74 minutes past that claim so the measured age is the one
+  // the incident actually had, rather than a round number chosen to pass.
+  const NOW_20 = Date.parse('2026-08-20T15:19:00Z');
+  const minsAgo20 = (m) => new Date(NOW_20 - m * 60_000).toISOString();
+  const dispatchedCard = (labels = ['pm:dispatched'], assignees = ['os-help']) => issue(labels, assignees);
+  const claimRow = (createdAt, body) => ({ created_at: createdAt, body });
+  // The claim template as SKILL.md step 4 tells every seat to write it, and as
+  // the measured card carried it — a `Claim:` marker line, a session, and a
+  // BACKTICK-DECORATED `Branch:` directive.
+  const claimBody8878 = [
+    'Claim: `domain:cli` execution seat.',
+    'Session: `session_019bmVFqoQPq63zhKrxdYG1r`',
+    'Branch: `claude/issue-8878-dispatch-latency`',
+    'Worktree: dedicated per-task worktree off main (os-dev standard)',
+  ].join('\n');
+  const claim8878 = [claimRow(minsAgo20(74), claimBody8878)];
+
+  // The extractor. Decoration is the NORMAL shape, not the exception (#10102).
+  t('H20 branch: the decorated `Branch:` directive yields the branch', claimedBranches(claimBody8878).join(','), 'claude/issue-8878-dispatch-latency');
+  t('H20 branch: an UNdecorated directive yields the same', claimedBranches('Branch: claude/issue-8878-x').join(','), 'claude/issue-8878-x');
+  t('H20 branch: the blockquoted claim template (SKILL.md step 4) is read', claimedBranches('> Branch: `claude/issue-6752-x`').join(','), 'claude/issue-6752-x');
+  t('H20 branch: a slug with dots and underscores survives', claimedBranches('Branch: claude/issue-1-a.b_c-d').join(','), 'claude/issue-1-a.b_c-d');
+  t('H20 branch: two directives yield two branches, in order', claimedBranches('Branch: `claude/issue-1-a`\nBranch: `claude/issue-2-b`').join(','), 'claude/issue-1-a,claude/issue-2-b');
+  t('H20 branch: the same branch named twice is de-duplicated', claimedBranches('Branch: claude/issue-1-a\nBranches: claude/issue-1-a').length, 1);
+  // The two under-reporting boundaries, both deliberate: a branch-shaped token
+  // in PROSE is not a claim's branch field, and a non-protocol spelling leaves
+  // this row nothing it can recognise. Both put the card out of scope rather
+  // than into a fabricated probe.
+  t('H20 branch: a branch-shaped token in prose is NOT the claim field', claimedBranches('rebased onto claude/issue-9-other yesterday').length, 0);
+  t('H20 branch: a non-protocol branch name is out of scope, not a probe', claimedBranches('Branch: `main`').length, 0);
+  t('H20 branch: no directive at all yields nothing', claimedBranches('Claim: seat.\nSession: `session_x`').length, 0);
+  t('H20 branch: a missing body does not crash', claimedBranches(undefined).length, 0);
+
+  // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
+  const gov = (rows) => governingClaim(rows);
+  t('H20 claim: a claim comment naming a branch is found', gov(claim8878).branches.join(','), 'claude/issue-8878-dispatch-latency');
+  t('H20 claim: …and carries its timestamp', gov(claim8878).createdAt, minsAgo20(74));
+  t('H20 claim: a `Branch:` line in a comment that is NOT a claim is ignored', gov([claimRow(minsAgo20(90), 'Branch: `claude/issue-1-a`')]), null);
+  t('H20 claim: a claim comment naming NO branch yields nothing to check', gov([claimRow(minsAgo20(90), 'Claim: seat.\nSession: `session_x`')]), null);
+  const reclaimed = [
+    claimRow(minsAgo20(600), 'Claim: first seat.\nBranch: `claude/issue-8878-abandoned`'),
+    claimRow(minsAgo20(74), claimBody8878),
+  ];
+  t('H20 claim: a RE-claimed card is judged on the most recent claim', gov(reclaimed).branches.join(','), 'claude/issue-8878-dispatch-latency');
+  t('H20 claim: …and on that claim\'s timestamp, not the spent one', gov(reclaimed).createdAt, minsAgo20(74));
+  t('H20 claim: recency is read from the timestamp, not thread order', gov([...reclaimed].reverse()).branches.join(','), 'claude/issue-8878-dispatch-latency');
+  t('H20 claim: an unreadable timestamp still qualifies the comment', gov([claimRow('not-a-date', claimBody8878)]).branches.length, 1);
+  t('H20 claim: …and reports no age rather than a fresh one (#4690)', claimAgeMinutes(gov([claimRow('not-a-date', claimBody8878)]), NOW_20), null);
+  t('H20 claim: an empty thread yields nothing', gov([]), null);
+  t('H20 claim: a non-array input does not crash', gov(undefined), null);
+  t('H20 claim: the measured age is read back as ~74 minutes', Math.round(claimAgeMinutes(gov(claim8878), NOW_20)), 74);
+
+  // The gathering policy — what buys a ref read at all.
+  t('H20 gate: a dispatched card with an aged claim is a candidate', h20NeedsRefProbe(dispatchedCard(), gov(claim8878), NOW_20), true);
+  t('H20 gate: an UNASSIGNED dispatched card is still a candidate', h20NeedsRefProbe(dispatchedCard(['pm:dispatched'], []), gov(claim8878), NOW_20), true);
+  t('H20 gate: a young claim buys no request', h20NeedsRefProbe(dispatchedCard(), gov([claimRow(minsAgo20(10), claimBody8878)]), NOW_20), false);
+  t('H20 gate: a card without `pm:dispatched` is out of scope', h20NeedsRefProbe(dispatchedCard(['pm:queue']), gov(claim8878), NOW_20), false);
+  t('H20 gate: no claim -> nothing to probe (that shape is H2\'s row)', h20NeedsRefProbe(dispatchedCard(), null, NOW_20), false);
+  t('H20 gate: an unreadable claim timestamp is probed, never assumed fresh', h20NeedsRefProbe(dispatchedCard(), gov([claimRow('not-a-date', claimBody8878)]), NOW_20), true);
+  t('H20 gate: a missing issue does not crash', h20NeedsRefProbe(undefined, gov(claim8878), NOW_20), false);
+
+  // ★ The measured #8878 shape: a complete claim, and no ref anywhere.
+  const refState = (branch, state, detail = null) => ({ branch, state, detail });
+  const absentRef = [refState('claude/issue-8878-dispatch-latency', 'absent')];
+  const fired20 = h20DispatchedNoBranchRef(dispatchedCard(), gov(claim8878), absentRef, NOW_20);
+  t('H20: the measured #8878 shape FIRES', typeof fired20, 'string');
+  t('H20: …and names the branch that has no ref', fired20.includes('`claude/issue-8878-dispatch-latency`'), true);
+  t('H20: …and says NO SUCH REMOTE REF EXISTS', fired20.includes('NO SUCH REMOTE REF EXISTS'), true);
+  t('H20: …with the measured age and the threshold', fired20.includes(`~74 min after the claim was posted (threshold ${DISPATCHED_NO_REF_STALE_MINUTES} min)`), true);
+  t('H20: …and states the two-acts mechanism', fired20.includes('Claiming and dispatching are two acts with a gap between them'), true);
+  t('H20: …and that it is invisible from the card itself', fired20.includes('invisible from the card'), true);
+  t('H20: …and warns the symptom is identical to a DEAD agent', fired20.includes('IDENTICAL to a dev agent that died'), true);
+  t('H20: …naming the opposite remedies rather than diagnosing one', fired20.includes('a dead agent needs a probe, an undispatched claim needs a dispatch'), true);
+  t('H20: …and carries the ⛔ keying rule verbatim', fired20.includes('keys on NO REF AT ALL, never on "no PR yet"'), true);
+  t('H20: …with the reason a PR key would be wrong', fired20.includes('legitimately has a ref and no PR for over an hour'), true);
+  t('H20: …and routes an already-merged delivery to H8 instead', fired20.includes("the missing paired write is H8's"), true);
+  t('H20: …and forbids a label written from this script', fired20.includes('never a label written from this script'), true);
+  t('H20: not a loud finding', isLoudFinding(fired20), false);
+
+  // ★ The regression pin the filing card asked for by name: a dev inside a long
+  // build has a ref and NO PR, for longer than the threshold, and must be
+  // silent. The guarantee is structural — the predicate is handed a ref state
+  // and nothing else, so there is no PR input it could key on. The arity pin
+  // is what fails if a later hand adds one.
+  t(
+    'H20: ref EXISTS and no PR anywhere, 10 hours in -> clean (⛔ never key on "no PR yet")',
+    h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow(minsAgo20(600), claimBody8878)]), [refState('claude/issue-8878-dispatch-latency', 'exists')], NOW_20),
+    null,
+  );
+  t('H20: …and the predicate takes NO pull-request input at all', h20DispatchedNoBranchRef.length, 3);
+
+  // ★ A young claim is not stuck. The dev may be seconds from its first push.
+  t(
+    'H20: a young claim with no ref yet -> clean',
+    h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow(minsAgo20(10), claimBody8878)]), absentRef, NOW_20),
+    null,
+  );
+  t(
+    'H20: exactly at the threshold -> still clean',
+    h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow(minsAgo20(DISPATCHED_NO_REF_STALE_MINUTES), claimBody8878)]), absentRef, NOW_20),
+    null,
+  );
+  t(
+    'H20: one minute past the threshold -> fires',
+    typeof h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow(minsAgo20(DISPATCHED_NO_REF_STALE_MINUTES + 1), claimBody8878)]), absentRef, NOW_20),
+    'string',
+  );
+
+  // ★ Three ref states, never two (#4690). An unreadable probe gets the QUIETER
+  // row: it must not read as healthy, and it must not claim the finding it did
+  // not measure.
+  const unread20 = h20DispatchedNoBranchRef(
+    dispatchedCard(),
+    gov(claim8878),
+    [refState('claude/issue-8878-dispatch-latency', 'unreadable', 'HTTP 500')],
+    NOW_20,
+  );
+  t('H20 unreadable: does NOT read as healthy', unread20 === null, false);
+  t('H20 unreadable: fires its own row', typeof unread20, 'string');
+  t('H20 unreadable: …which says the dispatch is UNJUDGED', unread20.includes('UNJUDGED, not confirmed'), true);
+  t('H20 unreadable: …and reports the observed status', unread20.includes('HTTP 500'), true);
+  t('H20 unreadable: …and does NOT assert the finding it did not measure', unread20.includes('NO SUCH REMOTE REF EXISTS'), false);
+  t('H20 unreadable: …citing the unread-is-not-absent rule', unread20.includes('#4690'), true);
+  t('H20 unreadable: …and refuses to guess WHY', unread20.includes('the cause is not guessed at'), true);
+  t('H20 unreadable: not a loud finding either', isLoudFinding(unread20), false);
+
+  // Mixed readings. "No ref at all" is a claim about EVERY branch the card
+  // names, so one unread probe is enough to withhold it — and one existing ref
+  // is enough to call the card healthy.
+  const mixedUnread20 = h20DispatchedNoBranchRef(
+    dispatchedCard(),
+    gov([claimRow(minsAgo20(74), 'Claim: seat.\nBranch: `claude/issue-1-a`\nBranch: `claude/issue-1-b`')]),
+    [refState('claude/issue-1-a', 'absent'), refState('claude/issue-1-b', 'unreadable', 'HTTP 502')],
+    NOW_20,
+  );
+  t('H20 mixed: absent + unreadable takes the quieter row', mixedUnread20.includes('UNJUDGED, not confirmed'), true);
+  t('H20 mixed: …and still names the branch that resolved absent', mixedUnread20.includes('`claude/issue-1-a`'), true);
+  t('H20 mixed: …explaining why one unread probe withholds the finding', mixedUnread20.includes('one unread probe is enough to withhold it'), true);
+  t(
+    'H20 mixed: one branch that DOES exist reads the card as worked',
+    h20DispatchedNoBranchRef(
+      dispatchedCard(),
+      gov([claimRow(minsAgo20(74), 'Claim: seat.\nBranch: `claude/issue-1-a`\nBranch: `claude/issue-1-b`')]),
+      [refState('claude/issue-1-a', 'absent'), refState('claude/issue-1-b', 'exists')],
+      NOW_20,
+    ),
+    null,
+  );
+
+  // The remaining gates and the caller contract.
+  t('H20: the label gate outranks a missing ref', h20DispatchedNoBranchRef(dispatchedCard(['pm:queue']), gov(claim8878), absentRef, NOW_20), null);
+  t('H20: no claim -> no row (a missing claim is H2\'s row, not this one)', h20DispatchedNoBranchRef(dispatchedCard(), null, absentRef, NOW_20), null);
+  t('H20: an unprobed card yields no row (caller contract, as H19)', h20DispatchedNoBranchRef(dispatchedCard(), gov(claim8878), [], NOW_20), null);
+  t('H20: absent ref states -> no row', h20DispatchedNoBranchRef(dispatchedCard(), gov(claim8878), undefined, NOW_20), null);
+  t('H20: a missing issue does not crash', h20DispatchedNoBranchRef(undefined, gov(claim8878), absentRef, NOW_20), null);
+  const unstamped20 = h20DispatchedNoBranchRef(dispatchedCard(), gov([claimRow('not-a-date', claimBody8878)]), absentRef, NOW_20);
+  t('H20: an unreadable claim timestamp fires rather than reading fresh', typeof unstamped20, 'string');
+  t('H20: …and says so in place of an age', unstamped20.includes('an unreadable claim timestamp (which must not read as fresh)'), true);
+  const many20 = Array.from({ length: 7 }, (_, i) => refState(`claude/issue-1-b${i}`, 'absent'));
+  const capped20 = h20DispatchedNoBranchRef(
+    dispatchedCard(),
+    gov([claimRow(minsAgo20(74), `Claim: seat.\n${many20.map((r) => `Branch: \`${r.branch}\``).join('\n')}`)]),
+    many20,
+    NOW_20,
+  );
+  t('H20: the branch list is capped at the render budget', capped20.includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
+
+  // The summary line's fifth `read X of Y` pair — H19's shape, and owed for the
+  // same reason: a pass that read no ref at all must not read like a board on
+  // which every dispatch is live.
+  const refCounts = (dispatchRefRead, dispatchRefTargets) => ({
+    repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
+    dispatchRefRead, dispatchRefTargets,
+  });
+  t('summary: the H20 coverage pair is reported', summaryLine(refCounts(4, 5), 1).includes('remote ref read on 4 of 5 distinct claimed branch(es)'), true);
+  t('summary: …scoped to the population H20 judges', summaryLine(refCounts(4, 5), 1).includes('named by open `pm:dispatched` card(s)'), true);
+  t('summary: …and names the threshold that bounded it', summaryLine(refCounts(4, 5), 1).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
+  t('summary: an H20 shortfall points at the rows that carry it', summaryLine(refCounts(4, 5), 1).includes('each unread ref is named on its own card\'s row, never dropped'), true);
+  t('summary: a complete H20 pass adds no shortfall clause', summaryLine(refCounts(5, 5), 1).includes('each unread ref'), false);
+  t('summary: absent H20 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('remote ref read on 0 of 0 distinct'), true);
+  t('summary: the report-only contract still ends the sentence after H20', summaryLine(refCounts(5, 5), 1).endsWith('not a gate verdict.'), true);
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
