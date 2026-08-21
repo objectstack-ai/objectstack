@@ -1287,12 +1287,15 @@ function typeDeclRegions(code) {
 }
 
 /**
- * Every `route:` / `client:` declaration a ledger makes that is not a string literal in ANY
- * quote — `route: ROUTES.health`, `route: BASE + '/types'` — and so is read by NEITHER the
- * recognizer (which needs a leading `'`) NOR `declinedIn` (which needs a leading `"` or
- * backtick). Before #10500 such a row left the population with no verdict at all: not read,
- * not declined, not counted in the denominator. That is the same silence #9896 closed for the
- * quote spellings, one spelling further out, and silence is the defect either way.
+ * Every `route:` / `client:` declaration a ledger makes IN CODE POSITION, with the quote its
+ * value opens in (`'`, `"`, backtick) or `null` for a value that is not a string literal at
+ * all — `route: ROUTES.health`, `route: BASE + '/types'`. The two readers below are filters
+ * over this one list, so what counts as a declaration is decided once: the non-literal half
+ * is read by NEITHER the recognizer (which needs a leading `'`) NOR `declinedIn` (which needs
+ * a leading `"` or backtick), and before #10500 such a row left the population with no verdict
+ * at all — not read, not declined, not counted in the denominator. That is the same silence
+ * #9896 closed for the quote spellings, one spelling further out, and silence is the defect
+ * either way.
  *
  * ⛔ This does NOT widen the recognizer either. Like `declinedIn`, it only reports what could
  * not be read — `rows` is untouched, byte for byte.
@@ -1307,22 +1310,87 @@ function typeDeclRegions(code) {
  *     precisely because it was the only exact discriminator it had against that member;
  *     `typeDeclRegions` is a second exact one, which is what lets the counter widen at all.
  */
-function unreadableIn(text) {
+function declarationsIn(text) {
   const code = codeOnly(text);
   const skip = typeDeclRegions(code);
   const out = [];
   const re = /\b(route|client)\s*:[ \t]*/g;
   let m;
   while ((m = re.exec(code)) !== null) {
+    if (skip.some(([a, b]) => m.index >= a && m.index <= b)) continue;
     const at = m.index + m[0].length;
     const ch = code[at];
-    if (ch === "'" || ch === '"' || ch === '`') continue;
-    if (skip.some(([a, b]) => m.index >= a && m.index <= b)) continue;
+    const quote = ch === "'" || ch === '"' || ch === '`' ? ch : null;
+    // The VALUE as written, off the raw text — `codeOnly` blanked the contents, and a
+    // report that names `client: ''` for every row is not a report. Cut at the closing
+    // quote in JS rather than matched to it, for `declinedIn`'s reason: an interpolated
+    // or unterminated literal must still name itself instead of dropping out.
     const line = text.slice(at).split('\n')[0];
-    const cut = line.search(/[,;]/);
-    out.push({ index: m.index, key: m[1], text: `${m[1]}: ${(cut === -1 ? line : line.slice(0, cut)).trim().slice(0, 60)}` });
+    let value;
+    if (quote === null) {
+      const cut = line.search(/[,;]/);
+      value = (cut === -1 ? line : line.slice(0, cut)).trim().slice(0, 60);
+    } else {
+      const body = line.slice(1);
+      const end = body.indexOf(quote);
+      value = `${quote}${end === -1 ? body.slice(0, 60) : body.slice(0, end)}${quote}`;
+    }
+    out.push({ index: m.index, key: m[1], quote, text: `${m[1]}: ${value}` });
   }
   return out;
+}
+
+/**
+ * The declarations above that are not a string literal in ANY quote — the #10500
+ * population, unchanged byte for byte. Kept as a NAMED filter over the one scan rather
+ * than as a scan of its own: the counter below now reads the quoted half of the same
+ * list, and two scans that each decide separately what "in code position" means are two
+ * scans that can drift into disagreeing while both look right.
+ */
+function unreadableIn(text) {
+  return declarationsIn(text).filter((d) => d.quote === null);
+}
+
+/**
+ * Every `client:` value a ledger declares in a quote — including the single quote this
+ * recognizer reads — that NO row window claimed (#10636).
+ *
+ * The residue #10500 left. Both terms of the `clientsDeclared` denominator were
+ * row-relative, so a correctly single-quoted `client:` belonging to a row whose `route:`
+ * could not be read fell out of both: its row never became a row, so `rows` does not
+ * carry it, and its own spelling is the one the recognizer reads, so nothing declined it.
+ * The value left the denominator without a word while the file plainly declared it, and a
+ * denominator that quietly omits a declaration renders a PARTIAL read as more complete
+ * than it is. Measured on `ba2d8d4730`: `i18n-route-ledger.ts` with one added
+ * `route: I18N_BASE + '/plurals'` row reported `3 of 3` declared `client:` values on a
+ * file declaring four.
+ *
+ * ⛔ NOT a widening of the recognizer either. `rows` is untouched; a value named here is
+ * billed to NO row — it is counted as declared and named with its own line, which is the
+ * one thing a count comparison cannot say for itself.
+ *
+ * WHY THIS CAN BE FILE-WIDE NOW, when the comment in `parseLedgerSource` argued it must
+ * not be. That argument was right for the scan it had: over raw text, a `client:` written
+ * in prose or inside a string payload would be billed to a row that never declared it,
+ * and a false red costs the same trust a false green does. #10500 built the two exact
+ * discriminators that answer it — `codeOnly` (comments and string CONTENTS blanked) and
+ * `typeDeclRegions` (the `client: string;` member of every ledger's own entry interface,
+ * and the `client: 'a' | 'b';` literal-union member the quote test alone would swallow) —
+ * and this reads the same list through both. The ROW BINDING stays window-relative: what
+ * moves file-wide is the denominator, not the question of which row owns a value.
+ *
+ * @param {string} text
+ * @param {Set<number>} claimed  index of every `client:` a row read or an in-window
+ *   decline already named — the ones this must not bill a second time.
+ */
+function unclaimedClientsIn(text, claimed) {
+  return declarationsIn(text)
+    .filter((d) => d.key === 'client' && d.quote !== null && !claimed.has(d.index))
+    // The snippet says WHY it is here. Every other entry in the declined list is a
+    // spelling this scan cannot read; this one is spelled exactly the way it reads, and a
+    // reader shown `client: 'i18n.getPlurals'` under a "reads single-quoted values only"
+    // verdict would reasonably conclude the report was broken.
+    .map((d) => ({ ...d, text: `${d.text} (no row read it)` }));
 }
 
 /**
@@ -1391,6 +1459,10 @@ function declinedIn(s) {
 function parseLedgerSource(text) {
   const rows = [];
   const declined = [];
+  // Index of every `client:` declaration this parse ACCOUNTED FOR — read as a row's binding,
+  // or named as a declined spelling inside a row window. The complement of this set, over the
+  // same file, is what #10636 was: declared, unread, and uncounted.
+  const claimed = new Set();
   const lineAt = (i) => 1 + (text.slice(0, i).match(/\n/g) || []).length;
   const routeRe = /route\s*:\s*'([^']+)'/g;
   let m;
@@ -1400,12 +1472,16 @@ function parseLedgerSource(text) {
     const window = nextRoute === -1 ? rest : rest.slice(0, nextRoute + 1);
     const client = window.match(/client\s*:\s*'([^']+)'/);
     rows.push({ route: m[1], client: client ? client[1] : null });
-    // `client:` is counted inside THIS row's window — the same window the line above reads
+    if (client) claimed.add(m.index + client.index);
+    // A `client:` is BOUND inside THIS row's window — the same window the line above reads
     // — and never file-wide: a `client:` written in prose elsewhere would otherwise be
     // billed to a row that never declared it, and a false red costs the same trust a false
-    // green does.
+    // green does. That is a rule about ATTRIBUTION and it still holds; the denominator's
+    // file-wide sweep at the bottom bills its findings to no row at all (#10636).
     for (const d of declinedIn(window)) {
-      if (d.key === 'client') declined.push({ key: 'client', line: lineAt(m.index + d.index), text: d.text });
+      if (d.key !== 'client') continue;
+      claimed.add(m.index + d.index);
+      declined.push({ key: 'client', line: lineAt(m.index + d.index), text: d.text });
     }
   }
   // `route:` is counted file-wide, because a declined row has no window to be found in —
@@ -1419,10 +1495,27 @@ function parseLedgerSource(text) {
   for (const d of unreadableIn(text)) {
     declined.push({ key: d.key, line: lineAt(d.index), text: d.text });
   }
+  // …and the `client:` values that ARE spelled the way this recognizer reads but that no row
+  // window claimed (#10636) — the residue the line above leaves, because a row whose `route:`
+  // was declined or unreadable never became a row, and nothing declined the `client:` sitting
+  // on it. Neither term of the denominator below could see those, so the file declared a value
+  // that left the count without a word.
+  for (const d of unclaimedClientsIn(text, claimed)) {
+    declined.push({ key: 'client', line: lineAt(d.index), text: d.text });
+  }
   // THE DENOMINATOR. Leads the recognizer's own regex would start on, plus the ones it
   // declined — so `routesDeclared - rows.length` is every declared row value this parse did
   // not turn into a row, whatever the reason: a declined quote, or the `route: ''` that its
   // `[^']+` also drops without a word.
+  //
+  // BOTH RATIOS ARE NOW THE SAME RATIO, which is the property #10636 was about. Numerator:
+  // values this parse READ — rows assembled, and of those the ones that carry a binding.
+  // Denominator: values the FILE DECLARES — every `route:` lead in any spelling, and every
+  // `client:` a row bound or the sweep above named, which after #10636 is every `client:`
+  // declared in code position (type members excluded, prose and string payloads masked).
+  // ⛔ The two sides must move together. A denominator widened past what its numerator can
+  // ever count trades an undercount for a permanently red ratio — which is why the sweep
+  // pushes to `declined` (a value NAMED as unread) instead of only bumping a number.
   const routesDeclared = [...text.matchAll(/route\s*:\s*'/g)].length + declined.filter((d) => d.key === 'route').length;
   const clientsDeclared = rows.filter((r) => r.client).length + declined.filter((d) => d.key === 'client').length;
   declined.sort((a, b) => a.line - b.line || a.key.localeCompare(b.key));
@@ -1769,6 +1862,11 @@ function selfTest() {
   check('parseLedgerSource', 'an all-single-quoted ledger declines nothing', 'declined', 0, ledgerRead.declined.length);
   check('parseLedgerSource', 'and its denominator equals what was read', '3 route / 2 client',
     '3 route / 2 client', `${ledgerRead.routesDeclared} route / ${ledgerRead.clientsDeclared} client`);
+  // Counted off the fixture SOURCE, not off the parse: a denominator that agrees with the
+  // numerator proves nothing on its own — both come from the same reader. This is the one
+  // count in the pair that a broken reader cannot move.
+  check('parseLedgerSource', 'and it equals every `client:` the source writes', 'partition',
+    ledgerSource.match(/client\s*:/g).length, ledgerRead.clientsDeclared);
 
   // ---- A PARTIAL LEDGER READ MUST SAY SO (#9896) ----------------------------
   // The negative half of the pair above: the same recognizer over a ledger carrying one
@@ -1788,13 +1886,25 @@ function selfTest() {
   check('parseLedgerSource', 'the narrow population is UNCHANGED — this reports, it does not widen', 'row count', 2, partial.rows.length);
   check('parseLedgerSource', 'a backtick-quoted `client:` costs the row its binding, not its seat', 'null client',
     null, partial.rows.find((r) => r.route.endsWith('/audit'))?.client);
-  check('parseLedgerSource', 'every declined spelling is counted — 2 route, 1 client', 'declined', 3, partial.declined.length);
-  check('parseLedgerSource', 'the denominator is what the FILE declared, not what was read', '4 route / 2 client',
-    '4 route / 2 client', `${partial.routesDeclared} route / ${partial.clientsDeclared} client`);
-  // ⚠️ Read that `2` honestly: the backtick row on line 3 declares a `client:` too, and it
-  // is counted in NEITHER column — a declined route takes its client out of the file with
-  // it, and the `route:` arm of the verdict is what reports that row. The client column
-  // answers "of the rows I read, how many bindings did I lose", nothing wider.
+  check('parseLedgerSource', 'every unread spelling is counted — 2 route, 2 client', 'declined', 4, partial.declined.length);
+  check('parseLedgerSource', 'the denominator is what the FILE declared, not what was read', '4 route / 3 client',
+    '4 route / 3 client', `${partial.routesDeclared} route / ${partial.clientsDeclared} client`);
+  // ⚠️ That `3` read `2` until #10636, and the missing one is this fixture's own line 3: the
+  // backtick-routed row declares `client: 'i18n.getLocales'` in the very quote the recognizer
+  // reads, on a row that never became a row — so BOTH row-relative terms of the denominator
+  // missed it, and the file declared a value that left the count without a word. It is now
+  // counted and NAMED, billed to no row, which is the distinction the window rule in
+  // `parseLedgerSource` is actually about. The client column therefore answers the same
+  // question the route column does: of everything the FILE declares, how much was read.
+  check('parseLedgerSource', 'the residue is named on its own line, and says why it is there', 'line 3 unclaimed client',
+    true, partial.declined.some((d) => d.key === 'client' && d.line === 3
+      && d.text === "client: 'i18n.getLocales' (no row read it)"));
+  // The partition for the client column, the same shape the `route:` one below has: every
+  // `client:` the fixture writes — in any quote, on a row or not — is either read as a
+  // binding or named as unread. Off the SOURCE, so it cannot agree with a broken counter.
+  check('parseLedgerSource', 'read + named accounts for every declared `client:`', 'partition',
+    partialSource.match(/client\s*:/g).length,
+    partial.rows.filter((r) => r.client).length + partial.declined.filter((d) => d.key === 'client').length);
   check('parseLedgerSource', 'each declined entry NAMES itself, with its line', 'line 3 backtick route',
     true, partial.declined.some((d) => d.key === 'route' && d.line === 3 && d.text.includes('GET /api/v1/i18n/locales')));
   check('parseLedgerSource', 'the double-quoted route is named too', 'line 4 double-quoted route',
@@ -1910,6 +2020,96 @@ function selfTest() {
     `${nonLiteralClient.routesDeclared} route / ${nonLiteralClient.clientsDeclared} client / ${nonLiteralClient.declined.length} declined`);
   check('parseLedgerSource', 'and the declined entry is the CLIENT one', 'client', 'client',
     nonLiteralClient.declined[0]?.key);
+
+  // ---- A DECLARED `client:` ON A ROW THAT WAS NEVER ASSEMBLED (#10636) ------
+  // The residue #10500 left. Both terms of `clientsDeclared` were row-relative, so a
+  // CORRECTLY single-quoted `client:` on a row whose `route:` could not be read was in
+  // neither: its row never became a row, and its own spelling is the one the recognizer
+  // reads, so nothing declined it. Measured on `ba2d8d4730` — this exact shape, appended to
+  // `i18n-route-ledger.ts`, reported `3 of 3` declared `client:` values on a file declaring
+  // four. The row DOES land in a verdict after #10500 (its `route:` is named as unread), so
+  // what was wrong here is a sub-count, not a silence — and a denominator that omits a
+  // declaration renders a partial read as more complete than it is.
+  const orphanSource = [
+    // The reject side lives on line 1, in the spelling that makes it hostile: a
+    // literal-union TYPE member opens with the very quote this counter reads, so the quote
+    // test alone would swallow it and `typeDeclRegions` is what keeps it out.
+    "export interface Entry { route: string; client: 'i18n.getLocales' | 'i18n.getPlurals' }",
+    'export const L = [',
+    "  { route: 'GET /api/v1/i18n/locales', family: 'i18n', disposition: 'sdk', client: 'i18n.getLocales' },",
+    "  { route: I18N_BASE + '/plurals', family: 'i18n', disposition: 'sdk', client: 'i18n.getPlurals' },",
+    '];',
+  ].join('\n');
+  const orphan = parseLedgerSource(orphanSource);
+  check('parseLedgerSource', 'a declared `client:` whose row was never assembled is COUNTED',
+    'declared', '2 route / 2 client / 2 declined',
+    `${orphan.routesDeclared} route / ${orphan.clientsDeclared} client / ${orphan.declined.length} declined`);
+  check('parseLedgerSource', 'the narrow population is UNCHANGED — this reports, it does not widen', 'row count',
+    1, orphan.rows.length);
+  check('parseLedgerSource', 'and the value NAMES itself, with its line and why it is there', 'line 4 i18n.getPlurals',
+    "line 4 client: 'i18n.getPlurals' (no row read it)",
+    orphan.declined.filter((d) => d.key === 'client').map((d) => `line ${d.line} ${d.text}`).join(' | '));
+  // THE REJECT SIDE, asserted positively (#10500's discipline, and the way a fix here goes
+  // wrong). Two ways to say it, because "no extra declined" alone would also pass if the
+  // sweep had stopped working altogether.
+  check('parseLedgerSource', 'a literal-union `client:` TYPE member is not billed as a declaration',
+    'no line-1 member in the declined list', false, orphan.declined.some((d) => d.line === 1));
+  const orphanNoInterface = parseLedgerSource(orphanSource.split('\n').slice(1).join('\n'));
+  check('parseLedgerSource', 'and deleting the interface changes NOTHING — it contributed no count',
+    'declared', '2 route / 2 client / 2 declined',
+    `${orphanNoInterface.routesDeclared} route / ${orphanNoInterface.clientsDeclared} client / ${orphanNoInterface.declined.length} declined`);
+  // Prose and string payloads are not declarations here either — the sweep reads CODE-ONLY
+  // source, which is exactly what makes a file-wide `client:` count safe when the row-window
+  // comment in `parseLedgerSource` argues it is not.
+  const orphanProse = parseLedgerSource([
+    "// The row whose client: 'i18n.getPlurals' we discussed is not declared anywhere.",
+    "const msg = 'client: i18n.getPlurals';",
+    'export const L = [',
+    "  { route: 'GET /api/v1/i18n/locales', family: 'i18n', disposition: 'sdk', client: 'i18n.getLocales' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `client:` in prose or a string payload is not a declaration', 'declined',
+    0, orphanProse.declined.length);
+  check('parseLedgerSource', 'and never reaches the denominator', '1 route / 1 client',
+    '1 route / 1 client', `${orphanProse.routesDeclared} route / ${orphanProse.clientsDeclared} client`);
+  // A value a row window DID claim is not billed a second time — including the MIS-BOUND one
+  // the steal fixture above characterises. That one is read, wrongly, and the `route:` arm
+  // carries its verdict; counting it again here would report it as unread as well.
+  check('parseLedgerSource', 'a claimed `client:` is never counted twice', 'claimed once',
+    '1 client / 0 unread client',
+    `${steal.clientsDeclared} client / ${steal.declined.filter((d) => d.key === 'client').length} unread client`);
+  // THE SAME RESIDUE ON THE OTHER QUOTES, closed by the same sweep. A `client:` in a
+  // spelling the recognizer declines is only ever looked for INSIDE a row window, so one
+  // sitting before the first assembled row — or in the gap a truncated window leaves — was
+  // missed for the same reason the single-quoted one was. The sweep keys on "no row claimed
+  // it" rather than on the quote, so it does not have to know which of the two it is looking
+  // at, and a third spelling arriving tomorrow needs no third rule.
+  const orphanTail = parseLedgerSource([
+    'export const L = [',
+    "  { route: I18N_BASE + '/plurals', family: 'i18n', disposition: 'sdk', client: `i18n.getPlurals` },",
+    "  { route: 'GET /api/v1/i18n/locales', family: 'i18n', disposition: 'sdk', client: 'i18n.getLocales' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a DECLINED `client:` outside every row window is counted too', 'declared',
+    '2 route / 2 client / 2 declined',
+    `${orphanTail.routesDeclared} route / ${orphanTail.clientsDeclared} client / ${orphanTail.declined.length} declined`);
+  check('parseLedgerSource', 'and it names itself, on its own line', 'line 2 backtick client', true,
+    orphanTail.declined.some((d) => d.key === 'client' && d.line === 2 && d.text.includes('i18n.getPlurals')));
+  // The verdict a reader actually sees carries both halves.
+  const orphanCov = bridgeCoverageFrom([{ file: 'g-route-ledger.ts', ...orphan }], ['/api/v1/i18n/locales']);
+  check('bridgeCoverageFrom', 'the verdict counts the client column over what the FILE declares', '1 of 2',
+    true, orphanCov.brokenScan.some((v) => v.includes('1 of 2 declared `client:`')));
+  check('bridgeCoverageFrom', 'and NAMES the declared value no row read', 'i18n.getPlurals',
+    true, orphanCov.brokenScan.some((v) => v.includes("client: 'i18n.getPlurals' (no row read it)")));
+  // …and the correctly spelled twin still carries none: this cannot false-red an accurate
+  // ledger, which is the failure mode a naive file-wide `client:` count would have had on
+  // all seven of today's ledgers at once.
+  const orphanTwin = parseLedgerSource(orphanSource.replace("I18N_BASE + '/plurals'", "'GET /api/v1/i18n/plurals'"));
+  check('parseLedgerSource', 'the single-quoted twin declares the same two and declines nothing',
+    'declared', '2 route / 2 client / 0 declined',
+    `${orphanTwin.routesDeclared} route / ${orphanTwin.clientsDeclared} client / ${orphanTwin.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and carries no verdict', 'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'g-route-ledger.ts', ...orphanTwin }], ['/api/v1/i18n/locales', '/api/v1/i18n/plurals']).brokenScan.length);
 
   // Comments and string payloads are not declarations. `runtime/src/route-ledger.ts` carries
   // the live instance of the first ("It never named a mounted route: the branch"), which is
