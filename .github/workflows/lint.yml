@@ -198,6 +198,45 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # The comment-mask CORPUS sweep (#10640) — the other instrument for the
+      # module the two gates above delegate "is this span a comment, or code?"
+      # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
+      # down; this parses every .{ts,tsx,mts,cts,js,mjs,cjs,jsx} file in the
+      # tree with @typescript-eslint/parser and diffs its comment ranges
+      # against the mask's, byte for byte. Neither subsumes the other, and that
+      # is measured in both directions on this tree rather than assumed:
+      # deleting the `{` counting inside `${...}` fails a pinned case and the
+      # sweep reads 0 disagreements over 4,741 files (the tree does not write
+      # that shape), while dropping `return` from REGEX_AFTER_KEYWORD passes all
+      # 23 pinned cases and the sweep names check-test-source-alias.mjs, where
+      # `return /(^|[^a-z])dist\//` is written today.
+      # The defect this would have caught shipped: 16 files disagreeing, 15 of
+      # them reading commented-out text as live code, 10,252 comment bytes in
+      # one file — and the instrument that found it lived in an agent's
+      # scratchpad, which is why re-deriving it was impossible until this file.
+      # WHY A HARD GATE ON EVERY PR, and not an on-demand flag: the sweep's
+      # verdict depends on the CORPUS as much as on the masker, so a PR that
+      # writes a shape the mask reads wrong turns ~20 source-scanning gates
+      # into liars on that file, on a PR that never touched the masker. That
+      # arrival is not detectable by any convention a human or an agent has to
+      # remember at the right moment — the failure mode this repo has already
+      # paid for at #4690 and again here.
+      # WHY A STEP AND NOT A JOB: a new job's `name:` is a required-context
+      # contract (scripts/check-required-contexts.mjs) that only a
+      # maintainer-present Settings change can enrol, and an unenrolled job is
+      # an advisory gate — #5617 verbatim. This job is already required.
+      # Invoked as `node` rather than `pnpm check:*` for the same reason as the
+      # other `node scripts/…` steps in this lane: that alias is a line in root
+      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # Runs its own comparator self-test first — 12 cases proving the
+      # comparison can still REPORT, because "0 files disagree" and "the
+      # comparison is broken" otherwise print the same line.
+      # Cost, measured on a contended 4-vCPU container: 4,741 files, 72 MB of
+      # source, 45–48 s, of which the parser is 45 s. The step prints CI's own
+      # number on every run.
+      - name: Comment mask agrees with a real parser over the whole corpus
+        run: node scripts/check-comment-mask-corpus.mjs
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the

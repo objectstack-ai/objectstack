@@ -372,8 +372,8 @@ async function main(argv) {
       console.error(`      ${row.firstDivergence.excerpt}`);
     }
   }
-  const shown = unparseable.length + disagreements.length;
-  if (shown > ROW_LIMIT * 2) console.error(`  ... and ${shown - ROW_LIMIT * 2} more`);
+  const suppressed = Math.max(0, unparseable.length - ROW_LIMIT) + Math.max(0, disagreements.length - ROW_LIMIT);
+  if (suppressed) console.error(`  ... and ${suppressed} more (the counts below are over ALL files, not just the rows printed)`);
 
   if (disagreements.length || unparseable.length) {
     console.error(
