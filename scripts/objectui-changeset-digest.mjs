@@ -1190,6 +1190,12 @@ function selfTest() {
       '.github/workflows/y.yml': 'on: push\n',
     });
     const head = g('rev-parse', 'HEAD').trim();
+    // A real objectui checkout has a remote-tracking main, and since #10495 the
+    // bump asks whether the revision it is pinning is reachable from it. Without
+    // this ref every drive below would take the "cannot answer" path and bury
+    // the assertions it is here to make under reachability warnings — a fixture
+    // that is unrealistic in exactly the dimension a later reader would trust.
+    g('update-ref', 'refs/remotes/origin/main', head);
 
     // --- a "framework" root without pre.json (launch window, no RC) ---
     const fwPlain = join(tmp, 'fw-plain');
@@ -2232,6 +2238,9 @@ function selfTest() {
     const c6sink = commit6('feat(core): third — the future sink (#4003)', cs6(3));
     const c6four = commit6('feat(core): fourth (#4004)', cs6(4));
     const c6to = commit6('feat(core): fifth (#4005)', cs6(5));
+    // As above (#10495): keep this fixture's truncation assertions independent
+    // of the reachability report by giving it the ref a real checkout has.
+    g6('update-ref', 'refs/remotes/origin/main', c6to);
     const shallowFile = join(ui6, '.git', 'shallow');
 
     const whole = buildDigest({
@@ -2470,6 +2479,218 @@ function selfTest() {
     // Leave the fixture complete, so nothing added after this group inherits a
     // truncated tree by accident.
     rmSync(shallowFile, { force: true });
+
+    // ---- #10495: is the revision being PINNED actually on objectui main? ----
+    // `bump-objectui.sh` pins `git rev-parse HEAD` of the operator's checkout.
+    // That answers "what is checked out", never "is it on main". Measured on a
+    // fresh --no-tags clone of objectui, 2026-08-21: 941 remote branches, 118
+    // branch tips not reachable from main, 291 commits present and not on main.
+    // The release cut re-asks the question and fails closed (#9450 / PR #10494),
+    // but only at RC time — so in between a non-main pin merges and
+    // `pnpm sdui:manifest` ratchets spec↔registry parity against it.
+    //
+    // The producer half is a WARNING, not a gate: the script is deliberately
+    // usable offline and `origin/main` is only as fresh as the last fetch. So
+    // every case below asserts what it SAYS, and that it still exits 0 and
+    // still writes the pin. Three answers are pinned, never two — "cannot
+    // answer" must not borrow the wording of either verdict.
+    const mkFramework = (name, pinSha) => {
+      const dir = join(tmp, name);
+      mkdirSync(join(dir, 'scripts'), { recursive: true });
+      mkdirSync(join(dir, '.changeset'), { recursive: true });
+      writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
+      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
+        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
+      }
+      return dir;
+    };
+    // Offline by construction — a self-test must never reach the network.
+    const runBump = (fwDir, uiRoot, args) =>
+      spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), ...args], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          OBJECTUI_ROOT: uiRoot,
+          OBJECTUI_NO_DEEPEN: '1',
+          GIT_TERMINAL_PROMPT: '0',
+        },
+      });
+    const mkUi = (name) => {
+      const dir = join(tmp, name);
+      mkdirSync(join(dir, '.changeset'), { recursive: true });
+      const gg = (...args) => git(dir, args);
+      gg('init', '-q', '-b', 'main');
+      gg('config', 'user.email', 'selftest@objectstack.ai');
+      gg('config', 'user.name', 'self test');
+      gg('config', 'commit.gpgsign', 'false');
+      let n = 0;
+      const c = (subject) => {
+        n += 1;
+        writeFileSync(join(dir, `src${n}.ts`), `${n}\n`);
+        writeFileSync(
+          join(dir, '.changeset', `entry-${n}.md`),
+          `---\n"@object-ui/core": patch\n---\n\n${subject}\n`,
+        );
+        gg('add', '-A');
+        gg('commit', '-q', '-m', subject);
+        return gg('rev-parse', 'HEAD').trim();
+      };
+      return { dir, gg, c };
+    };
+
+    const uiR = mkUi('objectui-reach');
+    const rBase = uiR.c('chore: base');
+    const rMain = uiR.c('feat(core): the commit main really has');
+    uiR.gg('update-ref', 'refs/remotes/origin/main', rMain);
+    uiR.gg('checkout', '-q', '-b', 'feature/pushed-never-merged');
+    const rPushed = uiR.c('feat(core): on a pushed branch that never merged');
+    uiR.gg('update-ref', 'refs/remotes/origin/feature/pushed-never-merged', rPushed);
+    uiR.gg('checkout', '-q', 'main');
+    uiR.gg('checkout', '-q', '-b', 'wip/local-only');
+    const rLocal = uiR.c('feat(core): never pushed anywhere');
+    uiR.gg('checkout', '-q', 'main');
+
+    // R1 — ON main. The control: a check that warns about everything proves
+    // nothing, and a bump on the healthy path must stay quiet.
+    const r1 = runBump(mkFramework('fw-reach-main', rBase), uiR.dir, ['--no-commit', rMain]);
+    check(
+      '#10495 R1 a pin that IS on main raises no warning of any kind',
+      r1.status === 0 &&
+        !r1.stderr.includes('COULD NOT DETERMINE') &&
+        !r1.stderr.includes('is NOT reachable from origin/main'),
+      `status=${r1.status}\nSTDERR:${r1.stderr}`,
+    );
+    check(
+      '#10495 R1b … and the line that prints anyway STATES the answer, so "checked and fine" is not inferred from silence',
+      r1.stdout.includes('(on origin/main)'),
+      r1.stdout,
+    );
+
+    // R2 — pushed, but on a branch that never merged. The 118-branch-tip case.
+    const fwPushed = mkFramework('fw-reach-pushed', rBase);
+    const r2 = runBump(fwPushed, uiR.dir, ['--no-commit', rPushed]);
+    check(
+      '#10495 R2 a pin that is NOT on main warns, and NAMES the branch it is on',
+      r2.stderr.includes('is NOT reachable from origin/main') &&
+        r2.stderr.includes('origin/feature/pushed-never-merged'),
+      r2.stderr,
+    );
+    check(
+      '#10495 R2b the warning separates "wrong branch" from "not pushed yet" — the operator does not have to go and look',
+      r2.stderr.includes('It IS pushed, but only onto branch(es) that have not merged') &&
+        !r2.stderr.includes('has not been pushed to objectui'),
+      r2.stderr,
+    );
+    check(
+      '#10495 R2c a warning is not a refusal: exit 0, the pin is written, and the summary line carries the verdict',
+      r2.status === 0 &&
+        readFileSync(join(fwPushed, '.objectui-sha'), 'utf8').trim() === rPushed &&
+        r2.stdout.includes('(NOT on origin/main)'),
+      `status=${r2.status}\nSTDOUT:${r2.stdout}`,
+    );
+    check(
+      '#10495 R2d the warning is recalled on the LAST line of the run, so it cannot scroll away',
+      r2.stdout.includes('⚠️ pin is NOT on objectui origin/main, see above'),
+      r2.stdout,
+    );
+
+    // R3 — the card's own shape, driven through the FRONT DOOR: no argument at
+    // all, `git rev-parse HEAD`, with a feature branch checked out.
+    uiR.gg('checkout', '-q', 'wip/local-only');
+    const r3 = runBump(mkFramework('fw-reach-local', rBase), uiR.dir, ['--no-commit']);
+    uiR.gg('checkout', '-q', 'main');
+    check(
+      '#10495 R3 a plain `bump-objectui.sh` with a feature branch checked out warns — the defect, through the default path',
+      r3.status === 0 &&
+        r3.stderr.includes('is NOT reachable from origin/main') &&
+        r3.stderr.includes(rLocal.slice(0, 12)),
+      `status=${r3.status}\nSTDERR:${r3.stderr}`,
+    );
+    check(
+      '#10495 R3b a LOCAL-only commit is reported as never pushed, not as an unmerged branch',
+      r3.stderr.includes('wip/local-only') &&
+        r3.stderr.includes('on remote branches: none') &&
+        r3.stderr.includes('has not been pushed to objectui') &&
+        !r3.stderr.includes('It IS pushed'),
+      r3.stderr,
+    );
+
+    // R4 — STATE 3, cause 1: the checkout cannot answer the question at all.
+    // Must not be dressed as either verdict.
+    const uiNo = mkUi('objectui-no-origin-main');
+    const noBase = uiNo.c('chore: base');
+    const noHead = uiNo.c('feat(core): tip');
+    const r4 = runBump(mkFramework('fw-reach-no-origin', noBase), uiNo.dir, ['--no-commit', noHead]);
+    check(
+      '#10495 R4 no origin/main → says it COULD NOT DETERMINE, and names that as the reason',
+      r4.status === 0 &&
+        r4.stderr.includes('COULD NOT DETERMINE') &&
+        r4.stderr.includes("has no 'origin/main' ref"),
+      `status=${r4.status}\nSTDERR:${r4.stderr}`,
+    );
+    check(
+      '#10495 R4b unanswered is NOT a false alarm and NOT a pass — it borrows neither verdict',
+      !r4.stderr.includes('is NOT reachable from origin/main') &&
+        !r4.stdout.includes('(on origin/main)') &&
+        r4.stdout.includes('(reachability UNKNOWN)'),
+      `STDOUT:${r4.stdout}\nSTDERR:${r4.stderr}`,
+    );
+
+    // R5 — STATE 3, cause 2: the object is absent. Two git behaviours make this
+    // reachable and make 128 the thing that must not be read as "no"; both are
+    // MEASURED here rather than asserted in prose, so a future git that changes
+    // either one fails this test instead of silently flipping the branch taken.
+    const uiMiss = mkUi('objectui-missing-object');
+    const missBase = uiMiss.c('chore: base');
+    uiMiss.gg('update-ref', 'refs/remotes/origin/main', missBase);
+    const missHead = uiMiss.c('feat(core): tip whose object we are about to delete');
+    rmSync(join(uiMiss.dir, '.git', 'objects', missHead.slice(0, 2), missHead.slice(2)), {
+      force: true,
+    });
+    const revParseMissing = spawnSync('git', ['-C', uiMiss.dir, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    });
+    check(
+      '#10495 R5a `git rev-parse HEAD` exits 0 for a commit whose OBJECT is gone — so NEW_SHA arriving is no proof of presence',
+      revParseMissing.status === 0 && revParseMissing.stdout.trim() === missHead,
+      `status=${revParseMissing.status} stdout=${JSON.stringify(revParseMissing.stdout)}`,
+    );
+    const isAncestorMissing = spawnSync(
+      'git',
+      ['-C', uiMiss.dir, 'merge-base', '--is-ancestor', missHead, 'origin/main'],
+      { encoding: 'utf8' },
+    );
+    check(
+      '#10495 R5b `merge-base --is-ancestor` exits 128 on an absent object — an ERROR, not the "no" that 1 means',
+      isAncestorMissing.status === 128,
+      `status=${isAncestorMissing.status} stderr=${isAncestorMissing.stderr}`,
+    );
+    const r5 = runBump(mkFramework('fw-reach-missing-object', missBase), uiMiss.dir, ['--no-commit']);
+    check(
+      '#10495 R5c an absent object is reported as UNDETERMINED and says which failure it was',
+      r5.stderr.includes('COULD NOT DETERMINE') &&
+        r5.stderr.includes('NOT PRESENT') &&
+        !r5.stderr.includes('is NOT reachable from origin/main'),
+      `status=${r5.status}\nSTDERR:${r5.stderr}`,
+    );
+
+    // R6 — the branch list is CAPPED, and a cap that fires says so with the real
+    // count. A capped list that reads as complete is the same defect class as
+    // the `head -40` this file's changeset list used to truncate with (#4731).
+    const uiMany = mkUi('objectui-many-branches');
+    const manyBase = uiMany.c('chore: base');
+    const manyMain = uiMany.c('feat(core): main tip');
+    uiMany.gg('update-ref', 'refs/remotes/origin/main', manyMain);
+    uiMany.gg('checkout', '-q', '-b', 'feature/many-0');
+    const manySha = uiMany.c('feat(core): a commit 13 local branches contain');
+    for (let i = 1; i <= 12; i += 1) uiMany.gg('branch', `dup/branch-${i}`, manySha);
+    uiMany.gg('checkout', '-q', 'main');
+    const r6 = runBump(mkFramework('fw-reach-many', manyBase), uiMany.dir, ['--no-commit', manySha]);
+    check(
+      '#10495 R6 a capped branch list SAYS it is capped, with the real count',
+      r6.stderr.includes('(+3 more; 13 total)'),
+      r6.stderr,
+    );
 
   } finally {
     rmSync(tmp, { recursive: true, force: true });

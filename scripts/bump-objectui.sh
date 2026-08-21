@@ -14,6 +14,14 @@
 #                             # on-demand gate by decision, never a CI job. Needs
 #                             # Playwright chromium. This script prints the reminder.
 #
+# The pin must name a commit that is on objectui MAIN. This script WARNS — it
+# does not refuse — when the revision being pinned is not reachable from the
+# objectui checkout's `origin/main`, and names the branch(es) it IS on. It never
+# fetches for you: `origin/main` is only as fresh as your last fetch and this
+# script stays usable offline. The release cut re-asks the same question against
+# a fresh full clone and REFUSES to cut (#9450). Three answers, never two — a
+# checkout that cannot answer the question says so rather than guessing (#10495).
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -122,15 +130,188 @@ else
   NEW_SHA="$(git -C "$OBJECTUI_ROOT" rev-parse HEAD)"
 fi
 
+# --- Is the revision we are about to pin actually ON objectui main? (#10495) --
+# `rev-parse HEAD` answers "what is checked out", never "is it on main". Bump
+# with a feature branch checked out — or pass a branch name — and the pin names
+# a revision that is not on main, and this script used to report success.
+# Measured on a fresh `--no-tags` clone of objectui, 2026-08-21: 941 remote
+# branches, 118 branch tips not reachable from `main`, 291 commits present and
+# not on main. Any of those is one `rev-parse HEAD` away from being the pin.
+#
+# A WARNING, NOT A GATE — deliberately, and the split is with #9450 / PR #10494:
+# `.github/workflows/cut-rc.yml` now runs this same predicate against a fresh
+# full clone and refuses to cut. That is the chokepoint that must fail closed.
+# Here it must not: `origin/main` in a local checkout is only as fresh as the
+# last fetch, so hard-failing would reject a legitimately-just-merged commit,
+# and this script is deliberately usable offline and on a machine that cannot
+# run the full procedure (same rationale as `print_sdui_next_step`). So: say it
+# loudly, name the branch it IS on, and let the operator decide. Never fetch on
+# the operator's behalf — unlike the `--unshallow` deepen below, which repairs
+# an input this script is about to DERIVE from, a fetch here would only change
+# the answer to a question the operator is being asked to judge.
+#
+# THREE ANSWERS, NOT TWO. `merge-base --is-ancestor` exits 0 (ancestor), 1 (not
+# an ancestor) and **128 on an absent object** — an error, not a verdict.
+# Measured, git 2.43.0:
+#     git merge-base --is-ancestor <absent-sha> origin/main
+#     fatal: Not a valid commit name <absent-sha>          -> exit 128
+# Reading 128 as "not an ancestor" invents a false alarm; reading anything that
+# is not 1 as "fine" reinstates exactly the silent pass this check exists to
+# remove. A checkout with no `origin/main` cannot answer the question at all.
+# So the exits are split three ways, and the third says what it could not
+# determine and why — it never borrows the wording of either verdict.
+#
+# The absent-object case is reachable from the DEFAULT path, not just from an
+# explicit argument. Measured, git 2.43.0: `git rev-parse HEAD` exits **0** and
+# prints the sha even when that commit object is missing from the object store —
+# it resolves the ref, it does not read the object. So NEW_SHA arriving here is
+# not proof the object is present, and presence is asked as its own question.
+REACH_TAG=""      # parenthetical for the one line that is printed anyway
+REACH_RECALL=""   # tail recall, so a warning cannot scroll out of the run
+
+# Render at most 10 ref names. A cap that fires SAYS SO, with the real count —
+# a capped list that reads as complete is this file's other standing lesson
+# (CONSOLE_CHANGES_MAX, #4731).
+reach_ref_list() {
+  local n="$#"
+  if (( n == 0 )); then printf 'none'; return 0; fi
+  local out
+  out="$(printf '%s, ' "${@:1:10}")"
+  out="${out%, }"
+  if (( n > 10 )); then out="${out} … (+$(( n - 10 )) more; ${n} total)"; fi
+  printf '%s' "$out"
+}
+
+report_objectui_reachability() {
+  local sha="$1"
+  local short="${sha:0:12}"
+  local rc=0
+
+  # Q1 — can this checkout answer the question AT ALL? Asked first because the
+  # later questions are meaningless without it: with no origin/main,
+  # `--is-ancestor` would report "the pin left main", which is this check's own
+  # overclaim wearing a new message.
+  if ! git -C "$OBJECTUI_ROOT" rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    REACH_TAG=" (reachability UNKNOWN)"
+    REACH_RECALL=" — ⚠️ pin reachability UNKNOWN, see above"
+    {
+      echo
+      echo "⚠️  COULD NOT DETERMINE whether ${short} is on objectui main."
+      echo "    ${OBJECTUI_ROOT} has no 'origin/main' ref, so the question cannot be asked"
+      echo "    in this checkout at all."
+      echo "    This is NOT 'the pin is fine' and NOT 'the pin left main'. It is unanswered,"
+      echo "    and the pin is being written anyway."
+      echo "    To make it answerable here:  git -C ${OBJECTUI_ROOT} fetch origin main"
+      echo "    (not run for you — this script stays usable offline.)"
+      echo "    The release cut re-asks it against a fresh full clone and fails closed (#9450)."
+      echo
+    } >&2
+    return 0
+  fi
+
+  # Q2 — is the object even present? `--is-ancestor` cannot return a verdict for
+  # an object it cannot read; it exits 128 there, and 128 must not be read as
+  # "no". Asked separately so the report can name WHICH failure this was.
+  if ! git -C "$OBJECTUI_ROOT" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+    REACH_TAG=" (reachability UNKNOWN)"
+    REACH_RECALL=" — ⚠️ pin reachability UNKNOWN, see above"
+    {
+      echo
+      echo "⚠️  COULD NOT DETERMINE whether ${short} is on objectui main."
+      echo "    The commit object is NOT PRESENT in ${OBJECTUI_ROOT}"
+      echo "    ('git cat-file -e ${short}^{commit}' exits 128). A ref can name a commit"
+      echo "    whose object is missing — 'git rev-parse' resolves the ref without reading"
+      echo "    the object — so this is reachable even from a plain HEAD bump."
+      echo "    'merge-base --is-ancestor' exits 128 here too: an error, not a verdict."
+      echo "    This is NOT 'the pin is fine' and NOT 'the pin left main'. It is unanswered."
+      echo "    Fetch or repair the objectui object store, then re-run this bump."
+      echo
+    } >&2
+    return 0
+  fi
+
+  # Q3 — the verdict. 0 / 1 / anything else, distinguished on purpose.
+  git -C "$OBJECTUI_ROOT" merge-base --is-ancestor "$sha" origin/main 2>/dev/null || rc=$?
+
+  if [[ "$rc" -eq 0 ]]; then
+    # Reachable. No banner — but the line that prints anyway says so, so that
+    # "checked, and fine" is stated rather than inferred from silence.
+    REACH_TAG=" (on origin/main)"
+    return 0
+  fi
+
+  if [[ "$rc" -ne 1 ]]; then
+    REACH_TAG=" (reachability UNKNOWN)"
+    REACH_RECALL=" — ⚠️ pin reachability UNKNOWN, see above"
+    {
+      echo
+      echo "⚠️  COULD NOT DETERMINE whether ${short} is on objectui main."
+      echo "    'git merge-base --is-ancestor ${short} origin/main' exited ${rc}; only 0"
+      echo "    (is an ancestor) and 1 (is not) are verdicts. Anything else is an error,"
+      echo "    and is being reported as one rather than folded into either answer."
+      echo "    This is NOT 'the pin is fine' and NOT 'the pin left main'. It is unanswered."
+      echo
+    } >&2
+    return 0
+  fi
+
+  # rc == 1: a real verdict, and the one this card exists for.
+  REACH_TAG=" (NOT on origin/main)"
+  REACH_RECALL=" — ⚠️ pin is NOT on objectui origin/main, see above"
+
+  # Enumerated only on this branch: with ~941 branches a --contains walk is not
+  # free, and the healthy path must not pay for it.
+  local -a local_refs=() remote_refs=()
+  mapfile -t local_refs < <(
+    git -C "$OBJECTUI_ROOT" for-each-ref --contains "$sha" --format='%(refname:short)' refs/heads 2>/dev/null || true
+  )
+  mapfile -t remote_refs < <(
+    git -C "$OBJECTUI_ROOT" for-each-ref --contains "$sha" --format='%(refname:short)' refs/remotes 2>/dev/null || true
+  )
+
+  local main_tip
+  main_tip="$(git -C "$OBJECTUI_ROOT" log -1 --format='%h, committed %cr' origin/main 2>/dev/null || echo 'unknown')"
+
+  {
+    echo
+    echo "⚠️  objectui pin ${short} is NOT reachable from origin/main in"
+    echo "    ${OBJECTUI_ROOT} — it names a revision that is not on objectui main."
+    echo "    on local branches : $(reach_ref_list ${local_refs[@]+"${local_refs[@]}"})"
+    echo "    on remote branches: $(reach_ref_list ${remote_refs[@]+"${remote_refs[@]}"})"
+    # Which of the two situations this is, said out loud, so the operator does
+    # not have to go and look: a branch that never merged and a commit that was
+    # never pushed take different remedies.
+    if (( ${#remote_refs[@]} > 0 )); then
+      echo "    → It IS pushed, but only onto branch(es) that have not merged into main."
+    elif (( ${#local_refs[@]} > 0 )); then
+      echo "    → It is on a LOCAL branch only — this commit has not been pushed to objectui."
+    else
+      echo "    → No branch in this checkout contains it (detached HEAD on a discarded commit?)."
+    fi
+    echo "    Or your origin/main is simply STALE: it points at ${main_tip}."
+    echo "      Refresh it with:  git -C ${OBJECTUI_ROOT} fetch origin main"
+    echo "      (not run for you — this script stays usable offline, and the answer to"
+    echo "       this question is yours to judge.)"
+    echo "    Pinning it anyway. Downstream: the release cut re-asks this against a fresh"
+    echo "    full clone and REFUSES to cut (#9450), so a bad pin surfaces at RC time at"
+    echo "    the earliest; until then 'pnpm sdui:manifest' would ratchet spec↔registry"
+    echo "    declaration parity against a tree that is not on main (ADR-0082 D4)."
+    echo
+  } >&2
+  return 0
+}
+
+report_objectui_reachability "$NEW_SHA"
+
 OLD_SHA="$(cat "${FRAMEWORK_ROOT}/.objectui-sha" 2>/dev/null | tr -d '[:space:]' || echo '<none>')"
 
 if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
-  echo "→ Already at ${NEW_SHA:0:12}, nothing to do."
+  echo "→ Already at ${NEW_SHA:0:12}${REACH_TAG}, nothing to do."
   exit 0
 fi
 
 echo "$NEW_SHA" > "${FRAMEWORK_ROOT}/.objectui-sha"
-echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}"
+echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
 
 SHORT="${NEW_SHA:0:12}"
 SUBJECT_LINE="$(git -C "$OBJECTUI_ROOT" log -1 --format=%s "$NEW_SHA")"
@@ -299,7 +480,7 @@ print_sdui_next_step() {
 }
 
 if [[ "$NO_COMMIT" -eq 1 ]]; then
-  echo "→ --no-commit: leaving files unstaged."
+  echo "→ --no-commit: leaving files unstaged${REACH_RECALL}."
   print_sdui_next_step
   exit 0
 fi
@@ -311,5 +492,5 @@ git -C "$FRAMEWORK_ROOT" commit -m "chore: bump objectui to ${SHORT}
 ${SUBJECT_LINE}
 
 objectui@${NEW_SHA}" -- .objectui-sha ${CS_FILE:+"$CS_FILE"}
-echo "✓ Committed. Push with: git push"
+echo "✓ Committed${REACH_RECALL}. Push with: git push"
 print_sdui_next_step
