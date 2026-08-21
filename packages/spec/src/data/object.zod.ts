@@ -876,7 +876,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     field: z.string().describe('Timestamp field the TTL is measured from (e.g. created_at, expires_at).'),
     expireAfter: lifecycleDuration('ttl.expireAfter').describe('Rows expire this long after `field` and are deleted by the Reaper.'),
     onlyWhen: lifecycleOnlyWhenSchema.optional().describe(
-      'Row filter the TTL reap applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { revoked_at: { $null: true } }). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
+      'Row filter the TTL reap applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { revoked_at: { $null: true } }). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage, which DROPs whole shards, and with archive, which selects rows by the ttl cutoff alone and does not apply this filter.',
     ),
   }).optional().describe('Per-row TTL auto-expiry (transient/event classes).'),
   storage: strictObject({
