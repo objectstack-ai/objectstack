@@ -243,15 +243,23 @@ describe('the other direction — a non-entitled caller is still refused', () =>
     // "the gate said no".
     expect(res.status).toBe(401);
 
-    // ⚠️ Measured, and deliberately not dressed up: this refusal carries an
-    // EMPTY body — no ADR-0112 envelope, no `code`. It comes from the vendor's
-    // `adminMiddleware` (`APIError.fromStatus('UNAUTHORIZED')`), which runs
-    // before this endpoint's handler and is byte-identical on stock
-    // better-auth 1.7.1 for both `/admin/impersonate-user` and
-    // `/admin/set-role`. This card changes the AUTHORIZATION predicate, not the
-    // authentication middleware, so the shape is pinned as it is rather than
-    // asserted to be something it is not.
-    expect(await res.text()).toBe('');
+    // ⚠️ This assertion USED to read `expect(await res.text()).toBe('')` — the
+    // vendor's `adminMiddleware` (`APIError.fromStatus('UNAUTHORIZED')`, no body
+    // argument) refused an anonymous caller with the EMPTY STRING under a
+    // `content-type: application/json` header, on every better-auth-native
+    // `/admin/` route. #9968 changed the AUTHORIZATION predicate only and pinned
+    // that shape as it was rather than dressing it up.
+    //
+    // #10349 closed it at the ONE seam every vendor route passes through
+    // (`AuthManager.handleRequest` → `vendor-admin-refusal-envelope.ts`), so the
+    // anonymous refusal now carries the ADR-0112 envelope — `code` AND `status`
+    // — and is byte-identical to what the ObjectStack raw `/admin/*` mounts
+    // answer. Authorization here is still untouched: the 403 assertions above
+    // and the 200 below are unchanged.
+    expect(JSON.parse(await res.text())).toEqual({
+      success: false,
+      error: { code: 'UNAUTHENTICATED', message: 'Sign in first' },
+    });
   });
 
   it('an org owner/admin who is NOT a platform admin is refused', async () => {

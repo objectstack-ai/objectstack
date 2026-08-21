@@ -41,6 +41,21 @@ export type PlatformAdminVerdict =
   | { ok: false; refusal: PlatformAdminRefusal };
 
 /**
+ * The human half of the two refusals, keyed by the status that carries them.
+ *
+ * Lifted out of `judgePlatformAdmin` (whose bytes are unchanged) so the
+ * better-auth-native `/admin/` lane can answer an anonymous caller with the
+ * SAME body rather than a second string that merely looks the same today —
+ * see `vendor-admin-refusal-envelope.ts` (#10349). The machine half is not
+ * duplicated anywhere: it is ADR-0112's own derived-code map,
+ * `standardErrorCodeForHttpStatus`.
+ */
+export const PLATFORM_ADMIN_REFUSAL_MESSAGES: Readonly<Record<401 | 403, string>> = {
+  401: 'Sign in first',
+  403: 'Admin role required',
+};
+
+/**
  * Is this session user a platform admin under ADR-0068 D2?
  *
  * Reads the canonical signals `customSession` contributes — the derived
@@ -82,7 +97,10 @@ export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
       ok: false,
       refusal: {
         status: 401,
-        body: { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } },
+        body: {
+          success: false,
+          error: { code: 'UNAUTHENTICATED', message: PLATFORM_ADMIN_REFUSAL_MESSAGES[401] },
+        },
       },
     };
   }
@@ -92,7 +110,10 @@ export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
       ok: false,
       refusal: {
         status: 403,
-        body: { success: false, error: { code: 'PERMISSION_DENIED', message: 'Admin role required' } },
+        body: {
+          success: false,
+          error: { code: 'PERMISSION_DENIED', message: PLATFORM_ADMIN_REFUSAL_MESSAGES[403] },
+        },
       },
     };
   }

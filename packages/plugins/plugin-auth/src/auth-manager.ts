@@ -30,6 +30,7 @@ import {
   type AuthEventAuditSurface,
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
+import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import {
   ADMIN_SESSION_COOKIE_KEY,
   STOP_IMPERSONATING_PATH,
@@ -3680,10 +3681,30 @@ export class AuthManager {
     // is left with an identity that still occupies the org roster and can no
     // longer sign in. Nothing tells the operator, and there is no way back.
     const endpointPath = this.betterAuthEndpointPath(request);
-    const response =
+    const vendorResponse =
       endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
         ? await this.runSubjectErasureAtomically(runHandler)
         : await runHandler();
+
+    // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
+    // caller through the vendor's `adminMiddleware`
+    // (`APIError.fromStatus('UNAUTHORIZED')`, no body argument), so the refusal
+    // reaches the client as a 401 that announces `application/json` and carries
+    // the EMPTY STRING — no envelope, nothing to branch on. The ObjectStack raw
+    // `/admin/*` mounts answer the identical question with the ADR-0112
+    // envelope and `code: 'UNAUTHENTICATED'` (`platform-admin-gate.ts`), and
+    // which of the two a caller gets depends only on which implementation
+    // happens to serve that route — an implementation detail, not a contract.
+    //
+    // This is the ONE seam every vendor route passes through, which is why the
+    // normalization belongs here and not in ten routes we do not own. It is
+    // scoped to the `/admin/` NAMESPACE (option C): the prefix test costs no new
+    // concept, because this method already discriminates on `endpointPath` twice
+    // above — `STOP_IMPERSONATING_PATH` and `SESSION_ERASURE_PATHS`.
+    //
+    // Status and admission are untouched; see the module header for the three
+    // narrowings and the measurement behind each.
+    const response = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
 
     if (response.status >= 500) {
       try {

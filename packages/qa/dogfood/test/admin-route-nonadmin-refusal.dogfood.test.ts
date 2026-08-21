@@ -75,7 +75,16 @@
 //     bridges while SSO is off). That is what proves the member's 403 is a
 //     gate verdict and not a payload the server rejects for everyone.
 //
-//   `better-auth-gate` (9 routes) — refusal side only, DELIBERATELY. On this
+//   `better-auth-gate` (9 routes) — refusal side only, DELIBERATELY. The
+//     ANONYMOUS half is now the full ADR-0112 pin, identical to the bucket
+//     above — `401` and `code: 'UNAUTHENTICATED'`. It was `[401, 403].includes(
+//     status)` until #10349, because the vendor's `adminMiddleware` answered an
+//     anonymous caller with a bodyless 401 and there was no code to assert;
+//     `AuthManager.handleRequest` now envelopes that refusal at the one seam
+//     every vendor route passes through, so the asymmetry this file used to
+//     DOCUMENT is closed and this bucket pins the closure.
+//
+//     The signed-in-non-admin half stays the vendor's own vocabulary. On this
 //     stack the platform admin is refused these routes too, with the same
 //     `YOU_ARE_NOT_ALLOWED_TO_*` code as the member. That is not a harness
 //     artifact: better-auth's admin plugin authorizes on the legacy
@@ -549,11 +558,23 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
     expect(routes.length, 'no better-auth-gate routes were derived').toBeGreaterThan(0);
 
     for (const route of routes) {
+      // ── #10349: this used to be `[401, 403].includes(anon.status)` ────────
+      //
+      // It had to be, because there was no code to assert: the vendor's
+      // `adminMiddleware` refused an anonymous caller with a bodyless 401 —
+      // `content-type: application/json` and the EMPTY STRING — so this suite
+      // DOCUMENTED the asymmetry against the `objectstack-gate` bucket above
+      // rather than closing it, and nothing tracked closing it.
+      //
+      // `AuthManager.handleRequest` now gives the vendor lane's `/admin/`
+      // refusals the ADR-0112 envelope (`vendor-admin-refusal-envelope.ts`),
+      // so the two buckets answer an anonymous caller identically and this
+      // assertion is the FIX'S OWN falsifiable pin: status AND code, exactly
+      // as the ObjectStack bucket asserts them thirty lines up. Loosening it
+      // back re-opens the gap silently.
       const anon = await fire(route, undefined);
-      expect(
-        [401, 403].includes(anon.status),
-        `${route} anonymous should be refused, got ${anon.status} ${anon.body}`,
-      ).toBe(true);
+      expect(anon.status, `${route} anonymous: ${anon.body}`).toBe(401);
+      expect(anon.code, `${route} anonymous code: ${anon.body}`).toBe('UNAUTHENTICATED');
 
       const member = await fire(route, memberToken);
       expect(
