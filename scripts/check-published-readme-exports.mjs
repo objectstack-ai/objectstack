@@ -279,6 +279,7 @@ import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
 import { isEntrypoint } from './invoked-as.mjs';
+import { createProgramChecked } from './ts-parse.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -827,7 +828,13 @@ const TS_OPTIONS = {
  * each); one shared program parses them once.
  */
 function typeSurface(absEntries) {
-  const program = ts.createProgram([...absEntries], TS_OPTIONS);
+  // `createProgramChecked` rather than `ts.createProgram`: a Program parks its
+  // syntax errors behind a SECOND call, `getSyntacticDiagnostics()`, which this
+  // gate never made. Every checker answer below — "does this type have that
+  // member?", "what does this module export?" — would then be an answer about a
+  // tree the compiler could not read, shaped exactly like an answer about a
+  // tree it could, and this gate's whole job is to trust those answers.
+  const program = createProgramChecked([...absEntries], TS_OPTIONS);
   const checker = program.getTypeChecker();
   const cache = new Map();
   // Shared by both member questions below, so the "not knowable is never a

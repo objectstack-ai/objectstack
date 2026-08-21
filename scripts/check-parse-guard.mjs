@@ -2,7 +2,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-parse-guard -- every `scripts/**` TypeScript parse goes through ONE module.
+ * check-parse-guard -- every `scripts/**` TypeScript parse goes through ONE module,
+ * and every parse this gate CANNOT reach is counted rather than left unsaid.
  *
  *   node scripts/check-parse-guard.mjs              # scan the tree
  *   node scripts/check-parse-guard.mjs --self-test  # verify the checker itself
@@ -50,23 +51,41 @@
  * string payload. None of those is a call site, and an allowlist to excuse them
  * would be a hole the next such file falls through silently.
  *
- * ## What it deliberately does NOT cover, so the green line does not over-claim
+ * ## All THREE parser entry points, not just the loudest one
  *
- * • **`ts.createProgram`** (`check-published-readme-exports.mjs`). A Program
- *   reports syntax through `getSyntacticDiagnostics()`, a different API with
- *   different failure modes; folding it in here would mean one helper making
- *   two promises. It has the same class of hole and is filed rather than
- *   silently swept in.
- * • **`ts.transpileModule`** (`check-where-matcher-conformance.mjs`). It
- *   reports nothing at all unless `reportDiagnostics: true` is passed -- same
- *   class, third API.
- * • **Outside `scripts/**`.** `packages/lint/src/*.ts`,
- *   `packages/cli/src/utils/detect-free-identifiers.ts`,
- *   `packages/spec/scripts/*.ts` and `packages/lint/scripts/*.mjs` parse too.
- *   They are not covered here for the reason `invoked-as.mjs` gives for its own
- *   `packages/cli` sibling: `scripts/` runs as plain `.mjs` against a possibly
- *   unbuilt tree, and making a published package depend on repo tooling to
- *   answer "did this parse?" trades this bug for a worse one.
+ * `createSourceFile` is one of three ways into the TypeScript parser, and the
+ * other two are quieter. `ts.createProgram` parks syntax errors behind a second
+ * call, `getSyntacticDiagnostics()`; `ts.transpileModule` reports nothing at
+ * all unless `reportDiagnostics: true` is passed, and still hands back an
+ * `outputText` that is not JavaScript. All three are banned here and all three
+ * have a checked counterpart in `ts-parse.mjs`.
+ *
+ * They were covered separately at first, on the reasoning that folding them in
+ * would make one helper carry two promises. What that actually bought was a
+ * green line narrower than it read: this gate said "every TypeScript parse goes
+ * through ts-parse.mjs" while two live gates in the same directory parsed
+ * through neither, and its own header was the only place that said so. A scope
+ * caveat that lives in a header is not enforced by anything, so the caveat is
+ * now a bound this file computes.
+ *
+ * ## What it still does NOT cover -- and now COUNTS instead of leaving unsaid
+ *
+ * Parses outside `scripts/**` are not banned here, for the reason
+ * `invoked-as.mjs` gives for its own `packages/cli` sibling: `scripts/` runs as
+ * plain `.mjs` against a possibly unbuilt tree, and making a PUBLISHED package
+ * depend on repo tooling to answer "did this parse?" trades this bug for a
+ * worse one. Whether the package-side validators want the same REFUSAL at all
+ * is a real question and not this gate's to answer: a `scripts/**` gate audits
+ * a tree its author controls, while a publish-time lint validator is handed
+ * metadata by someone else and may legitimately want to REPORT an unparseable
+ * source rather than end the process.
+ *
+ * What is this gate's to answer is whether its own verdict tells the truth
+ * about its reach. So the out-of-tree population is walked, counted and NAMED
+ * on every run. "120 files covered" reads as a statement about the repository;
+ * "120 files covered, N parses outside my scope, here they are" is the same
+ * measurement without the borrowed authority -- and the number moves when
+ * somebody adds one, which a sentence in a header never does.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -80,11 +99,51 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS = HERE;
 
-/** The one module allowed to call `ts.createSourceFile`. */
+/** The one module allowed to reach the TypeScript parser directly. */
 const PARSER_HOME = join(SCRIPTS, 'ts-parse.mjs');
 
-/** The canonical call, and the only accepted spelling. */
-export const CANONICAL = 'parseSourceFile(fileName, text /*, scriptKind */)';
+/**
+ * The three parser entry points, each with the checked call that replaces it.
+ *
+ * The receiver is deliberately NOT part of any pattern: a gate that renamed its
+ * `typescript` import, or destructured the function, would otherwise walk
+ * straight through. Matching the bare name costs a masked mention in prose,
+ * which is why prose is masked before the scan.
+ */
+export const ENTRY_POINTS = [
+  {
+    spelling: 'createSourceFile',
+    what: 'ts.createSourceFile',
+    why: 'a raw parse whose parseDiagnostics nobody reads',
+    canonical: 'parseSourceFile(fileName, text /*, scriptKind */)',
+  },
+  {
+    spelling: 'createProgram',
+    what: 'ts.createProgram',
+    why: 'a Program whose getSyntacticDiagnostics() nobody calls',
+    canonical: 'createProgramChecked(rootNames, options /*, host */)',
+  },
+  {
+    spelling: 'transpileModule',
+    what: 'ts.transpileModule',
+    why: 'a transpile that reports NOTHING without reportDiagnostics: true',
+    canonical: 'transpileChecked(fileName, text /*, transpileOptions */)',
+  },
+];
+
+/** The canonical `createSourceFile` replacement, kept as its own export. */
+export const CANONICAL = ENTRY_POINTS[0].canonical;
+
+/** One alternation over every banned spelling. Rebuilt from the table above. */
+const SPELLINGS = new RegExp(`\\b(${ENTRY_POINTS.map((e) => e.spelling).join('|')})\\b`, 'g');
+
+/** Build outputs and vendored trees are nobody's source. */
+const SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache', '.git', 'out',
+]);
+
+/** Anything the repo authors and TypeScript can parse. `.d.ts` is generated. */
+const OUTSIDE_EXT = /\.(?:[cm]?[jt]sx?)$/;
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -93,6 +152,27 @@ function walk(dir, out = []) {
     const st = statSync(p);
     if (st.isDirectory()) walk(p, out);
     else if (name.endsWith('.mjs') || name.endsWith('.js') || name.endsWith('.cjs')) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Everything the repo authors OUTSIDE `scripts/**` -- the population this gate
+ * reports on but does not govern.
+ *
+ * Walked from the repository root rather than from a list of directories on
+ * purpose: a list would have to be edited when a new top-level tree appears,
+ * and the failure of an un-edited list is a census that quietly stops counting
+ * a whole directory. That is the same shape of silence this file exists for.
+ */
+function walkOutside(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    if (SKIP_DIRS.has(name) || name.startsWith('.')) continue;
+    const p = join(dir, name);
+    if (p === SCRIPTS) continue; // governed above; not "outside"
+    const st = statSync(p);
+    if (st.isDirectory()) walkOutside(p, out);
+    else if (OUTSIDE_EXT.test(name) && !name.endsWith('.d.ts')) out.push(p);
   }
   return out;
 }
@@ -116,24 +196,54 @@ function lineOf(source, index) {
  */
 export function scanFile(rel, source, { isParserHome = false } = {}) {
   if (isParserHome) return [];
+  // Cheap prefilter. Masking is not free and the out-of-tree census reads every
+  // authored file in the repository; masking cannot INTRODUCE a spelling, so a
+  // source with none is already answered.
+  if (!SPELLINGS.test(source)) {
+    SPELLINGS.lastIndex = 0;
+    return [];
+  }
+  SPELLINGS.lastIndex = 0;
+
   const findings = [];
   const code = codeOnly(source);
 
-  // Any `createSourceFile` -- `ts.createSourceFile(...)`, a destructured
-  // `createSourceFile(...)`, or an aliased `tsc.createSourceFile(...)`. The
-  // receiver is deliberately not part of the pattern: a gate that renamed its
-  // typescript import would otherwise walk straight through.
-  const re = /\bcreateSourceFile\b/g;
   let m;
-  while ((m = re.exec(code))) {
+  while ((m = SPELLINGS.exec(code))) {
+    const entry = ENTRY_POINTS.find((e) => e.spelling === m[1]);
     findings.push({
       rel,
       line: lineOf(source, m.index),
-      what: 'ts.createSourceFile',
-      why: 'a raw parse whose parseDiagnostics nobody reads',
+      what: entry.what,
+      why: entry.why,
+      canonical: entry.canonical,
     });
   }
+  SPELLINGS.lastIndex = 0;
   return findings;
+}
+
+/**
+ * The out-of-tree census: the same scanner, a different verdict.
+ *
+ * Deliberately the SAME `scanFile` the governed half runs. A second scanner for
+ * the reported half would drift from the governed one in the direction that
+ * makes the census read lower than the truth, which is the exact failure this
+ * file is about.
+ *
+ * @param {(abs: string) => string} read  Injected so the self-test can drive
+ *   this over fixtures rather than over whatever today's tree happens to hold.
+ */
+export function censusOutside(files, read, rootFor = (abs) => relative(REPO_ROOT, abs)) {
+  const rows = [];
+  for (const abs of files) {
+    const rel = rootFor(abs);
+    for (const f of scanFile(rel, read(abs))) {
+      rows.push({ ...f, isTest: /\.(?:test|spec|pin\.test)\.[cm]?[jt]sx?$/.test(rel) });
+    }
+  }
+  rows.sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line);
+  return rows;
 }
 
 function main() {
@@ -150,30 +260,65 @@ function main() {
   if (findings.length) {
     console.error(`x  check:parse-guard — ${findings.length} raw TypeScript parse(s) in scripts/:\n`);
     for (const f of findings) console.error(`  ${f.rel}:${f.line}  ${f.what}  — ${f.why}`);
+    const used = ENTRY_POINTS.filter((e) => findings.some((f) => f.what === e.what));
     console.error(
-      `\n    ts.createSourceFile NEVER THROWS. A syntax error, or the wrong`
-        + `\n    ScriptKind, returns a recovered partial tree with the errors parked`
-        + `\n    on parseDiagnostics — so a scan of that tree finds none of what it`
-        + `\n    is looking for and scores the file CLEAN. The gate prints its green`
-        + `\n    line over a file it could not read.`
+      `\n    NONE of the three TypeScript parser entry points THROWS on a source`
+        + `\n    it cannot read. createSourceFile returns a recovered partial tree`
+        + `\n    with the errors parked on parseDiagnostics; createProgram parks`
+        + `\n    them behind a second call, getSyntacticDiagnostics(); transpileModule`
+        + `\n    reports nothing at all without reportDiagnostics: true and still`
+        + `\n    returns an outputText. In every case a scan of the result finds none`
+        + `\n    of what it is looking for and scores the source CLEAN — the gate`
+        + `\n    prints its green line over something it could not read.`
         + `\n`
-        + `\n    Route the parse through the one module that reads them:`
+        + `\n    Route it through the one module that reads them:`
         + `\n`
-        + `\n      import { parseSourceFile } from './ts-parse.mjs';   // '../ts-parse.mjs' from a subdir`
-        + `\n      const sf = ${CANONICAL};`
+        + `\n      import { ${used.map((e) => e.canonical.replace(/\(.*$/, '')).join(', ')} } from './ts-parse.mjs';`
+        + `\n      // '../ts-parse.mjs' from a subdirectory`
+        + used.map((e) => `\n      ${e.canonical}`).join('')
         + `\n`
         + `\n    Omit scriptKind unless the source has no real file name: TypeScript`
         + `\n    infers it from the extension, and forcing one is its own blind spot`
         + `\n    (a gate here really was reading 32 of its 2504 files as wreckage).`
         + `\n`
-        + `\n    scripts/ts-parse.mjs carries the rationale and the refusal fixture.`,
+        + `\n    scripts/ts-parse.mjs carries the rationale and the refusal fixtures.`,
     );
     return 1;
   }
+
   console.log(
     `✓ check:parse-guard: ${scanned} scripts/ file(s) — every TypeScript parse goes through ts-parse.mjs.`,
   );
+  reportOutside(censusOutside(walkOutside(REPO_ROOT), (abs) => readFileSync(abs, 'utf8')));
   return 0;
+}
+
+/**
+ * Print the population this gate reports on but does not govern.
+ *
+ * Not a failure, and deliberately not a ratchet: what the package side should
+ * DO about these is an open shape question (see the header), and a ratchet
+ * would force an answer by making the next unrelated PR red. What it must not
+ * be is absent — the green line above is a claim about `scripts/**`, and
+ * without this block it reads as a claim about the repository.
+ */
+export function reportOutside(rows) {
+  const prod = rows.filter((r) => !r.isTest);
+  const tests = rows.filter((r) => r.isTest);
+  const files = new Set(rows.map((r) => r.rel));
+  console.log(
+    `   … and ${rows.length} parse(s) OUTSIDE scripts/ in ${files.size} file(s) that this gate does`
+      + ` NOT govern — ${prod.length} in shipped/gate code, ${tests.length} in tests:`,
+  );
+  for (const r of [...prod, ...tests]) {
+    console.log(`     ${r.rel}:${r.line}  ${r.what}${r.isTest ? '  [test]' : ''}`);
+  }
+  console.log(
+    `   They cannot import scripts/ts-parse.mjs — a published package answering`
+      + `\n   "did this parse?" through repo tooling trades this bug for a worse one.`
+      + `\n   Counted and named so the line above is read as what it is: a statement`
+      + `\n   about scripts/, not about the repository. Shape decision: see the header.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +340,41 @@ export function selfTest() {
   t('two call sites in one file are two findings',
     hits('ts.createSourceFile(a, b);\nts.createSourceFile(c, d);').length === 2);
 
+  // -- the OTHER two parser entry points, same gate -------------------------
+  t('a ts.createProgram is a finding',
+    hits('const p = ts.createProgram([entry], OPTIONS);').length === 1);
+  t('a ts.transpileModule is a finding',
+    hits('const js = ts.transpileModule(code, opts).outputText;').length === 1);
+  t('an aliased or destructured createProgram is a finding too',
+    hits('import { createProgram } from "typescript";\nconst p = createProgram(files, o);').length === 2);
+  const allThree = hits('ts.createSourceFile(a, b);\nts.createProgram(c, d);\nts.transpileModule(e, f);');
+  t('one file reaching all three entry points is three findings, each naming its own API',
+    allThree.length === 3
+      && allThree.map((f) => f.what).join(',') === 'ts.createSourceFile,ts.createProgram,ts.transpileModule',
+    JSON.stringify(allThree.map((f) => f.what)));
+  t('each finding carries the checked call that replaces THAT api',
+    allThree[1].canonical.startsWith('createProgramChecked')
+      && allThree[2].canonical.startsWith('transpileChecked'),
+    JSON.stringify(allThree.map((f) => f.canonical)));
+
+  // -- the CHECKED calls must not match the banned ones. The names share a
+  //    prefix, so this is one word boundary away from banning the fix itself
+  //    and turning every converted call site red. ---------------------------
+  t('createProgramChecked is not a createProgram finding',
+    hits('import { createProgramChecked } from "./ts-parse.mjs";\n'
+      + 'const p = createProgramChecked(files, OPTIONS);').length === 0);
+  t('transpileChecked is not a transpileModule finding',
+    hits('import { transpileChecked } from "./ts-parse.mjs";\n'
+      + 'const js = transpileChecked(name, code, opts).outputText;').length === 0);
+
+  // -- the shared /g regex is reused for a prefilter AND a scan; a stale
+  //    lastIndex would make the SECOND file with a call site read clean ------
+  const twice = 'const sf = ts.createSourceFile(f, t);';
+  t('scanning the same source twice gives the same answer (no lastIndex carry-over)',
+    hits(twice).length === 1 && hits(twice).length === 1);
+  t('a file with no spelling at all does not disturb the next file that has one',
+    hits('const a = 1;').length === 0 && hits(twice).length === 1);
+
   // -- the finding is openable ----------------------------------------------
   const located = hits('const x = 1;\nconst y = 2;\nconst sf = ts.createSourceFile(f, t);');
   t('the finding carries the line number of the call',
@@ -208,6 +388,9 @@ export function selfTest() {
     hits('/**\n * ts.createSourceFile never throws.\n */\nconst a = 1;').length === 0);
   t('a string payload naming the call is not a finding',
     hits('const probe = "ts.createSourceFile(f, t)";').length === 0);
+  t('prose naming the other two entry points is not a finding either',
+    hits('// ts.createProgram parks syntax behind getSyntacticDiagnostics()\n'
+      + '/* ts.transpileModule reports nothing by default */\nconst a = 1;').length === 0);
   t('a template payload naming the call is not a finding',
     hits('const probe = `const sf = ts.createSourceFile(${f}, ${t});`;').length === 0);
 
@@ -220,6 +403,29 @@ export function selfTest() {
     hits('const sf = ts.createSourceFile(f, t);', { isParserHome: true }).length === 0);
   t('…and any other file may not',
     hits('const sf = ts.createSourceFile(f, t);', { isParserHome: false }).length === 1);
+  t('the parser home is exempt for all three entry points, not just the first',
+    hits('ts.createSourceFile(a, b);\nts.createProgram(c, d);\nts.transpileModule(e, f);',
+      { isParserHome: true }).length === 0);
+
+  // -- the out-of-tree census: the SAME scanner, a different verdict ---------
+  const OUTSIDE = new Map([
+    ['packages/lint/src/validate-react-page-props.ts', 'sf = tsc.createSourceFile("page.tsx", src);'],
+    ['packages/spec/scripts/build-api-surface.ts', 'const program = ts.createProgram(entries, o);'],
+    ['packages/spec/src/ui/app.test.ts', 'const program = ts.createProgram([entry], {});'],
+    ['packages/lint/src/clean.ts', '// nothing to see here\nexport const a = 1;'],
+  ]);
+  const census = censusOutside([...OUTSIDE.keys()], (k) => OUTSIDE.get(k), (k) => k);
+  t('the census counts every out-of-tree parse, whatever the api',
+    census.length === 3, JSON.stringify(census.map((r) => `${r.rel}:${r.what}`)));
+  t('the census marks a test-file site as a test and a shipped one as not',
+    census.filter((r) => r.isTest).length === 1
+      && census.find((r) => r.isTest).rel === 'packages/spec/src/ui/app.test.ts',
+    JSON.stringify(census.map((r) => [r.rel, r.isTest])));
+  t('a clean out-of-tree file contributes nothing to the census',
+    !census.some((r) => r.rel.endsWith('clean.ts')));
+  t('the census is sorted, so its printed block is diffable run to run',
+    census.map((r) => r.rel).join('|')
+      === [...census].sort((a, b) => a.rel.localeCompare(b.rel)).map((r) => r.rel).join('|'));
 
   // -- the masker is load-bearing: prove it, rather than trusting it --------
   t('codeOnly blanks a comment but keeps the line count',
@@ -233,8 +439,9 @@ export function selfTest() {
     return 1;
   }
   console.log(
-    `✓ check:parse-guard self-test: ${cases.length} cases pass (every spelling of the raw call is caught, `
-      + `prose and payloads are not, and only ts-parse.mjs is exempt).`,
+    `✓ check:parse-guard self-test: ${cases.length} cases pass (every spelling of all three parser entry `
+      + `points is caught, their checked replacements are not, prose and payloads are not, only ts-parse.mjs `
+      + `is exempt, and the out-of-tree census counts what this gate does not govern).`,
   );
   return 0;
 }

@@ -172,6 +172,32 @@ jobs:
       - name: scripts/ entry guards go through one predicate
         run: pnpm check:entry-guard
 
+      # Every `scripts/**` TypeScript parse goes through ONE module (#10133 /
+      # #10573), and this is the half that keeps it that way (#10574).
+      # NONE of the three parser entry points throws on a source it cannot
+      # read: `ts.createSourceFile` returns a tree built by error recovery with
+      # the errors parked on `parseDiagnostics`; `ts.createProgram` parks them
+      # behind a second call, `getSyntacticDiagnostics()`; `ts.transpileModule`
+      # reports nothing at all without `reportDiagnostics: true` and still
+      # hands back an `outputText`. A gate then walks the wreckage, finds none
+      # of the shapes it is looking for, and scores the file CLEAN — so the
+      # SYMPTOM OF A MISSING REFUSAL IS A GREEN LINE, and an unguarded gate is
+      # indistinguishable from a guarded one by reading CI. That is not a
+      # theory: one gate here forced `ScriptKind.TSX` on 2504 test files, read
+      # 32 of them as wreckage, and printed `OK` while six pinned engine
+      # doubles went uncounted.
+      # The #10573 sweep converted 32 call sites across 15 gates; it could not
+      # stop the sixteenth being typed, and within the hour a new gate landed
+      # with two raw calls in it — caught by this step, which is the whole
+      # argument for having it. Same shape as `check:entry-guard` above.
+      # Also prints the parses OUTSIDE `scripts/**` (#10575) that it does not
+      # govern, so its green line is read as a claim about `scripts/` and not
+      # about the repository.
+      # Scans ~121 scripts/ files plus a read-only census of the rest, no
+      # spawns; ~0.6s.
+      - name: scripts/ TypeScript parses go through one module
+        run: pnpm check:parse-guard
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the

@@ -70,6 +70,35 @@
  * failing, one is simply never typed into the sixteenth gate -- and a missing
  * copy is invisible, because its symptom is a green line.
  *
+ * ## Three parser entry points, ONE question
+ *
+ * `createSourceFile` is not the only way into the TypeScript parser, and the
+ * other two are quieter still. Measured here against TypeScript 6.0.3:
+ *
+ *   • **`ts.createProgram`** parks syntax errors behind a SECOND call,
+ *     `getSyntacticDiagnostics()`. A Program nobody asks answers every type
+ *     question it is given about a tree it could not read, and the answers look
+ *     exactly like answers about a tree it could.
+ *   • **`ts.transpileModule`** reports NOTHING AT ALL unless
+ *     `reportDiagnostics: true` is passed -- the quietest of the three. Hand it
+ *     a snippet with a dropped operand and it hands back
+ *     `return row.a === ;` as `outputText`: output that is not JavaScript, with
+ *     an empty diagnostic list, because the list was never requested.
+ *
+ * Both were live in this tree when this section landed, and both had the SAME
+ * shape as the `createSourceFile` defect rather than a milder one:
+ * `check-published-readme-exports.mjs` built a Program and never called
+ * `getSyntacticDiagnostics`, and `check-where-matcher-conformance.mjs`
+ * transpiled without `reportDiagnostics`, where the un-runnable `outputText`
+ * became a `new Function` throw that the caller's own `catch` filed as
+ * `UNJUDGED` -- a source the gate could not READ, recorded as a source it could
+ * not JUDGE, which is a different and much quieter claim.
+ *
+ * `createProgramChecked` and `transpileChecked` below route those two through
+ * the same refusal, so "did this parse?" has one answer under `scripts/**`
+ * whichever entry point a gate reaches for -- and `check-parse-guard.mjs` fails
+ * on all three raw spellings, so there is no fourth answer to drift into.
+ *
  * ## Why it EXITS rather than throws
  *
  * A throw is swallowable, and the swallow is already written down in this repo:
@@ -123,11 +152,23 @@ import { isEntrypoint } from './invoked-as.mjs';
 export const EXIT_UNPARSEABLE = 3;
 
 /** Parses attempted, the distinct file names, and the refusals. */
-const census = { parses: 0, files: new Set(), refusals: 0 };
+const census = { parses: 0, programs: 0, transpiles: 0, files: new Set(), refusals: 0 };
 
-/** A snapshot of what this module has been asked to parse in this process. */
+/**
+ * A snapshot of what this module has been asked to parse in this process.
+ *
+ * `parses` counts every source that reached the parser through ANY of the three
+ * entry points, so it stays the numerator of "how much of this run was read";
+ * `programs` and `transpiles` say which door they came through.
+ */
 export function parseCensus() {
-  return { parses: census.parses, files: census.files.size, refusals: census.refusals };
+  return {
+    parses: census.parses,
+    programs: census.programs,
+    transpiles: census.transpiles,
+    files: census.files.size,
+    refusals: census.refusals,
+  };
 }
 
 /**
@@ -169,6 +210,57 @@ function describeScriptKind(scriptKind) {
   }
   return String(scriptKind);
 }
+
+/**
+ * `ts.Diagnostic[]` -- the shape `getSyntacticDiagnostics()` and
+ * `transpileModule`'s `diagnostics` hand back -- as the same plain rows
+ * {@link describeDiagnostics} produces, so all three refusals read identically
+ * in a log. `file` is carried because a Program's diagnostics span many files
+ * while one parse's do not.
+ *
+ * @param {readonly ts.Diagnostic[]} diagnostics
+ * @returns {{ line: number, column: number, message: string, file?: string }[]}
+ */
+export function describeTsDiagnostics(diagnostics) {
+  if (!Array.isArray(diagnostics)) return [];
+  return diagnostics.map((d) => {
+    const at = d.file && typeof d.start === 'number'
+      ? ts.getLineAndCharacterOfPosition(d.file, d.start)
+      : { line: 0, character: 0 };
+    return {
+      line: at.line + 1,
+      column: at.character + 1,
+      message: ts.flattenDiagnosticMessageText(d.messageText, ' '),
+      file: d.file?.fileName,
+    };
+  });
+}
+
+/**
+ * The first five locations of a refusal, plus an `and N more` line. Shared by
+ * all three refusals so a reader who has learned to open one has learned to
+ * open all of them.
+ */
+function locationLines(fileName, rows) {
+  const shown = rows.slice(0, 5);
+  const rest = rows.length - shown.length;
+  return [
+    ...shown.map((d) => `      ${d.file ?? fileName}:${d.line}:${d.column}  ${d.message}`),
+    ...(rest > 0 ? [`      … and ${rest} more`] : []),
+  ];
+}
+
+/**
+ * The closing half every refusal shares: why the run ends here rather than
+ * carrying on over a source nobody could read.
+ */
+const REFUSAL_WHY = [
+  `    A scan of a tree the parser could not read finds none of what it is`,
+  `    looking for and scores the source CLEAN — a source the gate could not`,
+  `    read, reported as a source with nothing to report. The run is aborted`,
+  `    instead: a number nobody measured is worse than no number.`,
+  ``,
+];
 
 /**
  * The refusal text. Separate from the exit so the self-test can read it, and so
@@ -237,6 +329,136 @@ export function parseSourceFile(fileName, text, scriptKind) {
   return sourceFile;
 }
 
+/**
+ * The refusal text for a Program whose sources do not parse.
+ *
+ * Pinned here rather than inlined for the same reason {@link refusalReport} is:
+ * a self-test case reads it, so the wording answers to a case instead of to
+ * whoever edits it next.
+ */
+export function programRefusalReport(rootNames, rows) {
+  return [
+    `x  ts-parse — REFUSING to query a Program whose sources do not parse.`,
+    ``,
+    `    roots      ${rootNames.length} entry point(s), starting at ${rootNames[0] ?? '(none)'}`,
+    `    errors     ${rows.length} syntactic diagnostic(s) from TypeScript ${ts.version}`,
+    ``,
+    ...locationLines(rootNames[0] ?? '(unknown)', rows),
+    ``,
+    `    ts.createProgram does not throw and does not volunteer this: syntax`,
+    `    errors sit behind a SECOND call, getSyntacticDiagnostics(), which most`,
+    `    callers never make. Every checker answer below an unread Program —`,
+    `    "does this type have that member?", "what does this module export?" —`,
+    `    is then an answer about a tree the compiler could not read, and it is`,
+    `    shaped exactly like an answer about a tree it could.`,
+    ``,
+    ...REFUSAL_WHY,
+  ].join('\n');
+}
+
+/**
+ * The refusal text for a source that could not be transpiled.
+ */
+export function transpileRefusalReport(fileName, rows) {
+  return [
+    `x  ts-parse — REFUSING to run output transpiled from a source that does not parse.`,
+    ``,
+    `    file       ${fileName}`,
+    `    errors     ${rows.length} diagnostic(s) from TypeScript ${ts.version}`,
+    ``,
+    ...locationLines(fileName, rows),
+    ``,
+    `    ts.transpileModule reports NOTHING unless reportDiagnostics: true is`,
+    `    passed, and it still returns an outputText — text that is not`,
+    `    JavaScript, handed back as if it were. A caller that runs it gets a`,
+    `    throw from somewhere else entirely, one \`catch\` away from being filed`,
+    `    as "could not judge this candidate" rather than "could not read it".`,
+    ``,
+    ...REFUSAL_WHY,
+  ].join('\n');
+}
+
+/**
+ * Build a `ts.Program`, or refuse.
+ *
+ * The ONLY sanctioned way to build one under `scripts/**` -- see
+ * `check-parse-guard.mjs`, which fails on a raw `ts.createProgram` anywhere
+ * else in that tree.
+ *
+ * The check is `program.getSyntacticDiagnostics()` over EVERY file the Program
+ * pulled in, not just the roots. A Program's answers are transitive -- an entry
+ * point's exported type is read out of whatever file declares it -- so a root
+ * that parsed while its declaration source did not is exactly the state that
+ * produces confident answers about an unread tree. Syntactic only: a SEMANTIC
+ * diagnostic is a fact about the code under test and belongs to the caller's
+ * own verdict, while a syntactic one means there is no code under test.
+ *
+ * @param {readonly string[]} rootNames
+ * @param {ts.CompilerOptions} options
+ * @param {ts.CompilerHost} [host]
+ * @returns {ts.Program} A Program with NO syntax errors. There is no other
+ *   return: unparseable sources end the process with {@link EXIT_UNPARSEABLE}.
+ */
+export function createProgramChecked(rootNames, options, host) {
+  const roots = [...rootNames];
+  census.programs += 1;
+  census.parses += roots.length;
+  for (const r of roots) census.files.add(r);
+
+  const program = host === undefined
+    ? ts.createProgram(roots, options)
+    : ts.createProgram(roots, options, host);
+
+  const rows = describeTsDiagnostics(program.getSyntacticDiagnostics());
+  if (rows.length > 0) {
+    census.refusals += 1;
+    process.stderr.write(programRefusalReport(roots, rows));
+    process.exit(EXIT_UNPARSEABLE);
+  }
+  return program;
+}
+
+/**
+ * Transpile `text` to JavaScript, or refuse.
+ *
+ * The ONLY sanctioned way to call `ts.transpileModule` under `scripts/**` --
+ * see `check-parse-guard.mjs`, which fails on the raw call anywhere else in
+ * that tree.
+ *
+ * `reportDiagnostics` is forced ON and is deliberately not a parameter: the
+ * default is what makes this API the quietest of the three, and a knob that can
+ * restore the silence is a knob that will. Every diagnostic this API can
+ * produce -- syntax, and the `isolatedModules` grammar rules -- means the
+ * emitted text is not a faithful translation of the input, so all of them
+ * refuse.
+ *
+ * @param {string} fileName  What the source is called. Decides the ScriptKind
+ *   exactly as it does for {@link parseSourceFile}; pass the real path when you
+ *   have one, and a `.ts`/`.tsx` name for a synthesised snippet.
+ * @param {string} text  The source.
+ * @param {ts.TranspileOptions} [transpileOptions]
+ * @returns {ts.TranspileOutput} Output emitted from a source that parsed.
+ */
+export function transpileChecked(fileName, text, transpileOptions = {}) {
+  census.transpiles += 1;
+  census.parses += 1;
+  census.files.add(fileName);
+
+  const result = ts.transpileModule(text, {
+    ...transpileOptions,
+    fileName,
+    reportDiagnostics: true,
+  });
+
+  const rows = describeTsDiagnostics(result.diagnostics ?? []);
+  if (rows.length > 0) {
+    census.refusals += 1;
+    process.stderr.write(transpileRefusalReport(fileName, rows));
+    process.exit(EXIT_UNPARSEABLE);
+  }
+  return result;
+}
+
 if (process.env.OS_TOOLING_PARSE_CENSUS) {
   process.on('exit', () => {
     const c = parseCensus();
@@ -271,6 +493,10 @@ export function selfTest() {
   const JSX = 'const el = <div className="x">hi</div>;\n';
   const GENERIC_ARROW = 'const id = <T>(x: T): T => x;\n';
   const CLEAN = 'export const a: number = 1;\n';
+  // The measured transpile wreck: a dropped right-hand operand. Kept as one
+  // string so the case below and the raw-behaviour case below it are provably
+  // talking about the SAME source.
+  const DROPPED_OPERAND = 'const f = (row) => { return row.a === ; };\nreturn f;\n';
 
   const dir = mkdtempSync(join(tmpdir(), 'ts-parse-'));
   try {
@@ -355,8 +581,110 @@ export function selfTest() {
         + `console.log(JSON.stringify(parseCensus()));\n`,
     );
     t('the census counts parses and distinct file names',
-      counted.status === 0 && counted.out === '{"parses":3,"files":2,"refusals":0}',
+      counted.status === 0
+        && counted.out === '{"parses":3,"programs":0,"transpiles":0,"files":2,"refusals":0}',
       JSON.stringify(counted));
+
+    // -- ts.createProgram: the syntax lives behind a SECOND call -------------
+    const PROGRAM_OPTIONS =
+      `{ noLib: true, skipLibCheck: true, noEmit: true, types: [],`
+        + ` module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext,`
+        + ` moduleResolution: ts.ModuleResolutionKind.Bundler,`
+        + ` allowImportingTsExtensions: true }`;
+    const fixture = (name, text) => {
+      const abs = join(dir, name);
+      writeFileSync(abs, text);
+      return abs;
+    };
+
+    const okEntry = fixture('prog-ok.ts', CLEAN);
+    const brokenEntry = fixture('prog-broken.ts', TRUNCATED);
+    const importer = fixture('prog-importer.ts', `import { a } from './prog-broken.ts';\nexport const b = a;\n`);
+
+    const program = (roots) =>
+      run(
+        `import { createProgramChecked } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+          + `const p = createProgramChecked(${JSON.stringify(roots)}, ${PROGRAM_OPTIONS});\n`
+          + `console.log('PROGRAM ' + p.getSourceFiles().length);\n`,
+      );
+
+    const progOk = program([okEntry]);
+    t('a Program over sources that parse is returned and is usable',
+      progOk.status === 0 && progOk.out.startsWith('PROGRAM '), JSON.stringify(progOk));
+
+    const progBad = program([brokenEntry]);
+    t('a Program over a source that does NOT parse REFUSES instead of answering',
+      progBad.status === EXIT_UNPARSEABLE && progBad.out === '',
+      JSON.stringify({ status: progBad.status, out: progBad.out }));
+    t('…and that refusal names the file, not just the root list',
+      progBad.err.includes('prog-broken.ts'), progBad.err.slice(0, 300));
+
+    // The root parsed; the file it imports did not. This is the case a
+    // roots-only check would wave through, and a Program's answers are
+    // transitive, so it is the one that matters.
+    const progTransitive = program([importer]);
+    t('a Program whose ROOT parses but whose IMPORT does not still refuses',
+      progTransitive.status === EXIT_UNPARSEABLE
+        && progTransitive.err.includes('prog-broken.ts'),
+      JSON.stringify({ status: progTransitive.status, err: progTransitive.err.slice(0, 300) }));
+
+    // -- ts.transpileModule: the quietest of the three ----------------------
+    const transpile = (text, fileName = 'snippet.ts') =>
+      run(
+        `import { transpileChecked } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+          + `const r = transpileChecked(${JSON.stringify(fileName)}, ${JSON.stringify(text)},`
+          + ` { compilerOptions: { target: ts.ScriptTarget.ES2022, isolatedModules: true } });\n`
+          + `console.log('EMITTED ' + JSON.stringify(r.outputText));\n`,
+      );
+
+    const tsOk = transpile('const f = (row) => row.a === 1;\nreturn f;\n');
+    t('a snippet that parses transpiles and hands back its output',
+      tsOk.status === 0 && tsOk.out.startsWith('EMITTED '), JSON.stringify(tsOk));
+
+    const tsBad = transpile(DROPPED_OPERAND);
+    t('a snippet that does NOT parse refuses rather than emitting text that is not JavaScript',
+      tsBad.status === EXIT_UNPARSEABLE && tsBad.out === '',
+      JSON.stringify({ status: tsBad.status, out: tsBad.out }));
+    t('…and that refusal names the snippet and quotes TypeScript’s own message',
+      /snippet\.ts:1:\d+\s+Expression expected\./.test(tsBad.err), tsBad.err.slice(0, 300));
+
+    // WHY the refusal is needed, pinned rather than asserted in prose: the RAW
+    // call is silent about this exact source and still returns something that
+    // reads like code. If TypeScript ever starts reporting by default this case
+    // goes red, and the header's claim about the default gets re-read.
+    const raw = run(
+      `const out = ts.transpileModule(${JSON.stringify(DROPPED_OPERAND)},`
+        + ` { compilerOptions: { target: ts.ScriptTarget.ES2022, isolatedModules: true } });\n`
+        + `console.log(JSON.stringify({ reported: (out.diagnostics ?? []).length,`
+        + ` hasWreck: out.outputText.includes('=== ;') }));\n`,
+    );
+    t('the RAW transpileModule is silent about that same source and still returns text',
+      raw.status === 0 && raw.out === '{"reported":0,"hasWreck":true}', JSON.stringify(raw));
+
+    // -- the refusal is not swallowable on the new doors either --------------
+    const swallowedTranspile = run(
+      `import { transpileChecked } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+        + `let caught = false;\n`
+        + `try { transpileChecked('snippet.ts', ${JSON.stringify(DROPPED_OPERAND)}); } catch { caught = true; }\n`
+        + `console.log(caught ? 'SWALLOWED' : 'NOT REACHED');\n`,
+    );
+    t('a caller’s try/catch cannot downgrade the transpile refusal either',
+      swallowedTranspile.status === EXIT_UNPARSEABLE && !swallowedTranspile.out.includes('SWALLOWED'),
+      JSON.stringify(swallowedTranspile));
+
+    // -- the census names which door each source came through ---------------
+    const countedAll = run(
+      `import { createProgramChecked, transpileChecked } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+        + `import { parseSourceFile as ps, parseCensus as pc } from ${JSON.stringify(pathToFileURL(SELF).href)};\n`
+        + `ps('a.ts', 'const a = 1;');\n`
+        + `createProgramChecked(${JSON.stringify([okEntry])}, ${PROGRAM_OPTIONS});\n`
+        + `transpileChecked('snippet.ts', 'const a = 1;\\n');\n`
+        + `console.log(JSON.stringify(pc()));\n`,
+    );
+    t('the census counts programs and transpiles as their own doors',
+      countedAll.status === 0
+        && countedAll.out === '{"parses":3,"programs":1,"transpiles":1,"files":3,"refusals":0}',
+      JSON.stringify(countedAll));
 
     // -- the diagnostics reader itself, in-process ---------------------------
     t('describeDiagnostics answers [] for a tree that parsed',
@@ -365,6 +693,8 @@ export function selfTest() {
       describeDiagnostics(/** @type {any} */ ({})).length === 0);
     t('describeDiagnostics answers [] for undefined rather than throwing',
       describeDiagnostics(/** @type {any} */ (undefined)).length === 0);
+    t('describeTsDiagnostics answers [] for a missing list rather than throwing',
+      describeTsDiagnostics(/** @type {any} */ (undefined)).length === 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -377,7 +707,8 @@ export function selfTest() {
   }
   console.log(
     `✓ ts-parse self-test: ${cases.length} cases pass (every measured wreck refuses and names its file, `
-      + `both ScriptKind directions, and a caller’s try/catch cannot swallow it).`,
+      + `across all three parser entry points, both ScriptKind directions, a Program's transitive import `
+      + `included, and a caller’s try/catch cannot swallow any of it).`,
   );
   return 0;
 }
