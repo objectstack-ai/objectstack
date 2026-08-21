@@ -130,6 +130,24 @@ function unregisteredHintsIn(text: string): string[] {
   return [...new Set(commandHintsIn(text))].filter((h) => resolveCommand(h) === null);
 }
 
+/**
+ * The source with its comment lines removed — what doctor can actually PRINT.
+ *
+ * The rule this file enforces is about the report an operator reads, so a
+ * command named in a comment (the print site documents the dead prescription
+ * it replaced, verbatim) is prose, not a prescription. Only whole comment
+ * lines are dropped, never a trailing `//`: `http://localhost:3000` lives
+ * inside these strings, and a regex greedy enough to strip after it would
+ * silently delete real hints and leave the sweep below passing over less than
+ * it claims.
+ */
+function printableSource(src: string): string {
+  return src
+    .split('\n')
+    .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
+    .join('\n');
+}
+
 describe('resolveCommand — the registry probe these cases are judged with', () => {
   // A probe that cannot fail proves nothing about the source it clears, so it
   // is exercised on both verdicts before being trusted below.
@@ -153,28 +171,32 @@ describe('resolveCommand — the registry probe these cases are judged with', ()
 });
 
 describe('doctor.ts source — no phantom prescriptions anywhere in the file', () => {
-  const source = fs.readFileSync(DOCTOR_SRC, 'utf8');
+  const printable = printableSource(fs.readFileSync(DOCTOR_SRC, 'utf8'));
 
   it('names only commands `os` registers', () => {
     // The class-closing assertion. Before the fix this listed exactly one
     // entry, `objectstack codemod v2-to-v3`; it must stay empty.
-    expect(unregisteredHintsIn(source)).toEqual([]);
+    expect(unregisteredHintsIn(printable)).toEqual([]);
   });
 
   it('finds enough hints for the sweep above to mean something', () => {
-    // Guards the assertion against a regex that silently stops matching: an
-    // empty haystack would make the case above pass over anything.
-    expect(commandHintsIn(source).length).toBeGreaterThan(5);
+    // Guards the assertion against a haystack that quietly emptied — a regex
+    // that stops matching, or a comment filter that ate the code with the
+    // comments. Either would make the case above pass over nothing at all.
+    expect(commandHintsIn(printable).length).toBeGreaterThan(10);
   });
 
   it('has dropped the dead codemod prescription outright', () => {
-    expect(source).not.toContain('codemod v2-to-v3');
+    // The print site still documents the dead command in a comment, on
+    // purpose — that is the record of why this line reads as it does. What
+    // must not survive is the prescription reaching an operator's screen.
+    // (The word itself does survive, in the sentence that reports there is no
+    // codemod; banning the word would ban saying so.)
+    expect(printable).not.toContain('codemod v2-to-v3');
+    expect(printable).not.toContain('os codemod');
     // Not repointed at `os migrate meta` either: that command declines the TS
-    // rewrite this hint promised, so naming it here would restate the defect.
-    // (The reasoning lives in a comment at the print site; the ban is on the
-    // hint text, so the comment is stripped before this looks.)
-    const withoutComments = source.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    expect(withoutComments).not.toContain('migrate meta');
+    // rewrite this hint promised, so prescribing it would restate the defect.
+    expect(printable).not.toContain('migrate meta');
   });
 });
 
