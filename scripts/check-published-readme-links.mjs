@@ -128,6 +128,44 @@
 // is *followable* -- it just lands on raw MDX source), and whether an external
 // URL is alive (that is lychee's job and it needs the network).
 //
+// ## The three link shapes read, and the one that only looks like a fourth
+//
+// The header above claims "every outbound link in a PUBLISHED markdown file",
+// so the extractor owes that population every shape a reader can actually
+// follow. Three of them:
+//
+//   * INLINE_LINK           `[text](dest)`, `![alt](dest)`, title optional
+//   * REFERENCE_DEFINITION  `[label]: dest` at the head of a line
+//   * AUTOLINK              a bare absolute URI wrapped in angle brackets
+//
+// The autolink was missing for this gate's first three days, and the hole was
+// not academic: 13 docs-site links across 6 published READMEs sat in it,
+// every one of them in the "Docs" / "API Reference" footer -- the most
+// prominent link position these files have. All 13 resolved, so nothing was
+// broken through it; what was broken was the population. A 404 written in that
+// form was read by NONE of the four assertions and shipped to npm green.
+//
+// The shape that only looks like a fourth is the pointy-bracket DESTINATION,
+// `[text](<dest>)` -- angle brackets INSIDE an inline link's parentheses, which
+// is how CommonMark spells a destination containing a space. That is not an
+// autolink and never was; `INLINE_LINK`'s own `(<...>|...)` alternative has
+// always read it. The two are distinguished POSITIONALLY here: `extractLinks`
+// records the span each link construct consumed and refuses an autolink match
+// that starts inside one. Without that, `[d](<https://objectstack.ai/docs/x>)`
+// -- a pointy destination that happens to contain no space, and so is a
+// well-formed autolink body too -- would be counted twice, and the census this
+// gate prints would over-report by one per occurrence. The `--self-test` pins
+// the count, not just the presence, for exactly that reason.
+//
+// Deliberately NOT matched: CommonMark's EMAIL autolink, the address-shaped
+// `<foo@example.com>` with no scheme. It renders as a `mailto:` link, so it is
+// a link -- but it can never be a docs-site URL, so every assertion here would
+// classify it `external` and read no further. Matching it would widen the
+// recognizer and change no verdict. The scheme'd `<mailto:foo@example.com>`
+// form IS matched, because it costs nothing to fold into the URI pattern, and
+// it too classifies `external`; a pin holds that so a later reader does not
+// have to re-derive which of the two is in.
+//
 // ## Why fenced blocks and code spans are stripped first
 //
 // A markdown link inside a code fence is example text, not a link. This gate
@@ -197,12 +235,39 @@ const INLINE_LINK = /!?\[[^\]]*]\(\s*(<[^>\n]*>|[^)\s]*?)(?:\s+(?:"[^"]*"|'[^']*
 const REFERENCE_DEFINITION = /^ {0,3}\[[^\]]+]:\s*(<[^>\n]*>|\S+)/;
 
 /**
+ * CommonMark's URI autolink: a bare absolute URI in angle brackets, rendered as
+ * a live link by GitHub and by npm alike.
+ *
+ * Transcribed from the CommonMark scheme production rather than approximated: 2
+ * to 32 characters, opening with an ASCII letter, continuing with letters,
+ * digits, `+`, `.` or `-`; then a colon; then any run of characters that are
+ * not ASCII control, space, or either angle bracket. The final class is what
+ * keeps the pattern honest about the shapes it must NOT claim -- `<not a url>`
+ * carries a space and no scheme, and an HTML tag like `<br>` has no colon, so
+ * neither can match. Both are pinned.
+ *
+ * The absent `g`-flag twin of the pointy-destination question above: this one
+ * IS global, and `extractLinks` filters its matches by span rather than by
+ * pattern, because a pointy destination and an autolink are genuinely the same
+ * characters in different positions -- no regex reading one line at a time can
+ * separate them, and a lookbehind that tried would be guessing at nesting.
+ */
+const AUTOLINK = /<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/g;
+
+/**
  * Every outbound link destination in one markdown document, with the 1-based
  * line it was written on.
  *
  * Fenced blocks and code spans are removed first -- that is the whole
  * discrimination mechanism, and both strippers preserve newlines so the line
  * number points at what a human will look at.
+ *
+ * Autolinks are matched LAST and filtered by span, because the two bracketed
+ * forms are the same characters in different positions: the angle brackets of
+ * `[d](<https://x/y>)` belong to the inline link that already claimed them, and
+ * counting them again would inflate the census by one per occurrence. So each
+ * link construct records the range it consumed, and an autolink starting inside
+ * one is dropped rather than re-read.
  *
  * @param {string} markdown
  * @returns {{ line: number, dest: string }[]}
@@ -212,11 +277,24 @@ export function extractLinks(markdown) {
   const found = [];
   prose.split('\n').forEach((line, idx) => {
     const dests = [];
+    /** @type {[number, number][]} half-open spans already claimed on this line */
+    const claimed = [];
     INLINE_LINK.lastIndex = 0;
     let m;
-    while ((m = INLINE_LINK.exec(line)) !== null) dests.push(m[1]);
+    while ((m = INLINE_LINK.exec(line)) !== null) {
+      dests.push(m[1]);
+      claimed.push([m.index, m.index + m[0].length]);
+    }
     const ref = REFERENCE_DEFINITION.exec(line);
-    if (ref) dests.push(ref[1]);
+    if (ref) {
+      dests.push(ref[1]);
+      claimed.push([ref.index, ref.index + ref[0].length]);
+    }
+    AUTOLINK.lastIndex = 0;
+    while ((m = AUTOLINK.exec(line)) !== null) {
+      if (claimed.some(([start, end]) => m.index >= start && m.index < end)) continue;
+      dests.push(m[1]);
+    }
     for (const raw of dests) {
       // CommonMark's pointy-bracket destination: `[x](<a b>)`.
       const dest = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw;
@@ -541,15 +619,26 @@ function selfTest() {
     '',
     '```ts',
     'const s = "[fenced](/content/docs/never.mdx)";',
+    'const t = "<https://objectstack.ai/docs/never-fenced>";',
     '```',
     '',
     'A code span `[spanned](/content/docs/never.mdx)` is not a link.',
+    'A code span `<https://objectstack.ai/docs/never-spanned>` is not one either.',
     '',
     '[ref]: /content/docs/refdef.mdx',
     '',
     'Pointy [b](</content/docs/spaced page.mdx>) form.',
     'Titled [c](/content/docs/titled.mdx "A title") form.',
     '![img](/content/docs/pic.png)',
+    '',
+    'Bare autolink <https://objectstack.ai/docs/autolinked> in prose.',
+    'Mail <mailto:hi@objectstack.ai> too.',
+    // The double-count trap: a pointy DESTINATION whose body is also a
+    // well-formed autolink, because it happens to contain no space.
+    'Pointy [d](<https://objectstack.ai/docs/pointy-no-space>) form.',
+    // Angle brackets that are not links at all.
+    'Not <not a url> and not <br> and not <a href="https://x.ai">tagged</a>.',
+    'And not the address-shaped <foo@example.com> either.',
   ].join('\n');
   const links = extractLinks(doc);
   const dests = links.map((l) => l.dest);
@@ -560,8 +649,48 @@ function selfTest() {
   ok('extractLinks drops a link title', dests.includes('/content/docs/titled.mdx'));
   ok('extractLinks reads an image destination', dests.includes('/content/docs/pic.png'));
   ok('extractLinks reports the real line number', links.find((l) => l.dest === '/content/docs/x.mdx')?.line === 1);
-  // Five, not seven: the fenced one and the code-spanned one are the discrimination.
-  ok('extractLinks finds exactly the five PROSE destinations', links.length === 5);
+
+  // ---- extractLinks: the CommonMark autolink ----------------------------
+  // The shape this gate could not see for its first three days. Every one of
+  // the 13 it was blind to sat in a published README's "Docs" footer, so the
+  // ACCEPT pins below are the population and the REJECT pins are the price:
+  // widening a recognizer is only safe if what it newly claims is exactly the
+  // links and nothing else that wears angle brackets.
+  ok('extractLinks reads a bare autolink', dests.includes('https://objectstack.ai/docs/autolinked'));
+  ok('extractLinks reads a mailto autolink', dests.includes('mailto:hi@objectstack.ai'));
+  ok(
+    'extractLinks reports the real line number for an autolink',
+    links.find((l) => l.dest === 'https://objectstack.ai/docs/autolinked')?.line === 17,
+  );
+  ok(
+    'extractLinks SKIPS an autolink inside a fenced block',
+    !dests.includes('https://objectstack.ai/docs/never-fenced'),
+  );
+  ok(
+    'extractLinks SKIPS an autolink inside a code span',
+    !dests.includes('https://objectstack.ai/docs/never-spanned'),
+  );
+  // The reject side, one pin per shape that wears the brackets without being a
+  // link: no scheme, no colon, a tag with attributes, and the address-shaped
+  // EMAIL autolink this recognizer deliberately leaves out (see the header).
+  ok('extractLinks does NOT match angle-bracketed prose', !dests.some((d) => d.includes('not a url')));
+  ok('extractLinks does NOT match an HTML tag', !dests.some((d) => d === 'br' || d.startsWith('a href')));
+  ok('extractLinks does NOT match a bare email autolink', !dests.includes('foo@example.com'));
+  // The double-count guard, asserted as a COUNT rather than a presence: a
+  // pointy-bracket destination with no space is a valid autolink body too, so
+  // a span-blind recognizer reads it twice and every census this gate prints
+  // inflates by one per occurrence. Presence alone cannot see that.
+  ok(
+    'extractLinks counts a pointy-bracket destination exactly ONCE',
+    dests.filter((d) => d === 'https://objectstack.ai/docs/pointy-no-space').length === 1,
+  );
+  ok(
+    'extractLinks still unwraps the pointy destination it always read',
+    dests.includes('/content/docs/spaced page.mdx'),
+  );
+  // Eight, not thirteen: two fenced, two code-spanned, and the three
+  // bracket-wearing non-links are the discrimination.
+  ok('extractLinks finds exactly the eight PROSE destinations', links.length === 8);
 
   // ---- classify: every bucket, both directions --------------------------
   ok('classify: root-relative', classify('/content/docs/a.mdx') === 'root-relative');
@@ -753,6 +882,66 @@ function selfTest() {
     );
   }
 
+  // ---- the autolink reaches the assertions, not just the extractor ------
+  // Extraction is necessary and not sufficient: the defect was that all four
+  // assertions were SILENT on this shape, so each is re-observed FAILING with
+  // the destination written as an autolink. Pinning extraction alone would
+  // leave the gate free to read the link and then check nothing about it.
+  // A1 is the one assertion this shape cannot reach, and that is CommonMark's
+  // doing rather than an omission here: an autolink body must be an ABSOLUTE
+  // URI, so a root-relative path in angle brackets is not a link on any of the
+  // three surfaces -- GitHub and npm render `</content/docs/x.mdx>` as literal
+  // text. Pinned in the direction that is actually true, so a later author does
+  // not read the missing A1 pin as a hole and "fix" it by dropping the scheme
+  // requirement -- which would start claiming every HTML tag in the tree.
+  const auto1 = runDoc('Docs: </content/docs/automation/flows.mdx>');
+  ok(
+    'a root-relative path in angle brackets is NOT an autolink (no scheme)',
+    auto1.stats.links === 0 && auto1.findings.length === 0,
+  );
+  const auto2 = runDoc('Docs: <https://docs.objectstack.ai/docs/automation/flows>');
+  ok(
+    'A2 FAILS on an alias origin written as an autolink',
+    auto2.findings.length === 1 && auto2.findings[0].kind === 'non-canonical-host',
+  );
+  ok('A2 counts the autolink it read', auto2.stats['non-canonical'] === 1);
+  const auto3 = runDoc('Docs: <https://objectstack.ai/docs/automation/no-such-page>');
+  ok(
+    'A3 FAILS on a dead docs page written as an autolink',
+    auto3.findings.length === 1 && auto3.findings[0].kind === 'dead-page',
+  );
+  const auto3ok = runDoc('Docs: <https://objectstack.ai/docs/automation/flows>');
+  ok(
+    'A3 SILENT on a resolving autolink, and COUNTS it resolved',
+    auto3ok.findings.length === 0 && auto3ok.stats.resolved === 1,
+  );
+  const auto4 = runDoc(
+    'Docs: <https://objectstack.ai/docs/automation/flows#no-such-heading-anywhere>',
+  );
+  ok(
+    'A4 FAILS on a dead anchor written as an autolink',
+    auto4.stats.fragments === 1 && auto4.findings.some((f) => f.kind === 'dead-anchor'),
+  );
+  // The card's own positive control, kept as a pin: this exact input returned
+  // [] from the shipped extractor, which is what made the hole measurable.
+  const autoCard = runDoc('Docs: <https://objectstack.ai/docs/no-such-page-anywhere>');
+  ok(
+    'the reported 404-in-an-autolink is now a finding rather than silence',
+    autoCard.stats.links === 1 && autoCard.findings.some((f) => f.kind === 'dead-page'),
+  );
+  // A mailto autolink is a LINK (it is counted) and is out of scope BY NAME
+  // (it is classified external and yields nothing) -- both halves, because
+  // "no findings" alone is also what a recognizer that never saw it produces.
+  const autoMail = runDoc('Mail: <mailto:hi@objectstack.ai>');
+  ok(
+    'a mailto autolink is counted as a link and classified external',
+    autoMail.stats.links === 1 && autoMail.stats.external === 1 && autoMail.findings.length === 0,
+  );
+  // The non-links, at document level: an angle bracket in prose must not
+  // manufacture a link, or the empty-scan guard above stops meaning anything.
+  const autoNone = runDoc('Text <not a url>, a tag <br>, and <foo@example.com>.');
+  ok('bracket-wearing non-links yield no links at all', autoNone.stats.links === 0);
+
   // ---- the empty-scan guard is real, not decorative ---------------------
   const empty = runDoc('No links here at all.\n\n```ts\nconst x = 1;\n```\n');
   ok('a document with no links yields no findings and no links', empty.stats.links === 0 && empty.findings.length === 0);
@@ -764,10 +953,14 @@ function selfTest() {
   }
   console.log(
     '✓ check:published-readme-links --self-test — extraction discrimination (fence, code span,\n'
-      + '  ref-def, pointy brackets, titles), all seven classify buckets, the remedy builder and its\n'
-      + '  refusal, the canonicaliser both ways, the pageCandidates directory/index subtlety, and\n'
-      + '  all four assertions observed both FAILING and SILENT — including the host split itself:\n'
-      + '  an alias origin is a FINDING, and is still resolved and still anchor-checked.',
+      + '  ref-def, pointy brackets, titles, AUTOLINKS), all seven classify buckets, the remedy\n'
+      + '  builder and its refusal, the canonicaliser both ways, the pageCandidates directory/index\n'
+      + '  subtlety, and all four assertions observed both FAILING and SILENT — including the host\n'
+      + '  split itself (an alias origin is a FINDING, and is still resolved and still\n'
+      + '  anchor-checked) and the autolink shape (assertions 2, 3 and 4 re-observed FAILING on it;\n'
+      + '  A1 pinned UNREACHABLE through it, since an autolink body must be an absolute URI; a\n'
+      + '  pointy-bracket destination counted exactly ONCE; and angle-bracketed non-links —\n'
+      + '  tags, prose, bare addresses — claimed by nothing).',
   );
 }
 
