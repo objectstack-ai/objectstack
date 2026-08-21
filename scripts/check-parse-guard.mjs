@@ -132,6 +132,66 @@ const SCRIPTS = HERE;
 const PARSER_HOME = join(SCRIPTS, 'ts-parse.mjs');
 
 /**
+ * The SCAN SURFACE, written in the syntax `scripts/pm/dispatch-gates.mjs` can
+ * read.
+ *
+ * ── The defect this repairs (#10784) ────────────────────────────────────────
+ *
+ * That derivation scans a gate's module body for path-ish string literals. The
+ * only literal describing this gate's population was the bare single-segment
+ * word `scripts` (from the `'scripts/'` prefix test in `packsScripts`, whose
+ * trailing slash the extractor trims), and `hintCovers` refuses a
+ * separator-less literal as too generic. So this gate scored, for EVERY card in
+ * the tree:
+ *
+ *   pnpm check:parse-guard  [lint.yml]  dead: 'scripts' — the tree HAS it; the
+ *   covering rule refuses the literal as too generic (no path separator)
+ *
+ * A gate in that state is named by no dispatch brief — including a brief for
+ * the one edit most likely to break it. It is the sibling half of the same
+ * blind spot #10784 records for `check-entry-guard`: both gates walk this
+ * directory, and both were invisible to the derivation, by two different
+ * routes — one declaring a population too generic to match, the other declaring
+ * a roster of the files it already has. Anyone adding a script got neither.
+ *
+ * The row this discharges lived in that tool's `ESCAPABLE_LITERAL_LEDGER`,
+ * which is SHRINK-ONLY and fails a discharged row as STALE by name. Declaring
+ * the subtree here is the sanctioned remedy; deleting the row is the other half
+ * of the same step, and both land together.
+ *
+ * ── Why the subtree spelling, and not a wider extractor ─────────────────────
+ *
+ * The refusal is measured, not incidental, and it is not this file's to relax:
+ * `hintCovers`' docblock prices teaching the extractor to accept bare top-level
+ * directory words at +139084 fabricated (gate, file) pairs, precisely because
+ * `packages`, `apps` and `examples` are path COMPONENTS in dozens of gates that
+ * never read those roots. A declared subtree is a different claim — an author
+ * stating what this gate reads — and the glob collapse reduces it back to this
+ * root and to nothing else.
+ *
+ * ── Why the OUTSIDE walk is deliberately NOT declared ───────────────────────
+ *
+ * `walkOutside(REPO_ROOT)` really does read the whole repo, but it CENSUSES;
+ * it cannot fail this gate. The failing population is the scanned root alone,
+ * which is what the green line claims and what `TIERS` exists to keep straight.
+ * Declaring the repo root would name this gate for every card in the tree to
+ * reach the one directory whose edits can turn it red — the "22 leads is the
+ * same as none" failure the derivation's own header prices a fabricated lead
+ * against. The refusal is pinned in the self-test rather than left in this
+ * paragraph.
+ *
+ * ── Provenance, never a lookup key ──────────────────────────────────────────
+ *
+ * Nothing in this gate reads this array; `walk(SCRIPTS)` does the walking, and
+ * the glob form handed to `walk` would name a directory that does not exist.
+ * The self-test derives both directions from SCRIPTS rather than re-spelling
+ * the root. The literal has to be written out — assembling it at runtime would
+ * put it out of reach of the very extractor it exists for, which is a silent
+ * way to keep the defect while looking fixed.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
+
+/**
  * The three parser entry points, each with the checked call that replaces it.
  *
  * The receiver is deliberately NOT part of any pattern: a gate that renamed its
@@ -644,6 +704,34 @@ export function selfTest() {
     codeOnly('// gone\nconst a = 1;\n').split('\n').length === 3
       && !codeOnly('// gone\nconst a = 1;\n').includes('gone'));
 
+  // -- the dispatch-gates scan surface (#10784) -----------------------------
+  //
+  // Enforcement cannot hold any of these: ROOT_DIR_WATCH_HINTS is read by
+  // another tool entirely, so a wrong or stale one runs green here forever and
+  // pays itself out as a dev dispatched on a scripts/ card with this gate
+  // missing from the brief. Both directions are derived from the walked root
+  // rather than re-spelled.
+  const walkedRoot = relative(REPO_ROOT, SCRIPTS);
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  t('the scan surface is declared for the root this gate actually walks',
+    ROOT_DIR_WATCH_HINTS.includes(`${walkedRoot}/**`),
+    JSON.stringify({ walkedRoot, ROOT_DIR_WATCH_HINTS }));
+  t('and it declares no root this gate does not walk (a declaration that can drift from the scan is worse '
+    + 'than none -- it replaces a silent gate with a lying one)',
+    declaredRoots.every((r) => r === walkedRoot),
+    JSON.stringify(declaredRoots));
+  t('the declared literal carries a path separator, which is the whole reason it is written this way -- a '
+    + 'bare root word is refused as too generic and reaches nothing',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')));
+  // The census side stays undeclared: walkOutside reads the whole repo but
+  // cannot fail this gate, and naming the repo root would put this gate in
+  // every card's brief to reach the one directory whose edits turn it red.
+  t('the repo root is NOT declared -- the outside walk is a census, not the failing population',
+    !declaredRoots.some((r) => r === '' || r === '.' || relative(REPO_ROOT, join(REPO_ROOT, r)) === ''));
+  // Provenance, never a lookup key: the glob form appearing where the walk root
+  // is read would send readdirSync at a directory that does not exist.
+  t('the declared form is NOT the walk root itself', !ROOT_DIR_WATCH_HINTS.includes(walkedRoot));
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  x ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
   if (failed.length) {
@@ -654,7 +742,8 @@ export function selfTest() {
     `✓ check:parse-guard self-test: ${cases.length} cases pass (every spelling of all three parser entry `
       + `points is caught, their checked replacements are not, prose and payloads are not, only ts-parse.mjs `
       + `is exempt, and the out-of-tree census counts what this gate does not govern — TIERED by a read of `
-      + `the owning package.json, so no row is printed under a reason that is false of it).`,
+      + `the owning package.json, so no row is printed under a reason that is false of it) -- plus the `
+      + `dispatch-gates scan surface, derived from the walked root, with the census side held out of it.`,
   );
   return 0;
 }
