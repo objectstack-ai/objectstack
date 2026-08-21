@@ -138,21 +138,43 @@ describe('raceWithTimeout (#10604)', () => {
         ).rejects.toBe(timeoutError);
     });
 
+    /**
+     * ⚠️ `process.getActiveResourcesInfo()` is PROCESS-wide, and in CI this file
+     * shares one worker with three dozen others — so the absolute count is
+     * AMBIENT and this test does not own it. Foreign timers alive at the sample
+     * expire while this test awaits, pulling the reading DOWN: the shard read
+     * `expected 2 to be 4` on the third leg (#10661), the only one that spends
+     * real time on the loop (the first two settle on microtasks, where no timer
+     * phase can run and the reading cannot move under the test).
+     *
+     * A leak is a GROWTH, so the assertion is about the direction the SUBJECT
+     * can move the count, never the ambient value. Non-increase keeps every bit
+     * of the detection — an unreclaimed 120s guard is `+1` here, which is what
+     * ablating the `clearTimeout` half reds — and gives up only the decrease,
+     * which nothing `raceWithTimeout` does can cause. Each leg re-anchors on its
+     * own sample so a comparison spans one outcome instead of the whole test.
+     *
+     * ⛔ Do not "fix" the ambience by isolating this file or pinning the shard
+     * layout: that would make the pin's validity a property of the runner
+     * config rather than of its own assertion.
+     */
     it('leaves no ref\'d timer behind on any of the three outcomes', async () => {
         const refd = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
-        const before = refd();
+        let before = refd();
 
         await raceWithTimeout(Promise.resolve('ok'), 120_000, () => new Error('must not fire'));
-        expect(refd()).toBe(before);
+        expect(refd()).toBeLessThanOrEqual(before);
 
+        before = refd();
         await expect(
             raceWithTimeout(Promise.reject(new Error('x')), 120_000, () => new Error('must not fire')),
         ).rejects.toThrow('x');
-        expect(refd()).toBe(before);
+        expect(refd()).toBeLessThanOrEqual(before);
 
+        before = refd();
         await expect(
             raceWithTimeout(new Promise(() => {}), 10, () => new Error('hung')),
         ).rejects.toThrow('hung');
-        expect(refd()).toBe(before);
+        expect(refd()).toBeLessThanOrEqual(before);
     });
 });
