@@ -386,6 +386,50 @@ jobs:
       - name: Release-rehearsal clone preflight self-test
         run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
+      # Shallow-history guard self-tests (#9902). Three seat-run tools ask
+      # WINDOWED history questions (`--since` over a branch), and a shallow
+      # clone answers those from whatever part of the window is present, exits
+      # 0, and prints no warning. Agent containers clone shallow, and all three
+      # run from a seat rather than from CI — every workflow that reads history
+      # already checks out with `fetch-depth: 0`, which is precisely why the
+      # exposure survived: CI is not where these run.
+      #
+      # Measured in one container on 2026-08-21 (graft floor 2026-06-02):
+      # `check-governed-merges` rendered `✅ clean window` for a window in which
+      # GitHub lists 38 commits touching `docs/adr/**` and 13 touching
+      # `AGENTS.md`; `check-engine-split-ratio --days 90` — the workflow's own
+      # invocation — printed a 98.1% ADR trigger metric over a denominator 17
+      # commits short, one of whose members was the graft boundary commit
+      # itself (it carries the whole tree, so a truncated window does not just
+      # lose data points, it fabricates one).
+      #
+      # What runs here is the self-tests, not the live tools: the live tools
+      # judge whatever clone they are pointed at, and a CI checkout's depth is
+      # the workflow's business, not a verdict this job can hold. Each pins BOTH
+      # directions on real temp-git fixtures — a window crossing the floor is
+      # refused, and a still-shallow clone whose floor PREDATES the window is
+      # answered untouched, because the predicate is the floor rather than
+      # `--is-shallow-repository` and a guard that refused provably-correct
+      # answers would only train bypass.
+      #
+      # `git-history.mjs` is listed first and deliberately: it is the shared
+      # predicate all three call, it shipped for #9878 with a self-test that
+      # until now NOTHING in this repo ran, and an unrun self-test is a phantom
+      # check — the AGENTS.md rule about `@ts-expect-error` in an uncompiled
+      # file, wearing a different hat. Invoked as `node`/`bash` rather than
+      # through `pnpm check:*`: that alias belongs in root package.json, which
+      # is declared territory of the @changesets/cli v3 migration lane (#9465)
+      # while it runs. Temp-dir fixtures, no network, ~6 s in total.
+      #
+      # (`check-governed-merges.mjs`'s own cases run in the
+      # `pnpm check:pm-governed-merges` step above, which is already its
+      # self-test.)
+      - name: Shallow-history guard self-tests
+        run: |
+          node scripts/pm/git-history.mjs --self-test
+          node scripts/check-engine-split-ratio.mjs --self-test
+          bash scripts/collect-release-notes.sh --self-test
+
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
       # and it is the enforcement of a rule that used to live only in prose: the
