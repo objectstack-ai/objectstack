@@ -536,7 +536,7 @@ function rowFromAction(row: any): ApprovalActionRow {
 export interface ApprovalServiceOptions {
   engine: ApprovalEngine;
   clock?: ApprovalClock;
-  logger?: { info?: (msg: any, ...rest: any[]) => void; warn?: (msg: any, ...rest: any[]) => void; error?: (msg: any, ...rest: any[]) => void; debug?: (msg: any, ...rest: any[]) => void };
+  logger?: { info?: (msg: any, ...rest: any[]) => void; warn: (msg: any, ...rest: any[]) => void; error?: (msg: any, ...rest: any[]) => void; debug?: (msg: any, ...rest: any[]) => void };
   /**
    * Optional automation surface used to resume a suspended flow run when a
    * decision finalises a request. Usually attached after construction via
