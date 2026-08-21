@@ -358,6 +358,91 @@ describe('ObjectKernel', () => {
         });
     });
 
+    describe('The shutdown guard is reclaimed on the same terms (#10604)', () => {
+        // The startup site cleared its timer and never unref'd; this one
+        // unref'd and never cleared. Two hand-rolled copies of one race, each
+        // doing the opposite half, and neither settling the promise the race
+        // still held a reaction on — four leaking promises per showcase run.
+        // Both sites now go through `TimeoutGuard`, so these pin the wiring.
+
+        it('leaves no timer armed once shutdown has settled', async () => {
+            vi.useFakeTimers();
+            try {
+                const k = new ObjectKernel({
+                    logger: { level: 'error' },
+                    gracefulShutdown: false,
+                    skipSystemValidation: true,
+                    shutdownTimeout: 60_000,
+                });
+
+                await k.use({
+                    name: 'reclaimed-shutdown-guard',
+                    version: '1.0.0',
+                    init: async () => {},
+                    start: async () => {},
+                    destroy: async () => {},
+                } as PluginMetadata);
+
+                const before = vi.getTimerCount();
+                await k.bootstrap();
+                await k.shutdown();
+
+                // Before the fix this was `before + 1`: `performShutdown()` won
+                // the race and the 60s guard stayed armed, to fire later against
+                // a kernel already 'stopped'. `unref()` hid it from the event
+                // loop but not from here — which is the distinction this
+                // assertion exists to keep.
+                expect(vi.getTimerCount()).toBe(before);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it('still forces exit when teardown hangs past shutdownTimeout', async () => {
+            // The companion to the assertion above, and the one that makes it
+            // safe: reclaiming the guard must not disarm it. Dropping the
+            // `unref()` is what keeps this reachable at all — an unref'd guard
+            // lets an otherwise-idle process exit silently instead of reporting
+            // the timeout.
+            const exitSpy = vi
+                .spyOn(process, 'exit')
+                .mockImplementation((() => undefined) as never);
+
+            try {
+                const k = new ObjectKernel({
+                    logger: { level: 'error' },
+                    gracefulShutdown: false,
+                    skipSystemValidation: true,
+                    shutdownTimeout: 50,
+                });
+                const errorSpy = vi.spyOn(
+                    (k as unknown as { logger: Record<'error', (...a: unknown[]) => void> }).logger,
+                    'error',
+                );
+
+                await k.use({
+                    name: 'hanging-teardown',
+                    version: '1.0.0',
+                    init: async () => {},
+                    // Never settles: `performShutdown()` awaits every destroy().
+                    destroy: () => new Promise<void>(() => {}),
+                } as PluginMetadata);
+
+                await k.bootstrap();
+                await k.shutdown();
+
+                expect(errorSpy).toHaveBeenCalledWith(
+                    'Shutdown timed out — forcing exit',
+                    expect.objectContaining({ message: 'Shutdown timeout exceeded' }),
+                );
+                expect(exitSpy).toHaveBeenCalledWith(1);
+                expect(k.getState()).toBe('stopped');
+            } finally {
+                exitSpy.mockRestore();
+            }
+        }, 2000);
+    });
+
     describe('Startup Failure Rollback', () => {
         it('should rollback started plugins on failure', async () => {
             let plugin1Destroyed = false;
