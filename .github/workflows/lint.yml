@@ -152,6 +152,44 @@ jobs:
       - name: Raw control-byte guard
         run: pnpm check:nul-bytes
 
+      # The three shared modules the two `scripts/**` routing gates below
+      # DELEGATE their design arguments to (#10608). Both of those gates are
+      # SPELLING gates by deliberate design — `check:entry-guard` enforces that
+      # only `scripts/invoked-as.mjs` may read `process.argv[1]`, and
+      # `check:parse-guard` that every TypeScript parse goes through
+      # `scripts/ts-parse.mjs` — and each answers "why is spelling enough?" the
+      # same way: the BEHAVIOUR is pinned once, at the module, by that module's
+      # own `--self-test`. Neither self-test ran anywhere. So CI enforced
+      # *"everybody routes through the module"* and never once checked that the
+      # module still refuses — a regression inside `ts-parse.mjs` (a
+      # `process.exit` downgraded to a `throw`, a dropped `parseDiagnostics`
+      # read) was caught by nothing, and its symptom is the same green line this
+      # whole family exists to distrust (#10574 / #10573 / #4690).
+      #
+      # `js-comment-mask.mjs` is here because BOTH gates ask it to tell code
+      # from prose before they judge anything, and its header records that it
+      # exists because two private `stripComments` families drifted apart in
+      # opposite directions. Its two failure directions are not symmetric: a
+      # mask that stops masking makes both gates fabricate findings out of their
+      # own documentation — loud — while a mask that starts OVER-masking makes
+      # both go quietly green over text they never read.
+      #
+      # What runs here is the self-tests, not the modules' callers: the callers
+      # are the two gate steps below, which already run on every PR.
+      # Invoked as `node` rather than through `pnpm check:*`: those aliases
+      # belong in root package.json, declared territory of the @changesets/cli
+      # v3 migration lane (#9465) while it runs — same shape as the
+      # `node scripts/…` steps later in this lane. dispatch-gates.mjs derives
+      # gate families from either spelling.
+      # `ts-parse` spawns ~20 real node children (~10 s measured, and the spawns
+      # are the point — they pin that a caller's try/catch cannot swallow the
+      # refusal); the other two are in-process fixtures, ~0.5 s combined.
+      - name: scripts/ shared-module self-tests (parse · entry predicate · comment mask)
+        run: |
+          node scripts/ts-parse.mjs --self-test
+          node scripts/invoked-as.mjs --self-test
+          node scripts/js-comment-mask.mjs --self-test
+
       # Every `scripts/**` entry guard goes through ONE predicate (#10086).
       # The hand-typed forms of "did node run me, or did someone import me?"
       # had drifted into ELEVEN spellings across 33 files, and NINE were wrong
@@ -931,6 +969,29 @@ jobs:
       # Runs its own --self-test first.
       - name: Dispatcher error-code vocabulary guard
         run: pnpm check:dispatcher-error-vocabulary
+
+      # Optional-`error` sink contract (#9754, wired by #10608). A sink TYPE that
+      # declares `error` as OPTIONAL must also declare `warn` as NON-optional, so
+      # every value of that type has somewhere to put a durability report —
+      # silence stops being representable at AUTHORING time instead of being
+      # caught one gate-run later. `AuthEventAuditLogger` declared `error?` and
+      # `debug?` and no `warn` at all: the call site could not have been written
+      # correctly against the contract it was given. Producer-side half of
+      # AGENTS.md → Prime Directive #12; the call-site rule
+      # (`check:durability-log-level`) is separate and unchanged.
+      #
+      # WHY THIS STEP EXISTS AT ALL: the gate landed with PR #10555 carrying its
+      # root alias, and NO workflow ever invoked it — so from the hour it merged
+      # it enforced nothing, while reading in `package.json` exactly like the
+      # gates that do. That is #10574's defect one file over, and it is the only
+      # thing this change repairs; the gate itself is untouched.
+      # Runs its own --self-test FIRST (13 cases, both directions, both
+      # narrowings pinned as counts), then the scan — 36 sink types, 15
+      # baselined shrink-only. AST over packages/**, no spawns; ~3.5 s.
+      # No `paths:` filter, for the standard reason: a filter on `packages/**`
+      # would go dormant on the PR that edits the baseline.
+      - name: Optional-`error` sink contract
+        run: pnpm check:optional-error-sink
 
       # Namespace-wildcard fall-through guard (#4116). A handler mounted on
       # `<prefix>/*` claims the whole namespace, and Hono's first-registered
