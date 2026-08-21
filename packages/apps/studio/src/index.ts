@@ -13,10 +13,16 @@
  *
  * NOTE (transitional): the `STUDIO_APP` schema is still imported from
  * `@objectstack/platform-objects/apps`; a follow-up moves the definition into
- * this package and drops the dependency. This package is intentionally NOT yet
- * wired into the dev/serve plugin set — that boot-path switch (and removing the
- * app from plugin-auth's manifest) lands separately so it can be verified
- * against a live `os dev` boot.
+ * this package and drops the dependency.
+ *
+ * This package is deliberately NOT wired into the dev/serve plugin set — that
+ * is a settled decision, not a pending follow-up. `plugin-dev`'s `DevPlugin`
+ * boot loop and `cli`'s `os serve` app-package loop both register only
+ * `@objectstack/setup` and `@objectstack/account`, and `plugin-auth`'s
+ * manifest no longer registers Studio either (ADR-0048; see that plugin's own
+ * header note). All three carry the same reason: the console ships a
+ * dedicated Studio surface at `/_console/studio/<pkg>/<pillar>`, so Studio no
+ * longer needs to exist as a navigable app tile in a stock boot.
  */
 
 import { STUDIO_APP } from '@objectstack/platform-objects/apps';
