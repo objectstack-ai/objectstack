@@ -164,6 +164,7 @@ import {
   readBundle,
   readSpecBlob,
   readStamp,
+  writeStamp,
 } from './console-spec-probes.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -251,6 +252,46 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
       '  This job consumes a dist that may have been RESTORED FROM CACHE, and an',
       '  unstamped dist is one no build ever proved the spec injection for —',
       '  including a dist saved by a run that failed before the assertion.',
+      '',
+      ...remedy(cacheKey),
+    );
+    return { code: 1, out, err };
+  }
+
+  // A stamp whose `packages` array is EMPTY (objectstack#10595). Well-formed —
+  // readStamp's Array.isArray shape check accepts `[]` — and therefore not a
+  // code-2 "cannot read"; it is readable and says nothing, which is a different
+  // failure. Measured: all three of this gate's substantive verdicts (the
+  // published-only detector in the bundle, the stamp's own fresh witness
+  // missing from it, and probe expiry) live inside the loop below, so an empty
+  // array silences every one of them. A dist literally carrying the PUBLISHED
+  // spec — the objectstack#8134 defect this gate exists to end — passes green.
+  //
+  // That is strictly MORE vacuous than the state objectstack#10428 refused one
+  // input over: an unbuilt spec skips only the expiry re-check and leaves the
+  // two bundle assertions standing. Refusing the lesser vacuity while tolerating
+  // the greater one is incoherent, so this refuses on the same terms.
+  //
+  // Scoped to `stamp.packages.length === 0`, NOT to the `asserted === 0` notice
+  // below, which a legitimate no-skew stamp also reaches: a no-skew entry is a
+  // POSITIVE record that the build looked and found nothing to tell the two
+  // specs apart, whereas an empty array is no record at all. Keying on
+  // `asserted` would fail the no-skew runs objectstack#10428 deliberately kept
+  // passing. Advisory when bare, for the same reason every other refusal here
+  // is: exit 1 under the flag, matching the no-dist and no-stamp verdicts.
+  if (stamp.packages.length === 0 && requireStamp) {
+    err.push(
+      `✗ Console dist at ${rel(distDir)} carries a stamp with an EMPTY \`packages\` array.`,
+      '',
+      '  The stamp is well-formed and asserts nothing. Every verdict that actually',
+      "  interrogates the dist — the published-only detector, the stamp's own fresh",
+      '  witness, probe expiry — is derived per package entry, so with no entries',
+      '  this run would report green without making a single assertion about the',
+      '  artifact it is guarding. A dist carrying the PUBLISHED spec would pass.',
+      '',
+      '  Nothing this repo builds writes such a stamp: assert-console-spec-injection.mjs',
+      '  records one hard-coded @objectstack/spec entry on both of its stamping paths.',
+      '  So this dist was hand-assembled, truncated in transit, or partially restored.',
       '',
       ...remedy(cacheKey),
     );
@@ -598,6 +639,86 @@ function selfTest() {
       }).code,
       0,
     );
+  }
+
+  // 7c. THE THIRD VACUITY PATH (objectstack#10595): a well-formed stamp whose
+  //     `packages` array is EMPTY. readStamp's Array.isArray check accepts `[]`,
+  //     and every substantive verdict is derived per entry, so the gate asserts
+  //     nothing at all — strictly more vacuous than 7b, which still ran the two
+  //     bundle assertions.
+  {
+    const empty = { stampVersion: 1, generatedBy: 'scripts/assert-console-spec-injection.mjs', packages: [] };
+    const dist = makeDist(path.join(root, 'empty-stamp'), `console(${JSON.stringify(FRESH)})`, empty);
+
+    expect('empty packages is advisory by default', evaluate({ distDir: dist, specDir }).code, 0);
+
+    const r = evaluate({ distDir: dist, specDir, requireStamp: true, cacheKey: 'Linux-console-dist-cafe01' });
+    expect('empty packages is fatal under --require-stamp', r.code, 1);
+    const text = r.err.join('\n');
+    checked += 1;
+    // Branch-unique wording: every refusal prints remedy(), so keying on that
+    // cannot tell this branch from the no-stamp one it sits next to.
+    if (!text.includes('EMPTY `packages` array')) {
+      failures.push('empty-packages failure must name the empty packages array');
+    }
+    checked += 1;
+    if (!text.includes('gh cache delete "Linux-console-dist-cafe01"')) {
+      failures.push('empty-packages failure must name the exact cache key to delete');
+    }
+
+    // THE REJECT SIDE, ASSERTED POSITIVELY. The point is not the exit code on a
+    // benign fixture — it is that an empty stamp silences the verdict this whole
+    // gate exists for. This dist carries the PUBLISHED spec (objectstack#8134's
+    // defect); before this fix it exited 0 under --require-stamp.
+    const poisoned = makeDist(
+      path.join(root, 'empty-stamp-poisoned'),
+      `console(${JSON.stringify(FRESH)});console(${JSON.stringify(STALE)})`,
+      empty,
+    );
+    expect(
+      'a PUBLISHED-spec bundle under an empty stamp no longer passes --require-stamp',
+      evaluate({ distDir: poisoned, specDir, requireStamp: true }).code,
+      1,
+    );
+
+    // PRECISION, and the reason this keys on `packages.length` and not on the
+    // `asserted === 0` notice further down. A no-skew entry ALSO leaves
+    // `asserted` at 0 and reaches that same notice, but it is a positive record
+    // that the build looked and found nothing to tell the specs apart — an
+    // assertion nobody was owed, which objectstack#10428 deliberately kept
+    // passing. Keying on `asserted` would silently fail every no-skew run.
+    expect(
+      'precision: a no-skew stamp still passes --require-stamp on a built spec',
+      evaluate({
+        distDir: makeDist(path.join(root, 'noskew-required'), 'console("anything")', stampFor({ skew: false, freshWitness: null, staleDetector: null })),
+        specDir,
+        requireStamp: true,
+      }).code,
+      0,
+    );
+  }
+
+  // 7d. The producer cannot emit that stamp in the first place. writeStamp is
+  //     the one call site every producer passes, and the entries array is meant
+  //     to GROW (objectstack#9659) — the day it is derived rather than literal,
+  //     an empty result becomes producible. Refused at the write.
+  {
+    const dir = fs.mkdtempSync(path.join(root, 'writestamp-'));
+    checked += 1;
+    let threw = null;
+    try {
+      writeStamp(dir, []);
+    } catch (error) {
+      threw = error;
+    }
+    if (!(threw instanceof ProbeError)) {
+      failures.push(`writeStamp([]) must throw ProbeError, got ${threw === null ? 'no throw' : threw.constructor.name}`);
+    }
+    expect('writeStamp([]) writes no stamp at all', fs.existsSync(path.join(dir, STAMP_BASENAME)), false);
+
+    // Positive control: the shape the real producer writes still goes through.
+    writeStamp(dir, [{ name: '@objectstack/spec', skew: true, freshWitness: FRESH, staleDetector: STALE }]);
+    expect('writeStamp writes a populated stamp', fs.existsSync(path.join(dir, STAMP_BASENAME)), true);
   }
 
   // 8. A build that found no skew records it, and this gate says so honestly.
