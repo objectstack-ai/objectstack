@@ -112,12 +112,6 @@ Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded autom
 |---------|-------------|
 | `os explain [schema]` | Display human-readable explanation of an ObjectStack schema |
 
-### Code Transforms
-
-| Command | Description |
-|---------|-------------|
-| `os codemod v2-to-v3` | Migrate ObjectStack v2 config to v3 format |
-
 ## Configuration
 
 The CLI looks for `objectstack.config.ts` (or `.js`, `.mjs`) in the current directory:
@@ -296,14 +290,12 @@ os projects bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud Pro
 │   ├── compile.ts              # os compile
 │   ├── validate.ts             # os validate
 │   ├── generate.ts             # os generate (alias: g)
-│   ├── projects/               # os projects <subcommand>
+│   ├── environments/           # os environments <subcommand>
 │   │   ├── list.ts
 │   │   ├── show.ts
 │   │   ├── create.ts
 │   │   ├── switch.ts
 │   │   └── bind.ts
-│   ├── codemod/                # os codemod <subcommand>
-│   │   └── v2-to-v3.ts
 │   └── ...
 ├── src/utils/                  # Shared utilities
 └── package.json                # oclif config under "oclif" key
