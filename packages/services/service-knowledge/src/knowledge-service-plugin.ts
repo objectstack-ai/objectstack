@@ -70,6 +70,15 @@ export class KnowledgeServicePlugin implements Plugin {
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;
+  /**
+   * Captured where the subscription is taken out, not resolved at teardown:
+   * `destroy()` — the hook the kernel actually calls — takes NO
+   * `PluginContext` (`Plugin.destroy?(): Promise<void> | void`, core
+   * `types.ts`). Holding the very service the subscription was placed with also
+   * means the unsubscribe cannot miss it because the registry has already been
+   * torn down around us.
+   */
+  private realtime: IRealtimeService | undefined;
   private logger: KnowledgeLogger | undefined;
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
@@ -141,6 +150,7 @@ export class KnowledgeServicePlugin implements Plugin {
         return;
       }
 
+      this.realtime = realtime;
       this.subscriptionId = await realtime.subscribe('knowledge-event-sync', async (event) => {
         const object = event.object;
         if (!object) return;
@@ -293,14 +303,42 @@ export class KnowledgeServicePlugin implements Plugin {
     );
   }
 
-  async stop(ctx: PluginContext): Promise<void> {
+  /**
+   * The kernel's teardown hook (`Plugin.destroy?()`, core `types.ts`) — the
+   * ONLY teardown entry point `ObjectKernel.performShutdown()` and
+   * `LiteKernel.destroy()` invoke.
+   *
+   * [#10371] IT USED TO BE `stop()`, WHICH NOTHING CALLED. `Plugin` declares
+   * `init()`, `start?()` and `destroy?()` and no `stop()`, so the kernel walked
+   * past this plugin at shutdown and the `knowledge-event-sync` realtime
+   * subscription outlived the kernel that created it. `start()` IS on the
+   * interface, so the pair read as symmetric in review — that asymmetry is what
+   * let the same shape survive in six packages at once.
+   *
+   * No timer here, so this member never cost a merge-queue eviction the way the
+   * `plugin-reports` / `service-messaging` members did (#9371). The class is
+   * the same one either way: a teardown the kernel does not reach.
+   */
+  async destroy(): Promise<void> {
     if (!this.subscriptionId) return;
     try {
-      const realtime = ctx.getService<IRealtimeService>('realtime');
-      await realtime.unsubscribe(this.subscriptionId);
+      await this.realtime?.unsubscribe(this.subscriptionId);
     } catch {
       // best-effort
     }
     this.subscriptionId = undefined;
+    this.realtime = undefined;
+  }
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class, and removing it would break an embedder who learned to call
+   * it directly precisely BECAUSE the kernel never did. The parameter is now
+   * optional and ignored: `destroy()` takes no context, so teardown uses the
+   * realtime service captured when the subscription was taken out. Prefer
+   * kernel shutdown; direct callers keep working unchanged.
+   */
+  async stop(_ctx?: PluginContext): Promise<void> {
+    await this.destroy();
   }
 }

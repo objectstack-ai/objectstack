@@ -721,6 +721,58 @@ export class SecurityPlugin implements Plugin {
    */
   private readonly objectSecurityMetaCache = new Map<string, ObjectSecurityMeta>();
   private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
+  /**
+   * [#10757] Per-EXECUTION-CONTEXT memo for
+   * {@link SecurityPlugin.resolvePermissionSetsForContext}.
+   *
+   * ## The duplicate it removes
+   *
+   * `findData` (`@objectstack/metadata-protocol`) answers a paginated list with
+   * TWO engine operations — `find` for the page, then `count` for the total —
+   * and this middleware runs on both. Each pass re-resolved the same permission
+   * sets for the same context, so one `GET /data/:object?$top=1` issued
+   * `select * from sys_permission_set where name in (...)` TWICE, back to back,
+   * with identical bindings (measured on a real stack: queries 21 and 23 of 24).
+   * On a database a network hop away that is a full round trip spent asking a
+   * question already answered microseconds earlier.
+   *
+   * ## Why keying on the context object is the request scope
+   *
+   * The execution context is built ONCE per request and threaded unchanged
+   * through every operation of that request — `@objectstack/rest` memoizes it
+   * per `req` (`RestServer.execCtxMemo`), and the runtime/MCP dispatchers each
+   * assemble one per dispatch. Keying a `WeakMap` on that object therefore
+   * scopes the memo to exactly the resolution the context represents, and the
+   * entry is collected with it: no TTL, no module-level table keyed by user id,
+   * nothing that outlives the caller it was resolved for.
+   *
+   * ## Why a write epoch, and not object identity alone
+   *
+   * Object identity alone would be a staleness window rather than a
+   * de-duplication: a context that performs a WRITE and then reads again is
+   * entitled to see the write. A permission change lands as a write to
+   * `sys_permission_set` / `sys_user_permission_set` / `sys_position_*` through
+   * this very engine, so {@link SecurityPlugin.writeEpoch} is bumped on every
+   * write operation the middleware sees -- before the `isSystem` bypass, so a
+   * seeder, a package publish or the auto-org-admin grant invalidates too -- and
+   * an entry is reused only while the epoch it was resolved at still stands.
+   * Any write, by ANY context in this process, retires every entry.
+   *
+   * What that leaves is exactly one thing: two reads by one context with no
+   * intervening write, which is the find/count pair above and is the definition
+   * of a duplicate question. It is NOT a cache -- nothing here survives a write,
+   * and nothing here survives its context.
+   */
+  private readonly permissionSetMemo = new WeakMap<
+    object,
+    { epoch: number; key: string; sets: Promise<PermissionSet[]> }
+  >();
+  /**
+   * [#10757] Monotonic counter bumped on every engine WRITE this middleware
+   * sees. Read only by {@link SecurityPlugin.permissionSetMemo}; see its doc for
+   * why the guard exists and what it is guarding against.
+   */
+  private writeEpoch = 0;
   private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
 
   constructor(options: SecurityPluginOptions = {}) {
@@ -853,6 +905,12 @@ export class SecurityPlugin implements Plugin {
         this.tenancyDisabledCache.clear();
         this.cbpRelCache.clear();
         this.objectSecurityMetaCache.clear();
+        // [#10757] A permission set can be DECLARED in metadata, so a metadata
+        // change is a permission change even when no row was written. Retiring
+        // the per-context memo here keeps it on the same invalidation footing
+        // as every other metadata-derived cache above, rather than being the
+        // one that survives a Studio edit.
+        this.writeEpoch++;
       });
     }
 
@@ -1184,6 +1242,17 @@ export class SecurityPlugin implements Plugin {
 
     // Register security middleware
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      // [#10757] Retire every memoized permission-set resolution the moment a
+      // WRITE passes through the engine. Deliberately the FIRST statement in
+      // the middleware — ahead of the `isSystem` bypass immediately below —
+      // because the writes most likely to change what a caller may see are
+      // system ones: the platform seeder, a package publish, the auto-org-admin
+      // grant. A guard that only saw user writes would leave a memo standing
+      // across exactly the grants that matter. See {@link permissionSetMemo}.
+      if (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete') {
+        this.writeEpoch++;
+      }
+
       // System operations bypass security
       if (opCtx.context?.isSystem) {
         return next();
@@ -3885,14 +3954,77 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
+   * [#10757] The memo key: every field of the execution context this resolution
+   * reads. Two contexts that agree on all of them get the same answer, and a
+   * context whose grants were rewritten in place (rather than replaced) gets a
+   * different key and is re-resolved.
+   *
+   * Spelled out rather than derived from the object, deliberately: a
+   * `JSON.stringify(context)` would fold in fields the resolution never reads
+   * (making the memo miss for no reason) and would silently start keying on any
+   * field added later — including one that should NOT participate. The list is
+   * short because the inputs are: {@link resolvePermissionSetsForContext} reads
+   * `positions`, `permissions`, `principalKind` and the PRESENCE of `userId`,
+   * and nothing else off the context.
+   */
+  private permissionSetMemoKey(context: any): string {
+    const positions = Array.isArray(context?.positions) ? context.positions : [];
+    const permissions = Array.isArray(context?.permissions) ? context.permissions : [];
+    return JSON.stringify([
+      positions,
+      permissions,
+      context?.principalKind ?? null,
+      context?.userId ? 1 : 0,
+    ]);
+  }
+
+  /**
    * Resolve the effective permission sets for an execution context — positions +
    * explicit permission sets, with the configured baseline applied both as an
    * implicit request (when none were named) and as a post-resolution fallback
    * (when named ones resolved to nothing). Shared by the engine middleware and
    * {@link getReadFilter} so both enforce identical RLS. May throw if the
    * underlying metadata/db resolution fails (callers fail-closed).
+   *
+   * [#10757] Memoized per execution context and retired by any write — see
+   * {@link permissionSetMemo} for the duplicate this removes, why the context
+   * object IS the request scope, and why the write epoch is what makes reuse a
+   * de-duplication rather than a staleness window. A REJECTION is never
+   * retained: the entry is dropped so the next caller re-resolves (callers
+   * fail closed on a throw, so a memoized failure would deny for the rest of
+   * the context's life on a fault that may already be over).
    */
   private async resolvePermissionSetsForContext(
+    context: any,
+  ): Promise<PermissionSet[]> {
+    // A primitive/absent context has no identity to key on — and no grants to
+    // resolve either. Straight through.
+    if (!context || typeof context !== 'object') {
+      return this.resolvePermissionSetsForContextUnmemoized(context);
+    }
+    const key = this.permissionSetMemoKey(context);
+    const hit = this.permissionSetMemo.get(context);
+    // Every caller gets its OWN array, exactly as before this memo existed —
+    // a shared array would be a new aliasing hazard on top of a query saving,
+    // and no caller should have to know which of the two it holds. (The
+    // PermissionSet objects inside were already shared instances: they come
+    // from the metadata/bootstrap registries, not from this call.)
+    if (hit && hit.epoch === this.writeEpoch && hit.key === key) {
+      return hit.sets.then((s) => [...s]);
+    }
+    const sets = this.resolvePermissionSetsForContextUnmemoized(context);
+    const entry = { epoch: this.writeEpoch, key, sets };
+    this.permissionSetMemo.set(context, entry);
+    sets.catch(() => {
+      if (this.permissionSetMemo.get(context) === entry) {
+        this.permissionSetMemo.delete(context);
+      }
+    });
+    return sets.then((s) => [...s]);
+  }
+
+  /** The actual resolution — see {@link resolvePermissionSetsForContext}. */
+  private async resolvePermissionSetsForContextUnmemoized(
     context: any,
   ): Promise<PermissionSet[]> {
     const positions = context?.positions ?? [];

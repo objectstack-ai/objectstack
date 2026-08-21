@@ -165,10 +165,30 @@ Why this shape:
   *CLOSED-by-recipe*, naming any pinned fallback and asking the run to record **which**
   of the two its verdict rests on. Deleting the gap loses the reason the recipe exists.
 
-The validator does **not** yet resolve `provisioning.use` against the area's `fixtures`
-keys — that was deliberately deferred (option C on #7716's open question, tracked at
-#7720), to be revisited if the recipe shape spreads to more areas. Until then a typo'd
-`use` is caught by review, not by `check:platform-checklist`: copy the key, don't retype it.
+The validator **resolves `provisioning.use` against its own area's `fixtures` keys**: a
+`use` naming a key that area does not define fails `check:platform-checklist`, naming the
+item, the key that resolved to nothing, and the recipes the area does offer. This is
+option C on #7716's open question — deferred at #7720 while the recipe shape lived in a
+single area, landed at #10593 on its own stated condition, once the shape had spread to
+three areas and six references.
+
+Two things the resolve deliberately does **not** do:
+
+- **It does not flag a recipe no item references.** Cross-area reuse has no spelling yet
+  (below), so a recipe whose only consumer lives in another area is referenced from that
+  item's `knownGaps` prose — invisible to the check. Redding the unreferenced direction
+  would answer the cross-area question by accident, in the direction of "recipes are
+  area-local", and that is a convention decision rather than a mechanical one.
+- **It does not reach across areas.** Resolution is area-scoped because the mechanism is:
+  `use` names a key in the item's *own* file. A `use` pointing at another area's recipe
+  key is therefore a dangling pointer and fails — there is no qualified spelling
+  (`search:qa-contributor-bound-member` or similar) and no shared recipe file. A
+  cross-area consumer still cites the recipe **by name in `knownGaps`** and does not fork
+  a second copy; `records-forms.crud-roundtrip` clause 7 is the worked instance. Giving
+  that pointer a spelling the tooling can see is the open half of #10593.
+
+⚠️ Remember the cadence: this gate is **not** CI-wired (above), so it catches a typo'd
+`use` at the next manual run, not on the PR that introduced it. Copy the key, don't retype it.
 
 ## Lifecycle — append, change, retire (never delete)
 

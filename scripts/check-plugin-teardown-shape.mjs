@@ -233,17 +233,11 @@ const POSITIVE_CONTROL = {
  * `EmailServicePlugin` / `WebhookOutboxPlugin` spell it `dispose`.
  */
 const KNOWN_TEARDOWN_UNREACHED = [
-  { file: 'packages/connectors/connector-openapi/src/connector-openapi-plugin.ts', cls: 'ConnectorOpenApiPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/connectors/connector-rest/src/connector-rest-plugin.ts', cls: 'ConnectorRestPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/connectors/connector-slack/src/connector-slack-plugin.ts', cls: 'ConnectorSlackPlugin', alias: 'stop', repair: '#10371' },
   { file: 'packages/metadata/src/plugin.ts', cls: 'MetadataPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/plugins/plugin-approvals/src/approvals-plugin.ts', cls: 'ApprovalsServicePlugin', alias: 'stop', repair: '#10371' },
   { file: 'packages/plugins/plugin-email/src/email-plugin.ts', cls: 'EmailServicePlugin', alias: 'dispose', repair: '#10371' },
-  { file: 'packages/plugins/plugin-reports/src/reports-plugin.ts', cls: 'ReportsServicePlugin', alias: 'stop', repair: '#10371' },
   { file: 'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts', cls: 'WebhookOutboxPlugin', alias: 'dispose', repair: '#10371' },
   { file: 'packages/runtime/src/app-plugin.ts', cls: 'AppPlugin', alias: 'stop', repair: '#10371' },
   { file: 'packages/runtime/src/external-validation-plugin.ts', cls: 'ExternalValidationPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/services/service-knowledge/src/knowledge-service-plugin.ts', cls: 'KnowledgeServicePlugin', alias: 'stop', repair: '#10371' },
 ];
 
 // ---------------------------------------------------------------------------

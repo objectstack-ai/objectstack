@@ -71,9 +71,37 @@ export class ConnectorSlackPlugin implements Plugin {
         ctx.logger.info(`ConnectorSlackPlugin: Slack connector '${def.name}' registered`);
     }
 
-    async stop(_ctx: PluginContext): Promise<void> {
+    /**
+     * The kernel's teardown hook (`Plugin.destroy?()`, core `types.ts`) — the
+     * ONLY teardown entry point `ObjectKernel.performShutdown()` and
+     * `LiteKernel.destroy()` invoke.
+     *
+     * [#10371] IT USED TO BE `stop()`, WHICH NOTHING CALLED. `Plugin` declares
+     * `init()`, `start?()` and `destroy?()` and no `stop()`, so the kernel
+     * walked past this plugin at shutdown and the Slack connector stayed registered in the automation
+     * engine for the lifetime of the process. `start()` IS on the
+     * interface, so the pair read as symmetric in review — that asymmetry is
+     * what let the same shape survive in six packages at once.
+     *
+     * No timers here, so this instance never cost a merge-queue eviction the
+     * way the `plugin-reports` / `service-messaging` members did (#9371). The
+     * class is the same one either way: a teardown the kernel does not reach.
+     */
+    async destroy(): Promise<void> {
         if (this.automation && this.connectorName) {
             try { this.automation.unregisterConnector(this.connectorName); } catch { /* ignore */ }
         }
+        this.automation = undefined;
+        this.connectorName = undefined;
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class, and removing it would break an embedder who learned to
+     * call it directly precisely BECAUSE the kernel never did. Prefer kernel
+     * shutdown; direct callers keep working unchanged.
+     */
+    async stop(_ctx?: PluginContext): Promise<void> {
+        await this.destroy();
     }
 }

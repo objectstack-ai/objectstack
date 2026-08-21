@@ -46,9 +46,9 @@ Core business logic and data modeling schemas.
 | **[Postgres Driver](/docs/references/data/driver-postgres)** | `driver/postgres.zod.ts` | PostgresConfig | PostgreSQL configuration |
 | **[Mongo Driver](/docs/references/data/driver-mongo)** | `driver/mongo.zod.ts` | MongoConfig | MongoDB configuration |
 
-## UI Protocol (11 of 17 schemas)
+## UI Protocol (10 of 16 schemas)
 
-Presentation layer - views, forms, dashboards, and themes.
+Presentation layer - views, forms, dashboards, and app branding.
 
 | Protocol | Source File | Key Schemas | Purpose |
 |:---------|:-----------|:------------|:--------|
@@ -61,7 +61,6 @@ Presentation layer - views, forms, dashboards, and themes.
 | **[Action](/docs/references/ui/action)** | `action.zod.ts` | Action, ActionType | UI button actions |
 | **[Component](/docs/references/ui/component)** | `component.zod.ts` | PageComponent variants | Reusable UI components |
 | **[Chart](/docs/references/ui/chart)** | `chart.zod.ts` | Chart, ChartType | Chart definitions |
-| **[Theme](/docs/references/ui/theme)** | `theme.zod.ts` | Theme, ColorPalette | Theming and branding |
 | **[Widget Contract](/docs/protocol/objectui/widget-contract)** ↗ | `widget.zod.ts` | FieldWidgetProps | Props a custom field widget receives — the contract is documented with ObjectUI, outside `references/ui/` |
 
 ## Kernel Protocol (17 of 31 schemas)
@@ -132,7 +131,7 @@ AI/ML capabilities - agents, skills, tools, MCP exposure, RAG, and cost tracking
 
 ## API Protocol (17 of 28 schemas)
 
-REST/GraphQL endpoints, real-time subscriptions, and discovery.
+REST endpoints, real-time subscriptions, and discovery.
 
 | Protocol | Source File | Key Schemas | Purpose |
 |:---------|:-----------|:------------|:--------|

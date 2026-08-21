@@ -108,7 +108,7 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     'ResponsiveConfigSchema',
     'NotificationTypeSchema',
     'SharingConfigSchema',
-    'ThemeSchema',
+    // (`ThemeSchema` stood here until #10485 retired the theme surface whole.)
     'PageSchema',
     'PageComponentSchema',
   ] as const;

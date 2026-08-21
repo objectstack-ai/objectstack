@@ -254,7 +254,8 @@ import type * as M162 from './ui/notification.zod.js';
 import type * as M163 from './ui/page.zod.js';
 import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
-import type * as M166 from './ui/theme.zod.js';
+// M166 was './ui/theme.zod.js' — retired whole at #10485 (ADR-0049); the
+// M-indices are positional, so the slot stays vacant rather than renumbering.
 import type * as M167 from './ui/view.zod.js';
 // Appended out of alphabetical order deliberately: the M-indices are positional
 // identifiers the pin lines below reference by number, so a new module takes the
@@ -264,7 +265,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 839 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 834 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1338,12 +1339,8 @@ export type Iso697 = Assert<Eq< z.input< typeof M165.ResponsiveConfigSchema >, z
 export type Iso698 = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 export type Iso699 = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 
-// ui/theme.zod.ts
-export type Iso700 = Assert<Eq< z.input< typeof M166.ColorPaletteSchema >, z.infer< typeof M166.ColorPaletteSchema > >>;
-export type Iso701 = Assert<Eq< z.input< typeof M166.TypographySchema >, z.infer< typeof M166.TypographySchema > >>;
-export type Iso702 = Assert<Eq< z.input< typeof M166.BorderRadiusSchema >, z.infer< typeof M166.BorderRadiusSchema > >>;
-export type Iso703 = Assert<Eq< z.input< typeof M166.ShadowSchema >, z.infer< typeof M166.ShadowSchema > >>;
-export type Iso704 = Assert<Eq< z.input< typeof M166.ThemeModeSchema >, z.infer< typeof M166.ThemeModeSchema > >>;
+// ui/theme.zod.ts (Iso700–Iso704) left with the module at #10485 — the Iso
+// numbers are positional and stay vacant.
 
 // ui/view.zod.ts
 export type Iso705 = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;
@@ -1661,7 +1658,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 839 isomorphic pins', () => {
+  it('still declares all 834 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1928,9 +1925,14 @@ describe('ADR-0122 type-alias convention', () => {
     // schemas or converted aliases to `Parsed` pairs; this one moved the
     // input/output identity into the annotation itself, where both halves
     // spell the same type.
+    //
+    // 839 -> 834 is #10485 — `Iso700`-`Iso704` DELETED with `ui/theme.zod.ts`
+    // (ADR-0049 retirement of the whole theme authoring surface): the five
+    // schemas they pinned no longer exist, so there is nothing left to exempt.
+    // The Iso numbers are positional and stay vacant.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(839);
+    expect(pins).toHaveLength(834);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

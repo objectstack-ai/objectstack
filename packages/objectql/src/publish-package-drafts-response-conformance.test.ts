@@ -208,6 +208,7 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(strippedKeys(raw)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(raw);
         expect(parsed.success).toBe(true);
+        expect(parsed.outcome).toBe('published');
         expect(parsed.publishedCount).toBe(2);
         expect(parsed.failedCount).toBe(0);
         expect(parsed.failed).toEqual([]);
@@ -219,12 +220,12 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.published.map((e) => e.name).sort()).toEqual(['cases', 'leads']);
     });
 
-    it('the five always-emitted keys are required — the producer sets them on every return site', async () => {
+    it('the six always-emitted keys are required — the producer sets them on every return site', async () => {
         const p = await makeProtocol();
         await stageDrafts(p, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
         const raw: any = await p.publishPackageDrafts({ packageId: PKG });
 
-        for (const key of ['success', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
+        for (const key of ['success', 'outcome', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
             expect(raw[key], `producer must emit '${key}'`).toBeDefined();
             const body: Record<string, unknown> = { ...raw };
             delete body[key];
@@ -365,6 +366,7 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         const raw: any = await p.publishPackageDrafts({ packageId: PKG });
 
         expect(raw.success).toBe(false);
+        expect(raw.outcome).toBe('refused');
         expect(raw.publishedCount).toBe(0);
         expect(raw.published).toEqual([]);
         expect(raw.failedCount).toBeGreaterThan(0);
@@ -373,5 +375,134 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.failed[0]).toMatchObject({ type: 'object', name: 'ticket' });
         expect(typeof parsed.failed[0]!.error).toBe('string');
         expect(typeof parsed.failed[0]!.code).toBe('string');
+    });
+});
+
+/**
+ * #10462 — `outcome`, the first-class discriminant for WHICH exit answered.
+ *
+ * The defect this pins shut, measured on cloud#1488: a publish with nothing
+ * to promote and a genuine refusal both answer `success: false` with
+ * `publishedCount: 0`, and the no-op leaves no trace — so an AI consumer
+ * graded the no-op as "refused and rolled back" and burned two repair rounds
+ * re-authoring artifacts that were already correct. cloud#1492's patch
+ * discriminates on `failed.length > 0`, an invariant the producer never
+ * stated and nothing pinned. `outcome` states it, typed, and these cases pin
+ * it in both directions.
+ *
+ * The card's own requested pin — "every non-success return carries at least
+ * one `failed[]` entry" — is FALSE today and the no-op is its counterexample
+ * (`success: false`, `failed: []`). The three invariants below are the honest
+ * restatement (PM ruling on the card).
+ */
+describe('outcome discriminates the three publish exits (#10462)', () => {
+    /** Stage the measured pre-flight refusal class (ADR-0028 prefix rule). */
+    async function makeRefusal() {
+        const p = await makeProtocol();
+        (p as any).engine.registry.registerPackage?.({
+            id: PKG, manifest: { namespace: 'edu' },
+        });
+        await stageDrafts(p, [
+            { type: 'object', name: 'ticket', item: { name: 'ticket', label: 'Ticket', fields: {} } },
+        ]);
+        return p;
+    }
+
+    /**
+     * DEFECT CONTROL — the two shapes cloud#1488 could not tell apart,
+     * side by side (a case that exercised only the no-op would prove nothing
+     * about discrimination). Red on origin/main by construction: there the
+     * two responses differ on no key but `failed[]`'s contents.
+     */
+    it('a no-op publish and a genuine refusal are distinguishable through outcome', async () => {
+        // The no-op: a package with NO pending drafts.
+        const pNoop = await makeProtocol();
+        const noop: any = await pNoop.publishPackageDrafts({ packageId: 'app.empty' });
+
+        // The refusal: the same fixture class the refused-batch case stages.
+        const refused: any = await (await makeRefusal()).publishPackageDrafts({ packageId: PKG });
+
+        // Identical on every axis the consumer previously had…
+        expect(noop.success).toBe(false);
+        expect(refused.success).toBe(false);
+        expect(noop.publishedCount).toBe(0);
+        expect(refused.publishedCount).toBe(0);
+        expect(noop.published).toEqual([]);
+        expect(refused.published).toEqual([]);
+        // …and now distinguishable through the declared discriminant.
+        expect(noop.outcome).toBe('nothing_to_publish');
+        expect(refused.outcome).toBe('refused');
+        // Both shapes stay inside the declared face.
+        expect(strippedKeys(noop)).toEqual([]);
+        expect(strippedKeys(refused)).toEqual([]);
+    });
+
+    /**
+     * The three producer invariants — BOTH directions of each biconditional
+     * (asserted as boolean equality, which is the biconditional), on every
+     * response class this suite can stage against the real engine. (i) is the
+     * guarantee cloud#1492's `failed.length > 0` discrimination needs, stated
+     * by the producer at last. (iii) doubles as the pin that existing
+     * `success` semantics did not move.
+     */
+    const expectOutcomeInvariants = (res: any) => {
+        // (i) refused ⟺ failed[] non-empty.
+        expect(res.outcome === 'refused').toBe(res.failed.length > 0);
+        // (ii) nothing_to_publish ⟺ nothing landed AND nothing refused.
+        expect(res.outcome === 'nothing_to_publish')
+            .toBe(res.published.length === 0 && res.failed.length === 0);
+        // (iii) success === (outcome === 'published').
+        expect(res.success).toBe(res.outcome === 'published');
+    };
+
+    it('the invariants hold on a published batch, a refused batch, and a no-op', async () => {
+        const pOk = await makeProtocol();
+        await stageDrafts(pOk, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
+        const ok: any = await pOk.publishPackageDrafts({ packageId: PKG });
+        expect(ok.outcome).toBe('published');
+        expectOutcomeInvariants(ok);
+
+        const refused: any = await (await makeRefusal()).publishPackageDrafts({ packageId: PKG });
+        expect(refused.outcome).toBe('refused');
+        expectOutcomeInvariants(refused);
+
+        const pNoop = await makeProtocol();
+        const noop: any = await pNoop.publishPackageDrafts({ packageId: 'app.empty' });
+        expect(noop.outcome).toBe('nothing_to_publish');
+        expectOutcomeInvariants(noop);
+    });
+
+    /**
+     * PRESERVED-BEHAVIOUR CONTROL — `outcome` is additive: every pre-existing
+     * field answers exactly as before on all three exits, `success` included.
+     * Green on origin/main by construction (minus the `outcome` key), so its
+     * power to fail is proven by mutation, not by running main: rewiring
+     * `success` from `outcome` (the "a no-op is not a failure" refactor this
+     * card explicitly does NOT make — that call is the maintainer's) goes red
+     * on the no-op leg below. The mutation run is reported in the PR.
+     */
+    it('every pre-existing field answers exactly as before on all three exits', async () => {
+        const pOk = await makeProtocol();
+        await stageDrafts(pOk, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
+        const { outcome: _okOutcome, ...ok } = (await pOk.publishPackageDrafts({ packageId: PKG })) as any;
+        expect(ok).toMatchObject({ success: true, publishedCount: 1, failedCount: 0, failed: [] });
+        expect(ok.published.map((e: any) => e.name)).toEqual(['cases']);
+        expect(typeof ok.commitId).toBe('string');
+
+        const { outcome: _refusedOutcome, ...refused } =
+            (await (await makeRefusal()).publishPackageDrafts({ packageId: PKG })) as any;
+        expect(refused).toMatchObject({ success: false, publishedCount: 0, published: [] });
+        expect(refused.failedCount).toBeGreaterThan(0);
+        expect(refused.failed[0]).toMatchObject({ type: 'object', name: 'ticket' });
+        expect(typeof refused.failed[0].error).toBe('string');
+        expect(typeof refused.failed[0].code).toBe('string');
+
+        const pNoop = await makeProtocol();
+        const { outcome: _noopOutcome, ...noop } =
+            (await pNoop.publishPackageDrafts({ packageId: 'app.empty' })) as any;
+        // The EXACT pre-#10462 no-op shape, strictly — the issue's own quote.
+        expect(noop).toEqual({
+            success: false, publishedCount: 0, failedCount: 0, published: [], failed: [],
+        });
     });
 });

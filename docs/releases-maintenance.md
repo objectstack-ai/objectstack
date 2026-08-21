@@ -50,6 +50,34 @@ CONSOLE_BUMP=patch scripts/bump-objectui.sh   # force the bump type
 scripts/bump-objectui.sh --no-changeset       # opt out (rarely)
 ```
 
+#### The pin must be a commit on objectui `main` (#10495)
+
+`bump-objectui.sh` pins `git rev-parse HEAD` of your objectui checkout, which
+answers *what is checked out* — never *is it on main*. Bump with a feature branch
+checked out and you pin a revision that is not on main. So the bump now asks the
+question and **warns** — it does not refuse:
+
+* **On `origin/main`** — the pin line says `(on origin/main)` and nothing else is
+  printed. "Checked, and fine" is stated, not inferred from silence.
+* **Not on `origin/main`** — a loud warning naming the branch(es) the commit *is*
+  on, and saying which situation it is: pushed onto a branch that never merged, or
+  never pushed at all. The pin is still written; deciding is yours.
+* **Cannot be answered** — no `origin/main` in the checkout, or the commit object
+  is absent — it says *that*, and never borrows the wording of either verdict.
+  (`git merge-base --is-ancestor` exits **128** on an absent object: an error, not
+  a "no". And `git rev-parse HEAD` exits 0 for a commit whose object is missing,
+  so the pin arriving is no proof the object is there.)
+
+It is a warning rather than a gate on purpose: `origin/main` is only as fresh as
+your last fetch, so a hard failure here would reject a legitimately-just-merged
+commit, and this script stays usable offline. It never fetches for you — it prints
+the `git fetch origin main` you may want. The hard gate lives at the chokepoint
+that must fail closed: `.github/workflows/cut-rc.yml` re-asks the same question
+against a fresh full clone and **refuses to cut** (#9450). Until an RC is cut,
+though, a bad pin merges and `pnpm sdui:manifest` below would ratchet
+spec↔registry parity against a tree that is not on main — which is why the
+producer half warns at all.
+
 #### After the pin moves: run the declaration-parity ratchet (#5960)
 
 The bump has a second half, and it is not optional:

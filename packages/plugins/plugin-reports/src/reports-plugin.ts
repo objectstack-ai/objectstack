@@ -53,12 +53,20 @@ export class ReportsServicePlugin implements Plugin {
   private intervalHandle?: ReturnType<typeof setInterval>;
   private jobName?: string;
   private jobService?: IJobService;
+  /**
+   * Captured in `init()` because `destroy()` — the hook the kernel actually
+   * calls — takes NO `PluginContext` (`Plugin.destroy?(): Promise<void> | void`
+   * in core's `types.ts`). Teardown still needs somewhere to report a failed
+   * job cancellation, so the logger is held rather than resolved late.
+   */
+  private logger?: PluginContext['logger'];
 
   constructor(options: ReportsPluginOptions = {}) {
     this.options = options;
   }
 
   async init(ctx: PluginContext): Promise<void> {
+    this.logger = ctx.logger;
     ctx.getService<{ register(m: any): void }>('manifest').register({
       id: 'com.objectstack.service.reports',
       name: 'Reports Service',
@@ -166,12 +174,58 @@ export class ReportsServicePlugin implements Plugin {
     });
   }
 
-  async stop(ctx: PluginContext): Promise<void> {
+  /**
+   * The kernel's teardown hook (`Plugin.destroy?()`, core `types.ts`) — the
+   * ONLY teardown entry point `ObjectKernel.performShutdown()` and
+   * `LiteKernel.destroy()` invoke.
+   *
+   * [#10371] IT USED TO BE `stop()`, WHICH NOTHING CALLED. The body below was
+   * correct in every respect except its NAME: `Plugin` declares `init()`,
+   * `start?()` and `destroy?()` and no `stop()`, so the kernel walked straight
+   * past this plugin at shutdown and the dispatcher went on ticking after
+   * `await kernel.shutdown()` had resolved. The asymmetry is what hid it:
+   * `start()` IS on the interface and does fire, so a `start`/`stop` pair reads
+   * as symmetric in review.
+   *
+   * WHY IT STAYED INVISIBLE, AND WHERE THE BILL LANDS. `start()` `unref()`s the
+   * interval, so a long-lived host process still exits and nothing complains in
+   * production. Under vitest the worker is alive throughout teardown, so a tick
+   * fires after the test file is over, reads through a driver the suite already
+   * disconnected, and a console fallback warns; `console.*` inside a worker is
+   * an RPC (`onUserConsoleLog`) and one issued after `rpcDone()` snapshotted the
+   * pending set is rejected as `EnvironmentTeardownError`. Nothing awaits that
+   * promise, so it lands as an unhandled rejection and fails a run in which
+   * every test passed. That is the identical defect #9371 fixed in
+   * `MessagingServicePlugin` — measured there as two green PRs (334/334 and
+   * 337/337) evicted from the merge queue.
+   *
+   * The job-service branch matters as much as the timer: when `service-job` is
+   * installed the dispatcher is a scheduled job rather than a `setInterval`, so
+   * a teardown the kernel never reaches leaks whichever of the two this
+   * deployment happens to use.
+   */
+  async destroy(): Promise<void> {
     if (this.intervalHandle) clearInterval(this.intervalHandle);
     this.intervalHandle = undefined;
     if (this.jobService && this.jobName && typeof this.jobService.cancel === 'function') {
       try { await this.jobService.cancel(this.jobName); }
-      catch (err) { ctx.logger.warn('ReportsServicePlugin: failed to cancel job', err as any); }
+      catch (err) { this.logger?.warn('ReportsServicePlugin: failed to cancel job', err as any); }
     }
+    // Cleared so a second teardown is a no-op rather than a second cancel — a
+    // teardown that only works once is a teardown that fails inside a suite.
+    this.jobService = undefined;
+    this.jobName = undefined;
+  }
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class, and removing it would break an embedder who learned to call
+   * it directly precisely BECAUSE the kernel never did. The parameter is now
+   * optional and ignored: `destroy()` takes no context, so teardown reads the
+   * logger captured in `init()`. Prefer kernel shutdown; direct callers keep
+   * working unchanged.
+   */
+  async stop(_ctx?: PluginContext): Promise<void> {
+    await this.destroy();
   }
 }

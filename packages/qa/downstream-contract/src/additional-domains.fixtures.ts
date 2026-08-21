@@ -20,7 +20,6 @@ import type { SharingRule, PermissionSet } from '@objectstack/spec/security';
 import type { Position } from '@objectstack/spec/identity';
 import type { EmailTemplateDefinition, TranslationBundle } from '@objectstack/spec/system';
 import type { Webhook } from '@objectstack/spec/automation';
-import type { Theme } from '@objectstack/spec/ui';
 
 export const DcDatasource: Datasource = {
   name: 'dc_primary',
@@ -131,18 +130,9 @@ export const DcMapping: Mapping = {
   fieldMapping: [{ source: 'Name', target: 'name', transform: 'none' }],
 };
 
-export const DcTheme: Theme = {
-  name: 'dc_light',
-  label: 'DC Light',
-  mode: 'light',
-  colors: {
-    primary: '#1E6FD9',
-    secondary: '#6C757D',
-    background: '#FFFFFF',
-    surface: '#F8F9FA',
-    text: '#212529',
-  },
-};
+// `DcTheme` left with `ThemeSchema` (#10485, ADR-0049 — the theme authoring
+// surface is retired; the freeze pins author state against a LIVE surface, and
+// this one no longer exists).
 
 export const DcTranslationBundle: TranslationBundle = {
   en: {

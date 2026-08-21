@@ -203,8 +203,8 @@ class MyBusinessPlugin implements Plugin {
     // CRUD operations - works with any data layer
     const user = await engine.insert('user', { name: 'John' });
     const users = await engine.find('user', { filter: { active: true } });
-    await engine.update('user', user.id, { name: 'Jane' });
-    await engine.delete('user', user.id);
+    await engine.update('user', { id: user.id, name: 'Jane' });
+    await engine.delete('user', { where: { id: user.id } });
   }
 }
 ```
@@ -212,8 +212,10 @@ class MyBusinessPlugin implements Plugin {
 **Interface Methods:**
 - `insert(objectName, data)` - Create a record
 - `find(objectName, query?)` - Query records
-- `update(objectName, id, data)` - Update a record
-- `delete(objectName, id)` - Delete a record
+- `update(objectName, data, options?)` - Update a record (one row when `data.id` is a
+  truthy scalar, or `options.where.id` is; `options.multi` for a bulk update)
+- `delete(objectName, options?)` - Delete a record (`options.where.id` for one row,
+  `options.multi` for a bulk delete)
 
 ### ObjectKernel
 
@@ -247,8 +249,8 @@ interface PluginContext {
   getService<T>(name: string): T;
   hook(name: string, handler: Function): void;
   trigger(name: string, ...args: any[]): Promise<void>;
-  logger: Console;
-  getKernel?(): any;
+  logger: Logger;
+  getKernel(): ObjectKernel;
 }
 ```
 
@@ -481,7 +483,6 @@ export class LoggingMiddleware implements Plugin {
       ctx.logger.info('Response', {
         method: req.method,
         path: req.path,
-        status: res.statusCode,
         duration
       });
     });
@@ -607,7 +608,7 @@ import { RateLimiter, DEFAULT_RATE_LIMITS } from '@objectstack/runtime';
 
 const limiter = new RateLimiter(DEFAULT_RATE_LIMITS.auth);
 const decision = limiter.consume(`ip:${ip}`);
-if (!decision.allowed) reply.code(429).send({ retryAfterMs: decision.retryAfterMs });
+if (!decision.allowed) res.status(429).json({ retryAfterMs: decision.retryAfterMs });
 ```
 
 ### Observability (opt-in adapters)

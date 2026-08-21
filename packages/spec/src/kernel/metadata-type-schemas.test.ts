@@ -367,6 +367,8 @@ describe('#6931 — the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS
  * sentence was prose until #10194 found its converse failure mode — two stack
  * collections (`themes`, `analyticsCubes`) with strict schemas and NO map
  * entry, so the divergence the sentence forbids simply lived outside the map.
+ * (#10485 later retired the `themes` carrier and `ThemeSchema` whole, and the
+ * `theme` binding left the map with them — the row below went too.)
  *
  * Two halves, both load-bearing:
  *
@@ -386,7 +388,7 @@ const STACK_COLLECTION_OF: Record<string, string> = {
   webhook: 'webhooks',
   connector: 'connectors',
   sharing_rule: 'sharingRules',
-  theme: 'themes',
+  // theme: 'themes' — retired at #10485 (ADR-0049).
   analytics_cube: 'analyticsCubes',
 };
 

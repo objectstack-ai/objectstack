@@ -164,6 +164,6 @@ This is Prime Directive #10 (declared ≠ enforced) landing on a gate — the sa
 
 - `scripts/bump-objectui.sh` prints it as a NEXT STEP on every successful bump, including `--no-commit`. A **reminder, not a hard gate** — a machine without Playwright must still be able to move the pin, and hard-failing there would be CI-side cost wearing a local disguise.
 - `scripts/build-console.sh` closes with it too, because `pnpm objectui:refresh` runs bump-then-build and that output is the last thing an operator sees.
-- `docs/releases-maintenance.md` carries it as prose, in the pin-bump procedure and in the pin-freshness "fix when it fires" step.
+- `docs/releases-maintenance.md` carries it as prose, in the pin-bump procedure — the pin-freshness "fix when it fires" step that used to carry it too went with the `Console Pin Freshness` gate itself (#10134).
 
 **What is unchanged.** Decision 4's mechanism and its "not every PR" verdict both stand, and this addendum records no reversal — it names the producer correctly and supplies the trigger the decision left blank.

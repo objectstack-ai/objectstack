@@ -92,6 +92,14 @@ export class ApprovalsServicePlugin implements Plugin {
   private service?: ApprovalService;
   private engine?: IObjectQLEngine;
   private escalationJobScheduled = false;
+  /**
+   * Captured where the job is scheduled, not resolved at teardown: `destroy()`
+   * — the hook the kernel actually calls — takes NO `PluginContext`
+   * (`Plugin.destroy?(): Promise<void> | void`, core `types.ts`). Holding the
+   * very service the schedule was placed with also means the cancel cannot miss
+   * it because the registry has already been torn down around us.
+   */
+  private jobService?: IJobService;
 
   constructor(options: ApprovalsPluginOptions = {}) {
     this.options = options;
@@ -259,6 +267,7 @@ export class ApprovalsServicePlugin implements Plugin {
           }
         };
         await jobs.schedule(ESCALATION_JOB_NAME, { type: 'interval', intervalMs }, sweep);
+        this.jobService = jobs;
         this.escalationJobScheduled = true;
         void sweep().catch((err: any) => {
           ctx.logger.warn?.('[approvals] boot sweep failed', { error: err?.message });
@@ -372,16 +381,46 @@ export class ApprovalsServicePlugin implements Plugin {
     }
   }
 
-  async stop(ctx: PluginContext): Promise<void> {
+  /**
+   * The kernel's teardown hook (`Plugin.destroy?()`, core `types.ts`) — the
+   * ONLY teardown entry point `ObjectKernel.performShutdown()` and
+   * `LiteKernel.destroy()` invoke.
+   *
+   * [#10371] IT USED TO BE `stop()`, WHICH NOTHING CALLED. `Plugin` declares
+   * `init()`, `start?()` and `destroy?()` and no `stop()`, so the kernel walked
+   * past this plugin at shutdown: the SLA escalation job stayed scheduled and
+   * this plugin's ObjectQL hooks stayed bound to an engine the kernel had
+   * finished with. `start()` IS on the interface, so the pair read as symmetric
+   * in review — that asymmetry is what let the same shape survive in six
+   * packages at once.
+   *
+   * This member owns no timer of its own (the escalation clock belongs to
+   * `service-job`), so it never cost a merge-queue eviction the way the
+   * `plugin-reports` / `service-messaging` members did (#9371). The class is
+   * the same one either way: a teardown the kernel does not reach.
+   */
+  async destroy(): Promise<void> {
     if (this.escalationJobScheduled) {
       try {
-        const jobs = ctx.getService<IJobService>('job');
-        await jobs?.cancel?.(ESCALATION_JOB_NAME);
+        await this.jobService?.cancel?.(ESCALATION_JOB_NAME);
       } catch { /* ignore */ }
       this.escalationJobScheduled = false;
+      this.jobService = undefined;
     }
     if (this.engine) {
       try { unbindAllHooks(this.engine); } catch { /* ignore */ }
     }
+  }
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class, and removing it would break an embedder who learned to call
+   * it directly precisely BECAUSE the kernel never did. The parameter is now
+   * optional and ignored: `destroy()` takes no context, so teardown uses the
+   * job service captured when the escalation clock was wired. Prefer kernel
+   * shutdown; direct callers keep working unchanged.
+   */
+  async stop(_ctx?: PluginContext): Promise<void> {
+    await this.destroy();
   }
 }

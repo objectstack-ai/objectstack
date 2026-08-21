@@ -105,7 +105,6 @@
     "ui/SelectionConfig:type = \"none\"",
     "ui/SharingConfig:allowAnonymous = false",
     "ui/SharingConfig:enabled = false",
-    "ui/Theme:mode = \"light\"",
     "ui/TimelineConfig:scale = \"week\"",
     "ui/UrlNavItem:target = \"_self\"",
     "ui/UserActionsConfig:addRecordForm = false",

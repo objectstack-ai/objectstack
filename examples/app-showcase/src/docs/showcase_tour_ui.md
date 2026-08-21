@@ -1,6 +1,6 @@
 ---
 title: "Tour · UI"
-description: Guided tour of the UI domain — apps, views, pages, dashboards, reports, datasets, actions, themes, and portals.
+description: Guided tour of the UI domain — apps, views, pages, dashboards, reports, datasets, and actions.
 ---
 
 # Guided tour — UI
@@ -68,9 +68,10 @@ canonical example of each linked from that page.
   `action.bulkEnabled` is not a third way — it was retired in spec 17 and
   its tombstone points at `bulkActions`.
 
-## Themes
+## Branding
 
-`src/ui/themes/` ships light + dark theme variants.
+Each app's `branding` block (`primaryColor` / `accentColor`) is the colour
+surface — the `themes` collection was retired in spec 17.1 (ADR-0049).
 
 Continue with the [Automation tour](./showcase_tour_automation.md), or go
 back to the [overview](./showcase_index.md).
