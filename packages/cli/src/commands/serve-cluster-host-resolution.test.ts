@@ -278,11 +278,18 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
   // Serve.CAPABILITY_PROVIDERS — every `pkg` in that table is CLI-declared.
   'spec.pkg': 'Serve.CAPABILITY_PROVIDERS entries are all CLI-declared',
   'ex.pkg': 'CAPABILITY_PROVIDERS `extras` entries are all CLI-declared',
-  // The app's own `plugins: [...]` config entries — an app-supplied specifier, so
-  // this IS the class, but no source scan can classify it and host-anchoring it
-  // changes a user-facing error message plus which copy of a CLI-declared plugin
-  // wins. Filed as #10908 rather than widened here.
-  plugin: 'app-supplied plugin name from objectstack.config.ts — see #10908',
+  // The app's own `plugins: [...]` config entries, now routed through
+  // `Serve.importConfigPlugin` (#10908). Two bare `import()` sites remain there,
+  // both reached only AFTER the declaration has been consulted, and both are the
+  // reason this list exists rather than a hole in it:
+  //   • the specifier is not a package name at all (path, `file://`, `node:`) —
+  //     nothing a package.json can declare;
+  //   • the served app does NOT declare it, so it must resolve from this CLI,
+  //     which is exactly the pre-existing behaviour #10908 promised to keep.
+  // The DECLARED case — the only one this card moves — goes to `importFromHost`.
+  // Pinned behaviourally, not by this comment, in
+  // `serve-config-plugin-host-resolution.test.ts`.
+  pluginSpecifier: 'post-declaration branches: a path/URL, or a package the app does not declare (#10908)',
 };
 
 /**

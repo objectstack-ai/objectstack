@@ -54,6 +54,7 @@ import {
   createHostImporter,
   hostImportFailureKind,
   isDeclaredByHost,
+  packageNameFromSpecifier,
   readHostDeclaration,
   type HostImporter,
 } from '@objectstack/types/node';
@@ -391,6 +392,91 @@ export default class Serve extends Command {
     if (opts.required) return 'required';
     if (opts.declared) return 'auto';
     return 'off';
+  }
+
+  /**
+   * Load one `plugins: [...]` entry of the served app's own config that is
+   * written as a STRING (#10908).
+   *
+   * This is the most app-owned specifier in the whole file — it is supplied by
+   * the app being served, and `plugins: [...]` is THE documented way to extend a
+   * deployment. It used to be loaded with a bare `import()`, which Node ESM
+   * resolves against the IMPORTER's realpath: this CLI's. So an app that writes
+   * `plugins: ['@acme/my-plugin']` and DECLARES `@acme/my-plugin` in its own
+   * package.json could only be served where that package happened to be hoisted
+   * somewhere the CLI could see it — true in a dev checkout, false in a real
+   * distribution layout. Same mechanism as cloud#1013 and #10645, but on the
+   * surface users are explicitly told to use.
+   *
+   * ── Why this is three branches and not `await importFromHost(specifier)` ────
+   *
+   * The obvious repair is to hand every specifier to `importFromHost`. MEASURED,
+   * that is NOT a superset of what this line does today — in two ways, both of
+   * which would take working deployments away:
+   *
+   *   1. A RELATIVE specifier changes base. `createHostImporter` passes a
+   *      non-package specifier through to an `import()` that physically lives in
+   *      `@objectstack/types`, and ESM resolves a relative specifier against the
+   *      module CONTAINING the call — so `'./local-plugin.js'` would resolve
+   *      against `@objectstack/types/dist/` instead of this file's directory.
+   *   2. An UNDECLARED bare name changes base the same way, and this one bites.
+   *      `createHostImporter`'s fallback is documented as "the importing
+   *      package's own resolution", but the import it falls back to also lives
+   *      in `@objectstack/types`, which under a pnpm-isolated layout can see
+   *      only `@objectstack/types`'s own dependencies. Measured from an app that
+   *      declares nothing: `@objectstack/plugin-auth` and `@objectstack/plugin-
+   *      audit` resolve from THIS package and fail through the host importer.
+   *      An app that writes `plugins: ['@objectstack/plugin-auth']` without
+   *      declaring it — a spelling this repo's own fixtures use — boots today
+   *      and would stop booting.
+   *
+   * So the declaration is what selects the resolver, exactly as #4719 says it
+   * should, and each branch keeps the resolution it already had:
+   *
+   *   • not a package name (path, `file://` URL, `node:` builtin) → unchanged;
+   *     nothing a package.json can declare, so the gate has no opinion.
+   *   • DECLARED by the served app → `importFromHost`: the app's own copy wins.
+   *     This is the repair — the whole card is this branch.
+   *   • UNDECLARED → this CLI's own resolution, byte-identical to the bare
+   *     `import()` that has always been here. No app loses a plugin it does not
+   *     declare but the CLI ships.
+   *
+   * Nothing about WHICH plugins are accepted changes: this only moves where a
+   * declared one resolves FROM. The #4719 declaration gate is untouched, and no
+   * undeclared package gains a way in that it did not already have.
+   *
+   * @param pluginSpecifier The string as the app wrote it in `plugins: [...]`.
+   * @param hostRoot Root of the served app; defaults to the process CWD, the
+   * same value `serve`'s boot path computes.
+   */
+  static async importConfigPlugin(pluginSpecifier: string, hostRoot?: string): Promise<any> {
+    const root = hostRoot ?? process.cwd();
+    try {
+      // `await` inside the `try` rather than a bare `return`: a returned promise
+      // would settle OUTSIDE it and skip the diagnostic wrapper below.
+      if (packageNameFromSpecifier(pluginSpecifier) === undefined) {
+        return await import(/* webpackIgnore: true */ pluginSpecifier);
+      }
+      if (isDeclaredByHost(pluginSpecifier, root)) {
+        return await importFromHost(pluginSpecifier, root);
+      }
+      try {
+        return await import(/* webpackIgnore: true */ pluginSpecifier);
+      } catch (cliError: unknown) {
+        // Present but broken is a crash, not an absence — never reinterpret it.
+        if (!Serve.isModuleNotFoundError(cliError)) throw cliError;
+        // Undeclared AND unresolvable anywhere. Re-enter the host importer for
+        // the failure alone: it owns the #4719 "declare it in that app's
+        // package.json" remedy, and having one owner of that wording is why
+        // this does not compose the message itself.
+        return await importFromHost(pluginSpecifier, root);
+      }
+    } catch (importError: any) {
+      // The wrapper lives with the load it describes, so the composed
+      // user-facing string is testable rather than assembled at the call site
+      // (triage on #10908 requires this text be CHOSEN, not drift).
+      throw new Error(`Failed to import plugin '${pluginSpecifier}': ${importError.message}`);
+    }
   }
 
   /**
@@ -2673,12 +2759,11 @@ export default class Serve extends Command {
 
             // Resolve string references (package names)
             if (typeof plugin === 'string') {
-              try {
-                 const imported = await import(plugin);
-                 pluginToLoad = imported.default || imported;
-              } catch (importError: any) {
-                 throw new Error(`Failed to import plugin '${plugin}': ${importError.message}`);
-              }
+              // Host-anchored, NOT a bare `import()`: this specifier comes from
+              // the served app's own config, so what the app DECLARES about it is
+              // the contract (#10908). The helper carries the failure wrapper too.
+              const imported = await Serve.importConfigPlugin(plugin, hostRoot);
+              pluginToLoad = imported.default || imported;
             }
 
             // Wrap raw config objects (no init/start) into AppPlugin
