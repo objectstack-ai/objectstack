@@ -61,9 +61,16 @@
  * missing URL into a failure so a dropped `env:` line cannot quietly return this
  * seam to no coverage.
  *
- * Everything runs in its OWN database (`os_metadata_protocol_9434`), created on
- * the spot, because `sys_setting` is a fixed platform table name that other live
- * suites also use.
+ * Everything runs in its OWN database, created on the spot, because
+ * `sys_setting` is a fixed platform table name that other live suites also use.
+ *
+ * That database is DERIVED FROM THIS FILE's path (#10382) rather than named by
+ * a constant. It used to be the literal `os_metadata_protocol_9434`, which was
+ * distinct from the sibling suite's only because two authors happened to type
+ * two different strings — and `afterAll` below issues `drop database`, so a
+ * third live file copy-pasted from this one that kept the constant would drop
+ * the database a running sibling is mid-test in. `currentLiveMysqlDatabase()`
+ * takes no argument, so there is nothing for a copy-paste to carry over.
  */
 
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
@@ -78,10 +85,11 @@ import {
     SYS_SETTING_TABLE,
 } from './sys-setting-identity-index.js';
 import type { IndexExec } from './partial-index-probe.js';
+import { currentLiveMysqlDatabase } from './live-mysql-database.testkit.js';
 
 const MYSQL_URL = process.env.OS_TEST_MYSQL_URL;
 const EXPECT_LIVE = process.env.OS_EXPECT_LIVE_DIALECT_MATRIX === '1';
-const DB = 'os_metadata_protocol_9434';
+const DB = currentLiveMysqlDatabase();
 
 /**
  * The sentence the `unsupported` arm ends with, immediately before the
