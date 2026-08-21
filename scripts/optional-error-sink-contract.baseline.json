@@ -10,86 +10,29 @@
     "",
     "⛔ This file is NOT an exemption list and NOT a place to add new work. A newly written sink",
     "with an optional `error` is a violation to fix, never a row to append. Every entry below",
-    "names WHY it is still here; what closes it is the same one-line repair in all but three",
-    "cases: drop the `?` from `warn`.",
+    "names WHY it is still here.",
     "",
-    "The 15 entries are the measured first-run population, not an estimate: 36 sink types in",
-    "packages/** declare `error`, 11 declare it REQUIRED, 10 declare it optional beside a",
-    "REQUIRED `warn` (the convention this repo already half-holds), and these 15 are the drift.",
-    "The PR that introduced the gate repaired the two the card names — `SweepLogger`",
-    "(plugin-email) and `ProjectionLogger` (plugin-security) — and recorded the rest here rather",
-    "than changing 13 more packages' exported contracts in one diff."
+    "HISTORY, so the shrink is auditable rather than asserted:",
+    "  17 red — the measured first-run population (36 sink types in packages/** declare `error`;",
+    "           11 declare it REQUIRED; 8 declared it optional beside a REQUIRED `warn`).",
+    "  -2     — #9754's own PR repaired `SweepLogger` (plugin-email) and `ProjectionLogger`",
+    "           (plugin-security), and recorded the remaining 15 here.",
+    " -12     — #10556 paid down twelve of the thirteen mechanical repairs: cloud-connection,",
+    "           metadata-protocol, plugin-approvals/lifecycle-hooks, both plugin-audit sinks,",
+    "           both plugin-auth sinks, plugin-email/attachment-reclaim, plugin-reports,",
+    "           plugin-sharing, plugin-webhooks and service-knowledge.",
+    "  = 3    — what is left, and NONE of the three is left for lack of effort:",
+    "           one is a serialisation leftover whose reason has expired (approval-service.ts),",
+    "           and two are DESIGN calls escalated to the maintainer rather than answered by a",
+    "           dev to make this checker green (security-plugin.ts, settings-service.types.ts)."
   ],
   "entries": [
-    {
-      "file": "packages/cloud-connection/src/cloud-connection-plugin.ts",
-      "sink": "logger@PluginContext",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Boot-time cloud-connection sink. Not repaired here: the value comes from the host kernel's `PluginContext`, so making `warn` required is a change to what every embedder must pass — sized separately from #9754's own surface."
-    },
-    {
-      "file": "packages/metadata-protocol/src/migrations/partial-index-probe.ts",
-      "sink": "IndexMigrationLogger",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Partial-index migration probe. Mechanical to repair (`warn?` -> `warn`) once its callers are re-checked; left out of #9754's PR to keep the contract change to the two sinks the card names."
-    },
     {
       "file": "packages/plugins/plugin-approvals/src/approval-service.ts",
       "sink": "logger@ApprovalServiceOptions",
       "verdict": "optional-fallback",
       "members": "{ info? warn? error? debug? }",
-      "note": "Approval-service options bag. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts",
-      "sink": "MinimalLogger",
-      "verdict": "optional-fallback",
-      "members": "{ debug? info? warn? error? }",
-      "note": "Approval lifecycle hooks. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/plugins/plugin-audit/src/auth-event-audit.ts",
-      "sink": "AuthEventAuditLogger",
-      "verdict": "optional-fallback",
-      "members": "{ error? warn? debug? }",
-      "note": "The sink #9754's body calls the sharpest instance — it declared `error?` and `debug?` and NO `warn` until #9750 added `warn?`. Deliberately NOT repaired here: `packages/plugins/plugin-audit` is the file surface of open PR #10450, and a contract change racing an open PR on the same package is how two correct diffs land jointly wrong."
-    },
-    {
-      "file": "packages/plugins/plugin-audit/src/read-audit.ts",
-      "sink": "ReadAuditLogger",
-      "verdict": "optional-fallback",
-      "members": "{ error? warn? debug? }",
-      "note": "Sibling of `AuthEventAuditLogger` in the same package, and held for the same reason: `packages/plugins/plugin-audit` belongs to open PR #10450 while #9754 is in flight."
-    },
-    {
-      "file": "packages/plugins/plugin-auth/src/member-role-canonical.ts",
-      "sink": "LoggerLike",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? debug? }",
-      "note": "Member-role canonicalisation sink. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/plugins/plugin-auth/src/reconcile-membership.ts",
-      "sink": "logger@ReconcileMembershipDeps",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Membership reconciliation deps. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/plugins/plugin-email/src/attachment-reclaim.ts",
-      "sink": "ReclaimLogger",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Attachment-reclaim sink, in the SAME package as the repaired `SweepLogger` and mechanically identical. Left for a follow-up on purpose: its call sites are a separate set from the sweep's, and #9754's PR keeps its blast radius to the two sinks whose consumers the lane PM had already measured."
-    },
-    {
-      "file": "packages/plugins/plugin-reports/src/report-service.ts",
-      "sink": "logger@ReportServiceOptions",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Report-service options bag. Same mechanical repair, different package; not in #9754's named surface."
+      "note": "Approval-service options bag. Mechanically identical to the twelve repaired in #10556 — drop the `?` from `warn`. Held out of that PR to serialize against PR #10546, which owned this file while it was open. #10546 has since MERGED (2026-08-21), so the reason this row is still here has expired: it is a one-line repair awaiting a dispatch, not a design call and not an exemption."
     },
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.ts",
@@ -97,27 +40,6 @@
       "verdict": "optional-fallback",
       "members": "{ info? warn? error? }",
       "note": "⚠️ NOT mechanical, and the sharpest live illustration of this rule: the field is initialised `= {}`, so today the plugin's own default sink prints nothing at all. Making `warn` required forces a DECISION about what that default should be (a console-backed sink, or a declared silent one), which is a design call rather than a `?`-deletion."
-    },
-    {
-      "file": "packages/plugins/plugin-sharing/src/bulk-recompute.ts",
-      "sink": "MinimalLogger",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? }",
-      "note": "Sharing bulk-recompute sink. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/plugins/plugin-webhooks/src/auto-enqueuer.ts",
-      "sink": "OptionalLogger",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? debug? error? }",
-      "note": "Webhook auto-enqueuer sink. Same mechanical repair, different package; not in #9754's named surface."
-    },
-    {
-      "file": "packages/services/service-knowledge/src/knowledge-service.ts",
-      "sink": "KnowledgeLogger",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? debug? }",
-      "note": "Knowledge-service sink. Its plugin builds the value by forwarding `ctx.logger` through a cast, so the repair is mechanical but touches the forwarding shape too; not in #9754's named surface."
     },
     {
       "file": "packages/services/service-settings/src/settings-service.types.ts",

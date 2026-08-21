@@ -72,6 +72,24 @@
 // the cheap direction: before the fix, two picks in one run with nothing bound in
 // between both returned the base.
 //
+// ## An occupier must OWN the port it calls held — a reservation is not a bind
+//
+// The "outside the registry" case below used to stage its holder by picking a
+// port and deleting the claim, then binding it. Between the `rm -f` and the
+// stub's `listen` the port was claimed by nobody, so any concurrent
+// `smoke_pick_free_port` caller scanning from 3210 could legitimately take it —
+// and losing there does not fail as "the precondition evaporated", it fails as
+// `STEAL_HELD != THIEF`, which reads as an accusation of the picker on a PR
+// that never touched it. The sibling `gen-sdui-manifest-collision.test.ts` had
+// the same gap and measured it: an in-file racer won that bind 39 times in 80,
+// reddening three unrelated PRs in one afternoon (PR #10456).
+//
+// So the stub binds `:0` and reports back the port the kernel gave it. It is
+// already holding that port when it names it, which is exactly what STEAL_HELD
+// asserts, and no gap is left to race through. The registry property gets
+// PLAINER rather than weaker: a port bound straight from the ephemeral range
+// was never claimed in any registry, so there is no claim to remove.
+//
 // No `objectstack dev` boot and no scaffold: the contract under test belongs to
 // the shell script, and the ports are picked at run time by the script's own
 // helper so this test cannot collide with a concurrent agent — which would be a
@@ -110,6 +128,37 @@ const HTTP_STUB = [
 ].join('');
 
 /**
+ * The same announcing stub, except it BINDS AN EPHEMERAL PORT and prints the
+ * one the kernel gave it on stdout.
+ *
+ * Bind first, name second. Taking a port from the picker and binding it
+ * afterwards leaves a window in which anything scanning the same base can
+ * legitimately take it, and losing there evaporates the precondition the
+ * STEAL assertions rest on — see the header. Port 0 closes that window by
+ * construction: the number is written from inside the `listening` callback, so
+ * by the time the harness can read it the socket is already held.
+ *
+ * ⛔ No host argument — deliberately, and NOT the `127.0.0.1` the sdui sibling
+ * uses. `smoke_pick_free_port`'s probe binds the WILDCARD address because that
+ * is the spelling `serve.ts`'s own `isPortAvailable()` uses, so an occupier
+ * here has to hold the wildcard address for that probe to see it at all. The
+ * asymmetry between the two files is load-bearing and is recorded on #10261:
+ * do not converge them.
+ */
+const OWNED_HTTP_STUB = [
+  'const http = require("node:http");',
+  'const s = http.createServer((_q, r) => {',
+  '  r.writeHead(200, { "content-type": "application/json" });',
+  '  r.end(JSON.stringify({ iam: process.env.STUB_NAME }));',
+  '});',
+  // Losing the bind must EXIT, not throw: an unhandled 'error' event would kill
+  // the harness with a stack trace at the point a vacuity guard is supposed to
+  // name the problem. Near-unreachable on `:0`, and kept for that reason.
+  's.once("error", () => process.exit(1));',
+  's.listen(0, () => console.log(s.address().port));',
+].join('');
+
+/**
  * Run a bash harness that SOURCES the real script (so the real functions run)
  * and prints `KEY=value` lines. Returns them parsed.
  */
@@ -124,6 +173,7 @@ function runHarness(body: string[]): Record<string, string> {
       `export SMOKE_ROOT=${JSON.stringify(dir)}`,
       'export SMOKE_KEEP=1',
       `export STUB=${JSON.stringify(HTTP_STUB)}`,
+      `export OWNED_STUB=${JSON.stringify(OWNED_HTTP_STUB)}`,
       // Sourcing defines the helpers and runs nothing.
       `source ${JSON.stringify(SCRIPT)}`,
       // The script's own `set -euo pipefail` came with it. Several steps below
@@ -305,21 +355,36 @@ describe.skipIf(!RUNNABLE)('[#9647] publish-smoke.sh smoke-tests its OWN dev ser
   it('skips a port held from outside the registry and hands the claim back', () => {
     const r = runHarness([
       'export SMOKE_PORT_RESERVATION_DIR="$SMOKE_ROOT/reg"',
-      // Take a port, then forget the claim — now the port is held by something
-      // the registry knows nothing about, which is the one case a claim cannot
-      // cover and the probe still has to.
-      'STEAL="$(smoke_pick_free_port 3210)"',
-      'rm -f "$SMOKE_PORT_RESERVATION_DIR/$STEAL"',
-      'STUB_PORT="$STEAL" STUB_NAME=THIEF node -e "$STUB" >/dev/null 2>&1 & THIEF=$!',
-      'sleep 1',
+      // A port held by something the registry knows nothing about — the one
+      // case a claim cannot cover and the probe still has to. The thief takes
+      // it straight from the ephemeral range and reports what it got, so being
+      // outside the registry is a property of HOW IT GOT THE PORT rather than
+      // something staged by picking a port and then deleting its claim. That
+      // staging is what left the port unclaimed across the bind; see the
+      // header. Nothing to remove now, so nothing to lose the port during.
+      'THIEF_FILE="$SMOKE_ROOT/thief.port"',
+      'STUB_NAME=THIEF node -e "$OWNED_STUB" > "$THIEF_FILE" 2>/dev/null & THIEF=$!',
+      // The port appears only once the socket is bound, so waiting for the
+      // number IS waiting for the hold — there is no second thing to wait for,
+      // and no fixed sleep to be wrong about on a loaded container.
+      'STEAL=""',
+      'for _ in $(seq 1 40); do STEAL="$(tr -d "[:space:]" < "$THIEF_FILE" 2>/dev/null || true)"; [ -n "$STEAL" ] && break; sleep 0.25; done',
       'echo "STEAL_BASE=$STEAL"',
       'echo "STEAL_HELD=$(curl -sS "http://localhost:$STEAL/" | jq -r .iam)"',
+      // An ephemeral base cannot scan off the end of the port space: the first
+      // candidate is the port the thief holds, the second is free, and the scan
+      // returns there rather than walking its whole 200-port span upward.
       'PICK="$(smoke_pick_free_port $STEAL)"',
       'echo "STEAL_PICK=$PICK"',
       'echo "STEAL_CLAIM_RELEASED=$([ -e "$SMOKE_PORT_RESERVATION_DIR/$STEAL" ] && echo no || echo yes)"',
       'echo "STEAL_CLAIM_ON_PICK=$([ -e "$SMOKE_PORT_RESERVATION_DIR/$PICK" ] && echo yes || echo no)"',
       'kill "$THIEF" 2>/dev/null',
     ]);
+    // The base is now reported BY THE THIEF rather than returned by the picker,
+    // so "is it a number at all" is a question this case did not used to have.
+    // Not ceremony: with STEAL empty, `smoke_pick_free_port` falls back to its
+    // own 3210 default and STEAL_PICK then differs from STEAL_BASE for free.
+    expect(r.STEAL_BASE).toMatch(/^\d+$/);
     // Vacuity guard: the thief really held the port.
     expect(r.STEAL_HELD).toBe('THIEF');
     expect(r.STEAL_PICK).not.toBe(r.STEAL_BASE);

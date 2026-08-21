@@ -11,6 +11,7 @@ import {
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
   ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
   ACTION_RECORD_WRITE_DISCARDED,
+  ACTION_BODY_SOURCE_UNPARSEABLE,
 } from './validate-action-body-writes.js';
 import {
   extractHookBodyWrites,
@@ -499,5 +500,48 @@ describe('[#8663] validateActionBodyWrites — unprovisioned anchor writes', () 
         actionStackOver(declared, "await ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: ctx.user.id });"),
       ),
     ).toEqual([]);
+  });
+});
+
+// ── [#10653] The body that could not be READ, on the action surface ──────────
+//
+// Same extractor, same synthesised wrapper, same parse as the hook rule — so
+// the body that came back silently unread there came back silently unread here.
+// The hook rule's tests carry the attribution proof for the wrapper; what is
+// pinned here is that this surface reports it too, rather than inheriting only
+// the half of the fix that fits in one file.
+describe('an unparseable action body is reported, not scored clean (#10653)', () => {
+  const wrecked = "const x = 1;\n/* TODO\nawait ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: 1 });\n";
+
+  it('POSITIVE CONTROL — the repaired body is flagged, so the wreck had something to lose', () => {
+    const repaired = "const x = 1;\nawait ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: 1 });\n";
+    const findings = validateActionBodyWrites(actionStackOver(federatedObject, repaired));
+    expect(findings.map((f) => f.rule)).toContain(ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR);
+    expect(findings.map((f) => f.rule)).not.toContain(ACTION_BODY_SOURCE_UNPARSEABLE);
+  });
+
+  it('the wrecked body loses that finding, and gains the parse one', () => {
+    const findings = validateActionBodyWrites(actionStackOver(federatedObject, wrecked));
+    expect(findings.map((f) => f.rule)).not.toContain(ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR);
+    const parseFindings = findings.filter((f) => f.rule === ACTION_BODY_SOURCE_UNPARSEABLE);
+    expect(parseFindings).toHaveLength(1);
+    expect(parseFindings[0].severity).toBe('warning');
+    expect(parseFindings[0].where).toBe('action "stamp_owner" › body');
+    expect(parseFindings[0].path).toBe('actions[0].body.source');
+    expect(parseFindings[0].message).toContain('did not parse');
+  });
+
+  it('FALSE-POSITIVE CONTROL — no body that parses gains a parse finding', () => {
+    const parseable = [
+      "await ctx.api.object('wh_order').updateById(ctx.recordId, { owner_id: ctx.user.id });",
+      "ctx.record.stage = 'won'; await ctx.api.object('wh_order').update(ctx.record);",
+      "const r = ctx.record;\nif (r) { await ctx.api.object('wh_order').insert({ owner_id: 1 }); }",
+      ...ACTION_BODY_WRITE_PATTERNS.map((p) => p.example.source),
+      ...ACTION_RECORD_WRITE_PATTERNS.map((p) => p.example.source),
+    ];
+    for (const source of parseable) {
+      const rules = validateActionBodyWrites(actionStackOver(federatedObject, source)).map((f) => f.rule);
+      expect(rules, `parseable body gained a parse finding:\n${source}`).not.toContain(ACTION_BODY_SOURCE_UNPARSEABLE);
+    }
   });
 });

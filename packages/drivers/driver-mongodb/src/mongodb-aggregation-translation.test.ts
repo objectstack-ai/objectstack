@@ -330,3 +330,40 @@ describe('the in-process pipeline evaluator discriminates', () => {
     expect(counted).toBe(1);
   });
 });
+
+/**
+ * [#10576] A per-aggregation `filter` (`AggregationNodeSchema.filter`, the
+ * contract half of #10413) reaching this builder is refused with the ADR-0112
+ * envelope — never silently accumulated over the UNFILTERED rows, which is the
+ * #10413 defect at the driver seam. `AggregationInput.filter` has declared the
+ * key since #6850 and nothing ever read it; a declared key a builder ignores
+ * is exactly the silent drop this card closes. The engine never pushes a
+ * filtered aggregation down (it lowers in memory) — the refusal exists for the
+ * direct caller of this exported builder.
+ */
+describe('[#10576] per-aggregation filter refuses instead of silently dropping', () => {
+  it('answers NOT_IMPLEMENTED / 501, naming the aggregation and the engine lowering', () => {
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      buildAggregationPipeline({
+        aggregations: [{ function: 'count', alias: 'won_count', filter: { stage: 'closed_won' } }],
+      });
+    } catch (err) {
+      thrown = err as Error & { code?: string; status?: number };
+    }
+    expect(thrown, 'a filter this builder cannot lower must not be silently dropped').toBeDefined();
+    expect(thrown!.code).toBe('NOT_IMPLEMENTED');
+    expect(thrown!.status).toBe(501);
+    expect(thrown!.message).toContain(
+      'Per-aggregation `filter` on "won_count" is not supported by this backend (driver-mongodb).',
+    );
+    expect(thrown!.message).toContain('`engine.aggregate` lowers filtered aggregations in memory');
+  });
+
+  it('control: an EMPTY filter object is vacuous (the where/having convention) and still lowers', () => {
+    const pipeline = buildAggregationPipeline({
+      aggregations: [{ function: 'count', alias: 'n', filter: {} }],
+    });
+    expect(pipeline[0]).toHaveProperty('$group');
+  });
+});

@@ -905,6 +905,7 @@ Then in your object definition:
 ```typescript
 export const AuditLog = ObjectSchema.create({
   name: 'audit_log',
+  sharingModel: 'private',
   datasource: 'analytics', // Routes to the analytics database
   fields: { /* ... */ },
 });

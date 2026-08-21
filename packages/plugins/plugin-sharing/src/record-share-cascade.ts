@@ -203,7 +203,14 @@ export interface CascadeEngine {
 
 interface MinimalLogger {
   info?: (msg: any, ...rest: any[]) => void;
-  warn?: (msg: any, ...rest: any[]) => void;
+  /**
+   * Non-optional for the same reason as `rule-hooks.ts`'s twin: this logger is
+   * FORWARDED into `stashAffectedRows` (bulk-recompute.ts), whose sink
+   * guarantees a `warn` channel under #9754. A `warn?` here would re-open the
+   * silence one module downstream of where it was closed, and `tsc` said so the
+   * moment the callee tightened (#10556).
+   */
+  warn: (msg: any, ...rest: any[]) => void;
 }
 
 /**

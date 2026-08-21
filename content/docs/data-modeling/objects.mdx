@@ -15,6 +15,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
@@ -79,7 +80,7 @@ Control which platform features are active for this object:
 enable: {
   trackHistory: true,      // Field history tracking for audit
   searchable: true,        // Include in global search index
-  apiEnabled: true,        // Expose via REST/GraphQL APIs
+  apiEnabled: true,        // Expose object via automatic APIs (REST)
   apiMethods: ['get', 'list', 'create', 'update', 'delete'],
   files: true,             // File attachments
   feeds: true,             // Activity feed and comments
@@ -373,6 +374,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const ProjectTask = ObjectSchema.create({
   name: 'project_task',
+  sharingModel: 'private',
   label: 'Project Task',
   pluralLabel: 'Project Tasks',
   icon: 'check-square',
