@@ -365,6 +365,11 @@ export function selfTest() {
     ['escaped backtick inside a template, without nesting',
       ['const t = ' + BT + 'a \\' + BT + ' b' + BT + ';',
         "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    // Depth alone is NOT a defect shape: matched backticks pair off whatever a
+    // scan believes about nesting, and this case stayed green under every
+    // mutation of the fix that produced it (#10427). It is here for coverage of
+    // the depth-2 path. The shapes that DO discriminate are the ones below,
+    // where nesting meets an escape or a quoted backtick and the pairing breaks.
     ['template nested inside a nested template',
       ['const d = ' + BT + '${rows.map((r) => ' + BT + '${r.cells.map((c) => ' + BT + '<${c}>' + BT + ").join('')}" + BT + ").join('')}" + BT + ';',
         "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
@@ -378,6 +383,9 @@ export function selfTest() {
     // scan that only counts `${`/`}` desyncs on both.
     ['a backtick inside a regex inside an interpolation',
       ['const q = ' + BT + '\\' + BT + '${name.replace(/' + BT + "/g, '" + BT + BT + "')}\\" + BT + BT + ';',
+        "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
+    ['an object literal, then a nested template, in one interpolation',
+      ['const o = ' + BT + '${fmt({ a: 1 }, ' + BT + '\\' + BT + BT + ')} tail' + BT + ';',
         "/* err.code = 'GHOST' */", "err.code = 'REAL';"].join('\n')],
     ['a brace and a backtick quoted inside an interpolation',
       ['const b = ' + BT + "${fmt({ a: 1 }, '" + BT + "')} tail" + BT + ';',
