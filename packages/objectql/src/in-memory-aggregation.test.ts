@@ -400,3 +400,95 @@ describe('count-all `*` sentinel (regression #1982)', () => {
     ]);
   });
 });
+
+// [#10576] Per-aggregation `filter` — the contract half of #10413. This module
+// is the documented LOWERING for every driver: `engine.aggregate` routes any
+// call whose aggregations carry a filter through here, so these pure-function
+// pins are what "one fix, all drivers" rests on.
+describe('applyInMemoryAggregation — per-aggregation filter (#10576)', () => {
+  const opps = [
+    { stage: 'closed_won', amount: 500, region: 'east' },
+    { stage: 'closed_won', amount: 200, region: 'west' },
+    { stage: 'open', amount: 900, region: 'east' },
+    { stage: 'closed_lost', amount: 50, region: 'west' },
+  ];
+
+  it('narrows the source rows for the ONE aggregation carrying the filter; siblings see every row', () => {
+    const out = applyInMemoryAggregation(opps, {
+      aggregations: [
+        { function: 'count', alias: 'opp_count' },
+        { function: 'count', alias: 'won_count', filter: { stage: 'closed_won' } },
+        { function: 'sum', field: 'amount', alias: 'won_amount', filter: { stage: 'closed_won' } },
+      ],
+    } as any);
+    expect(out).toEqual([{ opp_count: 4, won_count: 2, won_amount: 700 }]);
+  });
+
+  it('applies per bucket under groupBy', () => {
+    const out = applyInMemoryAggregation(opps, {
+      groupBy: ['region'],
+      aggregations: [
+        { function: 'count', alias: 'n' },
+        { function: 'sum', field: 'amount', alias: 'won', filter: { stage: 'closed_won' } },
+      ],
+    } as any).sort((a, b) => String(a.region).localeCompare(String(b.region)));
+    expect(out).toEqual([
+      { region: 'east', n: 2, won: 500 },
+      { region: 'west', n: 2, won: 200 },
+    ]);
+  });
+
+  it('an empty filter object is vacuous — byte-identical to no filter', () => {
+    const filtered = applyInMemoryAggregation(opps, {
+      aggregations: [{ function: 'count', alias: 'n', filter: {} }],
+    } as any);
+    const bare = applyInMemoryAggregation(opps, {
+      aggregations: [{ function: 'count', alias: 'n' }],
+    } as any);
+    expect(filtered).toEqual(bare);
+  });
+
+  it('a filter that excludes every row answers the ruled empty-group values (aggregation-policy.ts)', () => {
+    const out = applyInMemoryAggregation(opps, {
+      aggregations: [
+        { function: 'count', alias: 'n', filter: { stage: 'nope' } },
+        { function: 'count_distinct', field: 'stage', alias: 'kinds', filter: { stage: 'nope' } },
+        { function: 'sum', field: 'amount', alias: 'total', filter: { stage: 'nope' } },
+        { function: 'avg', field: 'amount', alias: 'mean', filter: { stage: 'nope' } },
+        { function: 'min', field: 'amount', alias: 'lo', filter: { stage: 'nope' } },
+        { function: 'max', field: 'amount', alias: 'hi', filter: { stage: 'nope' } },
+      ],
+    } as any);
+    expect(out).toEqual([{ n: 0, kinds: 0, total: 0, mean: null, lo: null, hi: null }]);
+  });
+
+  it('an unknown operator REFUSES with the ADR-0112 envelope, naming the aggregation position', () => {
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      applyInMemoryAggregation(opps, {
+        aggregations: [
+          { function: 'count', alias: 'ok' },
+          { function: 'count', alias: 'bad', filter: { amount: { $median: 3 } } },
+        ],
+      } as any);
+    } catch (e) {
+      thrown = e as Error & { code?: string; status?: number };
+    }
+    expect(thrown).toBeDefined();
+    expect(thrown!.code).toBe('INVALID_FILTER');
+    expect(thrown!.status).toBe(400);
+    expect(thrown!.message).toMatch(/Unsupported operator '\$median' in `aggregations\[1\]\.filter`/);
+  });
+
+  it('null-safe negation (#5298 semantics): $ne is satisfied by a row whose column has no value', () => {
+    const withNulls = [
+      { stage: 'closed_won', amount: 10 },
+      { stage: null, amount: 20 },
+      { amount: 30 },
+    ];
+    const out = applyInMemoryAggregation(withNulls, {
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'not_won', filter: { stage: { $ne: 'closed_won' } } }],
+    } as any);
+    expect(out).toEqual([{ not_won: 50 }]);
+  });
+});

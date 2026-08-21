@@ -410,10 +410,18 @@ const DEBT = {
   },
   '@objectstack/metadata': {
     errors: 89,
-    note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '
-      + 'Re-measured 92 at 5ab08428, up from 87. Composition moved as well as the count: the note used to '
-      + 'name TS2353, which is gone, and TS2322 has taken its place. Two thirds of the pile sits in '
-      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16).',
+    note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). '
+      + 'Re-measured 89 at 4b84834a32, DOWN from 92 at 5ab08428 -- itself up from 87, so this entry has '
+      + 'now drifted both ways. Against the composition recorded here at 92 the delta is attributable '
+      + 'tier by tier: code-tier lost the 4 TS2322 (-4), config-tier gained one TS2835 (+1), noise did '
+      + 'not move. TS2353 then TS2322 have each passed through the code tier and left; TS2345 x30 is its '
+      + 'only lasting resident. Read the 89 as three mechanical repairs, not 89 problems: all 30 TS2345 '
+      + 'are one defect thirty times over, in metadata.test.ts between 608 and 945, every one the same '
+      + 'mock PluginContext literal missing registerServiceFactory and getServiceScoped, so one shared '
+      + 'fixture closes the code tier outright; the 25 TS2835 are the widest spread (12 files) and are '
+      + 'one codemod, a relative import wanting an explicit .js extension under node16 resolution. '
+      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16) do still hold 50 of the 89, '
+      + 'but that is over HALF -- the "two thirds" claimed here was true at neither 92 nor 89.',
   },
   '@objectstack/metadata-protocol': {
     errors: 63,
