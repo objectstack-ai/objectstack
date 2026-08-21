@@ -5,6 +5,7 @@ import { HotReloadManager } from './hot-reload.js';
 import type { ObjectLogger } from './logger.js';
 import type { Plugin } from './types.js';
 import type { HotReloadConfigParsed } from '@objectstack/spec/kernel';
+import { recordGuards, stillPinningTheLoop } from './refd-timer-probe.testkit.js';
 
 /** Records `error` reports; every other level is dropped. `child()` is self. */
 function createRecordingLogger(errors: { message: string; error?: unknown }[]): ObjectLogger {
@@ -57,13 +58,6 @@ describe('HotReloadManager', () => {
     const noState = () => ({});
     const noRestore = () => {};
 
-    /**
-     * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
-     * resources currently keeping the event loop alive, which is exactly the
-     * property that made `os migrate` idle ~120s in #4813.
-     */
-    const refdTimers = () => process.getActiveResourcesInfo().filter(r => r === 'Timeout').length;
-
     it("leaves no ref'd timer behind when destroy() wins the race", async () => {
       const calls = { count: 0 };
       const plugin = {
@@ -75,20 +69,31 @@ describe('HotReloadManager', () => {
         },
       } as unknown as Plugin;
 
-      manager.registerPlugin('guarded-plugin', guardedConfig());
+      const config = guardedConfig();
+      manager.registerPlugin('guarded-plugin', config);
 
-      const before = refdTimers();
-      const reloaded = await manager.reloadPlugin(
-        'guarded-plugin',
-        plugin,
-        '1.0.0',
-        noState,
-        noRestore
-      );
+      // The guard is named by the timeout it was armed with rather than
+      // counted out of the process — `refd-timer-probe.testkit.ts` explains
+      // why `reloadPlugin()`'s `await` makes an absolute count unsound (#10685).
+      let reloaded = false;
+      const guards = await recordGuards(config.shutdownTimeout, async () => {
+        reloaded = await manager.reloadPlugin(
+          'guarded-plugin',
+          plugin,
+          '1.0.0',
+          noState,
+          noRestore
+        );
+      });
 
       expect(reloaded).toBe(true);
       expect(calls.count).toBe(1);
-      expect(refdTimers()).toBe(before);
+
+      // The reload armed exactly one shutdown guard. Without this the reclaim
+      // below would be vacuously green — a zero because nothing was measured,
+      // rather than because nothing was left behind.
+      expect(guards).toHaveLength(1);
+      expect(stillPinningTheLoop(guards)).toBe(0);
     });
 
     it('still reports the timeout when destroy() never answers', async () => {

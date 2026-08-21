@@ -454,6 +454,41 @@ function selfTest() {
   t('splitRemoteRef refuses an unknown remote', splitRemoteRef('upstream/main', ['origin']) === null);
 
   // ── real repos ────────────────────────────────────────────────────────────
+  // Every window edge below is a COMPLETE UTC instant, never a bare
+  // `YYYY-MM-DD`. `git rev-list --since=2026-06-20` is an *approxidate*: git
+  // fills the missing time of day from the CURRENT WALL CLOCK, not from
+  // midnight. With this fixture stamped 12:00:00Z, that edge swept across c19
+  // once a day — 21 commits before 12:00 UTC, 20 after — so this self-test was
+  // green every morning and red every afternoon (measured 2026-08-21: three
+  // off-by-one failures, ~10 h red on `main`, `Lint & Repo Gates` failing for
+  // every PR and the merge queue evicting them on rebuild). A complete instant
+  // is parsed exactly and never consults `now`; putting each edge at 00:00:00Z
+  // additionally leaves 12 h — half the fixture's daily cadence, the widest gap
+  // available — between it and the nearest commit stamp. `collect-release-notes.sh
+  // --self-test`, which runs over an identical fixture in the same `lint.yml`
+  // step, has always spelled its window this way.
+  const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
+  const FIXTURE_COMMITS = 40;
+  const WINDOW_SINCE = '2026-06-20T00:00:00Z';
+  const WINDOW_UNTIL = '2026-07-11T00:00:00Z';
+  const NARROW_SINCE = '2026-07-08T00:00:00Z';
+
+  // Both halves of that property, recomputed from the constants rather than
+  // asserted about them, so moving a window or re-cadencing the fixture re-runs
+  // the check instead of dating it. A bare date fails the shape test; a stamp
+  // or edge nudged toward its neighbour fails the gap test.
+  const stampsMs = Array.from({ length: FIXTURE_COMMITS }, (_, i) => Date.parse(FIXTURE_EPOCH) + i * day);
+  const edges = [WINDOW_SINCE, WINDOW_UNTIL, NARROW_SINCE];
+  const edgesAreCompleteInstants = edges.every((e) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e));
+  const closestEdgeMs = Math.min(
+    ...edges.map((e) => Math.min(...stampsMs.map((stamp) => Math.abs(Date.parse(e) - stamp)))),
+  );
+  t('every window edge is a COMPLETE instant and clears every fixture stamp by hours — a bare '
+    + 'YYYY-MM-DD is approxidated to the CURRENT time of day, which is what made this self-test '
+    + 'pass before 12:00 UTC and fail after it',
+    edgesAreCompleteInstants && closestEdgeMs >= 6 * 60 * 60 * 1000,
+    `complete=${edgesAreCompleteInstants} closest edge-to-stamp gap ${closestEdgeMs / (60 * 60 * 1000)}h`);
+
   const root = mkdtempSync(join(tmpdir(), 'git-history-selftest-'));
   const g = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
@@ -463,8 +498,8 @@ function selfTest() {
     g(['config', 'user.email', 'selftest@objectstack.ai'], up);
     g(['config', 'user.name', 'selftest'], up);
     // 40 commits, one per day, oldest first: 2026-06-01 .. 2026-07-10.
-    for (let i = 0; i < 40; i += 1) {
-      const d = new Date(Date.parse('2026-06-01T12:00:00Z') + i * day).toISOString();
+    for (let i = 0; i < FIXTURE_COMMITS; i += 1) {
+      const d = new Date(Date.parse(FIXTURE_EPOCH) + i * day).toISOString();
       writeFileSync(join(up, 'f.txt'), `commit ${i}\n`);
       g(['add', 'f.txt'], up);
       execFileSync('git', ['commit', '--quiet', '-m', `c${i}`], {
@@ -488,7 +523,7 @@ function selfTest() {
       return { stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), code: r.status };
     };
 
-    const fullAnswer = runCliAllowFail(['count', '--since=2026-06-20', '--until=2026-07-11'], full);
+    const fullAnswer = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`], full);
     t('a complete clone answers, exit 0', fullAnswer.code === 0, JSON.stringify(fullAnswer));
     t('and the answer is the real one (21 commits: the daily fixture commits i=19..39)',
       fullAnswer.stdout.trim() === '21', `got ${JSON.stringify(fullAnswer.stdout)}`);
@@ -497,11 +532,11 @@ function selfTest() {
     const shallow = join(root, 'shallow');
     g(['clone', '--quiet', '--depth=5', `file://${up}`, shallow], root);
     t('the shallow fixture really is shallow', isShallow(shallow) === true);
-    const raw = g(['rev-list', '--count', '--first-parent', '--since=2026-06-20', '--until=2026-07-11', 'origin/main'], shallow).trim();
+    const raw = g(['rev-list', '--count', '--first-parent', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`, 'origin/main'], shallow).trim();
     t('BASELINE — raw git answers the same question with a wrong number and no warning '
       + '(this is the defect, reproduced)', raw === '5' && raw !== '20', `raw git said ${raw}`);
 
-    const refused = runCliAllowFail(['count', '--since=2026-06-20', '--until=2026-07-11', '--no-fetch'], shallow);
+    const refused = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`, '--no-fetch'], shallow);
     t('the helper REFUSES that same question rather than answering it', refused.code === 2, `exit ${refused.code}`);
     t('and stdout stays EMPTY, so a captured number is empty rather than plausible '
       + '(zero is a broken scan, not a clean repo — #4690)', refused.stdout.trim() === '',
@@ -511,7 +546,7 @@ function selfTest() {
       refused.stderr);
 
     // Deepening from a real (local) remote makes the same question answerable.
-    const deepened = runCliAllowFail(['count', '--since=2026-06-20', '--until=2026-07-11'], shallow);
+    const deepened = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, `--until=${WINDOW_UNTIL}`], shallow);
     t('with fetching allowed it deepens and then answers, exit 0', deepened.code === 0, JSON.stringify(deepened));
     t('and the answer now MATCHES the complete clone', deepened.stdout.trim() === '21',
       `got ${JSON.stringify(deepened.stdout)}`);
@@ -524,7 +559,7 @@ function selfTest() {
     // A shallow clone deep enough for the asked window answers with NO fetch.
     const shallowDeep = join(root, 'shallow-deep');
     g(['clone', '--quiet', '--depth=5', `file://${up}`, shallowDeep], root);
-    const narrow = runCliAllowFail(['count', '--since=2026-07-08', '--until=2026-07-11', '--no-fetch'], shallowDeep);
+    const narrow = runCliAllowFail(['count', `--since=${NARROW_SINCE}`, `--until=${WINDOW_UNTIL}`, '--no-fetch'], shallowDeep);
     t('a still-shallow clone whose floor predates the window answers WITHOUT fetching '
       + '(a bare is-shallow guard would have refused this correct answer)',
       narrow.code === 0 && narrow.stdout.trim() === '3', JSON.stringify(narrow));
@@ -533,14 +568,14 @@ function selfTest() {
       + 'not the shallow flag', isShallow(shallowDeep) === true);
 
     // ── historyHorizon: the read-only reading the #9902 adopters call ───────
-    const hFull = historyHorizon({ cwd: full, ref: 'origin/main', sinceMs: Date.parse('2026-06-20') });
+    const hFull = historyHorizon({ cwd: full, ref: 'origin/main', sinceMs: Date.parse(WINDOW_SINCE) });
     t('historyHorizon clears a complete clone and reports no floor',
       hFull.covered === true && hFull.shallow === false && hFull.floor === null && hFull.remedy === null,
       JSON.stringify(hFull));
     t('and it carries the ref tip, so an allowed answer can still be printed with its horizon',
       /^\d{4}-\d{2}-\d{2}$/.test(hFull.tip), JSON.stringify(hFull));
 
-    const hShort = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse('2026-06-20') });
+    const hShort = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse(WINDOW_SINCE) });
     t('historyHorizon REFUSES the window raw git answered with 5 instead of 21',
       hShort.covered === false, JSON.stringify(hShort));
     t('and it names the floor rather than only saying "shallow"',
@@ -552,7 +587,7 @@ function selfTest() {
       + 'newer than the floor already present',
       remedyDate !== undefined && Date.parse(remedyDate) <= Date.parse('2026-07-06'), String(hShort.remedy));
 
-    const hNarrow = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse('2026-07-08') });
+    const hNarrow = historyHorizon({ cwd: shallowDeep, ref: 'origin/main', sinceMs: Date.parse(NARROW_SINCE) });
     t('a shallow clone whose floor predates the window is CLEARED by historyHorizon too — '
       + 'the adopters must not refuse answers that are provably right',
       hNarrow.covered === true && hNarrow.shallow === true, JSON.stringify(hNarrow));
@@ -560,14 +595,14 @@ function selfTest() {
       hNarrow.floor === '2026-07-06', JSON.stringify(hNarrow));
 
     t('an unresolvable ref is refused rather than read as covered',
-      historyHorizon({ cwd: shallowDeep, ref: 'origin/nope', sinceMs: Date.parse('2026-07-08') }).covered === false);
+      historyHorizon({ cwd: shallowDeep, ref: 'origin/nope', sinceMs: Date.parse(NARROW_SINCE) }).covered === false);
 
     // No remote to deepen from: refuse, never answer.
     const orphan = join(root, 'orphan');
     g(['clone', '--quiet', '--depth=5', `file://${up}`, orphan], root);
     g(['remote', 'remove', 'origin'], orphan);
     g(['update-ref', 'refs/heads/probe', g(['rev-parse', 'HEAD'], orphan).trim()], orphan);
-    const noRemote = runCliAllowFail(['count', '--since=2026-06-20', '--ref=probe'], orphan);
+    const noRemote = runCliAllowFail(['count', `--since=${WINDOW_SINCE}`, '--ref=probe'], orphan);
     t('with no remote to deepen from it refuses instead of answering from what is there',
       noRemote.code === 2, JSON.stringify(noRemote));
     t('and it says so by name', /no remote|does not resolve/.test(noRemote.stderr || ''), noRemote.stderr);
@@ -578,7 +613,7 @@ function selfTest() {
       badSince.code === 1, JSON.stringify(badSince));
 
     // ensure answers nothing at all
-    const ens = runCliAllowFail(['ensure', '--since=2026-07-08'], shallowDeep);
+    const ens = runCliAllowFail(['ensure', `--since=${NARROW_SINCE}`], shallowDeep);
     t('ensure proves coverage and prints no number', ens.code === 0 && ens.stdout.trim() === '',
       JSON.stringify(ens));
   } finally {
