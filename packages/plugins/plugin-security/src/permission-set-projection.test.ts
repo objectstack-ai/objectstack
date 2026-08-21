@@ -1132,16 +1132,21 @@ describe('reconcilePermissionSetProjection', () => {
     expect(out.backfillFailed).toBe(1);
     expect(heard).toEqual([]);   // neither the failure, nor the count, nor the "reconciled" line
 
-    // THE CONTRACT. Without that cast the same sink no longer compiles: `warn`
-    // is non-optional on `ProjectionLogger` (#9754). Restore `warn?` in
-    // permission-set-projection.ts and this directive turns into an "Unused
-    // '@ts-expect-error' directive" error — which is how this assertion proves
-    // it is live rather than decorative.
-    await reconcilePermissionSetProjection(protocol, {
-      ql,
-      // @ts-expect-error — #9754: a ProjectionLogger MUST declare a `warn` channel
-      logger: { info: (m: string) => heard.push(m) },
-    });
+    // THE CONTRACT is what removes that cast's subject: `warn` is non-optional
+    // on `ProjectionLogger` (#9754), so no TS caller can build the sink above
+    // without saying `as unknown as` out loud.
+    //
+    // ⚠️ Deliberately NOT pinned here with `@ts-expect-error`. This package's
+    // tsconfig excludes `**/*.test.ts` (it carries a TEST_DEBT ledger entry in
+    // scripts/check-type-check-coverage.mjs), so no tsc program compiles this
+    // file and the directive would evaluate NEVER — a phantom check that reads
+    // like proof, which is the failure AGENTS.md → "Build & Test" names and
+    // `pnpm check:type-check-coverage` refuses. The compile-time half of this
+    // contract is pinned in plugin-email's `outbox-sweep.test.ts`, whose
+    // package DOES compile its tests (observed: reverting `warn` there turns
+    // that directive into `error TS2578: Unused '@ts-expect-error' directive`),
+    // and the type half of BOTH sinks is held by
+    // `pnpm check:optional-error-sink`.
   });
 
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {
