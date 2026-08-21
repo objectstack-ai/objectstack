@@ -3,6 +3,11 @@ import { PluginHealthMonitor } from './health-monitor.js';
 import { createLogger } from './logger.js';
 import type { Plugin } from './types.js';
 import type { PluginHealthCheckParsed } from '@objectstack/spec/kernel';
+import {
+  recordGuards,
+  refdTimeouts,
+  stillPinningTheLoop,
+} from './refd-timer-probe.testkit.js';
 
 describe('PluginHealthMonitor', () => {
   let monitor: PluginHealthMonitor;
@@ -117,64 +122,22 @@ describe('PluginHealthMonitor', () => {
       }) as unknown as Plugin;
 
     /**
-     * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
-     * resources currently keeping the event loop alive, which is exactly the
-     * property that made `os migrate` idle ~120s in #4813.
-     *
-     * The count is *process*-global, so it is only ever read here in
-     * synchronously adjacent pairs (see below). Comparing two reads separated
-     * by an `await` is what made this suite flaky in the merge queue (#6329):
-     * the runner shares this loop and keeps a **non-unref'd 100ms** timer on it
-     * (`throttle(sendTasksUpdate, 100)` in `@vitest/runner`), so once the
-     * window between the reads stretched past 100ms under full concurrent load
-     * — the failing run measured 105ms — that timer fired inside the window and
-     * the count fell by one for a reason that had nothing to do with the
-     * monitor. Between two adjacent synchronous statements no timer callback
-     * can run at all, so a difference measured that way is the monitor's doing
-     * and nobody else's.
+     * The instrument these pins measure with lives in
+     * `refd-timer-probe.testkit.ts`, together with the argument for its shape:
+     * `getActiveResourcesInfo()` is PROCESS-global, so two readings are only
+     * comparable across a window that crosses no event-loop turn — the very
+     * property this suite states below and the one three sibling pins were
+     * relying on without saying so (#10685). `stillPinningTheLoop()` is the
+     * synchronous form of that window; `refdTimeouts()` is the raw reading,
+     * used here only in synchronously adjacent pairs.
      */
-    const refdTimers = () =>
-      process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
-
-    /**
-     * Run `body` while recording the `Timeout` handles `setTimeout` hands out,
-     * and return those armed with `delay` — the monitor's health-check guards,
-     * told apart from every other timer on the shared loop by the very timeout
-     * they were configured with.
-     *
-     * Holding the handles is what lets the assertion below name the guard
-     * instead of counting the world. It records where the guard came from; what
-     * it then asserts is still the observable consequence — whether that handle
-     * is keeping the event loop alive — never that `clearTimeout` was called.
-     */
-    const recordingGuards = async (
-      delay: number,
-      body: () => Promise<void>
-    ): Promise<NodeJS.Timeout[]> => {
-      const guards: NodeJS.Timeout[] = [];
-      const real = globalThis.setTimeout;
-      const recording = ((...args: Parameters<typeof globalThis.setTimeout>) => {
-        const handle = real(...args);
-        if (args[1] === delay) guards.push(handle);
-        return handle;
-      }) as typeof globalThis.setTimeout;
-      Object.assign(recording, real);
-
-      globalThis.setTimeout = recording;
-      try {
-        await body();
-      } finally {
-        globalThis.setTimeout = real;
-      }
-      return guards;
-    };
 
     it("leaves no ref'd timer behind when the health check wins the race", async () => {
       const calls = { count: 0 };
       const config = guardedConfig();
       monitor.registerPlugin('guarded-plugin', config);
 
-      const guards = await recordingGuards(config.timeout, async () => {
+      const guards = await recordGuards(config.timeout, async () => {
         monitor.startMonitoring('guarded-plugin', healthyPlugin(calls));
 
         // The initial check runs immediately; wait for its report to land.
@@ -193,14 +156,14 @@ describe('PluginHealthMonitor', () => {
 
       // Everything from here to the last assertion runs in one uninterrupted
       // synchronous turn, so each difference is attributable.
-      const whileMonitoring = refdTimers();
+      const whileMonitoring = refdTimeouts();
 
       // Drop the monitoring interval — whatever is left is the guard's doing.
       monitor.stopMonitoring('guarded-plugin');
-      const afterStop = refdTimers();
+      const afterStop = refdTimeouts();
 
       // The interval was pinning the loop and is now reclaimed. This also keeps
-      // the instrument honest: `refdTimers()` demonstrably observes *this*
+      // the instrument honest: `refdTimeouts()` demonstrably observes *this*
       // monitor's timers on *this* loop, so the guard's zero below is a real
       // reading and not a blind one.
       expect(whileMonitoring - afterStop).toBe(1);
@@ -208,8 +171,7 @@ describe('PluginHealthMonitor', () => {
       // The guard is not pinning the loop: reclaiming it a second time is a
       // no-op. Had it outlived the race it would still be armed and ref'd, and
       // this reclaim would drop the count by one.
-      for (const guard of guards) clearTimeout(guard);
-      expect(refdTimers()).toBe(afterStop);
+      expect(stillPinningTheLoop(guards)).toBe(0);
     });
 
     it('still reports the timeout when the check never answers', async () => {

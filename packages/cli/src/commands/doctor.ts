@@ -1138,9 +1138,85 @@ function walkDir(dir: string, ext: string): string[] {
   return results;
 }
 
-function findMissingTests(cwd: string): string[] {
+// ─── Monorepo-anchored scans (#10679) ───────────────────────────────
+//
+// The two checks below walk `<cwd>/packages/spec/src` — a path that exists in
+// THIS monorepo and in no application built with the framework. Both used to
+// answer "that directory is not here" with `[]`, the same value they return
+// for "I walked it and found nothing wrong", and the caller printed a `✓` over
+// the second reading of an empty list. In a stock `create-objectstack`
+// scaffold that produced, verbatim:
+//
+//     ✓ Test coverage         All *.zod.ts files have matching tests
+//     ✓ Deprecations          No @deprecated tags found
+//
+// about files doctor never opened. Doctor already refuses to do this one
+// screen down: the D5e advisory's `✓` is withheld unless
+// `ledgerReadingIsComplete()` says the ledger half was read in full, because
+// "no problems found" and "I never looked" are byte-identical to a reader —
+// and the run exits 0 either way, so nothing downstream can tell them apart.
+// A green check over unread state is worse than a crash; a crash reports
+// itself.
+//
+// The fix is the same one #5413 applied to the ledger, in the same shape:
+// whether the tree was examined becomes a FACT IN THE TYPE rather than an
+// absence, so the print site cannot help but branch on it.
+
+/**
+ * What a walk of a monorepo-internal tree actually examined.
+ *
+ * `scanned: false` is the entire reason this type exists — it is the state a
+ * bare `string[]` could not express. `dir` is carried on BOTH arms so the skip
+ * notice can name the directory doctor resolved and looked for, rather than
+ * restating a relative literal the reader has to trust.
+ */
+type MonorepoTreeScan =
+  | { scanned: false; dir: string }
+  | { scanned: true; dir: string; findings: string[] };
+
+/**
+ * The line an unexamined tree prints INSTEAD of a `✓`, and its verbose detail.
+ *
+ * Triage named two admissible shapes for this defect — skip with a named
+ * reason, or scope the line to what was actually walked — and this is the
+ * first. Keeping the check's own name in the left column matters: an operator
+ * scans the report by that column, so the row has to be PRESENT and say it did
+ * not run, not quietly disappear (the `Installed packages` rows were moved for
+ * the same reason).
+ *
+ * It is deliberately NOT a warning. Nothing is wrong in an application that
+ * has no `packages/spec/src` — this check simply has no subject there — and
+ * routing it through `printWarning` would flip `hasWarnings` and end every
+ * healthy user app's report on "Environment is functional but has some
+ * warnings". Withholding a false `✓` must not manufacture a false `⚠`.
+ */
+export function monorepoTreeSkipNotice(
+  name: string,
+  dir: string,
+): { message: string; detail: string } {
+  return {
+    // 21 + the joining space = the 22-column name field the sibling `✓` lines
+    // in this report use, so a skipped row lines up with the ones that ran.
+    message: `${name.padEnd(21)} Skipped — no packages/spec/src in this directory (monorepo-only check)`,
+    detail:
+      `Looked for ${dir} and found nothing to walk. This check reads the monorepo's own `
+      + 'spec sources, so outside that checkout it has no subject — and a ✓ here would be a '
+      + 'claim about files doctor never opened.',
+  };
+}
+
+/** Print a skipped monorepo-anchored check, with its reason under `--verbose`. */
+function printMonorepoTreeSkip(name: string, dir: string, verbose: boolean): void {
+  const notice = monorepoTreeSkipNotice(name, dir);
+  printInfo(notice.message);
+  if (verbose) {
+    console.log(chalk.dim(`      → ${notice.detail}`));
+  }
+}
+
+function findMissingTests(cwd: string): MonorepoTreeScan {
   const specSrcDir = path.join(cwd, 'packages/spec/src');
-  if (!fs.existsSync(specSrcDir)) return [];
+  if (!fs.existsSync(specSrcDir)) return { scanned: false, dir: specSrcDir };
 
   const missing: string[] = [];
   const zodFiles = walkDir(specSrcDir, '.zod.ts');
@@ -1153,12 +1229,12 @@ function findMissingTests(cwd: string): string[] {
       missing.push(`Missing test: ${relTest} (for ${relZod})`);
     }
   }
-  return missing;
+  return { scanned: true, dir: specSrcDir, findings: missing };
 }
 
-function findDeprecatedUsages(cwd: string): string[] {
+function findDeprecatedUsages(cwd: string): MonorepoTreeScan {
   const specSrcDir = path.join(cwd, 'packages/spec/src');
-  if (!fs.existsSync(specSrcDir)) return [];
+  if (!fs.existsSync(specSrcDir)) return { scanned: false, dir: specSrcDir };
 
   const deprecated: string[] = [];
   const tsFiles = walkDir(specSrcDir, '.ts')
@@ -1178,7 +1254,7 @@ function findDeprecatedUsages(cwd: string): string[] {
       // Skip unreadable files
     }
   }
-  return deprecated;
+  return { scanned: true, dir: specSrcDir, findings: deprecated };
 }
 
 // ─── Deprecated Pattern Detection ───────────────────────────────────
@@ -1833,22 +1909,42 @@ export default class Doctor extends Command {
       });
     }
     
-    // Check if spec package is built
-    const specDistPath = path.join(cwd, 'packages/spec/dist');
-    
-    if (fs.existsSync(specDistPath)) {
-      results.push({
-        name: '@objectstack/spec',
-        status: 'ok',
-        message: 'Built',
-      });
-    } else {
-      results.push({
-        name: '@objectstack/spec',
-        status: 'warning',
-        message: 'Not built',
-        fix: 'Run: pnpm --filter @objectstack/spec build',
-      });
+    // Check if the monorepo's spec WORKSPACE is built.
+    //
+    // #10679 — gated on that workspace existing, which is the same defect
+    // class as the two `✓`s further down and the reason this probe is on the
+    // same card. `packages/spec` is a directory in this repo and in no
+    // application: outside the checkout the probe had no subject, yet it
+    // reported `⚠ @objectstack/spec  Not built` about it anyway — a warning
+    // that flipped every stock scaffold's report to "functional but has some
+    // warnings", prescribing `pnpm --filter @objectstack/spec build`, a
+    // command that cannot succeed where there is no such workspace.
+    //
+    // Here the honest report is no row at all. An application consumes
+    // `@objectstack/spec` from `node_modules`, where "built" is not a state it
+    // can be in — that dependency is covered by the `Dependencies` row above
+    // and by `checkSpecVersionGap()`. Inside the monorepo nothing changes: the
+    // workspace is present, and an unbuilt `dist/` is still the real warning
+    // it always was.
+    const specWorkspaceDir = path.join(cwd, 'packages/spec');
+
+    if (fs.existsSync(path.join(specWorkspaceDir, 'package.json'))) {
+      const specDistPath = path.join(specWorkspaceDir, 'dist');
+
+      if (fs.existsSync(specDistPath)) {
+        results.push({
+          name: '@objectstack/spec',
+          status: 'ok',
+          message: 'Built',
+        });
+      } else {
+        results.push({
+          name: '@objectstack/spec',
+          status: 'warning',
+          message: 'Not built',
+          fix: 'Run: pnpm --filter @objectstack/spec build',
+        });
+      }
     }
     
     // Check Git
@@ -1928,27 +2024,40 @@ export default class Doctor extends Command {
     // ── Extended Checks ──────────────────────────────────────────────
 
     // Missing test files
-    printStep('Checking for missing test files...');
+    //
+    // #10679 — the scan reports whether it ran, and the `✓` is reachable only
+    // from the arm where it did. The step line moved inside that arm too:
+    // "Checking for missing test files..." followed by a skip row announces
+    // work that never started.
     const missingTests = findMissingTests(cwd);
-    if (missingTests.length > 0) {
-      hasWarnings = true;
-      for (const msg of missingTests) {
-        printWarning(msg);
-      }
+    if (!missingTests.scanned) {
+      printMonorepoTreeSkip('Test coverage', missingTests.dir, flags.verbose);
     } else {
-      printSuccess('Test coverage         All *.zod.ts files have matching tests');
+      printStep('Checking for missing test files...');
+      if (missingTests.findings.length > 0) {
+        hasWarnings = true;
+        for (const msg of missingTests.findings) {
+          printWarning(msg);
+        }
+      } else {
+        printSuccess('Test coverage         All *.zod.ts files have matching tests');
+      }
     }
 
-    // Deprecated usage detection
-    printStep('Scanning for @deprecated usage...');
+    // Deprecated usage detection (#10679 — same shape as above)
     const deprecatedUsages = findDeprecatedUsages(cwd);
-    if (deprecatedUsages.length > 0) {
-      hasWarnings = true;
-      for (const msg of deprecatedUsages) {
-        printWarning(`Deprecated: ${msg}`);
-      }
+    if (!deprecatedUsages.scanned) {
+      printMonorepoTreeSkip('Deprecations', deprecatedUsages.dir, flags.verbose);
     } else {
-      printSuccess('Deprecations          No @deprecated tags found');
+      printStep('Scanning for @deprecated usage...');
+      if (deprecatedUsages.findings.length > 0) {
+        hasWarnings = true;
+        for (const msg of deprecatedUsages.findings) {
+          printWarning(`Deprecated: ${msg}`);
+        }
+      } else {
+        printSuccess('Deprecations          No @deprecated tags found');
+      }
     }
 
     // Config-aware checks (only if config exists)
