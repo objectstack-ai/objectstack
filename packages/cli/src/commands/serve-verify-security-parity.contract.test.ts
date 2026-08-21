@@ -39,10 +39,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appSecurityPluginOptions, appDefaultPermissionSetName } from '@objectstack/plugin-security';
-// @ts-expect-error -- the repo's one comment/code separator (#9367) is a plain
-// `.mjs` script with no type declarations. This file IS in cli's tsc program,
-// so the suppression is a real one, not a phantom: delete the import and tsc
-// reports the unused directive.
+// The repo's one comment/code separator (#9367). Typed by the hand-written
+// `scripts/js-comment-mask.d.mts` next to it, so this import needs no
+// suppression and `maskComments` arrives as `(source: string) => string`
+// rather than `any` — which is what makes the `source: string` annotation on
+// BOOT_PATHS below a real check instead of a formality.
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
