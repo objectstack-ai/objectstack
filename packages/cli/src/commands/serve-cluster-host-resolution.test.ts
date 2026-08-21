@@ -278,11 +278,11 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
   // Serve.CAPABILITY_PROVIDERS — every `pkg` in that table is CLI-declared.
   'spec.pkg': 'Serve.CAPABILITY_PROVIDERS entries are all CLI-declared',
   'ex.pkg': 'CAPABILITY_PROVIDERS `extras` entries are all CLI-declared',
-  // The app's own `plugins: [...]` config entries — an app-supplied specifier,
-  // so this IS the class, but it cannot be classified from source and changing
-  // it moves app-config plugin loading. Filed separately rather than widened
-  // here; see the PR for #10769.
-  plugin: 'app-supplied plugin name from objectstack.config.ts — filed separately',
+  // The app's own `plugins: [...]` config entries — an app-supplied specifier, so
+  // this IS the class, but no source scan can classify it and host-anchoring it
+  // changes a user-facing error message plus which copy of a CLI-declared plugin
+  // wins. Filed as #10908 rather than widened here.
+  plugin: 'app-supplied plugin name from objectstack.config.ts — see #10908',
 };
 
 /**
