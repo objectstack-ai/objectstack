@@ -441,14 +441,25 @@ jobs:
       #
       # Nothing in CI *uses* the lock (GitHub runners are one job per machine),
       # so this step exists to keep the mechanism honest rather than to serialise
-      # anything: 29 cases over the budget clamp, ticket liveness (dead pid,
+      # anything: 48 cases over the budget clamp, ticket liveness (dead pid,
       # REUSED pid, over-age), fd hygiene, exit-code passthrough, and real
       # multi-process contention — queue timeout, legacy free-hand coexistence in
       # both directions, and three staggered waiters acquiring in arrival order.
+      #
+      # Since #10289 it also guards the BASH 3.2 FLOOR and the bounded-refusal
+      # rule, which is why the count moved: `/usr/bin/env bash` is 3.2.57 on
+      # macOS, and a bash 4+/5+ construct there does not fail loudly — it makes
+      # the acquisition deadline unreachable and turns the wait into an unbounded
+      # spin that prints no VERDICT at all. So the suite now scans the
+      # acquisition path for 4+/5+ constructs, runs a real acquisition with
+      # EPOCHSECONDS/EPOCHREALTIME unset and mapfile disabled, and asserts that
+      # an unusable host (no `flock`) and a stopped clock each REFUSE with a
+      # verdict and a non-zero exit rather than waiting forever.
+      #
       # It runs entirely on a private lock under a temp dir; it never touches
       # /tmp/os-heavy-verify.lock, so a runner and an agent container behave the
       # same. Unconditional and un-`if:`-ed, like the self-tests above — an
-      # exemption is what a self-test must not have. No network, ~15 s.
+      # exemption is what a self-test must not have. No network, ~40 s.
       - name: Verify-lock entry-point self-test
         run: bash scripts/pm/os-verify-lock.sh --self-test
 
