@@ -269,6 +269,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 import { maskComments } from './js-comment-mask.mjs';
 
 const ROOTS = ['examples', 'apps', 'packages'];
@@ -499,7 +500,7 @@ function parse(text, file) {
   // `scriptKind` left to the parser so `.tsx` / `.jsx` / `.mjs` are inferred
   // from the name. The parser is error-tolerant: a file it cannot fully parse
   // still yields the nodes around the failure rather than throwing.
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, /* setParentNodes */ true);
+  return parseSourceFile(file, text);
 }
 
 // ── the gate ──────────────────────────────────────────────────────────────

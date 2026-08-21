@@ -149,6 +149,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = join(ROOT, 'scripts', 'startup-registry-verdict.baseline.json');
@@ -943,7 +944,7 @@ function run({ list = false, packagesDir } = {}) {
     for (const file of files) {
         const text = readFileSync(file, 'utf8');
         if (!text.includes('providesServices')) continue;
-        const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
         for (const [service, owners] of buildProviderIndex(collectPluginUnits(sf))) {
             if (!providers.has(service)) providers.set(service, new Set());
             for (const o of owners) providers.get(service).add(o);
@@ -957,7 +958,7 @@ function run({ list = false, packagesDir } = {}) {
         for (const probe of SERVICE_REGISTRY_PROBES.keys()) if (text.includes(probe)) interesting = true;
         for (const registry of OPEN_CAPABILITY_REGISTRIES.keys()) if (text.includes(registry)) interesting = true;
         if (!interesting) continue;
-        const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
         analyzeSourceFile(sf, relative(relBase, file).split(sep).join('/'), findings, seams, providers);
     }
 
@@ -1346,7 +1347,7 @@ function selfTest() {
 
     let failures = 0;
     for (const c of cases) {
-        const sf = ts.createSourceFile('t.ts', `${PROVIDERS}\n${c.code}`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile('t.ts', `${PROVIDERS}\n${c.code}`, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
         analyzeSourceFile(sf, 't.ts', findings, seams);

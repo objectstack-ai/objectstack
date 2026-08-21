@@ -143,6 +143,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -841,7 +842,7 @@ const EXPRESS_RESPONSE_MODULES = {
  * @returns {{bodies: number, reads: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>, readSites: string[]}}
  */
 export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = HONO_CONTEXT_RECEIVERS) {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = {
     bodies: 0,
     // Zero-argument `.json()` calls on the SAME receivers: reads, never writes.
@@ -1253,7 +1254,7 @@ function discoverExpressRoutes() {
  * @returns {{responses: number, ok: number, err: number, privateOk: number, stringError: number, siblingCode: number, sites: string[], stringErrorSites: string[], siblingCodeSites: string[]}}
  */
 export function scanSource(source, fileName = 'module.ts') {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = {
     responses: 0, ok: 0, err: 0, privateOk: 0, stringError: 0, siblingCode: 0,
     sites: [], stringErrorSites: [], siblingCodeSites: [],
@@ -1363,7 +1364,7 @@ export function scanSource(source, fileName = 'module.ts') {
  * @returns {{handBuilt: number, sites: string[]}}
  */
 export function scanDomainSource(source, fileName = 'domain.ts') {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = { handBuilt: 0, sites: [] };
 
   const isDispatcherResult = (obj) =>

@@ -275,6 +275,7 @@ import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
@@ -816,7 +817,7 @@ function localFunctions(sourceFile) {
  * #5393 hit and #5480 removed the excuse for.
  */
 function scanSource(fileName, text, slice = SLICES[0], opts = {}) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const sf = parseSourceFile(fileName, text);
   const pinnedNames = pinnedImportsOf(sf, slice);
   const locals = localFunctions(sf);
   const doubles = [];
@@ -960,7 +961,7 @@ function declaredBindings(sf) {
  * construct left the population without any verdict being recorded.
  */
 function censusSource(fileName, text, slice) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const sf = parseSourceFile(fileName, text);
   const declared = declaredBindings(sf);
   const unrecognised = [];
   const scopedOut = [];
@@ -1202,7 +1203,7 @@ function censusRecognizer() {
     const rel = relative(ROOT, abs).split(sep).join('/');
     const text = readFileSync(abs, 'utf8');
     if (!/\b(delete|update)\s*[(:,}]/.test(text)) continue;
-    const sf = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const sf = parseSourceFile(abs, text);
 
     const consider = (props) => {
       for (const m of props) {
@@ -1802,7 +1803,7 @@ function envelopeImportsOf(sourceFile) {
  * caller-supplied id, in a function that answers a receipt.
  */
 function scanSeams(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(fileName, text, ts.ScriptKind.TS);
   const envelopeNames = envelopeImportsOf(sf);
   const localFns = localFunctions(sf);
   const methodFns = classMethods(sf);
@@ -1949,7 +1950,7 @@ function declaredFunctionNames(sourceFile) {
 function fileDeclaresFunction(file, fn) {
   const abs = join(ROOT, file);
   if (!existsSync(abs)) return false;
-  const sf = ts.createSourceFile(file, readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(file, readFileSync(abs, 'utf8'), ts.ScriptKind.TS);
   return declaredFunctionNames(sf).has(fn);
 }
 
@@ -3517,7 +3518,7 @@ ${body}
   // (`scalarWhereIdOf` is where "scalar" means something) and this pins it
   // where a mutation can reach it.
   const whereIdOf = (src) => {
-    const f = ts.createSourceFile('t.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const f = parseSourceFile('t.ts', src, ts.ScriptKind.TS);
     let lit = null;
     const v = (n) => { if (!lit && ts.isObjectLiteralExpression(n) && propertyNamed(n, 'where')) lit = n; ts.forEachChild(n, v); };
     v(f);
@@ -3929,7 +3930,7 @@ class Svc {
   // a walker blind to one of them would classify that seam's loss as the
   // quieter story — and the classifier would still look healthy.
   const namesOf = (src) => declaredFunctionNames(
-    ts.createSourceFile('d.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS));
+    parseSourceFile('d.ts', src, ts.ScriptKind.TS));
   expect('declaredFunctionNames reads a top-level function declaration (`callData`s shape)',
     namesOf('export async function callData(deps) { return 1; }').has('callData'));
   expect('…an OBJECT LITERAL method (`protocol.updateData` / the MCP bridge’s shape)',
@@ -4053,7 +4054,7 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
   // another would print a confident table and hide the same blind spot the
   // constants did.
   const kindsOf = (src) => {
-    const sf = ts.createSourceFile('k.test.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const sf = parseSourceFile('k.test.ts', src, ts.ScriptKind.TSX);
     const out = [];
     const visit = (n) => {
       if (ts.isObjectLiteralExpression(n) || ts.isClassDeclaration(n)) {
@@ -4076,7 +4077,7 @@ const engine: any = { registry: {}, insert: async (o: string, d: any) => d, find
   expect('#9943 — a method body is its own kind too', kindsOf('const e = { async update(o, d) {} };') === 'method body');
 
   const assignSites = (src) => objectAssignSites(
-    ts.createSourceFile('a.test.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX), SCANNED_VERBS,
+    parseSourceFile('a.test.ts', src, ts.ScriptKind.TSX), SCANNED_VERBS,
   );
   let sites = assignSites('const ql = Object.assign(makeQl(), { async find() { return []; }, async insert() { return null; } });');
   expect('#8553 — an Object.assign override varying OTHER engine members reads as BASE-accounted '
