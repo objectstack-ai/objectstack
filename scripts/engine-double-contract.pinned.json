@@ -127,6 +127,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.batch-atomic.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-atomic.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-not-attempted.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.batch-not-attempted.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.batch-row-conformance.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -173,6 +193,16 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.batch-verb-driver-text.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.bulk-record-not-found.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.bulk-record-not-found.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -285,6 +315,11 @@
       "file": "packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.dropped-fields.bulk.test.ts",
+      "verb": "update",
+      "pinned": 2
     },
     {
       "file": "packages/metadata-protocol/src/protocol.dropped-fields.test.ts",
@@ -352,6 +387,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.many-data-atomic.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.many-data-atomic.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-types-mint-door-agreement.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -512,6 +557,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.record-package-commit-durability.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -610,6 +665,21 @@
       "file": "packages/metadata-protocol/src/protocol.unrecognised-meta-type.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.update-path-id-wins.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.update-path-id-wins.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.upsert-existence.test.ts",
+      "verb": "update",
+      "pinned": 2
     },
     {
       "file": "packages/metadata-protocol/src/protocol.validate-data.test.ts",
@@ -1122,12 +1192,22 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/admin-import-users.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-auth/src/admin-revoke-user-session-match-guard.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts",
       "verb": "update",
       "pinned": 1
     },

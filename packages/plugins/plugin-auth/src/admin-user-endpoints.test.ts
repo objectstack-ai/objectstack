@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import {
   runAdminCreateUser,
   runAdminSetUserPassword,
@@ -338,7 +339,10 @@ describe('runAdminCreateUser', () => {
       }
       return [];
     });
-    const engineUpdate = vi.fn(async () => ({}));
+    const engineUpdate = vi.fn(async (_obj: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    });
     const engineInsert = vi.fn(async () => ({}));
     const m = makeDeps({
       getDataEngine: () => ({ update: engineUpdate, insert: engineInsert, find }),

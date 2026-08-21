@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -59,6 +60,7 @@ function makeRlsEngine() {
         return visible(row, options?.context) ? row : null;
     });
     const update = vi.fn(async (_object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         const id = options?.where?.id;
         const row = rows.get(id);
         if (!row || !visible(row, options?.context)) {

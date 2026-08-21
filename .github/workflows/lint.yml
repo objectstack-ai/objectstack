@@ -172,6 +172,32 @@ jobs:
       - name: scripts/ entry guards go through one predicate
         run: pnpm check:entry-guard
 
+      # Every `scripts/**` TypeScript parse goes through ONE module (#10133 /
+      # #10573), and this is the half that keeps it that way (#10574).
+      # NONE of the three parser entry points throws on a source it cannot
+      # read: `ts.createSourceFile` returns a tree built by error recovery with
+      # the errors parked on `parseDiagnostics`; `ts.createProgram` parks them
+      # behind a second call, `getSyntacticDiagnostics()`; `ts.transpileModule`
+      # reports nothing at all without `reportDiagnostics: true` and still
+      # hands back an `outputText`. A gate then walks the wreckage, finds none
+      # of the shapes it is looking for, and scores the file CLEAN — so the
+      # SYMPTOM OF A MISSING REFUSAL IS A GREEN LINE, and an unguarded gate is
+      # indistinguishable from a guarded one by reading CI. That is not a
+      # theory: one gate here forced `ScriptKind.TSX` on 2504 test files, read
+      # 32 of them as wreckage, and printed `OK` while six pinned engine
+      # doubles went uncounted.
+      # The #10573 sweep converted 32 call sites across 15 gates; it could not
+      # stop the sixteenth being typed, and within the hour a new gate landed
+      # with two raw calls in it — caught by this step, which is the whole
+      # argument for having it. Same shape as `check:entry-guard` above.
+      # Also prints the parses OUTSIDE `scripts/**` (#10575) that it does not
+      # govern, so its green line is read as a claim about `scripts/` and not
+      # about the repository.
+      # Scans ~121 scripts/ files plus a read-only census of the rest, no
+      # spawns; ~0.6s.
+      - name: scripts/ TypeScript parses go through one module
+        run: pnpm check:parse-guard
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the
@@ -441,14 +467,25 @@ jobs:
       #
       # Nothing in CI *uses* the lock (GitHub runners are one job per machine),
       # so this step exists to keep the mechanism honest rather than to serialise
-      # anything: 29 cases over the budget clamp, ticket liveness (dead pid,
+      # anything: 48 cases over the budget clamp, ticket liveness (dead pid,
       # REUSED pid, over-age), fd hygiene, exit-code passthrough, and real
       # multi-process contention — queue timeout, legacy free-hand coexistence in
       # both directions, and three staggered waiters acquiring in arrival order.
+      #
+      # Since #10289 it also guards the BASH 3.2 FLOOR and the bounded-refusal
+      # rule, which is why the count moved: `/usr/bin/env bash` is 3.2.57 on
+      # macOS, and a bash 4+/5+ construct there does not fail loudly — it makes
+      # the acquisition deadline unreachable and turns the wait into an unbounded
+      # spin that prints no VERDICT at all. So the suite now scans the
+      # acquisition path for 4+/5+ constructs, runs a real acquisition with
+      # EPOCHSECONDS/EPOCHREALTIME unset and mapfile disabled, and asserts that
+      # an unusable host (no `flock`) and a stopped clock each REFUSE with a
+      # verdict and a non-zero exit rather than waiting forever.
+      #
       # It runs entirely on a private lock under a temp dir; it never touches
       # /tmp/os-heavy-verify.lock, so a runner and an agent container behave the
       # same. Unconditional and un-`if:`-ed, like the self-tests above — an
-      # exemption is what a self-test must not have. No network, ~15 s.
+      # exemption is what a self-test must not have. No network, ~40 s.
       - name: Verify-lock entry-point self-test
         run: bash scripts/pm/os-verify-lock.sh --self-test
 
@@ -1329,10 +1366,42 @@ jobs:
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
 
+      # Hand-written `.d.mts` mirrors (#10549). `scripts/js-comment-mask.mjs`
+      # and `scripts/check-regen-pending.mjs` are untyped `.mjs` that each ship
+      # a hand-written declaration beside them, and both files say "keep this in
+      # step with the module by hand". Nothing checked that they were. A
+      # `.d.mts` has no runtime existence, so nothing executes it and nothing
+      # notices: TypeScript consumers see ONLY the declaration, so a drift makes
+      # every consumer type-check GREEN against a signature the module does not
+      # implement, first symptom a runtime failure downstream. That this file
+      # silently decides typecheck outcomes is measured rather than theoretical
+      # — PR #10513 went red with `TS2578` on two lanes purely because the
+      # mirror existed on the merged tree and not on the branch's, and that
+      # episode cost PR #10450 two merge-queue evictions. This gate asserts
+      # name, kind and required arity per declared export, and it DISCOVERS its
+      # corpus (every `scripts/**/*.d.mts`), so a third mirror added tomorrow is
+      # covered by existing rather than by anyone remembering to enrol it.
+      # Invoked as `node` rather than through a `pnpm check:*` alias for the
+      # same reason as the two steps above: that alias belongs in root
+      # package.json, declared territory of the @changesets/cli v3 lane (#9465)
+      # while it runs. dispatch-gates.mjs derives gate families from either
+      # spelling. Imports two small modules; milliseconds.
+      - name: Hand-written declaration mirrors
+        run: |
+          node scripts/check-declaration-mirrors.mjs --self-test
+          node scripts/check-declaration-mirrors.mjs
+
       # The inventory of `packages/**` tests coupled to `examples/**` (#8754).
-      # Sibling of the gate above, on the axis it cannot see: that one detects
-      # tests whose FILESYSTEM READS escape their package, this one detects
-      # tests that IMPORT an example app live. `packages/cli` dynamically
+      # Sibling of the cross-package gate above, on the axis that gate does not
+      # own. ⚠️ The line that used to stand here — "that one detects tests whose
+      # FILESYSTEM READS escape their package, this one detects tests that
+      # IMPORT an example app live" — stopped being true in #10452, which taught
+      # the cross-package gate to read escaping import SPECIFIERS as well as
+      # path-shaped reads. Both now see the same couplings and do different
+      # things with them: the cross-package gate turns one into a declared input
+      # radius plus the turbo glob that hashes it, while this gate keeps the
+      # `examples/**` INVENTORY and grades what CI can see of each entry.
+      # `packages/cli` dynamically
       # imports `examples/app-showcase/src/ui/views/contact.view` and asserts
       # `toEqual` over a hardcoded `_sections` key list; `packages/lint`
       # statically imports the same app's `Contact`/`ContactViews`. Neither
