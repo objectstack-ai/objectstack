@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
+import type { SchemaValidationResult } from '@objectstack/spec/contracts';
+import { readEnvelopeFrom } from '../../utils/response-envelope.js';
 
 /** Resolve server URL + token from flags then env (mirrors createApiClient). */
 function resolveTarget(flags: { url?: string; token?: string }): { url: string; token?: string } {
@@ -40,17 +42,20 @@ export default class DatasourceValidate extends Command {
       },
       body: '{}',
     });
-    const body = (await res.json()) as {
-      results?: Array<{
-        ok: boolean;
-        object: string;
-        diffs: Array<{ kind: string; column?: string; expected?: string; actual?: string; severity: string }>;
-      }>;
-      error?: string;
-    };
-    if (body.error) this.error(body.error);
+    // The severe half of #10675 was HERE. Reading the pre-envelope `body.results`
+    // made every response look like zero results, so this command answered
+    // "No federated objects to validate." with exit 0 against drift the server
+    // had already flagged `missing_column … severity:error` — a gate passing on
+    // a body it never read. `readEnvelopeFrom` refuses to yield an empty payload
+    // for a body it cannot parse, so the message below is now reachable only
+    // from a server that really reported no federated objects.
+    const envelope = await readEnvelopeFrom<{ ok?: boolean; results?: SchemaValidationResult[] }>(res);
+    if (!envelope.ok) {
+      this.error(envelope.message);
+      return;
+    }
 
-    const results = body.results ?? [];
+    const results = envelope.data.results ?? [];
     if (results.length === 0) {
       this.log('No federated objects to validate.');
       return;

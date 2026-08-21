@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Args, Command, Flags } from '@oclif/core';
+import type { RemoteTable } from '@objectstack/spec/contracts';
+import { readEnvelopeFrom } from '../../utils/response-envelope.js';
 
 /** Resolve server URL + token from flags then env (mirrors createApiClient). */
 function resolveTarget(flags: { url?: string; token?: string }): { url: string; token?: string } {
@@ -39,13 +41,17 @@ export default class DatasourceListTables extends Command {
     const res = await fetch(`${url}/api/v1/datasources/${args.name}/external/tables${qs}`, {
       headers: token ? { authorization: `Bearer ${token}` } : {},
     });
-    const body = (await res.json()) as {
-      tables?: Array<{ schema?: string; name: string; columnCount: number; rowCountEstimate?: number }>;
-      error?: string;
-    };
-    if (body.error) this.error(body.error);
+    // The payload lives under `data` in the declared envelope, and its shape is
+    // the service contract's own `RemoteTable` rather than a transcription of
+    // it — a copy is what silently reported "No remote tables found." against a
+    // server that had listed two (#10675).
+    const envelope = await readEnvelopeFrom<{ tables?: RemoteTable[] }>(res);
+    if (!envelope.ok) {
+      this.error(envelope.message);
+      return;
+    }
 
-    const tables = body.tables ?? [];
+    const tables = envelope.data.tables ?? [];
     if (tables.length === 0) {
       this.log('No remote tables found.');
       return;
