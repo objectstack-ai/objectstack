@@ -269,6 +269,18 @@ function actingUserId(context: ExecutionContext | undefined): string | null {
 const OOO_MAX_CHAIN = 8;
 
 /**
+ * Row cap on the single `sys_member` read that screens an expanded team slate
+ * (#10547, {@link ApprovalService.dropMembersProvablyOutsideOrg}).
+ *
+ * Sized above the 10000-member cap the `sys_team_member` expansion itself
+ * carries, because the screen reads MEMBERSHIP rows and a person may hold
+ * several. A result that comes back at the cap is treated as no evidence at
+ * all — see the truncation note on that method; the cap is therefore a
+ * fail-open threshold, never a silent trim of the slate.
+ */
+const MEMBER_SCREEN_READ_LIMIT = 50000;
+
+/**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
  * literally (#3807). Each can legitimately come back empty — an unstaffed
  * position, an emptied team, a mis-pointed unit — and the caller then falls
@@ -1187,15 +1199,35 @@ export class ApprovalService implements IApprovalService {
    * team routed that organization's people an approval over a record they are
    * not a tenant of.
    *
-   * ⚠️ The screen is on the TEAM, not on its members, and that is the whole
-   * difference from the screen next door ({@link managerIsProvablyOutsideOrg},
-   * #10153). `sys_user` carries no tenancy fact at all, so a manager can only
-   * be placed by his `sys_member` rows; `sys_team` carries `organization_id`
-   * outright (`packages/platform-objects/src/identity/sys-team.object.ts`), so
-   * a team id transitively names exactly one organization and ONE row answers
-   * the question. Screening the MEMBERS instead would be both a wider read and
-   * a different assertion — it would rule on #7497 (does approver routing imply
-   * record read visibility?), which this card does not.
+   * TWO screens run here, and they assert different things (#10230, #10547):
+   *
+   *   1. the TEAM must not provably belong to another organization
+   *      ({@link teamIsProvablyOutsideOrg}) — `sys_team` carries
+   *      `organization_id` outright
+   *      (`packages/platform-objects/src/identity/sys-team.object.ts`), so a
+   *      team id transitively names exactly one organization and ONE row
+   *      answers the question;
+   *   2. each expanded MEMBER must not provably hold membership only in other
+   *      organizations ({@link dropMembersProvablyOutsideOrg}) —
+   *      `sys_team_member` carries `team_id` and `user_id` and NO tenancy
+   *      column at all, so passing (1) says nothing whatever about the people
+   *      it lists.
+   *
+   * #10230 landed (1) alone and deferred (2) on purpose. What closed the
+   * deferral is that (1) does not imply (2) even a little: a member removed
+   * from the organization but left on the team, a team re-parented across
+   * organizations (`/organization/update-team` accepts `organizationId` in its
+   * partial body), or a `sys_team_member` row written by a seed rather than
+   * through better-auth all produce a team that passes (1) carrying a user who
+   * is provably a tenant of somewhere else. Measured on this tree, not read off
+   * the schema — the probe is quoted in `team-member-org-screen.test.ts`.
+   *
+   * (2) is the SAME assertion as {@link managerIsProvablyOutsideOrg}, one hop
+   * further out, and it is asserted the same way: `sys_user` carries no tenancy
+   * fact, so `sys_member` rows are the only evidence that a person is placed
+   * anywhere. Like that screen, this one grants no reads and applies no read
+   * screen to any approver type that lacks one today, so it decides nothing
+   * #7497 (does approver routing imply record read visibility?) asks.
    */
   private async expandTeamUsers(teamId: string, organizationId?: string | null): Promise<string[]> {
     if (!teamId) return [];
@@ -1209,7 +1241,10 @@ export class ApprovalService implements IApprovalService {
         context: SYSTEM_CTX,
       } as any);
     } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    const users = Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // #10547: the TEAM proved its tenancy above; its members have not proved
+    // theirs, and `sys_team_member` holds no fact that could. One read.
+    return await this.dropMembersProvablyOutsideOrg(teamId, users, organizationId);
   }
 
   /**
@@ -1270,6 +1305,109 @@ export class ApprovalService implements IApprovalService {
       { teamId, teamOrganizationId: teamOrg, requestOrganizationId: requestOrg },
     );
     return true;
+  }
+
+  /**
+   * Drop the expanded team members who are PROVABLY tenants of other
+   * organizations and not of `organizationId`. (#10547)
+   *
+   * Returns the survivors, in the order they were expanded.
+   *
+   * Posture — identical to {@link managerIsProvablyOutsideOrg} and
+   * {@link teamIsProvablyOutsideOrg}, deliberately, because it is the same
+   * assertion about the same table:
+   *
+   *   - membership rows exist for this user, none in `organizationId`
+   *       ⇒ the tenancy fact is present and NEGATIVE ⇒ drop him;
+   *   - no membership rows at all for him, the read failed, or the request
+   *     carries no organization
+   *       ⇒ the tenancy fact is ABSENT ⇒ leave routing exactly as it was.
+   *
+   * The absent limb is load-bearing rather than timid, and #3807 is the recorded
+   * cost of getting it wrong: a stack that stamps an organization on requests
+   * but never materializes `sys_member` rows would otherwise lose EVERY team
+   * approver at once. This package's own `team_ok` expansion fixture and
+   * #10230's T2/T3 fixtures are exactly such stacks — they carry team rows and
+   * a request organization and no `sys_member` table at all — so the absent
+   * limb is exercised by neighbours on every run of this suite.
+   *
+   * ONE read for the whole slate, never one per person: the expansion is capped
+   * at 10000 members and a per-user query would turn a single team approver
+   * into 10000 round trips.
+   *
+   * ⚠️ A TRUNCATED read fails open, and that is the subtle half. This read is
+   * the only evidence that a member IS a tenant here, so a result cut off at
+   * the limit could be missing the very row that keeps a legitimate approver on
+   * the slate — screening him out on missing evidence, which inverts the
+   * posture into fail-CLOSED precisely where it must not. When the read comes
+   * back at the cap it is treated as no evidence at all.
+   */
+  private async dropMembersProvablyOutsideOrg(
+    teamId: string,
+    userIds: string[],
+    organizationId?: string | null,
+  ): Promise<string[]> {
+    const requestOrg = organizationId ? String(organizationId) : '';
+    // No organization on the request ⇒ nothing to screen against, and no read.
+    // The ordinary single-organization / embedded stack costs nothing here.
+    if (!requestOrg || !userIds.length) return userIds;
+    let rows: any[] = [];
+    try {
+      // No `as any` on this options bag — #4918's ratchet grandfathers this
+      // file for its EXISTING erasures only, and a NEW one must carry the
+      // declared type. `ApprovalEngine.find` already accepts it as written.
+      rows = await this.engine.find('sys_member', {
+        where: { user_id: { $in: userIds } },
+        fields: ['user_id', 'organization_id'],
+        limit: MEMBER_SCREEN_READ_LIMIT,
+        context: SYSTEM_CTX,
+      });
+    } catch { return userIds; } // membership unreadable — see the fail-open note
+    if ((rows?.length ?? 0) >= MEMBER_SCREEN_READ_LIMIT) {
+      // Possibly truncated ⇒ the evidence is incomplete ⇒ no evidence.
+      this.logger?.warn?.(
+        `[approvals] #10547: the membership screen for team '${teamId}' read `
+        + `${rows.length} 'sys_member' rows, at or above its ${MEMBER_SCREEN_READ_LIMIT}-row `
+        + `cap, so the result may be truncated. Routing is left unchanged rather than risk `
+        + `dropping a member whose proof of membership fell outside the read.`,
+        { teamId, requestOrganizationId: requestOrg, rowsRead: rows.length },
+      );
+      return userIds;
+    }
+    const orgsByUser = new Map<string, string[]>();
+    for (const r of rows ?? []) {
+      const uid = String((r as any)?.user_id ?? '');
+      const org = String((r as any)?.organization_id ?? '');
+      if (!uid || !org) continue;
+      const seen = orgsByUser.get(uid);
+      if (seen) seen.push(org); else orgsByUser.set(uid, [org]);
+    }
+    const kept: string[] = [];
+    const dropped: Array<{ userId: string; organizationIds: string[] }> = [];
+    for (const uid of userIds) {
+      const orgs = orgsByUser.get(uid);
+      if (!orgs?.length) { kept.push(uid); continue; }        // no tenancy fact recorded
+      if (orgs.includes(requestOrg)) { kept.push(uid); continue; } // a member here
+      dropped.push({ userId: uid, organizationIds: orgs });
+    }
+    if (dropped.length) {
+      this.logger?.warn?.(
+        `[approvals] #10547: ${dropped.length} member(s) of team '${teamId}' were dropped from `
+        + `the approver slate — ${dropped.map(d => `'${d.userId}'`).join(', ')} hold membership `
+        + `in other organization(s), none of them the request's organization '${requestOrg}', so `
+        + `routing this approval to them would put approval authority over the record outside its `
+        + `tenant. The TEAM itself belongs to this organization; its 'sys_team_member' rows carry `
+        + `no organization of their own. Remove them from the team, grant them a membership in `
+        + `this organization, or route this step with an approver type that names someone in it.`,
+        {
+          teamId,
+          requestOrganizationId: requestOrg,
+          droppedUserIds: dropped.map(d => d.userId),
+          droppedMemberOrganizationIds: dropped.map(d => d.organizationIds),
+        },
+      );
+    }
+    return kept;
   }
 
   /**
