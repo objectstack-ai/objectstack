@@ -83,6 +83,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 
@@ -477,5 +478,10 @@ function selfTest() {
   console.log('\n✓ check-label-desc-cap --self-test: all cases passed');
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) selfTest();
 else run();
