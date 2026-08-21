@@ -72,7 +72,8 @@
  *
  * Paying for the build instead does not rescue it, because the headline scenario
  * is one this gate deliberately does not test. With the dist and stamp held
- * fixed and only the tree varying: spec unbuilt PASSES (expiry not re-checked),
+ * fixed and only the tree varying: spec unbuilt now FAILS under --require-stamp
+ * (objectstack#10428; it used to pass with the expiry check silently skipped),
  * spec unchanged PASSES, spec MOVED FORWARD PASSES, and only a spec that has
  * caught up to the published text FAILS. "Spec moved forward since the dist was
  * built" is precisely what a spec trigger would be bought for, and PR
@@ -84,13 +85,34 @@
  * tree STATE, not an event, so once it is true today's 6/100 console runs still
  * catch it. Widening the filter buys latency, not coverage.
  *
- * The exit, for whoever asks a third time: objectstack#10428 proposes deriving
- * the expiry probe from packages/spec SOURCE text — `describe()` arguments are
- * plain string literals — which would make that one assertion BUILDLESS. The
- * light job is worthless only because its single meaningful assertion needs a
- * build; remove the build and this question reopens on entirely different terms.
- * Full working — the paths-filter replay under both picomatch versions, the
- * per-commit attribution — is on objectstack#9710's ruling comment.
+ * The exit proposed for whoever asks a third time was to derive the expiry probe
+ * from packages/spec SOURCE text — `describe()` arguments are "plain string
+ * literals present in both" — making that one assertion BUILDLESS and reopening
+ * the light-job question on different terms. That was PRICED under
+ * objectstack#10428 and DECLINED. The premise is 98% true and the missing 2% is
+ * the wrong 2%: of 2993 `.describe()` probe candidates in a built spec, 44 do not
+ * appear anywhere in `src/**` as literal text (59, or 2.0%, against the narrower
+ * `.zod.ts` source subset the package actually publishes), by two irreducible
+ * bundler transforms:
+ *
+ *   - 25/44 quote-and-escape normalisation. Source writes `'…definition\'s…'`;
+ *     esbuild re-emits `"…definition's…"`. Same characters, different bytes, so a
+ *     literal substring search over source text misses it.
+ *   - 19/44 constant-folded concatenation. Source splits a long description as
+ *     `'… declares ' + '`_packageId`.'` (api/protocol.zod.ts:341-342 is one);
+ *     the bundler folds it to one literal that exists in no source file.
+ *
+ * A missed probe here reads as "not expired" — a SILENT PASS, the same failure
+ * class this gate exists to end, so the 2% lands on exactly the side that cannot
+ * be tolerated. The reverse channel is worse-behaved still: 260 of 3161 source
+ * candidates (8.2%) are description text the built package does not ship, and a
+ * detector matching one of those would report EXPIRED on a healthy tree.
+ * Symmetric src-vs-src derivation would cancel both, but that is a redesign of
+ * what assert-console-spec-injection.mjs stamps — and it still cannot make the
+ * BUNDLE side buildless, which is where the dist dependency actually lives.
+ * So the dependency stays and is made MANDATORY instead: see --require-stamp
+ * below. Full working — the paths-filter replay under both picomatch versions,
+ * the per-commit attribution — is on objectstack#9710's ruling comment.
  *
  * ## Failure response: FAIL, deliberately, rather than rebuild
  *
@@ -101,9 +123,31 @@
  * rejected. Failing once, with the eviction command spelled out, is the cheaper
  * and more honest response. Every failure below names its remedy.
  *
+ * ## What --require-stamp requires (objectstack#10428)
+ *
+ * The flag's job is to refuse a VACUOUS pass: a caller passing it has asserted
+ * that this run's green means something. That covered the dist side only — a
+ * missing dist, an unstamped dist — and left the tree side open, so a run with
+ * packages/spec unbuilt skipped the expiry re-check, printed an `ℹ`, and exited
+ * 0. Five of six verdicts here are pure functions of the restored dist and its
+ * stamp; the expiry re-check is the only one that reads the checkout. A run that
+ * skips it cannot fail on anything about the PR it is guarding.
+ *
+ * ci.yml gets a readable spec today only by STEP ADJACENCY — the Console Pin
+ * Gate happens to run `turbo run build --filter=@objectstack/client...` first,
+ * and @objectstack/spec is in that closure. Nothing enforced the ordering, so
+ * reordering the steps or calling this from a job without that build turned the
+ * assertion off silently. --require-stamp now covers the tree side too, which
+ * makes the ordering a contract instead of a coincidence and needs no new flag
+ * at the call site — a flag a new job could forget is the same failure again.
+ * The bare invocation is unchanged: a checkout with no built spec still gets the
+ * advisory notice, because there the five bundle assertions genuinely do stand
+ * on their own.
+ *
  * Exit codes:
  *   0  verified; or no dist to verify; or an unstamped dist without --require-stamp
- *   1  the restored dist is not one this repo can vouch for (see the message)
+ *   1  the restored dist is not one this repo can vouch for (see the message); or,
+ *      under --require-stamp, a run that could not make an assertion it promised
  *   2  cannot run (unreadable assets, malformed stamp)
  */
 
@@ -214,8 +258,10 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
   }
 
   // The tree's own spec, for the expiry re-check. Absent when spec is not built
-  // — a real state for a bare checkout, and not a reason to fail: the bundle
-  // assertions below stand on their own.
+  // — a real state for a bare checkout, and not a reason to fail on its own: the
+  // bundle assertions below stand without it. Under --require-stamp it IS a
+  // reason to fail, but only once we know a probe was actually skipped; that is
+  // counted in the loop and answered after it (see `expiryDeferred`).
   let treeBlob = null;
   let treeBlobNote = '';
   try {
@@ -226,6 +272,7 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
   }
 
   let asserted = 0;
+  let expiryDeferred = 0;
   for (const entry of stamp.packages) {
     const name = entry?.name || '<unnamed>';
 
@@ -274,6 +321,13 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
     // Expiry. A stale detector is evidence only while it still separates the two
     // specs; once this tree's spec also contains it, a bundle that "passes" is
     // proving nothing at all.
+    //
+    // Count the probes this run could NOT re-check, rather than reading
+    // `asserted` afterwards: an entry can have skew and still carry no stale
+    // detector, and such an entry has no expiry question to defer. Only a probe
+    // that exists and went unexamined is a skipped assertion.
+    if (staleDetector && !treeBlob) expiryDeferred += 1;
+
     if (staleDetector && treeBlob && treeBlob.includes(staleDetector)) {
       err.push(
         `✗ The stamped staleness probe for ${name} has EXPIRED.`,
@@ -301,7 +355,46 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
     if (staleDetector) out.push(`    absent  (published only): "${staleDetector}"`);
   }
 
-  if (treeBlobNote && asserted > 0) {
+  // A probe that was never re-checked is an assertion this run did not make.
+  // Advisory by default — a bare checkout legitimately has no built spec, and
+  // the five bundle assertions above still stand. Fatal under --require-stamp,
+  // for the reason that flag exists: five of this gate's six verdicts are pure
+  // functions of the restored dist and its stamp, and the expiry re-check is the
+  // ONLY one that reads this tree. Skipping it leaves a run that cannot fail on
+  // anything about the checkout it is guarding, which is the vacuous pass
+  // --require-stamp already refuses one layer in (objectstack#10428).
+  //
+  // Exit 1, not 2, deliberately: every other --require-stamp refusal here (no
+  // dist, no stamp) is a 1, and they are the same kind of statement — the run
+  // could not prove what this caller promised was provable. 2 stays reserved for
+  // a tree this script cannot read at all.
+  if (expiryDeferred > 0) {
+    if (requireStamp) {
+      err.push(
+        `✗ ${expiryDeferred === 1 ? 'A stamped staleness probe was' : `${expiryDeferred} stamped staleness probes were`} never re-checked for expiry.`,
+        '',
+        `  ${treeBlobNote}`,
+        '',
+        '  This gate has six failure verdicts and five of them read only the restored',
+        '  dist and its stamp. The expiry re-check is the one that reads THIS TREE, so',
+        '  a run without it cannot fail on anything about the checkout it guards — it',
+        '  would report green while asserting nothing about this PR.',
+        '',
+        '  --require-stamp callers have asserted that this run is one whose verdict',
+        '  means something, so the skip is a failure here rather than the notice a',
+        '  bare checkout gets.',
+        '',
+        '  How to clear this: build the spec before this step.',
+        '',
+        '        pnpm --filter @objectstack/spec build',
+        '',
+        '  In ci.yml the Console Pin Gate already does, via',
+        '  `turbo run build --filter=@objectstack/client...` (@objectstack/spec is in',
+        '  that closure). If you are seeing this there, the steps were reordered or',
+        '  this check moved to a job that does not build the closure.',
+      );
+      return { code: 1, out, err };
+    }
     out.push(`ℹ Probe expiry not re-checked: ${treeBlobNote}`);
     out.push('  (build the spec — `pnpm --filter @objectstack/spec build` — to enable it)');
   }
@@ -332,6 +425,23 @@ function makeSpecPkg(dir, descriptions) {
   );
   const body = descriptions.map((d) => `z.string().describe(${JSON.stringify(d)})`).join(';\n');
   fs.writeFileSync(path.join(dir, 'dist', 'index.mjs'), `${body}\n`);
+  return dir;
+}
+
+/**
+ * A spec package that has never been built: the manifest and its exports map are
+ * there, `dist/` is not. This is what a bare checkout looks like, and what the
+ * Console Pin Gate would look like if its build step were reordered away.
+ */
+function makeUnbuiltSpecPkg(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({
+      name: '@objectstack/spec',
+      exports: { '.': { import: { types: './dist/index.d.mts', default: './dist/index.mjs' } } },
+    }),
+  );
   return dir;
 }
 
@@ -438,6 +548,56 @@ function selfTest() {
     const dist = path.join(root, 'absent');
     expect('no dist passes', evaluate({ distDir: dist, specDir }).code, 0);
     expect('no dist fails when required', evaluate({ distDir: dist, specDir, requireStamp: true }).code, 1);
+  }
+
+  // 7b. THE SECOND VACUITY PATH (objectstack#10428): an unbuilt spec means the
+  //     expiry re-check — the only one of six verdicts that reads this tree —
+  //     never ran. Advisory on a bare checkout, fatal under --require-stamp.
+  //
+  //     Asserted on the REJECT side on purpose. "No error" proves nothing here:
+  //     before the fix this fixture exited 0 with an `ℹ`, which is precisely a
+  //     green that asserts nothing, so only a red and its branch-unique wording
+  //     can tell the fixed script from the broken one.
+  {
+    const unbuilt = makeUnbuiltSpecPkg(path.join(root, 'spec-unbuilt'));
+    const dist = makeDist(path.join(root, 'unbuilt-tree'), `console(${JSON.stringify(FRESH)})`, stampFor());
+
+    expect('unbuilt spec is advisory by default', evaluate({ distDir: dist, specDir: unbuilt }).code, 0);
+
+    const r = evaluate({ distDir: dist, specDir: unbuilt, requireStamp: true });
+    expect('unbuilt spec is fatal under --require-stamp', r.code, 1);
+    const text = r.err.join('\n');
+    checked += 1;
+    if (!text.includes('never re-checked for expiry')) {
+      failures.push('skipped-expiry failure must say the probe was never re-checked');
+    }
+    checked += 1;
+    if (!text.includes('pnpm --filter @objectstack/spec build')) {
+      failures.push('skipped-expiry failure must name the build that clears it');
+    }
+
+    // POSITIVE CONTROL. The normal CI ordering — spec built before the check —
+    // must still pass under the same flag. Without this the case above would be
+    // satisfied by a script that fails --require-stamp unconditionally.
+    expect(
+      'positive control: built spec still passes under --require-stamp',
+      evaluate({ distDir: dist, specDir, requireStamp: true }).code,
+      0,
+    );
+
+    // PRECISION. The refusal is scoped to a probe that actually went unexamined,
+    // not to "the spec is unbuilt". A stamp recording no skew has no expiry
+    // question to skip, so an unbuilt tree is still a clean pass for it —
+    // otherwise this would fail runs over an assertion nobody was owed.
+    expect(
+      'no-skew stamp does not fail on an unbuilt spec',
+      evaluate({
+        distDir: makeDist(path.join(root, 'noskew-unbuilt'), 'console("anything")', stampFor({ skew: false, freshWitness: null, staleDetector: null })),
+        specDir: unbuilt,
+        requireStamp: true,
+      }).code,
+      0,
+    );
   }
 
   // 8. A build that found no skew records it, and this gate says so honestly.
