@@ -148,6 +148,35 @@
 // and `@objectstack/rest`, the three services and `plugin-auth` are not even
 // dependencies of it -- so no graph edge reached them and no glob hashed them.
 //
+// ── The third way out: an ANCHOR the file cannot ask for (#10029) ───────────
+//
+// Every seed above answers "where am I?" from the module itself, so it resolves
+// in the depth coordinate with nothing but the source. A CJS-typed package
+// cannot ask that question at all: `packages/plugins/plugin-auth` publishes
+// `dist/index.js` as CommonJS, so under `module: NodeNext` `import.meta` is a
+// TS1470 there however well it runs under vitest. Four of its tests therefore
+// walk UP from `process.cwd()` to an anchor -- its own `package.json`, or the
+// workspace root -- and that walk resolved to nothing here. Nothing, in this
+// gate, does not mean "unknown": it means the reads built on it produced no
+// depth, no name and NO FLAG, which is the one failure mode this file exists
+// not to have.
+//
+// Measured on `19f98fa1f^`, not reasoned: `rate-limit-storage-isolation.test.ts`
+// read `packages/runtime/src` and `packages/services/service-sms/src` off such a
+// seed, appeared in no roster, and turbo replayed a cached green over the scan
+// it never re-ran -- #7802 exactly, by a fourth spelling. #10161 reseeded that
+// ONE file from `__dirname`. `findUpSeeds()` closes the CLASS it was an instance
+// of, so the next author who reaches for the idiom gets a red gate instead of
+// silence. Today's population is clean, which is the point: this lands with no
+// gate turning red and is pinned by `--self-test` cases that fail without it.
+//
+// What is new in kind: an anchor names an ABSOLUTE directory, where every other
+// spelling names a place relative to the file. So it is the first seed that
+// needs to know where the file SITS before it can be expressed as a depth, and
+// the first that can name a directory this scan cannot locate (another
+// package's manifest) -- which it answers with the trade `walkLiteral` already
+// makes for an unreadable argument: keep the escape verdict, invent no name.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
@@ -751,6 +780,15 @@ export const RECOGNISED_PATH_SPELLINGS = [
   "const P = new URL('<rel>', import.meta.url);",
   "readFileSync(resolve(HERE, '<rel>'))    // the same expressions in argument",
   "readFileSync(new URL('<rel>', import.meta.url))              // position",
+  '',
+  '// ANCHOR seeds -- a findUp walk, for a CJS-typed package where import.meta',
+  '// is a TS1470. Both compose with every expression above (#10029).',
+  "const PKG = findUp((dir) => JSON.parse(readFileSync(join(dir, 'package.json'))).name",
+  "                           === '<the name of THIS package>');   // -> package root",
+  "const REPO = findUp((dir) => existsSync(join(dir, 'pnpm-workspace.yaml')));",
+  '                                        // -> repo root',
+  '  ⛔ NOT a manifest name belonging to some OTHER package -- that root cannot',
+  '     be located from here, so the escape is flagged and the path is NOT named',
 ];
 
 /**
@@ -1081,23 +1119,130 @@ const DIR_ARG_READS = new Set(['readdirSync', 'opendirSync']);
 function* readArgumentLists(src) {
   const re = new RegExp(String.raw`\b(${PATH_ARG_READS.join('|')})\s*\(`, 'g');
   for (const m of src.matchAll(re)) {
-    const from = m.index + m[0].length;
-    let depth = 1;
-    let quote = null;
-    let i = from;
-    for (; i < src.length; i++) {
-      const c = src[i];
-      if (quote) {
-        if (c === '\\') i += 1;
-        else if (c === quote) quote = null;
-        continue;
-      }
-      if (c === "'" || c === '"' || c === '`') quote = c;
-      else if (c === '(') depth += 1;
-      else if (c === ')' && --depth === 0) break;
-    }
-    if (depth === 0) yield { fn: m[1], args: src.slice(from, i) };
+    const args = balancedArgs(src, m.index + m[0].length);
+    if (args !== null) yield { fn: m[1], args };
   }
+}
+
+/**
+ * The argument text of a call whose opening paren sits at `from - 1`, or `null`
+ * when the parens never close. Quote-aware, so a `(` inside a string literal --
+ * or the `)` inside a `` throw new Error(`could not locate ${what}`) `` -- does
+ * not move the depth.
+ *
+ * Extracted from `readArgumentLists` rather than written a second time beside
+ * the anchor seeds below, which need the same balanced read over a DIFFERENT
+ * callee. A mirrored helper is the shape #10628 already had to undo in this file
+ * once (a hand-copied `globToRegExp`); one balancer means a fix to it cannot
+ * land on one caller and miss the other.
+ */
+function balancedArgs(src, from) {
+  let depth = 1;
+  let quote = null;
+  let i = from;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if (c === '(') depth += 1;
+    else if (c === ')' && --depth === 0) break;
+  }
+  return depth === 0 ? src.slice(from, i) : null;
+}
+
+/**
+ * The marker files that identify the WORKSPACE ROOT to a `findUp` walk. A
+ * predicate that tests for one of these resolves, statically, to the repo root
+ * -- there is exactly one directory in the tree that has it.
+ *
+ * Published and plural for the same reason `RECOGNISED_PATH_SPELLINGS` is: the
+ * set is what the gate can SEE, so a walk keyed on some other root marker
+ * (`turbo.json`, `.git`) yields no seed and the reads built on it go undeclared
+ * silently. Adding one here is a data change plus a `--self-test` case.
+ */
+export const WORKSPACE_ROOT_MARKERS = ['pnpm-workspace.yaml'];
+
+/** `const X = findUp(` / `let X = findUp(` — the binding the anchor seeds arrive as. */
+const FIND_UP_BINDING = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*string\s*)?=\s*findUp\s*\(/g;
+/** A manifest-name predicate, in either argument order. */
+const MANIFEST_NAME_TEST = /\bname\s*===\s*(['"`])([^'"`]+)\1|(['"`])([^'"`]+)\3\s*===\s*\bname\b/;
+
+/**
+ * The ANCHOR seeds: `findUp` walks that name an absolute directory in the tree
+ * rather than a place relative to the importing file (#10029).
+ *
+ * Every seed above this one answers "where am I?" -- `import.meta.url`,
+ * `__dirname`, `import.meta.dirname`. A CJS-typed package cannot ask that
+ * question: under `module: NodeNext` `import.meta` is a TS1470 there however
+ * well it runs under vitest, so `packages/plugins/plugin-auth` reaches for a
+ * walk up from `process.cwd()` instead, and four of its tests spell it. That
+ * walk resolved to NOTHING here, so every path built on it resolved to nothing
+ * too -- no depth, no name, no flag, which is this gate's one failure mode.
+ * Measured on `19f98fa1f^`: `rate-limit-storage-isolation.test.ts` read
+ * `packages/runtime/src` and `packages/services/service-sms/src` through such a
+ * seed and appeared in NO roster, while turbo replayed a cached green over the
+ * scan it never re-ran (#7802 exactly). #10161 reseeded that one file from
+ * `__dirname`; this closes the CLASS the file was an instance of.
+ *
+ * Two predicates are knowable without executing anything, and they are the two
+ * the idiom uses:
+ *
+ *   PACKAGE ROOT -- the predicate reads a `package.json` and compares its `name`
+ *     to a literal. When that literal is the scanned file's OWN package, the
+ *     answer is this package's root: depth 0, named.
+ *   REPO ROOT -- the predicate tests for a WORKSPACE_ROOT_MARKERS file. The
+ *     answer is the repo root, which sits `pkgSegs.length` levels ABOVE the
+ *     package root, so the binding escapes on its own -- exactly as the
+ *     `resolve(HERE, '../../../..')` spelling of the same anchor already does.
+ *
+ * ⚠️ Why these need repo context when no other seed does. Every other spelling
+ * is relative to the FILE, so it resolves in the depth coordinate on its own; an
+ * anchor names an absolute directory, and where that lands relative to the
+ * package root is not knowable until you know where the file sits. So both
+ * arrive only with `fileSegs`, and a caller with none (the depth-only
+ * `--self-test` shapes) gets no seed rather than a guessed one.
+ *
+ * ⛔ The boundary that keeps this from FABRICATING. A predicate naming some
+ * OTHER package's manifest resolves to that package's root, which this scan
+ * cannot locate without walking the tree -- so it takes the sound half of the
+ * trade `walkLiteral` already makes for an unreadable argument: the walk
+ * necessarily passed through the repo root, so `min` says so and the escape is
+ * flagged, while `segs` is `null` and no name is invented. A roster entry
+ * pointing at a file nobody reads is worse than a missing one.
+ *
+ * An unrecognised predicate yields no seed at all, which is the pre-#10029
+ * behaviour and is why the recognised set is published rather than implied.
+ */
+function findUpSeeds(src, hereDepth, fileSegs, ownPackageName) {
+  const seeds = new Map();
+  // An anchor is absolute; without the file's place in the tree there is no
+  // depth to express it in. Depth-only callers get nothing, deliberately.
+  if (!fileSegs) return seeds;
+  const pkgSegs = fileSegs.slice(0, fileSegs.length - 1 - hereDepth);
+  const repoRootDepth = -pkgSegs.length;
+  for (const m of src.matchAll(FIND_UP_BINDING)) {
+    const args = balancedArgs(src, m.index + m[0].length);
+    if (args === null) continue;
+    if (WORKSPACE_ROOT_MARKERS.some((f) => args.includes(f))) {
+      seeds.set(m[1], { end: repoRootDepth, min: repoRootDepth, vendored: false, segs: [] });
+      continue;
+    }
+    const named = args.includes('package.json') ? args.match(MANIFEST_NAME_TEST) : null;
+    if (!named) continue;
+    const wanted = named[2] ?? named[4];
+    if (ownPackageName && wanted === ownPackageName) {
+      seeds.set(m[1], { end: 0, min: 0, vendored: false, segs: pkgSegs });
+    } else {
+      // Another package's root: outside this one for certain, locatable only by
+      // walking the tree. Keep the verdict, drop the name.
+      seeds.set(m[1], { end: repoRootDepth, min: repoRootDepth, vendored: false, segs: null });
+    }
+  }
+  return seeds;
 }
 
 /**
@@ -1131,7 +1276,7 @@ function* readArgumentLists(src) {
  * `--self-test` pins the shapes that must keep flagging AND the shapes that must
  * not; an added spelling without an added case is the next silent regression.
  */
-function scanPathExpressions(src, hereDepth, fileSegs = null) {
+function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = null) {
   const known = new Map();
   const escapes = [];
   const files = new Set();
@@ -1154,6 +1299,19 @@ function scanPathExpressions(src, hereDepth, fileSegs = null) {
   const collect = (into, info) => {
     if (info?.segs?.length && !info.vendored) into.add(info.segs.join('/'));
   };
+
+  // The anchor seeds go in FIRST, and they are read by their own balanced pass
+  // rather than by `DECL` below, because `DECL` cannot reach them: it stops an
+  // initialiser at the first `;`, and a `findUp` predicate is a block with
+  // statements in it. Seeding `known` here is what lets every later spelling
+  // compose with an anchor exactly as it composes with an `import.meta.url`
+  // seed -- `join(REPO, 'packages', 'runtime', 'src')` is the ordinary literal
+  // walk once `REPO` has a depth.
+  for (const [name, info] of findUpSeeds(src, hereDepth, fileSegs, ownPackageName)) {
+    known.set(name, info);
+    collect(files, info);
+    report(name, info);
+  }
 
   const DECL = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+(?:\n\s*[^;\n]*)??)\s*;/g;
   for (const m of src.matchAll(DECL)) {
@@ -1200,8 +1358,8 @@ function scanPathExpressions(src, hereDepth, fileSegs = null) {
  * exported name the `--self-test` shapes and any future reader reach for; the
  * roster half of the same walk is internal to `findEscapingPackages()`.
  */
-export function escapingBindings(src, hereDepth, fileSegs = null) {
-  return scanPathExpressions(src, hereDepth, fileSegs).escapes;
+export function escapingBindings(src, hereDepth, fileSegs = null, ownPackageName = null) {
+  return scanPathExpressions(src, hereDepth, fileSegs, ownPackageName).escapes;
 }
 
 /**
@@ -1229,12 +1387,25 @@ export function repoRelativeLiterals(src) {
   return out;
 }
 
+/**
+ * Memoised, because the anchor seeds (#10029) need it BEFORE the scan rather
+ * than only after it: a `findUp` keyed on a manifest `name` is this package's
+ * root when the literal is this package's name, and some other package's root
+ * -- unnameable from here -- when it is not. Asking per test file re-read the
+ * same manifest once per test in the package; asking per package root does not.
+ */
+const packageNameCache = new Map();
+
 function packageNameOf(pkgRoot) {
+  if (packageNameCache.has(pkgRoot)) return packageNameCache.get(pkgRoot);
+  let name;
   try {
-    return JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).name ?? null;
+    name = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).name ?? null;
   } catch {
-    return null;
+    name = null;
   }
+  packageNameCache.set(pkgRoot, name);
+  return name;
 }
 
 /** Every package with at least one test that reads outside its own directory. */
@@ -1260,9 +1431,13 @@ export function findEscapingPackages() {
       // asserts on synthetic sources with no place in the tree, so it passes
       // none and gets depth-only answers, exactly as before.
       const fileSegs = relative(REPO_ROOT, file).split(sep).filter(Boolean);
-      const scan = scanPathExpressions(src, hereDepth, fileSegs);
-      if (!scan.escapes.length) continue;
+      // Read BEFORE the scan, not after: an anchor seed keyed on a manifest
+      // `name` is only this package's root while the literal is this package's
+      // name, so the scan needs the answer to avoid resolving another package's
+      // anchor to this one's directory (#10029).
       const name = packageNameOf(pkgRoot);
+      const scan = scanPathExpressions(src, hereDepth, fileSegs, name);
+      if (!scan.escapes.length) continue;
       if (!name) continue;
       if (!found.has(name))
         found.set(name, { dir: relative(REPO_ROOT, pkgRoot), tests: [], literals: new Map(), dirEntries: new Set() });
@@ -1343,10 +1518,19 @@ export function findEscapingPackages() {
  * `heldBy` names the escaping test that reads it, and that witness is checked --
  * the named test must still be one of this package's escaping tests. Which is
  * what makes the ablation this limb exists for fail: reseed
- * `managed-extension-fields.test.ts` from `process.cwd()` (a root walk this
- * detector deliberately does not resolve) and it stops being an escaping test at
- * all, so plugin-auth keeps its entry through its second test while
- * `packages/**\/*.object.ts` loses its only witness and is named here.
+ * `managed-extension-fields.test.ts` from a BARE `process.cwd()` and it stops
+ * being an escaping test at all, so plugin-auth keeps its entry through its
+ * second test while `packages/**\/*.object.ts` loses its only witness and is
+ * named here.
+ *
+ * ⚠️ "Bare" is load-bearing since #10029, and this sentence used to say
+ * `process.cwd()` was "a root walk this detector deliberately does not
+ * resolve". Half of that is now false: the `findUp` ANCHOR seeds -- which is
+ * how plugin-auth actually spells a cwd walk -- DO resolve, so reseeding that
+ * way leaves the test escaping and ablates nothing. It is the unadorned
+ * `process.cwd()` expression, with no recognised anchor predicate on it, that
+ * still resolves to nothing. Reach for the wrong one and this limb reads as
+ * healthy while nothing was measured.
  *
  * A rostered DIRECTORY is asked with `coversDirectory` against this glob ALONE,
  * the same predicate the coverage limb uses -- so two globs that only jointly
@@ -1767,6 +1951,157 @@ function selfTest() {
   ok(
     'does NOT flag the bare file expression itself (it names its own file)',
     !at("const SELF = fileURLToPath(import.meta.url);\nconst C = readFileSync(SELF, 'utf8');", 2),
+  );
+
+  // ── the ANCHOR seeds (#10029) ──────────────────────────────────────────────
+  //
+  // A `findUp` walk from `process.cwd()`, which is how a CJS-typed package
+  // reaches its own root when `import.meta` is a TS1470 there. Until these
+  // cases existed the walk resolved to nothing, so every path built on it
+  // resolved to nothing too and the reads went undeclared SILENTLY -- measured
+  // on `19f98fa1f^` against `rate-limit-storage-isolation.test.ts`, which read
+  // two other packages by directory and appeared in no roster while turbo
+  // replayed a cached green over it.
+  //
+  // ⚠️ Today's `findUp` population is CLEAN (the three surviving plugin-auth
+  // tests read in-package or vendored), so no gate turns red from this and none
+  // turns newly green either. That makes these cases the only proof there is:
+  // each one below fails on a detector without `findUpSeeds()`. The two that
+  // pin a NAME are the load-bearing pair -- a case asserting only "it does not
+  // flag" passes just as happily on a seed that resolved to NOTHING, which is
+  // precisely the bug.
+  const FIND_UP_FN =
+    'function findUp(predicate: (dir: string) => boolean, what: string): string {\n' +
+    '  let dir = process.cwd();\n' +
+    '  for (;;) {\n' +
+    '    if (predicate(dir)) return dir;\n' +
+    '    const parent = dirname(dir);\n' +
+    '    if (parent === dir) throw new Error(`could not locate ${what}`);\n' +
+    '    dir = parent;\n' +
+    '  }\n' +
+    '}\n';
+  // Verbatim from `packages/plugins/plugin-auth/src/*.test.ts` — a predicate
+  // BLOCK with statements in it, which is why `DECL` cannot read these and
+  // `findUpSeeds()` balances the parens itself.
+  const PKG_SEED =
+    'const PKG = findUp((dir) => {\n' +
+    "  const manifest = join(dir, 'package.json');\n" +
+    '  if (!existsSync(manifest)) return false;\n' +
+    "  const { name } = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: string };\n" +
+    "  return name === '@objectstack/plugin-auth';\n" +
+    "}, 'the @objectstack/plugin-auth package root');\n";
+  const REPO_SEED =
+    'const REPO = findUp(\n' +
+    "  (dir) => existsSync(join(dir, 'pnpm-workspace.yaml')),\n" +
+    "  'the workspace root (pnpm-workspace.yaml)',\n" +
+    ');\n';
+  // `packages/plugins/plugin-auth/src/x.test.ts` — one directory below its
+  // package root, whose own root is 3 segments below the repo root.
+  const PA = ['packages', 'plugins', 'plugin-auth', 'src', 'x.test.ts'];
+  const PA_NAME = '@objectstack/plugin-auth';
+  const anchorEscapes = (src) => escapingBindings(src, 1, PA, PA_NAME).length > 0;
+  const anchorFiles = (src) => [...scanPathExpressions(src, 1, PA, PA_NAME).files];
+  const anchorDirs = (src) => [...scanPathExpressions(src, 1, PA, PA_NAME).dirs];
+
+  // ⭐ The #10029 specimen, reconstructed: the exact read that was invisible.
+  const RATE_LIMIT_SHAPE =
+    FIND_UP_FN +
+    REPO_SEED +
+    "const abs = join(REPO, 'packages/runtime/src');\n" +
+    'for (const entry of readdirSync(abs, { recursive: true, withFileTypes: true })) {\n}\n';
+  ok('flags a directory read off a workspace-root anchor (the #10029 specimen)', anchorEscapes(RATE_LIMIT_SHAPE));
+  ok(
+    'and NAMES the directory it read, so a narrow glob can be checked against it',
+    anchorDirs(RATE_LIMIT_SHAPE).includes('packages/runtime/src'),
+  );
+  ok(
+    'the workspace-root anchor escapes on its own, like resolve(HERE, $DOTDOTS) already does',
+    anchorEscapes(FIND_UP_FN + REPO_SEED),
+  );
+  ok(
+    'a segment-by-segment join off the anchor resolves the same way',
+    anchorFiles(FIND_UP_FN + REPO_SEED + "const G = join(REPO, 'scripts', 'check-nul-bytes.mjs');").includes(
+      'scripts/check-nul-bytes.mjs',
+    ),
+  );
+
+  // The package-root anchor. Its whole point is that it does NOT escape, so the
+  // name is what proves it resolved at all — this is the `better-auth-schema-parity`
+  // shape, which triage measured in-package and which must stay quiet for the
+  // RIGHT reason.
+  const IN_PACKAGE_SHAPE = FIND_UP_FN + PKG_SEED + "const source = readFileSync(join(PKG, 'src', 'auth-manager.ts'), 'utf8');";
+  ok('does NOT flag a package-root anchor read that stays inside the package', !anchorEscapes(IN_PACKAGE_SHAPE));
+  ok(
+    '⭐ and resolves that anchor to THIS package root — the case a bare "does not flag" would pass without the seed',
+    anchorFiles(IN_PACKAGE_SHAPE).includes('packages/plugins/plugin-auth/src/auth-manager.ts'),
+  );
+  ok(
+    'flags a climb OUT of the package off the package-root anchor',
+    anchorEscapes(FIND_UP_FN + PKG_SEED + "const G = join(PKG, '..', '..', '..', 'scripts', 'check-nul-bytes.mjs');"),
+  );
+  ok(
+    'and names it',
+    anchorFiles(FIND_UP_FN + PKG_SEED + "const G = join(PKG, '..', '..', '..', 'scripts', 'check-nul-bytes.mjs');").includes(
+      'scripts/check-nul-bytes.mjs',
+    ),
+  );
+  ok(
+    'a vendored read off the anchor stays invisible (member-role-canonical: no glob can hash node_modules)',
+    !anchorEscapes(
+      FIND_UP_FN +
+        PKG_SEED +
+        "const require_ = createRequire(join(PKG, 'probe.js'));\n" +
+        "const VENDOR_DIST = dirname(require_.resolve('better-auth'));\n" +
+        "const SRC = readFileSync(join(VENDOR_DIST, 'plugins', 'organization', 'routes', 'crud-members.mjs'), 'utf8');",
+    ),
+  );
+
+  // ⛔ The boundary, pinned in both directions. A manifest name that is not this
+  // package's names a root this scan cannot locate, so it keeps the escape
+  // verdict and loses the name — the same trade an unreadable `join()` argument
+  // makes. Inventing this package's root for it would put a file nobody reads on
+  // the roster AND hide a real escape behind a depth of 0.
+  const FOREIGN_SEED =
+    'const OTHER = findUp((dir) => {\n' +
+    "  const manifest = join(dir, 'package.json');\n" +
+    '  if (!existsSync(manifest)) return false;\n' +
+    "  const { name } = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: string };\n" +
+    "  return name === '@objectstack/core';\n" +
+    "}, 'the @objectstack/core package root');\n";
+  ok(
+    'flags an anchor keyed on ANOTHER package manifest',
+    anchorEscapes(FIND_UP_FN + FOREIGN_SEED + "const S = readFileSync(join(OTHER, 'src', 'x.ts'), 'utf8');"),
+  );
+  ok(
+    'but names nothing for it — no fabricated roster entry',
+    !anchorFiles(FIND_UP_FN + FOREIGN_SEED + "const S = readFileSync(join(OTHER, 'src', 'x.ts'), 'utf8');").some((p) =>
+      p.endsWith('x.ts'),
+    ),
+  );
+  // The published set is the whole claim: a predicate outside it yields NO seed,
+  // which is the pre-#10029 silence and is stated rather than discovered later.
+  ok(
+    'an unrecognised anchor predicate yields no seed (stated boundary, not a bug)',
+    !anchorEscapes(
+      FIND_UP_FN +
+        "const ROOT = findUp((dir) => existsSync(join(dir, 'turbo.json')), 'the turbo root');\n" +
+        "const G = join(ROOT, 'packages/runtime/src');\n" +
+        'const names = readdirSync(G);',
+    ),
+  );
+  // ⚠️ An anchor names an ABSOLUTE directory, so unlike every seed above it it
+  // cannot be placed in the depth coordinate without knowing where the file
+  // sits. A caller with no repo context gets no seed rather than a guessed one.
+  ok(
+    'an anchor yields nothing to a depth-only caller (no fileSegs, no guess)',
+    escapingBindings(FIND_UP_FN + REPO_SEED + "const G = join(REPO, 'packages/runtime/src');", 1).length === 0,
+  );
+  // A bare `process.cwd()` with no recognised predicate on it still resolves to
+  // nothing — the ablation `globHolderVerdict()` documents depends on it, and
+  // #10029 is the reason that sentence now says BARE.
+  ok(
+    'a bare process.cwd() walk is still unresolved',
+    !anchorEscapes("const ROOT = process.cwd();\nconst G = readFileSync(join(ROOT, 'packages/runtime/src/x.ts'), 'utf8');"),
   );
 
   // ── The radius roster, reconstructed rather than quoted (#9763) ────────────
