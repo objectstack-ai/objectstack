@@ -46,14 +46,14 @@
 // form affordable -- at 149 links a gate can assert per link without a
 // baseline. The spelling census at that commit:
 //
-//     94  relative (../sibling, ./file.md)      -- not this gate's business
+//     94  relative (../sibling, ./file.md)      -- assertion 5 (added #10813)
 //     34  absolute, other hosts                  -- not this gate's business
 //     10  fragment-only (#section)               -- not this gate's business
 //      8  ROOT-RELATIVE                          -- assertion 1, all findings
 //      2  relative into `content/docs`           -- lands on raw MDX source
 //      1  docs.objectstack.ai                    -- assertions 3 + 4
 //
-// ## The four assertions, and why they are ordered by cost
+// ## The five assertions, and why they are ordered by cost
 //
 //   1. ROOT-RELATIVE IS REJECTED OUTRIGHT. No filesystem lookup, and it cannot
 //      false-positive: there is no root-relative href that is correct in a file
@@ -123,10 +123,65 @@
 // and twelve by 2026-08-21. A gate that prescribes is a gate that propagates,
 // so the prescription has to be the ruled one.
 //
-// Deliberately NOT asserted: whether a relative link resolves (that is a
-// different claim, owned by nothing here yet, and `../../../content/docs/x.mdx`
-// is *followable* -- it just lands on raw MDX source), and whether an external
-// URL is alive (that is lychee's job and it needs the network).
+// Deliberately NOT asserted: whether an external URL is alive (that is lychee's
+// job and it needs the network), and what a relative href means to a reader on
+// npm -- see the assertion-5 section below for why that second one is a ruling
+// rather than a scan. Whether a relative target EXISTS was in this list until
+// #10813; it is assertion 5 now.
+//
+// ## Assertion 5: the half of a relative link that IS decidable (#10813)
+//
+// `packages/runtime/README.md` linked six repo-relative targets that are not in
+// the tree: three MiniKernel design documents deleted from the repo root in
+// January as "redundant markdown files", and three example paths whose
+// directories were renamed twice and then moved out of this repo altogether.
+// Nothing read them, and the reason is the same one that produced every other
+// gate in this family: the assertions above read ABSOLUTE urls,
+// `check:published-readme-exports` reads fenced import lines, and the lychee
+// lane never sees `packages/**/README.md`. A relative href could name anything
+// and ship to npm green.
+//
+// Two shapes hide under "relative link in a published README", and only one of
+// them is decidable without a ruling:
+//
+//   * DOES THE TARGET EXIST IN THE TREE -- decidable, and it cannot
+//     false-positive: the path is in the tree or it is not. That is assertion
+//     5. The census that makes it affordable is the same one that makes the
+//     docs-site assertions affordable -- 101 relative destinations across the
+//     population, small enough to assert per link with no baseline.
+//
+//   * WHAT A RELATIVE HREF MEANS TO A READER ON NPM -- npmjs.com renders the
+//     README outside the repo, so EVERY relative link is unresolvable there,
+//     including the 101 that are perfectly correct in-tree. Failing them all
+//     would not be a gate; it would be a ruling on link rewriting that nobody
+//     has made, and this repo's published READMEs lean on the relative form
+//     everywhere (`[`@objectstack/spec`](../spec)`). Out of scope BY NAME, not
+//     by omission.
+//
+// So assertion 5 makes the narrow claim and says so in the message it prints:
+// the link is dead ON GITHUB, where a relative href is supposed to work.
+//
+// A climb ABOVE the repo root is reported as its own kind rather than folded in
+// with a missing file, because the remedies do not overlap -- `../../../x` from
+// a `packages/<pkg>/README.md` is an off-by-one in the climb, while `../x` is a
+// target that moved or was deleted.
+//
+// ## What assertion 5 does on a README carrying no relative paths
+//
+// Nothing -- and that is the common case rather than an edge one: 18 of the 60
+// published documents carry no relative destination at all, so on nearly a
+// third of the population this assertion is vacuous BY CONSTRUCTION. That is
+// correct behaviour (a document with no relative link has no relative link to
+// break) and it is also precisely the shape of #4690: a check that passes
+// because it read nothing is indistinguishable, in the output, from one that
+// read everything and found it clean.
+//
+// The vacuity is therefore refused at the POPULATION level, never the document
+// level. `run()` throws when the whole scan yields zero relative destinations,
+// the same way it already throws on zero links, and 101-across-42-documents is
+// the measurement that refusal is calibrated against. The green line prints the
+// resolved count too, so a classifier that quietly stopped recognising the
+// bucket surfaces as a number that fell rather than as continued silence.
 //
 // ## The three link shapes read, and the one that only looks like a fourth
 //
@@ -182,7 +237,7 @@
 // mute button, and a muted gate still reads as coverage.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, posix, relative as relativeTo, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
@@ -407,16 +462,54 @@ export function resolveDocsPage(contentRoot, pathname) {
 }
 
 /**
+ * Where a relative destination written in `file` lands, and whether anything is
+ * there.
+ *
+ * `file` is the repo-root-relative posix path of the document, so the base is
+ * its own directory -- the same base GitHub uses to resolve a relative href in
+ * a rendered blob. Fragment and query are stripped before resolving
+ * (`../a.md#L10` targets `../a.md`) and the path is percent-decoded, because
+ * `%20` in an href is a space in a filename.
+ *
+ * Four outcomes rather than two. `escapes` is separated from `missing` because
+ * the remedies do not overlap (see the header). `empty` is the destination that
+ * carries only a query -- there is no path to resolve, so there is nothing to
+ * assert, and naming it keeps it out of the resolved COUNT rather than silently
+ * inflating it.
+ *
+ * @param {string} repoRoot
+ * @param {string} file repo-root-relative posix path of the document
+ * @param {string} dest
+ * @returns {{ status: 'ok'|'missing'|'escapes'|'empty', target: string|null }}
+ */
+export function resolveRelativeTarget(repoRoot, file, dest) {
+  const pathOnly = dest.split('#')[0].split('?')[0];
+  if (pathOnly === '') return { status: 'empty', target: null };
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathOnly);
+  } catch {
+    decoded = pathOnly; // a lone `%` is not an escape sequence; read it literally
+  }
+  const root = resolve(repoRoot);
+  const target = resolve(root, posix.dirname(file), decoded);
+  if (target !== root && !target.startsWith(`${root}${sep}`)) {
+    return { status: 'escapes', target };
+  }
+  return { status: existsSync(target) ? 'ok' : 'missing', target };
+}
+
+/**
  * @typedef {{ kind: string, file: string, line: number, dest: string, detail: string }} Finding
  */
 
 /**
- * Run all three assertions over one document.
+ * Run all five assertions over one document.
  *
- * @param {{ file: string, text: string, contentRoot: string, table: [string, string][] }} options
+ * @param {{ file: string, text: string, contentRoot: string, table: [string, string][], repoRoot: string }} options
  * @returns {{ findings: Finding[], stats: Record<string, number> }}
  */
-export function checkDocument({ file, text, contentRoot, table }) {
+export function checkDocument({ file, text, contentRoot, table, repoRoot = ROOT }) {
   /** @type {Finding[]} */
   const findings = [];
   const stats = {
@@ -429,6 +522,7 @@ export function checkDocument({ file, text, contentRoot, table }) {
     fragment: 0,
     relative: 0,
     'non-canonical': 0,
+    'relative-resolved': 0,
     resolved: 0,
     redirected: 0,
     fragments: 0,
@@ -455,6 +549,35 @@ export function checkDocument({ file, text, contentRoot, table }) {
             + `link the rendered page absolutely (${CANONICAL_DOCS_ORIGIN}${DOCS_BASE}/...) or, `
             + `for a file in this repo, use a path relative to this README.`,
       );
+      continue;
+    }
+
+    // ── 5. a repo-relative destination has to name something in the tree ─
+    // The narrow, decidable half: existence. NOT whether npm can follow it --
+    // npm can follow no relative link at all, and ruling on that is a card, not
+    // a scan (see the header).
+    if (kind === 'relative') {
+      const { status, target } = resolveRelativeTarget(repoRoot, file, dest);
+      if (status === 'ok') stats['relative-resolved']++;
+      else if (status === 'escapes') {
+        add(
+          'escapes-repo',
+          `climbs above the repository root, which no host can serve. `
+            + `${file} sits ${posix.dirname(file).split('/').length} directory level(s) down, so `
+            + `count the ../ segments against that depth.`,
+        );
+      } else if (status === 'missing') {
+        add(
+          'dead-relative-target',
+          `resolves to ${relativeTo(resolve(repoRoot), target)}, which is not in this tree. `
+            + `A relative href resolves against this file's own directory, so a target that moved `
+            + `or was deleted is a 404 ON GITHUB — the surface where relative links are supposed `
+            + `to work. Point it at where the content lives now, or, if it lives nowhere in this `
+            + `repo, drop the link and keep the name as a code span. `
+            + `(Whether npm can follow a relative link AT ALL is a separate, unruled question — `
+            + `this assertion is only about existence.)`,
+        );
+      }
       continue;
     }
 
@@ -529,7 +652,8 @@ function report(findings, stats, population) {
       `✓ check:published-readme-links — ${stats.links} outbound link(s) across `
         + `${population} published markdown file(s): 0 root-relative, `
         + `0 non-canonical origin(s), ${stats.resolved} docs-site page(s) resolved `
-        + `(${stats.redirected} via redirect), ${stats.fragments} anchor(s) verified.`,
+        + `(${stats.redirected} via redirect), ${stats.fragments} anchor(s) verified, `
+        + `${stats['relative-resolved']}/${stats.relative} relative target(s) found in the tree.`,
     );
     return 0;
   }
@@ -569,6 +693,7 @@ async function run() {
       text: doc.text,
       contentRoot: CONTENT_ROOT,
       table,
+      repoRoot: ROOT,
     });
     findings.push(...f);
     for (const [k, v] of Object.entries(stats)) totals[k] = (totals[k] ?? 0) + v;
@@ -580,6 +705,17 @@ async function run() {
     throw new Error(
       `${SELF}: read ${docs.length} published document(s) and found NO links at all. `
         + 'The extractor matched nothing — that is a broken scanner, not a clean tree.',
+    );
+  }
+  // Assertion 5's own population axis. It is vacuous per DOCUMENT by design (18
+  // of 60 carry no relative link), so the document-level silence proves nothing
+  // and only the population total can. 101 across 42 documents when this
+  // landed; zero means the `relative` bucket stopped being recognised.
+  if (!totals.relative) {
+    throw new Error(
+      `${SELF}: read ${docs.length} published document(s) carrying ${totals.links} link(s), and `
+        + 'classified NONE of them relative. Measured when assertion 5 landed: 101 relative '
+        + 'destinations across 42 of 60 documents. Zero is a broken classifier, not a clean tree.',
     );
   }
   return report(findings, totals, docs.length);
@@ -783,8 +919,21 @@ function selfTest() {
   // REAL content root with links known to exist / not exist there. Using the
   // real tree keeps the self-test honest about the resolver it actually ships.
   const table = [['/docs/guides/:path*', '/docs']];
+  // The fixture sits where a published README actually sits. Assertion 5
+  // resolves against the DOCUMENT's directory, so depth is load-bearing: at
+  // `packages/<pkg>/README.md`, `../x` is a sibling package, `../../x` is the
+  // repo root, and `../../../x` is above it — the three cases that assertion
+  // has to tell apart. A depth-1 fixture would make the escape case
+  // unreachable and the sibling case wrong.
+  const FIXTURE_FILE = 'packages/fixture-pkg/README.md';
   const runDoc = (text) =>
-    checkDocument({ file: 'fixture/README.md', text, contentRoot: CONTENT_ROOT, table });
+    checkDocument({
+      file: FIXTURE_FILE,
+      text,
+      contentRoot: CONTENT_ROOT,
+      table,
+      repoRoot: ROOT,
+    });
 
   // Assertion 1 -- observed FAILING, then observed SILENT.
   const a1 = runDoc('See [Flows](/content/docs/automation/flows.mdx).');
@@ -799,7 +948,7 @@ function selfTest() {
   );
   const a1clean = runDoc('See [Flows](https://objectstack.ai/docs/automation/flows).');
   ok('A1 SILENT on the absolute form', a1clean.findings.length === 0);
-  ok('A1 SILENT on a relative link', runDoc('See [spec](../../spec/src/).').findings.length === 0);
+  ok('A1 SILENT on a relative link', runDoc('See [spec](../spec/src/).').findings.length === 0);
   ok('A1 SILENT on an external URL', runDoc('See [x](https://github.com/o/r).').findings.length === 0);
   ok('A1 SILENT on a bare fragment', runDoc('See [x](#see-also).').findings.length === 0);
   ok(
@@ -882,6 +1031,98 @@ function selfTest() {
     );
   }
 
+  // ---- Assertion 5 -- observed FAILING, then observed SILENT ------------
+  // Real paths in the real tree, for the same reason assertions 3 and 4 use the
+  // real content root: it keeps the self-test honest about the resolver that
+  // actually ships.
+  const a5 = runDoc('See [Guide](../../MINI_KERNEL_GUIDE.md).');
+  ok(
+    'A5 FAILS on a relative target that is not in the tree',
+    a5.findings.length === 1 && a5.findings[0].kind === 'dead-relative-target',
+  );
+  ok('A5 failure names the path it resolved to', a5.findings[0]?.detail.includes('MINI_KERNEL_GUIDE.md'));
+  // The message has to name the surface the claim is actually about. A reader
+  // told only "broken on npm" would reach for link rewriting -- the half this
+  // assertion deliberately does not rule on.
+  ok('A5 failure says GITHUB, the surface where a relative link should work', a5.findings[0]?.detail.includes('GITHUB'));
+  ok('A5 does not count a dead target as resolved', a5.stats['relative-resolved'] === 0);
+
+  const a5ok = runDoc('See [LICENSING.md](../../LICENSING.md).');
+  ok('A5 SILENT on a relative target that exists', a5ok.findings.length === 0);
+  ok('A5 counts the target it resolved', a5ok.stats['relative-resolved'] === 1);
+  const a5dir = runDoc('See [runtime](../runtime).');
+  ok(
+    'A5 SILENT on a DIRECTORY target — GitHub renders a listing',
+    a5dir.findings.length === 0 && a5dir.stats['relative-resolved'] === 1,
+  );
+  // The `./` form, both limbs. It needs a fixture document in a package that
+  // really has a `src/`, so it drives `checkDocument` directly rather than
+  // through `runDoc` — `packages/fixture-pkg/` does not exist, and a pin whose
+  // only true branch is "the target is missing" would agree with a resolver
+  // that had stopped working.
+  const runIn = (file, text) =>
+    checkDocument({ file, text, contentRoot: CONTENT_ROOT, table, repoRoot: ROOT });
+  const a5dot = runIn('packages/runtime/README.md', 'See [src](./src).');
+  ok(
+    'A5 SILENT on a ./ target that exists inside the package',
+    a5dot.findings.length === 0 && a5dot.stats['relative-resolved'] === 1,
+  );
+  const a5dotBad = runIn('packages/runtime/README.md', 'See [src](./no-such-dir).');
+  ok(
+    'A5 FAILS on a ./ target that does not',
+    a5dotBad.findings.length === 1 && a5dotBad.findings[0].kind === 'dead-relative-target',
+  );
+  ok(
+    'A5 resolves against the DOCUMENT, not a fixed base: the same href reads differently elsewhere',
+    runIn('packages/spec/README.md', 'See [src](./src).').stats['relative-resolved'] === 1
+      && runIn('packages/runtime/README.md', 'See [x](../spec/src).').stats['relative-resolved'] === 1,
+  );
+
+  // The three ways a destination carries more than a path.
+  ok('A5 strips a #fragment before resolving', runDoc('See [L](../../LICENSING.md#patents).').findings.length === 0);
+  ok('A5 strips a ?query before resolving', runDoc('See [L](../../LICENSING.md?plain=1).').findings.length === 0);
+  ok('A5 percent-decodes the path', runDoc('See [L](../../LICENSING%2Emd).').findings.length === 0);
+  const a5bad = runDoc('See [L](../../NO_SUCH_FILE_ANYWHERE.md#frag).');
+  ok('A5 still FAILS when a dead target wears a fragment', a5bad.findings.length === 1 && a5bad.findings[0].kind === 'dead-relative-target');
+
+  // The climb above the root is its own kind, not a missing file.
+  const a5esc = runDoc('See [X](../../../outside-this-repo.md).');
+  ok(
+    'A5 reports a climb above the repo root as its OWN kind',
+    a5esc.findings.length === 1 && a5esc.findings[0].kind === 'escapes-repo',
+  );
+  ok('A5 escape message names the depth to count against', a5esc.findings[0]?.detail.includes('2 directory level(s)'));
+
+  // Discrimination: the same string in a region this gate does not read.
+  ok('A5 SILENT inside a fenced block', runDoc('```md\n[x](../../MINI_KERNEL_GUIDE.md)\n```').findings.length === 0);
+  ok(
+    'A5 SILENT inside a code span',
+    runDoc('A span `[x](../../MINI_KERNEL_GUIDE.md)` is not a link.').findings.length === 0,
+  );
+
+  // Out of scope BY NAME, pinned so a later widening is a deliberate act.
+  ok('A5 does not claim a bare fragment', runDoc('See [x](#see-also).').stats.relative === 0);
+  ok('A5 does not claim an absolute URL', runDoc('See [x](https://github.com/o/r).').stats.relative === 0);
+  ok('A5 does not claim a root-relative path', runDoc('See [x](/content/docs/a.mdx).').stats.relative === 0);
+  // The npm half. This link is unresolvable on npmjs.com — like all 101 of them
+  // — and assertion 5 passes it anyway. That is the fence, and it is asserted
+  // rather than merely described, because a later author reading "relative
+  // links break on npm" in the header could reasonably decide to fail them.
+  const a5npm = runDoc('See [core](../core).');
+  ok(
+    'A5 PASSES a correct relative link despite npm being unable to follow it — that half is a ruling, not a scan',
+    a5npm.findings.length === 0 && a5npm.stats['relative-resolved'] === 1,
+  );
+
+  // The per-document vacuity the header names, asserted rather than assumed:
+  // a document with no relative link yields no finding AND a zero counter, so
+  // the population-level refusal in run() is the thing carrying the weight.
+  const a5none = runDoc('See [Flows](https://objectstack.ai/docs/automation/flows).');
+  ok(
+    'A5 is vacuous on a document carrying no relative link, and counts zero rather than staying silent',
+    a5none.stats.relative === 0 && a5none.stats['relative-resolved'] === 0 && a5none.findings.length === 0,
+  );
+
   // ---- the autolink reaches the assertions, not just the extractor ------
   // Extraction is necessary and not sufficient: the defect was that all four
   // assertions were SILENT on this shape, so each is re-observed FAILING with
@@ -955,7 +1196,10 @@ function selfTest() {
     '✓ check:published-readme-links --self-test — extraction discrimination (fence, code span,\n'
       + '  ref-def, pointy brackets, titles, AUTOLINKS), all seven classify buckets, the remedy\n'
       + '  builder and its refusal, the canonicaliser both ways, the pageCandidates directory/index\n'
-      + '  subtlety, and all four assertions observed both FAILING and SILENT — including the host\n'
+      + '  subtlety, the relative-target resolver (fragment, query and percent-decoding stripped;\n'
+      + '  a directory target accepted; a climb above the repo root reported as its own kind; the\n'
+      + '  npm half PASSED on purpose; and the per-document vacuity counted rather than silent),\n'
+      + '  and all five assertions observed both FAILING and SILENT — including the host\n'
       + '  split itself (an alias origin is a FINDING, and is still resolved and still\n'
       + '  anchor-checked) and the autolink shape (assertions 2, 3 and 4 re-observed FAILING on it;\n'
       + '  A1 pinned UNREACHABLE through it, since an autolink body must be an absolute URI; a\n'

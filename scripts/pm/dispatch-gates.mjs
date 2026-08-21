@@ -76,7 +76,13 @@
  *     be invisible: a gate that computes its population and names only its own
  *     baseline artifact scores silent for every card in the tree. All three
  *     buckets are now accounted for in the closing summary, and `--residue`
- *     names the two unmatched ones runnably — see residueLines;
+ *     names the two unmatched ones runnably — see residueLines. Silence is also
+ *     SPLIT there (#10784): a family whose declared literals are all tracked
+ *     FILES has named artifacts, not a population, and a roster of the files
+ *     that already exist can never contain one added tomorrow — so for a card
+ *     under that roster's own directory the verdict is not evidence in either
+ *     direction. That is the shape that read as a clearance and was not; see
+ *     artifactOnlySilence for what it does and does not claim;
  *   - an UNREACHABLE check is one whose whole declared population matches
  *     nothing in the tree — every path literal its own source names is a path
  *     this repo does not have. It is not a fourth bucket and it is not about
@@ -1123,6 +1129,136 @@ export function classifyEntry(entry, paths) {
 }
 
 // ---------------------------------------------------------------------------
+// Telling a WEAK silence from an INVERTED one (#10784)
+// ---------------------------------------------------------------------------
+
+/**
+ * The deepest directory containing every one of these paths, compared on
+ * SEGMENT boundaries, or '' when they share nothing above the repo root.
+ *
+ * Segment boundaries for the same reason `hintCovers` uses them: a string
+ * prefix would report `packages/spec` as the shared home of `packages/spec.ts`
+ * and `packages/species/x.ts`, which is a directory neither one is in.
+ */
+export function commonDirectory(paths) {
+  if (!paths.length) return '';
+  let shared = paths[0].split('/').slice(0, -1);
+  for (const p of paths.slice(1)) {
+    const other = p.split('/').slice(0, -1);
+    let i = 0;
+    while (i < shared.length && i < other.length && shared[i] === other[i]) i++;
+    shared = shared.slice(0, i);
+    if (!shared.length) break;
+  }
+  return shared.join('/');
+}
+
+/**
+ * A silent family whose ENTIRE declared population is tracked FILES — an
+ * artifact roster rather than a population — or null.
+ *
+ * ## Why `silent` needed splitting at all (#10784)
+ *
+ * `silent` is this derivation's weakest claim, and the residue block already
+ * says so and names two ways to earn it that have nothing to do with the
+ * caller's paths. A third way was measured, and it is worse than weak: a gate
+ * whose declared literals are an ENUMERATION OF THE FILES THAT ALREADY EXIST.
+ * `check-entry-guard` was the specimen — its only module-body literals were the
+ * ten allowlisted files that already violate its import-safety half, while at
+ * runtime it walked the whole directory and judged new files too. So the
+ * derivation answered `silent` for a NEW file under that root: not a weak
+ * verdict there but an INVERTED one, for exactly the input most likely to fail
+ * the gate. One CI round was paid for it before the shape had a name.
+ *
+ * A reader could not tell that from an ordinary silence, because the output
+ * said the same words for both. This is the distinction, printed.
+ *
+ * ## The test, and why it is FILES and not a shape heuristic
+ *
+ * Every declared literal must collapse to a path the tree tracks as a FILE. A
+ * gate that names one directory has declared a population, whatever else it
+ * names; a gate that names only files has declared ARTIFACTS — a baseline it
+ * maintains, an allowlist of current members, a sibling tool it reads — and
+ * artifacts are not a population. Both known sub-shapes fall out of the one
+ * test rather than needing to be told apart: one artifact is the "names only
+ * its baseline artifact" case the residue prose already describes, and several
+ * under a common root is the enumeration above.
+ *
+ * Deliberately NOT inferred: whether the author meant the roster as the
+ * population. Intent is not in the tree — the same refusal `unreachableFamilies`
+ * makes — so this reports the SHAPE and hands the reader the discriminator.
+ * A gate that really does read only those files is silent correctly, and the
+ * note says which question to answer rather than answering it.
+ *
+ * `coversYourPath` is the half that makes it a lead instead of a standing fact:
+ * the artifacts' common directory contains one of the caller's paths. It is
+ * NOT a claim that the gate reads that file — see `artifactOnlyNote` for the
+ * two live shapes that are indistinguishable from the tree, and for the claim
+ * that is exactly true of both. It is the one place where a roster's silence
+ * could have been read as a clearance about the card, which is the only place
+ * this note raises its voice.
+ *
+ * @param {{hints?: string[]}} entry
+ * @param {string[]} paths the card's file surface
+ * @param {Set<string>} trackedFiles every file git tracks, repo-relative
+ */
+export function artifactOnlySilence(entry, paths, trackedFiles) {
+  const artifacts = [...new Set(entry.hints ?? [])].map(collapseHint);
+  if (artifacts.length === 0) return null;
+  if (!artifacts.every((a) => trackedFiles.has(a))) return null;
+  const dir = commonDirectory(artifacts);
+  const coversYourPath = Boolean(dir) && paths.some((p) => p === dir || p.startsWith(`${dir}/`));
+  return { artifacts, dir, coversYourPath };
+}
+
+/**
+ * The note printed under an artifact-roster family in the `--residue` listing.
+ *
+ * ## What it claims, and the claim it deliberately stops short of
+ *
+ * It does NOT say the gate reads your file. It cannot: whether a roster is a
+ * baseline sitting in a directory or a census taken of it is exactly the intent
+ * this tool refuses to read out of the tree, and measured on this repo the two
+ * live side by side — `check:where-matcher` names one baseline JSON under
+ * `scripts/` and walks `packages/**` test files, while `check-entry-guard`
+ * named ten files under `scripts/` and walked all of it. An alarm that read the
+ * first as "this gate very likely reads your file" would be a FABRICATED lead,
+ * which this file's header prices as the expensive direction.
+ *
+ * What it says instead is exactly true of both: a list of files that already
+ * exist can never contain one added tomorrow, so `silent` here is not evidence
+ * about your path in either direction. That is the whole defect — the verdict
+ * read as a clearance and was not — stated without inventing the half the tree
+ * cannot answer, and with the discriminator handed to the reader.
+ *
+ * The remedy is spelled from the roster's OWN common directory at runtime, not
+ * from a literal here: a worked example baked into this file would be a path
+ * this tool does not read entering its own declared population, which is the
+ * trap `DEFAULT_BASE_REF` is assembled in two halves to avoid.
+ */
+export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
+  const what =
+    `⚠ artifact roster: all ${artifacts.length} declared literal(s) are tracked FILES` +
+    (dir ? `, under ${dir}` : '') +
+    ' — artifacts this gate names (a baseline, an allowlist of current members), not a population it declares.';
+  if (!coversYourPath) {
+    return [
+      `      ${what}`,
+      dir
+        ? `        Nothing of yours is under ${dir}, so this silence is an ordinary one.`
+        : '        They share no directory, so this silence is an ordinary one.',
+    ];
+  }
+  return [
+    `      ${what}`,
+    `        ⛔ One of YOUR paths is under ${dir}. A list of the files that already exist can never contain one added tomorrow, so this`,
+    '        `silent` is not evidence about your path in EITHER direction — it is the shape that reads as a clearance and is not.',
+    `        Read the gate before treating it as one. If it scans ${dir}, the fix belongs there: declare the scan surface beside the`,
+    `        roster (the subtree spelling, ${dir}/**), after which it is MATCHED here. If it really reads only those files, the silence is correct.`,
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // The reachability sweep — a declared population that matches NOTHING (#9883)
 // ---------------------------------------------------------------------------
 
@@ -1487,15 +1623,34 @@ export function escapableLiteralKey({ check, hint }) {
  * this, so the rule fails rather than needing to be remembered.
  */
 const ESCAPABLE_LITERAL_LEDGER = new Set([
-  // Its ONLY hint, so this family is unnameable for every card in the tree —
-  // including a card about its own blind spot, which is how it was found.
-  'check:parse-guard scripts',
-  // Reaches `scripts` through a package-relative predicate over tarball
-  // contents (`rel.startsWith('scripts/')`), not through the repo root it
-  // appears to name. Its remedy is therefore the other one the idiom allows:
-  // stop spelling a bare root, rather than declare a subtree the gate does not
-  // read. Recorded here so that decision is made once, on its own card.
-  'check:published-files scripts',
+  // EMPTY — a verdict, not an absence. Every gate this derivation can SEE
+  // spelling a bare top-level root has been discharged. Both instances are
+  // recorded here because they took the two DIFFERENT remedies the idiom
+  // allows, and a future FRESH row has to CHOOSE between them rather than
+  // reach for the first one it is offered:
+  //
+  //   DISCHARGED (#10784): `check:parse-guard scripts`. That gate really does
+  //   walk the repo's scripts/ tree, so declaring the subtree spelling beside
+  //   the literal was TRUE. The row then failed as STALE by name and came out —
+  //   the shrink the docblock above describes, walked once end to end.
+  //
+  //   DISCHARGED (#10875): `check:published-files scripts`. That gate reached
+  //   `scripts` through a package-relative predicate over would-be tarball
+  //   contents, NOT through the repo root it appeared to name, so the escape
+  //   hatch was the wrong remedy for it: a `scripts/**` declaration would have
+  //   been false, and would have named the gate for every repo-root scripts/
+  //   edit it does not read — a fabricated lead, which `hintCovers`' docblock
+  //   prices above a missing one. It took the OTHER remedy the idiom allows,
+  //   stop spelling a bare root, and the row discharged by CONSTRUCTION rather
+  //   than by declaration: nothing was added to this list to make it happen,
+  //   which is the shape a shrink-only list wants.
+  //
+  // ⚠️ An empty ledger is NOT "the species is gone", and must not be read as
+  // one. This list only ever saw the half the derivation can see — a literal
+  // that reaches the HINT SET, which needs a separator somewhere in the source
+  // spelling. #10840 measures the other half at ~33 gates whose population
+  // literal carries no separator at all; those are invisible to the derivation
+  // AND to this ledger, and emptying this list moves none of them.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2339,7 +2494,10 @@ export function unreachableLines(unreachable, swept) {
   return lines;
 }
 
-export function residueLines({ discovered, matched, undetermined, silent, unfiltered, unreachable, swept }, kinds = CHANGE_KIND_GATES) {
+export function residueLines(
+  { discovered, matched, undetermined, silent, unfiltered, unreachable, swept, artifactRosters, invertedRosters },
+  kinds = CHANGE_KIND_GATES,
+) {
   const placed = matched + undetermined + silent;
   if (placed !== discovered) {
     throw new Error(
@@ -2365,6 +2523,22 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
         '(a reachability count without the corpus it swept cannot be read: zero unreachable and a zero-file sweep print alike — #4690)',
     );
   }
+  // The silence split (#10784), held to the same standard as the two counts
+  // above and for the same reason: this one sizes the part of `silent` that is
+  // not weak but INVERTED, and a count that could go missing quietly would
+  // render the one line a reader needs as a line with `undefined` in it.
+  if (!Number.isInteger(artifactRosters) || artifactRosters < 0 || artifactRosters > silent) {
+    throw new Error(
+      `artifact-roster count is not derivable: got ${String(artifactRosters)} of ${silent} silent ` +
+        '(it is a subset of the silent families, counted from the tree — never omitted)',
+    );
+  }
+  if (!Number.isInteger(invertedRosters) || invertedRosters < 0 || invertedRosters > artifactRosters) {
+    throw new Error(
+      `inverted-roster count is not derivable: got ${String(invertedRosters)} of ${artifactRosters} artifact roster(s) ` +
+        "(the rosters whose common directory contains one of the caller's paths — a subset, never omitted)",
+    );
+  }
   const unplaced = undetermined + silent;
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
@@ -2377,6 +2551,14 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
       ' nothing that can match it. That second one is escapable, and gates have escaped it: a gate whose population really' +
       ' is a root file reaches it by declaring the subtree spelling (`AGENTS.md/**`), after which it is no longer silent' +
       " for that file. hintCovers' docblock carries the measurement and what the refusal buys.",
+    `  ${artifactRosters} of those ${silent} declare ONLY tracked FILES — an artifact roster, not a population: a baseline the gate maintains, or an` +
+      ' allowlist of the members it already has. A list of the files that already exist can never contain one added tomorrow, so its silence is a' +
+      ` fact about the roster rather than about your paths.${
+        invertedRosters
+          ? ` ⛔ For ${invertedRosters} of them the roster sits in a directory one of YOUR paths is in, and there this verdict is not evidence in` +
+            ' EITHER direction — it is the shape that reads as a clearance and is not. Named, with the discriminator and the remedy, under --residue.'
+          : ' None of their rosters sits in a directory your paths are in. They are named, with the discriminator, under --residue.'
+      }`,
     `  ${unfiltered} of the ${discovered} sit only in workflows that declare no pull_request path filter — CI schedules those on` +
       ' EVERY pull request, so no path derivation can narrow them and their verdict above is about relevance, never schedule.',
     `  ${unreachable} of the ${discovered} declare a population that reaches NOTHING in the tree, swept over ${swept} tracked file(s) —` +
@@ -2732,12 +2914,18 @@ function derive(paths, { showResidue = false } = {}) {
   const matched = new Map();
   const undetermined = [];
   const silent = [];
+  // The corpus the reachability sweep already read, as a membership test: the
+  // artifact-roster split asks whether a declared literal is a tracked FILE,
+  // and re-reading the tree for it would be a second answer to a question this
+  // run has already asked once.
+  const trackedSet = new Set(swept);
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = classifyEntry(entry, paths);
     if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
+  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, trackedSet)).filter(Boolean);
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
@@ -2788,6 +2976,12 @@ function derive(paths, { showResidue = false } = {}) {
           ? `   names: ${[...new Set(entry.hints)].slice(0, 3).join(', ')}${entry.hints.length > 3 ? ', …' : ''}`
           : '';
         console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]${names}`);
+        // The silence split (#10784): a family that declared only ARTIFACTS
+        // said the same words in this listing as one that really does not read
+        // your file. The note says which, and raises its voice only where the
+        // roster was taken from a directory the card edits.
+        const roster = withHints ? artifactOnlySilence(entry, paths, trackedSet) : null;
+        if (roster) for (const line of artifactOnlyNote(roster)) console.log(line);
       }
     };
     listing('Undetermined (source names no path at all — NOT known irrelevant)', undetermined, false);
@@ -2810,6 +3004,8 @@ function derive(paths, { showResidue = false } = {}) {
     unfiltered: [...byCheck.values()].filter((e) => e.triggers.length === 0).length,
     unreachable: unreachable.length,
     swept: swept.length,
+    artifactRosters: rosters.length,
+    invertedRosters: rosters.filter((r) => r.coversYourPath).length,
   })) {
     console.log(line);
   }
@@ -3533,22 +3729,50 @@ function selfTest() {
   // `derive` runs — a second pass built here could enumerate a population no
   // dispatch prompt is derived from.
   const ledgerSwept = trackedFiles();
-  const ledgerRows = escapableLiteralRows([...discoverFamilies().byCheck], trackedPrefixes(ledgerSwept));
+  const ledgerPrefixes = trackedPrefixes(ledgerSwept);
+  const ledgerFamilies = [...discoverFamilies().byCheck];
+  const ledgerRows = escapableLiteralRows(ledgerFamilies, ledgerPrefixes);
   const ledgerKeys = ledgerRows.map(escapableLiteralKey);
-  // Zero rows is a broken recognizer, not a clean tree, and it must not read as
-  // a pass — the same #4690 rule the reachability sweep applies to itself. The
-  // stale half below would catch it too; this says so in one line rather than
-  // leaving the reader to derive it from a failure two cases down.
-  t('the live sweep still reaches this species at all — zero rows is a broken recognizer', ledgerRows.length > 0);
+  // #4690 at ZERO ROWS: a quiet sweep must still prove it can SPEAK.
+  //
+  // This guard used to be `ledgerRows.length > 0` — a live-tree count, which
+  // read the right rule off the wrong quantity. It conflated two separable
+  // claims: "the recognizer still works" and "the tree still owes a row".
+  // While a debt existed the two moved together, so the conflation was
+  // invisible; paying the LAST row (#10875) is what pulled them apart, and the
+  // guard then failed on a clean tree — a shrink-only ledger that could not be
+  // allowed to reach zero, which is the one end state it exists to reach.
+  //
+  // So the recognizer is asked directly instead: splice ONE synthetic family
+  // spelling a bare root into the LIVE corpus and require the sweep to find
+  // exactly it, and exactly one more row than the tree really owes. That holds
+  // at zero live rows and at any other count, it fails loudly if the recognizer
+  // or the prefix set goes dead, and unlike the fixture cases above it runs on
+  // the live prefixes the real sweep runs on.
+  const probeKey = 'check:escapable-literal-probe';
+  const probedRows = escapableLiteralRows([...ledgerFamilies, [probeKey, { hints: ['scripts'] }]], ledgerPrefixes);
+  const probedKeys = probedRows.map(escapableLiteralKey);
+  t(
+    'the live sweep still RECOGNISES this species — a probe family spelling a bare root is found,' +
+      ' so a quiet sweep means a clean tree rather than a broken recognizer (#4690)',
+    probedKeys.filter((k) => k === `${probeKey} scripts`).length === 1 &&
+      probedRows.length === ledgerRows.length + 1,
+  );
   const freshRows = ledgerKeys.filter((k) => !ESCAPABLE_LITERAL_LEDGER.has(k));
   const staleRows = [...ESCAPABLE_LITERAL_LEDGER].filter((k) => !ledgerKeys.includes(k)).sort();
   t(
     'no gate has NEWLY joined the escapable-literal species' +
       (freshRows.length
-        ? ` — FRESH: ${freshRows.join(' · ')}. Declare the subtree spelling beside the literal` +
-          ' (the ROOT_DIR_WATCH_HINTS idiom — see check-role-word.mjs and check-examples-live-imports.mjs),' +
-          ' or the gate is unnameable by any dispatch derivation and lands already invisible.' +
-          ' ⛔ The ledger is SHRINK-ONLY: a new line in it is not the remedy.'
+        ? ` — FRESH: ${freshRows.join(' · ')}. Unnameable by any dispatch derivation as spelled,` +
+          ' so it lands already invisible. TWO remedies, and which one is right depends on what the' +
+          ' gate actually READS — pick, do not reach for the first one:' +
+          ' (a) it really does walk that repo root ⇒ declare the subtree spelling beside the literal,' +
+          ' the ROOT_DIR_WATCH_HINTS idiom (see check-role-word.mjs and check-examples-live-imports.mjs);' +
+          ' (b) it does NOT ⇒ stop spelling a bare root, respelling the literal to say what the predicate' +
+          ' means (check-published-files.mjs is the worked instance: its predicate is package-relative,' +
+          ' over tarball contents, so it took (b) and the row discharged by construction).' +
+          ' ⛔ Declaring a root the gate does not read is a FABRICATED lead — worse than the row,' +
+          ' at the price hintCovers puts on one. ⛔ The ledger is SHRINK-ONLY: a new line is not a remedy.'
         : ''),
     freshRows.length === 0,
   );
@@ -3564,19 +3788,40 @@ function selfTest() {
   // The spelling rule the ledger's docblock states, held mechanically rather
   // than remembered: a row keyed by a direct script path would enter THIS
   // file's own hint set as a path it does not read.
+  //
+  // Carried on a WITNESS PAIR rather than on the ledger alone. The ledger is
+  // empty now, and `[].every(...)` is a pass that proves nothing — precisely
+  // the vacuous shape #10784's ablation caught one case over, where a fixture
+  // with no subtree hint to strip compared silent to silent and read green. The
+  // sample row keeps the positive half exercised at zero rows; the negative
+  // witness is what gives the case teeth at all, since the live key format
+  // (\`${check} ${hint}\`) always carries a space and the extractor refuses a
+  // span with one — so a key in that format cannot build a hint whatever it
+  // names, and only the bare-path spelling the docblock warns against can.
+  const asHints = (row) => extractWatchHints(`const L = ${JSON.stringify(row)};`);
   t(
     'no ledger row enters this file\'s own declared population as a path',
-    [...ESCAPABLE_LITERAL_LEDGER].every((row) => extractWatchHints(`const L = ${JSON.stringify(row)};`).length === 0),
+    [...ESCAPABLE_LITERAL_LEDGER, 'check:sample-gate someroot'].every((row) => asHints(row).length === 0),
+  );
+  t(
+    '…and that rule can FAIL: the direct-script spelling it forbids does build a hint',
+    asHints('scripts/check-x.mjs').length === 1,
   );
   // The ledger describes the derivation, so it must agree with what the
-  // derivation actually reports. Both current rows name the root `scripts`,
-  // which the tree has and the covering rule refuses — the pair that puts them
-  // in this species rather than in the dead one.
-  const ledgerPrefixes = trackedPrefixes(ledgerSwept);
+  // derivation actually reports: every row must name a root the tree HAS and
+  // the covering rule refuses — the pair that puts a row in this species rather
+  // than in the dead one beside it in the residue block. Asserted over whatever
+  // the ledger holds, never over a remembered count of it.
+  //
+  // Run over the PROBED rows, which are the live rows plus the one synthetic
+  // row spliced in above. Two things fall out of that and both are wanted: the
+  // property is still checked on every real row, and the case can never go
+  // vacuous now that the live half is legitimately empty — the probe row is a
+  // row of exactly this species, so `.every` always has something to judge.
   t(
     'every ledger row names a root the tree HAS and the covering rule refuses',
-    ledgerRows.length > 0 &&
-      ledgerRows.every(
+    probedRows.length > 0 &&
+      probedRows.every(
         ({ hint, plain }) =>
           // refused: the gate cannot be named for anything under the root
           !hintCovers(hint, `${plain}/any-file-under-it.mjs`) &&
@@ -3585,6 +3830,135 @@ function selfTest() {
           ledgerPrefixes.has(plain) &&
           deepestTrackedPrefix(hint, ledgerPrefixes) === plain,
       ),
+  );
+
+  // ── The scripts/** blind spot, closed at the source (#10784) ──────────────
+  //
+  // BOTH gates that walk `scripts/` were invisible to this derivation, by two
+  // opposite routes: `check:parse-guard` declared a bare root the covering rule
+  // refuses as too generic, and `check:entry-guard` declared its baseline
+  // ROSTER — the files that already violate its import-safety half — so a newly
+  // added script could never be in the declared population, BY CONSTRUCTION.
+  // Anyone adding a script got neither gate named, and one CI round was paid.
+  //
+  // Pinned against the LIVE tree through the same discovery pass `derive` runs:
+  // a hand-built fixture here could pass while the real gates stayed
+  // unnameable, which is the exact failure this case exists to prevent from
+  // recurring. The probe path deliberately does not exist — "a file nobody has
+  // written yet" is the one input a roster of current members can never contain.
+  const scriptsFamilies = discoverFamilies().byCheck;
+  const unwrittenScript = 'scripts/the-one-nobody-has-written-yet.mjs';
+  for (const gate of ['check:entry-guard', 'check:parse-guard']) {
+    const entry = scriptsFamilies.get(gate);
+    t(`${gate} is discovered at all — the pin below means nothing without this`, Boolean(entry));
+    const verdict = entry ? classifyEntry(entry, [unwrittenScript]) : null;
+    t(
+      `${gate} is MATCHED for a brand-new scripts/ file, not silent and not unreachable`,
+      verdict?.verdict === 'matched',
+      JSON.stringify({ verdict: verdict?.verdict, hints: entry?.hints }),
+    );
+    // The ablation, run in-place: strip the declared SUBTREE from the live hint
+    // set and the verdict must fall back to what it was before this landed.
+    // Without it the case above could pass through any hint that happened to
+    // cover the probe, and the reader could not tell which half was load-bearing.
+    const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.includes('/*')) } : null;
+    t(
+      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to silent`,
+      // The length check is what stops this passing VACUOUSLY. With no subtree
+      // hint to remove, `undeclared` is the entry itself and `silent === silent`
+      // reads as a pass — measured, on the ablation run that removed both
+      // declarations: this case stayed green while the two above went red.
+      Boolean(undeclared) &&
+        undeclared.hints.length < entry.hints.length &&
+        classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent',
+      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
+    );
+  }
+
+  // ── The bare root this gate must NOT spell (#10875) ───────────────────────
+  //
+  // `check:published-files` asks whether a published package ships a scripts/
+  // directory OF ITS OWN — a package-relative predicate over would-be tarball
+  // contents. Written as a quoted literal it read to this derivation as a
+  // declaration of the repo's own scripts/ tree, which the gate never opens:
+  // the last row of ESCAPABLE_LITERAL_LEDGER, discharged by respelling the
+  // predicate rather than by declaring a subtree that would have been FALSE.
+  //
+  // ⛔ The remedy the FRESH message offers first — declare the subtree — is the
+  // WRONG one here, and it is the one a reader reaches for. The ledger cannot
+  // say so, because by design it says nothing at all once a row is out. So the
+  // correct verdict is pinned here, in both directions, against the live tree.
+  const publishedFiles = scriptsFamilies.get('check:published-files');
+  t(
+    'check:published-files is discovered at all — the pins below mean nothing without it',
+    Boolean(publishedFiles),
+  );
+  t(
+    'check:published-files declares no bare repo root it does not open',
+    Boolean(publishedFiles) && !publishedFiles.hints.includes('scripts'),
+    JSON.stringify({ hints: publishedFiles?.hints }),
+  );
+  t(
+    '…so a brand-new repo-root scripts/ file does NOT name it — a fabricated lead is the costlier error',
+    Boolean(publishedFiles) && classifyEntry(publishedFiles, [unwrittenScript]).verdict !== 'matched',
+    JSON.stringify({ verdict: publishedFiles && classifyEntry(publishedFiles, [unwrittenScript]).verdict }),
+  );
+  // Non-vacuity for the case above, and the whole difference between a verdict
+  // that is CORRECT and one that is merely quiet: it must be passing because
+  // the gate reads a different population, never because the gate went dark.
+  // Its own source is a population it really does have, and still names it.
+  t(
+    '…and it is not silent everywhere: the population it really has still names it',
+    Boolean(publishedFiles) &&
+      classifyEntry(publishedFiles, ['scripts/check-published-files.mjs']).verdict === 'matched',
+    JSON.stringify({
+      verdict: publishedFiles && classifyEntry(publishedFiles, ['scripts/check-published-files.mjs']).verdict,
+    }),
+  );
+
+  // ── Telling a WEAK silence from an INVERTED one (#10784) ──────────────────
+  //
+  // The residue said the same words for a gate that genuinely does not read
+  // your file and for one whose declared literals are a census of the files it
+  // already has. These pin the split as a property of the HINT SET, so a gate
+  // of that shape reports itself rather than waiting to be noticed.
+  t('a common directory is found on segment boundaries', commonDirectory(['scripts/a.mjs', 'scripts/pm/b.mjs']) === 'scripts');
+  t('a sibling whose name merely shares a prefix does not invent one', commonDirectory(['packages/spec/a.ts', 'packages/species/b.ts']) === 'packages');
+  t('files with nothing above the repo root share no directory', commonDirectory(['README.md', 'AGENTS.md']) === '');
+  t('one file is its own directory', commonDirectory(['scripts/pm/a.mjs']) === 'scripts/pm');
+
+  const rosterTree = new Set(['scripts/a.mjs', 'scripts/b.mjs', 'scripts/pm/c.mjs']);
+  const rosterFam = (hints) => ({ hints, files: [], workflows: new Set(['lint.yml']) });
+  const roster = artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), [unwrittenScript], rosterTree);
+  t('a population of nothing but tracked FILES is an artifact roster', roster?.artifacts.length === 2 && roster.dir === 'scripts');
+  t('…and it is flagged when the card edits the directory the roster sits in', roster?.coversYourPath === true);
+  t(
+    'the same roster is NOT flagged for a card somewhere else — it is a standing fact there, not a lead',
+    artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree)?.coversYourPath === false,
+  );
+  t(
+    'one declared DIRECTORY is a population, so the family is not a roster however many files sit beside it',
+    artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/pm']), [unwrittenScript], rosterTree) === null,
+  );
+  t(
+    'a literal the tree does not track is not an artifact either — that is the unreachable species',
+    artifactOnlySilence(rosterFam(['scripts/gone.mjs']), [unwrittenScript], rosterTree) === null,
+  );
+  t('a family that declares nothing at all is undetermined, never a roster', artifactOnlySilence(rosterFam([]), [unwrittenScript], rosterTree) === null);
+  const rosterNote = artifactOnlyNote(roster).join('\n');
+  t('the note states the shape', rosterNote.includes('artifact roster') && rosterNote.includes('2 declared'));
+  t(
+    'and STOPS SHORT of claiming the gate reads your file — the half the tree cannot answer, and a fabricated lead if asserted',
+    !/reads your file|very likely reads/.test(rosterNote),
+    rosterNote,
+  );
+  t('names the remedy as the subtree spelling of the roster\'s OWN root', rosterNote.includes('scripts/**'));
+  t('and hands over the discriminator instead of deciding intent', rosterNote.includes('If it really reads only those files'));
+  t(
+    'a roster that does not touch the card prints the standing fact, not the warning',
+    artifactOnlyNote(artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree))
+      .join('\n')
+      .includes('ordinary one'),
   );
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
@@ -4400,11 +4774,19 @@ function selfTest() {
   // every discovered family, and it names no gate. The second is the one that
   // rots — a hand-written list of gate names in this paragraph is exactly what
   // was wrong with it — so it is asserted directly rather than by inspection.
-  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000 });
+  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
   t('the residue summary names NO gate — the property the deleted prose lacked', !/check:[\w:-]+/.test(residue.join('\n')));
+  // The silence split (#10784). The summary must SIZE the inverted part of
+  // `silent`, not only describe the weak part in prose, and it must say so
+  // differently when none of the rosters touches the caller's paths — a
+  // constant sentence would be a line the reader learns to skip.
+  t('the residue summary sizes the artifact rosters inside silent', residue.some((l) => l.includes('4 of those 55')));
+  t('and calls out the ones whose roster sits where the card is', residue.some((l) => l.includes('For 1 of them') && l.includes('EITHER direction')));
+  const noInverted = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 0 });
+  t('with none of them there it says THAT instead, rather than printing the warning at zero', noInverted.some((l) => l.includes('None of their rosters')) && !noInverted.join('\n').includes('EITHER direction'));
   // The same rot, one noun over (#10012). The top-level-FILE clause used to
   // illustrate the unreachable class with `README.md`, which was honest until
   // that gate declared `README.md/**` — after which the sentence offered, as
@@ -4428,7 +4810,7 @@ function selfTest() {
   // which is the failure class this whole card is about.
   let refused = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000 });
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refused = true;
   }
@@ -4438,7 +4820,7 @@ function selfTest() {
   // a derivation rather than as the absent measurement it is.
   let refusedUnfiltered = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000 });
+    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refusedUnfiltered = true;
   }
@@ -4458,19 +4840,34 @@ function selfTest() {
   };
   t(
     'an omitted unreachable count is REFUSED, never printed as undefined',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000 }),
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'an unreachable count with NO corpus size is REFUSED — the number is unreadable without it',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5 }),
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'a sweep that swept zero files is REFUSED at the summary too, not printed as a clean repo',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0 }),
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'zero unreachable over a real corpus is a legitimate answer, not a refusal',
-    !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000 }),
+    !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
+  );
+  // The silence split is held to the same standard as the counts above: it is
+  // a SUBSET count, so both directions of the subsetting are refused rather
+  // than trusted, and an omitted one must not print as `undefined`.
+  t(
+    'an omitted artifact-roster count is REFUSED, never printed as undefined',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, invertedRosters: 0 }),
+  );
+  t(
+    'a roster count larger than the silent bucket it subsets is REFUSED',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 56, invertedRosters: 0 }),
+  );
+  t(
+    'and an inverted count larger than the rosters it subsets is REFUSED',
+    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 5 }),
   );
 
   // ── The families a changeset will add (#10309) ────────────────────────────

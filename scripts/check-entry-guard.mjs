@@ -447,6 +447,60 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/ts-parse.mjs',
 ]);
 
+/**
+ * The SCAN SURFACE, written in the syntax `scripts/pm/dispatch-gates.mjs` can
+ * read. It is a DIFFERENT claim from the roster above, and keeping the two
+ * apart is the whole of this declaration.
+ *
+ * ── The defect this repairs (#10784) ────────────────────────────────────────
+ *
+ * That derivation scans a gate's module body for path-ish string literals and
+ * reads what it finds as the gate's DECLARED POPULATION. The only literals this
+ * file carried were the ten KNOWN_IMPORT_UNSAFE entries — an enumeration of the
+ * files that ALREADY violate the import-safety half. So the derivation believed
+ * this gate's population was a roster of ten existing files, and a NEWLY ADDED
+ * file under the walked root could never appear in it, BY CONSTRUCTION.
+ * Measured on a card whose surface was one new script:
+ *
+ *   pnpm check:entry-guard  [lint.yml]  names: scripts/check-changeset-no-major.mjs,
+ *     scripts/check-empty-changeset.mjs, scripts/check-error-status-conformance.mjs, …
+ *
+ * — filed under `Silent`, "source names paths, none of which cover yours", for
+ * exactly the input this gate is most likely to fail on. Silent is that
+ * derivation's weakest claim; here it was not weak but INVERTED, and the cost
+ * was paid rather than hypothetical: a new script went green in a local gate
+ * union and red in CI on `Lint & Repo Gates`, after the dev had reported.
+ *
+ * `main()` walks the root and judges every file it finds, new ones included.
+ * The walk is the population; the roster is DATA the walk is compared against.
+ * This declares the first in a form the derivation can match and leaves the
+ * second alone — the same separation the derivation's own docblock draws for
+ * gates that "compute their own population and name only their baseline
+ * artifact".
+ *
+ * ── Why the subtree spelling, and not a wider extractor ─────────────────────
+ *
+ * `hintCovers` refuses a bare single-segment literal as too generic, and the
+ * refusal is measured rather than incidental: teaching the extractor to accept
+ * bare top-level directory words was priced at +139084 fabricated (gate, file)
+ * pairs, because `packages`, `apps` and `examples` are path COMPONENTS in
+ * dozens of gates that never read those roots. A declared subtree is a
+ * different claim — an author stating what this gate reads — and the glob
+ * collapse reduces it back to this one root and to nothing else. One gate pays
+ * for its own precision instead of every gate paying for one gate's.
+ *
+ * ── Provenance, never a lookup key ──────────────────────────────────────────
+ *
+ * Nothing in this gate reads this array; `walk(SCRIPTS)` does the walking, and
+ * the glob form handed to `walk` would name a directory that does not exist.
+ * The self-test derives BOTH directions from SCRIPTS rather than re-spelling
+ * the root, so moving or renaming the scanned directory cannot leave the
+ * declaration describing the old one. The literal has to be written out here —
+ * assembling it at runtime would put it out of reach of the very extractor it
+ * exists for, which is a silent way to keep the defect while looking fixed.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
+
 /** Every exporting file, with the statements that would run on import. */
 function importSafetyCensus(files) {
   const rows = [];
@@ -674,6 +728,45 @@ export function selfTest() {
   t('else continues the statement before it', topLevelStatements(codeOnly('if (a) { x(); } else { y(); }\n')).length === 1);
   t('catch continues the statement before it', topLevelStatements(codeOnly('try { x(); } catch (e) { y(); }\n')).length === 1);
 
+  // ── the dispatch-gates scan surface (#10784) ─────────────────────────────
+  //
+  // Enforcement cannot hold any of these: ROOT_DIR_WATCH_HINTS is read by
+  // another tool entirely, so a wrong or stale one runs green here forever and
+  // pays itself out as a dev dispatched on a new-script card with this gate
+  // missing from the brief — which is the round that was actually paid. Both
+  // directions are derived from the walked root rather than re-spelled, so
+  // moving or renaming it cannot leave the declaration describing the old one.
+  const walkedRoot = relative(REPO_ROOT, SCRIPTS);
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  t(
+    'the scan surface is declared for the root this gate actually walks',
+    ROOT_DIR_WATCH_HINTS.includes(`${walkedRoot}/**`),
+    JSON.stringify({ walkedRoot, ROOT_DIR_WATCH_HINTS }),
+  );
+  t(
+    'and it declares no root this gate does not walk (a declaration that can drift from the scan is worse than none — it replaces a silent gate with a lying one)',
+    declaredRoots.every((r) => r === walkedRoot),
+    JSON.stringify(declaredRoots),
+  );
+  // The load-bearing one for #10784: the roster and the surface must not be the
+  // same claim. A file this gate would judge tomorrow is covered by the
+  // declaration and, by construction, can never be in a list of the members it
+  // already has — so a derivation reading only the roster answers "silent" for
+  // the one input most likely to fail here.
+  const unwritten = `${walkedRoot}/the-one-nobody-has-written-yet.mjs`;
+  t(
+    'the declared surface covers a file this gate has never seen…',
+    declaredRoots.some((r) => unwritten.startsWith(`${r}/`)),
+    unwritten,
+  );
+  t(
+    '…which the baseline roster can never contain, which is why the two are separate declarations',
+    !KNOWN_IMPORT_UNSAFE.has(unwritten) && [...KNOWN_IMPORT_UNSAFE].every((rel) => rel !== `${walkedRoot}/**`),
+  );
+  // Provenance, never a lookup key: the glob form appearing where the walk root
+  // is read would send readdirSync at a directory that does not exist.
+  t('the declared form is NOT the walk root itself', !ROOT_DIR_WATCH_HINTS.includes(walkedRoot));
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);
   if (failed.length) {
@@ -682,7 +775,8 @@ export function selfTest() {
   }
   console.log(
     `✓ check-entry-guard self-test: ${cases.length} cases pass — all 11 measured spellings rejected, canonical form and masked prose/payloads accepted, ` +
-      `and the import-safety rule recognised on both sides (dispatch/exit/argv-branch/try rejected; declarations, non-exporters and all three guard spellings accepted).`,
+      `and the import-safety rule recognised on both sides (dispatch/exit/argv-branch/try rejected; declarations, non-exporters and all three guard spellings accepted) — ` +
+      `plus the dispatch-gates scan surface, derived from the walked root and held apart from the baseline roster.`,
   );
   return 0;
 }

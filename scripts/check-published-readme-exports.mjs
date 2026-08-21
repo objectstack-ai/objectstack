@@ -6,6 +6,7 @@
 //
 //   node scripts/check-published-readme-exports.mjs
 //   node scripts/check-published-readme-exports.mjs --self-test
+//   node scripts/check-published-readme-exports.mjs --unread-report
 //
 // ## The bug it exists to prevent (#9532, from #9517)
 //
@@ -661,6 +662,50 @@ export function extractLocalBindings(markdown, importBound) {
 }
 
 /**
+ * The `X.y(…)` call SITES this run could not type, in one document.
+ *
+ * Same matcher, same fence and same dedup as `extractMemberCalls` -- the sites
+ * this returns are exactly the ones `countUnreadCalls` counts, because that
+ * function is now a cardinality view over THIS one rather than a second walk.
+ * That is the discipline this file's header states for `publishedDocs` and for
+ * the same reason: two derivations of one population disagree the first time
+ * either is edited, silently, each still green. The `NOT read:` pair and the
+ * per-document breakdown `--unread-report` prints are one population, computed
+ * once, split two ways.
+ *
+ * Dedup is by `<receiver>.<member>` WITHIN the document, matching
+ * `extractMemberCalls`, so the two numbers on the green line stay
+ * commensurable. `line` is the first line the deduped site was seen on -- the
+ * one a hand read opens the file at -- and is carried rather than counted, so
+ * adding it moved no number.
+ *
+ * @returns `{ sites: [{ line, object, member }], receivers: [string] }`, both in
+ *          document order.
+ */
+export function unreadCallSites(markdown, readableNames) {
+  const known = new Set(readableNames);
+  const receivers = new Set();
+  const seen = new Set();
+  const sites = [];
+  for (const fence of readFences(markdown)) {
+    for (const { n, text } of fence.lines) {
+      if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
+      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+      let m;
+      while ((m = rx.exec(text)) !== null) {
+        if (known.has(m[1])) continue;
+        const key = `${m[1]}.${m[2]}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sites.push({ line: n, object: m[1], member: m[2] });
+        receivers.add(m[1]);
+      }
+    }
+  }
+  return { sites, receivers: [...receivers] };
+}
+
+/**
  * How many `X.y(…)` call sites this run could NOT type, and on how many
  * distinct receivers -- the number the GREEN line was missing (#9870).
  *
@@ -678,24 +723,14 @@ export function extractLocalBindings(markdown, importBound) {
  * get a build green. What it stops is the green line reading as coverage of
  * published documents when what it covers is import-bound receivers INSIDE
  * them.
+ *
+ * ⛔ It is a CARDINALITY VIEW over `unreadCallSites`, never its own walk: the
+ * scalar a reader sees and the rows `--unread-report` breaks it into must not
+ * be able to disagree about what an unread site IS (#10815).
  */
 export function countUnreadCalls(markdown, readableNames) {
-  const known = new Set(readableNames);
-  const receivers = new Set();
-  const seen = new Set();
-  for (const fence of readFences(markdown)) {
-    for (const { text } of fence.lines) {
-      if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
-      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
-      let m;
-      while ((m = rx.exec(text)) !== null) {
-        if (known.has(m[1])) continue;
-        seen.add(`${m[1]}.${m[2]}`);
-        receivers.add(m[1]);
-      }
-    }
-  }
-  return { calls: seen.size, receivers: receivers.size };
+  const { sites, receivers } = unreadCallSites(markdown, readableNames);
+  return { calls: sites.length, receivers: receivers.length };
 }
 
 /** `@objectstack/spec/data` -> `{ name: '@objectstack/spec', subpath: './data' }`. */
@@ -943,6 +978,30 @@ function typeSurface(absEntries) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The accumulator `analyzeDocument` fills, with every field at its zero.
+ *
+ * Defined HERE and used by both the run and the `--self-test`, for the reason
+ * this file's header gives for `publishedDocs`: a second copy of the shape
+ * disagrees with this one the first time a field is added, silently. The
+ * self-test copy is the dangerous half -- a fixture that omits a field the run
+ * accumulates is not a failing test, it is a test that cannot see the field at
+ * all, and it stays green.
+ */
+export function newMeasured() {
+  return {
+    symbolChecks: 0,
+    receivers: 0,
+    derivedReceivers: 0,
+    rejectedReceivers: 0,
+    callChecks: 0,
+    unreadCalls: 0,
+    unreadReceivers: 0,
+    // The per-document rows behind `unreadCalls`/`unreadReceivers` (#10815).
+    unreadByDocument: [],
+  };
+}
+
+/**
  * Findings for one published markdown document.
  *
  * @param doc      `{ pkg, file, text }`
@@ -959,12 +1018,19 @@ function typeSurface(absEntries) {
  *
  *                 Fields: `symbolChecks`, `receivers` (import-bound),
  *                 `derivedReceivers` and `rejectedReceivers` (#9870's local
- *                 bindings, bound and refused), `callChecks`, and
+ *                 bindings, bound and refused), `callChecks`,
  *                 `unreadCalls`/`unreadReceivers` -- what this run could NOT
- *                 type. That last pair is the one a reader needs and the run
- *                 cannot fake: it is the complement of `callChecks` over the
- *                 same matcher, so a widening that silently stopped widening
- *                 shows up as the unread count refusing to fall.
+ *                 type -- and `unreadByDocument`, that pair's per-document
+ *                 rows (#10815). The unread pair is the one a reader needs and
+ *                 the run cannot fake: it is the complement of `callChecks`
+ *                 over the same matcher, so a widening that silently stopped
+ *                 widening shows up as the unread count refusing to fall.
+ *
+ *                 ⛔ Build it with `newMeasured()`. A hand-rolled literal that
+ *                 omits `unreadByDocument` throws here rather than skipping the
+ *                 row: a silently unrecorded document would make the breakdown
+ *                 disagree with the scalars, which is the one thing
+ *                 `--unread-report` may not do.
  */
 export function analyzeDocument(doc, resolveTarget, measured = null) {
   const findings = [];
@@ -1108,9 +1174,28 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
     });
   }
   if (measured) {
-    const unread = countUnreadCalls(doc.text, [...readable.keys()]);
-    measured.unreadCalls += unread.calls;
-    measured.unreadReceivers += unread.receivers;
+    // ⭐ ONE statement produces the row and both scalars, from the SAME object.
+    // The scalars are what the green line prints; the row is what
+    // `--unread-report` prints. Deriving the scalars from anything but
+    // `unread` -- a second walk, a different `readable` set, a count taken
+    // before this point -- is the drift that makes a breakdown disagree with
+    // the total printed above it, and a hand read that takes the wrong
+    // denominator produces a defect count nothing anywhere reddens (#10815).
+    // `unreadReport` re-adds the rows and refuses to print them if the sum has
+    // moved; the self-test drives that refusal with a mutated row.
+    //
+    // Every analyzed document gets a row, including the ones with nothing
+    // unread: the report needs the denominator ("33 of 60 documents hold one")
+    // and a zero row is the only evidence that a document was read at all.
+    const unread = unreadCallSites(doc.text, [...readable.keys()]);
+    measured.unreadByDocument.push({
+      pkg: doc.pkg,
+      file: doc.file,
+      sites: unread.sites,
+      receivers: unread.receivers,
+    });
+    measured.unreadCalls += unread.sites.length;
+    measured.unreadReceivers += unread.receivers.length;
   }
   return findings;
 }
@@ -1202,6 +1287,122 @@ function successSummary({ measured, baselineCount, memberChecks }) {
     `  (free variables, parameters, globals, non-workspace imports). Visibility, not a ` +
     `verdict — see #9870.`
   );
+}
+
+/**
+ * `NOT read:` decomposed per document -- the body of `--unread-report` (#10815).
+ *
+ * ## What it is for
+ *
+ * The green line states the blind spot as TWO WHOLE-REPO SCALARS and nothing
+ * else. They stop the green line reading as coverage (#9870), which is what
+ * they were added for. What they cannot answer is the question the ruling on
+ * #9870 then asked of them, and the question every per-document hand read
+ * starts from: WHICH DOCUMENT HOLDS HOW MANY, AND WHICH SITES ARE THEY?
+ *
+ * Without an answer here, a hand read has to re-implement `analyzeDocument`'s
+ * `readable` derivation and `countUnreadCalls`' body outside this file to get
+ * one. That is precisely the re-derivation this file's header refuses for
+ * `publishedDocs` -- and it fails the same way: a hand read whose population
+ * silently disagrees with the gate's produces a defect count with the wrong
+ * denominator, and nothing anywhere goes red.
+ *
+ * ## ⭐ The checksum, and why it REFUSES rather than warns
+ *
+ * The rows are re-added here and compared with the scalars the same run
+ * accumulated. They cannot disagree today -- `analyzeDocument` produces the row
+ * and both scalars from one object -- and that is the point: this is the guard
+ * that keeps it true through the next edit to that block. A future increment
+ * taken from a second walk, or a row pushed under a different `readable` set,
+ * moves one side and not the other.
+ *
+ * On a mismatch the rows are NOT printed. A breakdown that disagrees with the
+ * total above it is worse than no breakdown: it is the same wrong-denominator
+ * hand read as before, now with the gate's own authority behind it. Suppressing
+ * the rows leaves the reader with the scalars they already had, plus a sentence
+ * saying the decomposition could not be reconciled -- strictly no worse than
+ * this flag not existing.
+ *
+ * ⛔ The mismatch changes NO verdict and NO exit code, here or anywhere: it is a
+ * statement about this gate, not about any README, and `--unread-report` sits in
+ * the same "visibility, not a verdict" register as the pair it decomposes. The
+ * `--self-test` drives BOTH directions over a fixture -- reconciling rows print,
+ * a mutated row prints the refusal -- which is how a guard whose runtime
+ * population is zero by construction is kept honest in this file (the namespace
+ * branch, #10367, is pinned the same way for the same reason).
+ *
+ * ## Why the header names the scalars it does NOT decompose
+ *
+ * The card behind this flag was filed after a per-document number was quoted as
+ * `47 sites / 18 receivers` when the gate's population for that document is
+ * `30 / 17`. `47` is `derivedReceivers` -- a WHOLE-REPO scalar printed one line
+ * above `NOT read:` on the same green output. Nothing on that line says which
+ * quantity is per-document (none of them were), so the mistake is one the
+ * OUTPUT invites. => the header below names the pair these rows belong to, and
+ * names the neighbouring scalars as having no share here at all; every row
+ * repeats the word `unread`, so a number copied out of one carries the scalar it
+ * came from with it.
+ */
+export function unreadReport(measured) {
+  const rows = measured.unreadByDocument;
+  const calls = rows.reduce((sum, r) => sum + r.sites.length, 0);
+  const receivers = rows.reduce((sum, r) => sum + r.receivers.length, 0);
+
+  if (calls !== measured.unreadCalls || receivers !== measured.unreadReceivers) {
+    return [
+      `  ✗ --unread-report — the per-document rows do NOT re-add to this run's`,
+      `  \`NOT read:\` pair, so the breakdown is NOT printed.`,
+      `      rows sum to ${calls} unread call(s) / ${receivers} unread receiver(s), over ` +
+        `${rows.length} document row(s)`,
+      `      the run measured ${measured.unreadCalls} unread call(s) / ` +
+        `${measured.unreadReceivers} unread receiver(s)`,
+      `  A row that disagrees with the total above it is worse than no row: a hand read`,
+      `  takes the wrong denominator and nothing anywhere goes red. This is a defect in`,
+      `  ${SELF}, NOT in any README — the run's`,
+      `  verdict and exit code are unchanged (#10815).`,
+    ].join('\n');
+  }
+
+  const held = rows.filter((r) => r.sites.length > 0);
+  // Heaviest document first: this list is read as a work queue for the
+  // per-document hand reads, and that is the order they get scheduled in.
+  const ordered = [...held].sort(
+    (a, b) =>
+      b.sites.length - a.sites.length ||
+      b.receivers.length - a.receivers.length ||
+      a.file.localeCompare(b.file),
+  );
+  // Column widths from the data, so a row cannot be read as a different quantity
+  // because the number happened to line up with one.
+  const pad = (n, w) => String(n).padStart(w);
+  const callW = Math.max(...ordered.map((r) => String(r.sites.length).length), 1);
+  const recvW = Math.max(...ordered.map((r) => String(r.receivers.length).length), 1);
+  const lineW = Math.max(...ordered.flatMap((r) => r.sites.map((s) => String(s.line).length)), 1);
+  const body = ordered.flatMap((r) => [
+    `  ${pad(r.sites.length, callW)} unread call(s) / ` +
+      `${pad(r.receivers.length, recvW)} unread receiver(s)  ${r.file}`,
+    ...r.sites.map((s) => `      line ${pad(s.line, lineW)}  ${s.object}.${s.member}(…)`),
+  ]);
+
+  return [
+    `  --unread-report — this run's \`NOT read:\` pair, decomposed per document.`,
+    `  ⚠️ Every number below is a share of THAT pair and of no other quantity this gate`,
+    `  prints. \`name(s) built from one\` is printed one line ABOVE the pair and`,
+    `  \`call(s) checked\` beside it; both are WHOLE-REPO scalars with no per-document`,
+    `  share here, so no row below is a share of either (#10815).`,
+    `  A row is one document's unread \`X.y(…)\` call sites and the distinct receivers they`,
+    `  sit on IN THAT DOCUMENT — receivers are summed per document exactly as \`NOT read:\``,
+    `  sums them, so a receiver named in two documents counts twice in the row and twice`,
+    `  in the scalar. Every site listed is a receiver with no type this gate can reach;`,
+    `  the remedy is a human reading the document, never a build change or a baseline.`,
+    '',
+    ...body,
+    '',
+    `  Σ ${calls} unread call(s) / ${receivers} unread receiver(s) across ${held.length} of ` +
+      `${rows.length} published document(s) —`,
+    `  these rows re-add to this run's \`NOT read:\` pair. A breakdown that did NOT re-add`,
+    `  is not printed at all, so a row you read here is the gate's own population (#10815).`,
+  ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,7 +1632,14 @@ export function surfaceTarget(surface, abs) {
   };
 }
 
-function run() {
+/**
+ * @param {{unreadReport?: boolean}} [options] `--unread-report` prints the
+ *        `NOT read:` pair decomposed per document. ⛔ Opt-in, and visibility
+ *        only: it changes no finding, no verdict and no exit code, so the CI
+ *        invocation in package.json does not pass it and nothing about a run's
+ *        result depends on whether it was passed.
+ */
+function run({ unreadReport: wantsUnreadReport = false } = {}) {
   const { byName, docs } = publishedDocs();
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
@@ -1491,15 +1699,7 @@ function run() {
   };
 
   const findings = [];
-  const measured = {
-    symbolChecks: 0,
-    receivers: 0,
-    derivedReceivers: 0,
-    rejectedReceivers: 0,
-    callChecks: 0,
-    unreadCalls: 0,
-    unreadReceivers: 0,
-  };
+  const measured = newMeasured();
   for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget, measured));
 
   // Reconcile against the shrink-only baseline, BOTH directions.
@@ -1552,11 +1752,27 @@ function run() {
   });
   if (unbound) throw new Error(unbound);
 
+  // ⛔ BELOW the four refusals and BELOW the unbuilt branch, never above either.
+  // Both of those states are runs that measured nothing, and `unreadCalls` is the
+  // COMPLEMENT of what was read: a no-population run drives it UP (this file's
+  // header measures `NOT read: 3` against `0 … checked` on such a fixture). A
+  // breakdown of that number is a work queue derived from an unread tree — the
+  // wrong-denominator hand read this flag exists to prevent, handed out by the
+  // flag itself. Here, the run has a population and `measured` is complete.
+  //
+  // Printed on BOTH terminal paths: the report is self-contained (it restates
+  // the pair it decomposes), and a README finding elsewhere in the tree is no
+  // reason to withhold a document's unread population from the reader who asked
+  // for it. It goes to stdout in both, like every other line that is data rather
+  // than a complaint, and it changes neither return value below.
+  const report = wantsUnreadReport ? unreadReport(measured) : null;
+
   if (fresh.length === 0 && stale.length === 0) {
     console.log(`✓ check:published-readme-exports — ${header}`);
     console.log(
       successSummary({ measured, baselineCount: baseline.length, memberChecks }),
     );
+    if (report) console.log(`\n${report}`);
     return 0;
   }
 
@@ -1592,6 +1808,7 @@ function run() {
         `README — a baseline that can only grow rots into a list nobody trusts.\n`,
     );
   }
+  if (report) console.log(report);
   return 1;
 }
 
@@ -1850,6 +2067,37 @@ function selfTest() {
     { calls: 1, receivers: 1 },
   );
 
+  // The SITES behind that count (#10815). `--unread-report` needs the list, not
+  // the cardinality — "which document holds how many, and which sites are they?"
+  // is the question every per-document hand read starts from, and the two
+  // scalars on the green line cannot answer it.
+  eq(
+    'unreadCallSites — the sites themselves, in document order, each with its line',
+    unreadCallSites(unreadDoc, ['ObjectKernel']),
+    {
+      sites: [
+        { line: 4, object: 'kernel', member: 'bootstrap' },
+        { line: 5, object: 'kernel', member: 'shutdown' },
+        { line: 6, object: 'kernel', member: 'getService' },
+        { line: 7, object: 'other', member: 'registerTool' },
+      ],
+      receivers: ['kernel', 'other'],
+    },
+  );
+  // ⭐ ONE POPULATION, TWO VIEWS. The scalar pair the green line prints must be
+  // the cardinality of the very list the report breaks down — asserted by
+  // MEASURING both over one fixture, because reading the source proves only
+  // what today's source says. Two separate walks over the same markdown would
+  // pass this file's other pins and still disagree the first time either is
+  // edited, silently, each still green — the failure this file's own header
+  // refuses for `publishedDocs`.
+  const oneWalk = unreadCallSites(unreadDoc, ['ObjectKernel']);
+  eq(
+    'countUnreadCalls — is exactly the cardinality of unreadCallSites, not a second walk',
+    countUnreadCalls(unreadDoc, ['ObjectKernel']),
+    { calls: oneWalk.sites.length, receivers: oneWalk.receivers.length },
+  );
+
   // -- specifier splitting ------------------------------------------------------
   eq('splitSpecifier — scoped root', splitSpecifier('@objectstack/spec'), {
     name: '@objectstack/spec',
@@ -2077,15 +2325,11 @@ function selfTest() {
   // that fallback. Louder than before and measuring less: #4690 rebuilt inside
   // the fix for #4690's cousin. A findings-only assertion cannot see it, because
   // the correct answer for the vacuous case is also "no findings".
-  const blank = () => ({
-    symbolChecks: 0,
-    receivers: 0,
-    derivedReceivers: 0,
-    rejectedReceivers: 0,
-    callChecks: 0,
-    unreadCalls: 0,
-    unreadReceivers: 0,
-  });
+  // ⛔ The accumulator comes from `newMeasured()`, never from a literal spelled
+  // out here. A self-test fixture that omits a field the run accumulates is not
+  // a failing test — it is a test that cannot SEE the field, and it stays green
+  // while the run's own copy grows past it (#10815).
+  const blank = newMeasured;
   const answering = blank();
   analyzeDocument(derivedInstance, resolveFake, answering);
   eq(
@@ -2276,6 +2520,176 @@ function selfTest() {
         '      A zero in "0 documented call(s) checked" is an alarm a reader can act on; a zero\n' +
         '      in "0 of the findings are call sites" is a ratio over an empty set and says\n' +
         '      nothing at all.',
+    );
+  }
+
+  // -- ⭐ `--unread-report`: `NOT read:` DECOMPOSED, AND THE CHECKSUM (#10815) --
+  //
+  // ## What the flag is for
+  //
+  // The green line states the blind spot as two WHOLE-REPO scalars. They stop it
+  // reading as coverage (#9870), which is what they were added for. What they
+  // cannot answer is the question every per-document hand read starts from:
+  // which document holds how many, and WHICH SITES ARE THEY? Until this flag,
+  // answering it meant re-implementing `analyzeDocument`'s `readable` derivation
+  // and `countUnreadCalls`' body outside this file — the re-derivation this
+  // file's header refuses for `publishedDocs`, failing the same way: a hand read
+  // whose population silently disagrees with the gate's produces a defect count
+  // with the wrong denominator, and nothing anywhere goes red.
+  //
+  // ## ⭐ The property under test is NOT "the flag prints something"
+  //
+  // It is that the ROWS RE-ADD TO THE SCALARS, and that a breakdown which does
+  // not re-add is NOT PRINTED. Both are driven below over rows produced by the
+  // PRODUCTION path — `analyzeDocument` filling a `newMeasured()` — never typed
+  // in, and the drift directions are MUTATED rather than argued: a row that grew
+  // and a scalar that moved are different edits with one consequence, and each
+  // must reach the refusal.
+  //
+  // The runtime population of that refusal is zero by construction today, since
+  // one statement in `analyzeDocument` produces the row and both scalars from
+  // one object. That is the point of pinning it here rather than trusting it:
+  // the guard exists for the NEXT edit to that statement, and a guard nothing
+  // exercises is the shape this file raises to a hard error elsewhere (#4690).
+  // It is pinned in both directions over a fixture for the same reason the
+  // namespace branch is (#10367) — the coverage is real at a tree population
+  // of 0.
+  const unreadHeavy = {
+    pkg: '@objectstack/spec',
+    file: 'packages/spec/README.md',
+    text: [
+      '```typescript',
+      "import { defineStack } from '@objectstack/spec';",
+      'const stack = defineStack({});',
+      'stack.validate();',
+      'app.listen(3000);',
+      'app.use(router);',
+      'logger.info("up");',
+      '```',
+    ].join('\n'),
+  };
+  const withRows = (mutate = () => {}) => {
+    const m = newMeasured();
+    // Two documents on purpose: one holding unread sites and one whose every
+    // receiver IS read. The read-clean document is what makes the denominator
+    // ("1 of 2") a measured quantity rather than a count of rows that happened
+    // to be non-empty.
+    analyzeDocument(unreadHeavy, resolveFake, m);
+    analyzeDocument(derivedInstance, resolveFake, m);
+    mutate(m);
+    return m;
+  };
+  const rowsMeasured = withRows();
+  eq(
+    'analyzeDocument — EVERY analyzed document gets a row, and the rows re-add to the scalars',
+    {
+      rows: rowsMeasured.unreadByDocument.map((r) => [r.file, r.sites.length, r.receivers.length]),
+      scalars: [rowsMeasured.unreadCalls, rowsMeasured.unreadReceivers],
+    },
+    {
+      rows: [
+        ['packages/spec/README.md', 3, 2],
+        ['packages/kernel/README.md', 0, 0],
+      ],
+      scalars: [3, 2],
+    },
+  );
+
+  const reconciled = unreadReport(rowsMeasured);
+  eq(
+    'unreadReport — a row per document that holds one, heaviest first, every site with its line',
+    reconciled.split('\n').filter((l) => /^ {2}\d|^ {6}line /.test(l)),
+    [
+      '  3 unread call(s) / 2 unread receiver(s)  packages/spec/README.md',
+      '      line 5  app.listen(…)',
+      '      line 6  app.use(…)',
+      '      line 7  logger.info(…)',
+    ],
+  );
+  eq(
+    'unreadReport — the Σ line states what the rows re-add to, WITH its denominator',
+    reconciled.split('\n').find((l) => l.startsWith('  Σ')),
+    '  Σ 3 unread call(s) / 2 unread receiver(s) across 1 of 2 published document(s) —',
+  );
+  if (/✗ --unread-report/.test(reconciled)) {
+    failures.push(
+      'rows that DO re-add printed the mismatch refusal. The checksum must pass silently on\n' +
+        '      agreement, or the refusal is noise a reader learns to scroll past.',
+    );
+  }
+
+  // ⚠️ THE TRANSCRIPTION THE HEADER HAS TO PREVENT. This flag was filed after one
+  // document's share of the blind spot was quoted as `47 sites / 18 receivers`
+  // when the gate's population for that document is `30 / 17`: `47` is
+  // `derivedReceivers`, a WHOLE-REPO scalar printed one line ABOVE `NOT read:` on
+  // the same green output. Nothing on that line said which quantity was
+  // per-document — none of them were — so the mistake is one the OUTPUT invited.
+  // => the header must name the neighbouring scalars as having no share here, and
+  // every row must carry the word `unread`, so a number copied out of one takes
+  // the scalar it belongs to with it.
+  for (const clause of ['name(s) built from one', 'call(s) checked', 'WHOLE-REPO scalars']) {
+    if (!reconciled.includes(clause)) {
+      failures.push(
+        `the --unread-report header must name \`${clause}\` as a quantity these rows are NOT a\n` +
+          '      share of. Printing only whole-repo scalars where a per-document number was needed\n' +
+          '      is what invited the mis-quote this flag exists to make impossible (#10815).',
+      );
+    }
+  }
+  const rowLines = reconciled.split('\n').filter((l) => /^ {2}\d/.test(l));
+  if (
+    rowLines.length === 0 ||
+    !rowLines.every((l) => /^ {2}\d+ unread call\(s\) \/ \d+ unread receiver\(s\) {2}\S/.test(l))
+  ) {
+    failures.push(
+      'every ROW must spell both of its numbers `unread …`, so a figure copied out of one\n' +
+        '      cannot be read back as a different scalar. Rows seen:\n      ' +
+        JSON.stringify(rowLines),
+    );
+  }
+
+  // ⭐ THE CHECKSUM ITSELF, driven in every direction a future edit can drift.
+  const drifted = [
+    ['a row grew past its scalar', withRows((m) => m.unreadByDocument[0].sites.push({ line: 99, object: 'ghost', member: 'call' }))],
+    ['the call scalar moved past its rows', withRows((m) => { m.unreadCalls += 1; })],
+    ['the receiver scalar moved past its rows', withRows((m) => { m.unreadReceivers -= 1; })],
+    ['a whole document row went missing', withRows((m) => { m.unreadByDocument.shift(); })],
+  ];
+  for (const [what, m] of drifted) {
+    const text = unreadReport(m);
+    if (!text.startsWith('  ✗ --unread-report')) {
+      failures.push(
+        `--unread-report must REFUSE when ${what}. Rows that do not re-add to the scalars are\n` +
+          '      the wrong-denominator hand read this flag exists to prevent, and the run cannot\n' +
+          '      tell which side is wrong — so neither may be published as the other\'s breakdown.',
+      );
+    }
+    if (/README\.md/.test(text)) {
+      failures.push(
+        `--unread-report printed a per-document row after ${what}. A breakdown that disagrees\n` +
+          '      with the total above it is WORSE than no breakdown: it lends this gate\'s authority\n' +
+          '      to a population the gate did not measure. The rows must be withheld, not annotated.',
+      );
+    }
+  }
+  eq(
+    'unreadReport — the refusal names BOTH sums, so the drift is diagnosable without a rerun',
+    unreadReport(drifted[0][1]).split('\n').filter((l) => l.startsWith('      ')),
+    [
+      '      rows sum to 4 unread call(s) / 2 unread receiver(s), over 2 document row(s)',
+      '      the run measured 3 unread call(s) / 2 unread receiver(s)',
+    ],
+  );
+  // ⛔ And a mismatch stays VISIBILITY. It is a defect in THIS FILE, never a
+  // verdict about a README, and it moves no exit code — the same register
+  // `NOT read:` occupies and the whole reason this flag could be added without
+  // touching what the gate blocks on.
+  const refusalText = unreadReport(drifted[0][1]);
+  if (!/verdict and exit code are unchanged/.test(refusalText) || !/NOT in any README/.test(refusalText)) {
+    failures.push(
+      'the mismatch refusal must say the verdict and exit code are unchanged AND that the\n' +
+        '      defect is in this gate rather than in a README. Without both, a reader takes a\n' +
+        '      broken checksum for a documentation failure and goes to fix the wrong file.',
     );
   }
 
@@ -2600,7 +3014,14 @@ function selfTest() {
       '  read, which is why the fourth condition is a conjunction. The namespace branch\n' +
       '  itself (#10367) is exercised in both directions on a fixture, since the tree\n' +
       '  population for it is 0: a real export stays silent, an invented one is reported with\n' +
-      '  a sentence naming the PACKAGE, and the unwired shape is pinned as reading nothing.',
+      '  a sentence naming the PACKAGE, and the unwired shape is pinned as reading nothing.\n' +
+      '  `--unread-report` (#10815) decomposes `NOT read:` per document, and its CHECKSUM is\n' +
+      '  pinned rather than trusted: the rows come from the production `analyzeDocument` path,\n' +
+      '  they must re-add to the scalars the green line prints, and four separate drifts — a\n' +
+      '  row grown, either scalar moved, a whole row lost — must each REFUSE and withhold the\n' +
+      '  breakdown instead of publishing one that disagrees with its own total. The header is\n' +
+      '  pinned to name the neighbouring whole-repo scalars as having no per-document share,\n' +
+      '  which is the mis-quote the flag exists to make impossible.',
   );
 }
 
@@ -2613,7 +3034,7 @@ if (isEntrypoint(import.meta.url)) {
     process.exit(0);
   }
   try {
-    process.exit(run());
+    process.exit(run({ unreadReport: process.argv.includes('--unread-report') }));
   } catch (err) {
     console.error(`✗ check:published-readme-exports — ${err.message}`);
     process.exit(1);

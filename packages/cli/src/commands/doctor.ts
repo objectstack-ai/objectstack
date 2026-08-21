@@ -2255,7 +2255,37 @@ export default class Doctor extends Command {
           }
         }
         console.log('');
-        printInfo(`Found ${deprecations.length} deprecated pattern(s). Run \`objectstack codemod v2-to-v3\` to auto-fix.`);
+        // #10680 — this line used to prescribe `objectstack codemod v2-to-v3`,
+        // a command `os` has never registered. oclif resolves commands by
+        // globbing `dist/commands/**/*.js` (package.json `oclif.commands`);
+        // there is no `src/commands/codemod*`, and neither bundled plugin
+        // (`@oclif/plugin-help`, `@oclif/plugin-plugins`) supplies one — so the
+        // prescription exited 2, `command codemod:v2-to-v3 not found`, for every
+        // operator who followed it. `content/docs/protocol/backward-compatibility.mdx`
+        // already records the automated codemod as "not yet available".
+        //
+        // Re-pointing it at `os migrate meta` — the one registered command in
+        // this neighborhood — would be the same defect respelled. That command's
+        // subject is an authored stack CONFIG replayed across protocol majors,
+        // and its own header states it "does not silently rewrite TS config
+        // source (that AST rewrite is unsafe and lossy)": both of its writes are
+        // `--out` JSON snapshots. It cannot touch the `src/**` TypeScript these
+        // patterns are found in, and three of the eight (`EnhancedObjectKernel`
+        // and the two deep-import paths) are not metadata at all. `os lint --fix`
+        // is likewise print-only — "Show what would be fixed (dry-run)".
+        //
+        // So nothing registered auto-fixes these, and the line now says so. The
+        // replacements are real and already computed per finding; the loop above
+        // prints them under `--verbose`. A hint that prescribes nothing beats one
+        // that sends the operator to a command they will spend their time on
+        // before discovering it was never built — the same false-confidence class
+        // as a `✓` printed over a tree that was never walked.
+        printInfo(
+          `Found ${deprecations.length} deprecated pattern(s). No automated codemod ships with the CLI — `
+          + (flags.verbose
+            ? 'apply the → replacement shown under each finding above.'
+            : 'apply each finding’s replacement by hand (re-run with --verbose to print them).'),
+        );
       } else {
         printSuccess('Deprecation scan      No deprecated patterns found');
       }
