@@ -73,7 +73,8 @@ enable: {
     'list',                  // aggregate/search/export; create+update grants
     'create',                // upsert/import). undefined = all, [] = none.
     'update',
-    'delete'
+    'delete',
+    'bulk'                   // omitting `bulk` DENIES batch operations
   ],
   files: true,               // Allow file attachments
   feeds: true,               // Enable activity feed (Chatter-like)
