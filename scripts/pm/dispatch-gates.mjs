@@ -1623,17 +1623,34 @@ export function escapableLiteralKey({ check, hint }) {
  * this, so the rule fails rather than needing to be remembered.
  */
 const ESCAPABLE_LITERAL_LEDGER = new Set([
-  // DISCHARGED and deleted (#10784): `check:parse-guard scripts`. It declared
-  // the subtree spelling beside the literal, the row failed as STALE by name,
-  // and the row came out — the shrink the docblock above describes, walked once
-  // end to end. Recorded here as the worked instance, not as a row.
-
-  // Reaches `scripts` through a package-relative predicate over tarball
-  // contents (`rel.startsWith('scripts/')`), not through the repo root it
-  // appears to name. Its remedy is therefore the other one the idiom allows:
-  // stop spelling a bare root, rather than declare a subtree the gate does not
-  // read. Recorded here so that decision is made once, on its own card.
-  'check:published-files scripts',
+  // EMPTY — a verdict, not an absence. Every gate this derivation can SEE
+  // spelling a bare top-level root has been discharged. Both instances are
+  // recorded here because they took the two DIFFERENT remedies the idiom
+  // allows, and a future FRESH row has to CHOOSE between them rather than
+  // reach for the first one it is offered:
+  //
+  //   DISCHARGED (#10784): `check:parse-guard scripts`. That gate really does
+  //   walk the repo's scripts/ tree, so declaring the subtree spelling beside
+  //   the literal was TRUE. The row then failed as STALE by name and came out —
+  //   the shrink the docblock above describes, walked once end to end.
+  //
+  //   DISCHARGED (#10875): `check:published-files scripts`. That gate reached
+  //   `scripts` through a package-relative predicate over would-be tarball
+  //   contents, NOT through the repo root it appeared to name, so the escape
+  //   hatch was the wrong remedy for it: a `scripts/**` declaration would have
+  //   been false, and would have named the gate for every repo-root scripts/
+  //   edit it does not read — a fabricated lead, which `hintCovers`' docblock
+  //   prices above a missing one. It took the OTHER remedy the idiom allows,
+  //   stop spelling a bare root, and the row discharged by CONSTRUCTION rather
+  //   than by declaration: nothing was added to this list to make it happen,
+  //   which is the shape a shrink-only list wants.
+  //
+  // ⚠️ An empty ledger is NOT "the species is gone", and must not be read as
+  // one. This list only ever saw the half the derivation can see — a literal
+  // that reaches the HINT SET, which needs a separator somewhere in the source
+  // spelling. #10840 measures the other half at ~33 gates whose population
+  // literal carries no separator at all; those are invisible to the derivation
+  // AND to this ledger, and emptying this list moves none of them.
 ]);
 
 // ---------------------------------------------------------------------------
@@ -3712,22 +3729,50 @@ function selfTest() {
   // `derive` runs — a second pass built here could enumerate a population no
   // dispatch prompt is derived from.
   const ledgerSwept = trackedFiles();
-  const ledgerRows = escapableLiteralRows([...discoverFamilies().byCheck], trackedPrefixes(ledgerSwept));
+  const ledgerPrefixes = trackedPrefixes(ledgerSwept);
+  const ledgerFamilies = [...discoverFamilies().byCheck];
+  const ledgerRows = escapableLiteralRows(ledgerFamilies, ledgerPrefixes);
   const ledgerKeys = ledgerRows.map(escapableLiteralKey);
-  // Zero rows is a broken recognizer, not a clean tree, and it must not read as
-  // a pass — the same #4690 rule the reachability sweep applies to itself. The
-  // stale half below would catch it too; this says so in one line rather than
-  // leaving the reader to derive it from a failure two cases down.
-  t('the live sweep still reaches this species at all — zero rows is a broken recognizer', ledgerRows.length > 0);
+  // #4690 at ZERO ROWS: a quiet sweep must still prove it can SPEAK.
+  //
+  // This guard used to be `ledgerRows.length > 0` — a live-tree count, which
+  // read the right rule off the wrong quantity. It conflated two separable
+  // claims: "the recognizer still works" and "the tree still owes a row".
+  // While a debt existed the two moved together, so the conflation was
+  // invisible; paying the LAST row (#10875) is what pulled them apart, and the
+  // guard then failed on a clean tree — a shrink-only ledger that could not be
+  // allowed to reach zero, which is the one end state it exists to reach.
+  //
+  // So the recognizer is asked directly instead: splice ONE synthetic family
+  // spelling a bare root into the LIVE corpus and require the sweep to find
+  // exactly it, and exactly one more row than the tree really owes. That holds
+  // at zero live rows and at any other count, it fails loudly if the recognizer
+  // or the prefix set goes dead, and unlike the fixture cases above it runs on
+  // the live prefixes the real sweep runs on.
+  const probeKey = 'check:escapable-literal-probe';
+  const probedRows = escapableLiteralRows([...ledgerFamilies, [probeKey, { hints: ['scripts'] }]], ledgerPrefixes);
+  const probedKeys = probedRows.map(escapableLiteralKey);
+  t(
+    'the live sweep still RECOGNISES this species — a probe family spelling a bare root is found,' +
+      ' so a quiet sweep means a clean tree rather than a broken recognizer (#4690)',
+    probedKeys.filter((k) => k === `${probeKey} scripts`).length === 1 &&
+      probedRows.length === ledgerRows.length + 1,
+  );
   const freshRows = ledgerKeys.filter((k) => !ESCAPABLE_LITERAL_LEDGER.has(k));
   const staleRows = [...ESCAPABLE_LITERAL_LEDGER].filter((k) => !ledgerKeys.includes(k)).sort();
   t(
     'no gate has NEWLY joined the escapable-literal species' +
       (freshRows.length
-        ? ` — FRESH: ${freshRows.join(' · ')}. Declare the subtree spelling beside the literal` +
-          ' (the ROOT_DIR_WATCH_HINTS idiom — see check-role-word.mjs and check-examples-live-imports.mjs),' +
-          ' or the gate is unnameable by any dispatch derivation and lands already invisible.' +
-          ' ⛔ The ledger is SHRINK-ONLY: a new line in it is not the remedy.'
+        ? ` — FRESH: ${freshRows.join(' · ')}. Unnameable by any dispatch derivation as spelled,` +
+          ' so it lands already invisible. TWO remedies, and which one is right depends on what the' +
+          ' gate actually READS — pick, do not reach for the first one:' +
+          ' (a) it really does walk that repo root ⇒ declare the subtree spelling beside the literal,' +
+          ' the ROOT_DIR_WATCH_HINTS idiom (see check-role-word.mjs and check-examples-live-imports.mjs);' +
+          ' (b) it does NOT ⇒ stop spelling a bare root, respelling the literal to say what the predicate' +
+          ' means (check-published-files.mjs is the worked instance: its predicate is package-relative,' +
+          ' over tarball contents, so it took (b) and the row discharged by construction).' +
+          ' ⛔ Declaring a root the gate does not read is a FABRICATED lead — worse than the row,' +
+          ' at the price hintCovers puts on one. ⛔ The ledger is SHRINK-ONLY: a new line is not a remedy.'
         : ''),
     freshRows.length === 0,
   );
@@ -3743,20 +3788,40 @@ function selfTest() {
   // The spelling rule the ledger's docblock states, held mechanically rather
   // than remembered: a row keyed by a direct script path would enter THIS
   // file's own hint set as a path it does not read.
+  //
+  // Carried on a WITNESS PAIR rather than on the ledger alone. The ledger is
+  // empty now, and `[].every(...)` is a pass that proves nothing — precisely
+  // the vacuous shape #10784's ablation caught one case over, where a fixture
+  // with no subtree hint to strip compared silent to silent and read green. The
+  // sample row keeps the positive half exercised at zero rows; the negative
+  // witness is what gives the case teeth at all, since the live key format
+  // (\`${check} ${hint}\`) always carries a space and the extractor refuses a
+  // span with one — so a key in that format cannot build a hint whatever it
+  // names, and only the bare-path spelling the docblock warns against can.
+  const asHints = (row) => extractWatchHints(`const L = ${JSON.stringify(row)};`);
   t(
     'no ledger row enters this file\'s own declared population as a path',
-    [...ESCAPABLE_LITERAL_LEDGER].every((row) => extractWatchHints(`const L = ${JSON.stringify(row)};`).length === 0),
+    [...ESCAPABLE_LITERAL_LEDGER, 'check:sample-gate someroot'].every((row) => asHints(row).length === 0),
+  );
+  t(
+    '…and that rule can FAIL: the direct-script spelling it forbids does build a hint',
+    asHints('scripts/check-x.mjs').length === 1,
   );
   // The ledger describes the derivation, so it must agree with what the
   // derivation actually reports: every row must name a root the tree HAS and
   // the covering rule refuses — the pair that puts a row in this species rather
   // than in the dead one beside it in the residue block. Asserted over whatever
   // the ledger holds, never over a remembered count of it.
-  const ledgerPrefixes = trackedPrefixes(ledgerSwept);
+  //
+  // Run over the PROBED rows, which are the live rows plus the one synthetic
+  // row spliced in above. Two things fall out of that and both are wanted: the
+  // property is still checked on every real row, and the case can never go
+  // vacuous now that the live half is legitimately empty — the probe row is a
+  // row of exactly this species, so `.every` always has something to judge.
   t(
     'every ledger row names a root the tree HAS and the covering rule refuses',
-    ledgerRows.length > 0 &&
-      ledgerRows.every(
+    probedRows.length > 0 &&
+      probedRows.every(
         ({ hint, plain }) =>
           // refused: the gate cannot be named for anything under the root
           !hintCovers(hint, `${plain}/any-file-under-it.mjs`) &&
@@ -3809,6 +3874,47 @@ function selfTest() {
       JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
     );
   }
+
+  // ── The bare root this gate must NOT spell (#10875) ───────────────────────
+  //
+  // `check:published-files` asks whether a published package ships a scripts/
+  // directory OF ITS OWN — a package-relative predicate over would-be tarball
+  // contents. Written as a quoted literal it read to this derivation as a
+  // declaration of the repo's own scripts/ tree, which the gate never opens:
+  // the last row of ESCAPABLE_LITERAL_LEDGER, discharged by respelling the
+  // predicate rather than by declaring a subtree that would have been FALSE.
+  //
+  // ⛔ The remedy the FRESH message offers first — declare the subtree — is the
+  // WRONG one here, and it is the one a reader reaches for. The ledger cannot
+  // say so, because by design it says nothing at all once a row is out. So the
+  // correct verdict is pinned here, in both directions, against the live tree.
+  const publishedFiles = scriptsFamilies.get('check:published-files');
+  t(
+    'check:published-files is discovered at all — the pins below mean nothing without it',
+    Boolean(publishedFiles),
+  );
+  t(
+    'check:published-files declares no bare repo root it does not open',
+    Boolean(publishedFiles) && !publishedFiles.hints.includes('scripts'),
+    JSON.stringify({ hints: publishedFiles?.hints }),
+  );
+  t(
+    '…so a brand-new repo-root scripts/ file does NOT name it — a fabricated lead is the costlier error',
+    Boolean(publishedFiles) && classifyEntry(publishedFiles, [unwrittenScript]).verdict !== 'matched',
+    JSON.stringify({ verdict: publishedFiles && classifyEntry(publishedFiles, [unwrittenScript]).verdict }),
+  );
+  // Non-vacuity for the case above, and the whole difference between a verdict
+  // that is CORRECT and one that is merely quiet: it must be passing because
+  // the gate reads a different population, never because the gate went dark.
+  // Its own source is a population it really does have, and still names it.
+  t(
+    '…and it is not silent everywhere: the population it really has still names it',
+    Boolean(publishedFiles) &&
+      classifyEntry(publishedFiles, ['scripts/check-published-files.mjs']).verdict === 'matched',
+    JSON.stringify({
+      verdict: publishedFiles && classifyEntry(publishedFiles, ['scripts/check-published-files.mjs']).verdict,
+    }),
+  );
 
   // ── Telling a WEAK silence from an INVERTED one (#10784) ──────────────────
   //
