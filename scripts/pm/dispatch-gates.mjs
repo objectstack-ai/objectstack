@@ -3799,8 +3799,14 @@ function selfTest() {
     const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.includes('/*')) } : null;
     t(
       `…and it is the subtree declaration doing it: strip it and ${gate} goes back to silent`,
-      undeclared ? classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent' : false,
-      JSON.stringify(undeclared?.hints),
+      // The length check is what stops this passing VACUOUSLY. With no subtree
+      // hint to remove, `undeclared` is the entry itself and `silent === silent`
+      // reads as a pass — measured, on the ablation run that removed both
+      // declarations: this case stayed green while the two above went red.
+      Boolean(undeclared) &&
+        undeclared.hints.length < entry.hints.length &&
+        classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent',
+      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
     );
   }
 
