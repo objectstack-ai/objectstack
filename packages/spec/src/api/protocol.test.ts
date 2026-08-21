@@ -1239,6 +1239,9 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
 describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #4463 D3 per element)', () => {
   const base = {
     success: true,
+    // #10462 — `outcome` is required on every producer return; this fixture is
+    // a successful publish, so 'published' is the invariant-consistent value.
+    outcome: 'published',
     publishedCount: 1,
     failedCount: 0,
     failed: [],
