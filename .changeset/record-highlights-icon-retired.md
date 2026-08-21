@@ -4,6 +4,8 @@
 
 feat(spec): retire `record:highlights` highlight-field `icon` — advertised on six surfaces, drawn by nothing (#10054, ADR-0049)
 
+<!-- adr-0087: registered record-highlights-field-icon-removed -->
+
 **BREAKING** accept-set narrowing, landing after the v17.0.0 cut (the lockstep
 launch-window convention ships it as `minor`; the migration prescription is
 registered under protocol major 18, where `os migrate meta` users will look).
