@@ -51,19 +51,27 @@
  * afternoon proving the sentence it quoted meant the opposite.
  *
  * This header used to state that as a property -- "cannot fabricate a lead".
- * It was not one. Measured on 2026-08-21 (#10427) by diffing this scan's mask
- * against `@typescript-eslint/parser`'s comment ranges over 4,733 files: 16
- * disagreed, and 15 of them in the FABRICATES direction, up to 10,252 comment
- * bytes handed to a caller as live code in a single file. The cause was the
- * template scan above; the same sweep after the fix disagrees on 0 files.
+ * It was not one. Measured on 2026-08-21 (#10427): walk every
+ * `.{ts,tsx,mts,cts,js,mjs,cjs,jsx}` file in the tree (minus `node_modules`,
+ * `dist`, `.next`, `build`, `.turbo`, `coverage`), parse each with
+ * `@typescript-eslint/parser` (`{ comment: true, range: true }`), and diff the
+ * comment ranges it reports against this scan's `comment` array byte for byte.
+ * Over 4,739 files, 16 disagreed -- 15 in the FABRICATES direction, up to
+ * 10,252 comment bytes handed to a caller as live code in a single file. The
+ * cause was the template scan above; the same sweep after the fix disagrees on
+ * 0 files.
  *
  * The lesson is about the claim, not the bug. A failure DIRECTION is a
  * property of an implementation, not of an intention, and this one cannot be
  * read off the code -- it took an independent parser over the whole tree to
  * find out which way the module actually failed. So the honest statement is
- * the one that can be re-derived: the shapes below are pinned, the sweep that
- * measured them is the way to check the rest, and neither direction is
- * promised by construction. Re-run it after touching `scanSource`.
+ * the one that can be re-derived: the shapes below are pinned, the sweep just
+ * described is the way to check the rest, and neither direction is promised by
+ * construction. Re-run it after touching `scanSource` -- and note that the
+ * sweep is the STRONGER instrument of the two. A mutation that deleted the
+ * brace counting inside `${...}` passed every case below AND the whole sweep,
+ * because the tree did not happen to write the shape; the case that now holds
+ * it was written from the mutation, not from the corpus.
  */
 
 /** A character that can end an identifier -- i.e. a value, so `/` is division. */
