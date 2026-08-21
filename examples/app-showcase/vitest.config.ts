@@ -39,6 +39,59 @@ export default defineConfig({
     ],
   },
   test: {
-    exclude: [...configDefaults.exclude, '**/e2e/**'],
+    // `test/fixtures/**` holds the deliberately-broken inputs that
+    // `test/vitest-console-teardown-race.test.ts` spawns vitest against. They
+    // are `*.test.ts` on purpose — that pin runs them with vitest's DEFAULT
+    // include and this very config, only with the fixture directory as `root`,
+    // at which point this exclude no longer matches them (it is evaluated
+    // against the path relative to the root in use). Collecting them here
+    // instead would import a leaked-console-log fixture into the app's own
+    // suite, i.e. arm the exact flake the pin exists to keep disarmed.
+    exclude: [...configDefaults.exclude, '**/e2e/**', 'test/fixtures/**'],
+
+    // ⛔ Do not remove without reading `test/vitest-console-teardown-race.test.ts`
+    // — that pin fails when this is off, and its ablation leg is what proves it.
+    //
+    // THE DEFECT (#10293, mechanism in #10374). vitest 4's worker replaces
+    // `console` with one that ships every write to the main thread over RPC.
+    // In `packages/vitest/dist/chunks/console.*.js`:
+    //
+    //     state().rpc.onUserConsoleLog({ type, content, taskId, ... });
+    //
+    // — the returned promise is DISCARDED. Teardown, in
+    // `packages/vitest/dist/chunks/init.*.js`, then does
+    // `await rpcDone()` followed by `$rejectPendingCalls(...)`, and `rpcDone()`
+    // awaits a SNAPSHOT (`Array.from(promises)`) taken when it is called. A
+    // console RPC created after that snapshot is still pending when
+    // `$rejectPendingCalls` runs, is rejected with `EnvironmentTeardownError`,
+    // and — because nobody kept the promise — surfaces as an UNHANDLED
+    // rejection. vitest fails a run on an unhandled error even when every
+    // assertion passed, so the observed signature is a green suite that exits
+    // 1: `Test Files 21 passed (21) / Tests 342 passed (342) / Errors 1 error`.
+    // Measured cost when it lands in the merge queue: the PR is dequeued and
+    // every speculative build behind it rebuilds.
+    //
+    // WHY THE WINDOW IS LOAD-DEPENDENT, which is why it reads as a flake: the
+    // window is the duration of `rpcDone()`, i.e. the time to complete the RPC
+    // round-trips already in flight. Idle that is ~1ms; on a saturated runner
+    // it is long enough for a leaked timer or poll to log inside it. Nothing
+    // about the code under test changes.
+    //
+    // WHY THIS SETTING AND NOT A QUIETER SUITE. Turning the interception off is
+    // vitest's own supported option, and it removes the MECHANISM rather than
+    // narrowing the trigger: with no RPC there is no pending call to reject, so
+    // no leak in any future test can redden a green run this way. It is also
+    // not a silencing: vitest's non-TTY default reporter sets
+    // `silent: 'passed-only'`, so today this app's console output from passing
+    // tests is discarded AFTER paying the round-trip. Written straight to the
+    // worker's stdout it is visible for the first time. Measured on this suite:
+    // 72 `onUserConsoleLog` calls per run, all currently discarded.
+    //
+    // WHAT IT COSTS. Console output loses vitest's `stdout | file > test`
+    // attribution header and its per-task buffering, so it interleaves in
+    // arrival order across forks — which is already how the bulk of this app's
+    // test output behaves, because ObjectQL's logger writes to `process.stdout`
+    // directly and never went through this path at all.
+    disableConsoleIntercept: true,
   },
 });
