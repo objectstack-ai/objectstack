@@ -3408,7 +3408,7 @@ function classifyRepoRead(tok, primary, repo) {
   if (repo.status === 404) {
     return {
       kind: 'repo-not-visible',
-      headline: `\`${OWNER_REPO}\` is not visible to this identity — the sweep would list nothing`,
+      headline: `\`${OWNER_REPO}\` is not visible to this identity — this container cannot read it`,
       detail: [
         `\`GET /rate_limit\` -> ${describeProbe(primary)}, but \`GET /repos/${OWNER_REPO}\` -> HTTP 404.`,
         ``,
@@ -3559,7 +3559,7 @@ export function classifyTransportProbe(obs) {
     return {
       kind: anonWorks ? 'bad-credential-anon-reachable' : 'bad-credential',
       headline: anonWorks
-        ? 'the token in the environment is not a valid GitHub credential — and it is the ONLY thing stopping the sweep'
+        ? 'the token in the environment is not a valid GitHub credential — and it is the ONLY thing stopping this container from reading'
         : 'the token in the environment is not a valid GitHub credential',
       detail: [
         `\`GET /rate_limit\` with GITHUB_TOKEN/GH_TOKEN = ${tok.redacted} -> ${describeProbe(primary)}.`,
@@ -3586,9 +3586,9 @@ export function classifyTransportProbe(obs) {
         ? [
             'GITHUB_TOKEN= GH_TOKEN= node scripts/pm/check-half-states.mjs',
             '  ↑ anonymous is 60 req/h and that quota is per EGRESS IP, shared with every',
-            '    other container behind it. This sweep spends one request per label page plus',
-            '    one per assigned pm-tracked card, so it can exhaust mid-run — which surfaces',
-            '    as another PREREQUISITE NOT MET, never as a short finding list.',
+            '    other container behind it. A request-heavy run can exhaust it mid-run,',
+            '    which then surfaces as another PREREQUISITE NOT MET, never as a short',
+            '    finding list.',
           ]
         : ['export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).'],
     };
@@ -6191,6 +6191,32 @@ function selfTest() {
   t('#7412 class 3 (cloud dev, measured): 401 + exhausted anon -> bad-credential', class3?.kind, 'bad-credential');
   t('…and it does NOT prescribe the token-less re-run', class3.fix.join(' ').includes('GITHUB_TOKEN= GH_TOKEN='), false);
   t('…and it names a real credential as the remedy', class3.fix[0].includes('a real GitHub token'), true);
+  // #10443: bad-credential and bad-credential-anon-reachable are shared with
+  // ci-failure.mjs (#9966), same as repo-scope-refused/host-unreachable/
+  // repo-not-visible above — a caller that runs no "sweep" and reads no
+  // "board". Cover both branches (anon-reachable and not).
+  {
+    const anonReachable = classifyTransportProbe({
+      token: 'prox_abcdefghi',
+      authed: { status: 401, rateLimitRemaining: null },
+      anon: { status: 200, rateLimitRemaining: 59 },
+    });
+    t(
+      "…and none of bad-credential-anon-reachable's prose names the sweep or the board read",
+      /the sweep|the board read/.test([anonReachable.headline, ...anonReachable.detail, ...anonReachable.fix].join(' ')),
+      false,
+    );
+    t(
+      '…and its headline instead speaks caller-neutrally about the container',
+      anonReachable.headline.includes('stopping this container from reading'),
+      true,
+    );
+  }
+  t(
+    "…and none of bad-credential's (anon-unusable) prose names the sweep or the board read",
+    /the sweep|the board read/.test([class3.headline, ...class3.detail, ...class3.fix].join(' ')),
+    false,
+  );
 
   // Class 4 — proxy-mediated cloud session, measured 2026-08-19 (#9946). The
   // account-scoped reading is not merely 200: it is GENUINELY GitHub's, with a
@@ -6277,6 +6303,23 @@ function selfTest() {
     classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }).fix[0].includes('PM_SWEEP_REPO'),
     true,
   );
+  // #10443: repo-not-visible is shared with ci-failure.mjs (#9966) exactly like
+  // repo-scope-refused above — a caller that runs no "sweep" and reads no
+  // "board", so its headline/detail/fix must describe what the CONTAINER
+  // cannot do, never what a caller-specific "sweep" would have found.
+  {
+    const notVisible404 = classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } });
+    t(
+      "…and none of repo-not-visible's prose (headline, detail, fix) names the sweep or the board read",
+      /the sweep|the board read/.test([notVisible404.headline, ...notVisible404.detail, ...notVisible404.fix].join(' ')),
+      false,
+    );
+    t(
+      '…and its headline instead speaks caller-neutrally about the container',
+      notVisible404.headline.includes('this container cannot read it'),
+      true,
+    );
+  }
   // A quota genuinely spent between the two stages wears the same 403 and has a
   // completely different remedy — it must not be reported as a scope refusal.
   t('repo-scoped 403 with remaining 0 is the quota, not a scope refusal', kind({ ...class4, repo: { status: 403, rateLimitRemaining: 0 } }), 'rate-limited');
