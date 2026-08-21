@@ -463,7 +463,8 @@ if (process.env.OS_TOOLING_PARSE_CENSUS) {
   process.on('exit', () => {
     const c = parseCensus();
     process.stderr.write(
-      `[ts-parse census] ${c.parses} parse(s) over ${c.files} distinct file name(s); ${c.refusals} refusal(s)\n`,
+      `[ts-parse census] ${c.parses} parse(s) over ${c.files} distinct file name(s) `
+        + `(${c.programs} program(s), ${c.transpiles} transpile(s)); ${c.refusals} refusal(s)\n`,
     );
   });
 }
