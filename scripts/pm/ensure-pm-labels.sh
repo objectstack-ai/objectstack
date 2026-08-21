@@ -36,7 +36,11 @@
 #
 # The label set IS the PM state machine (.claude/skills/pm-dispatch/SKILL.md,
 # "State model"): every label here is consumed by a named query or gate.
-# ⛔ The retired lanes (domain:ui; domain:spec-surface and domain:spec-tooling,
+# ⛔ The retired lanes (domain:ui — retired as a MAIN-repo lane and still absent
+# from the main-repo lane loop; the NAME re-entered circulation 2026-08-21 as an
+# objectui-repo STREAM label only, maintainer ruling 「按 domain:ui 定稿」 — see
+# the objectui stream block below, the same re-entry shape as domain:engine;
+# domain:spec-surface and domain:spec-tooling,
 # retired 2026-08-16 — maintainer ruling 「A」 merged both into the single
 # domain:spec lane, the sub-lane criteria surviving as the spec seat's dispatch
 # reference; domain:engine-core / domain:metadata / domain:drivers /
@@ -277,6 +281,29 @@ gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registr
 for D in engine services devx spec cli skills; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
+
+# objectui workload streams — maintainer rulings 2026-08-21, quoted verbatim:
+# 「B:两车道」→「现在本身就有 domain:devx」→「不要搞出那么多车道名称」→「也有
+# domain:spec」「其他就是 domain:ui ?」, naming finalized 「按 domain:ui 定稿」.
+# objectui cards are streamed by the domain of the surface their FIX lands on
+# (never by symptom location; docs cards follow the surface they document):
+# domain:devx (engineering face — .github/, scripts/, build/publish/release
+# pipeline, gate tooling) and domain:spec (contract face — packages/types, the
+# schema corpus, @objectstack/spec pin coupling) reuse the EXISTING cross-repo
+# lane names and are worked by those lanes exactly as main-repo cards are;
+# domain:ui is the ONE new label, named for the repo's own trade — the published
+# library (components, plugin-*, fields, layout, core) and the apps — worked by
+# the objectui execution seat. Cards whose landing surface is undetermined stay
+# unstreamed for triage first-touch rather than guessed. These rows create
+# objectui-repo label OBJECTS: the main-repo lane roster (the loop above) is
+# untouched, and the retired main-repo domain:ui lane stays retired there (see
+# the header). Named consumers: the objectui execution seat's candidate query
+# and the devx / spec lanes' cross-repo pulls (SKILL.md 多仓协调). Streaming
+# the existing objectui backlog is a triage duty once the vocabulary lands —
+# by file-path evidence, never guessed — not this script's.
+gh label create domain:devx -R objectstack-ai/objectui -c bfd4f2 -d "objectui devx stream: fix lands on .github/, scripts/ or release pipeline — devx lane cross-repo" 2>/dev/null || true
+gh label create domain:spec -R objectstack-ai/objectui -c bfd4f2 -d "objectui spec stream: fix lands on packages/types, schema corpus or spec pin coupling — spec lane" 2>/dev/null || true
+gh label create domain:ui   -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui stream: fix lands on the published library or apps — objectui execution seat" 2>/dev/null || true
 
 # Release board — `target:<major>` marks a release BLOCKER for that major
 # (SKILL.md "发版板"). Its consumer is a named query, one per backlog:

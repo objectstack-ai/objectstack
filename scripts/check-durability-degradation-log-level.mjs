@@ -240,6 +240,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = join(ROOT, 'scripts', 'durability-degradation.baseline.json');
@@ -2441,7 +2442,7 @@ function runReadSeamRule({ list = false } = {}) {
         for (const file of collectSourceFiles(join(ROOT, root))) {
             const text = readFileSync(file, 'utf8');
             if (!text.includes('catch')) continue;
-            const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+            const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
             analyzeReadSeams(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
                 usedDiscriminators,
             });
@@ -2716,7 +2717,7 @@ function run({ list = false } = {}) {
     for (const file of files) {
         const text = readFileSync(file, 'utf8');
         if (!text.includes('catch')) continue;
-        const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile(file, text, ts.ScriptKind.TS);
         analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), findings, seams, {
             usedPropagationSites,
             summaryBranches,
@@ -3815,7 +3816,7 @@ function selfTest() {
 
     let failures = 0;
     for (const c of cases) {
-        const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile('t.ts', c.code, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
         const summaryBranches = [];
@@ -4481,7 +4482,7 @@ function selfTestReadSeams() {
 
     let failures = 0;
     for (const c of cases) {
-        const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile('t.ts', c.code, ts.ScriptKind.TS);
         const findings = [];
         const seams = [];
         const usedDiscriminators = new Set();

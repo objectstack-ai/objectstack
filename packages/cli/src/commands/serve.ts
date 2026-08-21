@@ -2525,10 +2525,58 @@ export default class Serve extends Command {
             // ⚠️ The dependency is on the ORDER as much as on the overwrite:
             // this registration must stay ABOVE the stack's `plugins` loop, or
             // the CLI's option-less instance would supersede the app's
-            // configured one instead. #9863 remains open on its own question —
-            // whether `os serve` should grow an `appAuditPluginOptions(config)`
-            // helper like its `SecurityPlugin` sibling above, rather than
-            // reaching the capability only through a supersede.
+            // configured one instead — silently turning record-view auditing
+            // back OFF for every deployment that had opted in. That order is no
+            // longer held by this comment alone:
+            // `serve-audit-registration.contract.test.ts` fails on the
+            // inversion, and on the two facts below.
+            //
+            // ⚠️ It is also AUTH-GATED, which nothing had written down. This
+            // pair is registered by the `5d. Auto-register AuthPlugin (and
+            // paired Security/Audit)` branch, so an app that supplies its own
+            // AuthPlugin — or a production boot with no auth secret, or a host
+            // kernel — never reaches this line at all. There the app's
+            // `plugins` entry is the ONLY AuditPlugin and no supersede happens.
+            // The supersede is how the opt-in survives one particular boot
+            // shape; it is not the mechanism the opt-in is built on.
+            //
+            // [#9863, ruled 2026-08-20] NO `appAuditPluginOptions(config)`.
+            // The open question was whether to mirror the `SecurityPlugin`
+            // helper six lines up. Four measurements say no:
+            //
+            //   • #7001's REASON DOES NOT TRANSFER. That helper exists so two
+            //     boot paths could not disagree about one plugin's options.
+            //     `@objectstack/verify`'s `bootStack` constructs no AuditPlugin
+            //     at all and does not depend on `@objectstack/plugin-audit`, so
+            //     audit has exactly one boot path with an opinion and there is
+            //     no disagreement for a shared helper to close.
+            //   • IT WOULD HAVE NOTHING TO READ. `appSecurityPluginOptions`
+            //     derives from `config.permissions`, an already-declared spec
+            //     surface. There is no `audit` key in the stack schema and no
+            //     object-metadata audit field, so an audit helper means minting
+            //     an authorable surface, not reading one.
+            //   • THAT SURFACE IS THE SHAPE #8992 ALREADY REFUSED for the
+            //     object-metadata spelling (maintainer ruling 2026-08-16): a
+            //     declaration that survives in a deployment which never
+            //     installs the plugin — the import below is best-effort — i.e.
+            //     config that READS as audited and records nothing. On a
+            //     compliance surface that is worse than an absent feature.
+            //   • IT WOULD BE A SECOND SURFACE THAT SILENTLY LOSES TO THE
+            //     FIRST. An app setting both would have its config-derived
+            //     options superseded by its own `plugins` entry, by the very
+            //     contract above — a new footgun on the same capability.
+            //
+            // Measured pull for the surface: zero `readAudit` call sites in the
+            // repo outside `plugin-audit` itself. The reachability story is
+            // instead DOCUMENTED, now that #9864 made it a contract rather than
+            // the accident #9863 found: `content/docs/permissions/
+            // record-view-auditing.mdx` and the plugin README both spell the
+            // `plugins`-array opt-in and the `Plugin superseded:` line it logs.
+            //
+            // If the ruling is ever revisited, the site to argue about is
+            // `Serve.CAPABILITY_PROVIDERS.audit` — the `requires:` resolver is
+            // NOT auth-gated and already carries the `configKey` mechanism
+            // `analytics` uses — not this line.
             try {
               const auditPkg = '@objectstack/plugin-audit';
               const { AuditPlugin } = await import(/* webpackIgnore: true */ auditPkg);

@@ -37,6 +37,9 @@ import {
   withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
 import {
+  applyPlatformAdminImpersonation,
+} from './admin-impersonate-endpoint.js';
+import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
   isOrgAdminGrade,
@@ -2589,9 +2592,38 @@ export class AuthManager {
         // match ObjectStack's snake_case conventions (ban_reason,
         // ban_expires, impersonated_by). `role` and `banned` are already
         // snake_case-compatible.
-        return admin({
+        const adminPlugin: any = admin({
           schema: buildAdminPluginSchema(),
         });
+
+        // ADR-0068 D2 — re-authorize `/admin/impersonate-user` on ObjectStack's
+        // platform-admin predicate, IN PLACE on this plugin's own endpoints
+        // record. See `admin-impersonate-endpoint.ts` for the measurement that
+        // picked this shape over a second plugin (which boots and serves, but
+        // makes `checkEndpointConflicts` log an error on every start) and over
+        // a raw Hono mount (forbidden: hand-rolled signed cookies, and it would
+        // silently detach the #8243 rotation hook keyed on this path).
+        //
+        // Every OTHER better-auth-native `/admin/*` route still gates on the
+        // legacy scalar and still refuses platform admins — that is the parent
+        // card's remaining surface, deliberately untouched here.
+        const rewired = await applyPlatformAdminImpersonation(
+          adminPlugin,
+          (userId: string) => this.isPlatformAdminUserId(userId),
+        );
+        if (!rewired) {
+          // The vendor renamed or dropped the endpoint. Say so loudly: the
+          // route then falls back to the vendor's own handler, which refuses
+          // every platform admin — a broken button, not an open door.
+          console.error(
+            '[AuthManager] better-auth\'s admin plugin no longer exposes a ' +
+            '`impersonateUser` endpoint at /admin/impersonate-user, so the ' +
+            'ADR-0068 platform-admin authorization could NOT be applied. ' +
+            'Impersonation will refuse every ObjectStack platform admin until ' +
+            'admin-impersonate-endpoint.ts is updated for the new vendor shape.',
+          );
+        }
+        return adminPlugin;
       });
     }
 
@@ -4317,6 +4349,47 @@ export class AuthManager {
       }
     } catch { /* unresolved → null */ }
     return null;
+  }
+
+  /**
+   * ADR-0068 D2, asked on its own: is `userId` a PLATFORM admin — a
+   * `sys_user_permission_set` row pointing at the `admin_full_access`
+   * permission set with `organization_id = null` (seeded by
+   * `bootstrapPlatformAdmin`)?
+   *
+   * Deliberately NARROWER than {@link isOrgOrPlatformAdmin}: it does not admit
+   * organization owners/admins. Platform-admin routes must not be reachable by
+   * whoever happens to own an org (ADR-0068), so the two questions stay two
+   * methods.
+   *
+   * Reads through `withSystemReadContext` so the lookups are not themselves
+   * RLS-scoped to the acting — possibly non-privileged — user, and fails CLOSED
+   * (returns false) on any lookup error: this backs a security gate, and an
+   * unverifiable actor must never pass.
+   */
+  private async isPlatformAdminUserId(userId: string): Promise<boolean> {
+    if (!userId) return false;
+    const engine = this.getDataEngine();
+    if (!engine) return false;
+    try {
+      const sys = withSystemReadContext(engine);
+      const links = await sys.find('sys_user_permission_set', {
+        where: { user_id: userId },
+        limit: 50,
+      });
+      const platformLinks = (Array.isArray(links) ? links : []).filter(
+        (l: any) => !l.organization_id,
+      );
+      if (platformLinks.length === 0) return false;
+      const sets = await sys.find('sys_permission_set', { limit: 50 });
+      const adminSet = (Array.isArray(sets) ? sets : []).find(
+        (r: any) => r.name === 'admin_full_access',
+      );
+      if (!adminSet) return false;
+      return platformLinks.some((l: any) => l.permission_set_id === adminSet.id);
+    } catch {
+      return false;
+    }
   }
 
   /**

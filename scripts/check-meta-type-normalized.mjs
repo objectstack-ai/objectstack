@@ -82,6 +82,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -145,7 +146,7 @@ function walkFiles(dir, out) {
 /** Every raw-param decision site in one file. */
 function findViolations(file) {
     const text = readFileSync(file, 'utf8');
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const source = parseSourceFile(file, text);
     const found = [];
 
     const record = (node, kind) => {
@@ -198,7 +199,7 @@ function selfTest() {
         const ok2 = RestServer.metaTypeSingular(req.params.type) === 'book';
         const ok3 = metaType === 'doc';
     `;
-    const source = ts.createSourceFile('fixture.ts', fixture, ts.ScriptTarget.Latest, true);
+    const source = parseSourceFile('fixture.ts', fixture);
     const hits = [];
     const visit = (node) => {
         if (ts.isBinaryExpression(node) && COMPARISON_OPS.has(node.operatorToken.kind)

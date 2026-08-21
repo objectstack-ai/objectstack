@@ -842,6 +842,36 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/meta-object-primary-designation-roundtrip.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/meta-object-search-companion-roundtrip.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/meta-object-search-companion-roundtrip.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/meta-object-tenant-index-roundtrip.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/meta-object-tenant-index-roundtrip.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/package-disable-enforcement.test.ts",
       "verb": "delete",
       "pinned": 1

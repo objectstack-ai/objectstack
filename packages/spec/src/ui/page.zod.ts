@@ -562,8 +562,8 @@ export const PageSchema = lazySchema(() => strictObject({
   }).optional().describe('Slot override map for slotted pages'),
 
   /**
-   * JSX-source authoring (ADR-0080). When `kind === 'jsx'`, `source` is the
-   * source-of-truth: a constrained JSX text compiled by
+   * JSX-source authoring (ADR-0080). When `kind === 'html'` (alias `'jsx'`),
+   * `source` is the source-of-truth: a constrained JSX text compiled by
    * `@objectstack/sdui-parser` into the SchemaNode tree at SAVE time — parse,
    * never execute. `regions` then hold the DERIVED tree (a cache; the source
    * wins on any mismatch). For `full`/`slotted` pages `source` is unused.

@@ -1,6 +1,6 @@
 ---
 title: Doc Metadata
-description: Ship package documentation as metadata — flat src/docs/*.md files compiled into the manifest and rendered in the console
+description: Ship package documentation as metadata — flat src/docs/*.md files compiled into the manifest and rendered in the console, ordered by a book navigation spine
 ---
 
 # Doc Metadata
@@ -156,6 +156,170 @@ The CRM package manages accounts, contacts, and opportunities.
 
 Saved as `src/docs/crm_index.md`, this compiles to a `crm_index` doc and
 renders at `/docs/crm_index`.
+
+## Navigation: the `book` spine
+
+A doc is one page. A **Book** is the *spine* of a table of contents over many of them:
+an ordered set of groups (sections), plus the book's own identity and access. Flat
+`src/docs/*.md` files give you pages with no order; a book is what turns them into a
+navigable structure — and it is the only thing that does.
+
+A package ships **zero or more** books, and a book never owns content: one doc may
+surface in two books, or in none. Books are authored in `*.book.ts` files.
+
+### Membership is derived, never stored
+
+This is the load-bearing decision of the design ([ADR-0046](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0046-package-docs-as-metadata.md) §6.2.1),
+and it is why a book has no member array to keep up to date. A group declares a **rule**;
+the tree is computed against whatever docs exist at the moment it is requested.
+
+Precisely what derives it, in the order it runs:
+
+1. **Groups are ordered** by `group.order`, ties broken by declaration order.
+2. **Each doc joins the first group that claims it** — the first group, in that order,
+   whose `include` rule matches the doc **or** whose `key` equals the doc's own `group`.
+   First claim wins, so a doc never appears twice.
+3. **Within a group, docs sort by `doc.order`, then by label** (falling back to the doc
+   name).
+4. **Anything claimed by nobody is appended last** in a synthetic *Uncategorized* group.
+   Nothing is ever dropped.
+
+So the AI-authoring property the design was built for holds: create a doc whose name
+matches a rule and it files itself. There is no central array to read, modify and write
+back — which is the edit that drops or reorders siblings when two authors do it at once,
+and the one that package overlay cannot merge.
+
+An `include` rule takes one of two forms:
+
+- **A glob over doc names** — `'crm_guide_*'`. Only `*` is special and it is anchored to
+  the whole name.
+- **A tag** — `{ tag: 'tutorial' }`, matched against the doc's `tags`. Use it for
+  membership that cuts across naming; prefer a name convention when one exists.
+
+`group.package` scopes a rule to one package id (default: the book's own), so a group can
+deliberately gather docs another package ships.
+
+### The three per-doc keys the spine reads
+
+| Key | Effect | Set from |
+| :--- | :--- | :--- |
+| `order` | sort position within the group that claims the doc | frontmatter `order:` |
+| `group` | explicit placement — the `key` of the group this doc belongs to, used when no rule expresses it | frontmatter `group:` |
+| `tags` | the operand of a group's `include: { tag }` rule | **not read from frontmatter** — see below |
+
+<Callout type="warn">
+**`tags` cannot be set from a `src/docs/*.md` file today.** The frontmatter reader
+extracts single-line scalars — `title`, `description`, `order`, `group` — and has no case
+for a list, so a `tags:` block in a Markdown doc is not collected and the doc reaches the
+resolver with no tags. The schema key and the matcher are both live, so a doc declared
+programmatically in a stack's `docs` array does carry tags and does match. For the flat
+Markdown path, express the grouping with a name glob instead.
+</Callout>
+
+### Identity and access
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `name` | `string` | ✅ | Machine name (`snake_case`), namespace-prefixed like every metadata name |
+| `label` | `string` | — | Display title |
+| `description` | `string` | — | One-line summary |
+| `slug` | `string` | — | Portal URL segment; defaults to the name without its prefix |
+| `icon` | `string` | — | Icon name |
+| `order` | `number` | — | Orders this book among the portal's books |
+| `audience` | `'org' \| 'public' \| { permissionSet }` | — | Who may read it; defaults to `'org'` |
+| `groups` | `BookGroup[]` | ✅ | The spine. Two levels total — groups, then entries |
+
+`audience` is a reference into the permission model rather than a vocabulary of its own:
+`'org'` (the default) inherits the package grant and admits any signed-in principal,
+`'public'` is anonymously readable and indexable, and `{ permissionSet: 'crm_admin' }`
+admits a signed-in principal holding that named set. A caller whose holdings cannot be
+resolved is denied — the gate fails closed.
+
+<Callout type="info">
+The gate is a **capability** reference, never a distribution one: packages own permission
+sets but never positions, so a package gating its own Admin Guide keeps provenance and
+uninstall semantics intact. (ADR-0046 §6.7 sketched this as `{ profile }`; the shipped
+key is `permissionSet`, per ADR-0090.)
+</Callout>
+
+### A worked example
+
+Saved as `src/books/crm_docs.book.ts`, alongside the `crm_index` doc from the previous
+section:
+
+{/* os:check */}
+```typescript
+import { defineBook } from '@objectstack/spec/system';
+
+export const CrmDocsBook = defineBook({
+  name: 'crm_docs',
+  label: 'CRM Documentation',
+  slug: 'crm',
+  audience: 'org',
+  groups: [
+    {
+      key: 'overview',
+      label: 'Overview',
+      order: 1,
+      // Hand-pinned order; `...` sweeps in anything else the rule would match.
+      include: 'crm_index*',
+      pages: ['crm_index', '---', '...'],
+    },
+    {
+      key: 'guides',
+      label: 'User Guides',
+      order: 2,
+      include: 'crm_guide_*',          // crm_guide_leads, crm_guide_accounts, …
+    },
+    {
+      key: 'admin',
+      label: 'Administration',
+      order: 3,
+      include: 'crm_admin_*',
+      // This section alone is gated; the rest of the book stays 'org'-visible
+      // because the doc's effective audience is the union over claiming books.
+    },
+  ],
+});
+```
+
+A group may pin its order by hand instead of deriving it. `pages` wins over `include` for
+that group and takes doc names plus two literals: `'---'` renders a separator, and `'...'`
+expands to *the rest* — every doc the group's rule would have claimed but that no entry
+names, in `order`-then-label sequence. An entry can also be an object to attach a `label`
+override, a `badge` or an `icon`, or to point at an external `href` instead of a doc.
+
+<Callout type="warn">
+Inline `translations` on a **book** or a **book group** is rejected: no resolver ever read
+it, so a localized spine shipped its authoring-locale strings to every reader. The near
+neighbour that *does* work is `doc.translations`, read on every doc render path — localize
+the docs themselves.
+</Callout>
+
+### How `doc` and `book` compose
+
+The two kinds have a clean split, and the direction of reference only goes one way:
+
+- A **doc** carries the content and, optionally, three scalars that let a spine place it
+  (`order`, `group`, `tags`). It names no book.
+- A **book** carries the structure and names no docs — except in a `pages` override, which
+  is the deliberate escape hatch.
+
+The rendered tree is resolved on read, not on write:
+`GET /api/v1/meta/book/<name>/tree` fetches the book and the current doc set and returns
+the resolved groups and entries. Two behaviours follow from that:
+
+- **A name that matches no authored book is treated as a package id** and resolved against
+  the *implicit* per-package book — one group, `include: '*'`, audience `'org'`. There is
+  no "flat versus book" fork in the model; a package that authors no book still has one,
+  and that is what renders the flat case.
+- **Access is filtered twice.** The book's `audience` gates the whole tree (401 anonymous,
+  403 for a missing permission set), and then each entry is filtered by its doc's own
+  effective audience — the union over every book claiming it, defaulting to `'org'` for a
+  doc no book claims. An anonymous reader of a public book therefore never sees a nav
+  entry that would fail on fetch. Orphans in the *Uncategorized* group are deliberately
+  excluded from what a book "claims", so an unclaimed doc can never ride a public book out
+  of the tenant.
 
 ## Next Steps
 

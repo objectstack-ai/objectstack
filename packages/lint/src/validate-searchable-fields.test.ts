@@ -351,9 +351,15 @@ describe('validateSearchableFields — list views that narrow the set', () => {
     expect(findings[0].path).toBe('views[0].searchableFields[1]');
   });
 
-  it('does NOT read a ViewItem record\'s top level as an overlay (#9313)', () => {
-    // The record shape carries its set in `config` — a different rung,
-    // deliberately not walked (recorded scope; see the sort twin's module note).
+  // ── [#10001] the RECORD rung: a standalone ViewItem record ──
+  //
+  // The record shape (`ViewMetadataSchema`'s member 1) carries its set one
+  // level down, in `config`. The test that stood here pinned the #9313
+  // boundary ("a different rung, deliberately not walked"); #10001 closes
+  // that recorded scope — recogniser and binding order mirrored from the
+  // sort twin, which carries the full note.
+
+  it('flags a stale entry on a ViewItem record\'s nested `config.searchableFields` (#10001)', () => {
     const findings = validateSearchableFields({
       objects: [objectWithFields],
       views: [
@@ -362,6 +368,53 @@ describe('validateSearchableFields — list views that narrow the set', () => {
           object: 'crm_account',
           viewKind: 'list',
           config: { type: 'grid', columns: ['name'], searchableFields: ['email'] },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNKNOWN);
+    expect(findings[0].path).toBe('views[0].config.searchableFields[0]');
+    expect(findings[0].where).toBe('view "crm_account.pipeline" (ViewItem record)');
+  });
+
+  it('judges a record\'s set as a NARROWING — the #4830 admissibility applies (#10001)', () => {
+    // A lookup-typed entry in the record's config set is echoed as the
+    // `$searchFields` override on the view's toolbar search, the same as
+    // every other list-view surface.
+    const findings = validateSearchableFields({
+      objects: [
+        {
+          name: 'crm_case',
+          fields: { name: { type: 'text' }, account_id: { type: 'lookup' } },
+        },
+      ],
+      views: [
+        {
+          name: 'crm_case.mine',
+          object: 'crm_case',
+          viewKind: 'list',
+          config: { type: 'grid', searchableFields: ['name', 'account_id'] },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(findings[0].path).toBe('views[0].config.searchableFields[1]');
+  });
+
+  it('still does NOT read a record\'s top level as an overlay (#10001)', () => {
+    // A record carrying a stray top-level set (`saveMetaItem` persists the
+    // original body) is judged on `config.searchableFields` alone — the
+    // overlay rung's `!isRec(config)` guard holds, exactly as before #10001.
+    const findings = validateSearchableFields({
+      objects: [objectWithFields],
+      views: [
+        {
+          name: 'crm_account.pipeline',
+          object: 'crm_account',
+          viewKind: 'list',
+          searchableFields: ['not_a_field'],
+          config: { type: 'grid', columns: ['name'], searchableFields: ['name'] },
         },
       ],
     });

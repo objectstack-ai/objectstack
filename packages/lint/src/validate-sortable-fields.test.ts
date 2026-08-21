@@ -314,11 +314,19 @@ describe('validateSortableFields — the surfaces it walks', () => {
     expect(findings[0].message).toContain('crm_task');
   });
 
-  it('does NOT read a ViewItem record\'s top level as an overlay (#9313)', () => {
-    // `{ viewKind, config }` is the RECORD shape — its sort lives in `config`,
-    // a rung this rule deliberately does not walk (recorded scope, see the
-    // module note). The structural guard is `config` being a record, mirroring
-    // the wire schema's own member discrimination.
+  // ── [#10001] the RECORD rung: a standalone ViewItem record ──
+  //
+  // `{ name, object, viewKind: 'list', config }` is `ViewMetadataSchema`'s
+  // member 1 (`ViewItemWireSchema`) — the shape a Studio-saved view takes
+  // through `PUT /api/v1/meta/view`, whose `sort` lives one level down in
+  // `config`. The test that stood here pinned the #9313 boundary ("its sort
+  // lives in `config`, a rung this rule deliberately does not walk"); #10001
+  // closes that recorded scope, and the rung is recognised by the wire
+  // schema's own member discrimination: `viewKind: 'list'` AND a
+  // record-shaped `config` — the exact complement of the overlay rung's
+  // `!isRec(config)` guard.
+
+  it('walks a ViewItem record\'s nested `config.sort` (#10001)', () => {
     const findings = validateSortableFields({
       objects: [{ name: 'crm_lead', fields }],
       views: [
@@ -330,7 +338,111 @@ describe('validateSortableFields — the surfaces it walks', () => {
         },
       ],
     });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].where).toBe('view "crm_lead.pipeline" (ViewItem record)');
+    expect(findings[0].path).toBe('views[0].config.sort[0]');
+  });
+
+  it('honors the record config\'s `data.object` retarget over the record\'s `object` (#10001)', () => {
+    const findings = validateSortableFields({
+      objects: [
+        { name: 'crm_lead', fields: { name: { type: 'text' } } },
+        { name: 'crm_task', fields: { age: { type: 'formula' } } },
+      ],
+      views: [
+        {
+          name: 'crm_lead.tasks',
+          object: 'crm_lead',
+          viewKind: 'list',
+          config: {
+            type: 'grid',
+            data: { provider: 'object', object: 'crm_task' },
+            sort: [{ field: 'age', order: 'desc' }],
+          },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('crm_task');
+  });
+
+  it('still does NOT read a ViewItem record\'s top level as an overlay (#10001)', () => {
+    // The rung-split half the record rung must not disturb: a record carrying
+    // a stray top-level `sort` (`saveMetaItem` persists the original body) is
+    // judged on `config.sort` alone — the overlay rung's `!isRec(config)`
+    // guard keeps the record's top level out, exactly as before #10001.
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'crm_lead.pipeline',
+          object: 'crm_lead',
+          viewKind: 'list',
+          sort: [{ field: 'not_a_field', order: 'asc' }],
+          config: { type: 'grid', columns: ['name'], sort: [{ field: 'name', order: 'asc' }] },
+        },
+      ],
+    });
     expect(findings).toEqual([]);
+  });
+
+  it('a FORM record\'s config is not judged — the rung keys on viewKind \'list\' (#10001)', () => {
+    // `FormViewSchema` declares no `sort`; a stray one riding in the stored
+    // body (the store keeps the original) must not be judged by a list rule.
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'crm_lead.edit',
+          object: 'crm_lead',
+          viewKind: 'form',
+          config: { type: 'simple', sort: [{ field: 'score', order: 'desc' }] },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('each list-view rung is judged exactly once — no rung double-judges another\'s shape (#10001)', () => {
+    // One bad sort per rung in a single stack: object listView, container
+    // `list`, flattened overlay, ViewItem record. Exactly four findings, one
+    // per declared path — a leak or double judgment changes the census.
+    const findings = validateSortableFields({
+      objects: [
+        {
+          name: 'crm_lead',
+          fields,
+          listViews: { aging: { type: 'grid', sort: [{ field: 'score', order: 'desc' }] } },
+        },
+      ],
+      views: [
+        {
+          name: 'lead_views',
+          objectName: 'crm_lead',
+          list: { type: 'grid', sort: [{ field: 'score', order: 'desc' }] },
+        },
+        {
+          name: 'crm_lead.hot',
+          object: 'crm_lead',
+          viewKind: 'list',
+          type: 'grid',
+          sort: [{ field: 'score', order: 'desc' }],
+        },
+        {
+          name: 'crm_lead.pipeline',
+          object: 'crm_lead',
+          viewKind: 'list',
+          config: { type: 'grid', sort: [{ field: 'score', order: 'desc' }] },
+        },
+      ],
+    });
+    expect(findings.map((f) => f.path).sort()).toEqual([
+      'objects[0].listViews.aging.sort[0]',
+      'views[0].list.sort[0]',
+      'views[1].sort[0]',
+      'views[2].config.sort[0]',
+    ]);
   });
 
   it('a form overlay has no sort surface and is not judged (#9313)', () => {

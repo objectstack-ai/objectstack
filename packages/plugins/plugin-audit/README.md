@@ -179,6 +179,33 @@ claim.
 - an empty (or fully excluded) set registers **no hook at all**, so a deployment that opts
   nothing in pays nothing on its read path.
 
+### Turning it on under `os serve`
+
+"The place the plugin is installed" is a kernel you compose yourself in most of this
+README. On the `objectstack serve` boot path it is your stack's `plugins` array:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+
+const stack = defineStack({
+  plugins: [new AuditPlugin({ readAudit: { objects: ['contact', 'account'] } })],
+});
+```
+
+The CLI may auto-register an option-less `AuditPlugin` of its own earlier in the same boot.
+When it has, yours **supersedes** it: registering a plugin whose `name` is already taken
+overwrites the earlier registration — last-one-wins, on both `ObjectKernel` and
+`LiteKernel`, with a `warn` naming both versions, and the displaced instance never reaches
+`init()`. That is a declared contract (`packages/core/src/plugin-registration.ts`), not an
+ordering accident, so a `Plugin superseded: 'com.objectstack.audit'` line in the boot log
+is this opt-in working.
+
+⛔ There is no stack-config key for the audited set, for the same reason there is no
+object-metadata key: a key in `objectstack.config.ts` survives in a deployment that never
+installs this package, and would read as coverage while recording nothing. `requires:
+['audit']` loads the plugin but constructs it with no options — it cannot name objects.
+
 ### Only record-detail views produce a row
 
 A read is recorded when **both** hold:

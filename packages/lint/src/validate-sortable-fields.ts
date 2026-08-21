@@ -91,6 +91,13 @@
  *     without this rung the dispatch widening (#9313's other half) would be
  *     a silent no-op that reads as coverage. See the self rung note at the
  *     walk below for how the shape is recognised.
+ *   - `views[].config.sort` on a standalone ViewItem RECORD (#10001) — the
+ *     wire union's OTHER standalone member (`ViewItemWireSchema`,
+ *     `{ name, object, viewKind: 'list', config }`), through the same door:
+ *     objectui's `updateView` round-trips the whole record on every
+ *     pin/reorder toggle, `config` included. Judged against
+ *     `listViewObject(config) ?? entry.object`; the record rung note at the
+ *     walk below carries the recogniser.
  *
  * NOT walked, each verified against the schema rather than assumed:
  *
@@ -127,9 +134,8 @@
  * #4463 P2 gap this module's first landing recorded — and is walked since
  * #9313 (the self rung above). Its sibling shape, a standalone ViewItem
  * RECORD (`{ name, object, viewKind, config }` — `config.sort` one level
- * down), is NOT walked here: #9313's scope is the flattened overlay, and the
- * record shape is recorded as its own follow-up rather than silently ridden
- * along.
+ * down), was #9313's recorded follow-up scope and is walked since #10001
+ * (the record rung above).
  *
  * ── Skips, matching the search axis one for one (ADR-0072 D1) ────────────
  *
@@ -450,8 +456,8 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     // `viewKind: 'list'` (REQUIRED on the overlay arm since #7741, and a key
     // the strict container schema refuses by name, so a container can never
     // match) with no nested `config` (a body carrying one is a ViewItem
-    // RECORD, whose `config.sort` is a different rung — deliberately not
-    // walked here, see the module note). `view-walk.ts` established the same
+    // RECORD, judged by its own record rung below since #10001).
+    // `view-walk.ts` established the same
     // `self` rung for the section-carrying shapes; this is its list twin.
     //
     // The binding order matches every other list-view rung: the overlay's own
@@ -465,6 +471,42 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
         listViewObject(view) ?? viewObject,
         `view "${viewLabel}" (flattened list overlay)`,
         `views[${vi}].sort`,
+        'list-view sort',
+      );
+    }
+
+    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    //
+    // The self rung's structural complement — `ViewMetadataSchema`'s member 1
+    // (`ViewItemWireSchema`): `{ name, object, viewKind: 'list', config }`,
+    // the shape a Studio-saved view takes through `PUT /api/v1/meta/view`,
+    // with its `sort` one level down inside `config`. A hot wire shape, not a
+    // corner: objectui's `updateView` GETs the stored record and PUTs
+    // `{ ...current, ...partial }` (`view.zod.ts`'s #5074 trace), so every
+    // pin/reorder toggle round-trips the whole record, `config` included —
+    // and before this rung a record whose `config.sort` named nothing
+    // published through the runtime gate in silence, then answered
+    // `400 INVALID_SORT` on the view's first fetch (#6994/#7095), every load.
+    //
+    // Recognised by the wire schema's own member discrimination, exactly as
+    // the self rung recognises its member: `viewKind: 'list'` AND a
+    // record-shaped `config` (the union's own record/overlay split; a strict
+    // container can carry neither key, and a `form` record's
+    // `FormViewSchema` config declares no sort surface). The binding order
+    // matches every other list-view rung: the CONFIG's own `data.object`
+    // (ADR-0047 explicit retarget — a record's data binding lives on its
+    // config) ahead of the record's required top-level `object`.
+    // `config.sort[].id` row decorations (#5074) ride through `readSortKeys`
+    // unchanged. The record's top LEVEL is deliberately still not read: any
+    // stray `sort` riding beside `config` in the stored body (`saveMetaItem`
+    // persists the original) is a key the wire schema strips and no runtime
+    // read path serves — judging it would be a false-positive channel.
+    if (view.viewKind === 'list' && isRec(view.config)) {
+      check(
+        view.config.sort,
+        listViewObject(view.config) ?? viewObject,
+        `view "${viewLabel}" (ViewItem record)`,
+        `views[${vi}].config.sort`,
         'list-view sort',
       );
     }

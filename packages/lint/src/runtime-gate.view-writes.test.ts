@@ -1,7 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // #9313 — the two list-view FIELD rules at the runtime publish gate, on the
-// flattened standalone list overlay.
+// flattened standalone list overlay. #10001 extends the same door onto the
+// standalone ViewItem RECORD (`config.sort` / `config.searchableFields`, one
+// level down) — the boundary marker #9313 left here is flipped in the record
+// block below.
 //
 // The card's own trap, restated because every test here exists to spring it:
 // widening the reference-integrity suite's `runtimeTypes` to `view` is
@@ -176,22 +179,122 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     expect(offFlow).toEqual([]);
   });
 
-  // ── the shapes this card deliberately does not judge ──
+  // ── [#10001] the ViewItem RECORD rung — the #9313 boundary marker, flipped ──
+  //
+  // The test that stood here pinned the opposite: "a ViewItem RECORD's nested
+  // `config.sort` is not judged here — recorded scope, not a rung that fell
+  // off". That marker kept the gap RECORDED until its own card; #10001 is that
+  // card, and this block is the rung's proof. The record is
+  // `ViewMetadataSchema`'s member 1 (`ViewItemWireSchema`,
+  // `{ name, object, viewKind: 'list', config }`) — the shape a Studio-saved
+  // view takes through `PUT /api/v1/meta/view`, and a hot one: objectui's
+  // `updateView` GETs the stored record and PUTs `{ ...current, ...partial }`
+  // (`view.zod.ts`'s #5074 trace), so every pin/reorder toggle round-trips the
+  // whole record, `config` included.
 
-  it('a ViewItem RECORD\'s nested `config.sort` is not judged here — recorded scope, not a rung that fell off', () => {
-    // `{ name, object, viewKind, config }` is `ViewMetadataSchema`'s member 1;
-    // its bad sort lives one level down, in `config`, which no walk reads.
-    // #9313's scope is the flattened overlay (the fence in the claim), and the
-    // record shape is filed as its own follow-up — this pin is the boundary
-    // marker that keeps the gap RECORDED instead of rediscovered.
-    const record = {
-      name: 'crm_case.pipeline',
+  /** A ViewItem record as `saveMetaItem` stores it (original body, verbatim). */
+  const record = (
+    configPatch: Record<string, unknown>,
+    patch: Record<string, unknown> = {},
+  ) => ({
+    name: 'crm_case.pipeline',
+    object: 'crm_case',
+    viewKind: 'list',
+    config: { type: 'grid', columns: ['name'], ...configPatch },
+    ...patch,
+  });
+
+  it('REFUSES a record\'s `config.sort` naming an unknown field — the flipped boundary marker (#10001)', () => {
+    const { errors } = gate(record({ sort: [{ field: 'amout', order: 'desc' }] }));
+    const f = errors.find((e) => e.rule === SORT_FIELD_UNKNOWN);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].config.sort[0]');
+    expect(f!.where).toContain('ViewItem record');
+  });
+
+  it('REFUSES a record\'s `config.sort` naming a formula field — no column to ORDER BY (#10001)', () => {
+    const { errors } = gate(record({ sort: [{ field: 'days_open', order: 'desc' }] }));
+    const f = errors.find((e) => e.rule === SORT_FIELD_UNSORTABLE);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].config.sort[0]');
+  });
+
+  it('REFUSES a record\'s `config.searchableFields` entry that resolves to no field (#10001)', () => {
+    const { errors } = gate(record({ searchableFields: ['name', 'budget'] }));
+    const f = errors.find((e) => e.rule === SEARCHABLE_FIELD_UNKNOWN);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].config.searchableFields[1]');
+  });
+
+  it('honors the record config\'s own `data.object` binding over the record\'s `object` (#10001)', () => {
+    // ADR-0047's explicit retarget, resolved on the CONFIG (where a record's
+    // data binding lives), ahead of the record's top-level `object` — the
+    // same order every other list-view rung reads.
+    const { errors } = gate(record(
+      { data: { provider: 'object', object: 'crm_case' }, sort: 'nonexistent_field desc' },
+      { object: 'crm_other' },
+    ));
+    expect(errors.map((e) => e.rule)).toContain(SORT_FIELD_UNKNOWN);
+  });
+
+  it('a console-shaped record round-trip publishes clean — `updateView`\'s merged PUT, decorations and all (#10001)', () => {
+    // `{ ...current, ...partial }`: `isPinned`/`sortOrder` at the top,
+    // `config.sort[].id` carrying objectui's `crypto.randomUUID()` row ids
+    // (#5074) — `saveMetaItem` persists the original body, so the gate judges
+    // exactly this shape.
+    const result = gate(record(
+      {
+        sort: [{ id: 'a2b4c86e-1111-4111-8111-000000000003', field: 'status', order: 'asc' }],
+        searchableFields: ['name'],
+      },
+      { isPinned: true, sortOrder: 2 },
+    ));
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+  });
+
+  it('judges a record on its `config` rung ONLY — a stray top-level `sort` is not judged as an overlay (#10001)', () => {
+    // The rung-split control. The overlay rung's `!isRec(config)` guard keeps
+    // record bodies out, and the record rung reads `config` alone — so a
+    // record carrying a stray top-level `sort` (the wire schema strips the
+    // key, but `saveMetaItem` persists the ORIGINAL body) yields exactly one
+    // finding, on the config path. Two findings here = the rungs leaked into
+    // each other's shapes; a top-level-path finding = the record was read as
+    // an overlay. Both are the drift this control exists to catch.
+    const { errors } = gate(record(
+      { sort: [{ field: 'amout', order: 'desc' }] },
+      { sort: [{ field: 'also_not_a_field', order: 'asc' }] },
+    ));
+    const sortFindings = errors.filter((e) => e.rule === SORT_FIELD_UNKNOWN);
+    expect(sortFindings, JSON.stringify(errors)).toHaveLength(1);
+    expect(sortFindings[0].path).toBe('views[0].config.sort[0]');
+  });
+
+  it('a FORM record\'s config declares no list-field surface and is not judged (#10001)', () => {
+    // The rung keys on `viewKind: 'list'`, mirroring the overlay rung and the
+    // wire union's own arms: a `form` record carries `FormViewSchema` config,
+    // which has no `sort` / `searchableFields` — a stray one riding in the
+    // stored body must not be judged by a list-view rule.
+    const { errors } = gate({
+      name: 'crm_case.edit',
       object: 'crm_case',
-      viewKind: 'list',
-      config: { type: 'grid', columns: ['name'], sort: [{ field: 'amout', order: 'desc' }] },
-    };
-    const { errors } = gate(record);
+      viewKind: 'form',
+      config: { type: 'simple', fields: ['name'], sort: [{ field: 'amout', order: 'desc' }] },
+    });
     expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
+  // ── positive control: the pre-#10001 rungs behave EXACTLY as before ──
+
+  it('the flattened overlay is judged exactly once, on its top-level path — no record-rung leak (#10001)', () => {
+    // Passes on origin/main BEFORE the record rung and must keep passing
+    // after: one finding, top-level path. A `config`-rung leak into the
+    // overlay shape would move the path; a double judgment would add one.
+    const { errors } = gate(overlay({ sort: [{ field: 'amout', order: 'desc' }] }));
+    const sortFindings = errors.filter((e) => e.rule === SORT_FIELD_UNKNOWN);
+    expect(sortFindings, JSON.stringify(errors)).toHaveLength(1);
+    expect(sortFindings[0].path).toBe('views[0].sort[0]');
+    expect(sortFindings[0].where).toContain('flattened list overlay');
   });
 
   // ── the D4 differential, on the newly reachable rules ──

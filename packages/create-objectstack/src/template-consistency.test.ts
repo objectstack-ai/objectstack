@@ -288,7 +288,13 @@ describe('templates survive npm packing', () => {
   it('restores the aliased names when scaffolding', () => {
     const expected = walkRel(blankSrc).map(scaffoldedAs).sort();
     expect(scaffolded.sort()).toEqual(expected);
-    // What the CLI prints as "Created files:" must match what it actually wrote.
+    // `copyDir`'s collected array must match what the copy actually wrote.
+    // It is NOT the "Created files:" summary and has not been since that
+    // summary became a walk of the finished project directory: the copy runs
+    // before `<pm> install` and the skills installer, so a list built here
+    // could never name what they write (created-summary.ts carries the
+    // measurement). This still pins the copy — `loadBundled` returns it, and
+    // the run reports its length as the template-file count.
     expect(collected.sort()).toEqual(expected);
   });
 
