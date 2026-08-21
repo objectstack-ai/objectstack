@@ -142,6 +142,58 @@ const CODE_POSITION_PATTERNS = [
     name: 'fallback',
     re: /(?:\bcode\s*\??\s*:|\.code\s*=(?!=))\s*(?![`'"])[\w$.?!()[\]|&\s]{0,80}?(?:\|\||\?\?)\s*'([a-z][a-z0-9_]*)'/g,
   },
+  // [#10897] The SAME our-default slot, one indirection EARLIER — in the
+  // initializer of a `code`-named local, rather than at the stamp site:
+  //
+  //   const code = parsed?.code || 'lower_thing';   err.code = code;
+  //   const code: string = e?.code ?? 'lower_thing';
+  //
+  // The pattern above anchors on the POSITION token (`code:` / `code?:` /
+  // `.code =`), so it reaches a fallback chain only where the chain sits AT
+  // the stamp site. `const code =` is neither spelling, and a TYPE ANNOTATION
+  // does not rescue it: `const code: string = …` does match `code:`, but then
+  // the gap has to cross an `=`, which that character class refuses on purpose
+  // (refusing `=` is part of what stops a match leaping out of one property's
+  // value into a neighbour's). So both spellings matched nothing.
+  //
+  // And nothing else saw them either — this was a hole between two gates, not
+  // a hand-off. `check:dispatcher-error-vocabulary` does reach the local:
+  // `err.code = code` is its `codehelper`/`assignconst` shape, and its
+  // `resolveConstant` reduces a local whose initializer is a ternary or a
+  // chain OF LITERALS (#9568). But that reduction is ALL-OR-NOTHING by design:
+  // one runtime limb (`parsed?.code`) reduces the whole chain to nothing,
+  // because half an expression's values is a finding wrong in both directions
+  // at once. That bound is deliberate, correct, and unchanged by this pattern.
+  //
+  // Which leaves the literal half to this gate, on exactly the reasoning
+  // #10760 published for the stamp site: the capture is still only ever a
+  // STRING LITERAL, and a literal in our source is by construction ours — the
+  // default WE author, which is the operand ADR-0112 D1 governs. A vendor code
+  // passing through is a RUNTIME value with no literal to capture. WHERE we
+  // write the chain does not change whose default it is; the asymmetry between
+  // the two positions was an artifact of where the recognizer anchored, not a
+  // decision anyone took.
+  //
+  // The delegation runs the OTHER way for a local this gate must NOT touch: an
+  // all-literal initializer (`const code = 'lower_thing'`, a ternary of
+  // literals, a chain of literals) IS reducible, so the dispatcher gate emits
+  // a site for it under `assignconst` — measured, all three cases, lowercase
+  // included. The lookahead `(?!['"`])` and the gap class (which admits no
+  // quote at all) together keep this pattern off the head of such a chain, so
+  // the two gates never both report one literal.
+  //
+  // The annotation gap is `[^=;\n]`, the spelling `check-dispatcher-error-
+  // vocabulary`'s own `classfield` uses for this same job, so it cannot
+  // swallow the `=` it is meant to stop before. Everything after the `=` is
+  // the pattern above's gap class and tail verbatim: same operand alphabet,
+  // same 80-char runaway bound, same lowercase value space — an uppercase
+  // default stays out of it, and every filter in `findViolations` (D6
+  // field-addressed, NOT_CODES, `adr0112-ok:`) still applies. All pinned in
+  // --self-test, in both directions.
+  {
+    name: 'local-fallback',
+    re: /\b(?:const|let|var)\s+code\s*(?::[^=;\n]+)?=\s*(?![`'"])[\w$.?!()[\]|&\s]{0,80}?(?:\|\||\?\?)\s*'([a-z][a-z0-9_]*)'/g,
+  },
 ];
 
 /**
@@ -289,6 +341,37 @@ function selfTest() {
       `error: { code: a.b.c.${'d'.repeat(90)} || 'far_away_failed', message }`,
       0,
       'the gap is bounded: a runaway expression is a declared miss, not a leap',
+    ],
+
+    // [#10897] The same our-default slot in a LOCAL'S INITIALIZER. Pinned as a
+    // pair with the stamp-site spellings for the same reason those were pinned
+    // as a pair with the direct one: a recognizer that reached the new position
+    // by breaking an older one would pass a self-test that only pinned the new
+    // position. Every case below carries the error-shaped neighbour the filters
+    // require, positive AND negative — a zero that comes from a MISSING
+    // neighbour would be a broken probe testing nothing about the recognizer.
+    [`const code = parsed?.code || 'local_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'our default in an untyped local initializer'],
+    [`const code: string = parsed?.code ?? 'typed_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'our default in a TYPED local initializer (the annotation is what puts an = in the gap)'],
+    [`let code = e?.code || 'let_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'let, not only const'],
+    [`const code = a?.code || b?.code || 'local_chained_failed'; const err = new Error(msg); err.code = code;`, 1, 'local initializer, fallback at the end of a chain'],
+    [`error: { code: parsed?.code || 'stamp_still_seen_failed', message }`, 1, 'stamp-site objlit still matches (the pair half that must not regress)'],
+    [`const err = new Error(msg); (err as any).code = e?.code || 'assign_still_seen_failed';`, 1, 'stamp-site assignment still matches (the pair half that must not regress)'],
+
+    // Reject side for the local position.
+    [`const code = parsed?.code || 'LOCAL_UPPER_FAILED'; const err = new Error(msg); err.code = code;`, 0, 'a SCREAMING default in a local is compliant'],
+    [`const code = parsed?.code; const err = new Error(msg); err.code = code;`, 0, 'a vendor code through a local has no literal to capture, before or after this widening'],
+    [`const codeName = parsed?.code || 'not_the_code_local'; throw new Error(codeName);`, 0, 'a local whose name merely STARTS with code is not the code position'],
+    [`const message = parsed?.message || 'lower_thing'; throw new Error(message);`, 0, "a NEIGHBOUR's local fallback is not the code's value"],
+    [`const code = 'local_direct_failed'; const err = new Error(msg); err.code = code;`, 0, 'an all-literal local REDUCES (#9568), so its site is the dispatcher gate\'s, not ours'],
+    [`const code = 'chain_lower_a' || 'chain_lower_b'; const err = new Error(msg); err.code = code;`, 0, 'an all-literal chain reduces too, and stays the dispatcher gate\'s'],
+    [`const code: Foo = fallbackFor(e); const other = x || 'leapt_failed'; throw new Error(msg);`, 0, 'the annotation gap refuses ; and =, so a match cannot leap into the NEXT statement'],
+    [`const code = row.code || 'ok'; const err = new Error(msg); err.code = code;`, 0, 'NOT_CODES still applies through the local shape'],
+    [`issues.push({ field: 'email' }); const code = e?.code || 'invalid_email'; throw new Error(msg);`, 0, 'D6 still wins through the local shape'],
+    [`const code = e?.code || 'local_optout_failed'; throw new Error(msg); // adr0112-ok: D6b persisted audit column`, 0, 'opt-out still applies through the local shape'],
+    [
+      `const code = a.b.c.${'d'.repeat(90)} || 'local_far_away_failed'; const err = new Error(msg); err.code = code;`,
+      0,
+      'the local gap is bounded too: a runaway expression is a declared miss, not a leap',
     ],
   ];
   let failed = 0;
