@@ -267,7 +267,9 @@ async function makeEngine() {
   const rig = makeStubDriver();
   engine.registerDriver(rig.driver as never, true);
   await engine.init();
-  for (const obj of [CAMPAIGN, EDGE]) engine.registry.registerObject(obj as never);
+  // `packageId` is required (TS2554 without it) — the provenance every other
+  // test in this package passes as 'test'.
+  for (const obj of [CAMPAIGN, EDGE]) engine.registry.registerObject(obj as never, 'test');
   const protocol = new ObjectStackProtocolImplementation(engine);
   return { engine, protocol, ...rig };
 }
