@@ -1237,6 +1237,33 @@ jobs:
       - name: Release-page status guard
         run: pnpm check:release-page-status
 
+      # Release SECTION-COVERAGE guard (#10268). The guard above is keyed on the
+      # MAJOR: `releasedAssertionRe(17)` is satisfied by ANY 17.x.y released-claim,
+      # so a page saying "17.0.0 is released" passes forever however many 17.x
+      # minors ship after it. Reconstructed from history and measured on this
+      # change's base, that gate exits 0 on the exact #10232 state — v17 page with
+      # no 17.1 heading and an index still reading "(current series: 17.0.0)" while
+      # 17.1.0 had been on `latest` for hours. Third occurrence of the class
+      # (#8886/#8882 -> the gate above, #8917 -> no gate, #10232).
+      #
+      # ADVISORY BY DEFAULT, AND THAT IS MEASURED, NOT TIMID. The CHANGELOG heading
+      # lands in the version commit that publishes, so a hard failure starts the
+      # instant a minor ships and lasts until someone writes curated prose. Timed
+      # from git: 17.1.0 ran 5h44m (36 PRs landed), 16.1.0 ran 25 days (2712 PRs).
+      # Hard-failing would have red 2748 PRs for a debt none of them created. So
+      # findings are a `::warning::` + step summary with the job GREEN — the
+      # loud-but-non-blocking shape prerelease-pin-watch.yml uses — and the policy
+      # follows half-state-patrol.yml's rule verbatim: findings never fail
+      # anything, the job DOES fail when the sweep could not run. A broken
+      # instrument is fatal here in every mode. `--strict` promotes findings to
+      # exit 1 for a caller that owns the remedy; nothing on a PR passes it.
+      #
+      # No `pnpm check:*` alias: root package.json is inside the #9465 fence.
+      - name: Release section-coverage guard
+        run: |
+          node scripts/check-release-section-coverage.mjs --self-test
+          node scripts/check-release-section-coverage.mjs
+
       # Release-body limit guard (#4900). The GitHub Releases API rejects any
       # body over 125,000 characters, and @objectstack/spec's changelog section
       # for one v17 RC is ~343,000 — so the release step 422'd after npm had
