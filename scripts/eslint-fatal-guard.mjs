@@ -91,6 +91,38 @@
 // to "comment or code", #9367) rather than raw; and "the name appears" was
 // never the claim — `lintFilesStrict(` must actually be CALLED, because a
 // guard imported once is not a guard still called.
+//
+// ── MEASURED (#10599): the adoption test names a CALL, not a MEASUREMENT ───
+//
+// Those two tests ask whether `lintFilesStrict(` appears. A gate that KEPT one
+// guarded call and measured a second population through `eslint.lintText()`
+// answers yes to all three questions while the second population goes
+// unguarded. Both fixtures run through the checker as it stood after #10458:
+//
+//   import + `eslint.lintText(...)`, no strict call   → 1 problem (not armed)
+//   import + strict call + `eslint.lintText(...)`     → 0 problems  ← the hole
+//
+// So the "measures only through lintText" shape was already caught, and the
+// MIXED shape was not. This is not hypothetical plumbing: this gate's own
+// self-test counted through a bare `lintText()`. The same reporting fixture
+// with one character removed, through that helper:
+//
+//   parses                    → hits()=1  fatalErrorCount=0
+//   `as any;` (missing paren) → hits()=0  fatalErrorCount=1
+//                               "Parsing error: ')' expected."
+//
+// hits()=0 is what the ten `silent` assertions require, so a fixture that
+// stopped parsing would have read as PROOF THAT THE RULE IS QUIET about it.
+// The guard's own failure mode, inside the self-test that asserts the guard.
+//
+// A blanket `/\.lintText\s*\(/` ban was not available: this gate legitimately
+// lints text to establish what raw ESLint does with a file that will not parse
+// — ground truth the guard is built on, which routing through the guard would
+// make circular. Source text cannot tell that call from a measurement; which
+// result gets COUNTED is data flow. So the check does not guess. It bans the
+// BARE spelling and the gate declares which kind each call is —
+// `lintTextStrict()` when the result is counted, `lintTextUnguarded({ why })`
+// when it is not.
 import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -192,6 +224,68 @@ export async function lintFilesStrict(eslint, targets, { gate, repoRoot, onFatal
   return results;
 }
 
+/**
+ * `eslint.lintText()`, fatal-checked exactly as `lintFilesStrict()` is.
+ *
+ * The guard's claim is about MEASUREMENTS, not about one method name: a gate
+ * that counts the messages coming back from `lintText()` drops a parse failure
+ * for the same reason `lintFiles()` did — ESLint returns it as a message with
+ * no rule id, matching no rule the gate counts. Anything whose result is
+ * COUNTED belongs here.
+ *
+ * Every option other than the guard's own is forwarded to `eslint.lintText()`,
+ * so a call site reads like the bare one it replaces.
+ *
+ * @param {{lintText: (code: string, options?: object) => Promise<object[]>}} eslint
+ * @param {string} code
+ * @param {{gate: string, repoRoot?: string, onFatal?: (report: string, fatals: object[]) => never|unknown}} options
+ * @returns {Promise<object[]>} the results, when the text parsed
+ */
+export async function lintTextStrict(eslint, code, { gate, repoRoot, onFatal = exitOnFatal, ...textOptions } = {}) {
+  const results = await eslint.lintText(code, textOptions);
+  const fatals = collectFatalMessages(results, repoRoot);
+  if (fatals.length > 0) return onFatal(formatFatalReport(gate ?? 'eslint-fatal-guard', fatals), fatals);
+  return results;
+}
+
+/**
+ * `eslint.lintText()`, DECLARED as not a measurement. Behaviour: none added.
+ *
+ * This exists to be written down, not to do anything. `checkGuardAdoption()`
+ * cannot tell a gate MEASURING a population through `lintText()` from a
+ * self-test EXERCISING the linter — which result gets counted is a data-flow
+ * fact, and the check reads source text. Rather than guess with a heuristic
+ * that fires on the next author who writes a legitimate one, the distinction
+ * moves to where it is decidable: the author states it, at the call site, in
+ * code that survives comment stripping. A bare `.lintText(` in a guarded gate
+ * is then a finding with no judgement call left in it.
+ *
+ * The legitimate use is a call whose result is GROUND TRUTH FOR the guard
+ * rather than input to a count — the self-test fixture that must not parse,
+ * and its parses-cleanly control. Routing those through `lintTextStrict()`
+ * would be circular: they exist to establish the raw ESLint behaviour the
+ * guard is built on, so they must see it raw.
+ *
+ * It is an escape hatch and it is meant to be one: an author CAN route a real
+ * measurement through it. What it buys is that doing so takes typing the word
+ * `Unguarded` and a reason next to the call, where a reviewer reads it,
+ * instead of the silence that made #10123 and #10458 possible.
+ *
+ * @param {{lintText: (code: string, options?: object) => Promise<object[]>}} eslint
+ * @param {string} code
+ * @param {{why: string}} options `why` is required; every other key goes to `lintText`
+ * @returns {Promise<object[]>} whatever ESLint returned, fatals and all
+ */
+export async function lintTextUnguarded(eslint, code, { why, ...textOptions } = {}) {
+  if (typeof why !== 'string' || why.trim() === '') {
+    throw new TypeError(
+      'lintTextUnguarded() requires `why`: the reason this lint result is not a measurement. ' +
+      'If it IS counted, call lintTextStrict() instead (#10599).',
+    );
+  }
+  return eslint.lintText(code, textOptions);
+}
+
 /** The default handler: print the report and stop. Never returns. */
 function exitOnFatal(report) {
   console.error(report);
@@ -251,15 +345,42 @@ export function guardAdoptionProblems(gate, source) {
       `${gate}: does not import scripts/eslint-fatal-guard.mjs. A gate that counts ` +
       'ESLint messages scores an unparseable file as clean without it (#10123).',
     );
-  } else if (!/lintFilesStrict\s*\(/.test(src)) {
+  } else if (!/lintFilesStrict\s*\(|lintTextStrict\s*\(/.test(src)) {
     // The docblock's own thesis, asserted rather than assumed: a guard imported
     // once is not a guard still called. Importing this module runs none of it,
     // and the `.lintFiles(` test below cannot cover the gap — a gate that
     // stopped calling anything has no direct call left to catch.
+    //
+    // EITHER guarded entry point arms a gate (#10599). A gate whose whole
+    // population is text would route it through lintTextStrict() and never
+    // call lintFilesStrict() at all; demanding the files spelling would report
+    // a fully guarded gate as unguarded, which is how a true gate gets argued
+    // back out.
     problems.push(
-      `${gate}: imports scripts/eslint-fatal-guard.mjs but never calls lintFilesStrict(). ` +
+      `${gate}: imports scripts/eslint-fatal-guard.mjs but never calls lintFilesStrict() ` +
+      'or lintTextStrict(). ' +
       'Importing the guard does not arm it: a gate measuring around it still scores an ' +
       'unparseable file as clean (#10123).',
+    );
+  }
+  // The same claim about the OTHER method (#10599). `lintFilesStrict()` wraps
+  // `lintFiles` and nothing else, so a gate that kept one guarded call and
+  // measured a SECOND population through `eslint.lintText()` satisfied every
+  // test above while that second population went unguarded — measured on this
+  // tree, three problems reported, zero of them this one. The two tests above
+  // catch the gate that measures ONLY through lintText (it has no
+  // `lintFilesStrict(` call left to find); they cannot see the mixed one.
+  //
+  // Bare is the finding, not `lintText` itself: a guarded gate spells the
+  // counted ones `lintTextStrict(` and declares the rest `lintTextUnguarded(`,
+  // neither of which carries a `.lintText(`. That is why this is a ban and not
+  // a heuristic — nothing here has to guess which call is the measurement.
+  if (/\.lintText\s*\(/.test(src)) {
+    problems.push(
+      `${gate}: calls \`.lintText(\` directly. A counted lintText result discards a ` +
+      'parse failure exactly as `.lintFiles(` did — it comes back as a message with no ' +
+      'rule id. Call lintTextStrict() if the result is counted, or lintTextUnguarded() ' +
+      'with a `why` if it is not a measurement (#10599).',
     );
   }
   if (/\.lintFiles\s*\(/.test(src)) {
