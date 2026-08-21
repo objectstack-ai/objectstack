@@ -1,0 +1,258 @@
+---
+title: Report Metadata
+description: Analytics reports as metadata — the four report shapes, dataset binding, drill-through, and how a report differs from a list view and a dashboard widget
+---
+
+# Report Metadata
+
+A **Report** is an analytics artifact. It groups and aggregates the rows of a
+[dataset](/docs/data-modeling/analytics) into a pivot — grouped down-axis rows,
+optionally pivoted across a second axis, with measures in the cells — and gives that
+pivot its own page in the app.
+
+Three surfaces in this module look similar from a distance and are not
+interchangeable. Pick by **what the reader is looking at**:
+
+| | A report shows | Bound to | Authored in | Reached at |
+| :--- | :--- | :--- | :--- | :--- |
+| **List view** | individual records, one row each | an **object** | that object's `views` | the object's nav entry |
+| **Dashboard widget** | one aggregate slice, sized into a tile grid | a **dataset** | a dashboard's `widgets[]` | inside its dashboard |
+| **Report** | a whole pivot — grouped rows, optional across-axis columns, aggregated cells, an optional chart, drill-through to the records | a **dataset** | `defineStack({ reports })` | its own nav entry and URL |
+
+The line between the first and the third is the one that actually gets crossed. A flat
+list of records is an **object-bound row lens** (ADR-0017), not analytics — so it belongs
+in a view, whatever it is called. The showcase package made exactly that move: its former
+`TaskListReport` is now the `tabular` list view on `showcase_task`, because a report that
+never aggregated anything was a view wearing the wrong kind.
+
+The line between the second and the third is scale, not capability: a widget is one slice
+sized into a dashboard's grid, a report is the full grid with its own page. Both bind
+datasets the same way, so the numbers agree by construction.
+
+## A report binds a dataset — and only a dataset
+
+<Callout type="info">
+**There is one data path, not two.** Under the **ADR-0021** single-form cutover a report
+is dataset-bound, full stop. The legacy inline query — `objectName` plus `columns` plus
+`groupings` on the report itself — was removed in that cutover, so there is no
+object-bound report to choose between. Writing `objectName`, `object`, `source` or
+`dataSet` is rejected at authoring time with a pointer at `dataset`.
+</Callout>
+
+Every report except a `joined` one must declare `dataset` **and** a non-empty `values`;
+the schema refuses it otherwise, with the message *a report needs `dataset` + `values`
+(measure names)*. A `joined` report carries its data on `blocks[]` instead and must declare at
+least one block.
+
+The dataset owns the base object, the joins, and the named dimensions and measures. That
+is what keeps a number identical across every report, widget and dashboard that selects
+it. Dataset authoring — declaring dimensions and measures, and what `rows` / `values` /
+`runtimeFilter` select from them — is covered once, from the dataset side, in
+[Analytics & Datasets](/docs/data-modeling/analytics). This page covers the report shape
+on top of it.
+
+## The four report types
+
+`type` defaults to `tabular`.
+
+| `type` | Renders | Needs |
+| :--- | :--- | :--- |
+| `tabular` | the dataset's rows as a flat table | `dataset` + `values` |
+| `summary` | rows grouped down one or more dimensions, measures aggregated per group | `dataset` + `values`, and `rows` to group by |
+| `matrix` | a true pivot: `rows` down × `columns` across, measures in the cells | `dataset` + `values` + `rows` + `columns` |
+| `joined` | several independent sub-reports stacked in one page | `blocks[]` (each block dataset-bound) |
+
+### Summary — grouped totals
+
+{/* os:check */}
+```typescript
+import { defineReport } from '@objectstack/spec/ui';
+
+export const HoursByStatusReport = defineReport({
+  name: 'showcase_hours_by_status',
+  label: 'Hours by Status',
+  description: 'Estimated hours grouped by task status.',
+  type: 'summary',
+  dataset: 'showcase_task_metrics',
+  rows: ['status'],          // dimension names, down the page
+  values: ['est_hours'],     // measure names, aggregated per group
+});
+```
+
+### Matrix — a cross-tab
+
+`columns` is the across-axis and is read only by a `matrix` report; other types ignore it.
+
+{/* os:check */}
+```typescript
+import { defineReport } from '@objectstack/spec/ui';
+
+export const StatusPriorityMatrixReport = defineReport({
+  name: 'showcase_status_priority_matrix',
+  label: 'Status × Priority',
+  type: 'matrix',
+  dataset: 'showcase_task_metrics',
+  rows: ['status'],          // down axis
+  columns: ['priority'],     // across axis
+  values: ['est_hours'],     // in the cells
+});
+```
+
+### Joined — several sub-reports in one page
+
+Each block is independently queried and stacked in the container. Use it for comparative
+panels over one domain — "open / completed", "new / qualified / closed" — where each panel
+is a different slice rather than a different subject.
+
+A block is a sub-report, so it takes the same `dataset` / `rows` / `columns` / `values` /
+`runtimeFilter` / `order` vocabulary. Four things are **container-level only** and are
+rejected on a block: nested `blocks` (no recursion — a block's `type` enum excludes
+`joined`), `drilldown`, `protection`, and — as below — `order` on a `joined` container.
+
+{/* os:check */}
+```typescript
+import { defineReport } from '@objectstack/spec/ui';
+
+export const TaskOverviewReport = defineReport({
+  name: 'showcase_task_overview',
+  label: 'Task Overview',
+  type: 'joined',
+  blocks: [
+    {
+      name: 'open_block',
+      label: 'Open Tasks',
+      type: 'summary',
+      dataset: 'showcase_task_metrics',
+      rows: ['status'],
+      values: ['est_hours'],
+      runtimeFilter: { done: false },
+    },
+    {
+      name: 'done_block',
+      label: 'Completed Tasks',
+      type: 'summary',
+      dataset: 'showcase_task_metrics',
+      rows: ['status'],
+      values: ['task_count'],
+      runtimeFilter: { done: true },
+    },
+  ],
+});
+```
+
+## Ordering
+
+`order` is a **list** of sort keys, most significant first — an array rather than a map,
+because the key order is the sort significance and JSON object key order is not a contract
+you should have to lean on. Each key is `{ by, direction }`, `direction` defaulting to
+`asc`.
+
+Two rules are enforced when the report is authored, not discovered when it renders:
+
+- **`by` must name something this report selects** — a `rows` / `columns` dimension or a
+  `values` measure. Anything else is an authoring error rather than an ordering that
+  silently does nothing.
+- **A `joined` report orders per block.** `order` on the container is rejected with
+  *a `joined` report orders per block — move `order` onto `blocks[]`*.
+
+Ordering is optional: a selected date dimension already comes back chronological. What
+`order` is for — sorting by a measure, reversing a time axis, ordering a non-time
+dimension — and how it is applied server-side over the whole grid is covered in
+[Analytics & Datasets](/docs/data-modeling/analytics), which this page does not repeat.
+
+## Drill-through
+
+`drilldown` is a **boolean**, on by default (ADR-0021 D2). It turns click-through from an
+aggregated row or cell to the underlying records on or off for a `summary` / `matrix`
+report; the host resolves the dataset's object and its dimension-to-field mapping.
+
+<Callout type="warn">
+`drillDown` — camelCase — is a **different capability on a different surface**: it is the
+react-tier `<ObjectChart drillDown={…}>` prop, a configuration *object* that configures a
+chart segment drill. The report key is `drilldown`, all lowercase, and a plain boolean.
+The two are one character apart, so a rename suggestion would walk you straight into a
+second rejection — write `drilldown: true` / `false` if you mean the report.
+</Callout>
+
+## An embedded chart
+
+A report may carry one `chart`. Its `xAxis` and `yAxis` name the **bound dataset's**
+dimension and measure — not raw object fields — and are plotted from a second dataset
+query, so the chart and the grid cannot disagree.
+
+{/* os:check */}
+```typescript
+import { defineReport } from '@objectstack/spec/ui';
+
+export const HoursByStatusChartReport = defineReport({
+  name: 'showcase_hours_by_status_chart',
+  label: 'Hours by Status (Chart)',
+  type: 'summary',
+  dataset: 'showcase_task_metrics',
+  rows: ['status'],
+  values: ['est_hours'],
+  chart: {
+    type: 'bar',
+    xAxis: 'status',       // a dataset DIMENSION
+    yAxis: 'est_hours',    // a dataset MEASURE
+  },
+});
+```
+
+## Making a report reachable
+
+A report is not reachable because it exists. Give it a navigation entry on an app:
+
+{/* os:check */}
+```typescript
+import { defineApp } from '@objectstack/spec/ui';
+
+export const AnalyticsApp = defineApp({
+  name: 'showcase_analytics',
+  label: 'Analytics',
+  navigation: [
+    {
+      id: 'nav_hours_by_status',
+      type: 'report',
+      reportName: 'showcase_hours_by_status',
+      label: 'Hours by Status',
+      icon: 'chart-bar',
+    },
+  ],
+});
+```
+
+`reportName` is **cross-checked against the stack**: an app navigating to a report the
+stack does not define fails validation with `App '<app>' navigation references report
+'<name>' which is not defined in reports.` (The check is skipped for a stack that declares
+no reports at all, where the target may come from another package.) The entry resolves to
+`/report/<reportName>` in the console.
+
+## Permissions and protection
+
+The report schema carries exactly **one** access-shaped block, and it is not about
+viewers:
+
+- **`protection`** — the ADR-0010 package-author lock policy, declared once on the report
+  (never per block). The loader translates it into the runtime protection envelope at
+  registration time. It governs what an *installing org* may modify, not who may read the
+  numbers.
+
+There is deliberately no viewer-permission key on a report. Who may see what comes from
+the two layers underneath it: **row- and tenant-level security is enforced by the runtime
+per joined object** when the dataset is queried — never declared on the dataset and
+never on the report — and **reachability** comes from the app navigation entry and the
+permissions on the app that carries it. A report is a presentation over a dataset, so it
+inherits the dataset's enforcement rather than restating it.
+
+## Related
+
+- **Schema reference:** [Report](/docs/references/ui/report) — the full generated property
+  tables for `Report`, `JoinedReportBlock`, `ReportChart` and `ReportSort`.
+- [Analytics & Datasets](/docs/data-modeling/analytics) — declaring the dataset a report
+  binds, and the ordering and filter-placeholder semantics shared with dashboards.
+- [Dashboard Metadata](/docs/ui/dashboards) — the same dataset binding, sized into a tile
+  grid.
+- [View Metadata](/docs/ui/views) — the object-bound row lens a flat record list belongs
+  in.
+- [App Metadata](/docs/ui/apps) — navigation entries, including `type: 'report'`.
