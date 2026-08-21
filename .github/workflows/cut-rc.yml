@@ -272,9 +272,11 @@ jobs:
           OBJECTUI_ROOT="${RUNNER_TEMP}/objectui"
           # FULL clone, not shallow, and still a measured requirement rather than
           # caution. Two reasons, both surviving #10134:
-          #   - the check below asks whether the PIN is a real, reachable commit
-          #     of objectui main; a tip-only shallow clone cannot answer that and
-          #     would answer "no" for every pin older than the tip;
+          #   - the check below asks whether the PIN is reachable from objectui
+          #     main; a tip-only shallow clone cannot answer that and would answer
+          #     "no" for every pin older than the tip. Necessary, not sufficient:
+          #     a full clone carries every branch, main's and otherwise, so it
+          #     makes the question answerable without answering it;
           #   - build-console.sh builds from THIS clone (it honours
           #     $OBJECTUI_ROOT) by adding a worktree at the pin, which needs the
           #     pin's tree present.
@@ -284,14 +286,41 @@ jobs:
           git clone --no-tags https://github.com/objectstack-ai/objectui.git "$OBJECTUI_ROOT"
           echo "OBJECTUI_ROOT=${OBJECTUI_ROOT}" >> "$GITHUB_ENV"
 
-          # The pin must be IN the clone. Still a real failure mode, and the only
-          # objectui-side one left: a pin taken from a branch that never merged,
-          # or a main that was rewritten, names a revision nobody can resolve
-          # later — and the cut would publish a console built from it.
-          if ! git -C "$OBJECTUI_ROOT" cat-file -e "${OBJECTUI_SHA}^{commit}" 2>/dev/null; then
-            echo "::error::the committed pin ${OBJECTUI_SHA} is not present in a fresh full clone of objectui main. It names a revision that is not reachable from main (unmerged branch, or main was rewritten). Fix .objectui-sha in its own PR; do not cut against it."
+          # THE PIN MUST BE ON objectui MAIN — WHICH IS NOT WHAT OBJECT PRESENCE
+          # ANSWERS (#9450). This was one `cat-file -e`, and the sentence it
+          # printed on failure — "not reachable from main (unmerged branch, or
+          # main was rewritten)" — named a case the test cannot see. Measured on
+          # a fresh `--no-tags` clone of objectui, 2026-08-21: 291 commits across
+          # 118 branch tips are present and NOT reachable from main, and
+          # `cat-file -e` says yes to every one of them — including the "branch
+          # that never merged" the message claimed to catch. The clone being FULL
+          # is what OPENS that gap rather than closing it: `git clone` fetches
+          # every branch head, so the more complete the clone, the more non-main
+          # revisions it can vouch for.
+          #
+          # Nothing upstream closes it either — bump-objectui.sh pins
+          # `git rev-parse HEAD` of a local objectui checkout without asking which
+          # branch that is. "The operator happened to be on main" is the whole of
+          # the protection, so ask the question here rather than assume it.
+          #
+          # Three questions, three exits, in this order because the later ones
+          # cannot be asked until the earlier ones hold: `merge-base --is-ancestor`
+          # exits 128 on an absent object — an error, not a verdict — and with no
+          # origin/main it would report "the pin left main", which is this block's
+          # own overclaim wearing a new message.
+          if ! git -C "$OBJECTUI_ROOT" rev-parse --verify --quiet origin/main >/dev/null; then
+            echo "::error::the objectui clone has no origin/main ref, so \"is the pin on main\" cannot be answered in it. Refusing to cut rather than assuming the answer."
             exit 1
           fi
+          if ! git -C "$OBJECTUI_ROOT" cat-file -e "${OBJECTUI_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::the committed pin ${OBJECTUI_SHA} is not present in a fresh full clone of objectui at all — no branch carries it. It was never pushed, its branch was deleted, or main was rewritten. Fix .objectui-sha in its own PR; do not cut against it."
+            exit 1
+          fi
+          if ! git -C "$OBJECTUI_ROOT" merge-base --is-ancestor "$OBJECTUI_SHA" origin/main; then
+            echo "::error::the committed pin ${OBJECTUI_SHA} exists in objectui but is NOT reachable from objectui main — it names a revision on a branch that never merged. Cutting against it would publish @objectstack/console built from code that is not on main. Fix .objectui-sha in its own PR; do not cut against it."
+            exit 1
+          fi
+          echo "objectui pin ${OBJECTUI_SHA:0:12}: present in the clone, and reachable from objectui main."
 
           # Detach the clone AT THE PIN so nothing downstream can accidentally
           # read a working tree that is objectui main. build-console.sh builds
