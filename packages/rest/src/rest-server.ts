@@ -2616,7 +2616,9 @@ export class RestServer {
         const layeredCtx = await this.resolveExecCtx(environmentId, req)
             .catch(() => undefined);
         const layeredOrganizationId = organizationIdForMetaRead(
-            req.params.type, layeredCtx?.tenantId,
+            // [#10340] FOLDED, not raw — see the PUT door's org-scope comment
+            // for the measurement.
+            canonicalMetaUrlType(req.params.type), layeredCtx?.tenantId,
         );
         // [#9741] This door never carried an `as any`, but `p: any` meant its
         // request literal was never checked either — the same blind spot with
@@ -4077,7 +4079,9 @@ export class RestServer {
                         const listCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(() => undefined);
                         const listOrganizationId = organizationIdForMetaRead(
-                            req.params.type, listCtx?.tenantId,
+                            // [#10340] FOLDED, not raw — see the PUT door's
+                            // org-scope comment for the measurement.
+                            canonicalMetaUrlType(req.params.type), listCtx?.tenantId,
                         );
                         // [#9741] Typed against the spec request shape plus the
                         // transport-level `environmentId` — the `as any` this
@@ -4912,7 +4916,9 @@ export class RestServer {
                         const readCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(() => undefined);
                         const readOrganizationId = organizationIdForMetaRead(
-                            req.params.type, readCtx?.tenantId,
+                            // [#10340] FOLDED, not raw — see the PUT door's
+                            // org-scope comment for the measurement.
+                            canonicalMetaUrlType(req.params.type), readCtx?.tenantId,
                         );
                         if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !isAudienceGatedType) {
                             // [ADR-0106 D3] When a projection applies, the
@@ -5444,8 +5450,24 @@ export class RestServer {
                     // `resolveAuthzContext` — an API key's principal tenant,
                     // else the session's `activeOrganizationId`, which is the
                     // very field the dispatcher twin reads.
+                    //
+                    // [#10340] The type is FOLDED before the scope decision,
+                    // never the raw URL spelling. Storage folds `:type`
+                    // through `META_URL_TO_SINGULAR` — the COMPLETE map —
+                    // while `declaresOrgOverride` tolerates only the
+                    // manifest-collection spellings (incomplete by design;
+                    // see its header). Measured on `origin/main` for the two
+                    // registry-derived spellings, `translations` and
+                    // `email_templates`: the raw segment read and wrote
+                    // ENV-WIDE where the singular twin was org-scoped — one
+                    // item, two partitions, addressed by spelling (#4432 /
+                    // #7894's defect one layer down). Folding HERE keeps the
+                    // scope decision and the storage fold answering one
+                    // question, which is what `metadata-url-spelling.ts`
+                    // mandates: folding happens at the boundary and only
+                    // there; the layers below read the canonical singular.
                     const organizationId = organizationIdForMetaWrite(
-                        req.params.type, ctx?.tenantId,
+                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     const result = await p.saveMetaItem({
                         type: req.params.type,
@@ -5576,7 +5598,9 @@ export class RestServer {
                     // together. `ctx` is the capability gate's own
                     // `resolveExecCtx` result, resolved above.
                     const organizationId = organizationIdForMetaWrite(
-                        req.params.type, ctx?.tenantId,
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     const result = await (p as any).deleteMetaItem({
                         type: req.params.type,
@@ -5845,7 +5869,9 @@ export class RestServer {
                     // handlers in this file (see the `/published` comment's seam
                     // warning, which stands).
                     const organizationId = organizationIdForMetaWrite(
-                        req.params.type, ctx?.tenantId,
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     const result = await (p as any).publishMetaItem({
                         type: req.params.type,
@@ -5946,7 +5972,9 @@ export class RestServer {
                     // [#8919] `ctx` is the one the capability gate above resolved,
                     // so scope and authorization read the same identity.
                     const organizationId = organizationIdForMetaWrite(
-                        req.params.type, ctx?.tenantId,
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
@@ -6277,7 +6305,14 @@ export class RestServer {
                             });
                             return;
                         }
-                        const data = await (svc as any).getPublished(type, name);
+                        // [#10340] FOLDED here too — the smaller second site
+                        // of the same class. The layered consult above folds
+                        // internally (protocol boundary), but this fallback
+                        // reads the code/package registry, which stores
+                        // CANONICAL types; handed the raw segment it answered
+                        // 404 for a recognised plural and 200 for the singular
+                        // twin of the same code-published item.
+                        const data = await (svc as any).getPublished(canonicalMetaUrlType(type), name);
                         // The 404 this route could never produce before. An
                         // item that exists but was never published still
                         // answers 200 with its current definition — that is
@@ -6328,7 +6363,9 @@ export class RestServer {
                         const compoundCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(() => undefined);
                         const compoundOrganizationId = organizationIdForMetaRead(
-                            req.params.type, compoundCtx?.tenantId,
+                            // [#10340] FOLDED, not raw — see the PUT door's
+                            // org-scope comment for the measurement.
+                            canonicalMetaUrlType(req.params.type), compoundCtx?.tenantId,
                         );
                         const envelope = await p.getMetaItem({
                             type: req.params.type,
@@ -6469,7 +6506,9 @@ export class RestServer {
                     // masking round-trip stayed open after #6603. Full rationale
                     // on the single-segment `PUT` above.
                     const organizationId = organizationIdForMetaWrite(
-                        req.params.type, ctx?.tenantId,
+                        // [#10340] FOLDED, not raw — see the PUT door's
+                        // org-scope comment for the measurement.
+                        canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
                     const result = await p.saveMetaItem({
                         type: req.params.type,
