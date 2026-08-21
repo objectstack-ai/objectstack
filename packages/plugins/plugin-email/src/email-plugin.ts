@@ -1252,7 +1252,23 @@ export class EmailServicePlugin implements Plugin {
     return stripReadDecorations(item);
   }
 
-  async dispose(): Promise<void> {
+  /**
+   * Teardown — the kernel's ONLY teardown hook.
+   *
+   * [#10772] This body used to be spelled `dispose()`. `Plugin`
+   * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+   * `destroy?()` and no `dispose()`, and `ObjectKernel.performShutdown()` /
+   * `LiteKernel.destroy()` walk the plugins in reverse calling
+   * `plugin.destroy()` — so after `await kernel.shutdown()` had RESOLVED, the
+   * two metadata subscriptions were still live, the SMTP transport was still
+   * open and the provenance hook was still bound to the engine. `dispose()`
+   * had exactly ONE caller in the whole repo, a test in this package; the
+   * kernel was never one of them.
+   *
+   * Idempotent: every handle is cleared as it is released, so a second
+   * teardown is a no-op rather than a second close.
+   */
+  async destroy(): Promise<void> {
     this.templateBridgeArmed = false;
     try { this.unsubscribeTemplates?.(); } catch { /* best effort */ }
     this.unsubscribeTemplates = undefined;
@@ -1266,6 +1282,16 @@ export class EmailServicePlugin implements Plugin {
       try { unbindEmailTemplateProvenanceStamp(this.boundEngine as any); } catch { /* best effort */ }
       this.boundEngine = undefined;
     }
+  }
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class: an embedder may have learned to call it directly precisely
+   * BECAUSE the kernel never did, and deleting it would break them. Same
+   * signature, same return type — a direct caller sees no change.
+   */
+  async dispose(): Promise<void> {
+    await this.destroy();
   }
 
   /**
