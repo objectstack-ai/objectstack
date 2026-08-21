@@ -182,8 +182,10 @@ a modal's `bg-black/50` backdrop rendered fully transparent in production.
 Style a react page two ways instead:
 
 **1. Layout and chrome — inline `style={{ … }}` with theme tokens.** Colors come from the
-active theme as `hsl(var(--token))`, so the page follows light/dark and any theme the
-deployment installs:
+base stylesheet's shadcn token set as `hsl(var(--token))` — the values are bare HSL
+triples, and `app.branding.primaryColor` / `accentColor` re-derive `--primary` /
+`--accent` on the light/dark flip — so the page follows light/dark and the app's
+branding:
 
 ```jsx
 <div

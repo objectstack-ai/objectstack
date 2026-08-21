@@ -346,7 +346,6 @@ export interface MetadataStats {
   apis: number;
   positions: number;
   permissions: number;
-  themes: number;
   datasources: number;
   translations: number;
   plugins: number;
@@ -386,7 +385,6 @@ export function collectMetadataStats(config: any): MetadataStats {
     apis: count(config.apis),
     positions: count(config.positions),
     permissions: count(config.permissions),
-    themes: count(config.themes),
     datasources: count(config.datasources),
     translations: count(config.translations),
     plugins: count(config.plugins),
@@ -771,7 +769,6 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Dashboards', stats.dashboards],
         ['Reports', stats.reports],
         ['Actions', stats.actions],
-        ['Themes', stats.themes],
       ],
     },
     {

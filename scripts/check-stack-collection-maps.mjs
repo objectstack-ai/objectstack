@@ -455,9 +455,10 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines'],
+        keys: ['workflows', 'approvals', 'roles', 'profiles', 'policies', 'ragPipelines', 'themes'],
         reason:
-          'DRIFT — six kinds retired across ADR-0019 / ADR-0020 / ADR-0088 / ADR-0090 that this loop still '
+          'DRIFT — kinds retired across ADR-0019 / ADR-0020 / ADR-0088 / ADR-0090 / ADR-0049 (#10485 for '
+          + '`themes`) that this loop still '
           + 'iterates. Inert: `(manifest as any)[key]` is `undefined` for every one, because the schema '
           + 'rejects the keys long before the loop runs. Removing them is an `engine-core` source change '
           + '(#6242 row 3) and rides that lane, not this gate.',
@@ -550,7 +551,7 @@ const SITES = [
       {
         direction: 'missing',
         keys: [
-          'objectExtensions', 'datasourceMapping', 'datasources', 'themes', 'jobs', 'apis', 'webhooks',
+          'objectExtensions', 'datasourceMapping', 'datasources', 'jobs', 'apis', 'webhooks',
           'hooks', 'mappings', 'analyticsCubes', 'connectors', 'capabilities', 'datasets',
         ],
         reason:
@@ -579,7 +580,7 @@ const SITES = [
     waivers: [
       {
         direction: 'missing',
-        keys: ['datasourceMapping', 'translations', 'themes', 'data', 'sharingRules', 'webhooks'],
+        keys: ['datasourceMapping', 'translations', 'data', 'sharingRules', 'webhooks'],
         reason:
           'NOT DEMONSTRATED, and visible for the first time. This manifest tracked 3 of the non-kind '
           + 'collections and — unlike its ratcheted sibling `KIND_COVERAGE` — was answerable to nothing '

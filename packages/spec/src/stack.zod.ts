@@ -29,7 +29,6 @@ import { DashboardSchema } from './ui/dashboard.zod';
 import { ReportSchema } from './ui/report.zod';
 import { DatasetSchema } from './ui/dataset.zod';
 import { ActionSchema, InlineActionSchema } from './ui/action.zod';
-import { ThemeSchema } from './ui/theme.zod';
 
 // Automation Protocol
 import { FlowSchema } from './automation/flow.zod';
@@ -224,6 +223,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     portals:
       'the top-level `portals` collection was removed (#3464) — nothing ever consumed it. '
       + 'Author external-user UI with `apps`/`views` plus positions and permission sets.',
+    themes:
+      '`themes` was removed in @objectstack/spec 17.1 (#10485, ADR-0049) — authored themes '
+      + 'were parsed and stored, but no framework package ever read them back, no first-party '
+      + 'app mounted the spec-aware theme provider, and nothing selected an active theme, so '
+      + 'a declared theme changed nothing on screen. Delete the key. To colour the shipped '
+      + 'console, set `app.branding.primaryColor` / `accentColor` — the one live colour '
+      + 'surface (it drives `--primary`, `--accent` and their derived variables).',
     onDisable:
       'no kernel, runtime or service ever called `onDisable` (#4212 retired the uninvoked '
       + 'lifecycle family), so a value written here goes nowhere. Do teardown inside the '
@@ -336,7 +342,15 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
   datasets: z.array(DatasetSchema).optional().describe('Analytics semantic-layer datasets (ADR-0021)'),
   actions: z.array(ActionSchema).optional().describe('Global and Object Actions'),
-  themes: z.array(ThemeSchema).optional().describe('UI Themes'),
+  // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
+  // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
+  // artifact ingest and stopped there: no framework package ever read the
+  // stored items, `theme` was never a registered metadata type, no first-party
+  // app mounted the spec-aware provider, and nothing selected a theme — an
+  // authored theme shipped green and changed nothing. `app.branding` is the
+  // one colour surface. The unknown-key rejection carries the prescription via
+  // the `guidance` entry on this schema's `strictObject` options; the D3
+  // semantic entry `stack-themes-carrier-retired` carries it to upgraders.
 
   /**
    * ObjectFlow: Automation Layer
@@ -1788,7 +1802,8 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   reports: 'concat',
   datasets: 'concat',
   actions: 'concat',
-  themes: 'concat',
+  // `themes` left this table with the key (#10485) — the total-record type is
+  // what forces this comment to move in lockstep with the schema.
   flows: 'concat',
   jobs: 'concat',
   emailTemplates: 'concat',

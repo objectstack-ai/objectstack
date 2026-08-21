@@ -269,54 +269,29 @@ parse-clean no-op. Large datasets page via the view's `pagination` block.
 
 ## Theme
 
-ObjectUI theming is defined by `ThemeSchema` in `packages/spec/src/ui/theme.zod.ts`, and it declares **ten** authorable keys — that list is the whole vocabulary. Five of them are identity and inheritance: `name` (a snake_case identifier) and `label` are required, `description` is optional, `mode` is one of `light`, `dark`, or `auto` (default `light`), and `extends` names another theme to inherit from. The other five are the token surface:
+The `themes` authoring surface was **retired** in `@objectstack/spec` 17.1
+(#10485, ADR-0049 enforce-or-remove). Authored themes were parsed and stored,
+but no framework package ever read them back and nothing selected an active
+theme, so a declared theme never changed anything on screen. A stack that still
+declares `themes:` is now refused at parse with a prescription pointing here.
 
-| Key | Required | Shape | What it puts on the document |
-|-------|-------|-------|-------|
-| `colors` | ✅ | `ColorPalette`; only `primary` is mandatory inside it | The shadcn palette variables — **renamed on the way out**: `surface` emits `--card`, `text` emits `--foreground`, `textSecondary` emits `--muted-foreground`, `disabled` emits `--muted`, `error` emits `--destructive`. |
-| `borderRadius` | — | A scale object (`none`/`sm`/`base`/`md`/`lg`/`xl`/`2xl`/`full`), not a single token | `--radius-sm`, `--radius-md`, ... — and `base` emits the bare `--radius`. |
-| `shadows` | — | The same stops plus `inner` | `--shadow-sm`, `--shadow-md`, ... — and `base` emits the bare `--shadow`. |
-| `typography` | — | One live key since #5021: `fontFamily.base` | `--font-sans`. |
-| `customVars` | — | A flat string map | Every entry verbatim, `--` prefixed if you omit it: `z-modal: '1050'` emits `--z-modal: 1050`. This is the declared door for any other custom property. |
+**`app.branding` is the one colour surface.** Set
+`branding.primaryColor` / `branding.accentColor` on the app
+(`packages/spec/src/ui/app.zod.ts`): objectui's `AppShell` converts them to
+HSL and writes `--primary`, `--primary-foreground`, `--ring`,
+`--sidebar-primary`, `--sidebar-ring`, `--accent` and `--accent-foreground`,
+re-deriving them on the light/dark flip.
 
-```yaml
-name: corporate
-label: Corporate
-mode: light
-colors:
-  primary: '#2563eb'
-  surface: '#ffffff'
-  text: '#111827'
-borderRadius:
-  base: 0.25rem
-  md: 0.375rem
-shadows:
-  base: '0 1px 3px rgb(0 0 0 / 0.1)'
-typography:
-  fontFamily:
-    base: 'Inter, system-ui, sans-serif'
-customVars:
-  space-4: 1rem
+```ts
+export const MyApp = defineApp({
+  name: 'my_app',
+  label: 'My App',
+  branding: { primaryColor: '#2563eb', accentColor: '#06b6d4' },
+});
 ```
 
-`ThemeSchema` is `.strict()` (#4001), so a key outside that list is a **parse failure** at `defineStack({ themes })` / `defineTheme()`, carrying its own prescription — not a value silently dropped while the theme still reports valid.
-
-<Callout type="warn">
-  **Older theme samples no longer parse** — check yours before copying it forward.
-  **#3494** removed `spacing`, `breakpoints`, `logo`, `density`, `wcagContrast`,
-  `rtl`, `touchTarget` and `keyboardNavigation`: the theme engine never emitted a
-  variable for any of them, so authoring one was a silent no-op. **#5021**
-  (`@objectstack/spec` 17.0.0, ADR-0049) removed `animation`, `zIndex`, the
-  `typography.fontSize` / `fontWeight` / `lineHeight` / `letterSpacing` scales and
-  `typography.fontFamily.heading` / `mono`: those *were* emitted, faithfully and
-  for years, but no first-party component or stylesheet has ever read one.
-  The prescription in both waves is `customVars`, and it is a byte-for-byte
-  replacement — `customVars` carrying `font-size-lg: 1.125rem` puts exactly the
-  same `--font-size-lg` on the document the retired scale did. Run
-  `os migrate meta --from 16` to rewrite stored metadata automatically.
-</Callout>
-
-Widgets inherit the active theme automatically; they do not each carry their own copy of the palette or the font stack.
+Widgets read the resulting CSS variables (`hsl(var(--primary))`, …); they do
+not each carry their own copy of the palette.
 
 ## What's Next?
 

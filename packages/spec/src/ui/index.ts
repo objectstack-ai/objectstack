@@ -41,7 +41,17 @@ export * from './page.zod';
 export * from './widget.zod';
 export * from './component.zod';
 export * from './react-blocks';
-export * from './theme.zod';
+// `theme.zod.ts` was RETIRED WHOLE at #10485 (ADR-0049 enforce-or-remove;
+// maintainer ruling 2026-08-21: 退役授权面 — `app.branding` is the one colour
+// surface; objectui's ThemeEngine/ThemeContext and their unit tests are
+// retained). `ThemeSchema`, its sub-blocks (`ColorPaletteSchema`,
+// `TypographySchema`, `BorderRadiusSchema`, `ShadowSchema`, `ThemeModeSchema`)
+// and `defineTheme` are gone with the `defineStack({ themes })` carrier key:
+// the pipeline was live from the authoring gate through artifact ingest and
+// stopped there — no framework package read the stored items, `theme` was
+// never a registered metadata type, and nothing ever selected a theme. The
+// carrier's rejection carries the prescription (stack.zod.ts `guidance`);
+// upgraders get the D3 semantic entry `stack-themes-carrier-retired`.
 // `notification.zod` still exports the three presentation enums
 // (`NotificationType` / `NotificationSeverity` / `NotificationPosition`);
 // `NotificationActionSchema` / `NotificationAction` were REMOVED at #5015 per

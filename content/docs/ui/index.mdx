@@ -1,6 +1,6 @@
 ---
 title: UI Engine
-description: Apps, views, dashboards, themes, and public forms — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
+description: Apps, views, dashboards, branding, and public forms — server-driven UI declared as metadata and rendered by the ObjectUI runtime.
 ---
 
 # UI Engine
@@ -32,7 +32,7 @@ export const CrmApp = App.create({
 - **Apps** group navigation, branding, and entry points for one audience.
 - **Views** present object records as `grid` (the standard data table), `kanban`, `gallery`, `calendar`, `timeline`, `gantt`, `map`, `chart`, or `tree`. Forms are their own view kind with per-mode layouts ([Views](/docs/ui/views)).
 - **Pages** compose free-form layouts from widgets; **Dashboards** combine charts, reports, and datasets for analytics.
-- **Themes** define palettes, typography, and spacing as metadata — the showcase example ships light and dark theme variants.
+- **Branding** colours an app: `app.branding.primaryColor` / `accentColor` drive the console's `--primary` / `--accent` variables. (The standalone `themes` collection was retired in spec 17.1, ADR-0049 — it was parsed but never applied.)
 - **Public forms** expose a scoped slice of an object to external audiences through **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
 - The **Setup App** — the platform's built-in administration UI — is itself rendered from the same protocol ([Setup App](/docs/ui/setup-app)).
 

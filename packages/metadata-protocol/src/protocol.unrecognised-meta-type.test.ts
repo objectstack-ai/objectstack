@@ -27,7 +27,8 @@
  *
  *  - a DECLARED type still saves (`view`), and so does a type whose only write
  *    channel is runtime (`hook`);
- *  - a PLUGIN kind with no static registry entry still saves (`theme`) — the
+ *  - a PLUGIN kind with no static registry entry still saves (`webhook`;
+ *    `theme` was the specimen until #10485 retired that kind entirely) — the
  *    operation option C would have broken, and the one this change must not;
  *  - READS of an unrecognised type still answer, because the live type set
  *    legitimately holds keys the static contract does not (`data`, `kind` and
@@ -163,6 +164,18 @@ describe('#8421 — an unrecognised `/meta` type is refused instead of minted', 
         expect(metaRows(rows).length).toBe(0);
     });
 
+    it("[#10485] `theme` is now on the refused side — the retired kind left the spelling contract", async () => {
+        // Until #10485, `theme` was a URL-map-only plugin kind and this suite's
+        // ACCEPTED specimen. The retirement removed the `themes: 'theme'` fold
+        // from `PLURAL_TO_SINGULAR`, so `/meta/theme` now earns the same
+        // ADR-0112 refusal as any minted namespace — loud, and nothing stored.
+        const { protocol, rows } = makeProtocol();
+        await expect(
+            protocol.saveMetaItem({ type: 'theme', name: 'dark', item: { name: 'dark', label: 'Dark', colors: { primary: '#3b82f6' } } }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        expect(metaRows(rows).length).toBe(0);
+    });
+
     it('names the offending type and why, per the 2026-08-12 refusal ruling', async () => {
         const { protocol } = makeProtocol();
         await expect(
@@ -201,10 +214,12 @@ describe('#8421 — the traffic that must keep working', () => {
             item: { name: 'probe_item', object: 'task', events: ['beforeUpdate'] },
         },
         {
-            type: 'theme',
+            // `theme` held this slot until #10485 retired the themes surface
+            // (ADR-0049) and `theme` left the URL-spelling contract with it.
+            type: 'webhook',
             why: 'PLUGIN kind — no static registry entry at all',
-            // [#10194] spec-valid body — theme resolves a schema now.
-            item: { name: 'probe_item', label: 'Probe', colors: { primary: '#3b82f6' } },
+            // [#6245] spec-valid body — webhook resolves a schema.
+            item: { name: 'probe_item', label: 'Probe', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
         },
     ];
 
@@ -220,20 +235,20 @@ describe('#8421 — the traffic that must keep working', () => {
 
     it('POSITIVE CONTROL — the plugin path still serves its first create', async () => {
         // The measurement that disqualified option C, kept as a live control:
-        // `theme` has ZERO items at this moment, which is exactly the state a
+        // `webhook` has ZERO items at this moment, which is exactly the state a
         // live-registry check would have refused. The refusal that shipped
         // consults the static contract instead, so the first create of a
         // plugin kind is untouched.
         const { protocol, rows } = makeProtocol();
-        // [#10194] spec-valid body — theme resolves a schema now, and this
-        // control measures the STATIC-contract door, not the shape check.
+        // Spec-valid body — this control measures the STATIC-contract door,
+        // not the shape check. (`theme` was the specimen until #10485.)
         const result = await protocol.saveMetaItem({
-            type: 'theme',
-            name: 'dark',
-            item: { name: 'dark', label: 'Dark', colors: { primary: '#3b82f6' } },
+            type: 'webhook',
+            name: 'first_hook',
+            item: { name: 'first_hook', label: 'First', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
         });
         expect(result.success).toBe(true);
-        expect(metaRows(rows)[0]!.type).toBe('theme');
+        expect(metaRows(rows)[0]!.type).toBe('webhook');
     });
 });
 

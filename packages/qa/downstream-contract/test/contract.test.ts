@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ActionSchema, ReportSchema, PageSchema, ThemeSchema } from '@objectstack/spec/ui';
+import { ActionSchema, ReportSchema, PageSchema } from '@objectstack/spec/ui';
 import { DatasourceSchema, MappingSchema, CubeSchema, ObjectExtensionSchema } from '@objectstack/spec/data';
 import { ConnectorSchema } from '@objectstack/spec/integration';
 import { SharingRuleSchema, PermissionSetSchema } from '@objectstack/spec/security';
@@ -43,7 +43,7 @@ describe('downstream consumer contract (#2035)', () => {
     ['ObjectExtension', ObjectExtensionSchema, more.DcObjectExtension],
     ['Cube', CubeSchema, more.DcCube],
     ['Mapping', MappingSchema, more.DcMapping],
-    ['Theme', ThemeSchema, more.DcTheme],
+    // ['Theme', …] left with ThemeSchema (#10485, ADR-0049).
     ['TranslationBundle', TranslationBundleSchema, more.DcTranslationBundle],
   ];
 

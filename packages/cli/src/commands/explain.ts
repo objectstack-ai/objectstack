@@ -168,7 +168,10 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'description', type: 'string', description: 'App description' },
       { name: 'navigation', type: 'NavItem[]', description: 'Menu tree structure' },
       { name: 'logo', type: 'string', description: 'Logo URL or asset path' },
-      { name: 'theme', type: 'string', description: 'Theme reference' },
+      // `theme` here described a key that is only an alias of `branding`; the
+      // `themes` metadata surface itself was retired at #10485 (ADR-0049) —
+      // `app.branding` is the one colour surface.
+      { name: 'branding', type: 'AppBranding', description: 'Brand colors and logo (primaryColor, accentColor, logo)' },
       { name: 'defaultRoute', type: 'string', description: 'Landing page route' },
     ],
     example: `{

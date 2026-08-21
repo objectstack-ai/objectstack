@@ -155,7 +155,6 @@
     "defineSharingRule (function)",
     "defineSkill (function)",
     "defineStack (function)",
-    "defineTheme (function)",
     "defineTool (function)",
     "defineTranslationBundle (function)",
     "defineView (function)",

@@ -254,7 +254,8 @@ import type * as M162 from './ui/notification.zod.js';
 import type * as M163 from './ui/page.zod.js';
 import type * as M164 from './ui/report.zod.js';
 import type * as M165 from './ui/responsive.zod.js';
-import type * as M166 from './ui/theme.zod.js';
+// M166 was './ui/theme.zod.js' — retired whole at #10485 (ADR-0049); the
+// M-indices are positional, so the slot stays vacant rather than renumbering.
 import type * as M167 from './ui/view.zod.js';
 // Appended out of alphabetical order deliberately: the M-indices are positional
 // identifiers the pin lines below reference by number, so a new module takes the
@@ -1338,12 +1339,8 @@ export type Iso697 = Assert<Eq< z.input< typeof M165.ResponsiveConfigSchema >, z
 export type Iso698 = Assert<Eq< z.input< typeof M165.StyleMapSchema >, z.infer< typeof M165.StyleMapSchema > >>;
 export type Iso699 = Assert<Eq< z.input< typeof M165.ResponsiveStylesSchema >, z.infer< typeof M165.ResponsiveStylesSchema > >>;
 
-// ui/theme.zod.ts
-export type Iso700 = Assert<Eq< z.input< typeof M166.ColorPaletteSchema >, z.infer< typeof M166.ColorPaletteSchema > >>;
-export type Iso701 = Assert<Eq< z.input< typeof M166.TypographySchema >, z.infer< typeof M166.TypographySchema > >>;
-export type Iso702 = Assert<Eq< z.input< typeof M166.BorderRadiusSchema >, z.infer< typeof M166.BorderRadiusSchema > >>;
-export type Iso703 = Assert<Eq< z.input< typeof M166.ShadowSchema >, z.infer< typeof M166.ShadowSchema > >>;
-export type Iso704 = Assert<Eq< z.input< typeof M166.ThemeModeSchema >, z.infer< typeof M166.ThemeModeSchema > >>;
+// ui/theme.zod.ts (Iso700–Iso704) left with the module at #10485 — the Iso
+// numbers are positional and stay vacant.
 
 // ui/view.zod.ts
 export type Iso705 = Assert<Eq< z.input< typeof M167.FormButtonConfigSchema >, z.infer< typeof M167.FormButtonConfigSchema > >>;

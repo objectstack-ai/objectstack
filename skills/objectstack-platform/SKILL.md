@@ -176,7 +176,7 @@ export default defineStack({
 `defineStack()` accepts an `ObjectStackDefinitionInput`. Each top-level key
 holds a collection of one metadata kind — `manifest`, `objects`,
 `objectExtensions`, `views`, `apps`, `pages`, `dashboards`,
-`reports`, `datasets`, `actions`, `themes`, `flows`, `jobs`,
+`reports`, `datasets`, `actions`, `flows`, `jobs`,
 `emailTemplates`, `docs`, `books`, `positions`, `permissions`,
 `capabilities`, `sharingRules`, `apis`, `webhooks`, `api`, `agents`,
 `tools`, `skills`, `hooks`, `functions`, `mappings`, `analyticsCubes`,

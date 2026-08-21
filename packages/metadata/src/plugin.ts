@@ -73,7 +73,10 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     dashboards: 'dashboard',
     reports: 'report',
     actions: 'action',
-    themes: 'theme',
+    // `themes: 'theme'` removed at #10485 (ADR-0049): the carrier key is
+    // retired, so a parsed artifact can no longer carry the field — and the
+    // ingest half of the dead pipeline (items stored, read by nothing) goes
+    // with the authoring half rather than surviving it as drift.
     workflows: 'workflow',
     flows: 'flow',
     // ADR-0090 D3: stacks declare `positions` (stack.zod.ts); the retired

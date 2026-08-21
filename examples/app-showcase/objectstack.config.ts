@@ -42,7 +42,6 @@ import {
   allCapabilities,
   allSharingRules,
 } from './src/security/index.js';
-import { allThemes } from './src/ui/themes/index.js';
 import { ShowcaseTranslationBundle } from './src/system/translations/index.js';
 import { ShowcaseSeedData } from './src/data/seed/index.js';
 import { allCubes } from './src/data/analytics/showcase.cube.js';
@@ -208,7 +207,7 @@ export default defineStack({
   datasets: [ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset],
   reports: allReports,
   actions: allActions,
-  themes: allThemes,
+  // `themes` retired at #10485 (ADR-0049) — recolour via `app.branding` instead.
 
   // Logic
   flows: allFlows,
