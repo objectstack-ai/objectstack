@@ -345,8 +345,18 @@ export const SkillSchema = lazySchema(() => strictObject({
    *   of dynamically registered tools (e.g. the `action_<name>` tools
    *   materialised from each object's declarative Action list).
    *
-   * Tools should also be registered as first-class metadata
-   * (type: 'tool') unless they are dynamically materialised at runtime.
+   * A `tool` record is NEVER required, and the default third-party path
+   * declares none (ADR-0109). A name here resolves against, in order: the
+   * stack's own `stack.tools[]` names; `PLATFORM_PROVIDED_TOOL_NAMES`, the
+   * curated registry of tools the cloud AI runtime registers at boot; and the
+   * `action_<name>` family the runtime materialises from the app's own
+   * AI-exposed declarative actions (`ai.exposed` + `ai.description` on a
+   * headless action type — ADR-0011). The first of those is the OPTIONAL
+   * AI-presentation refinement layer (Phase 2: LLM-facing description,
+   * parameter narrowing, flow exposure) and has no runtime reader until that
+   * lands, so a `stack.tools` record authored today is inert. In the default
+   * path the executable, its authz and its audit stay on the action/flow the
+   * app already ships.
    *
    * **CLOUD-RUNTIME-ONLY** (#3905). Tool binding is consumed by the in-product
    * agent runtime, which composes an agent's tool set from its
