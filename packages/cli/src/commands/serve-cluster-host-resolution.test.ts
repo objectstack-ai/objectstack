@@ -458,8 +458,10 @@ describe('os serve → every app-declarable optional load is host-anchored', () 
     expect(SERVE_SOURCE).toContain('Node ESM resolves a bare');
     expect(SERVE_CODE).not.toContain('Node ESM resolves a bare');
     // …and real code either side of the comments survives untouched.
+    // Markers deliberately unrelated to the shape the tests above pin, so this
+    // guard reports on the STRIPPER and never doubles as a second shape check.
     expect(SERVE_CODE).toContain("const __clusterPkg: string = '@objectstack/service-cluster'");
-    expect(SERVE_CODE).toContain('function importFromHost(');
+    expect(SERVE_CODE).toContain('export default class Serve extends Command {');
   });
 
   it('never loads an app-declarable optional package through a bare import()', () => {
