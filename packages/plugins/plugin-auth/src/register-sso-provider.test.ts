@@ -48,7 +48,10 @@ describe('runRegisterSsoProviderFromForm (OIDC) — the emitted body must satisf
   // Regression pin for the end-to-end break where the bridge always emitted
   // `oidcConfig.mapping.id`, which `oidcMappingSchema` (a `z.strictObject` with
   // no `id` member since 1.7.0-rc.2) rejects outright — every OIDC registration
-  // answered `400 [body.oidcConfig.mapping] Unrecognized key: "id"`.
+  // answered `400 [body.oidcConfig.mapping] Unrecognized key: "id"`. "since
+  // 1.7.0-rc.2" is provenance, not a stamp: the member has been absent from
+  // every release since, the installed `@better-auth/sso@1.7.1` included
+  // (`dist/index.mjs:1852`, re-read 2026-08-20).
   //
   // These cases drive the REAL `/sso/register` endpoint. `@better-auth/sso`
   // validates the request body BEFORE the endpoint's session gate, so an

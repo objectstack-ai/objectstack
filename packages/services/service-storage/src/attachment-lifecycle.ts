@@ -12,8 +12,10 @@ import type { IStorageService } from '@objectstack/spec/contracts';
  * naive cascade. This module closes the resulting orphan leak:
  *
  *  1. Tombstone hooks (this file, installed on `sys_attachment`): when the
- *     LAST join row referencing an attachments-scope file is deleted, the
- *     `sys_file` row is marked `status='deleted'` + `deleted_at=now`.
+ *     LAST join row referencing an attachments-scope file goes away, the
+ *     `sys_file` row is marked `status='deleted'` + `deleted_at=now`. A join
+ *     row goes away two ways, and both are covered: it is DELETED, or an
+ *     UPDATE re-points its `file_id` at some other file (#10171).
  *     Re-attaching before the grace window expires un-tombstones it.
  *  2. The `lifecycle` declaration on `sys_file` (system-file.object.ts):
  *     the platform LifecycleService reaps tombstones `30d` after
@@ -101,8 +103,46 @@ function asIdList(id: unknown): Array<string | number> | null {
 }
 
 /**
+ * Tombstone every id in `fileIds` that no longer has a join row — the orphan
+ * rule, in ONE place because two write verbs now ask it (`afterDelete`, and
+ * `afterUpdate` for a `file_id` re-point). Two copies of "is this file an
+ * orphan, and may I tombstone it" is exactly the drift #10171 was filed
+ * against; the verbs differ only in how they name the departed file id.
+ *
+ * Best-effort throughout: a failure here must never fail the user's write.
+ */
+async function tombstoneOrphanedFiles(
+  engine: AttachmentLifecycleEngine,
+  logger: AttachmentLifecycleLogger,
+  fileIds: readonly string[],
+): Promise<void> {
+  for (const fileId of fileIds) {
+    try {
+      const remaining = await engine.find('sys_attachment', {
+        where: { file_id: fileId },
+        limit: 1,
+        context: { ...SYSTEM_CTX },
+      });
+      if (remaining?.length) continue;
+      const file = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
+      if (!file || file.scope !== 'attachments' || file.status !== 'committed') continue;
+      await engine.update(
+        'sys_file',
+        { id: fileId, status: 'deleted', deleted_at: new Date().toISOString() },
+        { context: { ...SYSTEM_CTX } },
+      );
+      logger.debug?.(`[storage] attachment lifecycle: tombstoned orphan sys_file ${fileId}`);
+    } catch (err) {
+      logger.warn(
+        `[storage] attachment lifecycle: failed to tombstone sys_file ${fileId} (${(err as Error)?.message ?? err})`,
+      );
+    }
+  }
+}
+
+/**
  * Install the tombstone hooks on `sys_attachment`. Lifecycle bookkeeping
- * must never block or fail a user's delete/insert — every handler is
+ * must never block or fail a user's delete/insert/update — every handler is
  * best-effort and only logs on failure.
  */
 export function installAttachmentLifecycleHooks(
@@ -152,28 +192,7 @@ export function installAttachmentLifecycleHooks(
     'afterDelete',
     async (ctx: any) => {
       const fileIds: string[] = Array.isArray(ctx?.[STASH_KEY]) ? ctx[STASH_KEY] : [];
-      for (const fileId of fileIds) {
-        try {
-          const remaining = await engine.find('sys_attachment', {
-            where: { file_id: fileId },
-            limit: 1,
-            context: { ...SYSTEM_CTX },
-          });
-          if (remaining?.length) continue;
-          const file = await engine.findOne('sys_file', { where: { id: fileId }, context: { ...SYSTEM_CTX } });
-          if (!file || file.scope !== 'attachments' || file.status !== 'committed') continue;
-          await engine.update(
-            'sys_file',
-            { id: fileId, status: 'deleted', deleted_at: new Date().toISOString() },
-            { context: { ...SYSTEM_CTX } },
-          );
-          logger.debug?.(`[storage] attachment lifecycle: tombstoned orphan sys_file ${fileId}`);
-        } catch (err) {
-          logger.warn(
-            `[storage] attachment lifecycle: failed to tombstone sys_file ${fileId} (${(err as Error)?.message ?? err})`,
-          );
-        }
-      }
+      await tombstoneOrphanedFiles(engine, logger, fileIds);
     },
     { object: 'sys_attachment', packageId: PACKAGE_ID },
   );
@@ -207,6 +226,67 @@ export function installAttachmentLifecycleHooks(
           `[storage] attachment lifecycle: failed to un-tombstone on re-attach (${(err as Error)?.message ?? err})`,
         );
       }
+    },
+    { object: 'sys_attachment', packageId: PACKAGE_ID },
+  );
+
+  // afterUpdate: an UPDATE that re-points a join row's `file_id` detaches the
+  // PRIOR file exactly the way a delete of that row would — and until #10171
+  // nothing said so, leaving a file with zero join rows sitting at
+  // `status='committed'`. That is not the module's "fail toward retention"
+  // bias, which buys a second look later: `sys_file`'s declared lifecycle
+  // makes a row a sweep candidate only via `ttl { field: 'deleted_at' }` or
+  // `retention { onlyWhen: { status: 'pending' } }`, and an untombstoned
+  // orphan matches NEITHER — so it is never a candidate, the reap guard is
+  // never asked about it, and the bytes are stranded permanently.
+  //
+  // ── Why the departed id comes from `ctx.previous`, and NOT from a
+  //    beforeUpdate stash like the delete pair above ────────────────────────
+  // The `beforeDelete` → `afterDelete` pair hands its ids over on the shared
+  // HookContext (STASH_KEY). Since #5574 (ADR-0058 Addendum II D1/D2) a
+  // PREDICATE write dispatches ONE CONTEXT PER MATCHED ROW, and those row
+  // contexts are fresh objects spread from the batch context in both phases
+  // (`dispatchPerRowBeforeHooks` / `buildPerRowAfterContexts` in objectql's
+  // `engine.ts`) — so a property a `before*` handler writes onto its own row
+  // context dies with that row and never reaches the `after*` phase. Measured
+  // on the wired engine for #10171: a stash set in `beforeUpdate` arrives in
+  // `afterUpdate` on the by-id path (`dispatch.mode === 'record'`) and is LOST
+  // on the predicate path (`dispatch.mode === 'per-row'`). A stash-based twin
+  // of the delete pair would therefore have been silently half-dead on exactly
+  // the multi-row updates that orphan the most files.
+  //
+  // `previous` has neither problem: the engine binds it to the row's PRE-IMAGE
+  // on BOTH phases and BOTH paths (by-id since #7867 unconditionally, per-row
+  // from the batch's prior-row read). It also costs no extra round trip — the
+  // prior-row read is memoized per operation and already demanded, because
+  // `attachment-access-hooks.ts` registers a `beforeUpdate` on this same
+  // object and the engine asks that demand PER OBJECT, not per handler.
+  //
+  // ── Why there is no revival leg here (deliberate, measured) ──────────────
+  // #10171 also asked for an `afterInsert`-style revival when an update points
+  // a row AT a tombstoned file. There is none, because the reap guard below
+  // already owns that question: it re-verifies references at sweep time and,
+  // finding the re-pointed join row, un-tombstones the file and vetoes the
+  // reap instead of reclaiming the bytes (`createSysFileReapGuard`, pinned by
+  // "vetoes and un-tombstones a row that regained references"). Measured for
+  // #10171: after a re-point onto a tombstoned file the guard confirms nothing
+  // and deletes no bytes. A second revival mechanism here would be a duplicate
+  // answer to a question that already has one — the failure mode being two
+  // implementations that drift apart, not a missing feature.
+  engine.registerHook(
+    'afterUpdate',
+    async (ctx: any) => {
+      // Only a payload that actually re-points `file_id` can detach anything.
+      const data = ctx?.input?.data;
+      if (!data || typeof data !== 'object' || !('file_id' in data)) return;
+      // No pre-image (an engine that does not bind it, a row that was not
+      // there) means the prior id is unknowable — tombstone nothing and keep
+      // the file, which is the retention-biased side of the trade.
+      const priorFileId = ctx?.previous?.file_id;
+      if (priorFileId === undefined || priorFileId === null || priorFileId === '') return;
+      // A write that re-states the same id detaches nothing.
+      if (String(priorFileId) === String(data.file_id)) return;
+      await tombstoneOrphanedFiles(engine, logger, [String(priorFileId)]);
     },
     { object: 'sys_attachment', packageId: PACKAGE_ID },
   );

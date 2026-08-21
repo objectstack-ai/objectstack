@@ -12,6 +12,32 @@ The **Source of Truth** for the ObjectStack Protocol. Contains strictly typed Zo
 - **Automation**: Flows, Workflows, Triggers.
 - **AI**: Agents, RAG Pipelines, Models, MCP Servers.
 
+## Export surfaces
+
+The package publishes one entry per protocol domain (`@objectstack/spec/data`,
+`/ui`, `/kernel`, …) plus fine-grained vocabulary entries
+(`@objectstack/spec/meta-spelling` — the `/meta/:type` URL-spelling contract).
+Each entry is a self-contained bundle: what an entry's module graph reaches is
+what every consumer of that entry pays for.
+
+**Standing principle** (maintainer ruling 2026-08-20, recorded verbatim on
+objectstack#10096):
+
+> **浏览器可达的 spec 导出面必须 schema-free。** A `@objectstack/spec` export
+> surface that browser/client consumers reach must carry vocabulary — maps,
+> folds, enums, pure predicates — without linking the zod schema/validation
+> machinery. The schema graph is the server/publish side's dependency, never
+> the price of spelling a URL segment or reading a posture predicate.
+
+Adding an export that browser/client code will import? Either place it on a
+schema-free entry (`/meta-spelling` is the reference pattern: derivation from
+the schema graph happens at build time via `gen:meta-url-spelling`, gated by
+`check:meta-url-spelling`), or verify the entry it lands on keeps a
+schema-free module graph. The package declares `sideEffects: false`, so
+bundlers may drop what a consumer does not reach — module-scope side effects
+in any published module are therefore also a defect (measured, not assumed;
+see objectstack#10031).
+
 ## Usage
 
 **Recommended: Use `ObjectSchema.create()` with `Field.*` helpers for strict TypeScript validation:**

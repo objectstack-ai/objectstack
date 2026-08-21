@@ -349,7 +349,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /meta/_drafts', domain: '/meta', disposition: 'sdk', client: 'meta.listDrafts' },
   { route: 'POST /meta/_migrate-stored', domain: '/meta', disposition: 'sdk', client: 'meta.migrateStored',
     note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }' },
-  { route: 'GET /meta/objects/:name/state/:field', domain: '/meta', disposition: 'sdk', client: 'meta.getLegalNextStates' },
+  { route: 'GET /meta/object/:name/state/:field', domain: '/meta', disposition: 'sdk', client: 'meta.getLegalNextStates',
+    note: '#9180 step 2 moved the SDK to the singular spelling and retired the plural REST registration; this row follows the client. The legacy if-chain branch in `domains/meta.ts` still matches BOTH literals (`objects` and `object`) — that tolerance is out of step 2 scope and is not narrowed here, so this row lists the canonical spelling of a branch that answers two' },
 
   // ── data (legacy chain) ───────────────────────────────────────────────────
   { route: 'POST /data/:object/query', domain: '/data', disposition: 'sdk', client: 'data.query' },

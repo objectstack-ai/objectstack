@@ -22,14 +22,16 @@
  *    branches fails the extraction and reddens the suite, instead of silently
  *    leaving a pin that verifies nothing.
  *
- * The three branches (better-auth 1.7.0-rc.2,
- * `dist/plugins/organization/routes/crud-members.mjs`):
+ * The three branches, re-read 2026-08-20 out of the installed
+ * better-auth 1.7.1, `dist/plugins/organization/routes/crud-members.mjs`
+ * (the line numbers are an aid — the extraction below keys on the text, so a
+ * shift moves them without breaking the pin, while a rewrite reddens it):
  *
- *  1. `removeMember`  — `const roles = toBeRemovedMember.role.split(",");`
- *                       … `if (roles.includes(creatorRole))`
+ *  1. `removeMember`  — `const roles = toBeRemovedMember.role.split(",");`  (`:193`)
+ *                       … `if (roles.includes(creatorRole))`               (`:195`)
  *  2. `updateMemberRole` — `const isUpdatingCreator =
- *                       toBeUpdatedMember.role.split(",").includes(creatorRole);`
- *  3. `organization/leave` — `if (member.role.split(",").includes(creatorRole))`
+ *                       toBeUpdatedMember.role.split(",").includes(creatorRole);` (`:288`)
+ *  3. `organization/leave` — `if (member.role.split(",").includes(creatorRole))`   (`:420`)
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

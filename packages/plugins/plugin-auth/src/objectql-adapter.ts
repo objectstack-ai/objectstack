@@ -239,12 +239,20 @@ function normaliseComparand(value: unknown): unknown {
  *
  * It is deliberately NOT a redundant belt over better-auth's own lower-casing.
  * better-auth's `internalAdapter` does lower-case `user.email` on
- * `createUser` / `createOAuthUser` / `updateUser` / `updateUserByEmail`
- * (`better-auth@1.7.0-rc.2/dist/db/internal-adapter.mjs:120,139,594,607`), but
- * that is an *internal* of a **prerelease** dependency, invisible to any
+ * `createOAuthUser` / `createUser` / `updateUser` / `updateUserByEmail` —
+ * measured 2026-08-20 against the installed `better-auth@1.7.1`, at
+ * `dist/db/internal-adapter.mjs:127,146,602,615`.
+ *
+ * ⚠️ Two things about that sentence changed under it, and only one of them was
+ * the version number. The previous stamp read `1.7.0-rc.2/…:120,139,594,607`
+ * and called the dependency a **prerelease**; `1.7.1` is a stable release, so
+ * that half of the reason is simply dead and is not restamped — it is removed.
+ * What survives is the half that still holds and still carries the argument:
+ * the lower-casing is an *internal* of the vendor's `dist`, invisible to any
  * published type, and it does not cover the raw {@link createObjectQLAdapter}
  * path (hand-built calls that never pass through better-auth at all). The
- * invariant the read half depends on has to be owned where it is relied upon.
+ * invariant the read half depends on has to be owned where it is relied upon —
+ * which is why this function exists whether or not the vendor keeps doing it.
  *
  * Idempotent by construction, so a payload better-auth already normalised is
  * unchanged — which is why this adds no behaviour to any existing write.

@@ -203,7 +203,8 @@ describe('#8421 — the traffic that must keep working', () => {
         {
             type: 'theme',
             why: 'PLUGIN kind — no static registry entry at all',
-            item: { name: 'probe_item', label: 'Probe', tokens: {} },
+            // [#10194] spec-valid body — theme resolves a schema now.
+            item: { name: 'probe_item', label: 'Probe', colors: { primary: '#3b82f6' } },
         },
     ];
 
@@ -224,10 +225,12 @@ describe('#8421 — the traffic that must keep working', () => {
         // consults the static contract instead, so the first create of a
         // plugin kind is untouched.
         const { protocol, rows } = makeProtocol();
+        // [#10194] spec-valid body — theme resolves a schema now, and this
+        // control measures the STATIC-contract door, not the shape check.
         const result = await protocol.saveMetaItem({
             type: 'theme',
             name: 'dark',
-            item: { name: 'dark', label: 'Dark', tokens: {} },
+            item: { name: 'dark', label: 'Dark', colors: { primary: '#3b82f6' } },
         });
         expect(result.success).toBe(true);
         expect(metaRows(rows)[0]!.type).toBe('theme');

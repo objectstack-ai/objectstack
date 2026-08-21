@@ -1,7 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { lintLivenessProperties } from './lint-liveness-properties.js';
+import {
+  lintLivenessProperties,
+  // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
+  // in the package's `exports` map). See the block below `getNested` in the
+  // source for why this ONE property is tested off the ledger.
+  checkItemAgainstWarnMap,
+  getNested,
+} from './lint-liveness-properties.js';
 
 /**
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
@@ -466,11 +473,16 @@ describe('lintLivenessProperties', () => {
     // `dashboard`, and was filed as #7079 rather than downgraded into a silence
     // check that would pass on a lint which never walks past `widgets[0]`.
     //
-    // #7079 is CLOSED: `app.props.navigation.children.runAction` (#4848's
-    // spec half — `planned` + `authorWarn`) gave the fan-out a new dotted
-    // subject under an array container, and the assertion was rewritten
-    // against it in the `app navigation` block at the bottom of this file,
-    // same construction (the warned key on index 1, never index 0).
+    // #7079 was closed by re-subjecting: `app.props.navigation.children.runAction`
+    // (#4848's spec half — `planned` + `authorWarn`) gave the fan-out a new
+    // dotted subject under an array container, and the assertion was rewritten
+    // against it in the `app navigation` block at the bottom of this file.
+    // ⚠️ That subject is GONE TOO as of #10068, which flipped `runAction` live
+    // once objectui shipped the consumer — and no dotted warned entry remains in
+    // any ledger, so this time there is nothing to re-subject to. Re-filed as
+    // **#10262**; see the `app navigation` block for the measurement and for why
+    // it is a silence pin rather than a positive assertion on a fixture that
+    // would pass on a broken walk.
 
     // ── #5010: four of these keys are RETIRED, so this lint must go quiet ─────
     //
@@ -537,31 +549,45 @@ describe('lintLivenessProperties', () => {
     });
   });
 
-  // ── #7079: the array fan-out gets its subject back ─────────────────────────
+  // ── #10068: `navigation.runAction` went LIVE, so this lint must go quiet ────
   //
-  // `getNested` resolves a dotted warn-map path by fanning it out over an ARRAY
-  // container level — `navigation.runAction` must check EVERY navigation entry,
-  // not just `navigation[0]`. That reach is what the docblock promises ("each
-  // flow node, each dataset measure") and it is the half a walk can lose
-  // silently: a `getNested` that stopped at index 0 still warns on every
-  // single-entry fixture, on every top-level warned key, and on the first item
-  // of every real app — so nothing else in this file would go red.
+  // Until 2026-08-20 this block held the POSITIVE fan-out assertions: `getNested`
+  // resolves a dotted warn-map path by fanning it out over an ARRAY container
+  // level, so `navigation.runAction` had to be found on EVERY navigation entry
+  // and not just `navigation[0]`. Those assertions rested on the row carrying
+  // `authorWarn` — #4848's spec half, `planned` because the declared deep-link
+  // auto-run slot was validated at authoring while no shipped shell read it.
   //
-  // The subject is `app.props.navigation.children.runAction`, #4848's spec half:
-  // `planned` + `authorWarn`, because the declared deep-link auto-run slot is
-  // validated at authoring but no shipped shell reads it yet. It sits under an
-  // array container in every authored app (`examples/app-crm` crm.app.ts:13,
-  // `app-todo` todo.app.ts:15, showcase `ui/apps/index.ts:27` all open
-  // `navigation: [`), which is precisely the subject class `widgets.colorVariant`
-  // stopped being when #6774 flipped it live.
+  // #10068 flipped the row `live`: the objectui consumer landed (objectui#5216
+  // via objectui PR #5354, absorbed by the `.objectui-sha` pin `9a3daf8`), so the
+  // row drops `authorWarn` and this lint must say nothing about the key — an
+  // advisory here would now tell authors the auto-run does not fire from a
+  // declaration that does fire.
   //
-  // Ledger-driven, like the rest of this file: it holds the real
-  // `@objectstack/spec` ledger to its `authorWarn` on that row as well as the
-  // walk to its fan-out. Because the discriminating assertion is a POSITIVE
-  // warning, it cannot pass vacuously — `lintLivenessProperties` returns [] both
-  // when the ledgers fail to load and when the walk is broken, and this block
-  // fails in either case.
-  describe('app navigation (#7079 — `getNested`\'s array fan-out)', () => {
+  // ⚠️ THE FAN-OUT HAS LOST ITS SUBJECT FOR THE SECOND TIME, and it is now gone
+  // for good rather than merely moved: `widgets.colorVariant` stopped being the
+  // subject when #6774 flipped it live (filed as #7079), #7079 was closed by
+  // re-subjecting to `navigation.runAction`, and that row has now flipped too.
+  // Measured across all 30 shipped ledgers at this commit, EVERY remaining
+  // warned entry is top-level (`agent.{lifecycle,memory,guardrails,
+  // structuredOutput}`, `field.relatedListFilter`, `object.externalSharingModel`,
+  // `tool.outputSchema`, `translation.flows`) — and a top-level path never
+  // reaches `getNested` at all, because `checkItem` takes the
+  // `path.includes('.') ? getNested(…) : [item[path]]` branch. So there is no
+  // dotted subject left anywhere to re-point at, and the fan-out is untested.
+  // Filed as **#10262**, which also carries the recommendation not to play this
+  // round a third time (test the WALKER against a synthetic warn map, and leave
+  // the ledger-driven coupling to the assertions that are genuinely about the
+  // ledger). Deliberately NOT replaced with a bare positive assertion on some
+  // single-entry fixture: that passes on a walk that stops at index 0, which is
+  // the exact non-test #7079 was filed to avoid writing.
+  //
+  // What is kept is the disposition #6774 used for `colorVariant`: a SILENCE pin
+  // (so a half-reverted flip — the ledger row restored to `planned`, or the
+  // objectui pin rolled back under it — shows up right here) plus the
+  // anti-vacuity guard below, because `lintLivenessProperties` returns [] both
+  // when the walk is broken and when it cannot resolve the ledgers at all.
+  describe('app navigation (#10068 — the deep-link slot is live now)', () => {
     const navApp = (navigation: Record<string, unknown>[]) => ({
       apps: [{ name: 'crm_app', label: 'CRM', navigation }],
     });
@@ -574,44 +600,47 @@ describe('lintLivenessProperties', () => {
       ...extra,
     });
 
-    // The load-bearing assertion, rebuilt in the deleted widget test's shape:
-    // the warned key sits on `navigation[1]` and NOWHERE on `navigation[0]`, so
-    // a walk that only ever reads the first element of an array level finds
-    // `undefined`, emits nothing, and this goes red. Putting the key on index 0
-    // — or on a single-entry `navigation` — would pass on both walks and prove
-    // nothing, which is the exact non-test #7079 was filed to avoid writing.
-    it('fans out over EVERY navigation entry, not just the first', () => {
+    // The silence pin. Authored on `navigation[1]` and nowhere on
+    // `navigation[0]` — the shape the old positive assertion used — so this
+    // keeps saying something specific about the entry the walk would have had
+    // to reach, rather than only about the first one.
+    it('no longer warns on `navigation.runAction` — the shell consumes it since objectui#5216 (#10068)', () => {
       const findings = lintLivenessProperties(navApp([
         navItem('nav_accounts', { objectName: 'crm_account', label: 'Accounts' }),
         navItem('nav_leads', { runAction: 'create_lead' }),
       ]));
-      const matched = paths(findings).filter((m) => m.includes('navigation.runAction'));
-      expect(matched).toHaveLength(1);
-      expect(findings.find((f) => f.message.includes('navigation.runAction'))?.where)
-        .toBe("app 'crm_app'");
+      expect(paths(findings).some((m) => m.includes('navigation.runAction'))).toBe(false);
     });
 
-    // The control for the assertion above: index 0 is not a blind spot either,
-    // so a red there means "the fan-out is broken", not "the walk moved".
-    it('warns when the deep-link slot is authored on the first entry too', () => {
-      const findings = lintLivenessProperties(navApp([
-        navItem('nav_leads', { runAction: 'create_lead' }),
-        navItem('nav_accounts', { objectName: 'crm_account', label: 'Accounts' }),
-      ]));
-      expect(paths(findings).filter((m) => m.includes('navigation.runAction'))).toHaveLength(1);
-    });
-
-    // `checkItem` breaks after the first hit per (item, path): the advisory is
-    // about the app's authoring, not a per-entry tally, so three offending
-    // entries are still one line. Pinned because it is the reason the assertion
-    // above can say `toHaveLength(1)` without that number being an accident.
-    it('reports one finding per app even when several entries author the slot', () => {
+    // Same pin with the key on index 0 and on several entries at once: a
+    // half-reverted flip is caught wherever the author happened to put it.
+    it('stays quiet however many navigation entries author the slot', () => {
       const findings = lintLivenessProperties(navApp([
         navItem('nav_accounts', { objectName: 'crm_account', runAction: 'create_account' }),
         navItem('nav_leads', { runAction: 'create_lead' }),
         navItem('nav_contacts', { objectName: 'crm_contact', runAction: 'create_contact' }),
       ]));
-      expect(paths(findings).filter((m) => m.includes('navigation.runAction'))).toHaveLength(1);
+      expect(paths(findings).some((m) => m.includes('navigation.runAction'))).toBe(false);
+    });
+
+    // Anti-vacuity guard for both silence pins above — the shape the dashboard
+    // block uses, and the reason those pins are worth keeping at all.
+    // `lintLivenessProperties` returns [] when it cannot resolve the shipped
+    // ledgers, so "no navigation findings" is also what a lint that had stopped
+    // reading ledgers returns; and with `runAction` live, `app` has no warned
+    // nav key left, so nothing inside the app walk can tell a working walk from
+    // one that was dropped from TYPE_COLLECTIONS. This authors the flipped key
+    // and a property that IS still `authorWarn` (`object.externalSharingModel`,
+    // the last one in tree) in the SAME call: same process, same ledger load,
+    // one warning and not two.
+    it('the navigation silence is a real verdict, not a lint that stopped loading ledgers', () => {
+      const findings = lintLivenessProperties({
+        objects: [{ name: 'widget', externalSharingModel: 'read' }],
+        ...navApp([navItem('nav_leads', { runAction: 'create_lead' })]),
+      });
+      const messages = findings.map((f) => f.message);
+      expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
+      expect(messages.some((m) => m.includes('navigation.runAction'))).toBe(false);
     });
 
     it('stays silent on navigation entries that author no warned key', () => {
@@ -619,6 +648,110 @@ describe('lintLivenessProperties', () => {
         navItem('nav_accounts', { objectName: 'crm_account', label: 'Accounts' }),
         navItem('nav_leads', { viewName: 'hot_leads' }),
       ]));
+      expect(findings).toEqual([]);
+    });
+  });
+});
+
+// ── #10262: the array fan-out, tested at the WALKER's own level ──────────────
+//
+// Everything above this line is deliberately ledger-driven: it asserts against
+// the REAL ledgers shipped by `@objectstack/spec`, which is what makes those
+// assertions contract tests. This block is the one exception, and the reason is
+// recorded twice over in the comments above.
+//
+// `getNested`'s array fan-out — a dotted warn-map path resolved over an ARRAY
+// container level must visit EVERY element, not just index 0 — is reachable
+// only from a DOTTED warned entry, because `checkItem` takes the
+// `path.includes('.') ? getNested(item, path) : [item[path]]` branch. Its
+// subject was therefore always "whichever row happens to carry `authorWarn`
+// under an array container today", and that is a ledger verdict: verdicts move.
+// Twice a row correctly flipping to `live` deleted this coverage —
+// `dashboard.widgets.colorVariant` (#6774, filed as #7079) and then
+// `app.…navigation.children.runAction` (#10068, filed as #10262) — and as of
+// #10262 every warned entry in all 30 shipped ledgers is top-level, so there is
+// nothing left to re-subject to and no reason to expect a third subject to last.
+//
+// So this block drives the walker with a SYNTHETIC warn map through the
+// package-internal seam (`checkItemAgainstWarnMap`, `getNested` — module
+// exports, not re-exported by `src/index.ts`, not in the package's `exports`
+// map). No ledger flip can empty it. The cost is honest and bounded: these
+// assertions say nothing about which properties the ledger warns on — that
+// stays the job of every other block in this file.
+describe('the array fan-out, against a synthetic warn map (#10262)', () => {
+  const warnOn = (...paths: string[]) =>
+    new Map(paths.map((p) => [p, { authorWarn: true, authorHint: 'synthetic (#10262)' }] as const));
+
+  /** `n` navigation entries; those at `authored` set the warned key. */
+  const navItems = (n: number, authored: number[]) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `nav_${i}`,
+      type: 'object',
+      objectName: 'crm_lead',
+      ...(authored.includes(i) ? { runAction: `create_${i}` } : {}),
+    }));
+
+  describe('getNested', () => {
+    it('resolves one value per element of an array container, in order', () => {
+      expect(getNested({ navigation: navItems(3, [0, 1, 2]) }, 'navigation.runAction'))
+        .toEqual(['create_0', 'create_1', 'create_2']);
+    });
+
+    // The load-bearing shape: a walk that stopped at index 0 returns
+    // `[undefined]` here — one entry, not three — while every fixture that
+    // authors the key on the FIRST element keeps passing. That asymmetry is
+    // exactly why a positive assertion on a single-entry fixture is not a test
+    // of the fan-out (#7079's original reasoning).
+    it('visits elements that do NOT set the key rather than filtering them out', () => {
+      expect(getNested({ navigation: navItems(3, [2]) }, 'navigation.runAction'))
+        .toEqual([undefined, undefined, 'create_2']);
+    });
+
+    it('flattens a trailing array container one step (`nodes.tags` → every tag)', () => {
+      expect(getNested({ nodes: [{ tags: ['a', 'b'] }, { tags: ['c'] }] }, 'nodes.tags'))
+        .toEqual(['a', 'b', 'c']);
+    });
+
+    it('treats a missing parent level as absent instead of throwing', () => {
+      expect(getNested({}, 'navigation.runAction')).toEqual([]);
+      expect(getNested({ navigation: null }, 'navigation.runAction')).toEqual([]);
+    });
+  });
+
+  describe('checkItem via the dotted branch', () => {
+    // The anti-index-0 assertion, restored as a property of the walker: the
+    // warned key is authored on exactly ONE entry of a four-entry container,
+    // and the walk must find it wherever that entry sits. A `getNested` that
+    // stopped at index 0 passes case 0 and fails 1, 2 and 3.
+    it.each([0, 1, 2, 3])('finds a warned key authored on navigation[%i] alone', (index) => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, [index]) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('navigation.runAction');
+      expect(findings[0].where).toBe("app 'crm_app'");
+    });
+
+    it('reports once per (item, path) however many entries author the key', () => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, [0, 1, 2, 3]) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
+      expect(findings).toHaveLength(1);
+    });
+
+    it('stays silent when no entry authors the warned key', () => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, []) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
       expect(findings).toEqual([]);
     });
   });

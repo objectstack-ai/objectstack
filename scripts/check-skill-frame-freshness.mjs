@@ -119,6 +119,7 @@ import {
   frameCountMentions,
   runAllChecks,
 } from './check-skill-frame-sync.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1040,6 +1041,6 @@ function main() {
   process.stdout.write(text);
 }
 
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   main();
 }

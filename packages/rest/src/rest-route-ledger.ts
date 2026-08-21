@@ -188,14 +188,12 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // at runtime. Both are `route-manager` mounts here now.
   //
   // Order is load-bearing and pinned by `meta-route-registration-order.test.ts`:
-  // the `/state/:field` pair precedes the compound `/published` twin (they
-  // collide only on a field literally named `published`), and BOTH `/published`
-  // rows precede `GET /api/v1/meta/:type/:section/:name` — a three-segment
-  // literal registered after that catch-all is mounted and unreachable.
-  { route: 'GET /api/v1/meta/objects/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
-    note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end; the SDK spells the segment `objects`' },
-  { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'server-only',
-    note: 'singular-spelling alias of the row above — metadata-protocol folds object/objects (#4432) and the dispatcher branch this mount replaces accepted both, so the replacement is not pickier than what it replaced. The SDK calls the plural only' },
+  // `/state/:field` precedes the compound `/published` twin (they collide only
+  // on a field literally named `published`), and BOTH `/published` rows precede
+  // `GET /api/v1/meta/:type/:section/:name` — a three-segment literal
+  // registered after that catch-all is mounted and unreachable.
+  { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
+    note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end. #9180 step 2 retired the plural `/api/v1/meta/objects/:name/state/:field` twin that used to carry this `sdk` disposition, and the SDK now spells the segment `object` — the `/meta` type segment is singular, always. The retired twin was a DECLARED registration, not a `META_URL_TO_SINGULAR` fold tolerance (this route matches a literal segment and never consulted the fold), so the boundary accept set is unchanged' },
   { route: 'GET /api/v1/meta/:type/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
     note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name)' },
   { route: 'GET /api/v1/meta/:type/:section/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',

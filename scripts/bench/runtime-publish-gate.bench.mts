@@ -488,23 +488,27 @@ function controlItemOwnPackage(): AnyRec {
 }
 
 /**
- * A finding's identity for verdict comparison, in two readings.
+ * A finding's identity for verdict comparison — the semantic tuple, which
+ * since #10064 is the tuple AS EMITTED.
  *
- * ⚠️ `raw` includes `path`, and on the OBJECT door every finding's path is
- * INDEX-based (`objects[417].sharingModel`). Narrowing moves the written item's
- * index, so `raw` differs between a full and a narrowed run even when the two
- * runs found the identical defect on the identical object — a naive comparison
- * reads that as a phantom. `semantic` drops the array index and keeps
- * everything a reader acts on (`where` already carries the object NAME), so it
- * is the reading that answers "did narrowing change the ANSWER".
+ * The pre-#10064 reason for two readings is gone: the gate now keys a
+ * collection-resident finding's top-level collection entry by NAME
+ * (`objects.acme_invoice.sharingModel`), so narrowing the snapshot no longer
+ * moves anything in `path` and the raw tuple IS the semantic one. The
+ * differential comparison therefore reads the full
+ * `(rule, where, path, message)` tuple by default (the #10064 ruling).
  *
- * BOTH are printed. The index difference is a real, wire-visible consequence of
- * this change and hiding it behind the normalisation would be dishonest.
+ * `verdictIndexInsensitive` survives as a CANARY, not as the default: the
+ * name-keying falls back to the positional spelling for an entry with no
+ * splice-safe name, and a positional top-level path CAN legitimately move
+ * under narrowing again. When the two readings disagree, the index-only
+ * difference is printed — hiding it would report a phantom as a verdict
+ * change (or vice versa) with nothing to diagnose it from.
  */
 const stripIndices = (p: unknown) => String(p ?? '').replace(/\[\d+\]/g, '[i]');
-const verdictRaw = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+const verdict = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
   [...r.errors, ...r.advisories].map((f) => `${f.rule}|${f.where}|${f.path}|${f.message}`).sort();
-const verdictSemantic = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
+const verdictIndexInsensitive = (r: { errors: AnyRec[]; advisories: AnyRec[] }) =>
   [...r.errors, ...r.advisories]
     .map((f) => `${f.rule}|${f.where}|${stripIndices(f.path)}|${f.message}`)
     .sort();
@@ -547,11 +551,18 @@ function packageMode() {
         `    whole gate: full ${full.toFixed(2)} ms → package closure ${scoped.toFixed(2)} ms`
         + ` — saving ${(((full - scoped) / full) * 100).toFixed(1)}%`,
       );
-      const rawD = diffCount(verdictRaw(fullV), verdictRaw(scopedV));
-      const semD = diffCount(verdictSemantic(fullV), verdictSemantic(scopedV));
+      // [#10064] The semantic tuple is the default — and it is the tuple as
+      // emitted, path included, now that the wire path is name-keyed. The
+      // index-insensitive reading prints only when it disagrees (a positional
+      // fallback path moved), so an index-only artefact cannot silently pose
+      // as a verdict change.
+      const semD = diffCount(verdict(fullV), verdict(scopedV));
+      const insD = diffCount(verdictIndexInsensitive(fullV), verdictIndexInsensitive(scopedV));
       console.log(
-        `    differential verdict — semantic: ${semD.added === 0 && semD.removed === 0 ? 'UNCHANGED' : `CHANGED (+${semD.added} / -${semD.removed})`}`
-        + ` · raw incl. array index: ${rawD.added === 0 && rawD.removed === 0 ? 'unchanged' : `+${rawD.added} / -${rawD.removed} (index-only differences show here)`}`,
+        `    differential verdict: ${semD.added === 0 && semD.removed === 0 ? 'UNCHANGED' : `CHANGED (+${semD.added} / -${semD.removed})`}`
+        + (semD.added === insD.added && semD.removed === insD.removed
+          ? ''
+          : ` · index-insensitive reading disagrees: +${insD.added} / -${insD.removed} (a positional-fallback path moved)`),
       );
       console.log(`    findings: full ${fullV.errors.length}e/${fullV.advisories.length}a → scoped ${scopedV.errors.length}e/${scopedV.advisories.length}a`);
 
@@ -572,7 +583,7 @@ function packageMode() {
         return owner === DEP_PKG || o.isSystem === true || String(o.name ?? '').startsWith('sys_');
       });
       const ctrlAV = runRuntimeAuthoringRules({ type: WRITE_TYPE, item: ctrlItem, context: { objects: ctrlA } });
-      const ctrlAD = diffCount(verdictSemantic(ctrlAFull), verdictSemantic(ctrlAV));
+      const ctrlAD = diffCount(verdict(ctrlAFull), verdict(ctrlAV));
       console.log(
         `    positive control A (own package dropped, |set| = ${ctrlA.length}): `
         + `${ctrlAD.added === 0 && ctrlAD.removed === 0 ? '⚠️ NO DELTA — control is vacuous on this door' : `delta +${ctrlAD.added} / -${ctrlAD.removed}`}`,
@@ -586,7 +597,7 @@ function packageMode() {
         return owner === OWN_PKG || owner === DEP_PKG;
       });
       const ctrlBV = runRuntimeAuthoringRules({ type: WRITE_TYPE, item, context: { objects: ctrlB } });
-      const ctrlBD = diffCount(verdictSemantic(fullV), verdictSemantic(ctrlBV));
+      const ctrlBD = diffCount(verdict(fullV), verdict(ctrlBV));
       console.log(
         `    positive control B (system objects dropped, |set| = ${ctrlB.length}): `
         + `${ctrlBD.added === 0 && ctrlBD.removed === 0 ? '⚠️ NO DELTA — this door has no objects×objects coupling' : `delta +${ctrlBD.added} / -${ctrlBD.removed}`}`,

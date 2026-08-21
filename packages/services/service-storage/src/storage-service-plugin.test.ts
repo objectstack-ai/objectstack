@@ -354,12 +354,14 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     await plugin.start(ctx);
     await ctx._flushReady();
 
-    // Lifecycle hooks (beforeDelete/afterDelete/afterInsert) + access hooks
+    // Lifecycle hooks (beforeDelete/afterDelete/afterInsert, plus afterUpdate
+    // since #10171 gave the update verb its detach leg) + access hooks
     // (beforeInsert/beforeUpdate/beforeDelete, #10091 added the update verb)
     // — see attachment-lifecycle.ts and attachment-access-hooks.ts.
     expect(hookEvents.sort()).toEqual([
       'afterDelete',
       'afterInsert',
+      'afterUpdate',
       'beforeDelete',
       'beforeDelete',
       'beforeInsert',

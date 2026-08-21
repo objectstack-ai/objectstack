@@ -538,6 +538,38 @@ const TENANCY_MODES_EXPLAINER =
  * move of a general field-roles mechanism — a consumer other than audit
  * stamping needs its own ruling before reading it.
  *
+ * That pin is WIDENED **by name** by the maintainer ruling recorded on
+ * cloud#1395, 2026-08-17T03:18Z, accepting the decision-inbox recommendations
+ * in full — verbatim: 「新进卡六张 同意你的建议」. It is transcribed here so the
+ * widening is declared, not discovered (#10110):
+ *
+ * > Ruled: Option A — extend the #8778 ruling: `resolveRecordOrganizationField`
+ * > is promoted to a shared resolver used by all three platform-row writers
+ * > (approvals, automation runs, audit). A platform row's organization is the
+ * > SUBJECT record's organization; actor context is the fallback, never the
+ * > primary.
+ *
+ * The ruling sanctions exactly THREE consumers of this key, and no others:
+ *
+ *   1. **audit stamping** — plugin-audit's `resolveRecordOrganizationField`;
+ *      the original #8778 consumer and, as of this annotation, still the only
+ *      one wired up;
+ *   2. **`plugin-approvals`** — the approval-row writer;
+ *   3. **the automation-run recorder** — reached when
+ *      `resolveRecordOrganizationField` is promoted to the shared platform-row
+ *      resolver.
+ *
+ * Consumers 2 and 3 are sanctioned but not yet implemented: #10101 carries that
+ * behaviour change (this card is annotation-only and changes no accept/reject
+ * behaviour). Which is why the `.describe()` below still speaks of audit rows —
+ * it states what reads the key TODAY, and #10101 updates it as the readers
+ * actually land.
+ *
+ * ⛔ The refusal posture is UNCHANGED for a FOURTH consumer. Three named
+ * platform-row writers are still not a general field-roles mechanism: anything
+ * outside the list above needs its own maintainer ruling before reading this
+ * key, exactly as #8778 required.
+ *
  * @example Shared database, platform-default tenant column (organization_id)
  * {
  *   enabled: true
@@ -727,6 +759,38 @@ export const LIFECYCLE_DURATION_REGEX = /^\d+(h|d|w|y)$/;
 const lifecycleDuration = (what: string) =>
   z.string().regex(LIFECYCLE_DURATION_REGEX, `${what} must be a duration literal like '6h', '14d', '12w' or '7y'`);
 
+/**
+ * [#10165] The `onlyWhen` row-filter value union, shared by
+ * `retention.onlyWhen` and `ttl.onlyWhen` — ONE shape on purpose: the two
+ * blocks are mirrors (maintainer ruling 2026-08-20, option A: give `ttl` an
+ * `onlyWhen` mirroring `retention`'s), and the runtime enforces them through
+ * one code path (`LifecycleService.reap` spreads the filter into the
+ * candidate-read `where` identically for both policies), so two copied unions
+ * here could only ever drift apart.
+ *
+ * Members: per-field equality (string/number/boolean), `{$in: [...]}`
+ * (non-empty), and the platform's canonical null predicate `{$null: boolean}`
+ * — `$null` is declared `z.boolean()` to match `FieldOperatorsSchema`'s
+ * first-class query-layer declaration exactly, never a `true`-only literal
+ * that would mint a third dialect of the predicate. The absence member exists
+ * because interleaved terminal rows are often supersets of live rows (a
+ * `sys_session` tombstone stamps `revoked_at` and clears nothing), so the
+ * only property that distinguishes a live row is a value's ABSENCE.
+ * Dialect compile coverage: `driver-sql`'s
+ * `sql-driver-ttl-onlywhen-null-dialects.test.ts` (SQLite live, pg + mysql2
+ * compiled SQL).
+ */
+const lifecycleOnlyWhenSchema = z.record(
+  z.string(),
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.object({ $in: z.array(z.union([z.string(), z.number()])).min(1) }).strict(),
+    z.object({ $null: z.boolean() }).strict(),
+  ]),
+);
+
 export const LifecycleSchema = lazySchema(() => strictObject({
   surface: "this object's `lifecycle` block",
   history:
@@ -792,16 +856,8 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     },
   }, {
     maxAge: lifecycleDuration('retention.maxAge').describe('Rows older than this (by created_at) are deleted by the Reaper — or archived first when `archive` is set.'),
-    onlyWhen: z.record(
-      z.string(),
-      z.union([
-        z.string(),
-        z.number(),
-        z.boolean(),
-        z.object({ $in: z.array(z.union([z.string(), z.number()])).min(1) }).strict(),
-      ]),
-    ).optional().describe(
-      'Row filter the retention applies to — per-field equality or {$in: [...]} (e.g. { status: { $in: ["completed", "failed"] } }). Rows OUTSIDE the filter are retained regardless of age: for tables that interleave live workflow state with terminal history (sys_automation_run). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
+    onlyWhen: lifecycleOnlyWhenSchema.optional().describe(
+      'Row filter the retention applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { status: { $in: ["completed", "failed"] } }). Rows OUTSIDE the filter are retained regardless of age: for tables that interleave live workflow state with terminal history (sys_automation_run). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
     ),
   }).optional().describe('Age-based retention window enforced by the LifecycleService Reaper.'),
   ttl: strictObject({
@@ -809,7 +865,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     history:
       'Until #4001 these were dropped silently — the TTL block still parsed, so rows the ' +
       'author expected to auto-expire lived forever.',
-    aliases: { expiresAfter: 'expireAfter', after: 'expireAfter', timestampField: 'field', on: 'field' },
+    aliases: { expiresAfter: 'expireAfter', after: 'expireAfter', timestampField: 'field', on: 'field', filter: 'onlyWhen', where: 'onlyWhen', when: 'onlyWhen' },
     guidance: {
       maxAge:
         '`maxAge` is a `retention` key, not a TTL key. TTL measures from the timestamp ' +
@@ -819,6 +875,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   }, {
     field: z.string().describe('Timestamp field the TTL is measured from (e.g. created_at, expires_at).'),
     expireAfter: lifecycleDuration('ttl.expireAfter').describe('Rows expire this long after `field` and are deleted by the Reaper.'),
+    onlyWhen: lifecycleOnlyWhenSchema.optional().describe(
+      'Row filter the TTL reap applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { revoked_at: { $null: true } }). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
+    ),
   }).optional().describe('Per-row TTL auto-expiry (transient/event classes).'),
   storage: strictObject({
     surface: "this object's `lifecycle.storage` block",
@@ -891,6 +950,26 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'lifecycle.retention.onlyWhen cannot be combined with archive — the Archiver moves rows by age alone and would archive rows the filter protects',
+    });
+  }
+  // [#10165] ttl.onlyWhen mirrors both of retention.onlyWhen's conflicts, from
+  // the Reaper's actual semantics rather than by symmetry alone:
+  // - rotation: the Rotator DROPs whole physical shards; a shard is dropped by
+  //   age with no row read, so rows the filter protects go down with it.
+  // - archive: `reapObject` returns into `archiveObject` before the ttl reap
+  //   ever runs, so with `archive` declared the filter guards a code path that
+  //   is never executed (declared ≠ enforced) — while the Archiver itself
+  //   copies and hot-deletes by `created_at` age alone.
+  if (lc.ttl?.onlyWhen && lc.storage?.strategy === 'rotation') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'lifecycle.ttl.onlyWhen cannot be combined with rotation storage — the Rotator DROPs whole shards and would destroy rows the filter protects',
+    });
+  }
+  if (lc.ttl?.onlyWhen && lc.archive) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs) and the Archiver moves rows by age alone',
     });
   }
 }));

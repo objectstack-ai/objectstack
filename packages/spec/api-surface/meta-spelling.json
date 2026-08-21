@@ -1,0 +1,10 @@
+{
+  "description": "Every exported `name (kind)` of one published entry point of @objectstack/spec — the breadth half of the ADR-0059 backward-compatibility gate. Sharded by entry point (#5837) so two PRs touching different entry points never share a file. Reads the BUILT dist/*.d.ts: regenerate with `pnpm --filter @objectstack/spec gen:api-surface` after a real build.",
+  "entry": "./meta-spelling",
+  "exports": [
+    "META_URL_TO_SINGULAR (const)",
+    "canonicalMetaUrlType (function)",
+    "metaUrlSpellingRefusal (function)",
+    "unrecognisedMetaTypeRefusal (function)"
+  ]
+}

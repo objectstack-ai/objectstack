@@ -34,15 +34,20 @@ export const SEMCONV = {
      * body parse included — not the handler's share of it.
      */
     httpRequestDurationMs: 'http_request_duration_ms',
-    /**
-     * Counter, labels: `method`, `route`. Incremented when an in-flight
-     * handler throws after the response is sent. Emitted by
-     * `@objectstack/runtime`'s `instrumentRouteHandler`, and NOT movable to
-     * the seam above as-is: the observation carries a status but no throw
-     * signal, so a transport-side emitter would count a different population
-     * (#9834 records the fork).
-     */
-    httpRequestErrorsTotal: 'http_request_errors_total',
+    // ⛔ RETIRED — `http_request_errors_total` was removed in
+    // `@objectstack/observability` 17.2.0 (#9834, ADR-0049 enforce-or-remove).
+    // ⛔ Do not re-add the name. It was DECLARED here as a stable server-wide
+    // signal and EMITTED only from `@objectstack/runtime`'s per-route wrapper,
+    // on a THROWN handler — so it never saw auth's `getRawApp()` mount, the
+    // REST data API, or any error a handler answered politely through
+    // `errorResponseBase` (which sets a status and does not re-throw). No
+    // transport-side emitter could preserve that population either: the
+    // `IHttpServer.afterResponse` observation carries `{method, routePattern,
+    // status, elapsedMs}` and no throw signal at all.
+    // ⇒ Read the 5xx rate from `http_requests_total{status=~"5.."}` instead.
+    // The transport emits that family through the seam, so it covers every
+    // inbound surface (#9650 / #9835 / #10004) and carries the status label
+    // this counter only stood in for. Maintainer ruling 2026-08-20.
 
     // ── Storage — emitted by `@objectstack/service-storage` adapters ──
     /** Counter, labels: `adapter` (`local`|`s3`|…), `op` (`get`|`put`|`delete`|`head`), `result` (`ok`|`error`). */
@@ -117,5 +122,8 @@ export const SEMCONV = {
 export const RUNTIME_METRICS = {
     httpRequestsTotal: SEMCONV.httpRequestsTotal,
     httpRequestDurationMs: SEMCONV.httpRequestDurationMs,
-    httpRequestErrorsTotal: SEMCONV.httpRequestErrorsTotal,
+    // `httpRequestErrorsTotal` retired with its SEMCONV declaration above
+    // (#9834). The alias is not a compatibility window of its own: there is no
+    // emitter left to read, so keeping the name here would hand callers a
+    // string nothing ever writes.
 } as const;

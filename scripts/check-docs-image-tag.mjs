@@ -33,8 +33,12 @@
 //
 // #9018 asks for this directly, and it is the difference between a gate and a
 // nuisance: `content/docs/**` is full of version-shaped strings that MUST NOT
-// track the CLI version. The reference pages alone carry ~30 sentences of the
-// form "removed in @objectstack/spec 17.0.0" -- historical facts about the
+// track the CLI version. The reference pages alone carry 92 sentences of the
+// form "removed in @objectstack/spec 17.0.0" -- re-measured at #10229, where the
+// "~30" this paragraph used to say was found to be well out of date, and the
+// direction of that error is the reassuring one: the hazard grew, the argument
+// for enumerating did not weaken. (95 across all of `content/docs/**`, in 22
+// files.) They are historical facts about the
 // release something was retired in, which stay true forever and would go red on
 // the next bump under any glob-plus-version-shape rule. `packages/cli/CHANGELOG.md`
 // is the same hazard at scale. An explicit list is re-readable, and its cost --
@@ -85,6 +89,70 @@
 // which is a one-line edit that leaves the shrinkage in the diff where a reviewer
 // sees it.
 //
+// ## Why PROSE claims get their own limb (#10229)
+//
+// The pin limb above asserts one thing precisely: the ANCHORED pins agree with
+// `packages/cli`. The 17.1.0 publish -- the first minor bump since this gate
+// landed -- proved that is NOT the same statement as "the docs agree with
+// `packages/cli`", and the gap is not small. `sync-docs-image-tags.mjs` moved all
+// eight anchored pins to 17.1.0 and this gate reported OK, while FIVE prose claims
+// in three files still said 17.0.0:
+//
+//   content/docs/deployment/self-hosting.mdx  the tag-scheme sentence
+//   content/docs/deployment/index.mdx         the tag-scheme sentence + the "Versioned by" cell
+//   content/docs/upgrading.mdx                the tag-scheme sentence + the "Versioned by" cell
+//
+// One of them was not merely stale but FALSE: it said the rolling `17.0` / `17` /
+// `latest` tags "move with every stable publish", which stopped being true the
+// moment 17.1.0 shipped and froze `17.0`. A reader pinning `17.0` on the strength
+// of that sentence gets 17.0.0 forever, silently -- the exact failure #9018 filed
+// this gate to prevent, arriving through the door the gate does not cover.
+//
+// ## Why the fix is METAVARIABLES, not a second thing to keep current
+//
+// #10229 suggests a rule keyed on "a version literal in the same file as an
+// anchored pin, disagreeing with it". That is not what landed, for two measured
+// reasons and one structural one.
+//
+// The two false positives it has in the corpus TODAY -- both in files that DO
+// carry anchored pins, which is precisely the case the card assumed was safe:
+//
+//   - `content/docs/upgrading.mdx`'s upgrade-checklist table, seven rows of
+//     `v17.0.0` ... `v9.0.0`. Historical facts, in the same file as line 41's pin.
+//   - `content/docs/deployment/self-hosting.mdx`'s `hotcrm-2.2.2.json` artifact
+//     URL, and `content/docs/deployment/index.mdx`'s `com.acme.crm@1.2.0`. Those
+//     are the READER's app version, which by construction never tracks ours.
+//
+// The structural reason is worse than the false positives: a rule demanding prose
+// literals TRACK the CLI version makes every publish turn this gate red on prose,
+// and `sync-docs-image-tags.mjs` cannot fix prose -- its rewrite is safe only
+// because a PATTERN match ends with its tag (see that file's header), which a
+// sentence does not. That is a standing hand-fix obligation at every release, i.e.
+// the drift this card is about, rescheduled rather than removed.
+//
+// So the prose is spelled with METAVARIABLES instead -- `X.Y.Z`, `X.Y`, `X`,
+// `latest` -- which is the spelling `docker/README.md`'s tag table has used all
+// along, and which is the one tag-scheme surface in this corpus that has never
+// drifted. This limb then asserts the ABSENCE of a concrete version in the
+// enumerated claims, so it creates NO release-time obligation: a publish cannot
+// redden it, only an author reintroducing a literal can.
+//
+// ## What this limb does NOT catch, stated so the green can be read
+//
+// It catches the STALENESS class (a concrete version in a claim that should be
+// generic). It cannot catch the FALSEHOOD class: `17.0` and `17` are not concrete
+// versions, and "move with every stable publish" is wrong for reasons no version
+// comparison reaches. Making the sentence generic removes the temptation to write
+// that sentence -- it is not a proof that nobody will.
+//
+// Enumeration and anchoring are preserved exactly as above: PROSE_CLAIMS names
+// (file, anchor) pairs one at a time, and a claim whose anchor stops matching is a
+// FAILURE (PROSE-ANCHOR-LOST), for the same anti-vacuity reason NO-OCCURRENCES is.
+// The 92 "removed in @objectstack/spec 17.0.0" sentences are untouched: they are
+// in neither an enumerated file nor an anchored claim. Nor are the two shapes that
+// DO live inside enumerated files -- the upgrade-checklist rows and the reader's
+// own app version -- both of which have controls in --self-test.
+//
 // ## The release-time obligation this gate creates
 //
 // Pinning docs to `packages/cli`'s version means THE NEXT VERSION BUMP TURNS THIS
@@ -117,6 +185,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * The package whose `version` every concrete pin below must equal.
@@ -177,6 +246,83 @@ export const PATTERNS = [
     describe: 'an `npm install` pin of the CLI itself',
   },
 ];
+
+/**
+ * The prose anchors (#10229). Each spans a CLAIM: the anchor phrase, the rest of
+ * its line, and the line after it.
+ *
+ * Two lines because MDX prose is hard-wrapped at ~78 columns and every drifted
+ * spelling in the corpus put its tag enumeration within one wrap of the anchor --
+ * `versions (`17.0.0`, `17.0`, `17`,\n`latest`)` was the shape that got past the
+ * pin patterns. A whole-paragraph span would reach into neighbouring sentences and
+ * start colliding with the legitimate literals listed in the header; a single line
+ * would miss the wrap. Table-row claims are bounded by their parentheses instead,
+ * which is tighter than a line.
+ */
+export const PROSE_ANCHORS = {
+  'tag-scheme': {
+    // The near-miss #10229 measured: `@objectstack/cli` followed by a backtick and
+    // the word "versions" is one character away from the `npm-pin` anchor, so the
+    // pin limb never saw it. That near-miss is exactly what makes it a good anchor.
+    regex: /`@objectstack\/cli` versions[^\n]*\n?[^\n]*/g,
+    describe: 'the sentence stating what the runtime image tags mirror',
+  },
+  'release-train': {
+    regex: /release train \([^)]*\)/g,
+    describe: 'the "Versioned by" table cell naming what the platform is versioned by',
+  },
+};
+
+/**
+ * The enumerated prose claims -- (file, anchor) pairs, one per claim site.
+ *
+ * This is the census as of #10229, and it is deliberately a list of CLAIMS rather
+ * than of files: `self-hosting.mdx` carries a tag-scheme sentence and no
+ * "Versioned by" cell, while the other two carry both. Enumerating pairs means a
+ * claim that is deleted or reworded past its anchor is PROSE-ANCHOR-LOST rather
+ * than a silent shrink -- the same bargain SURFACES makes with NO-OCCURRENCES.
+ *
+ * Adding a doc that describes the tag scheme? Add its claim here. The cost of
+ * forgetting is bounded the same way: an unenumerated claim is unguarded, which is
+ * how all five of these got past 17.1.0 in the first place.
+ */
+export const PROSE_CLAIMS = [
+  {
+    file: 'content/docs/deployment/self-hosting.mdx',
+    anchor: 'tag-scheme',
+    why: 'the self-hosting walkthrough\'s image-tag paragraph. Carried BOTH 17.1.0 defects: the stale exemplar and the false "move with every stable publish" claim.',
+  },
+  {
+    file: 'content/docs/deployment/index.mdx',
+    anchor: 'tag-scheme',
+    why: 'the deployment overview\'s runtime section. NOT in SURFACES -- it pins nothing, so the pin limb cannot reach it at all, and this is the only guard it has.',
+  },
+  {
+    file: 'content/docs/deployment/index.mdx',
+    anchor: 'release-train',
+    why: 'the "Versioned by" cell of the two-clocks table -- a live claim about the current train version.',
+  },
+  {
+    file: 'content/docs/upgrading.mdx',
+    anchor: 'tag-scheme',
+    why: 'the upgrade guide\'s "Moving the tag" section. Not named by #10229 -- found by re-measuring the corpus while implementing it, and the same class exactly.',
+  },
+  {
+    file: 'content/docs/upgrading.mdx',
+    anchor: 'release-train',
+    why: 'the "Versioned by" cell of the upgrade guide\'s two-clocks table. Same find as the row above.',
+  },
+];
+
+/**
+ * A concrete version literal ANYWHERE inside a span of prose.
+ *
+ * Deliberately looser than `isConcreteVersion`, which classifies a whole captured
+ * tag token: here there is no token, just a sentence, and the question is whether
+ * it contains a version at all. `v17.0.0`, `17.0.0` and `2.2.2` all match -- the
+ * limb's precision comes from WHERE it looks, not from this pattern.
+ */
+const PROSE_VERSION_LITERAL = /\d+\.\d+\.\d+/;
 
 /**
  * The live false-positive control (#9018's named risk).
@@ -326,6 +472,108 @@ export function checkSurfaces({ surfaces, expected, root }) {
   return { findings, stats };
 }
 
+/**
+ * Every span an anchor claims in `text`, with its 1-based starting line.
+ *
+ * @param {string} text
+ * @param {{ regex: RegExp }} anchor
+ * @returns {{ text: string, line: number }[]}
+ */
+export function extractProseClaims(text, anchor) {
+  /** @type {{ text: string, line: number }[]} */
+  const spans = [];
+  // A fresh regex per call: `lastIndex` on a shared /g literal is state, and the
+  // same anchor is used against several files.
+  const regex = new RegExp(anchor.regex.source, 'g');
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    spans.push({
+      text: match[0],
+      line: text.slice(0, match.index).split('\n').length,
+    });
+    // A zero-length match would spin forever; anchors are all non-empty, but the
+    // loop should not depend on that staying true.
+    if (match[0].length === 0) regex.lastIndex++;
+  }
+  return spans;
+}
+
+/**
+ * Assert that every enumerated prose claim is anchored, present, and version-free.
+ *
+ * @param {{ claims: { file: string, anchor: string, why: string }[], root: string }} options
+ * @returns {{ findings: Finding[], stats: Record<string, number> }}
+ */
+export function checkProseClaims({ claims, root }) {
+  /** @type {Finding[]} */
+  const findings = [];
+  const stats = { claims: claims.length, matched: 0 };
+
+  for (const claim of claims) {
+    const anchor = PROSE_ANCHORS[claim.anchor];
+    if (!anchor) {
+      // A claim naming an anchor that does not exist would otherwise scan nothing
+      // and pass -- the vacuous green, one level up from NO-OCCURRENCES.
+      findings.push({
+        kind: 'UNKNOWN-ANCHOR',
+        file: claim.file,
+        line: 0,
+        detail:
+          `names anchor '${claim.anchor}', which is not in PROSE_ANCHORS `
+          + `(have: ${Object.keys(PROSE_ANCHORS).join(', ')}). This claim asserts NOTHING as written.`,
+      });
+      continue;
+    }
+
+    const full = join(root, claim.file);
+    if (!existsSync(full)) {
+      findings.push({
+        kind: 'MISSING-SURFACE',
+        file: claim.file,
+        line: 0,
+        detail:
+          `enumerated in PROSE_CLAIMS (anchor '${claim.anchor}') but not present in the tree. `
+          + 'If the page moved, re-point the entry; if it is gone, delete the entry in the same change.',
+      });
+      continue;
+    }
+
+    const spans = extractProseClaims(readFileSync(full, 'utf8'), anchor);
+    if (spans.length === 0) {
+      findings.push({
+        kind: 'PROSE-ANCHOR-LOST',
+        file: claim.file,
+        line: 0,
+        detail:
+          `the '${claim.anchor}' anchor (${anchor.describe}) matches nothing, so this gate asserts NOTHING `
+          + 'about a claim it still counts as covered. Either the sentence was reworded past its anchor -- '
+          + 're-anchor it -- or the page genuinely stopped making the claim, in which case delete this '
+          + 'PROSE_CLAIMS entry in the same change so the shrinkage is visible in the diff.',
+      });
+      continue;
+    }
+    stats.matched += spans.length;
+
+    for (const span of spans) {
+      const literal = span.text.match(PROSE_VERSION_LITERAL);
+      if (!literal) continue;
+      findings.push({
+        kind: 'PROSE-VERSION',
+        file: claim.file,
+        line: span.line,
+        detail:
+          `${anchor.describe} carries the concrete version '${literal[0]}'. Prose describing the tag SCHEME `
+          + 'must use the metavariables `X.Y.Z` / `X.Y` / `X` / `latest`, the way docker/README.md\'s tag '
+          + 'table does: nothing rewrites a sentence at release time, so a literal here goes stale at the '
+          + 'next publish and no gate downstream can see it. Found in: '
+          + JSON.stringify(span.text.replace(/\s+/g, ' ').trim()),
+      });
+    }
+  }
+
+  return { findings, stats };
+}
+
 // ---------------------------------------------------------------------------
 // Loading the expected version.
 // ---------------------------------------------------------------------------
@@ -370,17 +618,28 @@ export function loadExpectedVersion(file) {
  * Named unconditionally, zeroes included: the live corpus is green, so the only
  * thing distinguishing "8 pins were compared" from "the loop never ran" is this.
  */
-export function summarise(stats, expected) {
-  return (
+export function summarise(stats, expected, proseStats) {
+  const pins = (
     `${stats.read}/${stats.surfaces} enumerated surface(s) read, `
     + `${stats.compared} concrete pin(s) compared against ${VERSION_SOURCE} ${expected}, `
     + `${stats.skipped} rolling/floating tag(s) skipped as non-concrete`
   );
+  if (!proseStats) return pins;
+  // Named separately and unconditionally, for the same reason the pin counts are:
+  // "5 prose claim(s) were scanned" and "the loop never ran" are the two readings
+  // of a green, and only this line tells them apart. Worded as SCANNED rather than
+  // as a verdict, because this same line is printed under a FAILING run -- saying
+  // "read as version-free" there would have the scope line contradict the findings
+  // directly above it.
+  return (
+    `${pins}; ${proseStats.matched} anchored prose claim(s) from `
+    + `${proseStats.claims} enumerated claim site(s) scanned for concrete versions`
+  );
 }
 
-function report(findings, stats, expected) {
+function report(findings, stats, expected, proseStats) {
   if (findings.length === 0) {
-    console.log(`check-docs-image-tag: OK (${summarise(stats, expected)}).`);
+    console.log(`check-docs-image-tag: OK (${summarise(stats, expected, proseStats)}).`);
     return 0;
   }
   const byKind = findings.reduce((acc, finding) => {
@@ -396,10 +655,17 @@ function report(findings, stats, expected) {
   }
   console.error(
     `Expected version: ${expected} (from ${VERSION_SOURCE}). `
-    + 'A version bump turns this gate red until the doc surfaces move in the same change -- that is the '
-    + 'mechanism, not a bug. Update the lines named above.\n',
+    + 'A version bump turns the PIN half of this gate red until the doc surfaces move in the same change -- '
+    + 'that is the mechanism, not a bug. Update the lines named above.\n',
   );
-  console.error(`Scope of this run: ${summarise(stats, expected)}.`);
+  if (findings.some((finding) => finding.kind === 'PROSE-VERSION')) {
+    console.error(
+      'A PROSE-VERSION finding is NOT fixed by bumping the number: prose describing the tag scheme must not '
+      + 'name a concrete version at all, or it goes stale again at the next publish with nothing to rewrite '
+      + 'it. Use `X.Y.Z` / `X.Y` / `X` / `latest`.\n',
+    );
+  }
+  console.error(`Scope of this run: ${summarise(stats, expected, proseStats)}.`);
   return 1;
 }
 
@@ -636,7 +902,7 @@ async function selfTest() {
     assert(
       extractOccurrences('17.0.0 and 1.2.3 are versions').length === 0,
       'a bare version-shaped string with NO anchor is not an occurrence -- this is what keeps the gate off '
-        + 'the ~30 "removed in @objectstack/spec 17.0.0" sentences in content/docs/references/**',
+        + 'the 92 "removed in @objectstack/spec 17.0.0" sentences in content/docs/references/**',
     );
     assert(
       extractOccurrences('ghcr.io/other/image:1.2.3').length === 0,
@@ -694,11 +960,212 @@ async function selfTest() {
       assert(false, `${LIVE_CONTROL.file} is missing -- the live false-positive control cannot run`);
     }
 
+    // ── The PROSE limb (#10229) ─────────────────────────────────────────────
+    //
+    // The live corpus is version-free after this change, so -- exactly as with the
+    // pin limb -- a green run cannot tell a working limb from one that matches
+    // nothing. Every assertion below is a positive control over a fixture.
+
+    // The DIRTY fixture: the corpus as `origin/main` actually stood at 17.1.0,
+    // copied from the real files rather than paraphrased. This is the state #10229
+    // measured, so the control is a reproduction, not a hypothetical.
+    write(
+      'prose/stale.mdx',
+      [
+        '| Versioned by | our release train (`17.0.0`) | your own catalog |',
+        '',
+        'health check and `OS_ARTIFACT_PATH` / `OS_PORT=8080` preset. Image tags mirror',
+        '`@objectstack/cli` versions (`17.0.0`, `17.0`, `17`, `latest`) and the image is',
+        'published multi-arch (amd64/arm64); the rolling `17.0` / `17` / `latest` tags',
+        'move with every stable publish, while a prerelease gets only its exact tag.',
+        '',
+      ].join('\n'),
+    );
+    // The wrapped spelling: the enumeration continues onto the NEXT line, which is
+    // how `content/docs/deployment/index.mdx` carried it. A one-line span misses it.
+    write(
+      'prose/wrapped.mdx',
+      [
+        'whose tags mirror `@objectstack/cli` versions (`17.0`, `17`,',
+        '`17.0.0`, `latest`). Pin the exact version in production.',
+        '',
+      ].join('\n'),
+    );
+
+    const proseDirty = checkProseClaims({
+      claims: [
+        { file: 'prose/stale.mdx', anchor: 'tag-scheme', why: 'fixture' },
+        { file: 'prose/stale.mdx', anchor: 'release-train', why: 'fixture' },
+        { file: 'prose/wrapped.mdx', anchor: 'tag-scheme', why: 'fixture' },
+        { file: 'prose/gone.mdx', anchor: 'tag-scheme', why: 'fixture' }, // never written
+        { file: 'prose/stale.mdx', anchor: 'no-such-anchor', why: 'fixture' },
+      ],
+      root: dir,
+    });
+    const proseKinds = (file, anchorKind) =>
+      proseDirty.findings.filter((f) => f.file === file && f.kind === anchorKind);
+
+    assert(
+      proseKinds('prose/stale.mdx', 'PROSE-VERSION').some((f) => f.line === 4),
+      'the tag-scheme sentence carrying `17.0.0` is PROSE-VERSION -- this is the exact line the pin limb '
+        + `misses by one character (backtick-space-"versions" instead of "@"). Got ${JSON.stringify(proseDirty.findings.map((f) => `${f.kind}:${f.line}`))}`,
+    );
+    assert(
+      proseKinds('prose/stale.mdx', 'PROSE-VERSION').some((f) => f.line === 1),
+      'the "Versioned by" table cell carrying `17.0.0` is PROSE-VERSION',
+    );
+    assert(
+      proseKinds('prose/wrapped.mdx', 'PROSE-VERSION').length === 1,
+      'a version on the WRAPPED continuation line is still inside the claim -- a single-line span would '
+        + `read this sentence as clean. Got ${JSON.stringify(proseKinds('prose/wrapped.mdx', 'PROSE-VERSION'))}`,
+    );
+    assert(
+      proseKinds('prose/gone.mdx', 'MISSING-SURFACE').length === 1,
+      'an enumerated prose claim whose file is gone is MISSING-SURFACE, not a silent pass',
+    );
+    assert(
+      proseDirty.findings.some((f) => f.kind === 'UNKNOWN-ANCHOR'),
+      'a claim naming an anchor that does not exist is UNKNOWN-ANCHOR -- it would otherwise scan nothing '
+        + 'and report clean, which is the vacuous green one level up',
+    );
+    // The report has to say what it found, or the remedy is a hunt.
+    assert(
+      proseKinds('prose/stale.mdx', 'PROSE-VERSION')[0]?.detail.includes('17.0.0') === true,
+      'a PROSE-VERSION finding quotes the literal and the sentence it sits in',
+    );
+
+    // The CLEAN fixture: the same three claims as repaired, spelled with
+    // metavariables. Pairs with the dirty run so an over-eager limb fails as
+    // loudly as a blind one.
+    write(
+      'prose/clean.mdx',
+      [
+        '| Versioned by | our release train (`X.Y.Z`) | your own catalog |',
+        '',
+        '`@objectstack/cli` versions: a stable publish pushes that exact version as',
+        '`X.Y.Z` and moves `latest` and the matching `X.Y` / `X` tags onto it, while a',
+        'prerelease gets only its exact tag.',
+        '',
+        'Historical facts and the reader\'s OWN app version are NOT claims about our',
+        'tag scheme, and must stay silent even in an enumerated file:',
+        '',
+        '| v17.0.0 | [Upgrade checklist](/docs/releases/v17#upgrade-checklist) |',
+        '| v9.0.0 | [Upgrade checklist](/docs/releases/v9#upgrade-checklist) |',
+        'OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json"',
+        'package id + version (`com.acme.crm@1.2.0`)',
+        'The key was removed in @objectstack/spec 17.0.0, and 16.4.2 before that.',
+        '',
+      ].join('\n'),
+    );
+    const proseClean = checkProseClaims({
+      claims: [
+        { file: 'prose/clean.mdx', anchor: 'tag-scheme', why: 'fixture' },
+        { file: 'prose/clean.mdx', anchor: 'release-train', why: 'fixture' },
+      ],
+      root: dir,
+    });
+    assert(
+      proseClean.findings.length === 0,
+      'the repaired spelling reports zero findings, AND the four legitimate literal shapes in the same file '
+        + '(the historical upgrade-checklist rows, the reader\'s artifact version, a package id + version, and '
+        + `a "removed in @objectstack/spec 17.0.0" sentence) stay silent. Got ${JSON.stringify(proseClean.findings.map((f) => `${f.kind}:${f.line}`))}`,
+    );
+    assert(
+      proseClean.stats.matched === 2,
+      `...and it really did look: both anchors matched. Got ${proseClean.stats.matched}`,
+    );
+
+    // Anti-vacuity for the anchors themselves: a claim reworded past its anchor.
+    write('prose/reworded.mdx', 'Image tags follow the CLI release, see the table above.\n');
+    const proseLost = checkProseClaims({
+      claims: [{ file: 'prose/reworded.mdx', anchor: 'tag-scheme', why: 'fixture' }],
+      root: dir,
+    });
+    assert(
+      proseLost.findings.length === 1 && proseLost.findings[0].kind === 'PROSE-ANCHOR-LOST',
+      'a claim whose anchor no longer matches is PROSE-ANCHOR-LOST -- otherwise this limb shrinks silently '
+        + `while still counting the claim as covered. Got ${JSON.stringify(proseLost.findings)}`,
+    );
+    assert(
+      proseLost.stats.matched === 0,
+      'a lost anchor contributes nothing to the matched count, so the summary cannot overstate the scope',
+    );
+
+    // The anchor spans, asserted directly.
+    assert(
+      extractProseClaims('a\n`@objectstack/cli` versions: the exact `X.Y.Z`\nnext line\nfar line', PROSE_ANCHORS['tag-scheme'])[0].line === 2,
+      'a prose claim reports the 1-based line its anchor starts on',
+    );
+    assert(
+      !extractProseClaims('a\nb\n`@objectstack/cli` versions: clean\nalso clean\n17.0.0 is two lines below', PROSE_ANCHORS['tag-scheme'])[0].text.includes('17.0.0'),
+      'the span stops after ONE continuation line -- it must not reach across a whole page and start '
+        + 'colliding with the legitimate literals the header lists',
+    );
+    assert(
+      extractProseClaims('npm install -g @objectstack/cli@17.0.0\n', PROSE_ANCHORS['tag-scheme']).length === 0,
+      'a real npm PIN is not a prose claim -- the pin limb owns it, and double-reporting it would push '
+        + 'authors to delete the pin instead of updating it',
+    );
+    assert(
+      extractProseClaims('| Versioned by | our release train (`X.Y.Z`) | x |', PROSE_ANCHORS['release-train'])[0].text === 'release train (`X.Y.Z`)',
+      'the release-train anchor is bounded by its parentheses, not by the line -- the rest of the table row '
+        + 'is somebody else\'s claim',
+    );
+    assert(
+      extractProseClaims('versions independently of this release train and deploys\n', PROSE_ANCHORS['release-train']).length === 0,
+      '"release train" without a parenthetical is prose, not a version claim -- content/docs/releases/v9.mdx '
+        + 'says exactly this and must not be dragged in',
+    );
+
+    // Every anchor in PROSE_ANCHORS is exercised above; a new one needs its own
+    // control rather than inheriting this green.
+    for (const name of Object.keys(PROSE_ANCHORS)) {
+      assert(
+        PROSE_CLAIMS.some((claim) => claim.anchor === name),
+        `PROSE_ANCHORS carries '${name}', which no PROSE_CLAIMS entry uses -- an anchor nothing is scanned `
+          + 'with is dead weight that reads like coverage',
+      );
+    }
+    // ...and every claim names a real anchor, checked here rather than only at runtime.
+    for (const claim of PROSE_CLAIMS) {
+      assert(
+        Object.hasOwn(PROSE_ANCHORS, claim.anchor),
+        `PROSE_CLAIMS entry ${claim.file} names anchor '${claim.anchor}', which is not in PROSE_ANCHORS`,
+      );
+    }
+
+    // ── The LIVE prose control (#10229, in situ) ────────────────────────────
+    //
+    // The fixtures prove the limb can go red. This proves it is pointed at real
+    // claims that still exist -- the assertion that catches the enumeration
+    // rotting after a docs rewrite, which is how all five claims got past 17.1.0.
+    const liveProse = checkProseClaims({ claims: PROSE_CLAIMS, root: scriptRepoRoot() });
+    assert(
+      liveProse.findings.length === 0,
+      `the live corpus carries no concrete version in an enumerated prose claim -- got ${JSON.stringify(liveProse.findings.map((f) => `${f.kind}@${f.file}:${f.line}`))}`,
+    );
+    assert(
+      liveProse.stats.matched >= PROSE_CLAIMS.length,
+      `every enumerated prose claim still matches its anchor in the real corpus (>= ${PROSE_CLAIMS.length} spans) -- `
+        + `got ${liveProse.stats.matched}. A shortfall means a page was reworded past its anchor.`,
+    );
+
     // ── The green states its own scope ──────────────────────────────────────
-    const line = summarise(clean.stats, expected);
+    const line = summarise(clean.stats, expected, proseClean.stats);
     assert(
       line.includes('3 concrete pin(s) compared') && line.includes('4 rolling/floating tag(s) skipped'),
       `the summary names every count, so a green can be read for its scope -- got "${line}"`,
+    );
+    assert(
+      line.includes('2 anchored prose claim(s)') && line.includes('2 enumerated claim site(s)'),
+      `the summary names the prose counts too -- got "${line}"`,
+    );
+    // The scope line is printed under a FAILING run as well, so it must not word
+    // itself as a verdict -- observed contradicting its own findings before this.
+    assert(
+      !summarise(clean.stats, expected, proseDirty.stats).includes('version-free'),
+      'the scope line states what was SCANNED, not what was concluded -- the same line prints above a list '
+        + `of PROSE-VERSION findings. Got "${summarise(clean.stats, expected, proseDirty.stats)}"`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -710,9 +1177,11 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-docs-image-tag --self-test: ${checked} assertions over a temp fixture (real checkSurfaces path) `
-    + "plus a live control on docker/README.md's tag table; every limb -- stale pin, rotted enumeration, "
-    + 'missing surface -- observed FAILING, and the X.Y.Z metavariable observed EXCLUDED.',
+    `✓ check-docs-image-tag --self-test: ${checked} assertions over a temp fixture (real checkSurfaces and `
+    + "checkProseClaims paths) plus live controls on docker/README.md's tag table and on PROSE_CLAIMS; every "
+    + 'limb -- stale pin, rotted enumeration, missing surface, stale PROSE claim, lost prose anchor, unknown '
+    + 'anchor -- observed FAILING, and the X.Y.Z metavariable, the historical "removed in 17.0.0" sentences, '
+    + "the upgrade-checklist rows and the reader's own app version observed EXCLUDED.",
   );
 }
 
@@ -722,7 +1191,8 @@ function main() {
   const root = scriptRepoRoot();
   const expected = loadExpectedVersion(join(root, VERSION_SOURCE));
   const { findings, stats } = checkSurfaces({ surfaces: SURFACES, expected, root });
-  process.exit(report(findings, stats, expected));
+  const prose = checkProseClaims({ claims: PROSE_CLAIMS, root });
+  process.exit(report([...findings, ...prose.findings], stats, expected, prose.stats));
 }
 
 // Entry-point guard (#9064). Without it, importing this module RUNS the check and
@@ -736,7 +1206,7 @@ function main() {
 // check-kernel-hook-pairs). Nothing about what this gate ASSERTS changes: both
 // `check:docs-image-tag` invocations run this file directly, where argv[1] is this
 // file and the branch is taken exactly as before.
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     await selfTest();
   } else {

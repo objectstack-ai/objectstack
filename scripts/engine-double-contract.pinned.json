@@ -52,12 +52,27 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/migrations/seed-tenancy-backfill.test.ts",
+      "verb": "update",
+      "pinned": 3
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-advisories.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -443,6 +458,26 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.publish-commit-capture-read-failure.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-draft-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-draft-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-rebind-announce.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.publish-item-rebind-announce.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1014,6 +1049,16 @@
     {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

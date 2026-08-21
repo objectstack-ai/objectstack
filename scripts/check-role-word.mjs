@@ -18,6 +18,9 @@
 // incremental work.
 //
 // The check fails when:
+//   • a configured ROOT does not exist — refused before anything is scanned,
+//     because a verdict over the roots that DID resolve is a verdict about a
+//     population nobody configured (#9932), or
 //   • a file NOT in the baseline contains the word, or
 //   • a baselined file's count INCREASES, or
 //   • a baselined file's count DECREASED / file vanished (improvement!) —
@@ -38,9 +41,17 @@
 //
 // Scope: content/docs (hand-written; references/ is generated from spec and
 // excluded — the spec source is the fix site there) and skills/. File and
-// directory NAMES count too (they become URLs).
-import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
-import { join, relative } from 'node:path';
+// directory NAMES count too (they become URLs). Both roots must BE THERE — a
+// configured root that does not resolve is a hard refusal, not a skip; see the
+// #9932 block above `missingRoots()`.
+import { spawnSync } from 'node:child_process';
+import {
+  readdirSync, readFileSync, writeFileSync, statSync, existsSync,
+  mkdirSync, mkdtempSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const ROOTS = ['content/docs', 'skills'];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
@@ -84,11 +95,13 @@ const WORD = /\brole(?:s)?\b/gi;
  *
  * ## Provenance, never a lookup key
  *
- * `walk()` runs over ROOTS behind `existsSync`, so the glob form appearing there
- * would send the scan at a directory that does not exist — skipped in exactly
- * the silence the green line below is built to expose. The self-test pins both
- * halves of the coupling: every separator-less ROOT is declared here, and
- * nothing declared here is itself a ROOTS entry.
+ * The glob form appearing in ROOTS would send the scan at a directory that does
+ * not exist. That used to be a silent skip; since #9932 it is a hard refusal
+ * (see the block above `missingRoots()`), so the mistake now fails the gate
+ * outright instead of quietly shrinking its population — but the coupling is
+ * still worth pinning, because a refusal names the wrong problem. The self-test
+ * pins both halves: every separator-less ROOT is declared here, and nothing
+ * declared here is itself a ROOTS entry.
  */
 const ROOT_DIR_WATCH_HINTS = ['skills/**'];
 
@@ -224,12 +237,18 @@ function newUseMessage(file, count) {
 // a zero in `0 .md/.mdx file(s) read` is an alarm a reader can act on, whereas
 // a zero in `0 baselined file(s)` says nothing at all.
 //
-// PER ROOT, not just a total. `walk()` runs behind `existsSync(root)`, so a
-// root that is renamed or moved away is skipped in SILENCE, and a bare total
-// hides that behind whatever the other root still contributes. Every configured
-// root is therefore named on every green run — including one that contributed
-// nothing, because a root omitted from the line is the same silence in a new
-// place.
+// PER ROOT, not just a total. At the time this was written `walk()` ran behind
+// `existsSync(root)`, so a root that was renamed or moved away was skipped in
+// SILENCE, and a bare total hid that behind whatever the other root still
+// contributed. Every configured root is therefore named on every green run —
+// including one that contributed nothing, because a root omitted from the line
+// is the same silence in a new place.
+//
+// #9932 later closed the missing-root half by refusing outright, so THAT state
+// can no longer reach this line. The per-root breakdown is not thereby idle:
+// its live subject is a root that EXISTS and contributed nothing — no matching
+// files, or everything under SKIP_DIRS — which is still green, still invisible
+// in a bare total, and the state the assertions below drive.
 //
 // Verdicts, populations and exit codes are untouched. This is the success text
 // and nothing else: the gate refuses exactly what it refused before.
@@ -277,6 +296,11 @@ function successSummary(scanned, ledger) {
  * number — it writes `{}` over the ledger, and its old line (`role-word
  * baseline updated: 0 file(s).`) read exactly like a debt fully paid.
  *
+ * Since #9932 the dead scan caused by a MISSING root cannot get this far — the
+ * refusal precedes the write, and the self-test pins that as byte-identity of
+ * the ledger, not merely as an exit code. The residual case this clause still
+ * speaks for is roots that exist and hold nothing.
+ *
  * @param {{root: string, files: number}[]} scanned per-ROOT counts, in ROOTS order
  * @param {Record<string, number>} ledger the freshly written baseline
  * @returns {string}
@@ -285,6 +309,98 @@ function updateSummary(scanned, ledger) {
   return (
     `role-word baseline updated: ${Object.keys(ledger).length} file(s) baselined `
     + `from ${scanClause(scanned)}.`
+  );
+}
+
+// ── A configured ROOT that does not exist is a REFUSAL (#9932) ───────────────
+//
+// `walk()` used to run behind `existsSync(root)`. A root named in ROOTS but
+// absent from the tree was skipped, and the gate went on to reach a verdict —
+// including OK — over whatever the surviving roots contributed. #9910 made that
+// condition LEGIBLE (every root is named in the Scanned line with its own
+// count) and deliberately stopped there, because refusing is a verdict change
+// and a verdict change is its own decision. This is that decision, taken.
+//
+// Measured on this file's parent commit, all three exit 0:
+//
+//   • No root exists — reachable with no source edit at all, by running the
+//     gate from any directory that is not the repository root. It printed
+//     `OK, no new occurrences` over a zero-file scan. Nothing contradicted the
+//     green, because BASELINE_PATH is cwd-relative too: the ledger read as `{}`
+//     and an empty ledger agrees with an empty scan.
+//   • One root missing, ledger fully populated — a third ROOT pointed at a
+//     directory that does not exist was named in the Scanned line with its zero
+//     and the run still said OK. This is the card's headline case, and the
+//     incidental protection people reach for (baselined files dropping out of
+//     `current` and tripping the ratchet-DOWN branch below) never covered it: a
+//     root whose ledger share is already zero takes nothing with it when it
+//     goes, and every root added to ROOTS starts there by definition.
+//   • `--update` with no root present — overwrote a populated ledger with `{}`
+//     and exited 0. The destructive one: the confirmation line #9910 added
+//     makes that readable, but readable is not refused.
+//
+// ## Why per-root, and not "refuse only when EVERY root is missing"
+//
+// The middle route was the suggested shape, and its entire justification is
+// keeping the gate runnable in a PARTIAL CHECKOUT. No such caller exists. The
+// gate has exactly two executing callers — the root `check:role-word` package
+// script, and the `Lint & Repo Gates` step that runs it — and that job checks
+// out with `actions/checkout` carrying no `sparse-checkout` filter. Nothing
+// anywhere in this repo configures one. The `fetch-depth: 0` there and the
+// `--depth` clones elsewhere truncate HISTORY, not the working tree, and both
+// roots are TRACKED directories, so every checkout of every ref materialises
+// both.
+//
+// So the middle route protects nobody and leaves green the one case the card
+// says is not hypothetical in shape: one root gone while the others still
+// report. The guard's own origin story is not the basis for this either way and
+// could not be checked here if it were — `git log -S` in a depth-50 clone
+// reaches only as far as the declaration commit, so "it was written for partial
+// checkouts" stays an unverified reading, while the caller inventory is a fact
+// about today.
+//
+// A root that EXISTS and contributes nothing is a DIFFERENT condition and stays
+// green on purpose. That one is the zero-volume Scanned line's subject, and it
+// is what the per-root #9910 assertions below now test — the missing-root state
+// they were written against can no longer reach a success message at all.
+
+/**
+ * Which configured roots are absent, in ROOTS order.
+ *
+ * `exists` is injected so the self-test can drive every combination — all
+ * present, all absent, and the PARTIAL tree that separates this shape from the
+ * refuse-only-when-all-are-missing one — without building a filesystem for each.
+ * The spawned legs there cover what a probe cannot: that the program consults
+ * this at all.
+ *
+ * @param {string[]} roots
+ * @param {(path: string) => boolean} [exists]
+ * @returns {string[]}
+ */
+function missingRoots(roots, exists = existsSync) {
+  return roots.filter((r) => !exists(r));
+}
+
+/**
+ * The refusal's text, named and pure for the same reason as the messages above:
+ * the roots are interpolated, so reading this file's SOURCE is not evidence
+ * about the sentence an author actually reads.
+ *
+ * @param {string[]} missing
+ * @returns {string}
+ */
+function missingRootsMessage(missing) {
+  return (
+    `check-role-word: configured root(s) not found — ${missing.join(', ')}. REFUSING to reach a `
+    + 'verdict. A directory named in ROOTS is a declaration that it is in scope, so a scan that '
+    + 'could not read it has not checked what this gate says it checks, and any verdict over the '
+    + 'roots that did resolve — OK included — would be about a population nobody configured. '
+    + 'Every ROOT resolves against the CURRENT WORKING DIRECTORY, so the usual cause is running '
+    + 'this from somewhere other than the repository root: run `pnpm check:role-word` from there. '
+    + 'If the directory moved for good, edit ROOTS in scripts/check-role-word.mjs so the gate '
+    + 'declares what it actually reads. The same refusal covers `--update`, where the stake is '
+    + 'higher: it rewrites the baseline from the tree it just read, so over a dead scan it would '
+    + 'write an empty one and report it exactly like a debt fully paid.'
   );
 }
 
@@ -369,13 +485,14 @@ function selfTest() {
   expect('#9910 — a scanned tree prints its real input volume, not a ledger-derived count',
     /\b215 [^\n]*file\(s\) read\b/.test(greenPaid));
 
-  // (3) `walk()` sits behind `existsSync(root)`, so a root that moved away is
-  // skipped in silence. A line that named only the roots which contributed
-  // would put that silence straight back, one root at a time.
+  // (3) A line that named only the roots which contributed would put the
+  // silence straight back, one root at a time. Since #9932 a root that MOVED
+  // AWAY is refused before this line renders, so what this fixture stands for
+  // now is the residual case: a root that exists and contributed nothing.
   const oneRootGone = successSummary(
     [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 0 }], PAID_OFF);
-  expect('#9910 — a root that contributed NOTHING is still named, with its zero (existsSync '
-    + 'skips a missing root silently, so dropping it from the line hides the same failure)',
+  expect('#9910 — a root that contributed NOTHING is still named, with its zero (a root can '
+    + 'exist and read empty; dropping it from the line hides that behind the other root\'s total)',
     /\bskills 0\b/.test(oneRootGone) && oneRootGone !== greenPaid);
 
   // (4) The same ambiguity on the privileged path, where it is destructive
@@ -384,6 +501,115 @@ function selfTest() {
   expect('#9910 — the --update confirmation states its input volume too, so re-baselining '
     + 'over a dead scan cannot read like a debt fully paid',
     updateSummary(DEAD_SCAN, PAID_OFF) !== updateSummary(SCANNED, PAID_OFF));
+
+  // ── A missing ROOT is REFUSED, per root (#9932) ───────────────────────────
+  //
+  // Two layers, because either alone is vacuous in precisely the way this card
+  // is about. The pure legs prove the PREDICATE discriminates; the spawned legs
+  // prove the program CONSULTS it. A predicate nothing calls is the same
+  // "declaration that silently self-cancels" shape the gate was carded for, and
+  // it would pass every assertion an in-process fixture can make.
+  //
+  // Fixture roots, not real ones: these names appear nowhere else in this file,
+  // so `includes()` below cannot pass on incidental prose.
+  const PRESENT_ROOT = 'alpha/one';
+  const ABSENT_ROOT = 'bravo-two';
+  expect('#9932 — with NO root present, every one of them is reported (the total-scan case, '
+    + 'measured green before this landed)',
+    missingRoots([PRESENT_ROOT, ABSENT_ROOT], () => false).join(',')
+      === `${PRESENT_ROOT},${ABSENT_ROOT}`);
+  // THE assertion that separates this shape from "refuse only when EVERY root
+  // is missing". Under that middle route, this is the line that goes red — so
+  // it is also the line that records which shape was chosen and why.
+  expect('#9932 — a PARTIALLY present tree is still refused, naming only the absent root '
+    + '(per-root, NOT refuse-only-when-all-are-missing: no partial-checkout caller exists)',
+    missingRoots([PRESENT_ROOT, ABSENT_ROOT], (r) => r === PRESENT_ROOT).join(',') === ABSENT_ROOT);
+  // Discrimination. Without it, a probe that returned every root would keep both
+  // assertions above green while refusing every healthy checkout in the world.
+  expect('#9932 — a fully present tree is NOT refused (proves the probe discriminates rather '
+    + 'than reporting everything)',
+    missingRoots([PRESENT_ROOT, ABSENT_ROOT], () => true).length === 0);
+  const refusal = missingRootsMessage([ABSENT_ROOT]);
+  expect('#9932 — the refusal names the missing root and not the present one',
+    refusal.includes(ABSENT_ROOT) && !refusal.includes(PRESENT_ROOT));
+
+  // The spawned legs. Each builds a tree, runs THIS file inside it as a child
+  // (no `--self-test`, so the child takes the normal path and terminates), and
+  // reads the child's real exit status — never a pipe's.
+  //
+  // The trees are built FROM ROOTS rather than re-spelled, so adding or renaming
+  // a root cannot leave these legs testing the population of an older file.
+  const SELF = fileURLToPath(import.meta.url);
+  const runIn = (cwd, args = []) => {
+    const r = spawnSync(process.execPath, [SELF, ...args], { cwd, encoding: 'utf8' });
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+  const REFUSAL_MARK = 'REFUSING to reach a verdict';
+  const sandbox = mkdtempSync(join(tmpdir(), 'check-role-word-selftest-'));
+  try {
+    if (ROOTS.length < 2) {
+      expect('#9932 — the partial-tree leg needs one root present and one absent; with fewer than '
+        + 'two ROOTS it cannot test the chosen shape at all. Re-express it before shrinking ROOTS',
+        false);
+    } else {
+      const [firstRoot, ...restRoots] = ROOTS;
+
+      // (1) Nothing there at all — the total-scan case, measured exit 0 before.
+      const noneDir = join(sandbox, 'none');
+      mkdirSync(noneDir, { recursive: true });
+      const none = runIn(noneDir);
+      expect('#9932 — a tree where NO configured root exists is REFUSED (exit 1) and names them '
+        + 'all, where it used to print OK over a zero-file scan',
+        none.status === 1 && none.out.includes(REFUSAL_MARK)
+          && ROOTS.every((r) => none.out.includes(r)));
+
+      // (2) The partial tree at the PROGRAM level. This is the leg the middle
+      // route fails, and the only leg that can see whether the main path
+      // consults the probe at all.
+      const partialDir = join(sandbox, 'partial');
+      mkdirSync(join(partialDir, firstRoot), { recursive: true });
+      const partial = runIn(partialDir);
+      expect('#9932 — a tree missing ONE configured root is REFUSED (exit 1), names it, and does '
+        + 'not name the root that resolved (the scan reached that one; it is not the problem)',
+        partial.status === 1 && partial.out.includes(REFUSAL_MARK)
+          && restRoots.every((r) => partial.out.includes(r))
+          && !partial.out.includes(firstRoot));
+
+      // (3) Discrimination at the program level: legs (1) and (2) would both
+      // pass on a gate that refused unconditionally.
+      //
+      // The exit-0 half records what a root that EXISTS and holds nothing does
+      // TODAY. That is the zero-volume Scanned line's subject, not this
+      // refusal's, and a later card that wants to refuse that too changes this
+      // line deliberately rather than discovering it went quietly green.
+      const wholeDir = join(sandbox, 'whole');
+      for (const r of ROOTS) mkdirSync(join(wholeDir, r), { recursive: true });
+      const whole = runIn(wholeDir);
+      expect('#9932 — a tree where every configured root EXISTS is not refused (a gate that '
+        + 'refused unconditionally would satisfy both legs above and no healthy checkout)',
+        whole.status === 0 && !whole.out.includes(REFUSAL_MARK));
+
+      // (4) The destructive path. Pinned as "the file did not change", not
+      // merely "exit 1": the claim is that the refusal happens BEFORE the write.
+      const updateDir = join(sandbox, 'update');
+      mkdirSync(join(updateDir, firstRoot), { recursive: true });
+      mkdirSync(join(updateDir, dirname(BASELINE_PATH)), { recursive: true });
+      const ledgerPath = join(updateDir, BASELINE_PATH);
+      // Opaque contents on purpose. The child must refuse before it ever parses
+      // this file, so byte-identity is the whole assertion — and a path-shaped
+      // key here would feed the dispatch-gates hint extractor described at the
+      // top of this file a literal that names no population this gate reads.
+      const ledgerBefore = '{\n  "pinned": 7\n}\n';
+      writeFileSync(ledgerPath, ledgerBefore);
+      const updated = runIn(updateDir, ['--update']);
+      expect('#9932 — `--update` over a tree with a missing root refuses BEFORE writing, leaving '
+        + 'the baseline byte-identical (it used to overwrite a populated one with {} and exit 0)',
+        updated.status === 1 && updated.out.includes(REFUSAL_MARK)
+          && readFileSync(ledgerPath, 'utf8') === ledgerBefore);
+    }
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 
   // ── The dispatch-gates declaration (#9964's pattern) ──────────────────────
   //
@@ -402,9 +628,9 @@ function selfTest() {
     ROOT_DIR_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))));
   expect('skills is the root it declares (the half PR #10038 met as red CI)',
     ROOT_DIR_WATCH_HINTS.includes('skills/**'));
-  // Provenance, never a lookup key: `walk()` runs behind existsSync(root), so
-  // the glob form appearing in ROOTS would skip the root in silence — the exact
-  // failure the per-root green line above exists to make visible.
+  // Provenance, never a lookup key: the glob form appearing in ROOTS would send
+  // the scan at a directory that does not exist. That used to be a silent skip;
+  // since #9932 it is a refusal, which fails loudly but names the wrong problem.
   expect('the declared form is NOT a ROOTS entry',
     !ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r)));
 
@@ -418,12 +644,25 @@ function selfTest() {
     + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and both '
     + 'success texts report what was READ \u2014 so a scanned tree and an unscanned one cannot print '
     + 'the same result once the ledger is empty. Every separator-less ROOT also declares the '
-    + 'subtree spelling dispatch-gates derives from, and declares nothing this gate does not walk.',
+    + 'subtree spelling dispatch-gates derives from, and declares nothing this gate does not '
+    + 'walk. A configured ROOT that does not exist is REFUSED — per root, before the scan and '
+    + 'before `--update` writes anything — proven by running this gate inside built trees, not '
+    + 'by a predicate no caller has to reach.',
   );
   process.exit(0);
 }
 
 if (process.argv.includes('--self-test')) selfTest();
+
+/* Probed for ALL roots first, so one message names every missing one rather
+ * than the run dying at whichever comes first — and probed here, ahead of both
+ * the scan and the `--update` write, because both are unsound over a population
+ * the gate could not read. */
+const absentRoots = missingRoots(ROOTS);
+if (absentRoots.length) {
+  console.error(missingRootsMessage(absentRoots));
+  process.exit(1);
+}
 
 const files = [];
 /* The input volume, per root, recorded as the scan runs — the same pass, not a
@@ -431,7 +670,12 @@ const files = [];
 const scanned = [];
 for (const root of ROOTS) {
   const before = files.length;
-  if (existsSync(root)) walk(root, files);
+  // No `existsSync` guard here any more: that skip WAS the defect, and a dead
+  // guard left behind would quietly restore it the moment the refusal above is
+  // moved or made conditional. A root that vanishes between the probe and this
+  // line throws — loudly, which is the right direction, since the failure this
+  // block exists to prevent is a silent PASS.
+  walk(root, files);
   scanned.push({ root, files: files.length - before });
 }
 

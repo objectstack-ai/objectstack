@@ -54,8 +54,21 @@ import { bootSchemaStack } from './schema-migrate.js';
 // where the same shape cost 30 ejected merge-queue builds in one night.
 import '@objectstack/objectql';
 import '@objectstack/runtime';
+import '@objectstack/platform-objects/plugin';
 
 const ORG_ID = 'org_x';
+/**
+ * [#9451] The receipt's well-known migration id, spelled as a LITERAL rather
+ * than imported from `@objectstack/metadata-protocol`.
+ *
+ * Not a workaround for a missing export — it is the stronger assertion. This id
+ * is an operator-facing string: `content/docs/deployment/seed-tenancy-repair.mdx`
+ * documents `WHERE id = 'seed-tenancy-backfill'` as the query to run, so renaming
+ * it breaks every query written from that page. A test importing the constant
+ * would follow such a rename in silence; this one goes red, which is the correct
+ * verdict for a change that is breaking for operators.
+ */
+const RECEIPT_MIGRATION_ID = 'seed-tenancy-backfill';
 /** The `__global__` counter the seed loader ran ahead to before the org existed. */
 const SEEDED_LAST_VALUE = 38;
 
@@ -152,7 +165,7 @@ async function writeDamagedInstall(): Promise<void> {
  * so the ONLY difference between this and case 2b is the declaration under
  * test.
  */
-async function bootServingStack(): Promise<void> {
+async function bootServingStack(options: { platformObjects?: boolean } = {}): Promise<void> {
   const { createStandaloneStack, Runtime } = await import('@objectstack/runtime');
   const stack = await createStandaloneStack({
     projectRoot: dir,
@@ -161,8 +174,40 @@ async function bootServingStack(): Promise<void> {
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
   for (const plugin of stack.plugins) await kernel.use(plugin as any);
+  // [#9451] `createStandaloneStack` does not compose the platform objects —
+  // `os serve` mounts `PlatformObjectsPlugin` itself ("platform infrastructure
+  // every served kernel needs", #4243), and the `sys_migration` ledger arrives
+  // with it. A case that wants to observe what a REAL served boot records has
+  // to mount it the same way; one that only wants the repair does not.
+  if (options.platformObjects) {
+    const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
+    await kernel.use(new PlatformObjectsPlugin() as any);
+  }
   await runtime.start();
   await kernel.shutdown();
+}
+
+/**
+ * The `sys_migration` ledger, read through a connection of OUR OWN after the
+ * boot has shut down — `'no-table'` when the ledger was never provisioned.
+ *
+ * Deliberately not folded into `readState()`: the byte-identical cases compare
+ * that snapshot whole, and a table that exists on one boot and not another
+ * belongs in its own observation rather than in theirs.
+ */
+async function readReceipts(): Promise<any[] | 'no-table'> {
+  const probe = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: dbFile },
+    useNullAsDefault: true,
+  });
+  try {
+    return await (probe as any).knex('sys_migration').select('*').orderBy('id');
+  } catch {
+    return 'no-table';
+  } finally {
+    await probe.disconnect();
+  }
 }
 
 beforeEach(async () => {
@@ -310,5 +355,82 @@ describe('#9380 the kernel:ready platform migrations, on the boots that reach th
     await kernel.shutdown();
 
     expect(await readState()).toEqual(before);
+  }, 180_000);
+
+  /**
+   * #9451 — the repair now leaves a durable receipt, and this is the assertion
+   * the card is actually about.
+   *
+   * Everything above proves the repair RUNS. None of it can answer the
+   * operator's question, which is asked after the fact: "was my data rewritten,
+   * and when?" Until now the only evidence was one `logger.info` line, so a
+   * replaced container took the answer with it — and the healthy path is silent
+   * by design, so absence of a message means nothing either way.
+   *
+   * The observation is therefore made the only way that can settle it: the
+   * boot is shut down, and the row is read out of the FILE through a connection
+   * of our own. A receipt that only exists in the booted process's memory (or
+   * in its log) fails this test exactly the way the defect does.
+   */
+  it('[#9451] a served boot records the repair in sys_migration, and the row outlives the process', async () => {
+    // Non-vacuity in the direction that matters: there is no ledger row before,
+    // and the fixture really is damaged (asserted by the first case).
+    expect(await readReceipts()).toBe('no-table');
+
+    await bootServingStack({ platformObjects: true });
+
+    const receipts = await readReceipts();
+    expect(receipts).not.toBe('no-table');
+    const rows = receipts as any[];
+    const receipt = rows.find((r) => r.id === RECEIPT_MIGRATION_ID);
+    expect(receipt).toBeDefined();
+
+    // The reading, pinned where a real ledger writes it: no self-check ran, so
+    // no certificate is claimed; nothing gates on this id, so `blocking` is 0;
+    // the already-minted duplicate is advisory because it needs an operator,
+    // not a gate.
+    expect(receipt.verified_at).toBeNull();
+    expect(receipt.blocking).toBe(0);
+    expect(receipt.advisory).toBe(1);
+    expect(typeof receipt.last_run_at).toBe('string');
+    expect(receipt.applied_at).toBe(receipt.last_run_at);
+
+    // And the row answers the card's question — which objects, whose
+    // organization, what could not be adopted.
+    expect(JSON.parse(receipt.details)).toEqual({
+      status: 'applied',
+      objectsStamped: 1,
+      organizationId: ORG_ID,
+      splits: ['crm_case.case_number'],
+      collisions: [`crm_case.case_number=CASE-00001`],
+    });
+
+    // The repair really did happen on this boot (the receipt describes THIS
+    // run, not a row someone wrote by hand).
+    const after: any = (await readState()).data;
+    expect(after.cases.find((c: any) => c.id === 's2').organization_id).toBe(ORG_ID);
+  }, 180_000);
+
+  it('[#9451] the receipt survives a restart against the same database', async () => {
+    // The scenario the whole card is about is a CONTAINER REPLACEMENT: the
+    // process that repaired the data is gone, and a new one boots against the
+    // same database. The second boot finds no split (the repair is idempotent),
+    // so it writes nothing — and the receipt from the first boot is still the
+    // answer.
+    await bootServingStack({ platformObjects: true });
+    const first = (await readReceipts() as any[]).find((r) => r.id === RECEIPT_MIGRATION_ID);
+    expect(first).toBeDefined();
+
+    await bootServingStack({ platformObjects: true });
+
+    const rows = (await readReceipts()) as any[];
+    const second = rows.filter((r) => r.id === RECEIPT_MIGRATION_ID);
+    // Exactly one row, unchanged: the ledger's grain is one row per migration,
+    // and a healthy boot must not restamp it — `last_run_at` moving on a boot
+    // that repaired nothing would make the receipt lie about when the data was
+    // rewritten.
+    expect(second).toHaveLength(1);
+    expect(second[0].last_run_at).toBe(first.last_run_at);
+    expect(second[0].details).toBe(first.details);
   }, 180_000);
 });

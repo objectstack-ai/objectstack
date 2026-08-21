@@ -5826,6 +5826,55 @@ export class RestServer {
                     const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
+
+                    // [#10063] Software-package binding for the PROMOTION —
+                    // `?package=<id>`, deliberately the SAME wire spelling and the
+                    // same normalisation the `PUT` door states it with a few
+                    // hundred lines up, not a second dialect for one value.
+                    //
+                    // Why this door needed it at all. #9612 taught the runtime
+                    // publish gate to narrow `objects` to the written item's
+                    // package closure, but only when the caller can NAME the
+                    // package. Three write doors reach that gate; `saveMetaItem`
+                    // and `publishPackageDrafts` both name one, and this one —
+                    // the single-item draft→active promotion — named nothing. So
+                    // every HTTP-driven promotion, which is precisely Studio's
+                    // designer save→publish loop on every edit, handed the gate
+                    // the whole tenant. The protocol half was already built and
+                    // waiting: `promoteDraftForPublish` declares
+                    // `packageId?: string | null` and threads it into both the
+                    // gate and `repo.promoteDraft`. Only the caller was mute.
+                    //
+                    // ⚠️ THE SHARP EDGE, and the reason this is a conditional
+                    // spread rather than a plain key. `promoteDraftForPublish`
+                    // forwards to `repo.promoteDraft` with
+                    // `...('packageId' in request ? { packageId: request.packageId ?? null } : {})`
+                    // — it branches on the KEY BEING PRESENT, not on the value,
+                    // because `null` is a meaningful scope there (pin the lookup
+                    // to the UNBOUND row) while an absent key means "match any
+                    // package", the historical resolution. Writing
+                    // `packageId: packageId` here would therefore put a
+                    // present-and-`undefined` key on every publish that names no
+                    // package, coercing it to `null` downstream and pinning the
+                    // lookup to unbound rows — so a draft authored under a package
+                    // would stop being found and the door would answer `no_draft`.
+                    // That is a silent outage on the untouched path, produced by a
+                    // change that reads like it only ADDS an option. The key must
+                    // be ABSENT when the caller states nothing.
+                    //
+                    // ⛔ Not read off the draft row either — see
+                    // `promoteDraftForPublish`'s own warning: `rowToItem` projects
+                    // `sys_metadata` into a `MetadataItem`, which carries no
+                    // package id, so a read from there is `undefined` on every
+                    // path — narrowing that never fires while looking like it
+                    // does. Widening `MetadataItem` is a `packages/spec` contract
+                    // change and stays filed rather than taken here.
+                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                    const packageRaw = req.query?.package;
+                    const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
+                        ? packageRaw
+                        : undefined;
+
                     // [#8805] The publish half of the same organization, and it
                     // is REQUIRED for the `PUT` fix to be usable rather than a
                     // separate improvement: `promoteDraftForPublish` resolves the
@@ -5854,6 +5903,7 @@ export class RestServer {
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
+                        ...(packageId ? { packageId } : {}),
                     });
                     res.json(result);
                 } catch (error: any) {
@@ -6013,7 +6063,7 @@ export class RestServer {
             },
         });
 
-        // GET /meta/objects/:name/state/:field?from=:state — ADR-0020 D3.3
+        // GET /meta/object/:name/state/:field?from=:state — ADR-0020 D3.3
         // legal-next-state introspection. [#7526]
         //
         // Ledgered since #3563 (`route-ledger.ts`, `meta.getLegalNextStates`)
@@ -6022,85 +6072,91 @@ export class RestServer {
         // four, so no registration here could ever deliver it and it answered
         // Hono's `notFound`, byte-identical to an unmounted path.
         //
+        // SINGULAR ONLY, and the SDK calls this path (#9180 step 2): the
+        // `/meta` type segment is always singular, so the plural twin that
+        // used to be registered beside this one is retired here.
+        //
+        // What the retirement does NOT touch, because it is a different
+        // mechanism: the plural was a DECLARED registration, never a
+        // `META_URL_TO_SINGULAR` fold tolerance. This mount matches on a
+        // LITERAL segment, so no request for it ever reached the fold — the
+        // boundary's accept set for `/meta/:type/...` is unchanged, which is
+        // what the 2026-08-17 re-weigh (item 3) requires of this step.
+        //
         // Registered BEFORE the compound `/:type/:section/:name/published`
-        // twin below, which it collides with on exactly one shape:
-        // `/meta/objects/x/state/published`. Two literal segments (`objects`,
+        // twin below, which it still collides with on exactly one shape:
+        // `/meta/object/x/state/published`. Two literal segments (`object`,
         // `state`) beat one, so the FSM reading wins that path — a field
         // literally named `published` is the ambiguity, and answering it as
-        // "the published version of the compound name objects/x/state" would
-        // be the less likely of the two by a wide margin.
-        //
-        // `/object` as well as `/objects`: `metadata-protocol` folds the two
-        // spellings (#4432) and the dispatcher branch accepts both, so the
-        // REST mount that replaces it must not be pickier than what it
-        // replaces.
-        for (const objectsSegment of ['objects', 'object']) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/${objectsSegment}/:name/state/:field`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const name = String(req.params?.name ?? '');
-                        const field = String(req.params?.field ?? '');
-                        // [#6877 shape] `?from=` narrows to ONE current state;
-                        // an array would reach `legalNextStates` as a
-                        // stringified pair and match no transition key.
-                        if (refuseRepeatedQueryParams(req, res, ['from'])) return;
-                        const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
-                        const ql = this.objectQLProvider
-                            ? await this.objectQLProvider(environmentId).catch(() => undefined)
-                            : undefined;
-                        const schema = (ql as any)?.registry?.getObject?.(name);
-                        if (!schema) {
-                            // `{ error: { code, message } }`, the envelope
-                            // `BaseResponseSchema` declares — not the bare
-                            // `{ error: 'string' }` the dispatcher branch this
-                            // mirrors emits. `pnpm check:route-envelope`
-                            // ratchets both non-conforming shapes DOWN only, so
-                            // a new route arrives conforming or not at all.
-                            res.status(404).json({
-                                error: { code: 'NOT_FOUND', message: 'Object not found' },
-                            });
-                            return;
-                        }
-                        // Dynamic import, matching the dispatcher branch this
-                        // mirrors: `@objectstack/objectql` is a devDependency
-                        // here, so a deployment serving REST without the data
-                        // engine must degrade rather than fail to load.
-                        let legalNextStates:
-                            | ((s: { validations?: unknown[] } | null | undefined, f: string, c: string) => string[] | null)
-                            | undefined;
-                        try {
-                            ({ legalNextStates } = await import('@objectstack/objectql'));
-                        } catch {
-                            legalNextStates = undefined;
-                        }
-                        if (typeof legalNextStates !== 'function') {
-                            res.status(501).json({
-                                error: {
-                                    code: 'NOT_IMPLEMENTED',
-                                    message: 'State-machine introspection is not available in this runtime',
-                                },
-                            });
-                            return;
-                        }
-                        // `next: null` = no FSM governs the field; `next: []` =
-                        // a declared dead end. Same three-valued answer the
-                        // dispatcher gives, because a UI asking "where can this
-                        // record go" must be able to tell those apart.
-                        const next = from === undefined ? null : legalNextStates(schema, field, from);
-                        res.json({ object: name, field, from: from ?? null, next });
-                    } catch (error: any) {
-                        handleRouteError(res, error);
+        // "the published version of the compound name object/x/state" would
+        // be the less likely of the two by a wide margin. The collision
+        // OUTLIVES the plural, so the order pin keeps its singular arm; only
+        // the plural's own line in it goes away.
+        this.routeManager.register({
+            method: 'GET',
+            path: `${metaPath}/object/:name/state/:field`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const name = String(req.params?.name ?? '');
+                    const field = String(req.params?.field ?? '');
+                    // [#6877 shape] `?from=` narrows to ONE current state;
+                    // an array would reach `legalNextStates` as a
+                    // stringified pair and match no transition key.
+                    if (refuseRepeatedQueryParams(req, res, ['from'])) return;
+                    const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
+                    const ql = this.objectQLProvider
+                        ? await this.objectQLProvider(environmentId).catch(() => undefined)
+                        : undefined;
+                    const schema = (ql as any)?.registry?.getObject?.(name);
+                    if (!schema) {
+                        // `{ error: { code, message } }`, the envelope
+                        // `BaseResponseSchema` declares — not the bare
+                        // `{ error: 'string' }` the dispatcher branch this
+                        // mirrors emits. `pnpm check:route-envelope`
+                        // ratchets both non-conforming shapes DOWN only, so
+                        // a new route arrives conforming or not at all.
+                        res.status(404).json({
+                            error: { code: 'NOT_FOUND', message: 'Object not found' },
+                        });
+                        return;
                     }
-                },
-                metadata: {
-                    summary: 'List the legal next states declared by an object field\'s state machine',
-                    tags: ['metadata'],
-                },
-            });
-        }
+                    // Dynamic import, matching the dispatcher branch this
+                    // mirrors: `@objectstack/objectql` is a devDependency
+                    // here, so a deployment serving REST without the data
+                    // engine must degrade rather than fail to load.
+                    let legalNextStates:
+                        | ((s: { validations?: unknown[] } | null | undefined, f: string, c: string) => string[] | null)
+                        | undefined;
+                    try {
+                        ({ legalNextStates } = await import('@objectstack/objectql'));
+                    } catch {
+                        legalNextStates = undefined;
+                    }
+                    if (typeof legalNextStates !== 'function') {
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'State-machine introspection is not available in this runtime',
+                            },
+                        });
+                        return;
+                    }
+                    // `next: null` = no FSM governs the field; `next: []` =
+                    // a declared dead end. Same three-valued answer the
+                    // dispatcher gives, because a UI asking "where can this
+                    // record go" must be able to tell those apart.
+                    const next = from === undefined ? null : legalNextStates(schema, field, from);
+                    res.json({ object: name, field, from: from ?? null, next });
+                } catch (error: any) {
+                    handleRouteError(res, error);
+                }
+            },
+            metadata: {
+                summary: 'List the legal next states declared by an object field\'s state machine',
+                tags: ['metadata'],
+            },
+        });
 
         // GET /meta/:type/:name/published — ADR-0033 published snapshot. [#7526]
         //

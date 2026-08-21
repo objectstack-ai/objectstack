@@ -410,7 +410,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   ],
   '@objectstack/plugin-dev': [
     '@objectstack/driver-memory', '@objectstack/objectql', '@objectstack/plugin-auth',
-    '@objectstack/plugin-hono-server', '@objectstack/plugin-security', '@objectstack/rest',
+    '@objectstack/plugin-hono-server', '@objectstack/rest',
     '@objectstack/runtime', '@objectstack/service-i18n', '@objectstack/service-realtime',
     '@objectstack/service-storage',
   ],

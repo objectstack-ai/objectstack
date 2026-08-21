@@ -1,0 +1,225 @@
+---
+title: Email Templates
+description: Author a localizable outbound mail template as metadata, and reach it from a flow's notify node or from services.email.
+---
+
+# Email Templates
+
+An **email template** is a named, localizable subject + body that lives as
+metadata. Your app declares it; the email service resolves it by
+`(name, locale)` at send time and renders its `{{placeholders}}` against a
+per-send data payload.
+
+Authoring and sending are two different surfaces. This page covers **authoring**
+a template and the ways to reach one. The service that delivers it — `send`,
+`sendTemplate`, `renderTemplate` and their typed error codes — is documented in
+[`services.email`](/docs/kernel/runtime-services/email-service).
+
+{/* os:check */}
+```typescript
+import { defineEmailTemplateDefinition } from '@objectstack/spec';
+
+export const TaskDoneEmail = defineEmailTemplateDefinition({
+  name: 'crm.task_done',
+  label: 'Task Done Notification',
+  category: 'workflow',
+  locale: 'en-US',
+  subject: 'Task done: {{task.title}}',
+  bodyHtml: '<p>The task <strong>{{task.title}}</strong> on {{project.name}} was marked done.</p>',
+  bodyText: 'The task {{task.title}} on {{project.name}} was marked done.',
+  variables: [
+    { name: 'task.title', type: 'string', required: true, description: 'Task title' },
+    { name: 'project.name', type: 'string', required: false, description: 'Project name' },
+  ],
+});
+```
+
+Declare it in the `emailTemplates` collection of `defineStack()`, or put it in a
+`*.email-template.ts` (or `.yml` / `.json`) file anywhere in the package:
+
+```typescript
+export default defineStack({
+  // …
+  emailTemplates: [TaskDoneEmail],
+});
+```
+
+⚠️ The canonical schema is **`EmailTemplateDefinitionSchema`**. A legacy
+`EmailTemplateSchema` was demoted and then removed outright; consumers
+historically wired the wrong one. If an example you find elsewhere sets `body`,
+`html`, `content`, `from` or `title`, it is written against the wrong shape — the
+real slots are `bodyHtml`, `bodyText`, `fromOverride` and `subject`.
+
+## `name` is a dotted namespace, not a title
+
+`name` is the identifier `sendTemplate({ template })` looks up, and the schema
+enforces dotted snake_case (`auth.password_reset`, `crm.large_deal_won`).
+Prefix it with your app or domain — the namespace is what keeps a tenant's
+templates from colliding with the built-in authentication mail.
+
+`category` (`auth` | `notification` | `workflow` | `marketing` | `custom`,
+default `custom`) is a filter facet in Studio listings, not a delivery
+behaviour. `active: false` makes `sendTemplate` return `TEMPLATE_INACTIVE`
+rather than silently sending nothing.
+
+## Placeholders
+
+Subject and both bodies are rendered by a deliberately tiny mustache-style
+renderer:
+
+- `{{path.to.value}}` — dotted-path lookup against the send's `data` object,
+  **HTML-escaped**.
+- `{{{path.to.value}}}` — the same value, *not* escaped. Use it only for
+  pre-rendered HTML fragments such as a URL you are dropping into `href`.
+- `{{ order.total | currency:EUR }}` / `{{ ts | datetime }}` — an optional
+  formatter from the shared formula whitelist, so money and dates render the
+  same way they do in-app. `datetime` honours the reference timezone the caller
+  passes; calendar-day `date` values are timezone-naive.
+
+Two properties of the renderer to author around:
+
+- **A missing placeholder renders as an empty string.** Rendering never throws.
+  Declare a variable `required` (below) if absence should be an error instead.
+- **There are no loops, conditionals or partials.** A template is a data-only
+  rendering by design; branching belongs in the caller, which passes in the
+  already-decided values.
+
+An unknown formatter falls back to the raw value rather than failing the render.
+
+## Declared variables
+
+`variables` documents the holes: each entry has a `name` (the path as written in
+the placeholder), a `type` (`string` | `number` | `boolean` | `date` | `url` |
+`user` | `record`, default `string`), an optional `description` shown as an
+authoring hint in Studio, and `required` (default `false`).
+
+`required` is enforced at send time: if a declared-required variable is absent
+from `data`, the send fails with `MISSING_VARIABLES` instead of mailing a
+sentence with a hole in it. The other fields are authoring metadata — the
+renderer does not coerce by `type`.
+
+## Locale resolution
+
+Rows sharing a `name` and differing in `locale` form one **bundle**. `locale` is
+a BCP-47 tag and defaults to `en-US`.
+
+{/* os:check */}
+```typescript
+import { defineEmailTemplateDefinition } from '@objectstack/spec';
+
+export const passwordResetEn = defineEmailTemplateDefinition({
+  name: 'auth.password_reset',
+  label: 'Password Reset',
+  category: 'auth',
+  locale: 'en-US',
+  subject: 'Reset your password',
+  bodyHtml: '<p>Use {{{reset_url}}} within {{ttl_minutes}} minutes.</p>',
+});
+
+export const passwordResetZh = defineEmailTemplateDefinition({
+  name: 'auth.password_reset',
+  label: 'Password Reset',
+  category: 'auth',
+  locale: 'zh-CN',
+  subject: '重置您的密码',
+  bodyHtml: '<p>请在 {{ttl_minutes}} 分钟内使用 {{{reset_url}}}。</p>',
+});
+```
+
+`sendTemplate({ template, locale })` walks a fixed ladder — exact, then default,
+then deterministic:
+
+1. **`locale`, matched exactly.** There is **no language-prefix matching**:
+   `zh` does not resolve `zh-CN`, and `en` does not resolve `en-US`. Author the
+   tags your callers actually pass.
+2. **`en-US`** — which is also where a call that omits `locale` *starts*, so
+   "no locale" means the default rather than an arbitrary row.
+3. Only for a call that named **no** locale, and only when the bundle has no
+   `en-US` row at all: the bundle's lowest locale tag. A single-locale tenant
+   keeps rendering, and renders identically on every boot.
+
+A call that names a locale with no exact row and no `en-US` row fails with
+`TEMPLATE_NOT_FOUND` — it does not silently fall through to another language.
+That rung ordering exists because one seam once answered "whichever row the
+store yields first" and a no-locale send rendered `zh-CN` out of an
+`en-US` + `zh-CN` bundle.
+
+## Reaching a template
+
+### From a flow's `notify` node
+
+A `notify` node has two mutually exclusive content paths, and the template one is
+the localizable path:
+
+```typescript
+{
+  id: 'tell_owner',
+  type: 'notify',
+  label: 'Notify Owner',
+  config: {
+    recipients: '{record.owner_id}',
+    template: 'crm.task_done',
+    templateData: { 'task.title': '{record.title}' },
+  },
+}
+```
+
+- `template` names the bundle. The delivery path resolves
+  `(name, recipient locale)` **per recipient, at delivery time**, so one node
+  mails each person in their own language.
+- Inline `title` / `message` are the **non-localizable** path: raw strings sent
+  to every recipient verbatim. The two paths cannot be combined on one node —
+  the schema refuses the ambiguous shape rather than letting a runtime
+  precedence rule silently drop one.
+- `templateData` **values** are interpolated per run, so `{record.x}` works in
+  them. `template` itself is read **raw** — it is a static metadata
+  cross-reference, and a `{token}` there is forwarded verbatim, never resolved.
+
+### From code
+
+Resolve the service and call it:
+
+```typescript
+const email = ctx.getService('email');
+
+await email.sendTemplate({
+  template: 'crm.task_done',
+  to: 'owner@example.com',
+  locale: 'zh-CN',
+  data: { task: { title: 'Ship the release' }, project: { name: 'Apollo' } },
+});
+```
+
+Use `renderTemplate({ template, data, locale })` when you want the rendered
+`{ subject, html, text }` **without** sending anything — the same resolver and
+the same locale ladder, exposed so non-email channels render localized content
+instead of duplicating it.
+
+## How an authored template reaches the sender
+
+Worth knowing, because it explains what an administrator can and cannot change.
+
+`sendTemplate` resolves rows of the `sys_email_template` platform object, not
+your source files. At boot the email plugin **materializes** every declared
+`email_template` into that object — validating each one through the canonical
+schema first, so a malformed template is a warning rather than a broken boot.
+Runtime saves are materialized on the same seam, so a Studio edit takes effect
+without a restart.
+
+Materialization is **seed-not-clobber**. Declared templates carry package
+provenance and are re-seeded on every boot, but a row an administrator created
+or edited is never overwritten. A reworded transactional mail survives your next
+deploy — which is the intended behaviour, and also the reason a source change
+that "does not take effect" is usually a customized row winning, not a failed
+seed.
+
+`bodyText` is optional: when you omit it the service derives a plain-text
+alternative by stripping tags from the rendered HTML. Authoring one explicitly
+is still recommended for spam scoring.
+
+## Related
+
+- **Schema reference:** [Email Template](/docs/references/system/email-template) — every field, generated from the spec
+- **The service:** [`services.email`](/docs/kernel/runtime-services/email-service) — `send`, `sendTemplate`, `renderTemplate`, error codes
+- **Calling it from automation:** [Flows](/docs/automation/flows) — the `notify` node
+- **Translating other metadata:** [Translations](/docs/ui/translations)

@@ -30,10 +30,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       description: {
         label: "Descripción"
       },
-      permissions: {
-        label: "Permisos",
-        help: "Matriz serializada en JSON de cadenas de permisos."
-      },
       active: {
         label: "Activo"
       },

@@ -69,8 +69,9 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -445,7 +446,7 @@ function selfTest() {
 // working tree (e.g. `origin/main`, to prove a new gate has no false positives
 // before it is pinned in CI) — an import that audited, printed and possibly
 // called process.exit(1) as a side effect would make that impossible.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isEntrypoint(import.meta.url)) {
     if (process.argv.includes('--self-test')) selfTest();
     else if (process.argv.includes('--list')) list();
     else run();

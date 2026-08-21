@@ -125,8 +125,11 @@ describe('#7894 INVARIANT 2 — no unmapped spelling of a DECLARED type may answ
   });
 
   it('never lets one spelling name two types', () => {
-    // The module asserts this at load; assert it here too so the failure is
-    // attributable to a test rather than to an import side effect.
+    // [#10096] The agreement's enforcement home is the build-time
+    // `check:meta-url-spelling` gate (it moved OFF the module-load path with
+    // the schema-free split — maintainer ruling 2026-08-20). Assert it here
+    // too so a disagreement also fails as an attributable test, quantified
+    // over the live manifest map rather than the generated data.
     for (const [plural, singular] of Object.entries(PLURAL_TO_SINGULAR)) {
       expect(META_URL_TO_SINGULAR[plural]).toBe(singular);
     }
@@ -293,6 +296,30 @@ describe('#7894 — the manifest map keeps its own job', () => {
     // were NOT simply added to this map.
     for (const key of ['fields', 'seeds', 'translations', 'external_catalogs', 'externalCatalogs']) {
       expect(PLURAL_TO_SINGULAR[key], `${key} must not enter the manifest map`).toBeUndefined();
+    }
+  });
+});
+
+describe('#10096 — the fine-grained entry is the SAME contract, re-exported', () => {
+  it('`meta-spelling` and `/shared` hand out identical bindings (one declaration, two entries)', async () => {
+    // The schema-free entry is additive: `/shared` keeps the four symbols, and
+    // both must resolve to the one declaration in
+    // `src/meta-spelling/metadata-url-spelling.ts`. Reference identity is the
+    // check that distinguishes a re-export from a fork — a faithful copy would
+    // pass every value comparison.
+    const entry = await import('../meta-spelling');
+    expect(entry.META_URL_TO_SINGULAR).toBe(META_URL_TO_SINGULAR);
+    expect(entry.canonicalMetaUrlType).toBe(canonicalMetaUrlType);
+    expect(entry.metaUrlSpellingRefusal).toBe(metaUrlSpellingRefusal);
+    expect(entry.unrecognisedMetaTypeRefusal).toBe(unrecognisedMetaTypeRefusal);
+  });
+
+  it('the generated data module carries every registry type, so it cannot silently lag', () => {
+    // Freshness belt-and-braces: `check:meta-url-spelling` diffs the artifact
+    // byte-for-byte; this quantifies the same fact through the public map so a
+    // stale artifact also fails as an attributable test.
+    for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+      expect(META_URL_TO_SINGULAR[expectedRestPlural(entry.type)], `${entry.type} must be mapped`).toBe(entry.type);
     }
   });
 });

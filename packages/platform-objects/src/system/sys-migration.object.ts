@@ -28,9 +28,14 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * per deployment.
  *
  * Writes flow through `recordDataMigrationRun` (system context, from the
- * migration commands) — the API surface is read-only diagnostics. The one
- * other writer is the engine's admit path, which sets `deviation_observed_at`
- * and nothing else (#4797).
+ * migration commands) — the API surface is read-only diagnostics. Two other
+ * writers exist, both narrow: the engine's admit path, which sets
+ * `deviation_observed_at` and nothing else (#4797), and the #8686 seed-tenancy
+ * repair, which records its own applied runs from a boot hook against the
+ * `@objectstack/spec/system` row contract rather than through the helper above
+ * (#9451 — `metadata-protocol` must not take a dependency on this package).
+ * That row gates nothing: it is a receipt an operator reads, so it carries
+ * `verified_at: null` and `blocking: 0` by construction.
  *
  * Registered by `PlatformObjectsPlugin` (`./plugin.ts`) — the ledger is
  * platform infrastructure, present on every kernel that composes the platform

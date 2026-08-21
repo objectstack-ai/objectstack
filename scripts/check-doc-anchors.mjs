@@ -119,10 +119,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import Slugger from 'github-slugger';
 
 import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * The page population this gate sweeps, as the repo-relative glob it really
@@ -604,7 +604,7 @@ function selfTest() {
 /* Run only when invoked as a program — the extractor and the slug helpers are
  * exported so a caller chasing a false positive can import them without the
  * import itself sweeping the repo. */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) selfTest();
   else runCheck();
 }

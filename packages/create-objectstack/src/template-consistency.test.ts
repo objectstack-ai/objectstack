@@ -361,6 +361,55 @@ describe('blank template pnpm build approvals (#3119)', () => {
   });
 });
 
+// A brand-new scaffold's very first `pnpm install` reported two unmet peers —
+// on the one screen where a newcomer is deciding whether this project is solid,
+// with nothing they did to cause it and nothing they can do about it (#10326).
+// Both are third-party ranges we cannot edit, so the declaration is pnpm's
+// scoped `allowedVersions`, and it has to travel INSIDE the scaffold: a
+// `peerDependencyRules` block in this repo's own pnpm-workspace.yaml would not
+// ship with the published packages, exactly as the overrides note there says.
+describe('blank template peer-skew declarations (#10326)', () => {
+  const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
+  // Same comment-stripping as the block above: the prose explaining these keys
+  // must not be what satisfies an assertion about the keys.
+  const settings = fs.existsSync(wsPath)
+    ? fs.readFileSync(wsPath, 'utf8').replace(/^\s*#.*$/gm, '')
+    : '';
+  const allowed = /^ {2}allowedVersions:\n((?:[ \t]+.*\n?)*)/m.exec(settings)?.[1] ?? '';
+
+  it('declares the stale better-auth > better-sqlite3 peer', () => {
+    // better-auth 1.7.1 peers `^12.0.0`; @objectstack/driver-sql resolves 13.x.
+    // The peer is optional and governs only a raw better-sqlite3 `Database`
+    // handed to better-auth's `database` option — a path ObjectStack never
+    // takes (AuthManager passes an ObjectQL adapter factory). Measured on the
+    // path it does govern, 1.7.1 behaves identically on 13.0.3 and 12.11.1.
+    expect(
+      /^\s*'better-auth>better-sqlite3':\s*'13'\s*$/m.test(allowed),
+      "allowedVersions must widen better-auth's stale better-sqlite3 peer to 13",
+    ).toBe(true);
+  });
+
+  it('declares the frozen @better-auth/scim > better-call peer', () => {
+    // scim is held at 1.7.0-rc.1 deliberately; the rc peers an EXACT 1.3.7
+    // while better-auth depends on 1.4.0. A better-auth plugin must share the
+    // host's better-call instance, so the single 1.4.0 copy is correct.
+    expect(
+      /^\s*'@better-auth\/scim>better-call':\s*'1\.4\.0'\s*$/m.test(allowed),
+      'allowedVersions must accept the single better-call 1.4.0 copy scim resolves to',
+    ).toBe(true);
+  });
+
+  it('scopes every rule to one declaring package, never a bare peer name', () => {
+    // A bare `better-sqlite3: '13'` would silence that peer for EVERY package
+    // that declares it, including ones whose complaint would be real.
+    const entries = [...allowed.matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const key of entries) {
+      expect(key, `"${key}" must be spelled <declaring package>><peer>`).toContain('>');
+    }
+  });
+});
+
 describe('README template table', () => {
   it('lists exactly the templates in the TEMPLATES registry', () => {
     const readme = fs.readFileSync(path.join(pkgRoot, 'README.md'), 'utf8');

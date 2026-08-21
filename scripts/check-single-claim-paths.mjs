@@ -146,6 +146,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
@@ -546,7 +547,7 @@ function selfTest() {
 
 // The basename comparison, as in the sibling guard: a future importer must not
 // trigger a judgment as a side effect.
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop());
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
   if (process.argv.includes('--self-test')) {
     await selfTest();

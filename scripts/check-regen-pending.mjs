@@ -71,6 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath } from './regen-artifacts.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SPEC_DIR = join(REPO_ROOT, 'packages/spec');
@@ -142,6 +143,60 @@ export function schemaTreeIsStale(specDir = SPEC_DIR) {
   const tree = newestMtime(join(specDir, 'json-schema'), (n) => n.endsWith('.json'));
   if (!tree) return true;
   return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) > tree;
+}
+
+/**
+ * The same question for the THIRD build artifact a gate reads: are
+ * `packages/spec`'s emitted **JS bundles** older than the sources they were
+ * bundled from?
+ *
+ * `check:browser-reachable-entries` (#10199) reads `dist/<entry>/index.mjs` and
+ * `index.js` — the module a consumer's `import` actually loads — to assert that
+ * a declared browser-reachable entry links no zod. That is a different artifact
+ * from the one `distIsStale` measures, and reusing it would be wrong **in the
+ * dangerous direction**: `packages/spec`'s build is two tsup passes, and the
+ * second (`BUILD_DTS=true tsup`, `dts: { only: true }`) refreshes the
+ * declarations WITHOUT re-emitting a single `.mjs`. A `.d.ts`-fresh tree can
+ * therefore carry bundles that predate the edit under test, and a zod-link
+ * verdict computed over those bundles is a FALSE GREEN on exactly the import
+ * the gate exists to catch.
+ *
+ * It is also wrong in the merely annoying direction: `OS_SKIP_DTS=1` — the
+ * documented local build flag — emits fresh JS and skips the declarations, so
+ * `distIsStale` reports stale for a tree whose bundles are exactly current, and
+ * this gate would refuse a build that could have answered.
+ *
+ * Three deliberate differences from `distIsStale`:
+ *   - the artifact side matches `.mjs`/`.js`, the emitted bundles (`.d.ts` and
+ *     `.d.mts` end in `.ts`/`.mts`, and sourcemaps in `.map`, so neither is
+ *     counted);
+ *   - `.test.ts` is excluded from the source side, on `schemaTreeIsStale`'s
+ *     reasoning: a test file is not an input to any entry's bundle graph, so
+ *     counting it would send every test-only spec PR to a rebuild it does not
+ *     need, and a guard that cries wolf is a guard someone deletes;
+ *   - `tsup.config.ts` IS counted, though it sits outside `src/`. It is the one
+ *     input whose edit invalidates this gate's measurement most directly —
+ *     `entry`, `splitting` and the external set are all decided there — so an
+ *     edited-but-unbuilt bundler config must read as stale rather than as a
+ *     tree the gate may believe.
+ *
+ * Missing counts as stale, and the direction is the same conservative one its
+ * two siblings take: a false "stale" costs a build, a false "fresh" costs a
+ * verdict nobody can trust.
+ */
+export function bundlesAreStale(specDir = SPEC_DIR) {
+  const bundles = newestMtime(
+    join(specDir, 'dist'),
+    (n) => n.endsWith('.mjs') || n.endsWith('.js'),
+  );
+  if (!bundles) return true;
+  const src = newestMtime(
+    join(specDir, 'src'),
+    (n) => n.endsWith('.ts') && !n.endsWith('.test.ts'),
+  );
+  const configPath = join(specDir, 'tsup.config.ts');
+  const config = existsSync(configPath) ? statSync(configPath).mtimeMs : 0;
+  return Math.max(src, config) > bundles;
 }
 
 /**
@@ -357,7 +412,7 @@ function main({ prePush = false } = {}) {
 
 // `check:generated --fix` imports `distIsStale` from here, so nothing may run on
 // import — only when this file IS the entry point.
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 /**
  * Replay the deferred-merge sequence against a THROWAWAY git repo (#8047).

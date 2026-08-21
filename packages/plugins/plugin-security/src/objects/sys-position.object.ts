@@ -93,8 +93,11 @@ export const SysPosition = ObjectSchema.create({
     {
       // Clone — POST a new sys_position row pre-filled from the source. The
       // dialog asks only for the new API name / label so the operator
-      // can rename atomically; permissions JSON is copied wholesale via
-      // defaultFromRow.
+      // can rename atomically; description is carried over via defaultFromRow.
+      // (Until #9885 this also copied the retired `permissions` column — a
+      // copy of a value nothing ever wrote; see the retirement note at the
+      // field group below. A clone does NOT copy permission-set bindings:
+      // `sys_position_permission_set` rows are runtime state, bound in Setup.)
       name: 'clone_position',
       label: 'Clone Position',
       icon: 'copy',
@@ -115,7 +118,6 @@ export const SysPosition = ObjectSchema.create({
         // the installation.
         { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'snake_case machine name, unique per organization' },
         { field: 'description', defaultFromRow: true },
-        { field: 'permissions', defaultFromRow: true },
       ],
     },
   ],
@@ -193,12 +195,21 @@ export const SysPosition = ObjectSchema.create({
     }),
 
     // ── Configuration ────────────────────────────────────────────
-    permissions: Field.textarea({
-      label: 'Permissions',
-      required: false,
-      description: 'JSON-serialized array of permission strings',
-      group: 'Configuration',
-    }),
+    // RETIRED (#9885, ADR-0049 enforce-or-remove, maintainer ruling
+    // 2026-08-20): `permissions` — a "JSON-serialized array of permission
+    // strings" textarea — was declared here while NO producer ever wrote it
+    // and NO runtime path ever read it (the object-scoped census read all
+    // sys_position-naming files; the bootstrap writers set label /
+    // description / managed_by / active / is_default only). Grants reach a
+    // position ONLY through permission-set bindings —
+    // `sys_position_permission_set` rows, resolved by position `name` in
+    // resolve-authz-context — so the declared column told an author (human
+    // or AI) that direct position-level permission strings are a platform
+    // capability; they are not. Re-declaring the column without a runtime
+    // reader in the same change is the exact defect the ruling removed.
+    // An undeclared field in a write is refused loudly by the engine's
+    // schema preflight (400 INVALID_FIELD); existing physical columns are
+    // untouched (ADR-0045 schema sync is additive).
 
     // ── Status ───────────────────────────────────────────────────
     active: Field.boolean({

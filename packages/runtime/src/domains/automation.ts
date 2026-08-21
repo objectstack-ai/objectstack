@@ -277,6 +277,119 @@ async function refuseUngrantedRunRead(
 }
 
 /**
+ * [#10145] ADR-0066 D1's authoring capability, required by the `/automation`
+ * DEFINITION writes.
+ *
+ * The same key the sibling metadata doors already demand — `PUT /meta/:type/:name`
+ * on both of its transports (#6603 REST, #7019 dispatcher), `POST /meta/_migrate-stored`,
+ * and every state-changing `/packages` route (#7033). A flow IS authored metadata:
+ * the domain's own `GET /` audit note says so in as many words ("Flow definitions
+ * are metadata and are governed on the metadata plane (`/meta`, ADR-0106)"), and
+ * that note settled the READ posture while leaving the WRITE half of the same
+ * sentence unstated. This is that half.
+ */
+const FLOW_AUTHORING_CAPABILITY = 'manage_metadata';
+
+/** [#10145] Refusal vocabulary for the authoring-write gate (ADR-0112: code AND status). */
+const FLOW_WRITE_DENY_STATUS = 403;
+const FLOW_WRITE_DENY_CODE = 'PERMISSION_DENIED';
+const FLOW_WRITE_DENY_MESSAGE =
+    `Authoring automation flows requires the \`${FLOW_AUTHORING_CAPABILITY}\` capability.`;
+
+/**
+ * [#10145] Which `/automation` routes AUTHOR a flow definition.
+ *
+ * One predicate, for the reason {@link isRunStateRead} is one predicate: this
+ * domain gets one policy per data class, and a policy spelled at three call
+ * sites is three policies that happen to agree today.
+ *
+ *   `POST   /`        → registerFlow    (create)
+ *   `PUT    /:name`   → registerFlow    (update)
+ *   `DELETE /:name`   → unregisterFlow  (deregister)
+ *
+ * ⛔ The EXECUTION routes are deliberately NOT here, and the omission is the
+ * ruling rather than an oversight — authoring and executing are different
+ * questions, and sweeping a run surface into a metadata gate would lock every
+ * ordinary user out of the flows built for them:
+ *
+ *   - `POST /:name/trigger` and the legacy `POST /trigger/:name` RUN a flow.
+ *     They are the door a member's own record action goes through.
+ *   - `POST /:name/runs/:runId/resume` resumes a paused run and is already
+ *     fail-closed on the suspended node's `resumeAuthority` (#3801 / #5561) —
+ *     a second, unrelated gate in front of it would refuse the very user the
+ *     flow paused for, which is the mistake #7968 records for the screen read.
+ *   - `POST /:name/toggle` mutates ENGINE enablement rather than a definition.
+ *     Arguably an authoring write; filed separately rather than folded in here,
+ *     so the decision is made in the open instead of riding a security fix.
+ *
+ * The reads are untouched: `GET /` and `GET /:name` serve flow definitions and
+ * keep the posture the #7900 audit recorded for them.
+ */
+function isFlowAuthoringWrite(parts: string[], method: string): boolean {
+    // `POST /automation` — the create door. `parts` is empty only for the
+    // domain root, so `POST /trigger/:name` (parts `['trigger', name]`) and
+    // `POST /:name/trigger` cannot reach this arm.
+    if (method === 'POST') return parts.length === 0;
+    // `PUT /automation/:name` / `DELETE /automation/:name` — the update and
+    // deregister doors. Exactly one segment: a deeper path is a run surface.
+    if (method === 'PUT' || method === 'DELETE') return parts.length === 1;
+    return false;
+}
+
+/**
+ * [#10145] The authoring-write gate: refuse a caller without
+ * {@link FLOW_AUTHORING_CAPABILITY}.
+ *
+ * ## What it closes, measured over HTTP
+ *
+ * On a walled multi-organization deployment (`OS_TENANCY_POSTURE=isolated`) a
+ * plain tenant org owner holding `organization_admin` and NOT this capability —
+ * the same session answered 403 by `PUT /meta/:type/:name`,
+ * `POST /ai/tools/:tool/execute` and `POST /packages/*` — created, modified and
+ * DELETED flows here, all 200. Flow metadata is registered at ENVIRONMENT
+ * scope, not organization scope, so the write crossed the tenant wall: a
+ * shipped flow one tenant deleted read 404 for the actor, for an unrelated
+ * tenant AND for the platform admin; an injected flow read 200 for all three.
+ * Privilege escalation and cross-tenant metadata mutation in one call.
+ *
+ * ## Structure — copied from this file's own neighbours, not reinvented
+ *
+ * Returns a refusal to short-circuit on, `undefined` to proceed, so the caller
+ * reads as a guard clause and no route can consume a denial as a value
+ * ({@link refuseUngrantedRunRead}'s shape).
+ *
+ * Engine self-invocation (`isSystem`, never settable from the wire) bypasses,
+ * matching `/meta`'s and `/packages`' gates and the run-state gate above: a
+ * door that refused what the engine's own metadata loader does would not be
+ * convergence. The capability channel is `systemPermissions` — CAPABILITIES,
+ * not permission-SET names, which ride `permissions` (#4705).
+ *
+ * The message names the CAPABILITY it wants and nothing about the caller (no
+ * positions, no permission-set names — #7450).
+ *
+ * ⚠️ Callers MUST run this BEFORE the automation service is resolved and before
+ * any body validation, so (a) an unentitled caller cannot use the 501-vs-403
+ * answer to fingerprint whether this deployment mounts automation, (b) nothing
+ * is registered or unregistered before the refusal — "delete first, refuse
+ * second" is the worst shape here, and it is precisely what the report
+ * measured — and (c) the definition contract is not enumerable by probing
+ * 422s from outside the authoring cohort.
+ */
+function refuseUngrantedFlowWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): HttpDispatcherResult | undefined {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return undefined;
+    if (new Set<string>(ec?.systemPermissions ?? []).has(FLOW_AUTHORING_CAPABILITY)) return undefined;
+
+    return {
+        handled: true,
+        response: deps.error(FLOW_WRITE_DENY_MESSAGE, FLOW_WRITE_DENY_STATUS, { code: FLOW_WRITE_DENY_CODE }),
+    };
+}
+
+/**
  * [#7968] The screen route's gate: **the run's own trigger identity, OR the
  * `sys_automation_run` read grant as an operator override.**
  *
@@ -713,6 +826,21 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // domain's policy cannot drift route by route the way the finding described.
     if (isRunStateRead(parts, m)) {
         const refusal = await refuseUngrantedRunRead(deps, context);
+        if (refusal) return refusal;
+    }
+
+    // [#10145] AUTHORING-WRITE GATE — `manage_metadata`, the capability the
+    // metadata plane these flow definitions live on already requires of every
+    // other door onto it. Placed with the two gates above and AHEAD of the
+    // service probe below for their reason, read one tier up: which capability
+    // a route requires must not vary with which automation service a deployment
+    // mounts, and a 501-vs-403 must not be what tells an unentitled caller
+    // whether automation is mounted here. Ahead of every body check too — a
+    // refused caller writes nothing and learns nothing about the definition
+    // contract. Which routes: `isFlowAuthoringWrite` above, one predicate, with
+    // the execution surfaces deliberately outside it.
+    if (isFlowAuthoringWrite(parts, m)) {
+        const refusal = refuseUngrantedFlowWrite(deps, context);
         if (refusal) return refusal;
     }
 

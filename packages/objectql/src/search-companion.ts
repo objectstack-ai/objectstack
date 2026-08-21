@@ -41,6 +41,7 @@
  */
 
 import { resolveDisplayField, TITLE_ELIGIBLE_TYPES } from '@objectstack/spec/data';
+import { SystemFieldName } from '@objectstack/spec/system';
 
 /**
  * Name of the hidden companion column. Double-underscore prefixed so it can
@@ -93,6 +94,34 @@ function isCompanionSourceType(type: string | undefined): boolean {
 }
 
 /**
+ * [#10290] Field names that carry the record's PRIMARY KEY — its address —
+ * rather than any human-authored text.
+ *
+ * Keyed on the NAME because that is where the role lives: the driver
+ * provisions `id` on every physical table unconditionally
+ * (`resolveInjectedSystemColumns` reports it even under `systemFields: false`),
+ * and there is no per-field `primaryKey` marker in the spec for a def-based
+ * test to read — the same reasoning `isPreservableUnderAudit`
+ * (`validation/rule-validator.ts`) already keys on {@link SystemFieldName.ID}.
+ * `_id` is the alternate spelling of the same address: `resolveRecordDisplayName`
+ * reads `record.id ?? record._id`, and the read path's own exclusion set
+ * (`SEARCH_AUTO_EXCLUDED_FIELDS`, `@objectstack/spec/data`) names both, for
+ * this refusal, one seam over.
+ */
+const RECORD_ADDRESS_FIELD_NAMES: ReadonlySet<string> = new Set<string>([SystemFieldName.ID, '_id']);
+
+/**
+ * [#10290] Is `fieldName` the object's primary key?
+ *
+ * Exported so the refusal in {@link resolveSearchCompanionSources} is one
+ * named judgement a caller can ask about, rather than a literal buried in a
+ * conditional.
+ */
+export function isPrimaryKeyField(fieldName: string | undefined | null): boolean {
+  return typeof fieldName === 'string' && RECORD_ADDRESS_FIELD_NAMES.has(fieldName);
+}
+
+/**
  * May `fieldMeta` feed the companion column?
  *
  * Fail-closed security gate (ADR-0061 D5 extended): only fields readable by
@@ -119,11 +148,62 @@ export function isCompanionSourceEligible(fieldMeta: CompanionFieldMeta | undefi
  * ({@link provisionSearchCompanion}) and the `plugin-pinyin-search` populate
  * hook — deriving both from the same function means there is no stored
  * mapping to drift.
+ *
+ * ## [#10290] The PRIMARY KEY is never a source
+ *
+ * ADR-0079's derivation ends at "first title-eligible field by declaration
+ * order", and on a table whose only text column IS its primary key — system
+ * tables, junction tables, append-only logs — that is `id`. `id` is
+ * `type: 'text'`, not hidden and carries no `requiredPermissions`, so it
+ * passed {@link isCompanionSourceEligible} and the companion was provisioned
+ * on it.
+ *
+ * The work that follows is doomed by construction rather than merely
+ * unlikely. The companion stores search-normalized forms of CJK text and
+ * nothing else: both writers gate on {@link containsCJK} of the source value
+ * (the `beforeInsert`/`beforeUpdate` stamp and the boot backfill). A primary
+ * key is a platform-generated identifier, ASCII by construction, so
+ * `containsCJK` can never be true — the boot backfill's keyset walk over such
+ * an object scans a whole platform table to compute nothing, forever.
+ * Measured on a real `bootStack` of `examples/app-showcase`: **20 of the 66
+ * objects** the backfill enumerated were in this state, `sys_secret`,
+ * `sys_oauth_access_token` and `sys_jwks` among them.
+ *
+ * ⛔ The refusal is keyed on the field's ROLE, NOT on "the display field
+ * resolved by fallback", and that is forced rather than chosen. The registry's
+ * materialization seam (`registry.ts` `materializeBaseLayer`) runs
+ * `provisionPrimary(schema, { synthesize: false })` BEFORE this module — a
+ * contractual order — and that pass WRITES `nameField: 'id'` onto the
+ * document. By the time provisioning asks this function, a derived fallback
+ * and an author's explicit pointer are byte-identical, so "was this a
+ * fallback?" is not a question this seam can answer. It does not need to: the
+ * values cannot qualify either way.
+ *
+ * This INTERPRETS ADR-0079, it does not amend it. The title contract is
+ * untouched — `resolveDisplayField` still resolves `id`, `provisionPrimary`
+ * still designates it, and `resolveRecordDisplayName` still renders the
+ * `Record #<id>` floor. What changes is only that the search normalizer
+ * declines to take its input from there. That is the same distinction #4483
+ * drew on the READ path one seam over: the display field's job in the
+ * `$search` auto-default is to ORDER the set, never to ADMIT a field the
+ * exclusions already rejected (`SEARCH_AUTO_EXCLUDED_FIELDS`, which names `id`
+ * and `_id`). This is that rule on the WRITE/provisioning path.
+ *
+ * Existing permanently-NULL `__search` columns on already-migrated tables are
+ * deliberately left in place: ADR-0045 migrations are additive, and dropping a
+ * physical column is a separate decision. What stops here is new provisioning
+ * and the per-boot walk — the backfill skips an object whose sources resolve
+ * empty, and {@link provisionSearchCompanion} no longer declares the column at
+ * all, so `plugin-pinyin-search`'s own `fields[SEARCH_COMPANION_FIELD]`
+ * early-out closes the walk one guard earlier still.
  */
 export function resolveSearchCompanionSources(schema: CompanionObjectMeta | undefined | null): string[] {
   if (!schema?.fields) return [];
   const display = resolveDisplayField(schema as any);
   if (!display) return [];
+  // [#10290] Before the metadata gate: the primary key's METADATA is a
+  // perfectly ordinary readable text column, so only its name can refuse it.
+  if (isPrimaryKeyField(display)) return [];
   const meta = schema.fields[display];
   return isCompanionSourceEligible(meta) ? [display] : [];
 }

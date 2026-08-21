@@ -1,0 +1,10 @@
+{
+  "description": "Which SOURCE DECLARATION each name exported by one public entry point of @objectstack/spec resolves to, after its alias chain is unwound: `<src path>#<declared name> (<kind>)`. Two exports share an origin string iff they are the same declaration — so equal origins across two entries are a harmless re-export, and different origins under one name are the #4411 dual-source trap. Generated from src/ (no build needed) and read by the export-surface pin tests, which compare against it instead of each building their own ts.createProgram — that was ~55s of compilation per CI lap and a non-deterministic timeout that ejected unrelated PRs from the merge queue (#4796). Sharded by entry point (#5837) so two retirement PRs never share a file. Carries NO line numbers: the pins asserted the line as `\\d+`, and recording it would rewrite this artifact on every edit that shifts a line in any .zod.ts. Regenerate with `pnpm --filter @objectstack/spec gen:export-origins` and read the diff.",
+  "entry": "./meta-spelling",
+  "exports": {
+    "META_URL_TO_SINGULAR": "src/meta-spelling/meta-url-data.generated.ts#META_URL_TO_SINGULAR (const)",
+    "canonicalMetaUrlType": "src/meta-spelling/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
+    "metaUrlSpellingRefusal": "src/meta-spelling/metadata-url-spelling.ts#metaUrlSpellingRefusal (function)",
+    "unrecognisedMetaTypeRefusal": "src/meta-spelling/metadata-url-spelling.ts#unrecognisedMetaTypeRefusal (function)"
+  }
+}

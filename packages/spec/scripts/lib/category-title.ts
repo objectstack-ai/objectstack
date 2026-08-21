@@ -78,6 +78,10 @@ export const CATEGORY_TITLES: Readonly<Record<string, string>> = {
   identity: 'Identity Protocol',
   integration: 'Integration Protocol',
   kernel: 'Kernel Protocol',
+  // [#10096] The schema-free `/meta` URL-spelling entry. "Vocabulary", not
+  // "Protocol": the entry carries the spelling contract's data and folds
+  // without the schema machinery every Protocol category links.
+  'meta-spelling': 'Meta-Spelling Vocabulary',
   migrations: 'Migrations Protocol',
   qa: 'QA Protocol',
   security: 'Security Protocol',

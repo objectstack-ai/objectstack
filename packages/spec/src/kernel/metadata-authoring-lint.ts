@@ -17,19 +17,50 @@
  *    `normalizeStackInput` uses — so the lint sees exactly the collections the
  *    normalizer recognises, and a new collection registered there is covered
  *    the moment it exists;
- *  - which schema judges each  → `getMetadataTypeSchema`, the canonical
- *    type→Zod registry;
- *  - whether linting is even meaningful → read off the schema itself (below).
+ *  - which schema judges each  → the **stack schema's own slot** for that
+ *    collection, injected by the caller (see below);
+ *  - whether linting is even meaningful → read off that schema (below).
  *
  * A third hand-written list of "types the lint covers" would have been the
  * #3786 shape all over again, inside the tool built to end it.
  *
+ * ## Which schema the posture is read from (#10039)
+ *
+ * The judging schema used to be `getMetadataTypeSchema(type)` — the canonical
+ * type→Zod registry. That registry answers a different question than the one
+ * this lint asks. It names the schema for a **persisted metadata body** of that
+ * type; the schema `defineStack` applies to a **stack collection entry** is the
+ * one in `ObjectStackDefinitionSchema`'s own shape, and for `view` the two are
+ * not the same object at all:
+ *
+ *   - `getMetadataTypeSchema('view')` → `ViewMetadataSchema`, a strip-mode
+ *     UNION over the three persisted runtime shapes (#3095);
+ *   - `ObjectStackDefinitionSchema.shape.views` → `z.array(ViewSchema)`, and
+ *     `ViewSchema` is the `.strict()` defineView CONTAINER.
+ *
+ * Reading posture off the registry therefore judged `views` lintable — "this
+ * key is dropped at load" — while the parse one step later REFUSED the same key
+ * loudly. That is precisely the second-disagreeing-voice failure the posture
+ * rule exists to prevent, and which {@link lintUnknownStackKeys} already avoids
+ * at the top level. Measured across all 29 collections, the registry and the
+ * stack slot agree everywhere except `views` (`strip`/91 keys vs `strict`/15),
+ * `themes` and `analyticsCubes` (unregistered in the type registry, `strict` in
+ * the stack schema — skipped either way), so correcting the source removes
+ * `views` from the lintable set and changes nothing else.
+ *
+ * The stack schema is **injected**, for the same reason and by the same route
+ * as {@link lintUnknownStackKeys}: `stack.zod.ts` imports this module, so
+ * importing `ObjectStackDefinitionSchema` back would close a cycle. It is a
+ * REQUIRED parameter rather than an optional one — a caller that omits it
+ * cannot be silently served the registry posture, because that fallback is the
+ * bug itself.
+ *
  * ## Why it lives in `kernel/` and not beside its core in `data/`
  *
- * Covering every type means importing every schema. The comparator and guidance
- * tables stay in `data/authoring-key-lint.ts` (light, frontend-safe — the
- * `/data` subpath is consumed by browser bundles); this walker sits beside
- * `metadata-type-schemas.ts`, which already imports the world.
+ * The comparator and guidance tables stay in `data/authoring-key-lint.ts`
+ * (light, frontend-safe — the `/data` subpath is consumed by browser bundles);
+ * this walker sits beside `metadata-type-schemas.ts`, the module whose registry
+ * it used to read. It no longer imports any schema of its own.
  *
  * ## What "lintable" means, per schema
  *
@@ -58,7 +89,6 @@ import {
   type UnknownAuthoringKeyFinding,
 } from '../data/authoring-key-lint';
 import { PLURAL_TO_SINGULAR } from '../shared/metadata-collection.zod';
-import { getMetadataTypeSchema } from './metadata-type-schemas';
 
 const EMPTY_GUIDANCE: Readonly<Record<string, { to?: string; why?: string }>> = Object.freeze({});
 
@@ -153,6 +183,31 @@ function keyPosture(schema: unknown, depth = 0): KeyPosture | null {
   return null;
 }
 
+/**
+ * The schema the parse applies to ONE ENTRY of `collection`, read off the stack
+ * schema's own shape — see the `#10039` section of the module docblock for why
+ * this and not `getMetadataTypeSchema(type)`.
+ *
+ * `undefined` when the stack schema declares no such collection (then there is
+ * no parse for the walk to agree with, and an undeclared top-level key is
+ * {@link lintUnknownStackKeys}'s subject, not this walker's) or declares it as
+ * something with no per-entry schema to read.
+ */
+function collectionEntrySchema(stackSchema: unknown, collection: string): unknown {
+  const u = unwrap(stackSchema);
+  const d = u?.def ?? u?._def;
+  if (d?.type !== 'object') return undefined;
+  const shape = (typeof d.shape === 'function' ? d.shape() : d.shape) ?? {};
+  const slot = shape[collection];
+  if (!slot) return undefined;
+  const su = unwrap(slot);
+  const sd = su?.def ?? su?._def;
+  // `views: z.array(ViewSchema).optional()` → the ELEMENT is what one entry is
+  // judged by. `valueType` covers a record-shaped collection (none today, but
+  // `normalizeStackInput` accepts map form, so the shape is not hypothetical).
+  return sd?.element ?? sd?.valueType ?? undefined;
+}
+
 /** One collection the walker will lint, and why it qualifies. */
 export interface LintableAuthoringCollection {
   /** Stack collection key, e.g. `'pages'`. */
@@ -165,11 +220,17 @@ export interface LintableAuthoringCollection {
  * The collections the walker covers, computed from the same sources it lints
  * with. Exported so the coverage TEST can assert the derivation has not quietly
  * shrunk — and so tooling can report what the evidence base actually spans.
+ *
+ * @param stackSchema `ObjectStackDefinitionSchema`, injected — see the module
+ *   docblock. Required: the answer is a property of the parse, so there is no
+ *   honest result without it.
  */
-export function listLintableAuthoringCollections(): LintableAuthoringCollection[] {
+export function listLintableAuthoringCollections(
+  stackSchema: unknown,
+): LintableAuthoringCollection[] {
   const out: LintableAuthoringCollection[] = [];
   for (const [collection, type] of Object.entries(PLURAL_TO_SINGULAR)) {
-    const schema = getMetadataTypeSchema(type);
+    const schema = collectionEntrySchema(stackSchema, collection);
     if (!schema) continue;
     const posture = keyPosture(schema);
     if (posture && posture.mode === 'strip' && posture.keys.size > 0) {
@@ -225,6 +286,13 @@ const NESTED_SURFACES: Readonly<
  * the merged posture from {@link keyPosture} is applied at this level and the
  * walk stops: guessing a branch would invent findings against a shape the author
  * never chose.
+ *
+ * **Every record is reported exactly once, here** (#10039). A union arm that
+ * resolves a branch hands the SAME record on with `depth + 1`, so the report is
+ * made by whichever arm finally resolves it — the picked branch's own key set
+ * where there is one, the merged set where there is not. Nothing outside this
+ * function reports; {@link lintUnknownKeysAgainstSchema} used to report the root
+ * as well, which double-emitted every finding on a union root.
  */
 function descend(
   schema: unknown,
@@ -259,8 +327,12 @@ function descend(
   if (d.type === 'object') {
     if (!isPlainRecord(raw)) return;
     const shape = (typeof d.shape === 'function' ? d.shape() : d.shape) ?? {};
-    // depth 0 is the item root, already reported by the caller.
-    if (depth > 0) {
+    // The item root included: this walk owns every report, at every level
+    // (#10039). It used to skip `depth === 0` because the caller reported the
+    // root as well — but only the OBJECT arm skipped it. A union root fell
+    // through to the arm above, which has no such guard, so the caller's report
+    // and the union's merged report were both emitted for one authored key.
+    {
       const posture = keyPosture(u);
       if (posture?.mode === 'strip' && posture.keys.size > 0) {
         lintAuthoredRecordKeys(raw, posture.keys, guidance, surface, path, out);
@@ -332,15 +404,21 @@ function pickUnionBranch(unionDef: any, value: unknown): unknown {
  *
  * @param rawStack The authored stack, after `normalizeStackInput` and before
  *   `ObjectStackDefinitionSchema.parse`.
+ * @param stackSchema `ObjectStackDefinitionSchema`, injected — see the module
+ *   docblock. Every collection's posture is read from this schema's own slot,
+ *   because that is the parse the warning has to agree with.
  */
-export function lintUnknownAuthoringKeys(rawStack: unknown): UnknownAuthoringKeyFinding[] {
+export function lintUnknownAuthoringKeys(
+  rawStack: unknown,
+  stackSchema: unknown,
+): UnknownAuthoringKeyFinding[] {
   if (!isPlainRecord(rawStack)) return [];
   const out: UnknownAuthoringKeyFinding[] = [];
 
   for (const [collection, type] of Object.entries(PLURAL_TO_SINGULAR)) {
     const items = rawStack[collection];
     if (!Array.isArray(items) || items.length === 0) continue;
-    const schema = getMetadataTypeSchema(type);
+    const schema = collectionEntrySchema(stackSchema, collection);
     if (!schema) continue;
     const posture = keyPosture(schema);
     // NOT gated on the ROOT being `strip`. A strict root reports nothing at its
@@ -403,11 +481,13 @@ export function lintUnknownKeysAgainstSchema(
 ): UnknownAuthoringKeyFinding[] {
   const out: UnknownAuthoringKeyFinding[] = [];
   if (!isPlainRecord(value)) return out;
+  // Key-bearing check only. The REPORT for this record — root included — is
+  // {@link descend}'s, so that every record is reported by exactly one place
+  // (#10039); reporting here as well is what emitted a union root's finding
+  // twice, invisibly through `defineStack` (its warn-once set absorbed the
+  // second) and fully visible to every other caller of this function.
   const posture = keyPosture(schema);
   if (!posture || posture.keys.size === 0) return out;
-  if (posture.mode === 'strip') {
-    lintAuthoredRecordKeys(value, posture.keys, guidance, surface, basePath, out);
-  }
   descend(schema, value, basePath, '', surface, guidance, out, 0);
   return out;
 }

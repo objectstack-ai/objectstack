@@ -226,6 +226,9 @@ importers:
       '@objectstack/plugin-approvals':
         specifier: workspace:*
         version: link:../../packages/plugins/plugin-approvals
+      '@objectstack/plugin-email':
+        specifier: workspace:*
+        version: link:../../packages/plugins/plugin-email
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../packages/services/service-automation

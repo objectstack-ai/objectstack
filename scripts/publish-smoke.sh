@@ -175,22 +175,173 @@ cleanup() {
 # app-specific assertion available is the authenticated CRUD probe in section 3,
 # which lands after the auth probes have already run against the wrong app.
 
-# Print a TCP port that is free right now, searching upward from $1.
+# Print a TCP port that is free right now AND reserved for this caller,
+# searching upward from $1.
 #
-# ADVISORY ONLY. It reserves nothing, and `objectstack dev` binds a moment later,
-# so a concurrent run can still take the port in between. Closing that race is
-# not this helper's job — smoke_wait_for_own_server turns losing it into a
-# warning and a correctly retargeted BASE_URL instead of a silent wrong answer.
-# This only has to make losing it rare.
+# WHY A RESERVATION AND NOT JUST A PROBE.
+#
+# The probe below used to be the whole of this helper: bind a socket, CLOSE it,
+# and report the port free. Between that close and `objectstack dev`'s own bind
+# the port is unowned, and the scan is deterministic from $base upward, so every
+# concurrent caller starting at the same base was handed the same number — a
+# check-then-use race whose "use" is in another process, colliding by
+# construction rather than by bad luck. Measured on this tree with the
+# reservation removed, eight concurrent callers scanning from 3210:
+#
+#     DISTINCT_PORTS=1 of 8       # every one of them was handed 3210
+#     BIND_OK=1  BIND_ERR=7       # seven lost the follow-up bind:
+#                                 #   Error: listen EADDRINUSE :::3210
+#
+# The identical shape in scripts/gen-sdui-manifest.sh dequeued a PR from the
+# merge queue (#10167, fixed in #10217 — this is the port of that fix). The
+# contention here is not hypothetical either: the collision test beside this
+# script draws from 3210 four times and the real path below draws once more, in
+# a container several agents share.
+#
+# So a port is CLAIMED before it is probed, in a registry every caller on this
+# host shares, and the claim outlives this function — it is released when the
+# claiming process dies, not when this function returns. Two cooperating callers
+# can no longer be handed the same port at all. The probe stays, because a claim
+# says nothing about processes that never heard of this registry.
+#
+# STILL ADVISORY against those, and that half is deliberately unchanged: nothing
+# here stops a process outside the registry from taking the port between this
+# function and `objectstack dev`'s bind. smoke_wait_for_own_server is what turns
+# losing that race into a warning and a correctly retargeted BASE_URL instead of
+# a silent wrong answer — see the collision-safety block above, which is why
+# this script never needed the loud-failure half the sdui fix relies on. What
+# the claim removes is the collision this script's own callers cause each other,
+# which is every collision anyone has actually measured here.
 #
 # Probes the wildcard address with no host argument, the same spelling
 # serve.ts's own isPortAvailable() uses, so this sees a busy port exactly when
-# the CLI would.
+# the CLI would. (The sibling helper probes 127.0.0.1 because vite binds
+# loopback; that difference is load-bearing in both directions and is why these
+# two functions are ported rather than merged — see the registry note below.)
 smoke_pick_free_port() {
-  node - "${1:-3210}" "${2:-200}" <<'SMOKE_PICK_FREE_PORT'
+  local base="${1:-3210}" span="${2:-200}"
+  local dir="${SMOKE_PORT_RESERVATION_DIR:-${TMPDIR:-/tmp}/objectstack-port-reservations}"
+
+  # `O_EXCL` alone already gives exactly one winner per port, so the lock is not
+  # what makes a claim exclusive — it makes the SWEEP of abandoned claims safe,
+  # which is the one step that unlinks a file another scanner may be creating.
+  # Missing `flock` therefore degrades to "sound, minus the sweep's tie-break",
+  # never to a hard failure: this script runs on developer machines too.
+  #
+  # The descriptor is opened by a subshell that exits before the dev server is
+  # spawned, so nothing this script starts can inherit it. That matters more here
+  # than it looks: `objectstack dev` leaves a `serve` child that outlives its
+  # parent (see kill_tree above), and an inherited lock fd would keep the
+  # registry locked by that orphan for the whole run.
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -w 30 9 2>/dev/null || true
+      smoke_scan_and_reserve_port "$base" "$span"
+    ) 9>"${dir}.lock"
+  else
+    smoke_scan_and_reserve_port "$base" "$span"
+  fi
+}
+
+# The scan itself: claim, then probe, then hand the port over. Split out from
+# `smoke_pick_free_port` only so the lock above wraps one named thing.
+smoke_scan_and_reserve_port() {
+  local base="$1" span="$2"
+  node - "$base" "$span" "$$" <<'SMOKE_PICK_FREE_PORT'
 const net = require('node:net');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const base = Number(process.argv[2]);
 const span = Number(process.argv[3]);
+// The CALLER's pid, not this node process's: the caller is what will hold the
+// port (it spawns `objectstack dev`), and its death is what makes the claim
+// collectable. `$$` survives the command substitution this helper is called in,
+// so it names the shell running the smoke, not a transient subshell.
+const owner = Number(process.argv[4]);
+
+// One registry per host, shared by every caller that sources this script —
+// sharing it IS the fix, so the tests that measure contention deliberately do
+// not override this. The override exists for tests of the protocol itself.
+//
+// The name is deliberately NOT script-specific. scripts/gen-sdui-manifest.sh
+// runs the same protocol against its own directory today; the two draw from
+// disjoint bases (3210 here, 5180 there), so they cannot collide with each
+// other and nothing is lost by that split right now. Converging both onto this
+// neutral default — and then onto one shared helper — is the follow-up, and it
+// is a pure rename on that side because the on-disk format is identical:
+// filename is the port, contents are the owner pid.
+const dir =
+  process.env.SMOKE_PORT_RESERVATION_DIR ||
+  path.join(process.env.TMPDIR || os.tmpdir(), 'objectstack-port-reservations');
+
+// A claim is collectable once its owner is gone. The floor keeps a claim
+// written moments ago out of the sweep whatever its pid says; the ceiling is a
+// backstop for the case pid liveness cannot see — a dead owner whose pid number
+// has since been reused by something unrelated.
+const SWEEP_FLOOR_MS = 10_000;
+const SWEEP_CEILING_MS = 12 * 60 * 60 * 1000;
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM'; // it exists, it is simply not ours to signal
+  }
+};
+
+const sweep = () => {
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    const file = path.join(dir, name);
+    let holder;
+    let age;
+    try {
+      holder = Number(String(fs.readFileSync(file, 'utf8')).trim());
+      age = now - fs.statSync(file).mtimeMs;
+    } catch {
+      continue; // vanished under us — someone else already collected it
+    }
+    if (age < SWEEP_FLOOR_MS) continue;
+    if (age < SWEEP_CEILING_MS && Number.isInteger(holder) && holder > 0 && alive(holder)) continue;
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* already gone */
+    }
+  }
+};
+
+// `wx` is O_CREAT|O_EXCL: exactly one creator wins, and the losers are told so
+// HERE rather than discovering it at bind time in another process.
+const claim = (port) => {
+  try {
+    fs.writeFileSync(path.join(dir, String(port)), `${owner}\n`, { flag: 'wx' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const release = (port) => {
+  try {
+    fs.unlinkSync(path.join(dir, String(port)));
+  } catch {
+    /* already gone */
+  }
+};
+
+// No host argument: the wildcard bind is the spelling serve.ts's own
+// isPortAvailable() uses, so a port this rejects is a port the CLI would too.
 const isFree = (port) =>
   new Promise((resolve) => {
     const probe = net.createServer();
@@ -198,12 +349,21 @@ const isFree = (port) =>
     probe.once('listening', () => probe.close(() => resolve(true)));
     probe.listen(port);
   });
+
 (async () => {
+  fs.mkdirSync(dir, { recursive: true });
+  sweep();
   for (let port = base; port < base + span; port += 1) {
+    // Claimed by a live caller — including by an earlier call from THIS caller,
+    // which is why two picks in one run cannot return one port.
+    if (!claim(port)) continue;
     if (await isFree(port)) {
       process.stdout.write(String(port));
       return;
     }
+    // Held by something outside the registry. Hand the claim back rather than
+    // hoarding a port we never got, and keep scanning.
+    release(port);
   }
   process.stderr.write(`no free TCP port in [${base}, ${base + span})\n`);
   process.exitCode = 1;

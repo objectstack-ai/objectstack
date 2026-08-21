@@ -82,7 +82,7 @@ export default class Validate extends Command {
       // "computed, then discarded" shape this file already had to fix once.
       const unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
-        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>),
+        ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
       ].map(formatUnknownAuthoringKey);
       const result = ObjectStackDefinitionSchema.safeParse(normalized);
 

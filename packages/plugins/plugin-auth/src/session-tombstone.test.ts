@@ -293,11 +293,14 @@ describe('#7732 — an interactive revoke tombstones the row instead of deleting
 // ───────────────────────────────────────────────────────────────────────────
 describe('#7732 — the tombstone survives the one thing that used to collect it', () => {
   it('the revoked client polling /get-session does not garbage-collect its own record', async () => {
-    // The measured GC: better-auth 1.7.0-rc.2 has no sweeper at all, and its
-    // ONE expiry-driven collection is inside `/get-session` — a row whose
-    // `expiresAt` has passed is deleted "to clean up the session". That is why
-    // even the automatic path's stamps were best-effort. It only fires on a row
-    // `findSession` returned, so a hidden tombstone is never presented to it.
+    // The measured GC, re-read 2026-08-20 off the installed better-auth 1.7.1:
+    // no sweeper at all (`setInterval` appears only in two client-side dist
+    // files), and its ONE expiry-driven collection is inside `/get-session`
+    // (`dist/api/routes/session.mjs:146-157`) — a row whose `expiresAt` has
+    // passed is deleted "to clean up the session", and at 1.7.1 only when
+    // `!deferSessionRefresh || isPostRequest`. That is why even the automatic
+    // path's stamps were best-effort. It only fires on a row `findSession`
+    // returned, so a hidden tombstone is never presented to it.
     const engine = createMemoryEngine();
     const manager = makeManager(engine);
     const { first, second, secondRow } = await twoSessions(manager, engine, 'poll@example.com');

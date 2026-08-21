@@ -211,6 +211,70 @@ describe('LifecycleSchema (ADR-0057)', () => {
     }
   });
 
+  it('accepts ttl.onlyWhen with the canonical null predicate — the #10165 acceptance shape', () => {
+    // The exact declaration this card unblocks (#7826 writes it on sys_session).
+    const result = LifecycleSchema.safeParse({
+      class: 'transient',
+      ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the null predicate on retention.onlyWhen too — one shared value union (#10165)', () => {
+    // The two blocks are declared mirrors; the union is one schema on purpose,
+    // so the absence member cannot exist on one side and not the other.
+    const result = LifecycleSchema.safeParse({
+      class: 'telemetry',
+      retention: { maxAge: '30d', onlyWhen: { processed_at: { $null: true }, archived: { $null: false } } },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects malformed null predicates on ttl.onlyWhen (non-boolean, extra keys, raw null)', () => {
+    for (const bad of [
+      { revoked_at: { $null: 'yes' } }, // $null is z.boolean(), matching FieldOperatorsSchema
+      { revoked_at: { $null: true, extra: 1 } }, // strict object: no extra keys
+      { revoked_at: null }, // raw null is NOT the predicate — write {$null: true}
+      { revoked_at: { $nin: [null] } }, // unsupported operator, unchanged by #10165
+    ]) {
+      const result = LifecycleSchema.safeParse({
+        class: 'transient',
+        ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: bad },
+      });
+      expect(result.success, `should reject ${JSON.stringify(bad)}`).toBe(false);
+    }
+  });
+
+  it('rejects ttl row-filter aliases (filter/where/when) with the onlyWhen prescription', () => {
+    for (const alias of ['filter', 'where', 'when'] as const) {
+      const result = LifecycleSchema.safeParse({
+        class: 'transient',
+        ttl: { field: 'expires_at', expireAfter: '1d', [alias]: { revoked_at: { $null: true } } },
+      });
+      expect(result.success).toBe(false);
+      const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+      expect(message).toContain('onlyWhen');
+    }
+  });
+
+  it('rejects ttl.onlyWhen combined with rotation storage (shard DROPs ignore filters) — #10165', () => {
+    const result = LifecycleSchema.safeParse({
+      class: 'telemetry',
+      ttl: { field: 'created_at', expireAfter: '14d', onlyWhen: { status: 'done' } },
+      storage: { strategy: 'rotation', shards: 14, unit: 'day' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects ttl.onlyWhen combined with archive (archive takes over; the ttl sweep never runs) — #10165', () => {
+    const result = LifecycleSchema.safeParse({
+      class: 'audit',
+      ttl: { field: 'expires_at', expireAfter: '90d', onlyWhen: { revoked_at: { $null: true } } },
+      archive: { after: '90d', to: 'datalake' },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects onlyWhen combined with rotation storage (shard DROPs ignore filters)', () => {
     const result = LifecycleSchema.safeParse({
       class: 'telemetry',
@@ -1685,7 +1749,10 @@ describe('TenancyConfigSchema — #2763 strategy/crossTenantAccess removal', () 
   it('accepts the stamp-only `organizationField`, with no default materialized (#8778)', () => {
     // The shipped shape: sys_api_key stays unwalled (`enabled: false`) while
     // audit rows stamp the organization of the key they describe. The key is
-    // read by audit stamping ONLY — read-neutrality is pinned beside each
+    // consulted by the sanctioned platform-row writers only — audit stamping
+    // today, plus `plugin-approvals` and the automation-run recorder once
+    // #10101 lands under the cloud#1395 widening of the #8778 scope pin. No
+    // read path reads it either way: read-neutrality is pinned beside each
     // read path (driver tenant scope, Layer 0, injection plan), not here.
     expect(
       TenancyConfigSchema.parse({ enabled: false, organizationField: 'active_organization_id' }),

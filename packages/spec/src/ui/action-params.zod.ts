@@ -373,7 +373,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
     + 'spelling at this boundary and the key an action body should read. Within the #5613 '
     + 'deprecation window `buildActionSession()` emits the same array under both this key and the '
     + 'deprecated `roles`, so migrating is a change of key and nothing else; `roles` is then removed '
-    + 'on the v11 session-alias removal path (#3280 deprecate → #3290 remove: one window, then gone). '
+    + 'on the v16 session-alias removal path (#3280 deprecate → #3290 remove: one window, then gone). '
     + 'Never gate PRIVILEGE on this array — ask the security service, which evaluates capability '
     + 'grants, placements and the derived posture (ADR-0095), never a position-name string '
     + 'comparison.',
@@ -406,7 +406,7 @@ export const ActionSessionSchema = lazySchema(() => z.object({
     + '`positions` instead: within the #5613 deprecation window `buildActionSession()` emits both '
     + 'keys with identical values, so migrating is a change of key and nothing else. The migration '
     + 'prescription and its acceptance criteria are the ADR-0087 semantic migration '
-    + '`action-session-roles-to-positions`; removal follows the v11 session-alias removal path '
+    + '`action-session-roles-to-positions`; removal follows the v16 session-alias removal path '
     + '(#3280 deprecated → #3290 removed). Never gate PRIVILEGE on this array — ask the '
     + 'security service, which evaluates capability grants, placements and the derived posture '
     + '(ADR-0095), never a role-name string comparison.',

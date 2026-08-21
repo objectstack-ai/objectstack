@@ -223,6 +223,7 @@ import { join, relative, resolve, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
@@ -878,7 +879,7 @@ function selfTest() {
 // Entry point
 // ---------------------------------------------------------------------------
 const invokedDirectly =
-  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // Imported (the self-test of another gate, or a measurement helper). Running

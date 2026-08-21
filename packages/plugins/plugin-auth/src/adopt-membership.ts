@@ -36,8 +36,12 @@
  * ## Why the seam is HERE, at the better-auth → ObjectQL adapter
  *
  * The three hook seams the framework already owns on this route all run at the
- * wrong moment or with the wrong reach, verified against better-auth
- * `1.7.0-rc.2`:
+ * wrong moment or with the wrong reach. Measured 2026-08-20 against the
+ * installed better-auth `1.7.1`, whose
+ * `dist/plugins/organization/routes/crud-invites.mjs` still calls
+ * `adapter.createMember(...)` unconditionally at `:324` and, in the `.catch`
+ * at `:332-339`, rolls the invitation back to `"pending"` and rethrows —
+ * `beforeAcceptInvitation` fires ahead of all of it at `:280`:
  *
  *  - `organizationHooks.beforeAcceptInvitation` fires *before* `createMember`
  *    and can only throw or mutate. The one mutation that would make the insert

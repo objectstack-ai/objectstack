@@ -202,6 +202,54 @@ contradicts it, and correct it here when it does.
   gets the diagnostic and the fix; the cryptic `command dev not found` only appears when
   the bare binary is invoked directly.
 
+- **`--no-ui` is a flag of `serve` and `start`, NOT of `dev` — boot flags are not portable
+  between the three, in either direction.** Measured on `main` at `736cfb14` by reading
+  each command's own `--help` FLAGS block:
+
+  | boot command | console flag | `--artifact` |
+  |---|---|---|
+  | `os dev` | `--ui` — **no negation**, so `--no-ui` is a parse error | `-a, --artifact` |
+  | `os serve` | `--[no-]ui` | ⛔ not a flag here |
+  | `os start` | `--[no-]ui` | `-a, --artifact` |
+
+  `dev` is the odd one out on `ui`, which is why the flag gets carried across to it:
+  `objectstack dev --no-ui` never runs — `Error: Nonexistent flag: --no-ui`, exit **2**.
+  The absence is real and not a help-rendering artifact: `dev` *does* render
+  `--[no-]compile`, `--[no-]restart` and `--[no-]seed-admin`, and in a single
+  `dev --no-restart --no-ui` run the parser names only `--no-ui`. It cuts the other way
+  too — `serve --no-ui --artifact <path>` rejects only **`--artifact`**. **Check:**
+  `<cmd> --help`; the `--[no-]x` spelling in FLAGS is the only proof that `--no-x`
+  parses. ⛔ Never copy a flag from a sibling command's line.
+
+  **The canonical checklist boot is one invocation, and it makes no `ui` decision to get
+  wrong** (the same line dogfood skill §0 prescribes — a checklist run wants the console):
+
+  ```
+  pnpm -C <abs>/examples/app-showcase exec objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db
+  ```
+
+  `--ui` on `dev` is a no-op forwarder onto `serve`'s `default: true` (`dev` forwards
+  `--ui` only when set, and never forwards a negation), so it is written out for intent,
+  not effect. Use the line as-is and the off switch never comes up.
+
+  ⚠️ **Why this is briefed rather than left to the error message: backgrounded — which is
+  how a runner boots a server — a rejected flag looks exactly like a server that booted
+  and died.** The process is gone, nothing is listening, and the usage dump scrolls past
+  in a log nobody reads until the first request times out — at which point the reader
+  starts debugging the **application**, which was never started. Since #10181 the CLI
+  says so in its own first line, ahead of the usage dump:
+
+  ```
+  objectstack: INVOCATION ERROR — Nonexistent flag: --no-ui. The command never ran: nothing was started and nothing is listening. Invoked as: objectstack dev --no-ui
+  ```
+
+  **So: when a backgrounded boot never answers, read the FIRST line of its log before
+  touching the app** — `INVOCATION ERROR` means the parse failed and no application code
+  ran. The same commit gave the other boot-lookalike a voice:
+  `node packages/cli/dist/index.js` (the package `main`, a re-export barrel) now refuses
+  by name and exits **1**, where it used to exit **0** in silence — the entry point is
+  `packages/cli/bin/run.js`.
+
 ### Trap vocabulary (`traps` field)
 
 | trap | what it fakes | counter |
@@ -216,7 +264,7 @@ contradicts it, and correct it here when it does.
 | `dispatcher-vs-hono-route` | route exists in unit tests, 404s on the real server | oracle = live server trace, never simulated dispatch |
 | `wrong-panel` | feature looks missing on a sibling surface | item's `steps` name the exact surface; check it |
 | `wrong-persona` | admin privileges mask a guard | run guard checks as the non-privileged persona |
-| `absence-inference` | a missing flag/key/script read as a missing capability | follow the forwarding chain to where the default is actually decided, before writing the finding down. A scaffold's bare `objectstack dev` still serves the console: `serve`'s `ui` flag is `default: true, allowNo: true`, so `--no-ui` is the off switch and absence means on |
+| `absence-inference` | a missing flag/key/script read as a missing capability | follow the forwarding chain to where the default is actually decided, before writing the finding down. A scaffold's bare `objectstack dev` still serves the console: `dev` forwards `--ui` only when set and never forwards a negation, and the default is decided one hop downstream by `serve`'s own `ui` flag (`default: true, allowNo: true`) — so absence means ON. ⛔ The off switch `--no-ui` is `serve`'s and `start`'s; `dev` has no such flag and rejects it (environment facts above) |
 
 ## Run records — the GitHub issue is the report
 

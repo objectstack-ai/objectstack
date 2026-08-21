@@ -1399,7 +1399,7 @@ List packages response
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
-| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. For the collection-resident write types (`object` / `permission` / `book`) the TOP-LEVEL collection entry is keyed by NAME (`objects.acme_invoice.sharingModel`), never by an array index — the gate evaluates against a private per-write snapshot whose indexes no caller can resolve (#10064). Every other write type is the sole member of its own collection, so its `[0]` is trivially stable and stays positional (`flows[0]...`), as do nested positions inside one named item (`objects.acme_invoice.indexes[1]`), which index the author's own document. |
 | **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |

@@ -24,8 +24,18 @@ export default defineConfig({
     // PREFIX, so with a FILE replacement it would also swallow any subpath and
     // resolve it to `…/formula/src/index.ts/<sub>` — `ENOTDIR` at run time,
     // from a config that reads as correct.
+    //
+    // `test/email-template-locale.test.ts` resolves this app's declared email
+    // templates through plugin-email's real `sys_email_template` loader and its
+    // real column mapping. Through the workspace link that package resolves to
+    // `dist/` — a build artifact — so a stale dist would grade the declarations
+    // against an OLD locale ladder, which is the one thing those assertions
+    // exist to measure. `pnpm check:test-source-alias` is the gate, and its
+    // registry is shrink-only: the alias is the sanctioned remedy, never a new
+    // registry entry.
     alias: [
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../packages/formula/src/index.ts') },
+      { find: /^@objectstack\/plugin-email$/, replacement: path.resolve(__dirname, '../../packages/plugins/plugin-email/src/index.ts') },
     ],
   },
   test: {

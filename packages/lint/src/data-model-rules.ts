@@ -53,10 +53,20 @@ export interface LintIssue {
  * `f.where ?? f.path` at the adapter) is the same discipline — a consumer-side
  * fallback would let the next rule ship the positional spelling again, silently.
  *
- * `path` is unchanged and stays positional: it is the slot that is SUPPOSED to
- * be a config path, `os validate` prints it after `at`, and the runtime gate's
- * `fingerprint` reads `where` and `path` together (making `where` more specific
- * cannot merge two findings that were distinct).
+ * `path` is unchanged and stays positional AT THE RULE LEVEL: it is the slot
+ * that is SUPPOSED to be a config path, `os validate` prints it after `at`
+ * (where the index resolves against the author's own config file), and the
+ * runtime gate's `fingerprint` reads `where` and `path` together (making
+ * `where` more specific cannot merge two findings that were distinct).
+ *
+ * [#10064] On the runtime gate's WIRE surface (`RuntimeAuthoringIssue.path`,
+ * the 422 `issues[]` / 2xx `advisories`), the top-level collection index of a
+ * collection-resident finding is rewritten to the entry's NAME
+ * (`objects[417].sharingModel` → `objects.acme_invoice.sharingModel`) after
+ * the differential — a runtime caller has no array to resolve `417` against;
+ * that index numbers the gate's private per-write snapshot. The rewrite lives
+ * in `runtime-gate.ts` (`nameKeyFindingPath`); rules keep emitting positional
+ * paths and need no awareness of it.
  */
 export interface LocatedLintIssue extends LintIssue {
   /** Human-readable location, e.g. `object "sys_account" · index 'uniq_org_email'`. */

@@ -88,6 +88,16 @@ const GATED: ReadonlyArray<{
   },
   { check: 'check:spec-changes', gen: 'gen:spec-changes', artifact: 'spec-changes.json' },
   { check: 'check:upgrade-guide', gen: 'gen:upgrade-guide', artifact: 'docs/protocol-upgrade-guide.md' },
+  // [#10096] The schema-free `/meta` URL-spelling data module. Cheap: tsx-loads
+  // the two source maps (lazySchema keeps the kernel module light), re-derives
+  // the three-limb union, and runs the manifest/derived agreement assertion
+  // that used to live at `shared/metadata-url-spelling.ts` module load — this
+  // gate is that assertion's build-time enforcement home (ruling 2026-08-20).
+  {
+    check: 'check:meta-url-spelling',
+    gen: 'gen:meta-url-spelling',
+    artifact: 'src/meta-spelling/meta-url-data.generated.ts',
+  },
   { check: 'check:skill-docs', gen: 'gen:skill-docs', artifact: 'skill docs (from SKILL.md frontmatter)' },
   { check: 'check:skill-refs', gen: 'gen:skill-refs', artifact: 'skill references' },
   { check: 'check:react-blocks', gen: 'gen:react-blocks', artifact: 'react-blocks contract' },
@@ -223,6 +233,21 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   {
     check: 'check:dual-source-exports',
     why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
+  },
+  // #10199, the mechanized form of the 2026-08-20 ruling on #10096. Reads the
+  // built dist like the two above, but the BUNDLES rather than the declarations
+  // — it walks the module graph a consumer's import actually loads and asserts a
+  // declared browser-reachable entry links no zod.
+  //
+  // NO_GENERATOR and not GATED, for `check:dual-source-exports`'s reason exactly:
+  // `browser-reachable-entries.json` is a hand-maintained CONTRACT, not a
+  // projection of the source. A `gen:` that rewrote it would grant
+  // browser-reachability by running a command — which is the one decision the
+  // ruling reserves for a maintainer — and, in the other direction, would
+  // "repair" a violation by silently demoting the entry that broke its promise.
+  {
+    check: 'check:browser-reachable-entries',
+    why: 'audits the built .mjs/.js bundles: a declared browser-reachable entry must link no zod in its module graph — the declared list is a hand-written contract, not generated (needs a fresh `pnpm build`)',
   },
   // Deliberately NOT beside `check:test-typecheck` in GATED above, and the
   // difference is the whole design of #5475: that gate compares a checked-in

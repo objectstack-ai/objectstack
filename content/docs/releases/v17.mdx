@@ -1,6 +1,6 @@
 ---
 title: v17.0.0
-description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0.
+description: Files become platform records with governed download, bulk export becomes its own opt-in privilege, the SDK reaches every route the server actually mounts, approvals route approvers dynamically, and a boot that cannot reach its datasource stops pretending it can. Backend and Console notes for 17.0.0 and 17.1.0.
 ---
 
 **The v17 line** is a truth-telling release. Where v16 made *declared metadata*
@@ -13,15 +13,22 @@ readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
 GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
 parsed-but-never-enforced spec clusters are removed rather than maintained.
 
-> **Release status: 17.0.0 is released.** It was published to the `latest` tag
-> on 2026-08-14, closing a train that ran through `17.0.0-rc.0` … `rc.6` (the
-> last of them cut 2026-08-10). `changeset pre exit` ran with the cut, so the
-> `@objectstack/*` packages no longer publish as `17.0.0-rc.N` and a plain
-> install resolves 17.0.0. Caret ranges on `^16.x` hold at 16.x until you opt
-> in, which is the reason this train is a major at all: its breaking density
-> (the `ApiMethod` shrink, the GraphQL removal, the ADR-0104 write cutover, the
-> dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
-> on their next install.
+> **Release status: 17.1.0 is released**, and is the current version of the v17
+> line. It was published to the `latest` tag on 2026-08-20, taking over from
+> 17.0.0 — which was published on 2026-08-14, closing a train that ran through
+> `17.0.0-rc.0` … `rc.6` (the last of them cut 2026-08-10). A plain install now
+> resolves 17.1.0. `changeset pre exit` ran with the 17.0.0 cut, so the
+> `@objectstack/*` packages no longer publish as `17.0.0-rc.N`. Caret ranges on
+> `^16.x` hold at 16.x until you opt in, which is the reason this train is a
+> major at all: its breaking density (the `ApiMethod` shrink, the GraphQL
+> removal, the ADR-0104 write cutover, the dead-cluster retirements) is too high
+> to auto-upgrade `^16.x` consumers into on their next install.
+>
+> ⚠️ **17.1.0 is a minor by version number, not by blast radius.** Several of its
+> security corrections change who can read or write on an existing deployment,
+> and several accept-set narrowings that landed after the 17.0.0 cut ship as
+> `minor` under the lockstep launch-window convention. Read the 17.1.0 upgrade
+> checklist before upgrading.
 
 ## Highlights — 17.0.0
 
@@ -98,6 +105,53 @@ parsed-but-never-enforced spec clusters are removed rather than maintained.
   ends this line at zero: object, field, view, dashboard, action, agent, page,
   mapping, translation, the six validation variants, the Studio surface and the
   registered types behind them.
+
+
+## Highlights — 17.1.0
+
+- **Deactivating a permission set or a position now actually stops granting
+  access.** Both objects shipped a Deactivate action whose dialog promised, in
+  all four locales, that access stops — and nothing read the column: a position
+  seeded `active: false` still granted its permission sets, and a permission set
+  seeded `active: false` still returned `posture: PLATFORM_ADMIN` (#8613). A
+  sharing rule reached users by a second road that never passed that seam, so a
+  rule sharing records with a deactivated position kept sharing them (#8710).
+  Both are closed. ⚠️ **On a deployment that used the switch believing it was
+  inert, this is a real revocation on live data** — read the upgrade checklist.
+- **Platform admin sets stop shipping a bulk-export wildcard.**
+  `admin_full_access`, `organization_admin` and the derived
+  `organization_admin_no_bypass` carried `objects['*'].allowExport = true`, which
+  made the 17.0 export axis undeniable: an application could declare an object
+  exportable by nobody and the platform exported it anyway (#8681). Export is now
+  granted per object, in an app's own permission set.
+- **Partial field masking.** `FieldSchema` declares `maskingRule` — a closed
+  preset enum (`phone`, `id_card`, `bank_account`, `email`, `name`) plus a
+  `{ keepHead, keepTail }` escape hatch — served masked-but-recognisable
+  (`138****5678`) to every non-system caller, with `requiredPermissions` as the
+  unmask gate (#8993).
+- **`sys_audit_log` can answer "who viewed this record".** The ledger covered
+  writes only; it gains a `read` action, its writer, and a `record_views` list
+  view. Record-detail reads only, per-object opt-in, batched off the request
+  path, and never any field values.
+- **All three flow doors answer the same status table.** A refused dispatch stops
+  reporting a failed run: `404` not found, `409` `FLOW_DISABLED`, `422`
+  `FLOW_NO_START_NODE`, `400` `FLOW_FAILED` for a run that actually ran and was
+  rejected. The automation `trigger` routes (#9378 line), the actions door
+  (#9446) and declared `type: 'flow'` endpoints (#9462) now read one shared
+  definition instead of three private copies.
+- **`error.code` is a closed vocabulary at every door** (#9106). A thrown code
+  outside `StandardErrorCode ∪ ERROR_CODE_LEDGER` no longer reaches `error.code`;
+  it rides the new optional `declaredCode` instead, so an app's own spellings
+  survive without widening the platform vocabulary.
+- **Console:** two objectui pin moves (`665661ab0932 → 82a94170c405 →
+  9a3daf8d37ad`) bringing dashboard component re-keying, the retirement of the
+  structured `confirm` object on actions, `I18nLabel` on metric widgets, and
+  host-performed `submitBehavior.url` redirects for consoles mounted at a
+  sub-path.
+
+---
+
+# 17.0.0 in detail
 
 ## Breaking changes & migration
 
@@ -3267,6 +3321,569 @@ instead of the empty state; `deleteView` removes every home a view has;
 by the bridge; and `crypto.randomUUID` is restored on insecure origins so list
 views stop crashing on LAN IPs.
 
+
+---
+
+# What's new in 17.1.0
+
+17.1.0 was published to the `latest` tag on **2026-08-20**, six days after the
+17.0.0 GA. It is a large minor: the version-locked train moved **69 packages**,
+carrying **111 minor and 203 patch changelog entries and no major**. The bundled
+Console advances two pins, `665661ab0932 → 82a94170c405 → 9a3daf8d37ad`.
+
+⚠️ **Read this before treating the version number as a safety guarantee.** A
+minor adds capabilities without breaking existing metadata or code — but several
+changes here landed *after* the 17.0.0 cut and ship as `minor` under the lockstep
+launch-window convention while being explicitly breaking, and they say so in
+their own changelog entries: the export-wildcard withdrawal (#8681), the strict
+close of the top-level stack surface (#8687), the dashboard `modal` target
+narrowing (#9013), and the list-view `sort` refusal (#9257). Two more —
+`sys_permission_set.active` / `sys_position.active` (#8613) and the sharing-rule
+recipient filter (#8710) — change who can read and write on **live data with no
+migration step to notice**. The 17.1.0 upgrade checklist below is not optional
+reading for this release.
+
+The practical theme is *honest refusals*. Where 17.0.0 made the authorable
+surface loud, 17.1.0 makes the runtime's answers loud: a flag that promised to
+revoke access now revokes it, a read that failed stops being served as an empty
+one, a flow that never dispatched stops being reported as a run that failed, and
+a credential that was never meant to be readable stops being served.
+
+## New capabilities in 17.1.0
+
+- **Partial field masking (#8993).** `FieldSchema` declares `maskingRule` — the
+  closed preset enum `phone` / `id_card` / `bank_account` / `email` / `name`,
+  plus a `{ keepHead, keepTail }` escape hatch — and plugin-security's
+  `FieldMasker` enforces it in the same change (ADR-0049 declare = enforce). A
+  field declaring a rule is served masked-but-recognisable to every non-system
+  caller, and the field's `requiredPermissions` (ADR-0066 D3) is the unmask gate.
+  Masking rides the single runtime channel, so API callers, browser users, the
+  CSV/XLSX export route and the AI-context interceptor all see the same
+  deterministic, length-preserving value. Masked callers cannot filter, sort,
+  group or aggregate on the field (403, the FLS predicate-oracle guard), and a
+  write that round-trips a masked placeholder is refused with
+  `400 VALIDATION_ERROR` rather than silently overwriting the stored value. New
+  exports: `FieldMaskingRuleSchema`, `FieldMaskingKeepSchema`,
+  `FIELD_MASKING_PRESETS`, `maskFieldValue`, `MASK_CHAR`.
+- **Record-view auditing.** `sys_audit_log` covered writes only, so *who viewed
+  this customer record, and when?* had no answer short of custom work. The ledger
+  gains a `read` action, its writer, and the `record_views` list view. Scope is
+  deliberately narrow: **record-detail reads only** (the read materialized one
+  record and its predicate pinned the primary key — the shape
+  `GET /data/:object/:id` produces; list and search reads are not audited),
+  **per-object opt-in with no global switch**
+  (`new AuditPlugin({ readAudit: { objects: ['contact', 'account'] } })`; an
+  empty opt-in registers no hook, so the default posture costs a read nothing),
+  and **batched off the request path** — rows persist on a later tick and keep
+  the instant the record was viewed, not the instant its batch drained. The row
+  records who, what and when and **never field values**: read auditing runs ahead
+  of field masking, so copying values in would mint a plaintext copy of exactly
+  what field-level security withholds. A system-elevated read (`api.sudo()`,
+  formula recomputes, roll-ups) and a read with no principal both write no row.
+- **Read-only approval visibility, per object, default OFF (#8652).**
+  `ApprovalsPluginOptions.recordReaderVisibleObjects` names the objects on which
+  a user who can READ a business record may also see that record's approval
+  requests and full action history. Omitted or empty leaves visibility exactly as
+  it is, so an existing deployment sees no change on upgrade — but **on an object
+  you list this is not a no-op**: a ledger keeper or supervisor who holds full read
+  but never appears in the approval used to get `200` with an empty list, and now
+  sees the request row (including its `payload` snapshot), every actor and
+  decision, **the action's comment text** (意见正文), and decision attachments.
+  Enable it where the approval commentary is meant to be seen; it is per object
+  precisely so enabling it for a ledger object does not enable it elsewhere. The
+  tier is read-only (`can_act: false`, and no approval action is delivered
+  through it), introduces no new permission concept — the service reads the
+  record **as the caller**, so ordinary CRUD and RLS decide — and leaves an
+  untargeted inbox list unchanged, so a work queue does not become a browse
+  surface.
+- **`os migrate duplicates` (#8928).** An operator-facing, read-only inventory of
+  the business identifiers the tenancy split already minted twice. It reports one
+  row per duplicated value with its holders (id, organization, partition,
+  creation timestamp), the live condition (an object still running a `__global__`
+  counter beside an organization-scoped one), and a `skipped` list carrying the
+  driver's own message so an unreadable target never reads as a clean one. JSON
+  on stdout, no persistence, no new schema, and it applies nothing — no DDL, no
+  seed. ⚠️ **Run it before the #8686 backfill:** `organization_id = NULL` is the
+  marker that says the row came from the untenanted side, and the repair
+  overwrites it. Reporting is all it does — renumbering an already-minted
+  identifier stays deliberately out of scope.
+- **Operator-initiated re-homing of stored cleartext datasource credentials
+  (#8155).** A datasource row created before the write door closed can still hold
+  its credential in cleartext inside `config`; the read paths were closed, but
+  nothing removed what was already at rest. `IDatasourceAdminService
+  .migrateCredential(name)` — the Setup action *"Move credential to the secret
+  store"*, backed by `POST /api/v1/datasources/:name/migrate-credential` — writes
+  the secret, **reads it back and compares**, and only then binds
+  `external.credentialsRef` and drops the inline key in one record write. Per
+  datasource, initiated by an operator, never a sweep and with no batch spelling.
+  It is idempotent, and it refuses rather than guesses: a credential embedded in a
+  connection URL, an alias spelling no connection builder reads, turso's
+  `encryptionKey`, and a code-defined datasource are each refused with a reason,
+  and any credential-shaped key left behind is named in the result so "migrated"
+  never reads as "this row is now clean".
+- **A hook refusal can mark its own message user-facing — `userMessage` (#9934).**
+  The console form deliberately discards the server `message` on 403 and
+  substitutes a generic string, which also suppressed every deliberate, localized
+  refusal an application hook author wrote. Setting `userMessage` on the thrown
+  error at throw time marks that text as user-facing. It is a text-carrying field
+  rather than a boolean beside `message`, so no boundary that rewraps or
+  substitutes `message` can promote platform prose into the marked channel, and
+  platform/driver code never sets it. `ApiErrorSchema.userMessage` and
+  `EnhancedApiErrorSchema.userMessage` are additive and optional; unmarked errors
+  produce byte-identical wire bodies. The SDK attaches `err.userMessage` from both
+  wire dialects.
+- **`ActionSchema.onSuccess` — post-success navigation (#9566, #9474).** One
+  contract for both server-executing action types: `onSuccess: { navigate, openIn? }`,
+  read for `type: 'api'` and `type: 'script'` only (a refinement refuses it on
+  `url`/`modal`/`flow`/`form`, where no success event exists for it to ride).
+  `navigate` is a route/URL template whose interpolation scope gains
+  **`${result.*}` — the action's server response payload** — which is what makes
+  "server clones a record, jump to the new record" declarable:
+  `navigate: '/apps/crm/tasks/${result.id}'`. `openIn` is the closed enum
+  `'self' | 'newTab'`, defaulting `'self'`. The existing handler-return convention
+  (`{ redirectUrl, openIn? }`) keeps its 17.0.0 semantics, so no shipped handler
+  silently flips behaviour.
+- **Localized email templates reach the inbox and flow `notify` nodes.**
+  `IEmailService` gains a render-only
+  `renderTemplate({ template, locale, data, timezone }) → { subject, html, text }`,
+  and the inbox channel consumes it, so localized `sys_email_template` content now
+  reaches `sys_inbox_message` (#9225). Flow `notify` nodes can reference a template
+  for localized delivery — `template` + `templateData` on `NotifyNodeConfig`,
+  resolved by `(name, recipient locale)` at delivery time (#9205).
+- **`map` joins the per-visualization blocks on `ListViewSchema`.**
+  `ListMapConfigSchema` is the eighth block alongside kanban / calendar / gantt /
+  gallery / timeline / chart / tree, declaring the map renderer's documented read
+  surface: `latitudeField`, `longitudeField`, `locationField`, `titleField`,
+  `descriptionField`, `zoom` (1–20) and `center`. All keys are optional and none
+  carries a default — with no camera declared the renderer fits the camera to the
+  queried records. Because `ListViewSchema` is strict, a `type: 'map'` view could
+  not declare its field mapping at all before this, so any marker title field
+  other than the renderer default `name` was unreachable.
+- **`icontains` joins the view and infix filter vocabularies (#8934).** The
+  operator has been executable on every driver since #5702/#6520 but was
+  authorable from only one of the three filter dialects. `VIEW_FILTER_OPERATORS`
+  and `AST_OPERATOR_MAP` gain the canonical spelling. The boundary is preserved
+  deliberately: `icontains` (LIKE-escaped substring — a comparand `%` is a
+  literal) and `ilike` (raw LIKE pattern) are **not** aliases of each other, and
+  there is no `not_icontains`, because the authoring vocabularies mirror the
+  executed set rather than widening it.
+- **Field-level `relatedListFilter` (#8704).** The field-level related-list family
+  (`relatedList` / `relatedListTitle` / `relatedListColumns`) gains a fourth
+  member, closing the gap where the only way to filter an auto-derived related
+  list was to abandon the auto-derived record page for a hand-written
+  `record:related_list` page. It carries the canonical Query-DSL
+  `FilterCondition` — no new dialect — and is AND-composed with the
+  parent-relationship condition as an authored constraint, with the tab badge
+  count honouring the same composed filter so counts match visible rows.
+  ⚠️ The consumption half (objectui#4664) had not landed at this pin: the key is
+  ledgered `planned` and carries an author warning until it does.
+- **Stamp-only `tenancy.organizationField` (#8778).** The platform could say what
+  an object is *walled* by (`tenancy.tenantField`) but not which column says who a
+  row is *about* — which for credential tables deliberately differ.
+  `TenancyConfigSchema` accepts an optional `organizationField` that is
+  **read-neutral and stamp-only**: the audit writer consults it, and
+  `applyTenantScope`, `injectTenantOnInsert`, `computeTenantLayer0Filter` and
+  `resolveInjectedSystemColumns` are measured blind to it, pinned by tests.
+  Declaring it never walls an object and never hides rows. `sys_api_key` now
+  declares it, so revoking a key from a different active organization lands the
+  audit row behind the wall of the *key's* organization.
+- **API keys are minted against the minter's active organization (#8287).** Under
+  `OS_TENANCY_POSTURE=isolated` a minted key could read **nothing at all**:
+  `sys_api_key` carried no organization column, so key authentication established
+  a user but no active organization, and every organization-scoped read answered
+  `200` with `total 0` while the console went on offering minting. `sys_api_key`
+  now declares `active_organization_id`; `POST /api/v1/keys` **inherits** the
+  caller's active organization (there is deliberately no org parameter and no
+  cross-org key) and re-checks `sys_member` membership at mint time. An
+  ex-member's key now fails closed at verify time rather than degrading to a
+  user-only principal. ⚠️ Pre-existing org-less keys are **never backfilled** —
+  they keep working under `single` and `group`, and are refused under `isolated`,
+  where they are provably dead today.
+- **`storage` becomes the canonical `CoreServiceName` slot (#9683).**
+  `file-storage` was the only member whose spelling diverged from its documented
+  accessor (`services.storage`). `storage` is now canonical; `file-storage` stays
+  an accepted, **deprecated v17 alias** — `@objectstack/service-storage` registers
+  the same instance under both names, and discovery reports the canonical key and
+  mirrors the row verbatim under the alias for its v17 lifetime. A custom v17
+  provider for this slot should register both names.
+- **Smaller authoring additions.** `Field.time` closes the temporal-builder gap —
+  `'time'` was a fully declared `FieldType` with no builder, splitting the three
+  temporal types two-and-one (#8656). `placeholder` becomes a declared
+  `FieldSchema` key, ending the preview-renders/save-422s trap where four shipped
+  objectui render surfaces applied the key and `PUT /api/v1/meta/object/:name`
+  refused it (#9019). `security.explain()` accepts the `recordIds` batch spelling
+  (#8480). `IHttpServer` gains an optional `afterResponse` response-observing
+  hook. `GanttConfigSchema` declares `viewMode`.
+
+## Security corrections in 17.1.0
+
+The largest cluster in this release, and the reason its minor version number is
+not a safety guarantee.
+
+- **`sys_permission_set.active` and `sys_position.active` now actually stop
+  granting access (#8613).** Both objects ship a Deactivate action whose
+  confirmation dialog promises, in all four locales, that access stops. Nothing
+  read the column: measured on the real resolver, a position seeded
+  `active: false` still granted its permission sets, and a permission set seeded
+  `active: false` still returned `posture: PLATFORM_ADMIN` with its system
+  permissions. Deactivation moved a badge in Setup and nothing else — while the
+  admin who had just revoked a compromised or over-broad grant was told the
+  opposite. `resolveAuthzContext` / `resolveUserAuthzGrants` now drop a
+  deactivated row **before** any derivation, so a deactivated position
+  contributes no grants and its name leaves `positions`, and a deactivated
+  permission set contributes no name, no `system_permissions`, no
+  `tab_permissions` and **no `PLATFORM_ADMIN` posture** (the flag is applied
+  before the posture is derived). Both tables were already read at that seam, so
+  this costs zero new hot-path queries. A row whose `active` column is **absent
+  or NULL is unaffected** — the predicate is "explicitly deactivated", never
+  "explicitly active". Enforcing the flag also opened a one-click,
+  installation-wide lockout (deactivating `admin_full_access` un-makes every
+  platform admin at once, and re-activating requires the permission the click
+  just took away), so the last-administrator guard now judges that write like the
+  delete and rename spellings it already refused.
+- **A deactivated `sys_position` stops conferring sharing-rule record shares
+  (#8710).** #8613 closed the authorization *derivation* seam; a sharing rule
+  reaches users by a second road that never passes it, so a rule sharing records
+  with `cfo` kept sharing them after `cfo` was deactivated. Maintainer ruling,
+  2026-08-15, verbatim: **"Access-conferring paths filter deactivated positions;
+  addressing paths do not."** A rule whose recipient is an explicitly deactivated
+  position now expands to nobody, and the shares it had already materialised are
+  **revoked on the next reconcile**. Deliberately unchanged, per the same ruling:
+  approval **routing** keeps reading the raw directory (filtering there is
+  fail-open — an approval step routing to nobody), and write gates and
+  blast-radius reads stay unfiltered, because dropping a deactivated row there
+  would make a refused binding permitted — access *widening*.
+- **The shipped admin permission sets no longer grant export on the `*` wildcard
+  (#8681).** Measured on 17.0.0 GA across 40 export probes, 5 principals and 8
+  objects with real bearer tokens: an org owner exported `crm_quote`,
+  `crm_campaign` and `crm_task` with `200` and full data, while no app permission
+  set granted export on any of them and the app had no way to say no — the
+  wildcard lives in code-package metadata, so editing it answers `403
+  [not_overridable]`. This was never a gate defect; the same run proves the gate
+  exact for every other principal. READ is untouched — this narrows bulk egress
+  only, and `allowExport` on a `'*'` entry remains a supported authoring shape in
+  an app's own sets.
+- **Credentials and secrets stop being served.** The metadata read path no longer
+  serves stored cleartext credentials (#8154), and `GET /api/v1/meta/:type/:name/diff`
+  stops serving stored credential values. `sys_account`'s OAuth access/refresh/id
+  tokens and its `password` / `previous_password_hashes` stop serializing on the
+  data API (`internal: true`). Custom email headers stop being served through the
+  generic data-API read of `sys_email` (#8149).
+- **Doors that answered anonymously now require a principal.** The
+  external-datasource federation HTTP family requires an authenticated caller on
+  every route (#9686); the datasource-admin family requires authentication
+  (#9391) and then the `manage_platform_settings` capability;
+  `POST /meta/:type/:name/publish` and `.../rollback` require `manage_metadata`
+  (#8919); the four mutating `install-local` routes require `manage_metadata` and
+  drop the `x-user-id` header fallback, and the `install-local` listing requires
+  an authenticated principal; and the four `/admin/sso/*` bridges run the
+  ADR-0068 platform-admin gate before delegating into better-auth. The REST and
+  endpoint-route 401 anonymous-deny bodies now carry `code: "UNAUTHENTICATED"`
+  alongside the existing `error` / `message` keys (#9487, #9823).
+- **Audit attribution is the authenticated identity.** On all five `/meta` write
+  doors the recorded actor is now the authenticated identity and the `X-Actor`
+  header is ignored. Audit rows are stamped from the record's own organization
+  rather than the actor's active one (#8707), REST `/meta` write doors carry the
+  caller's organization so rows are no longer stamped environment-wide, and the
+  metadata audit read is scoped to the caller's organization (#8747).
+- **Caller values stop reaching the server log.** A policy-authored
+  `INVALID_FILTER` refusal withholds the target field (#8197); four more
+  diagnostic families stop logging the caller's value, measured off live MySQL 8.0
+  and PostgreSQL 16; a caller value containing `" - "` no longer eats the
+  diagnostic's template head; MySQL duplicate-entry reports keep the value out;
+  and `publish-drafts` no longer discloses driver or subscriber text on
+  `unhideError` / `rebindError` (#8516).
+- **Two ADR-0055 `controlled_by_parent` corrections.** The master-editability
+  check consults the same app-authored write widener the by-id path does, and
+  detail writes compose the master's ownership floor the same way a direct write
+  does (#8865). ⚠️ The first of these is flagged in its own entry as **widening**
+  who may write rows that are refused today. An insert that omits a required
+  master-detail parent now answers `400 VALIDATION_FAILED` with `fields[]` rather
+  than a security-shaped refusal, and security explain reports partial masking as
+  a third state instead of calling gated fields hidden.
+
+## Behavior changes & fixes in 17.1.0
+
+### The flow doors answer real HTTP statuses
+
+- **The automation `trigger` routes** now answer `409` `FLOW_DISABLED` for a
+  disabled flow and `422` `FLOW_NO_START_NODE` for a definition with no start
+  node, instead of `200` wrapping an inner `{success: false}`. `AutomationResult
+  .code` gained the two members deliberately — rather than the transport guessing
+  from message text — and they carry **no** `status`, which is what lets a
+  transport tell a never-dispatched exit from a run that dispatched and failed.
+  Two statuses and not one because a disabled flow is reversible operational
+  state (`409`) while a definition with no start node cannot be executed as stored
+  and no retry helps (`422`).
+- **`POST /api/v1/actions/:object/:action`** answers that same table instead of
+  one blanket `400 FLOW_FAILED` (#9446), and **declared `type: 'flow'` endpoints**
+  join it (#9462) — that door used to answer `200` for every outcome with the raw
+  engine result in `data`, so a client branching on HTTP status read every
+  failure as a success on the surface an app publishes as its own public API. An
+  `outputMapping` is no longer applied to a failure, closing a hole where a
+  refused dispatch could be presented as data. All three doors now read one
+  definition (`packages/runtime/src/flow-dispatch-status.ts`).
+- **The resume route closed its envelope.** `POST /api/v1/automation/:name/runs/:runId/resume`
+  refuses a body carrying an unknown top-level key — the accepted set is exactly
+  `inputs`, `variables`, `output`, `branchLabel` — with `400 VALIDATION_FAILED`
+  naming the offending keys. A body like `{"nodeId":"ask","values":{…}}` used to
+  answer `200 success:true` with the screen submission treated as empty: the run
+  completed and the submitted value never reached the flow. A sibling change
+  refuses an accepted key carrying a value of the wrong type.
+- A flow ACTION that ran and failed now carries the flow author's `errorMessage`
+  and the run `summary` in `error.details`, and a triggered run carries the
+  author's `successMessage` / `errorMessage` through `execute()` and both retry
+  exits.
+
+### A failed read stops reading as an empty one
+
+A recurring class this release closes in several packages at once: a read that
+FAILED was indistinguishable from a read that legitimately found nothing.
+
+- **Four metadata-protocol seams (#8896).** `SeedLoaderService.loadExistingRecords()`
+  returned an empty `Map` — which is not a cache but the write decision, so the
+  upsert pre-load turned every update into an INSERT and `bulkWrite`'s retry
+  recheck was silently disarmed. `searchAll()` reported `totalObjects` /
+  `totalHits` / `truncated` as though a partial scan had been complete.
+  `findReferencesToMeta()` dropped whole source types from the list that answers
+  "what would break if I delete this", so a short list read as "nothing depends on
+  it". `publishPackageDrafts()` pushed a **fabricated** revert-plan entry whose
+  `existedBefore: false` means "revert = soft-remove", so reverting that commit
+  would DELETE an artifact whose previous version was supposed to be restored.
+  None of the four `catch`es is removed — each is discriminated by error type
+  through the shared `isMissingTableError` predicate, so an unprovisioned table
+  stays benign and everything else surfaces.
+- Siblings across the tree: `getMetaDiagnostics` stops publishing an unreadable
+  store as "0 problems" (#8855); `auditMetaItem` stops reporting a failed audit
+  read as an empty trail, and a missing `auditMetaItem` / `findReferencesToMeta`
+  capability is refused rather than answered as "no audit trail" / "nothing
+  depends on this" (#9426, #9326); `diffMetaItem` stops serving a history outage
+  as an empty diff (#8868, #8833); a failed `sys_organization` probe stops reading as
+  "this install has no organizations" (#9261); the roll-up summary index's failed
+  read is never cached as an empty index (#9154); a cascade-delete dependents
+  probe that FAILS no longer skips the referential guard; `ObjectQLPlugin`'s three
+  registry reads stop inventing an empty registry (one silently skipped schema
+  sync); a failed governance row-count probe stops being indistinguishable from a
+  quiet object; and `GET /api/v1/meta/:type` refuses a type name that names
+  nothing instead of serving it as an empty collection (#9488).
+
+### Author-time gates reach the runtime publish door
+
+Rules that only `os build` / `os validate` ran now also judge a runtime write, so
+Studio and the metadata API cannot land what the CLI refuses.
+
+- **Dashboard writes are judged by `validateWidgetBindings` (#7529)** — a widget
+  bound to a dataset that resolves to nothing was previously a `200` on the
+  publish door. All six of the rule's error-tier findings gate a publish as one
+  reference-integrity class.
+- **The five gating object rules cross the publish gate**, so an `object` write
+  through the metadata API is judged by the same completeness, managed-`apiMethods`
+  and autonumber rules `os build` runs.
+- **The publish gate judges a package write against that package's own closure
+  (#9612)** — it used to hand every rule the tenant's entire `objects` collection,
+  asking a question nobody wanted answered. The unit is now the package plus the
+  transitive closure of its **declared** `manifest.dependencies`, plus platform
+  objects unconditionally, plus rows carrying no package provenance. A write that
+  names no package narrows nothing and is judged exactly as before — an
+  unresolvable package buys a write *more* validation input, never less.
+- **The publish door reports the runtime authoring gate's advisory findings**
+  (#9176), and `publishPackageDrafts` (Studio's "publish whole app") reports them
+  too; the batch publish response gained a spec contract (#9406).
+- **New authoring-time refusals.** A dashboard header `modal` action's target
+  resolves against declared PAGES only (#9013) — `os validate` previously blessed
+  exactly the buttons the runtime refuses. A sharing rule anchored where sharing
+  has nothing to widen (a `public` effective sharing model, or a master-detail
+  detail) is an error, with separate ids because the repairs differ (#9698). A
+  list-view `sort` naming a formula field, or no field at all, is refused (#9257).
+  A bare date-range preset name in an ordering filter comparand is refused at
+  publish (#8793). Three write-surface rules ask provenance, not just membership,
+  before exempting a system column (#8663), and the same provenance question is
+  asked at a fifth blanket-`SYSTEM_FIELDS` read site, `searchableFields` (#8404).
+
+### The authorable surface closes further
+
+- **Unknown top-level stack keys are refused (#8687)** — `ObjectStackDefinitionSchema`
+  was the last strip-mode surface of the #4001 campaign. Measured on 17.0.0 GA,
+  three injected bogus top-level keys added **zero** warnings to `os validate` and
+  exited 0, even under `--strict`. The failure population is a typo or stale key
+  (`flow` for `flows`, `approvalProcesses` after its removal) shipping an artifact
+  with a whole metadata family absent at runtime. Near misses carry a did-you-mean,
+  and curated prescriptions answer the known retirements (`storage`, `approvals`,
+  `workflows`, `portals`, `onDisable`). `onEnable` is now declared rather than
+  undeclared-but-honoured.
+- Undeclared keys are refused on the **analytics authoring surface** (#4001 batch
+  D), on object **`indexes[]`** entries, on **`Field.inlineColumns` /
+  `Field.relatedListColumns`** (#9227), and on **`record:alert` /
+  `record:quick_actions` / `record:history` / `record:discussion`** (#8744) and
+  **`record:reference_rail`** (#8691) in `ComponentPropsMap`. Malformed field
+  `scale` / `precision` declarations are refused at authoring time (#8321), and the
+  closed vocabulary of expression-bindable text keys is declared (#9599).
+- **ADR-0049 retirements.** The `element:filter` element retires at element grain
+  (#9220); the inert `targetVariable` key leaves `element:text_input` and
+  `element:record_picker` (#9198); `MetadataPluginConfig` loses the inert
+  `additionalTypes` (#8586); `ApiKeySchema` retires — the identity module stops
+  publishing a second, fictional declaration of `sys_api_key` (#8715);
+  `sys_user_permission_set` retires the `delegated_from` column (#9730); and
+  `BATCH_PARTIAL_FAILURE`, `BATCH_COMPLETE_FAILURE` and `TRANSACTION_FAILED` leave
+  `StandardErrorCode` (ADR-0112 amendment, 2026-08-18).
+
+### Datasource credentials reach the driver
+
+- A bound `external.credentialsRef` now reaches the **mongo** client on a URL
+  branch, the **mysql** client on the DSN branch (#8696), and the **postgres**
+  server on the DSN branch, not just the knex config (#8873). A mysql datasource
+  that declares TLS now gets it, on both branches and in the spelling `mysql2` can
+  read (#8874).
+- Publish-time refusals close the authoring half: a credential in the mongo
+  options passthrough (`config.options.auth.password`, #9040);
+  credential-bearing URL query parameters (`?authToken=` / `?password=`, #8337);
+  a postgres `config.url` that `pg` itself cannot parse (#9091); `${…}` placeholder
+  syntax in memory `persistence.path` / `persistence.key` (#8495); and the
+  contradictory pairs "`credentialsRef` bound + a composed mongo config naming no
+  `username`" (#9147) and "`credentialsRef` bound + a mongo `config.url` naming no
+  user" (#9041).
+
+### Drivers, query engine and analytics
+
+- **One unresolvable WHERE column, one answer.** `find()` and `count()` both
+  refuse with `INVALID_FILTER` / 400 naming the column, and **MySQL joins the
+  predicate** with the full refusal envelope and recoveries (#8926).
+- **MySQL upserts stop merging onto rows the caller never identified.** An upsert
+  whose `conflictKeys` no PRIMARY KEY or UNIQUE index backs is refused (calls that
+  previously "resolved" now fail loudly), an upsert whose named conflict target
+  another UNIQUE key can absorb is refused (#8755), a merge that would rewrite the
+  row's primary key is refused and rolled back (#8622, #8807).
+- **MySQL metadata locks stop hanging.** A blocked `os migrate` refuses in 120s
+  instead of hanging effectively forever (#9354), and boot schema-sync's widening
+  ALTER bounds its lock wait too — a blocked boot warns and carries on, and an
+  un-run widening ALTER is reported at `error` naming the fix.
+- **Cascade delete and multi-value references.** `cascadeDeleteRelations` probes a
+  `multiple: true` reference field with a spelling its storage can answer; the
+  required-FK escalation on a `multiple: true` lookup is judged **per row**, so a
+  parent delete is refused only over the rows that actually hold it;
+  `deleteBehavior: 'set_null'` on a `multiple: true` reference removes the deleted
+  **member** from the stored array instead of nulling the whole field; and the
+  delete-cascade path's registry reads propagate instead of answering "no
+  relations" (#9002).
+- **Undeclared fields are refused at the schema** on insert (#8682) and on update
+  before `beforeUpdate` hooks run (#8738). `[]` no longer satisfies `required` on a
+  multi-value field (#9476). A TRUE `readonlyWhen` no longer strips hook-derived
+  values — the conditional strip judges only API-boundary callers (#9107). A
+  temporal filter comparand the platform cannot interpret is refused at the engine
+  door instead of answering `200` with zero rows, and a scalar `in`/`nin`
+  comparand no longer reaches a driver (#9228).
+- A dotted filter key whose head is a relation, a formula or a plain scalar is
+  refused **at both doors** (#8371), and unscoped `multi: true` write
+  refusals are restored through the wired engine on `sys_attachment` (#9719) and
+  `sys_comment`.
+
+### CLI & developer experience
+
+- **`objectstack init` scaffolds now compile (#9666).** `init … --install`
+  reported `✓ Scaffold validated` and the next documented step, `npm run dev`,
+  failed to compile: the CLI's own shipped template was refused by the CLI's own
+  shipped rule set, because the `app` and `plugin` templates declared no
+  `sharingModel` (OWD). Both templates now declare `sharingModel: 'private'` — the
+  rule's recommended default and the ADR-0090 D1 baseline — and `init`'s self-test
+  now runs the author-time rule registry over the generated project instead of
+  only checking that the config loaded. The rule set is the `build` one, the same
+  set `os dev` reaches, so this is a shift-left rather than a stricter bar.
+- **The ready banner names what actually booted (#8978).** On an `OS_ARTIFACT_URL`
+  boot the `objectstack.config.ts` in cwd is deliberately never executed, but the
+  banner's `Config:` row still printed it; on the plain artifact-fallback path it
+  named a config file that does not exist on disk at all. `serve` now reports the
+  resolved artifact's already-redacted `display` string in an `Artifact: …
+  (OS_ARTIFACT_URL)` row, omits the row where no safely-redacted value is in hand,
+  and reports the authored config exactly as before on an ordinary config boot.
+- **`os start` / `os dev` stop writing `OS_ARTIFACT_PATH` into the child `serve`
+  environment (#8985).** Both supervisors handed the resolved path down through
+  the same variable an operator sets, before the downstream `objectstack.config.ts`
+  is evaluated — so a config could not answer *"did a human ask for this, or did
+  the CLI put it here?"*. The path now travels on `OS_INTERNAL_ARTIFACT_PATH`, a
+  channel the CLI owns both ends of, restoring the property that the presence of
+  `OS_ARTIFACT_PATH` in a config's environment means an operator set it. Nothing
+  about resolution changed:
+  `--artifact > OS_ARTIFACT_URL > OS_INTERNAL_ARTIFACT_PATH > OS_ARTIFACT_PATH > <cwd>/dist/objectstack.json`.
+- `os init` template descriptions stop advertising metadata kinds they never emit
+  (#9737); scaffolded projects stop describing themselves as the blank template
+  (#9263); the scaffolded Dockerfile pins the runtime image to the CLI that builds
+  the artifact instead of `latest` under a comment saying to pin (#9017); the blank template's `specVersion`
+  stops shipping eleven majors stale (#9264); and the five remote content templates
+  retire from the scaffolder's catalog.
+- `os migrate meta --from N` can finally open the retired-key sources it exists to
+  rewrite (#9418); `os meta resync` explains a nonzero skip count instead of
+  leaving it to look like a no-op (#9184); `serve` warns when the declared replica
+  count exceeds the licensed node cap — ⚠️ deliberately advisory wording, because
+  nothing is actually refused yet (#8504); and `objectstack serve` registers
+  `ObservabilityServicePlugin`, so `observability:metrics` resolves for every
+  consumer following the canonical resolution chain.
+
+### Observability, packaging and published docs
+
+- `http_requests_total` and `http_request_duration_ms` are emitted from the
+  transport seam, so every inbound mount is counted (#9650). `/discovery`
+  describes the request's environment rather than the control plane (#9292), and
+  its `mcp` advertisement follows the request's environment too. A zero on
+  `cache_*` is documented as meaning "no configured consumer", not "no cache
+  activity" (#9954).
+- The plugin-mounted Hono error paths answer the declared envelope — six refusal
+  bodies stop speaking the pre-#3675 dialect (#9364) — and the hono adapter's and
+  the dispatcher's two discovery bodies join the response envelope (#9436, #9813).
+- A broad published-README accuracy sweep: five service READMEs, four more
+  READMEs, `driver-sql`, `mcp` and `plugin-audit` stop documenting symbols, APIs
+  and call sites that do not exist (#9532, #9544, #9867, #9579), and published
+  READMEs link to the docs site in the one form that works on npm, on GitHub and
+  on the docs site (#9632). The better-auth family moves off the `1.7.0-rc.2`
+  prerelease onto stable `^1.7.1`.
+
+## New in Console (Studio) — objectui pin `665661ab0932 → 9a3daf8d37ad`
+
+Two pin moves in this release (`665661ab0932 → 82a94170c405`, then
+`82a94170c405 → 9a3daf8d37ad`). Notable declared changes:
+
+- **Breaking (published API).** `app-shell` is no longer a component key;
+  `NavigationRenderer` no longer accepts `resolveGroupLabel` / `resolveItemLabel`
+  (app-navigation localization is owned by the server-side `/meta` boundary);
+  `<PageHeader>` retires the legacy `description` prop, leaving `subtitle` as the
+  only spelling; `dashboardComponents` is re-keyed from 11 PascalCase component
+  class names to the 8 schema `type` keys the package actually registers; and the
+  structured `confirm` object on actions is retired in favour of `confirmText`
+  (objectui#4314, ADR-0049).
+- **Modal targets name pages.** Both of objectui's copies of the prefix
+  convention retire — a `type: 'modal'` action's string `target`, and a dashboard
+  header `modal` action's `target`, each name a PAGE only. This is the renderer
+  half of the `os validate` narrowing above; the two repos now agree.
+- **Declared surfaces catch up to the spec.** The five `@objectstack/spec` 17.0.0
+  keys the renderers already honoured are published so authors can discover them;
+  `element:text.content` and `element:button.label` declare the inline
+  translation map they already accept; `ComponentInput.type` can declare a union;
+  `ObjectMetricWidgetProps` speaks `I18nLabel` on `label`, `trend.label`,
+  `description` and `title`; `ObjectMapSchema` declares what ObjectMap reads, with
+  the `map` block outranking the flat spelling; `AuthInvitation.status` becomes
+  the closed four-member union it always documented.
+- **Keys that declared nothing are settled.** `AccordionItem` and
+  `ToggleGroupItem` each retire `icon` and wire `disabled`; `VectorFieldMetadata
+  .indexed` / `.distance_metric` and `BaseFieldMetadata.indexed` are removed along
+  with the field designer's `Indexed` toggle, because the ObjectStack spec has no
+  field-level index flag; and the retired `striped` / `bordered` / `virtualScroll`
+  list-view surface is removed.
+- **Rendering and data fixes.** `FormSchema.onChange` — a declared callback the
+  form renderer never invoked — is called (objectui#4259); an option colour
+  authored as an explicit hex renders as authored instead of being quantized to
+  nine palette families (objectui#5141); `ObjectGrid`, `bridgeListView` and
+  `ObjectDataTable` read the declared column spelling and resolve column identity
+  before handing columns to the table; form-field type resolution no longer falls
+  back to `ui`-namespace SDUI node renderers; a top-level `conditionalFormatting`
+  no longer reaches the kanban view; `DatasetReportRenderer` stops reading
+  `filter` as an alias for `runtimeFilter`; a clicked cartesian mark names its own
+  series and the drill title reads its label; and a null second-dimension group is
+  drawn rather than carrying its measure invisibly.
+- **Navigation and shell.** A form's ruled `submitBehavior.url` redirect can be
+  performed by the HOST, so a destination stays inside a console mounted at a
+  sub-path (objectui#4989); the declared nav `runAction` slot is consumed and the
+  private `?runAction=` string convention retires; and the current organization
+  shows in the top bar for users with exactly one membership.
+
 ## Upgrade checklist
 
 ### 17.0.0
@@ -3597,6 +4214,107 @@ views stop crashing on LAN IPs.
   `select`/`radio` with no options. Each finding is a field that has been
   computing nothing.
 
+
+### 17.1.0
+
+⚠️ Despite the minor version number, four of these are behaviour changes on live
+data or on a published wire contract. Work through them before upgrading.
+
+- **Audit your deactivated permission sets and positions FIRST (#8613, #8710).**
+  Any `sys_permission_set` or `sys_position` row currently carrying
+  `active: false` **stops granting the moment this lands**, and a deactivated
+  position named as a sharing-rule recipient has its `sys_record_share` rows
+  **revoked on the next evaluation**. That is the correct direction — it is what
+  the Deactivate dialog always said — but on an installation that used the switch
+  believing it was inert it is a real revocation, with no migration step to
+  notice. List them and re-activate any that are still meant to grant:
+
+  ```
+  GET /api/v1/data/sys_permission_set?filters=[["active","=",false]]
+  GET /api/v1/data/sys_position?filters=[["active","=",false]]
+  GET /api/v1/data/sys_sharing_rule?filters=[["recipient_type","=","position"]]
+  ```
+
+  Rows whose `active` column is absent or NULL are unaffected.
+- **Grant `allowExport` explicitly wherever admin export is intended (#8681).**
+  The platform admin sets no longer carry the `'*'` export wildcard, and nothing
+  fails at parse time — a deployment that upgrades without editing anything is
+  valid metadata whose administrators have quietly lost export on every object no
+  app set names. There is deliberately no automatic replacement. Author it in
+  **your** app's permission set (platform sets are not overridable):
+
+  ```ts
+  {
+    name: 'system_admin',
+    objects: {
+      crm_account: { allowRead: true, allowExport: true },  // export intended
+      crm_quote:   { allowRead: true },                     // export withheld
+    },
+  }
+  ```
+
+  Verify behaviourally: sign in as an org owner and call
+  `GET /api/v1/data/<object>/export`, expecting `200` where export is intended and
+  `403 EXPORT_NOT_PERMITTED` where it is not.
+- **Re-run `os build` / `os validate` after upgrading.** Several new refusals can
+  fail a stack that built clean on 17.0.0: an unknown **top-level stack key**
+  (#8687 — check for a typo or a stale key such as `flow` for `flows`, which until
+  now shipped an artifact with that whole family absent at runtime); a dashboard
+  header `modal` action whose target names an action, a bare object or a
+  `<verb>_<object>` form rather than a declared **page** (#9013 — those buttons
+  already dispatch to a refusal at runtime; there is deliberately no automatic
+  rewrite, and `os migrate meta` surfaces it as a structured TODO); a **sharing
+  rule** anchored on an object whose effective sharing model is `public` or which
+  is a master-detail detail (#9698); a list-view **`sort`** naming a formula field
+  or no field at all (#9257); a bare **date-range preset** in an ordering filter
+  comparand (#8793); and undeclared keys on the analytics surface, on object
+  `indexes[]`, on `Field.inlineColumns` / `Field.relatedListColumns` and on five
+  more `record:*` component prop maps.
+- **Studio and metadata-API writes are now judged by the same rules.** If you
+  publish through `PUT /api/v1/meta/…` or Studio rather than the CLI, expect
+  writes that previously returned `200` to be refused — dashboard widget bindings
+  (#7529) and the five gating object rules now run at the publish door.
+- **Flow callers: branch on the HTTP status, not on an inner `success` flag.**
+  The automation `trigger` routes, `POST /api/v1/actions/:object/:action` and
+  declared `type: 'flow'` endpoints all answer `404` / `409 FLOW_DISABLED` /
+  `422 FLOW_NO_START_NODE` / `400 FLOW_FAILED`. A caller that treated `400` as
+  "the run failed", or that read a declared endpoint's result out of a `200` body,
+  needs updating — a declared endpoint's failures are now 4xx with the platform
+  error envelope and no inner `data.success` to read. `outputMapping` is no longer
+  applied to a failure. If you call the resume route, send only `inputs`,
+  `variables`, `output` and `branchLabel`: any other top-level key is now a `400`.
+- **Apps that throw their own `error.code` should read `declaredCode` (#9106).**
+  A thrown code outside `StandardErrorCode ∪ ERROR_CODE_LEDGER` no longer reaches
+  `error.code`; it arrives on the new optional `declaredCode` instead. One-line
+  fix: branch on `error.declaredCode` for app-specific spellings and on
+  `error.code` for platform conditions. Platform producers are unaffected.
+- **Retired surfaces.** `sys_user_permission_set.delegated_from` is gone (#9730);
+  `element:filter` (#9220), `targetVariable` on `element:text_input` /
+  `element:record_picker` (#9198), `MetadataPluginConfig.additionalTypes` (#8586)
+  and `ApiKeySchema` (#8715) are retired; and `BATCH_PARTIAL_FAILURE`,
+  `BATCH_COMPLETE_FAILURE` and `TRANSACTION_FAILED` leave `StandardErrorCode`.
+  Console hosts: `app-shell` is no longer a component key, `<PageHeader>`'s
+  `description` prop is gone in favour of `subtitle`, the structured `confirm`
+  object on actions is retired in favour of `confirmText`, and
+  `dashboardComponents` is re-keyed to the eight schema `type` keys.
+- **`file-storage` → `storage` (#9683).** The canonical `CoreServiceName` slot is
+  now `storage`. `file-storage` keeps working as a deprecated alias for the v17
+  line and retires at the next major; a custom v17 provider for this slot should
+  register **both** names.
+- **API keys under `isolated` tenancy (#8287).** Keys minted before this release
+  carry no organization and are **refused** under `OS_TENANCY_POSTURE=isolated`,
+  where they already read nothing. They are deliberately not backfilled — re-mint
+  them. Keys keep working under `single` and `group`.
+- **If a config read `process.env.OS_ARTIFACT_PATH` expecting the CLI to have
+  populated it (#8985)**, set the variable yourself or read the artifact from the
+  config's own inputs. `OS_ARTIFACT_PATH` remains a fully supported operator knob
+  on the rung it has always occupied; `os start` / `os dev` simply no longer
+  manufacture it on your behalf.
+- **Automations:** a triggered run now carries the flow author's
+  `successMessage` / `errorMessage`, and a flow ACTION that ran and failed carries
+  `errorMessage` and the run `summary` in `error.details` — review anything that
+  parsed the previous generic text.
+
 ## References
 
 ADR-0104 (field runtime value-shape contract / file-as-reference) · ADR-0105
@@ -3689,3 +4407,24 @@ service surface) · #8600/#7891 (authored OWD at the object door) ·
 #8309/#8307/#7220 (security posture at runtime publish) · #7751 (`object-*`
 block props) · #8315/#7675 (audit action enum) · #7735/#8019 (change-email) ·
 #7762/#7978/#7685 (verification harness).
+
+**17.1.0** — ADR-0049 (enforce-or-remove) · ADR-0055 (`controlled_by_parent`) ·
+ADR-0066 D3 (field `requiredPermissions`) · ADR-0067 (revert plans) · ADR-0068
+(platform-admin gate) · ADR-0090 D1 (OWD baseline) · ADR-0105 D7 (extension
+fields) · ADR-0110 D3 (failure is not emptiness) · ADR-0111 D7 (inert grants) ·
+ADR-0112 (error-code vocabulary, amended 2026-08-18) · ADR-0120 D3 (partitioned
+uniqueness) · #8613 (`active` stops granting) · #8710 (deactivated position,
+sharing rules) · #8681 (admin export wildcard) · #8993 (partial field masking) ·
+#8652 (read-only approval visibility) · #8155 (credential re-homing) · #8287
+(API-key organization) · #8778 (`tenancy.organizationField`) · #9934
+(`userMessage`) · #9106 (`error.code` closed at every door) · #9446 / #9462
+(flow-dispatch status table) · #8896 (four read seams) · #7529 / #9612 / #9176
+(runtime publish gate) · #8687 (strict top-level stack keys) · #9013 (dashboard
+`modal` target) · #9698 (sharing-rule enforceability) · #9257 (list-view `sort`) ·
+#8934 (`icontains`) · #8704 (`relatedListFilter`) · #9566 / #9474
+(`ActionSchema.onSuccess`) · #9225 / #9205 (email template rendering) · #8928
+(`os migrate duplicates`) · #9666 (scaffolds compile) · #8978 (ready banner) ·
+#8985 (`OS_INTERNAL_ARTIFACT_PATH`) · #9683 (`storage` slot) · #9730
+(`delegated_from`) · #8926 / #8807 / #8755 / #8622 / #9354 (MySQL driver) ·
+#9040 / #8337 / #9041 / #9091 / #9147 / #8495 (credential refusals at publish) ·
+#8873 / #8874 / #8696 (credentials reach the driver).

@@ -183,8 +183,10 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
     reason:
       'Hand-rolled ObjectStack table, not a better-auth model at all. '
       + '`packages/core/src/security/api-key.ts` mints and verifies the key and POST /api/v1/keys '
-      + 'writes the row, and better-auth 1.7.0-rc.2 ships NO apiKey plugin: there is no '
-      + '"better-auth/plugins/api-key" export subpath and "better-auth/plugins" exports no apiKey. '
+      + 'writes the row, and better-auth ships NO apiKey plugin — measured 2026-08-20 against '
+      + 'the installed 1.7.1: package.json declares no "./plugins/api-key" export subpath and '
+      + 'importing "better-auth/plugins" yields apiKey === undefined (bearer and admin are '
+      + 'functions in the same import, so the read is not a silent miss). '
       + 'So no model exists to derive and no column on this table can change hands. '
       + 'Pinned by the premise test at the bottom of this file (#7770).',
     noBetterAuthColumns: true,
@@ -915,9 +917,11 @@ describe('sys_api_key exemption premise (#7770)', () => {
     // This is the whole warrant for `noBetterAuthColumns: true` on
     // sys_api_key: the columns the issue worried about (`name`, `prefix`,
     // `key`, `userId`, `expiresAt`, `permissions`, `metadata`) belong to a
-    // plugin that does not exist at the pinned version — better-auth 1.7.0-rc.2
-    // publishes no `./plugins/api-key` subpath and `better-auth/plugins`
-    // exports no `apiKey`.
+    // plugin that does not exist at the installed version — measured
+    // 2026-08-20 against better-auth 1.7.1, which publishes no
+    // `./plugins/api-key` subpath and whose `better-auth/plugins` exports no
+    // `apiKey`. The assertion below re-measures this on every run, so the
+    // stamp is a reading aid and the test is the actual check.
     //
     // Going red here is CORRECT and is the point: a bump that (re)introduces
     // the plugin makes the exemption's premise expire BEFORE anyone can enable

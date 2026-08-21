@@ -268,36 +268,97 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * Arm the authored hook/action rebind on protocol metadata mutations
-   * (#2588, #2605). Shared by both assembly modes: called with the in-house
-   * shim when `registerProtocol` is on, and lazily from `start()` against
-   * whatever registered `protocol` (MetadataProtocolPlugin) otherwise.
+   * Arm the protocol-driven rebinds. Shared by both assembly modes: called with
+   * the in-house shim when `registerProtocol` is on, and lazily from `start()`
+   * against whatever registered `protocol` (MetadataProtocolPlugin) otherwise.
+   *
+   * Two independent subscriptions, each guarded on its own — a protocol
+   * implementation that offers one seam and not the other must still get the
+   * one it has:
+   *
+   *  1. `onMetadataMutation` (#2588, #2605) — this plugin's OWN authored
+   *     hook/action rebind.
+   *  2. `onMetaItemPublished` (#10219) — the kernel-wide `metadata:reloaded`
+   *     announce for the per-item publish door. See
+   *     {@link announcePerItemPublish}.
    */
   private subscribeMetadataRebind(ctx: PluginContext, protocol: unknown): void {
-    if (typeof (protocol as any)?.onMetadataMutation !== 'function') return;
-    const unsubscribe = (protocol as any).onMetadataMutation(
-      (evt: { type: string; name: string; state: string }) => {
-        if (evt?.state === 'draft') return;
-        if (evt?.type === 'hook') {
-          void this.resyncAuthoredHooks(ctx).catch((e: any) => {
-            ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
-              hook: evt.name,
-              error: e?.message,
+    if (typeof (protocol as any)?.onMetadataMutation === 'function') {
+      const unsubscribe = (protocol as any).onMetadataMutation(
+        (evt: { type: string; name: string; state: string }) => {
+          if (evt?.state === 'draft') return;
+          if (evt?.type === 'hook') {
+            void this.resyncAuthoredHooks(ctx).catch((e: any) => {
+              ctx.logger.warn('[ObjectQLPlugin] authored-hook rebind after mutation failed', {
+                hook: evt.name,
+                error: e?.message,
+              });
             });
-          });
-        } else if (evt?.type === 'action' || evt?.type === 'object') {
-          // `object` rows carry embedded `actions[]`, so an object edit can
-          // add/remove an authored action too — re-sync on both.
-          void this.resyncAuthoredActions(ctx).catch((e: any) => {
-            ctx.logger.warn('[ObjectQLPlugin] authored-action rebind after mutation failed', {
-              item: evt.name,
-              error: e?.message,
+          } else if (evt?.type === 'action' || evt?.type === 'object') {
+            // `object` rows carry embedded `actions[]`, so an object edit can
+            // add/remove an authored action too — re-sync on both.
+            void this.resyncAuthoredActions(ctx).catch((e: any) => {
+              ctx.logger.warn('[ObjectQLPlugin] authored-action rebind after mutation failed', {
+                item: evt.name,
+                error: e?.message,
+              });
             });
-          });
-        }
-      },
-    );
-    this.metadataUnsubscribes.push(unsubscribe);
+          }
+        },
+      );
+      this.metadataUnsubscribes.push(unsubscribe);
+    }
+    if (typeof (protocol as any)?.onMetaItemPublished === 'function') {
+      const unsubscribe = (protocol as any).onMetaItemPublished(
+        (evt: { type: string; name: string }) => this.announcePerItemPublish(ctx, evt),
+      );
+      this.metadataUnsubscribes.push(unsubscribe);
+    }
+  }
+
+  /**
+   * [#10219] Announce `metadata:reloaded` after a PER-ITEM publish
+   * (`POST /api/v1/meta/:type/:name/publish`), so every boot-cached consumer
+   * re-syncs without a restart.
+   *
+   * This is the missing third announcer of an event that had two: the metadata
+   * plugin's dev-artifact watcher, and the runtime dispatcher after
+   * `POST /packages/:id/publish-drafts` (#2576). Publishing one item at a time
+   * — what an AI author and the item-level Studio doors do — fired neither, so
+   * the load-bearing subscriber never ran: `service-automation`'s
+   * `resyncFlowsFromProtocol` binds record- and schedule-triggered flows off
+   * this event, and a flow published per item stayed `state='active'` and
+   * completely inert until the kernel was rebuilt. Same silence for authored
+   * hooks/actions of other packages, declared connectors and translations.
+   *
+   * The plugin is where the announce belongs because the protocol holds no
+   * kernel: it notifies, and this — holding `ctx` — triggers. That is the same
+   * division the dispatcher's `announceKernelEvent` makes for the batch door.
+   *
+   * `changed` uses the `'{type}/{name}'` spelling the batch announce emits, so
+   * a subscriber reading the payload cannot tell the two doors apart.
+   *
+   * Best-effort and never rethrown: the item is already published and durable,
+   * so a subscriber failure must not turn a landed publish into an error. It is
+   * reported at `warn` — the loss is an in-memory re-sync, AGENTS.md's own
+   * worked example of a FUNCTIONAL degradation, and the sibling announcers log
+   * it at exactly this level.
+   */
+  private async announcePerItemPublish(
+    ctx: PluginContext,
+    evt: { type: string; name: string },
+  ): Promise<void> {
+    try {
+      await ctx.trigger('metadata:reloaded', { changed: [`${evt.type}/${evt.name}`] });
+    } catch (e: any) {
+      ctx.logger.warn(
+        '[ObjectQLPlugin] the post-publish `metadata:reloaded` announce failed — the item IS published, but '
+        + 'boot-cached consumers keep the pre-publish view until this process restarts (a newly published '
+        + 'record-triggered flow does not bind its trigger and will not fire). Nothing retries this announce; '
+        + 're-publishing the item is idempotent.',
+        { item: `${evt.type}/${evt.name}`, error: e?.message ?? String(e) },
+      );
+    }
   }
 
   init = async (ctx: PluginContext) => {

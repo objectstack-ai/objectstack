@@ -290,3 +290,31 @@ describe('sys_user_permission_set — `delegated_from` is retired (#9730, ADR-00
     expect(f.reference).toBe('sys_user');
   });
 });
+
+describe('sys_position — `permissions` is retired (#9885, ADR-0049)', () => {
+  it('no longer declares `permissions` — nothing ever wrote or read it', () => {
+    // Maintainer ruling 2026-08-20 (REMOVE): the object-scoped census read
+    // every sys_position-naming file — the bootstrap writers set label /
+    // description / managed_by / active / is_default only, and position→grant
+    // resolution consults `sys_position_permission_set` rows plus the position
+    // `name`, never a `permissions` column. A free-text grant catalogue no
+    // runtime enforces tells an author that direct position-level grants
+    // exist; they do not. Re-declaring the key here without a runtime reader
+    // in the same change is the exact defect the ruling removed; this pin
+    // makes that re-growth loud.
+    expect(SysPosition.fields).not.toHaveProperty('permissions');
+  });
+
+  it('clone_position no longer copies the retired column (defaultFromRow itself survives)', () => {
+    const clone: any = (SysPosition.actions ?? []).find((a: any) => a.name === 'clone_position');
+    expect(clone, 'clone_position action still declared').toBeDefined();
+    const copied = ((clone.params ?? []) as any[])
+      .filter((p) => typeof p.field === 'string')
+      .map((p) => p.field);
+    // Positive control first: the copy mechanism is untouched — only the
+    // retired column left it. A clone that stopped copying `description`
+    // would be a different regression, not this retirement.
+    expect(copied).toContain('description');
+    expect(copied).not.toContain('permissions');
+  });
+});

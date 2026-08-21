@@ -100,12 +100,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 
 import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
 import { headingIds } from './check-doc-anchors.mjs';
 import { docsRelative, firstMatchingSource, pageCandidates } from './check-docs-redirects.mjs';
 import { publishedDocs } from './check-published-readme-exports.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const SELF = 'scripts/check-published-readme-links.mjs';
@@ -567,7 +567,7 @@ function selfTest() {
 /* Run only when invoked as a program — the extractor, the classifier and the
  * resolvers are exported so a caller chasing a false positive can import them
  * without the import itself sweeping the workspace. */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     selfTest();
     process.exit(0);

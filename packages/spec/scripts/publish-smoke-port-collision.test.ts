@@ -53,6 +53,25 @@
 // server. Without those a green "retargeted" could mean nothing was listening
 // and nothing was turned down.
 //
+// ## What the "skips one that is already held" test can and cannot see (#10212)
+//
+// The sibling collision test lost a round to a vacuity hole: its `PICKED_WITH_BUSY`
+// assertion stayed green on the broken picker because its occupier could lose its
+// own bind and die, making the next pick return the occupied number legitimately.
+// That hole is NOT present here — `HOLDER_REACHABLE` curls the occupier and is the
+// precondition guard the sibling was missing, and it was re-measured against the
+// pre-fix script rather than assumed.
+//
+// The blind spot here is a different one, and worth naming because a green run is
+// what hid it: that test draws its two ports SEQUENTIALLY, and the TOCTOU defect
+// is about CONCURRENT callers. It is sound but silent on the defect — measured
+// green on the unfixed picker, exactly as designed, because a second pick taken
+// after the first port is already held really does skip it. Detecting a
+// check-then-use race needs callers that overlap in time, which is what
+// `CONCURRENT_DISTINCT` below adds. `TRIPLE_DISTINCT` covers the same defect from
+// the cheap direction: before the fix, two picks in one run with nothing bound in
+// between both returned the base.
+//
 // No `objectstack dev` boot and no scaffold: the contract under test belongs to
 // the shell script, and the ports are picked at run time by the script's own
 // helper so this test cannot collide with a concurrent agent — which would be a
@@ -149,6 +168,9 @@ describe.skipIf(!RUNNABLE)('[#9647] publish-smoke.sh smoke-tests its OWN dev ser
     expect(r.SCAFFOLDED).toBe('no');
   });
 
+  // Sequential by construction, and therefore blind to the TOCTOU race by
+  // construction — see the header. Kept because "does it skip a busy port" is a
+  // real property worth pinning; the concurrent cases below are what pin #10212.
   it('picks a per-run port and skips one that is already held', () => {
     const r = runHarness([
       'FIRST="$(smoke_pick_free_port 3210)"',
@@ -236,5 +258,77 @@ describe.skipIf(!RUNNABLE)('[#9647] publish-smoke.sh smoke-tests its OWN dev ser
     expect(r.OUR_LEADER_ALIVE).toBe('yes');
     expect(r.WAIT_RC).not.toBe('0');
     expect(r.WAIT_SAID_STATE_FILE).toBe('1');
+  });
+
+  // ── #10212: the port is RESERVED, not merely probed ──────────────────────
+  //
+  // These deliberately do NOT override SMOKE_PORT_RESERVATION_DIR: sharing one
+  // host registry is the fix, so the cases that measure contention have to run
+  // against the registry real callers use. Only the protocol test below, which
+  // needs to plant a specific registry state, points somewhere scratch.
+
+  it('hands concurrent callers scanning one base distinct ports', () => {
+    const r = runHarness([
+      // Eight at once from a single base. Before the fix every one of them was
+      // handed 3210 — not usually, but by construction, because the scan is
+      // deterministic and the probe socket was closed before the port was
+      // reported free.
+      'for i in 1 2 3 4 5 6 7 8; do ( smoke_pick_free_port 3210 > "$SMOKE_ROOT/pick.$i" ) & done',
+      'wait',
+      // The picker prints with NO trailing newline, so each file is read on its
+      // own; `cat`-ing them together concatenates eight numbers into one line
+      // and any distinct-count taken from that reads 1 whatever happened.
+      'for f in "$SMOKE_ROOT"/pick.*; do printf "%s\\n" "$(cat "$f")"; done > "$SMOKE_ROOT/picks.txt"',
+      'echo "CONCURRENT_TOTAL=$(grep -c "[0-9]" "$SMOKE_ROOT/picks.txt")"',
+      'echo "CONCURRENT_DISTINCT=$(sort -u "$SMOKE_ROOT/picks.txt" | grep -c "[0-9]")"',
+    ]);
+    // Vacuity guard: all eight callers actually produced a port. Without this a
+    // picker that failed outright would score a perfect distinct-count of 0.
+    expect(r.CONCURRENT_TOTAL).toBe('8');
+    expect(r.CONCURRENT_DISTINCT).toBe('8');
+  });
+
+  it('gives each pick within one run its own port', () => {
+    const r = runHarness([
+      // Nothing binds anything here: the only thing that can keep these apart is
+      // the claim outliving the call. Before the fix all three returned the base.
+      'A="$(smoke_pick_free_port 3210)"',
+      'B="$(smoke_pick_free_port 3210)"',
+      'C="$(smoke_pick_free_port 3210)"',
+      'echo "TRIPLE=$A,$B,$C"',
+      'echo "TRIPLE_DISTINCT=$(printf "%s\\n" "$A" "$B" "$C" | sort -u | grep -c "[0-9]")"',
+    ]);
+    expect(r.TRIPLE).toMatch(/^\d+,\d+,\d+$/);
+    expect(r.TRIPLE_DISTINCT).toBe('3');
+  });
+
+  it('skips a port held from outside the registry and hands the claim back', () => {
+    const r = runHarness([
+      'export SMOKE_PORT_RESERVATION_DIR="$SMOKE_ROOT/reg"',
+      // Take a port, then forget the claim — now the port is held by something
+      // the registry knows nothing about, which is the one case a claim cannot
+      // cover and the probe still has to.
+      'STEAL="$(smoke_pick_free_port 3210)"',
+      'rm -f "$SMOKE_PORT_RESERVATION_DIR/$STEAL"',
+      'STUB_PORT="$STEAL" STUB_NAME=THIEF node -e "$STUB" >/dev/null 2>&1 & THIEF=$!',
+      'sleep 1',
+      'echo "STEAL_BASE=$STEAL"',
+      'echo "STEAL_HELD=$(curl -sS "http://localhost:$STEAL/" | jq -r .iam)"',
+      'PICK="$(smoke_pick_free_port $STEAL)"',
+      'echo "STEAL_PICK=$PICK"',
+      'echo "STEAL_CLAIM_RELEASED=$([ -e "$SMOKE_PORT_RESERVATION_DIR/$STEAL" ] && echo no || echo yes)"',
+      'echo "STEAL_CLAIM_ON_PICK=$([ -e "$SMOKE_PORT_RESERVATION_DIR/$PICK" ] && echo yes || echo no)"',
+      'kill "$THIEF" 2>/dev/null',
+    ]);
+    // Vacuity guard: the thief really held the port.
+    expect(r.STEAL_HELD).toBe('THIEF');
+    expect(r.STEAL_PICK).not.toBe(r.STEAL_BASE);
+    // POSITIVE CONTROL, and it is not optional. "No claim file for the stolen
+    // port" is also what a registry that does not exist looks like, so
+    // STEAL_CLAIM_RELEASED is vacuously green on the unfixed script — measured,
+    // not assumed. STEAL_CLAIM_ON_PICK is what fails there, and it is what makes
+    // the release assertion mean anything.
+    expect(r.STEAL_CLAIM_ON_PICK).toBe('yes');
+    expect(r.STEAL_CLAIM_RELEASED).toBe('yes');
   });
 });
