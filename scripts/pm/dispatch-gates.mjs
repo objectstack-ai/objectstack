@@ -1378,6 +1378,127 @@ export function unreachableReason(dead, cap = 3) {
 }
 
 // ---------------------------------------------------------------------------
+// The escapable-literal ledger (#10705)
+// ---------------------------------------------------------------------------
+
+/**
+ * One family's ESCAPABLE literals: the bare separator-less population literals
+ * it declares that the tree really HAS, and for which it has NOT declared the
+ * subtree spelling.
+ *
+ * ## The species, and why it is worth enumerating rather than re-finding
+ *
+ * `hintCovers` refuses a bare single-segment literal as too generic, and that
+ * refusal is measured (+139084 fabricated pairs — see its docblock) and stays.
+ * The consequence is a gate whose declared population is a bare top-level word
+ * the tree DOES have: nothing is wrong with the gate or the tree, but no
+ * dispatch derivation can name it, so it scores the same quiet verdict for
+ * every card in the tree and, as `check-plugin-teardown-shape.mjs` puts it,
+ * "lands already invisible".
+ *
+ * The escape exists and is a named, copyable idiom — `ROOT_DIR_WATCH_HINTS`,
+ * carried by `check-role-word.mjs` (`['skills/**']`) and by
+ * `check-examples-live-imports.mjs` (`['examples/**']`), each pinned in its own
+ * gate's self-test. What was missing is any record of WHO still needs to take
+ * it. Six instances were found one at a time, on six unrelated cards, by
+ * someone happening to read the residue block on the way past; the sixth was a
+ * re-discovery of the fourth, filed fresh by an agent who did not know the
+ * enumeration existed. Discovery-by-coincidence is the failure this ledger
+ * closes.
+ *
+ * ## What counts as ESCAPED, and why the test is the collapsed form
+ *
+ * A sibling hint escapes the literal only when it declares the SAME population
+ * as a subtree — `collapseHint(g) === plain`, with a separator in `g`. A hint
+ * that merely reaches INTO the root does not count, and the distinction is
+ * live rather than theoretical: `check:published-files` names
+ * `scripts/check-published-files.mjs`, which `hintCovers` accepts against the
+ * bare directory `scripts` through its reverse-containment branch while
+ * covering no other file under that root. Treating that as an escape would
+ * retire a ledger row for a gate that is still unnameable for every card under
+ * the root it appears to declare.
+ *
+ * ## What this does NOT see
+ *
+ * Only literals that reach the HINT SET, which requires a separator somewhere
+ * in the source spelling (`'scripts/'` trims to `scripts`). A gate that spells
+ * its root with no separator at all (`const POPULATION = 'packages'`) builds no
+ * hint, so it is invisible to the derivation AND to this ledger — the same
+ * shape #10107 recorded for the directory half. That remainder is bounded only
+ * by each gate's own `ROOT_DIR_WATCH_HINTS` declaration and self-test, because
+ * only the gate knows its real population; this tool cannot read intent out of
+ * a bare word, and a sweep that tried was measured at 73 (family, word) pairs
+ * across 52 of 128 families — overwhelmingly `join(ROOT, 'packages', …)` path
+ * components, which is the +139084 fabrication re-introduced one level up.
+ */
+export function escapableLiteralRows(entries, prefixes) {
+  const rows = [];
+  for (const [check, entry] of entries) {
+    const hints = [...new Set(entry.hints ?? [])];
+    for (const hint of hints) {
+      const plain = collapseHint(hint);
+      // Exactly `hintCovers`' refusal, read off the same two conditions rather
+      // than a paraphrase of them: a literal it does NOT refuse is nameable and
+      // is no part of this species.
+      if (plain.length < 2) continue;
+      if (hint.includes('/') || plain.startsWith('.')) continue;
+      // …and the tree HAS the whole literal. A bare word the tree does not have
+      // (`node_modules`, `@objectstack`) is the genuinely-dead species instead,
+      // which no declaration can fix and which `unreachableReason` already
+      // separates by exactly this test.
+      if (deepestTrackedPrefix(hint, prefixes) !== plain) continue;
+      if (hints.some((g) => g !== hint && g.includes('/') && collapseHint(g) === plain)) continue;
+      rows.push({ check, hint, plain });
+    }
+  }
+  return rows;
+}
+
+/** The ledger key for one row — see the ledger's docblock for the spelling rule. */
+export function escapableLiteralKey({ check, hint }) {
+  return `${check} ${hint}`;
+}
+
+/**
+ * ⛔ SHRINK-ONLY. The gates whose declared population is a bare top-level word
+ * the tree HAS, and which have not declared the subtree spelling for it.
+ *
+ * It is a DEBT list, not an exception list, and the same property makes it safe
+ * that makes `KNOWN_IMPORT_UNSAFE` safe (#10665): every entry has one remedy —
+ * declare the subtree spelling beside the literal, the `ROOT_DIR_WATCH_HINTS`
+ * idiom — and no entry records a judgement anyone has to re-make later. There
+ * is no supported route in the other direction: a family this rule newly
+ * reaches is a FAILURE with that one remedy, never a new line in here. An entry
+ * whose gate has since taken the escape fails as STALE and names itself, which
+ * is what stops the list from rotting into an allowlist nobody re-reads.
+ *
+ * Both halves are asserted in this file's self-test, against the live tree,
+ * and `check:pm-dispatch-gates` runs that self-test on every pull request. So a
+ * gate written tomorrow that spells a bare root word fails at AUTHORING time
+ * rather than landing invisible — which is the half of this class the six
+ * historical instances could not fix, because each of them was archaeology.
+ *
+ * ⚠️ Spelling rule for a new row: it must not become a watch hint of THIS file.
+ * `extractWatchHints` reads any quoted span carrying a separator, so a family
+ * keyed by a direct script path (`node scripts/check-x.mjs`) would enter this
+ * file's own declared population as a path it does not read — the same trap
+ * `DEFAULT_BASE_REF` is assembled in two halves to avoid. Spell such a row so
+ * it carries no separator, or join it at runtime. A self-test case below holds
+ * this, so the rule fails rather than needing to be remembered.
+ */
+const ESCAPABLE_LITERAL_LEDGER = new Set([
+  // Its ONLY hint, so this family is unnameable for every card in the tree —
+  // including a card about its own blind spot, which is how it was found.
+  'check:parse-guard scripts',
+  // Reaches `scripts` through a package-relative predicate over tarball
+  // contents (`rel.startsWith('scripts/')`), not through the repo root it
+  // appears to name. Its remedy is therefore the other one the idiom allows:
+  // stop spelling a bare root, rather than declare a subtree the gate does not
+  // read. Recorded here so that decision is made once, on its own card.
+  'check:published-files scripts',
+]);
+
+// ---------------------------------------------------------------------------
 // Change-kind derivation — the gates a path match can never reach
 // ---------------------------------------------------------------------------
 
@@ -2529,7 +2650,20 @@ export function tierLines(result) {
 // Live derivation
 // ---------------------------------------------------------------------------
 
-function derive(paths, { showResidue = false } = {}) {
+/**
+ * Discover every check family in the tree: the workflows that invoke it, the
+ * `paths:` triggers that schedule it, the script files it resolves to, and the
+ * watch hints those files declare.
+ *
+ * Lifted out of `derive` so the escapable-literal ledger can ask the SAME
+ * question the derivation asks, from the same implementation. The ledger's
+ * whole claim is about what the derivation can and cannot name, so a second
+ * discovery pass built beside this one would let the two disagree — and a
+ * ledger enumerating a population no dispatch prompt is actually derived from
+ * is the drift this file's header refuses everywhere else. The self-test is
+ * the only other caller, and it calls THIS.
+ */
+export function discoverFamilies() {
   const wfDir = join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
@@ -2582,6 +2716,11 @@ function derive(paths, { showResidue = false } = {}) {
       if (existsSync(abs)) entry.hints.push(...extractWatchHints(readFileSync(abs, 'utf8')));
     }
   }
+  return { byCheck, workflows };
+}
+
+function derive(paths, { showResidue = false } = {}) {
+  const { byCheck, workflows } = discoverFamilies();
 
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
@@ -3343,6 +3482,110 @@ function selfTest() {
   // the declaration and by nothing else.
   t('the bare root words the gate spells in ROOTS are still refused as too generic', !hintCovers('docs', 'docs/qa/platform-checklist/RUNNER.md') && !hintCovers('content', 'content/docs/deployment/cli.mdx'));
   t('while the declared subtrees cover those same paths', hintCovers('docs/**', 'docs/qa/platform-checklist/RUNNER.md') && hintCovers('content/**', 'content/docs/deployment/cli.mdx'));
+
+  // ── The escapable-literal ledger (#10705) ────────────────────────────────
+  //
+  // Every case above pins ONE gate that took the escape. What none of them can
+  // say is who still has not — and that is the whole finding: six instances
+  // were found one at a time, on six unrelated cards, the sixth a re-discovery
+  // of the fourth by an agent who did not know the enumeration existed. These
+  // cases turn that into a bounded list with a verdict.
+  //
+  // The predicate is pinned on FIXTURES first, because a tree-only assertion
+  // cannot show which of its conditions is doing the work; the live halves
+  // follow.
+  const fx = (hints) => [['check:fixture', { hints }]];
+  const fxPrefixes = new Set(['scripts', 'scripts/pm', 'examples', 'skills']);
+  t(
+    'a bare root literal the tree HAS, undeclared, is a ledger row',
+    escapableLiteralRows(fx(['scripts']), fxPrefixes).length === 1,
+  );
+  t(
+    'the same literal beside its subtree spelling is NOT — that gate escaped',
+    escapableLiteralRows(fx(['scripts', 'scripts/**']), fxPrefixes).length === 0,
+  );
+  // The live distinction `check:published-files` forced: a hint that reaches
+  // INTO the root covers the bare directory through hintCovers' reverse
+  // containment, while covering no other file under it. If this case ever goes
+  // green the ledger has started retiring rows for gates that are still
+  // unnameable.
+  t(
+    'a hint that merely reaches into the root does not escape it',
+    escapableLiteralRows(fx(['scripts', 'scripts/check-x.mjs']), fxPrefixes).length === 1,
+  );
+  t(
+    'a literal the covering rule never refused is no part of the species',
+    escapableLiteralRows(fx(['scripts/pm']), fxPrefixes).length === 0,
+  );
+  t(
+    'nor is a dotted root, which hintCovers admits as written',
+    escapableLiteralRows(fx(['.claude']), new Set(['.claude'])).length === 0,
+  );
+  // The other species the residue block names, kept out by exactly the test
+  // `unreachableReason` uses to tell them apart: no declaration can fix a
+  // literal the tree does not have, so it is not a debt anyone can pay.
+  t(
+    'a bare word the tree does NOT have is the genuinely-dead species, not this one',
+    escapableLiteralRows(fx(['node_modules']), fxPrefixes).length === 0,
+  );
+
+  // The live halves, over the real tree and through the SAME discovery pass
+  // `derive` runs — a second pass built here could enumerate a population no
+  // dispatch prompt is derived from.
+  const ledgerSwept = trackedFiles();
+  const ledgerRows = escapableLiteralRows([...discoverFamilies().byCheck], trackedPrefixes(ledgerSwept));
+  const ledgerKeys = ledgerRows.map(escapableLiteralKey);
+  // Zero rows is a broken recognizer, not a clean tree, and it must not read as
+  // a pass — the same #4690 rule the reachability sweep applies to itself. The
+  // stale half below would catch it too; this says so in one line rather than
+  // leaving the reader to derive it from a failure two cases down.
+  t('the live sweep still reaches this species at all — zero rows is a broken recognizer', ledgerRows.length > 0);
+  const freshRows = ledgerKeys.filter((k) => !ESCAPABLE_LITERAL_LEDGER.has(k));
+  const staleRows = [...ESCAPABLE_LITERAL_LEDGER].filter((k) => !ledgerKeys.includes(k)).sort();
+  t(
+    'no gate has NEWLY joined the escapable-literal species' +
+      (freshRows.length
+        ? ` — FRESH: ${freshRows.join(' · ')}. Declare the subtree spelling beside the literal` +
+          ' (the ROOT_DIR_WATCH_HINTS idiom — see check-role-word.mjs and check-examples-live-imports.mjs),' +
+          ' or the gate is unnameable by any dispatch derivation and lands already invisible.' +
+          ' ⛔ The ledger is SHRINK-ONLY: a new line in it is not the remedy.'
+        : ''),
+    freshRows.length === 0,
+  );
+  t(
+    'and no ledger row is stale' +
+      (staleRows.length
+        ? ` — STALE: ${staleRows.join(' · ')}. Good news, and the list must say so:` +
+          ' delete each one from ESCAPABLE_LITERAL_LEDGER. A stale line is how this would start' +
+          ' drifting into an allowlist nobody re-reads.'
+        : ''),
+    staleRows.length === 0,
+  );
+  // The spelling rule the ledger's docblock states, held mechanically rather
+  // than remembered: a row keyed by a direct script path would enter THIS
+  // file's own hint set as a path it does not read.
+  t(
+    'no ledger row enters this file\'s own declared population as a path',
+    [...ESCAPABLE_LITERAL_LEDGER].every((row) => extractWatchHints(`const L = ${JSON.stringify(row)};`).length === 0),
+  );
+  // The ledger describes the derivation, so it must agree with what the
+  // derivation actually reports. Both current rows name the root `scripts`,
+  // which the tree has and the covering rule refuses — the pair that puts them
+  // in this species rather than in the dead one.
+  const ledgerPrefixes = trackedPrefixes(ledgerSwept);
+  t(
+    'every ledger row names a root the tree HAS and the covering rule refuses',
+    ledgerRows.length > 0 &&
+      ledgerRows.every(
+        ({ hint, plain }) =>
+          // refused: the gate cannot be named for anything under the root
+          !hintCovers(hint, `${plain}/any-file-under-it.mjs`) &&
+          // …and the root is really there, which is what separates this species
+          // from the dead literals beside it in the residue block
+          ledgerPrefixes.has(plain) &&
+          deepestTrackedPrefix(hint, ledgerPrefixes) === plain,
+      ),
+  );
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //
