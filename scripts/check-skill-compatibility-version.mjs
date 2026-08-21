@@ -62,8 +62,9 @@
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILLS_DIR = 'skills';
@@ -689,6 +690,6 @@ function main() {
   );
 }
 
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   main();
 }

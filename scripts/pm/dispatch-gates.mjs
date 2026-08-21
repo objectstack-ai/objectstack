@@ -156,6 +156,7 @@ import {
   isMetadataFormModulePath,
 } from '../i18n-bundle-surface.mjs';
 import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
+import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
 // runs, not copies of them. They used to be written twice — see the shared
@@ -1397,6 +1398,40 @@ export function isTestFilePath(path) {
 }
 
 /**
+ * Is this path inside the ROOT package's tsc program — the population behind
+ * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
+ *
+ * This is the one gate population in the tree that no path literal can ever
+ * describe, in principle rather than by omission. The root program is declared
+ * by EXCLUSION: `tsconfig.json` names the four directories tsc does not walk,
+ * and "everything else" has no positive spelling. The ordinary derivation —
+ * scan a gate's own source for whole-string path literals — therefore reaches
+ * this gate for the twelve ledgered PACKAGE names and for the single measured
+ * coupling constant the gate declares, and reaches nothing at all for the root
+ * entry, which is the largest of the fifteen.
+ *
+ * The complement is computed from the config's own `exclude` array, never
+ * mirrored here — see `rootTsProgramExcludedDirs`.
+ *
+ * TypeScript extensions ONLY, and that half is load-bearing rather than tidy.
+ * The root config sets no `allowJs`, so the 117 tracked JavaScript files
+ * sitting in exactly these directories — nearly all of them the repo's own
+ * checker scripts — are NOT in the program, against 11 TypeScript files that
+ * are. A bare "outside those directories" test would fire on 128 paths to reach
+ * 11, sending every card that edits a checker to a ratchet needing a built
+ * workspace closure. That is how a convention entry earns the reputation that
+ * gets it skipped, which costs more than the hole it was added to close.
+ *
+ * @param {string} path repo-relative, posix
+ * @param {string[]} excludedTopLevelDirs from `rootTsProgramExcludedDirs()`
+ */
+export function isInRootTsProgram(path, excludedTopLevelDirs) {
+  const rel = path.replace(/^\.\//, '');
+  if (!/\.(ts|tsx|mts|cts)$/.test(rel)) return false;
+  return !excludedTopLevelDirs.includes(rel.split('/')[0]);
+}
+
+/**
  * `isExtractConfigPath` is imported at the top of this file, not defined here.
  *
  * It used to be a hand-written mirror of the gate's own filename test, with a
@@ -1491,6 +1526,61 @@ let metadataFormsExtracted = null;
 export function metadataFormsSurfaceIsExtracted() {
   metadataFormsExtracted ??= anyConfigExtractsMetadataForms(i18nExtractConfigs());
   return metadataFormsExtracted;
+}
+
+/**
+ * The root tsconfig's `exclude` array, as declared. Read, never mirrored: a
+ * hand-written copy of that list here would be a second contract — it agrees
+ * until one side moves and nothing reports the day it stops, which is the
+ * defect the i18n entries above were rewritten to remove. The config is the
+ * authority for this question and it is already on disk.
+ *
+ * Unreadable input must never look like an empty answer, so an unparseable
+ * config or a missing `exclude` THROWS rather than degrading to "excludes
+ * nothing" — that reading would fire this kind on every TypeScript file in the
+ * tree, and a convention entry that cries wolf on every card is worse than one
+ * that was never added. Same contract as the two walks above; the entrypoint
+ * turns the throw into a non-zero exit.
+ */
+export function rootTsconfigExcludeEntries() {
+  const raw = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error('tsconfig.json is not parseable, so the root tsc program cannot be derived', { cause });
+  }
+  const exclude = parsed?.exclude;
+  if (!Array.isArray(exclude) || exclude.length === 0) {
+    throw new Error('tsconfig.json declares no non-empty `exclude`: the root tsc program is defined by that list and cannot be derived without it');
+  }
+  return exclude;
+}
+
+/**
+ * A plain top-level directory name — the ONE exclude shape this complement can
+ * judge. A pattern form excludes files INSIDE directories rather than whole
+ * directories, and reading one as a directory would narrow the complement and
+ * put the original hole back in a new place.
+ */
+export function isPlainTopLevelDir(entry) {
+  return typeof entry === 'string' && entry !== '' && !/[\/*?[\]]/.test(entry);
+}
+
+/**
+ * The top-level directories the root program does not walk, memoised.
+ *
+ * Entries that are not plain directory names are DROPPED, which widens the kind
+ * (a card is told to run a gate it may not move) rather than narrowing it — the
+ * safe direction, since these are leads to run locally and not verdicts. It is
+ * not left to rot either: the self-test pins that the live config still
+ * consists only of the shape this reads, so the day someone adds a pattern
+ * form CI says so and a human decides what the complement should mean.
+ */
+let rootProgramExcludes = null;
+export function rootTsProgramExcludedDirs() {
+  rootProgramExcludes ??= rootTsconfigExcludeEntries().filter(isPlainTopLevelDir);
+  return rootProgramExcludes;
 }
 
 /**
@@ -1659,6 +1749,54 @@ export function reachesMetadataFormModule(path, modulePaths) {
  * self-test for the live pins that keep the constants honest as the coupling
  * they are: manual, per-file, and silently rottable if nothing watched it.
  *
+ * ## Why the ROOT-program entry does not weaken the ledger's discipline (#9873)
+ *
+ * `check-type-check-coverage.mjs` states, in its own source, the very thesis
+ * the card for this entry was filed to argue: "The root program is everything
+ * outside packages/apps/examples, so no list here can ever be complete -- add a
+ * constant when a coupling has actually been measured, the way this one was."
+ * That is a deliberate policy, written by the gate's author before the card
+ * existed, and the entry below is a proposal against it. So it owes an answer
+ * rather than a shrug.
+ *
+ * The answer is that the two lists answer different questions, and only one of
+ * them is a measurement.
+ *
+ * The gate's ledger records MAGNITUDE. `ROOT_PROGRAM_COUPLED_SCRIPT` does not
+ * merely say "this file is in the program" — it carries a measured claim, that
+ * the file accounts for 29 of that entry's 80 errors, and the ledger note
+ * spends that number. A rule that manufactured such constants automatically
+ * really would register couplings nobody had measured, and the refusal is
+ * right. This entry adds no constant, moves no count and asserts no magnitude:
+ * the ledger keeps exactly the one measured coupling it has today, with every
+ * reference to it intact.
+ *
+ * This table records RELEVANCE — which gate a seat is told to run before it
+ * pushes. That claim needs no measurement to be true, because it is already
+ * settled by a file the repo maintains for another purpose entirely: a path is
+ * in the root program when the root tsconfig does not exclude it. Nothing here
+ * is kept in sync by hand, so there is no second contract to rot, and the
+ * measured-couplings rule the gate states about ITS list is untouched.
+ *
+ * What leaving the two questions merged cost, once, in the expensive direction:
+ * PR #9853 added a single file under a directory this entry now covers, derived
+ * its gate union with this script at final head, ran both gates the run named
+ * and reported them green — then CI failed the type-debt ratchet with 19 new
+ * errors from that one file. The gate worked exactly as designed. Nobody could
+ * know to run it, and the repair most available at that point is the one the
+ * gate's own text calls maintainer-only.
+ *
+ * ⚠ Its known limit, stated here rather than discovered later: `exclude` drops
+ * files only from tsc's INITIAL WALK, so sources under an excluded directory
+ * that a root script IMPORTS are pulled into the program anyway — the ledger
+ * note for this entry records 4 of its 80 errors arriving exactly that way,
+ * from the showcase example. A path-shaped trigger cannot see an import graph,
+ * so a card editing only such a file is still not sent here. That is
+ * deliberately NOT closed on this card: the direction is the safe one (this
+ * entry under-covers rather than over-covers), and closing it means resolving
+ * the program INCLUDING imports, which is a different tool than a path
+ * predicate and a different card's scope.
+ *
  * ## How these entries stay honest
  *
  * - Every `name` here is resolved against the families actually discovered in
@@ -1720,6 +1858,12 @@ export function reachesMetadataFormModule(path, modulePaths) {
  *     day the entry stops firing by itself (its `matches` reads the flags), so
  *     delete it only once the opt-out is the permanent shape rather than a
  *     transient one.
+ *   - root-program entry: when the gate's own source names its root population
+ *     in a form this derivation can read — a positive literal, or a generated
+ *     manifest of the resolved program — the ordinary path match names it and
+ *     this entry is redundant. Growing more measured coupling constants does
+ *     NOT qualify: each names one file, and this entry exists for the files
+ *     that have no constant yet, which is every new one.
  *
  *   Delete an entry the day its criterion is met, not before.
  */
@@ -1770,6 +1914,16 @@ export const CHANGE_KIND_GATES = [
       },
     ],
   },
+  {
+    kind: 'adds or edits TypeScript in the ROOT tsc program (outside the directories tsconfig.json excludes)',
+    matches: (path) => isInRootTsProgram(path, rootTsProgramExcludedDirs()),
+    gates: [
+      {
+        name: 'check:type-check-debt',
+        why: 'the ROOT ledger entry (@objectstack/spec-monorepo) IS this program, so a file here moves its raw tsc count even though your diff touches no package — measured, one added bench file put it 19 over and cost a CI round. It is a shrink-only ratchet: the repair is to make the file typecheck, and raising the entry is maintainer-only, never the co-equal option. Most of this class is one missing setting rather than real breakage — the root config carries lib ES2020 and no types, so process and console are absent unless the file declares them ambiently. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)',
+      },
+    ],
+  },
 ];
 
 /**
@@ -1793,6 +1947,125 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
       );
     }
   }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
+// The families a changeset will add — derived, not listed (#10309)
+// ---------------------------------------------------------------------------
+
+/**
+ * The hypothetical changeset file the pending section is derived against.
+ *
+ * Assembled from halves for the reason DEFAULT_BASE_REF is: a module-body
+ * constant spelling it whole would enter THIS file's own watch-hint set as a
+ * path, which is the fabrication its header argues against. Only the joined
+ * value is pathy, and it exists at runtime alone.
+ *
+ * The dot is on the TEMPLATE rather than on the directory constant, and that is
+ * load-bearing here in a way it is not for the base ref. `looksPathy` is not
+ * "contains a slash" alone — `extractWatchHints` also admits a literal naming a
+ * top-level dotted dir with no separator in it at all, and the changeset
+ * directory is one of the four it names. Measured on this file: written the
+ * obvious way, as one `.changeset` constant, this tool's own source grew a
+ * ninth hint reaching the changeset directory — inert for gate matching today
+ * only because no family resolves to this file, and the broadest possible
+ * fabrication on the day one does. Spelled below, it grows none.
+ *
+ * The filename is deliberately not a plausible one. It is printed in the
+ * provenance column of every row below, and a reader who takes it for a file on
+ * disk has been told something false by a tool whose whole contract is that its
+ * leads are real.
+ */
+const CHANGESET_DIR_NAME = 'changeset';
+const CHANGESET_PROBE_NAME = 'the-one-you-have-not-written-yet.md';
+export const CHANGESET_PROBE_PATH = `.${CHANGESET_DIR_NAME}/${CHANGESET_PROBE_NAME}`;
+
+/**
+ * The families that will apply once this card's changeset exists — the ones the
+ * derivation is structurally short by at the moment it is USED (#10309).
+ *
+ * ## The defect this answers
+ *
+ * The PM derives the gate list at DISPATCH time, over the card's declared file
+ * surface, and pastes it into the brief. The dev then re-derives from the real
+ * diff. Measured over one round of five independent dispatches, every single
+ * dev reported the same delta and it was always the same five families:
+ * `check:changeset-gate-self-tests`, `check:objectui-changeset`,
+ * `check-adr-0087-registration.mjs`, `check-changeset-no-major.mjs`,
+ * `check-empty-changeset.mjs`. On two of the five cards those five were the
+ * WHOLE delta.
+ *
+ * They are triggered by the changeset directory, they are perfectly
+ * path-derivable, and the path is simply not there yet: the dev writes the
+ * changeset after the derivation runs. So the derivation is correct at the
+ * moment it runs and short by these families by the time anyone acts on it —
+ * and short the same way every time, which is the part that costs something. A
+ * delta that is constant trains a reader to skip the whole comparison, and a
+ * real delta then hides inside five rows of noise. The property worth having is
+ * that the difference between the PM's list and the dev's re-derivation is
+ * INFORMATION.
+ *
+ * ## Why this is a probe and not a list
+ *
+ * ⛔ There is no table of changeset gates in this file and there must not be.
+ * This re-runs the SAME classifier the matched list is built from, against one
+ * hypothetical path, over the families the live discovery pass already found —
+ * so it reads CI's declared trigger and the gates' own watch hints exactly as
+ * every other row does. A sixth changeset-triggered family appears here the day
+ * it lands, with nothing to edit. That is the same contract as the rest of the
+ * script ("this script names no gate from memory"), applied to a question about
+ * a file that does not exist yet.
+ *
+ * ## Why already-matched families are subtracted
+ *
+ * `matchedChecks` is the set the matched list already printed. When the input
+ * really does carry a changeset — the dev's re-derivation after writing one —
+ * these families match on their own and belong in that list; printing them here
+ * as well would be the same lead twice, in two sections that make different
+ * claims about time. Subtraction is also why no predicate over the input paths
+ * is needed: a path set that reaches these families for ANY reason removes them
+ * from this section, and a partial overlap leaves exactly the remainder.
+ *
+ * Pure over its inputs — `entries` is `[check, entry]` pairs — so the self-test
+ * drives it offline on fixtures.
+ */
+export function pendingChangesetFamilies(entries, matchedChecks, probe = CHANGESET_PROBE_PATH) {
+  const pending = [];
+  for (const [check, entry] of entries) {
+    if (matchedChecks.has(check)) continue;
+    const { verdict, hits } = classifyEntry(entry, [probe]);
+    if (verdict === 'matched') pending.push({ check, entry, hits });
+  }
+  return pending;
+}
+
+/**
+ * Render the pending-changeset section. Empty array when there is nothing
+ * pending, so the section vanishes rather than printing a zero — a card whose
+ * diff already carries a changeset has no temporal gap left to disclose, and a
+ * "0 families" heading would invite the reader to look for one.
+ */
+export function pendingChangesetLines(pending, probe = CHANGESET_PROBE_PATH) {
+  if (pending.length === 0) return [];
+  const lines = [
+    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card is docs-only:`,
+  ];
+  for (const { entry, hits } of [...pending].sort((a, b) => a.check.localeCompare(b.check))) {
+    const via = hits.map((h) => `${h.via} '${h.hint}'`).join('; ');
+    lines.push(
+      `  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   would match ${probe} via ${via}`,
+    );
+  }
+  lines.push(
+    `  Derived by re-running this same discovery pass against ${probe} — a path that does not exist. Nothing here is`,
+    '    listed in this script, so a changeset-triggered family added tomorrow prints itself with nothing to update.',
+    '  ⛔ NOT a fourth bucket, and NOT a second copy of the matched list: for the paths as they stand these families',
+    '    earn an ordinary verdict in the residue below and are counted there. They are lifted out here because the',
+    '    changeset is written by the DEV, after this derivation runs — so a list that is right when it is derived is',
+    '    short by exactly these rows by the time it is used. Once the diff really carries one they move into the',
+    '    matched list above and this section stops printing.',
+  );
   return lines;
 }
 
@@ -2031,9 +2304,15 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * The mandatory-tier policy has two clauses and only the first is a question
  * about paths:
  *
- *   - clause ①, encoded below: a card editing the PM dispatch skill is
- *     `claude-fable-5`, references included. That is a file-surface predicate
- *     and it is exactly what this script already takes as argv;
+ *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
+ *     surfaces is `claude-fable-5` — the pm-dispatch SKILL.md main file, every
+ *     file carrying an enforced copy of the decision frame (the COPIES table
+ *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
+ *     "the whole skill tree, references included" by the maintainer's
+ *     2026-08-20 ruling (「接受你的建议」— fable 当审计师用,不当施工队用):
+ *     references-only surfaces carry NO path mandate any more (opus execution,
+ *     compensated by the skill-face review at CONTRACT_REVIEW_TIER). Still a
+ *     file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is also
  *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
@@ -2050,17 +2329,19 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * it cannot reach, every time, rather than leaving the reader to remember there
  * were two. The output is a FLOOR, never a ceiling.
  *
- * The quota exemption (fable measured unavailable ⇒ opus, never lower) is a
- * claim-time note about a model's availability, not a property of the file
- * surface. This tool states the mandate; the seat records the exemption and its
- * reason in the claim comment.
+ * The sanctioned exits from a mandate — the one-line-class mechanical-edit
+ * downgrade (a card CONTENT judgment, like clause ②), the measured quota
+ * exemption (fable unavailable ⇒ opus, never lower) and the proactive
+ * low-headroom downgrade — are claim-time judgments, not properties of the
+ * file surface. This tool states the mandate; the seat records any exit and
+ * its reason in the claim comment.
  *
  * ## Why the globs are matched with `hintCovers`, asymmetry included
  *
  * Same matcher as the gate half, so there is one path-comparison rule in this
  * file rather than two — and so a glob gets the segment-boundary semantics for
- * free: `.claude/skills/pm-dispatchers/x.md` is not under
- * `.claude/skills/pm-dispatch/**`, which a string prefix would have mandated.
+ * free: a declared surface of `.claude/skills/pm-disp` is not an ancestor of
+ * `.claude/skills/pm-dispatch/SKILL.md`, though it is a string prefix of it.
  *
  * `hintCovers` also matches in the other direction — an input that is an
  * ANCESTOR of the glob (a surface declared as `.claude/skills`) counts as a
@@ -2083,10 +2364,10 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  *
  * ## One measured side effect of putting a path in a MODULE BODY
  *
- * Comment masking cannot reach a module-body string, so this glob — and the
- * suspect glob below — is a watch hint of this file's own source: measured,
- * `extractWatchHints` yields 6 hints here against 4 on the base, the new ones
- * being the globs themselves. They are
+ * Comment masking cannot reach a module-body string, so these globs — and the
+ * suspect glob below — are watch hints of this file's own source: re-measured
+ * after the 2026-08-20 narrowing, `extractWatchHints` yields 8 hints here
+ * against 4 on the base, the new ones being the four globs themselves. They are
  * inert today because no check family resolves to THIS file — the gate that
  * covers it is `check:pm-dispatch-gates`, which resolves to
  * `check-dispatch-gates.mjs` and matches this file through that file's one
@@ -2097,16 +2378,30 @@ export function residueLines({ discovered, matched, undetermined, silent, unfilt
  * this note is so the next reader knows the cost is known, not unnoticed.
  *
  * The authority for the policy is the maintainer ruling quoted in the PM
- * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款).
+ * dispatch skill (2026-08-10 three-tier ruling, clause ① of its 强制条款, as
+ * narrowed to protocol semantics by the 2026-08-20 ruling quoted there).
  * This table is a machine-readable copy of ONE predicate from it, not a second
  * statement of the policy: when they disagree, the skill wins and this table is
- * the thing to fix.
+ * the thing to fix. The frame-copy half of the predicate is DEFINED by another
+ * gate's table — check:skill-frame-sync's COPIES — and the self-test pins this
+ * table as covering every file listed there, so a copy added to that gate
+ * cannot silently fall out of the mandate.
  */
 export const MANDATORY_TIER_GLOBS = [
   {
-    glob: '.claude/skills/pm-dispatch/**',
+    glob: '.claude/skills/pm-dispatch/SKILL.md',
     tier: 'claude-fable-5',
-    why: 'clause ① of the model-tiering ruling: a card editing the PM dispatch skill is fable-mandatory, references included — the skill is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch',
+    why: 'clause ① of the model-tiering ruling (narrowed to protocol semantics, 2026-08-20): the PM dispatch skill MAIN file is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch — references/** dropped out of the path mandate that day',
+  },
+  {
+    glob: '.claude/agents/os-dev.md',
+    tier: 'claude-fable-5',
+    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
+  },
+  {
+    glob: 'skills/objectstack-pm-dispatch/SKILL.md',
+    tier: 'claude-fable-5',
+    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
 
@@ -2221,8 +2516,10 @@ export function tierLines(result) {
   return [
     `Model tier — MANDATORY: ${tier} (derived from the file surface, not recalled).`,
     ...hits.map((h) => `  - ${h.path} ⇢ '${h.glob}' — ${h.why}`),
-    '  The only exit is the measured quota exemption (fable unavailable ⇒ opus, never lower), recorded with its reason' +
-      " in the claim comment's `Container & model` line.",
+    '  Exits, each recorded with its reason in the claim comment\'s `Container & model` line: a one-line-class' +
+      ' mechanical governed edit drops to opus execution (sonnet floor for pure one-liners at PM discretion,' +
+      ` compensated by the skill-face review at ${CONTRACT_REVIEW_TIER}) — judged from the card CONTENT, never from` +
+      ' paths; the measured quota exemption (fable unavailable ⇒ opus, never lower); the proactive low-headroom downgrade.',
     clause2,
     ...suspicion,
   ];
@@ -2329,6 +2626,19 @@ function derive(paths, { showResidue = false } = {}) {
   if (kindLines.length) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
+  }
+
+  // The pending-changeset section prints in BOTH input modes and is gated on
+  // nothing but the answer itself: the PM's paths are a hypothesis with no
+  // changeset in it, and a dev's real diff has none either until the changeset
+  // is written. Where one already exists, the families are in `matched` above
+  // and this comes back empty. See pendingChangesetFamilies for the round of
+  // five dispatches that measured the gap.
+  const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+  const pendingOut = pendingChangesetLines(pending);
+  if (pendingOut.length) {
+    console.log('');
+    for (const line of pendingOut) console.log(line);
   }
 
   if (showResidue) {
@@ -3005,7 +3315,54 @@ function selfTest() {
   // condition and a command that satisfies it.
   const debtLine = kindHit.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
   t('the ratchet line states its built-closure prerequisite', /closure BUILT|BUILT closure/.test(debtLine) && debtLine.includes('turbo run build'));
-  t('a non-test path emits nothing', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
+  t('a non-test path in no other kind emits nothing — a .mjs is outside the root tsc program too', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
+
+  // ── The ROOT tsc program entry (#9873) ────────────────────────────────────
+  //
+  // The one gate population no path literal can describe: the root program is
+  // declared by EXCLUSION, so this entry derives the complement from the root
+  // tsconfig's own list. These pin the predicate, the config read under it, the
+  // rendered line, and the property the entry was added for — the path from the
+  // PR that paid for this now derives the ratchet.
+  const rootExcl = rootTsProgramExcludedDirs();
+  t('the root exclude list is read from the config and is not empty', rootExcl.length > 0);
+  t('and it really names the three source trees tsc skips', ['packages', 'apps', 'examples'].every((d) => rootExcl.includes(d)));
+  t('a new script in the root tree is in the root program — the PR #9853 case', isInRootTsProgram('scripts/bench/runtime-publish-gate.bench.mts', rootExcl));
+  t('so is a top-level config file', isInRootTsProgram('tsup.config.ts', rootExcl));
+  t('so is a declaration file in the same tree', isInRootTsProgram('scripts/check-regen-pending.d.mts', rootExcl));
+  t('a leading ./ does not hide one', isInRootTsProgram('./scripts/check-test-typecheck.mts', rootExcl));
+  t('a package source is NOT in the root program', !isInRootTsProgram('packages/rest/src/rest-server.ts', rootExcl));
+  t('nor an app source', !isInRootTsProgram('apps/console/src/main.ts', rootExcl));
+  t('nor an example source — imports can still pull one in, which the entry note states as its limit', !isInRootTsProgram('examples/app-showcase/src/data/objects/index.ts', rootExcl));
+  // The extension half, which is what keeps this entry from firing on nearly
+  // every card that touches tooling. The root config sets no `allowJs`, so the
+  // tree's checker scripts are outside the program: 117 tracked JS files sit in
+  // these same directories against 11 TypeScript files that are really in it,
+  // so a bare "outside those directories" test would fire on 128 paths to reach
+  // 11 — and send each of them to a ratchet that needs a built closure.
+  t('a checker script is NOT in the root program — the root config sets no allowJs', !isInRootTsProgram('scripts/check-type-check-coverage.mjs', rootExcl));
+  t('nor is this deriver itself', !isInRootTsProgram('scripts/pm/dispatch-gates.mjs', rootExcl));
+  t('nor a non-TS file that merely lives there', !isInRootTsProgram('scripts/pm/README.md', rootExcl));
+
+  // The exclude-SHAPE guard. This complement can only judge plain directory
+  // names and silently drops anything else; dropping WIDENS the kind, so the
+  // rot would be quiet by construction. This pair is what makes it loud.
+  t('plain directory names are judged', isPlainTopLevelDir('packages') && isPlainTopLevelDir('.github'));
+  t('a nested path is not a plain directory name', !isPlainTopLevelDir('packages/objectql/src/engine.test.ts'));
+  t('nor is a pattern form', !isPlainTopLevelDir('*.test.ts') && !isPlainTopLevelDir('[abc]'));
+  t('nor an empty or non-string entry', !isPlainTopLevelDir('') && !isPlainTopLevelDir(null));
+  t('the LIVE root tsconfig still consists only of the shape this reads', rootTsconfigExcludeEntries().every(isPlainTopLevelDir));
+
+  // The rendered line, anchored on the delimiters for the reason the pair
+  // above states at length: a bare `includes` survives a prefix-preserving
+  // rename, which is the one rot class the STALE branch exists to report.
+  const rootKind = changeKindLines(['scripts/bench/runtime-publish-gate.bench.mts'], resolved);
+  t('a root-program path emits the convention section', rootKind.length === 2 && rootKind[0].includes('ROOT tsc program'));
+  t('and it names the RATCHET half — the invocation that re-measures', rootKind.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  const rootLine = rootKind.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
+  t('the root-program line refuses the baseline raise and states the real repair', /shrink-only/.test(rootLine) && /maintainer-only/.test(rootLine));
+  t('and carries the built-closure prerequisite, like the other ratchet line', /closure BUILT/.test(rootLine) && rootLine.includes('turbo run build'));
+  t('a checker script beside it still emits nothing', changeKindLines(['scripts/check-type-check-coverage.mjs'], resolved).length === 0);
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one
   // line of the gate's own `findConfigs`.
@@ -3250,6 +3607,19 @@ function selfTest() {
   // than a pair of matching strings.
   t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
 
+  // The same coupling once more, for the frame-sync gate whose COPIES table
+  // the 2026-08-20 clause-① narrowing made a DEFINING input of the tier
+  // mandate. The tool's self-test reaches it through a spawned import — not a
+  // discoverable hint — so the gate declares it as a constant, and this pin
+  // keeps that declaration live: delete it and this reddens instead of a
+  // COPIES edit moving the gate's verdict while deriving nothing.
+  const FRAME = 'scripts/check-skill-frame-sync.mjs';
+  t(
+    'the dispatch-gates gate declares the frame-sync module the tier mandate is defined against',
+    covers(readHints('scripts/pm/check-dispatch-gates.mjs'), FRAME),
+  );
+  t('the declared frame-sync module exists', existsSync(join(ROOT, FRAME)));
+
   // The same shape again, for the TYPE-registry edge of walkMetadataForms
   // (#9144) — two specific, known files rather than a runtime-enumerated
   // population, so they are closed as coupling constants in
@@ -3429,7 +3799,13 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 5);
+  // Six, not five, since the root-program entry joined the table: `a.test.ts`
+  // is a root-level TypeScript file, so it is BOTH a test file and inside the
+  // root tsc program and legitimately hits two kinds. The ratchet therefore
+  // renders twice, under a different `why` each time — pinned just below,
+  // because a bare count cannot tell that apart from one kind rotting away.
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 6);
+  t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
   // one of the two is dropped from the table and something else is added, and a
@@ -3766,34 +4142,113 @@ function selfTest() {
     !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000 }),
   );
 
+  // ── The families a changeset will add (#10309) ────────────────────────────
+  //
+  // The measured defect: over one round of five dispatches, every dev's
+  // re-derivation was longer than the PM's list by the SAME five families, and
+  // on two of the five cards those five were the whole delta. They are
+  // changeset-triggered, and the changeset does not exist when the PM derives.
+  //
+  // These cases pin the property rather than the five names. The fixtures below
+  // invent gates this repo does not have — including a SIXTH changeset-
+  // triggered family — because the one thing this section must never become is
+  // a table: a hand-maintained list would pass a test written against today's
+  // five and go quietly wrong on the day a sixth lands, which is the failure
+  // mode the whole file is built against. A fixture family the script has never
+  // heard of appearing in the output is the only assertion that can tell a
+  // probe from a list.
+  const csFam = (check, hints, extra = {}) => [
+    check,
+    { check, filter: null, direct: false, workflows: new Set(['lint.yml']), files: [], hints, triggers: [], ...extra },
+  ];
+  const csEntries = [
+    csFam('check:invented-changeset-gate', ['.changeset']),
+    csFam('check:invented-sixth-changeset-gate', ['.changeset/**']),
+    csFam('check:invented-pre-mode-gate', ['.changeset/pre.json']),
+    csFam('check:invented-unrelated-gate', ['packages/objectql/src']),
+    csFam('check:invented-undetermined-gate', []),
+  ];
+  const pending = pendingChangesetFamilies(csEntries, new Set());
+  const pendingNames = pending.map((p) => p.check);
+  t('a family whose source names the changeset dir is pending for a card that has none yet', pendingNames.includes('check:invented-changeset-gate'));
+  t(
+    'a SIXTH changeset-triggered family the script has never heard of is pending too — the section is a probe, not a list',
+    pendingNames.includes('check:invented-sixth-changeset-gate'),
+  );
+  // Coverage, not a name match: a gate that reads only the pre-mode file lives
+  // in the changeset directory and is NOT moved by a new changeset. Widening
+  // the probe to "mentions the changeset dir" would fabricate this lead in the
+  // section a dispatch prompt pastes.
+  t('a family naming only the pre-mode file is NOT pending — a new changeset is not that file', !pendingNames.includes('check:invented-pre-mode-gate'));
+  t('a family naming an unrelated tree is NOT pending', !pendingNames.includes('check:invented-unrelated-gate'));
+  t('nor is one whose source names no path at all — undetermined is not pending', !pendingNames.includes('check:invented-undetermined-gate'));
+  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(join(ROOT, CHANGESET_PROBE_PATH)));
+  // The subtraction: when the input really carries a changeset these families
+  // are in the matched list already, and printing them twice would make two
+  // sections claim different things about the same lead.
+  const pendingAfterMatch = pendingChangesetFamilies(csEntries, new Set(['check:invented-changeset-gate']));
+  t(
+    'a family the matched list already printed is subtracted, never printed twice',
+    !pendingAfterMatch.map((p) => p.check).includes('check:invented-changeset-gate'),
+  );
+  t('and subtraction leaves exactly the remainder, not the whole section', pendingAfterMatch.map((p) => p.check).includes('check:invented-sixth-changeset-gate'));
+  // CI's own trigger reaches the probe too — the section asks the same question
+  // of both authorities the matched list does, not of watch hints alone.
+  const csTriggered = pendingChangesetFamilies(
+    [csFam('check:invented-trigger-gate', [], { triggers: [{ workflow: 'invented.yml', paths: ['.changeset/**'] }] })],
+    new Set(),
+  );
+  t('a family CI SCHEDULES for a changeset is pending on the trigger alone, with no watch hint', csTriggered.length === 1);
+  // Optional-chained on purpose: an implementation that stops finding this
+  // family must REDDEN this case, not throw out of the harness before the rest
+  // of the suite runs (measured while ablating the probe into a hand list).
+  t('and its provenance says so, rather than claiming a source literal', csTriggered[0]?.hits?.[0]?.via?.startsWith('CI trigger in') === true);
+  // Rendering.
+  const pendingOut = pendingChangesetLines(pending);
+  t('the section heading counts the families and carries the docs-only escape', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card is docs-only:$/.test(pendingOut[0]));
+  t('every row is a RUNNABLE invocation, the same as the matched list', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.startsWith('  - pnpm ') || l.startsWith('  - node ')));
+  t('every row prints the hypothetical path it would match, so the lead cannot read as a real one', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.includes(CHANGESET_PROBE_PATH)));
+  t('the section says out loud that it is not a fourth bucket', pendingOut.some((l) => l.includes('NOT a fourth bucket')));
+  t('and that the dev writes the changeset AFTER this derivation runs — the temporal gap is the point', pendingOut.some((l) => l.includes('written by the DEV, after this derivation runs')));
+  t('an empty pending set renders NOTHING — no zero heading to send a reader looking', pendingChangesetLines([]).length === 0);
+
   // ── The model-tier derivation (#8640) ─────────────────────────────────────
   //
-  // The incident these pin: a surface containing a pm-dispatch REFERENCES file
-  // was claimed as "not under the fable-mandatory roots" and dispatched at
-  // opus. Every direction of that judgment is asserted here — the root, the
-  // references half that was actually missed, a mixed surface where the
-  // ordinary paths must not dilute the mandate, and the ordinary surface that
-  // must NOT be mandated (a tool that mandates everything is ignored, which
-  // loses the guardrail by the other road).
+  // The incident these originally pinned: a surface containing a pm-dispatch
+  // REFERENCES file was claimed as "not under the fable-mandatory roots" and
+  // dispatched at opus — nothing mechanical compared the claim to the globs.
+  // The 2026-08-20 narrowing then made references paths genuinely non-mandatory
+  // (opus execution, compensated by the fable-tier skill-face review), so the
+  // references pin is now asserted in the OPPOSITE direction; the incident's
+  // lesson — derive, never recall — is what survives unchanged. Every
+  // direction is asserted: each protocol-semantic file, the references half
+  // that dropped out, a mixed surface where ordinary paths must not dilute the
+  // mandate, and the ordinary surface that must NOT be mandated (a tool that
+  // mandates everything is ignored, which loses the guardrail by the other road).
   const fableOf = (paths) => deriveTier(paths);
-  t('a pm-dispatch ROOT path is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
-  t('a pm-dispatch REFERENCES path is fable-mandatory too — the half the incident missed', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).tier === 'claude-fable-5');
-  const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/skills/pm-dispatch/references/review-checklist.md']);
+  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === 'claude-fable-5');
+  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
+  const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
-  t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('references/review-checklist.md'));
+  t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
   t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
   t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
   // Segment boundaries, both directions of the shared matcher's asymmetry.
   t('a sibling directory sharing a name PREFIX is not mandated', fableOf(['.claude/skills/pm-dispatchers/notes.md']).mandatory === false);
-  t('a surface declared as an ANCESTOR of a mandatory root IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
+  t('a bare string PREFIX of a mandatory file is not an ancestor of it, and is not mandated', fableOf(['.claude/skills/pm-disp']).mandatory === false);
+  t('a surface declared as an ANCESTOR of a mandatory file IS mandated — the safe direction here', fableOf(['.claude/skills']).mandatory === true);
+  t('the pm-dispatch DIRECTORY (ancestor of its SKILL.md) is mandated — a card declaring the directory may touch the main file', fableOf(['.claude/skills/pm-dispatch']).mandatory === true);
   t('another skill under the same parent is not mandated', fableOf(['.claude/skills/verify/SKILL.md']).mandatory === false);
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
   t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
   t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
-  t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes('.claude/skills/pm-dispatch/references/review-checklist.md') && mandLines.includes(".claude/skills/pm-dispatch/**'"));
-  t('the mandatory rendering names the ONE exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower'));
+  t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes("- .claude/agents/os-dev.md ⇢ '.claude/agents/os-dev.md'"));
+  t('the mandatory rendering names every sanctioned exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower') && mandLines.includes('one-line-class') && mandLines.includes('proactive low-headroom'));
+  t('the mechanical-edit exit names its compensating control from the single-source constant', mandLines.includes(`skill-face review at ${CONTRACT_REVIEW_TIER}`));
   const plainLines = tierLines(fableOf(['packages/spec/src/data/filter.zod.ts'])).join('\n');
   t('the no-mandate rendering claims no mandate', !plainLines.includes('MANDATORY'));
   t('the no-mandate rendering names the floor and the default, so the judgment call has its band', plainLines.includes(TIER_FLOOR) && plainLines.includes(TIER_DEFAULT));
@@ -3825,7 +4280,31 @@ function selfTest() {
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references case is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
+  // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
+  // pinned mechanically: a copy added to that gate without a matching mandate
+  // glob here would be exactly the prose-recall drift this section exists
+  // against. Spawned rather than imported — selfTest is synchronous, and the
+  // probe also proves the module stays import-safe from a cold process.
+  const frameProbe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const m = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
+    ],
+    { encoding: 'utf8', cwd: ROOT },
+  );
+  let frameFiles = [];
+  try {
+    frameFiles = JSON.parse((frameProbe.stdout ?? '').trim());
+  } catch {
+    /* frameFiles stays empty and the cases below fail loudly */
+  }
+  t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
+  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === 'claude-fable-5'));
+  t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
   //
@@ -4029,6 +4508,40 @@ function selfTest() {
     t('nor check-skill-frame-freshness.mjs', !unreachableBlock.includes('check-skill-frame-freshness.mjs'));
     t('and no phantom namespace literal survives into the printed reasons', !/'application\/json'|'refs\/remotes\/|'origin\/main'/.test(unreachableBlock));
 
+    // #10309, pinned END TO END for the same reason #10097 is: every case above
+    // drives `pendingChangesetFamilies`/`pendingChangesetLines` in isolation and
+    // all of them stay green if the call site is dropped from `derive`, or hidden
+    // behind a flag no dispatch brief tells anyone to pass. Only a real DEFAULT
+    // run over a real non-changeset surface can tell those apart — and this is
+    // also the one case that proves the LIVE tree still has such families at all,
+    // so a probe that silently stopped reaching them cannot pass as "none
+    // pending".
+    t('the DEFAULT run names the families a changeset will add', /^Once a changeset exists, \d+ more famil\(ies\) apply/m.test(plainOut));
+    const pendingBlock = plainOut.slice(plainOut.indexOf('Once a changeset exists,'), plainOut.indexOf('Unreachable — the'));
+    t('and the live tree really has some — the probe reaching nothing must not read as "none pending"', /^ {2}- (pnpm|node) \S/m.test(pendingBlock));
+    // `every` over an empty list is true, so the row count is asserted BESIDE
+    // it: without that, dropping the call site leaves this case green on a slice
+    // containing nothing at all (measured — it was the one live case ablating
+    // the call site did not redden).
+    const pendingRows = pendingBlock.split('\n').filter((l) => l.startsWith('  - '));
+    t('every live row is runnable and carries the hypothetical path', pendingRows.length > 0 && pendingRows.every((l) => /^ {2}- (pnpm|node) /.test(l) && l.includes(CHANGESET_PROBE_PATH)));
+    // The negative half: hand the SAME run a diff that already carries a
+    // changeset. Those families must move into the matched list and the section
+    // must stop printing — the double-print is the shape this section would be
+    // worst as, since the two headings make different claims about time.
+    const withChangeset = spawnSync(
+      process.execPath,
+      [SELF, 'packages/spec/src/data/filter.zod.ts', `.${'changeset'}/pinned-by-the-self-test.md`],
+      { encoding: 'utf8', cwd: ROOT },
+    );
+    const withOut = withChangeset.stdout ?? '';
+    t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
+    t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
+    t(
+      'because those families are in the MATCHED list instead, each one exactly once',
+      withOut.split('\n').filter((l) => l.startsWith('  - ') && l.includes('check-empty-changeset')).length === 1,
+    );
+
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
     // Node resolves the link for the module graph, so `import.meta.url` names
     // the real file while argv[1] names the link. Under the precedent's
@@ -4088,40 +4601,21 @@ function selfTest() {
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 /**
- * Is `entryArg` — a `process.argv[1]` — this very module?
+ * The entry guard, and the predicate under it, both live in
+ * `scripts/invoked-as.mjs` — one implementation for all of `scripts/`.
  *
- * Exported so the predicate the entry guard stands on is pinned by cases rather
- * than trusted by reading. Its failure direction is SILENT: an `invokedDirectly`
- * that wrongly answered `false` would turn every mode of this tool into a no-op
- * that prints nothing and exits 0, and `check:pm-dispatch-gates` holds the
- * child's exit STATUS only (see that gate's header) — so the no-op would report
- * as a pass, which is the silent-success direction this tree treats as worse
- * than no check at all.
+ * `invokedAs` is re-exported because this module's self-test drives it
+ * directly, and because that export was this tree's first landing of the
+ * two-comparison shape. The implementation moved; the export did not.
  *
- * Two comparisons, because node resolves symlinks for the module graph but
- * leaves `process.argv[1]` as the caller typed it. The plain `resolve` equality
- * is the spelling of the landed precedent one file over
- * (`scripts/pm/check-governed-merges.mjs`, whose header carries this shape's
- * incident history). The realpath comparison is the half that keeps a checkout
- * REACHED THROUGH A SYMLINK from reading as "imported": `import.meta.url` would
- * name the real file while `argv[1]` named the link, the equality would answer
- * false, and the tool would go quietly inert for whoever ran it that way. It
- * falls back to `false` rather than throwing — an unreadable entry path is not
- * this module.
+ * Its failure direction is SILENT: an entry guard that wrongly answered
+ * `false` would turn every mode of this tool into a no-op that prints nothing
+ * and exits 0, and `check:pm-dispatch-gates` holds the child's exit STATUS
+ * only (see that gate's header) — so the no-op would report as a pass.
  */
-export function invokedAs(entryArg, selfPath) {
-  if (!entryArg) return false;
-  const entry = resolve(entryArg);
-  const self = resolve(selfPath);
-  if (entry === self) return true;
-  try {
-    return realpathSync(entry) === realpathSync(self);
-  } catch {
-    return false;
-  }
-}
+export { invokedAs };
 
-const invokedDirectly = invokedAs(process.argv[1], fileURLToPath(import.meta.url));
+const invokedDirectly = isEntrypoint(import.meta.url);
 
 /**
  * Executed only as a CLI. Importing this module must have NO side effect.

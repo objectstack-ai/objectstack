@@ -109,7 +109,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ADR_DIR = 'docs/adr';
 
@@ -457,7 +457,7 @@ function selfTest() {
 /* Run only when invoked as a program. The extractor is exported so a future
  * caller (or a REPL session chasing a false positive) can import it without the
  * import itself sweeping the repo. */
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) selfTest();
   else runCheck();
 }

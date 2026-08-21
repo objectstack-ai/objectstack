@@ -12,7 +12,11 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError }
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import {
+    evaluateRuntimeAuthoringGate,
+    CLOSURE_CONTEXT_KEY_BY_TYPE,
+    type RuntimePendingDeclarations,
+} from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
@@ -3300,6 +3304,34 @@ export interface MetadataMutationEvent {
 }
 
 /**
+ * [#10219] A single item reached `active` through the per-item publish door
+ * (`publishMetaItem`, i.e. `POST /api/v1/meta/:type/:name/publish`). `type` is
+ * the CANONICAL singular metadata type name — the same spelling the promoted
+ * row carries — so a subscriber can build the `'{type}/{name}'` entry the
+ * `metadata:reloaded` payload's `changed` list is made of.
+ *
+ * Subscribe via {@link ObjectStackProtocolImplementation.onMetaItemPublished}.
+ *
+ * ## Why this is NOT the existing {@link MetadataMutationEvent}
+ *
+ * The per-item publish emits BOTH. The mutation event says "a row changed" and
+ * is emitted from `runPublishSideEffects`, the phase-2 helper the BATCH door
+ * (`publishPackageDrafts`) runs once per promoted draft as well — so a
+ * subscriber that announced a full metadata reload on it would fire N times for
+ * one "publish whole app", each announce driving a complete re-sync (schema DDL,
+ * connector re-materialization, flow re-bind) for every other item in the same
+ * batch. This event is emitted ONLY by the single-item door, which is the one
+ * the batch route's own announce does not cover.
+ */
+export interface MetaItemPublishedEvent {
+    /** Canonical singular metadata type of the promoted item. */
+    type: string;
+    name: string;
+    /** Scope the promotion landed in — `null` is env-wide. */
+    organizationId: string | null;
+}
+
+/**
  * Awaited per-type mutation projector (ADR-0094). Invoked AFTER a metadata
  * mutation persists — `saveMetaItem` (draft AND active saves),
  * `publishMetaItem`, `deleteMetaItem` — and AWAITED before the write returns,
@@ -3892,6 +3924,19 @@ export class ObjectStackProtocolImplementation implements
          * sentinel ⇒ nothing is narrowed.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The declarations this write's own BATCH is publishing
+         * alongside it, when the caller HAS a batch. Only
+         * `publishPackageDrafts` does; every other door writes one item, so its
+         * closure is the live universe and it states nothing here.
+         *
+         * Threaded rather than gathered: the batch's pending drafts are
+         * `sys_metadata` rows the caller has already listed and is about to
+         * consume, and re-deriving them from this side would mean guessing
+         * WHICH batch a write belongs to — which is the question the caller is
+         * the only one holding the answer to.
+         */
+        pending?: RuntimePendingDeclarations;
     }): RuntimeAuthoringIssue[] {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
@@ -3992,6 +4037,9 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
+            // [#10377] The batch's own pending drafts join the four
+            // collections above. Absent on every non-batch door.
+            ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
@@ -4183,6 +4231,98 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#10219] Per-item publish listeners — the producer-side half of the
+     * publish→re-bind signal.
+     *
+     * ## The gap this closes
+     *
+     * A metadata publish at RUNTIME leaves every boot-cached consumer holding
+     * the pre-publish view; the platform's declared signal for "re-read what
+     * you cached" is the `metadata:reloaded` lifecycle event. Two announcers
+     * existed — the metadata plugin's dev-artifact watcher, and the runtime
+     * dispatcher AFTER `POST /packages/:id/publish-drafts`. The per-item door
+     * (`POST /api/v1/meta/:type/:name/publish`) announced nothing, so a flow
+     * published one item at a time never bound its trigger until the kernel was
+     * rebuilt: measured on a cloud rig, a record-change flow published as
+     * `state='active'` produced no bind log and no execution, and only the
+     * `kernel:ready` cold-boot bind (#2560) ever picked it up.
+     *
+     * ## Why the seam is here and not at the HTTP route
+     *
+     * `publishMetaItem` is the ONE producer behind every per-item publish
+     * transport (REST today; anything else that reaches the protocol next), and
+     * the batch door's announce already lives outside the protocol. Announcing
+     * from the producer means a new transport inherits the signal instead of
+     * having to remember it — the same argument {@link onMetadataMutation}
+     * makes one method over.
+     *
+     * The protocol itself holds no kernel hook bus, so it does not announce:
+     * it NOTIFIES, and the plugin that owns this protocol instance
+     * (`ObjectQLPlugin.subscribeMetadataRebind`, which is armed for both
+     * assembly modes) translates the notification into `ctx.trigger(
+     * 'metadata:reloaded', { changed })`. That keeps the lifecycle event
+     * emitted by something that actually has the kernel, exactly as the
+     * dispatcher does for the batch door.
+     *
+     * Server-side extension only — NOT part of the ObjectStackProtocol wire
+     * contract (same status as {@link onMetadataMutation}).
+     */
+    private metaItemPublishedListeners: Array<(evt: MetaItemPublishedEvent) => void | Promise<void>> = [];
+
+    /**
+     * Subscribe to per-item publishes. Returns an unsubscribe fn.
+     *
+     * Listeners are AWAITED (unlike {@link onMetadataMutation}'s fire-and-forget
+     * fan-out) so the publish's own 2xx means "the re-bind was attempted",
+     * matching the batch door — which awaits its `metadata:reloaded` announce
+     * before answering. A caller that publishes a flow and immediately writes a
+     * record must not race the bind.
+     */
+    onMetaItemPublished(listener: (evt: MetaItemPublishedEvent) => void | Promise<void>): () => void {
+        this.metaItemPublishedListeners.push(listener);
+        return () => {
+            const i = this.metaItemPublishedListeners.indexOf(listener);
+            if (i >= 0) this.metaItemPublishedListeners.splice(i, 1);
+        };
+    }
+
+    /**
+     * Notify per-item publish listeners, awaited and isolated.
+     *
+     * Best-effort by contract: the draft is already promoted and durable when
+     * this runs, so a subscriber failure must never turn a landed publish into
+     * an error response. It IS logged — losing an in-memory re-sync is the
+     * functional degradation AGENTS.md uses as its worked example ("a trigger
+     * is not armed"), and the batch door's equivalent catch logs at `warn` for
+     * the same reason. The sentence names the consequence and the recovery
+     * rather than the internal failure alone.
+     *
+     * ⛔ The caught text is NOT copied onto the publish response. The batch door
+     * carries a `rebindError` key because its response is a batch receipt; this
+     * door's response is declared by `PublishMetaItemResponseSchema` and adding
+     * a zero-reader diagnostic key to a wire contract buys no capability
+     * (the #6955 ruling, one payload over) — the operator-facing channel is
+     * this log.
+     */
+    private async emitMetaItemPublished(evt: MetaItemPublishedEvent): Promise<void> {
+        for (const listener of this.metaItemPublishedListeners) {
+            try {
+                await listener(evt);
+            } catch (e) {
+                console.warn(
+                    `[Protocol] the post-publish re-bind announce FAILED for ${evt.type}/${evt.name} — the item IS `
+                    + `published and stored, but boot-cached consumers keep the PRE-publish view until this process `
+                    + `restarts: a newly published record-triggered flow does not bind its trigger (it will not fire), `
+                    + `an edited schedule-triggered flow keeps running its old definition, and authored hooks, actions `
+                    + `and translations are not re-synced. Nothing retries this announce. Re-publish the item once the `
+                    + `cause below is resolved (it is idempotent), or restart the process to rebuild every subscriber `
+                    + `from storage. Cause: ${e instanceof Error ? e.message : String(e)}`,
+                );
+            }
+        }
+    }
+
+    /**
      * Lazily obtain a SysMetadataRepository for the given organization.
      * Env-wide overlays (organizationId == null) share a singleton under
      * the `__env__` key.
@@ -4252,6 +4392,68 @@ export class ObjectStackProtocolImplementation implements
         if (inOrg) return requestOrgId;
         const inEnv = await this.engine.findOne('sys_metadata_history', {
             where: { organization_id: null, type: singularType, name },
+        });
+        return inEnv ? null : requestOrgId;
+    }
+
+    /**
+     * [#10219] ADR-0005 / #3115 — resolve the org scope the PENDING DRAFT of an
+     * item actually lives in, for a per-item publish whose caller may not be in
+     * that scope.
+     *
+     * This is the single-item twin of the rule `publishPackageDrafts` already
+     * follows. The batch door DISCOVERS each draft's scope (`listDrafts`
+     * surfaces a non-null-org caller's own rows AND the env-wide ones via its
+     * `$or`, and the promote targets `d.organizationId`); the per-item door
+     * DEDUCED one instead, from `organizationIdForMetaWrite(type, activeOrg)` at
+     * the REST seam. The two answers differ for exactly the types the registry
+     * declares `allowOrgOverride: true` (`view`, `dashboard`, `report`,
+     * `translation`, `email_template`): a draft authored env-wide — which is
+     * what package/AI authoring writes, and what `PUT ?mode=draft` writes when no
+     * active org is threaded — is looked up under `organization_id = <org>`,
+     * matches nothing, and answers `404 [no_draft] … nothing to publish` over a
+     * row the console's own pending-changes list is showing. Measured on a cloud
+     * rig: four AI-authored `view` drafts, visible in `sys_metadata` at
+     * `state='draft'`, all four refused by the per-item door while the batch
+     * "publish 4 changes" button promoted them.
+     *
+     * Non-org-overridable types (`object`, `flow`, …) never reached this at all:
+     * `organizationIdForMetaWrite` already answers `undefined` for them, which is
+     * why per-item publish worked for objects and flows and failed for views.
+     *
+     * Precedence is the ADR-0005 overlay order — the caller's own org shadows
+     * env-wide — so an org holding its own draft publishes THAT draft, and only
+     * an org with no draft of its own falls through to the env-wide row it was
+     * already authoring into. When NEITHER scope holds a draft the caller's own
+     * scope is returned unchanged, so a genuinely absent draft still raises the
+     * same `NO_DRAFT` refusal, from the scope the caller asked about.
+     *
+     * ⛔ This is discovery, not a tolerant fallback: it names the one row the
+     * promote will then address, and it reads DRAFT rows in `sys_metadata` (the
+     * thing being promoted) rather than the history lineage
+     * {@link resolveMetaItemOrgScope} reads — a first-ever draft of a
+     * never-published item has no lineage to resolve.
+     *
+     * Deliberately NO `catch`, for the same reason as its read-side sibling: a
+     * driver failure must fail the publish, not resolve to a scope nobody
+     * verified.
+     */
+    private async resolveDraftOrgScopeForPublish(
+        singularType: string,
+        name: string,
+        requestOrgId: string | null,
+    ): Promise<string | null> {
+        if (requestOrgId === null) return null;
+        // The package dimension is deliberately absent from both probes: the
+        // per-item door names no package, so `promoteDraft` resolves the draft
+        // with "match any package" and these reads must ask the same question
+        // it will (see `SysMetadataRepository.whereFor`).
+        const inOrg = await this.engine.findOne('sys_metadata', {
+            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
+        });
+        if (inOrg) return requestOrgId;
+        const inEnv = await this.engine.findOne('sys_metadata', {
+            where: { organization_id: null, type: singularType, name, state: 'draft' },
         });
         return inEnv ? null : requestOrgId;
     }
@@ -14059,6 +14261,26 @@ export class ObjectStackProtocolImplementation implements
         // rewrites it on upgrade). Different input class, different map; see
         // {@link canonicalMetaType}'s header for why the two are not one fold.
         request = canonicalizeMetaRequestType(request);
+        // [#10219] Then resolve WHICH SCOPE's draft this publish means. The
+        // caller states the scope it is IN; the draft may live env-wide. See
+        // {@link resolveDraftOrgScopeForPublish} — the single-item twin of the
+        // #3115 rule `publishPackageDrafts` already follows.
+        //
+        // Placed after the type fold (the probe must name the canonical stored
+        // `type`) and before every gate below, so the ADR-0010 lock check, the
+        // #6190 org-scoped-write refusal and the promote all judge ONE scope —
+        // the one the row is actually in. Resolving it later would gate against
+        // a partition the promotion never touches.
+        {
+            const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+            const resolvedOrgId = await this.resolveDraftOrgScopeForPublish(
+                singular, request.name, request.organizationId ?? null,
+            );
+            if (resolvedOrgId !== (request.organizationId ?? null)) {
+                const { organizationId: _requested, ...rest } = request;
+                request = resolvedOrgId === null ? rest : { ...rest, organizationId: resolvedOrgId };
+            }
+        }
         // [#8594] The refusal's own row is written HERE, by the route that owns
         // the (absent) transaction — see `promoteDraftForPublish`'s header. This
         // site has no transaction of its own, so recording it in the `catch` is
@@ -14131,6 +14353,19 @@ export class ObjectStackProtocolImplementation implements
         if (effects.seedApplied) response.seedApplied = effects.seedApplied;
         if (effects.materializeApplied) response.materializeApplied = effects.materializeApplied;
         if (effects.projectionApplied) response.projectionApplied = effects.projectionApplied;
+        // [#10219] LAST, and awaited: tell the host that ONE item went live, so
+        // it can announce `metadata:reloaded` and boot-cached consumers re-sync
+        // without a restart — the parity the batch door has had since #2576.
+        // After the side effects because a subscriber re-reads the protocol
+        // (`resyncFlowsFromProtocol` pulls `getMetaItems({type:'flow'})`), and
+        // it must see the finished state: the active row, its table, and any
+        // materialized rows. Before the return so the caller's 2xx means the
+        // re-bind was attempted, not merely queued.
+        await this.emitMetaItemPublished({
+            type: singularType,
+            name: request.name,
+            organizationId: orgId,
+        });
         return response;
     }
 
@@ -14183,6 +14418,17 @@ export class ObjectStackProtocolImplementation implements
          * the caller actually has a binding to state.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The OTHER drafts this promotion is part of a batch with,
+         * projected into the gate's context collections. Forwarded verbatim to
+         * {@link assertRuntimeAuthoringRules} — this method computes nothing
+         * from it and holds no opinion about its contents.
+         *
+         * Stated by `publishPackageDrafts` (a package publishes as a unit);
+         * absent on the `publishMetaItem` path, whose batch is one item, so a
+         * "same-batch" closure would be the item itself and change nothing.
+         */
+        pending?: RuntimePendingDeclarations;
     }): Promise<{
         singularType: string;
         orgId: string | null;
@@ -14287,6 +14533,13 @@ export class ObjectStackProtocolImplementation implements
                 // fires while looking like it does. Filed rather than widened
                 // here, because `MetadataItem` is a `packages/spec` contract.
                 ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+                // [#10377] The batch's own pending drafts, when this promotion
+                // is part of one. The package closure above says WHICH packages
+                // this write may resolve against; this says which of its own
+                // package's declarations are in flight beside it — two
+                // different narrowings, both needed for a package to be
+                // judged as a self-consistent unit.
+                ...(request.pending !== undefined ? { pending: request.pending } : {}),
             })
             : [];
 
@@ -14589,6 +14842,155 @@ export class ObjectStackProtocolImplementation implements
         });
         return { drafts };
     }
+
+    /**
+     * [#10377] The batch's own pending declarations, projected into the gate's
+     * context collections — the half of the closure that makes a package
+     * publishable as a SELF-CONSISTENT UNIT.
+     *
+     * ## What was broken
+     *
+     * `assertRuntimeAuthoringRules` resolves every context collection off
+     * `engine.registry`, i.e. the LIVE universe. A draft is not in it — the
+     * write-through runs on `mode: 'publish'` — and the batch's own promotions
+     * do not put it there either, because `applyRegistryWriteThrough` lives in
+     * Phase 2, after the Phase-1 transaction in which every draft is gated and
+     * promoted. So while a batch is being judged NO sibling of that batch is
+     * visible to any other member's gate pass, in ANY order. Measured
+     * 2026-08-21 on a cloud rig: a package carrying `dataset/shyx_customer_ds`
+     * and a `dashboard` whose widget binds it rolled back at the dashboard
+     * with `[widget-dataset-unknown] … does not resolve to a declared
+     * dataset`, on every attempt and under both dataset names the author
+     * tried. The dataset was in the same batch, three rows away.
+     *
+     * ## Why the bodies are read here and not inside the loop
+     *
+     * The promote DELETES the draft row (`repo.promoteDraft` = active-row put +
+     * draft delete), so a body read after the first promotion is a body that
+     * may already be gone — the same reason the seed capture inside Phase 1
+     * reads BEFORE its own promote. Reading the whole set up front also makes
+     * the closure ORDER-INDEPENDENT by construction rather than by luck of
+     * iteration: every member is judged against the same complete set.
+     *
+     * ## Scope, and why no extra filtering is needed
+     *
+     * `drafts` is already exactly this package's pending set — `listDrafts`
+     * narrows by `package_id`, and surfaces env-wide plus own-org rows, which
+     * is precisely the population the caller is about to promote. So the
+     * closure is "this package's own declarations", restated from the list the
+     * batch is defined by, never a second query with a second scope.
+     *
+     * ⛔ Read failures PROPAGATE — a repository that HAS the read and fails it
+     * is a fault, not a miss. This runs before Phase 1's transaction, so
+     * nothing has been written and the publish fails having changed nothing,
+     * and every row read here is a row `promoteDraftForPublish` is about to
+     * read again anyway. Swallowing would silently shrink the closure, which
+     * does not fail open — it manufactures a refusal that names a declaration
+     * the author can SEE in their own package (ADR-0110 D3: a miss and a fault
+     * are different facts). The MISSING-member case is the other fact and is
+     * handled below, loudly and without a throw.
+     *
+     * ## Why the batch's existing enumeration cannot supply the bodies
+     *
+     * `listDrafts` — the read that DEFINES this batch — is a declared header
+     * projection: it maps rows to `(type, name, organizationId, packageId,
+     * updatedAt, updatedBy)` and drops `metadata` on purpose, because its other
+     * caller is the console's "pending changes" list. Widening it would put
+     * every draft BODY on that listing, and it would not even remove the guard
+     * below: the doubles that lack `repo.get` stub `listDrafts` too, so a
+     * body-carrying projection would hand back headers there anyway — degrading
+     * SILENTLY instead of degrading with a reason. So the second read stays,
+     * and the absence of the member it needs is stated rather than assumed.
+     */
+    private async collectBatchPendingDeclarations(
+        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
+    ): Promise<RuntimePendingDeclarations | undefined> {
+        const pending: {
+            objects: unknown[]; permissions: unknown[]; books: unknown[]; datasets: unknown[];
+        } = { objects: [], permissions: [], books: [], datasets: [] };
+        let any = false;
+        for (const d of drafts) {
+            // The canonical fold, same boundary the promote applies: a stored
+            // manifest-plural spelling must route to the same collection its
+            // singular does, or one row's shape would decide whether the
+            // package is judged against itself.
+            const singular = canonicalMetaType(d.type);
+            const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
+            if (!key) continue;
+            const draftOrgId = d.organizationId ?? null;
+            const repo = this.getOverlayRepo(draftOrgId);
+            // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
+            //
+            // This method introduced the batch door's first dependency on
+            // `repo.get`. `SysMetadataRepository` has always had it, but the
+            // seam is overridable (`getOverlayRepo` is the injection point every
+            // publish double replaces), and the door's only previous body read —
+            // the `seed` capture — fires solely when a seed draft is in the
+            // batch, so a repository shape without `get` had never been asked
+            // for one. Measured: nine `publishPackageDrafts` cases in
+            // `@objectstack/objectql` drive a double declaring `listDrafts`
+            // alone, and this call turned every one of them into
+            // `TypeError: repo.get is not a function` — thrown BEFORE any
+            // promotion, so the batch door died on a shape it used to accept.
+            //
+            // The answer is a declared capability check, not a wider `try`: a
+            // missing member is a fact about the repository, knowable up front,
+            // and it must not read like a failed read. Degrading returns the
+            // closure to its pre-#10377 state (the live universe alone), which
+            // is the safe direction — the gate keeps judging and can only be
+            // MORE strict, never fail open.
+            //
+            // ⛔ All-or-nothing on purpose. Bailing out of the whole collection
+            // rather than skipping this one draft is what keeps the verdict from
+            // depending on WHICH org a draft happens to live in: a partial
+            // closure would resolve some of a package's own names and not
+            // others, which is a third behaviour nobody declared and nobody
+            // could reproduce.
+            if (typeof repo.get !== 'function') {
+                this.warnClosureReadUnavailable(singular, d.name);
+                return undefined;
+            }
+            const ref = {
+                type: singular, name: d.name, org: draftOrgId ?? 'env',
+            } as unknown as Parameters<typeof repo.get>[0];
+            const draft = await repo.get(ref, { state: 'draft' });
+            if (draft?.body === undefined || draft.body === null) continue;
+            pending[key].push(draft.body);
+            any = true;
+        }
+        // Absent, not empty: `undefined` is what keeps a batch with no
+        // closure-relevant drafts byte-identical to the pre-#10377 gate call,
+        // rather than routing it through a merge that would be a no-op.
+        return any ? pending : undefined;
+    }
+
+    /**
+     * [#10377] Say WHY the batch closure degraded — once per process.
+     *
+     * A bare degrade is the failure shape this repo has paid for before: a gate
+     * that quietly stops seeing part of its input reads as "clean", and the
+     * only symptom is a refusal somewhere else that names a declaration the
+     * author can see. So the reason is stated, with the member that was
+     * missing and what the consequence is.
+     *
+     * Deduped because Studio republishes the same package repeatedly and a
+     * repository shape does not change between two publishes — the first line
+     * carries the whole fact, and the hundredth adds nothing.
+     */
+    private warnClosureReadUnavailable(type: string, name: string): void {
+        if (this.closureReadWarned) return;
+        this.closureReadWarned = true;
+        console.warn(
+            `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
+            + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
+            + `back to the LIVE declarations only — the pre-#10377 closure — so a draft that references a `
+            + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
+            + `the gate still runs, with strictly less resolution context.`,
+        );
+    }
+
+    /** One warn per process for the {@link warnClosureReadUnavailable} degrade. */
+    private closureReadWarned = false;
 
     /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
@@ -14938,6 +15340,14 @@ export class ObjectStackProtocolImplementation implements
         ];
         const seedBodies: unknown[] = [];
 
+        // [#10377] The closure this batch is judged against, read ONCE and
+        // BEFORE any promotion (a promote deletes the draft row it reads).
+        // Every member of the batch is then gated against the same complete
+        // set, which is what makes a dashboard-plus-its-dataset package
+        // publishable in either order — see
+        // {@link collectBatchPendingDeclarations}.
+        const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
         // creates it (revert = soft-remove); true → it edits an existing artifact
@@ -15125,6 +15535,12 @@ export class ObjectStackProtocolImplementation implements
                             // `d.packageId` is the row's own binding, so this
                             // is the listed key restated, never a new one.
                             packageId: d.packageId,
+                            // [#10377] The whole batch's own declarations, so
+                            // this member is judged against the package it is
+                            // being published AS PART OF and not against the
+                            // universe as it stood before the publish started.
+                            ...(pendingDeclarations !== undefined
+                                ? { pending: pendingDeclarations } : {}),
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });

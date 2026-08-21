@@ -19,6 +19,7 @@
     "plugins",
     "kernel",
     "protocol",
+    "references",
     "releases"
   ]
 }

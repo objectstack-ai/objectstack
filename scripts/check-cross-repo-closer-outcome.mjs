@@ -89,15 +89,26 @@
 //
 // A battery of assertions over a script that is already correct is green on day
 // one and green forever, including the day someone deletes the thing it
-// guards. `--self-test` mutates the extracted source -- drop the `setFailed`,
-// stop collecting failed keys, `break` out of the loop instead of isolating,
-// disable the same-repo skip, narrow the keyword set, collapse the
-// already-closed branch, strip the backlink marker, drop the triage guard,
-// post blind when the comment listing is refused, stop recording which half
-// was lost -- and requires the battery to go RED for each, naming the scenario
-// it expects. Each mutation also asserts its own anchor was PRESENT before
-// substituting: a mutation that silently matched nothing would leave the
-// battery green and read exactly like a passing self-test.
+// guards. `--self-test` mutates the extracted source and requires the battery
+// to go RED for each mutation, naming the scenario it expects.
+//
+// What the mutations cover is written here as CLASSES, and their number is not
+// written here at all (#9917). The list this paragraph used to carry named ten
+// of them and was never updated again; the same habit in lint.yml's step
+// comment was counting seven when there were fifteen. A prose class survives
+// the next mutation being added, a hand-count does not, and `--self-test`
+// prints its own total on every run. The classes: a verdict DOWNGRADED (red
+// becomes a warning, or an info line nothing annotates), the loop's
+// BOOKKEEPING deleted (which keys failed, which half was lost, which target
+// was refused -- each one lets a run report green about work it did not do),
+// ISOLATION abandoned mid-loop, the TARGET PARSE narrowed (the keyword set,
+// the optional colon, the same-repo skip), a GUARD removed (already-closed,
+// triage, pull-request), and IDEMPOTENCY eroded (the backlink marker dropped,
+// or a blind post where a skip belongs).
+//
+// Each mutation also asserts its own anchor was PRESENT before substituting: a
+// mutation that silently matched nothing would leave the battery green and
+// read exactly like a passing self-test.
 //
 // One scenario (L11) is driven TWICE, the second run's world built out of the
 // first run's calls. Re-run idempotency is a property of the PAIR, and a
@@ -109,8 +120,8 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { isMap, isSeq, parseDocument } from 'yaml';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW = '.github/workflows/cross-repo-issue-closer.yml';
 const JOB = 'close-foreign-issues';
@@ -200,9 +211,14 @@ function makeDoubles({ body, token, issues = {}, prCommentError = null, summaryE
       calls.get.push(`${owner}/${repo}#${n}`);
       const t = target(owner, repo, n);
       if (t.getError) throw t.getError;
-      // `state_reason` is nullable on a real closed issue -- objectui#4478
-      // answers `null` from this very endpoint -- so the default models that
-      // rather than inventing a value the API does not promise.
+      // `state_reason` is nullable BY CONTRACT on this endpoint -- the API
+      // states a reason when it has one and promises nothing otherwise -- so
+      // the default models `null` rather than inventing a value the API does
+      // not promise. Modelled, not sampled, and that distinction is load
+      // bearing here: the citation that stood on this line named a foreign
+      // number as a closed issue answering `null` and it was a pull request
+      // (#9917). L9 carries the reason a sampled specimen is the wrong kind of
+      // evidence for THIS default in particular.
       //
       // `pull_request` is how the same endpoint says the number is a PULL
       // REQUEST, and it is modelled as ABSENCE rather than as `undefined`
@@ -388,14 +404,32 @@ const FIXED = httpError(503, 'No server is currently available to service your r
 const DENIED = httpError(404, 'Not Found');
 const UNAUTHORIZED = httpError(401, 'Bad credentials');
 
-/** A body carrying the three keyword shapes plus three that must NOT qualify. */
+/**
+ * A body carrying the three keyword shapes plus four that must NOT qualify.
+ *
+ * `CLOSES:` carries the OPTIONAL COLON deliberately, and it is one of the three
+ * targets rather than a fourth (#9755): the colon is therefore load-bearing for
+ * this body's target ARITY, so dropping `:?` from the shipped regex takes P1
+ * from three targets to two instead of leaving the count intact. M15 is that
+ * mutation. Before #9755 this fixture used only the space-separated spelling,
+ * and the consequence was measured rather than assumed -- adding `:?` to the
+ * shipped script moved real behaviour and all 105 assertions stayed green,
+ * because no scenario had ever put a colon in front of a qualified reference.
+ *
+ * That the colon is GitHub's syntax and not a typo is measured too, and in this
+ * repository: PR #10241 merged 2026-08-20T15:10:06Z carrying `Filed, not fixed:
+ * #10240`, and #10240 closed `completed` at 15:10:08Z with its own
+ * `closed_by_pull_requests` naming #10241. So a body spelled this way is a real
+ * closing declaration, and a cross-repo target inside one is a target.
+ */
 const MIXED_BODY = [
   'Fixes objectstack-ai/objectui#456',
-  'CLOSES my-org/some.repo#22',
+  'CLOSES: my-org/some.repo#22',
   'resolved third/party#7',
   '',
   'Part of objectstack-ai/objectui#999 -- a reference, not a close.',
   'Fixes #321 -- bare form, GitHub already handles it.',
+  'Closes: #4500 -- bare form WITH the colon; still GitHub\'s own job, not this one.',
   'Fixes objectstack-ai/objectstack#5 -- same repo, GitHub already closed it.',
 ].join('\n');
 
@@ -464,6 +498,13 @@ export const SCENARIOS = [
       return [
         t(listed.length === 3, `P1 finds exactly the three qualified foreign targets, got ${listed.length}: ${line}`),
         ...FOREIGN.map((k) => t(listed.includes(k), `P1 recognises ${k}`)),
+        // The colon half, named separately so a red says WHICH spelling was
+        // lost rather than only that the count moved (#9755). The target above
+        // is reached through `CLOSES:`; this asserts the separator, and the two
+        // negatives below assert the colon widens the SEPARATOR only and not
+        // the reference scope.
+        t(listed.includes(PR_TARGET), `P1 recognises the optional-colon spelling (\`CLOSES: ${PR_TARGET}\`)`),
+        t(!line.includes('#4500'), 'P1 does not act on the bare `#N` form when it carries the colon either'),
         t(!line.includes('#999'), 'P1 does not treat `Part of` as a closing keyword'),
         t(!line.includes('#321'), 'P1 does not act on the bare `#N` form GitHub already handles'),
         t(!line.includes('objectstack-ai/objectstack#5'), 'P1 skips the qualified SAME-repo reference'),
@@ -642,9 +683,25 @@ export const SCENARIOS = [
     scenario: () => ({
       body: MIXED_BODY,
       token: 'pat',
-      // Measured, not invented: objectstack-ai/objectui#4478 is closed and
-      // answers `state_reason: null` from `issues.get`. A fix that keys on the
-      // reason has to say what null means, and this pins the answer.
+      // MODELLED FROM THE CONTRACT, deliberately not sampled. `issues.get`
+      // declares `state_reason` nullable and promises no reason on a closed
+      // issue, so a fix that keys on the reason has to say what null means, and
+      // this pins the answer -- the shipped script's own reading of it, "no
+      // objection recorded", is stated on the already-closed branch of
+      // .github/workflows/cross-repo-issue-closer.yml, which is the subject
+      // this scenario drives.
+      //
+      // A SAMPLED citation stood here and was withdrawn (#9917): it named
+      // objectui#4478 as a closed issue answering `null`, and that number is a
+      // PULL REQUEST. Read that as the trap it is rather than as one bad
+      // lookup -- the objects that most dependably answer `state: 'closed'`
+      // with `state_reason: null` ARE pull requests, so hunting a specimen for
+      // this fixture walks straight into L13's subject, and the file then
+      // offers ONE observation as evidence for two opposite scenarios. L9 and
+      // L13 are kept on separate footings on purpose: L9 models the contract
+      // and cites nothing, L13 cites a measured pull request
+      // (objectstack-ai/objectstack#9143). Do not "improve" this by finding a
+      // real issue to name.
       issues: { [CLOSED_TARGET]: { state: 'closed', stateReason: null, comments: [] } },
     }),
     check: (r, t) => [
@@ -820,10 +877,13 @@ export const SCENARIOS = [
       token: 'pat',
       // A merged pull request answers `state: 'closed'` with
       // `state_reason: null` from the issues endpoint -- measured on
-      // objectstack-ai/objectstack#9143. That is the very fixture L9 uses to
-      // prove a closed ISSUE gets its backlink, which makes this scenario the
-      // ORDERING test: a `pull_request` guard placed after the state branch
-      // would sail past it and comment on somebody else's pull request.
+      // objectstack-ai/objectstack#9143. That is the very fixture SHAPE L9 uses
+      // to prove a closed ISSUE gets its backlink -- the shape, not the
+      // observation: L9 models its null from the contract and cites no object,
+      // precisely so that this measured pull request stays evidence for THIS
+      // scenario only (#9917). The shared shape is what makes this the ORDERING
+      // test: a `pull_request` guard placed after the state branch would sail
+      // past it and comment on somebody else's pull request.
       issues: {
         [PR_TARGET]: {
           state: 'closed',
@@ -1003,6 +1063,18 @@ const MUTATIONS = [
     expect: ['P1'],
   },
   {
+    id: 'M15',
+    what: 'the optional colon is dropped, so `Fixes: owner/repo#N` stops being a target (the #9755 defect, restored)',
+    // The anchor is the SEPARATOR alone, not the whole pattern: the reference
+    // half of this regex is the closer's own scope decision (qualified only)
+    // and is pinned by the negatives in P1, while this half is the one that has
+    // to keep agreeing with duplicate-fix-guard.yml. Restoring it to `\\s+` is
+    // exactly the text that shipped before #9755.
+    from: ':?\\\\s+([\\\\w.-]+)',
+    to: '\\\\s+([\\\\w.-]+)',
+    expect: ['P1'],
+  },
+  {
     id: 'M6',
     what: 'the already-closed branch is removed, so a closed issue is commented on AND re-closed',
     from: "if (issue.state === 'closed') {",
@@ -1146,7 +1218,7 @@ async function selfTest() {
 // reverse-verification route needs `extractScript` / `judge` pointed at another
 // tree (a pre-fix checkout), and a module that runs its gate on import would
 // silently judge THIS repo instead and print a pass about the wrong subject.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) await selfTest();
   else if (process.argv.includes('--list')) list();
   else await main();

@@ -86,6 +86,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 /** The verdict vocabulary, in report order. */
 export const VERDICTS = ['PASS', 'PARTIAL', 'FAIL', 'BLOCKED', 'NOT-RUN'];
@@ -941,6 +942,6 @@ async function selfTest() {
 
 if (process.argv.includes('--self-test')) {
   await selfTest();
-} else if (process.argv[1] && process.argv[1].endsWith('qa-rollup.mjs')) {
+} else if (isEntrypoint(import.meta.url)) {
   await main(process.argv.slice(2));
 }

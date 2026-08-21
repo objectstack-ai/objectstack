@@ -1047,7 +1047,7 @@
       "title": "The /api/v1/datasources admin lifecycle: static driver catalog, runtime create with provenance+health, secret never echoes (hasSecret only), bad drafts 400 DATASOURCE_ADMIN_ERROR, unwired federation degrades 503 naming external-datasource",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1061,7 +1061,7 @@
           "a crypto provider / secret binder (createDatasourceSecretBinder) so the inline secret is bound, not stored cleartext"
         ],
         "knownGaps": [
-          "the external-datasource FEDERATION service is intentionally NOT wired in the admin-lifecycle boot — its absence is what the 503-naming clause verifies; a boot that DOES wire it should record that and skip the 503 clause as not-applicable-this-run"
+          "STALE claim corrected (rev 2): the federation service is NO LONGER absent from a stock boot — packages/cli/src/commands/serve.ts:2966-2979 wires ExternalDatasourceServicePlugin UNCONDITIONALLY on every os dev / os serve boot (best-effort dynamic import, guarded only against double registration), and :2984-2993 additionally wires createExternalValidationPlugin. On a normal boot the 503-naming clause is therefore not-applicable-live: a working 2xx from remote-tables is the WIRED happy path (covered by integration-system.external-schema-introspection), never a regression against this item. Reaching the 503 needs a boot that genuinely lacks the service — @objectstack/service-datasource uninstalled so serve.ts's dynamic import fails (its catch swallows module-not-found), or a custom host that mounts registerDatasourceAdminRoutes without the federation plugin — or the unit pin (admin-routes.test.ts, the #4225 attribution cases with the service deliberately absent)"
         ]
       },
       "steps": [
@@ -1071,7 +1071,7 @@
         "GET /api/v1/datasources; confirm qa_ds_probe appears with origin:'runtime' and a health field",
         "GET /api/v1/datasources/qa_ds_probe; inspect the body for config + a hasSecret flag and confirm the cleartext secret value is ABSENT",
         "POST /api/v1/datasources with a bad draft (invalid config shape / missing required); capture status + code",
-        "GET /api/v1/datasources/qa_ds_probe/remote-tables (an external-datasource-served route) on the boot with federation UNWIRED; capture the 503 + which service its message names",
+        "GET /api/v1/datasources/qa_ds_probe/remote-tables (an external-datasource-served route): on a stock os dev boot federation IS wired (serve.ts:2966-2979) so expect a WIRED answer (2xx, or a 400 EXTERNAL_DATASOURCE_ERROR from the introspector — not a 503) and score the 503 clause via its unit pin; only a boot that genuinely lacks the service (dynamic import failed / custom host without the plugin) shows the 503 — capture which service the answer names either way",
         "GET /api/v1/datasources/does-not-exist; capture the 404"
       ],
       "acceptance": [
@@ -1100,10 +1100,10 @@
           "evidence": "the 400 response"
         },
         {
-          "clause": "an unwired federation service degrades 503 naming external-datasource: the introspection routes (/:name/remote-tables, /:name/test, /:name/object-draft) answer 503 SERVICE_UNAVAILABLE whose message names the external-datasource service — NOT datasource-admin (the #4225 mis-attribution the resolve() helper exists to prevent, since datasource-admin itself is running fine)",
-          "oracle": "api",
-          "verify": "the remote-tables 503 message names 'external-datasource', not 'datasource-admin'",
-          "evidence": "the 503 response"
+          "clause": "WHEN federation is genuinely unwired, the introspection routes (/:name/remote-tables, /:name/test, /:name/object-draft) degrade 503 SERVICE_UNAVAILABLE whose message names the external-datasource service — NOT datasource-admin (the #4225 mis-attribution the resolve() helper exists to prevent, since datasource-admin itself is running fine). NOT REACHABLE on a stock os dev / os serve boot (rev 2): serve.ts:2966-2979 wires ExternalDatasourceServicePlugin unconditionally, so live remote-tables answers as a wired route there — a 2xx on a stock boot is the happy path (integration-system.external-schema-introspection), never a regression against this clause",
+          "oracle": "test",
+          "verify": "admin-routes.test.ts #4225 cases (external-datasource deliberately absent → 503 'The external-datasource service is not available.' while datasource-admin routes still serve); a live wired-boot 2xx scores this clause not-applicable-live, not fail. Live 503 evidence only from a boot that genuinely lacks the service (see knownGaps)",
+          "evidence": "the unit-test output (or the 503 response on a deliberately unwired boot)"
         },
         {
           "clause": "unknown name → 404 RESOURCE_NOT_FOUND; and (FINDING) the /api/v1/datasources admin CRUD is UNLEDGERED — absent from packages/rest/src/rest-route-ledger.ts (only the /datasources/:name/external/* federation routes are ledgered there), a tranche-3 route-ledger discipline gap the run must record (PENDING-GAPS §E)",
@@ -1139,6 +1139,210 @@
           "date": "2026-08-08",
           "change": "new — the external-datasource ADMIN lifecycle (driver catalog, runtime create + provenance/health, secret-never-echoes, 400/503 per-service attribution, unledgered-mount finding); distinct from external-datasource-federated-read (which tests the seeded read-only fixture's query path) — cross-referenced, not duplicated. Per PENDING-GAPS §B/§E (#4225/#4249)",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-20",
+          "change": "scoped scan-functionality (扫描功能) sweep: the knownGap's claim that the federation service is 'intentionally NOT wired in the admin-lifecycle boot' went STALE — serve.ts:2966-2979 now wires ExternalDatasourceServicePlugin unconditionally on every os dev / os serve boot (and :2984-2993 wires createExternalValidationPlugin). Rewrote the knownGap to the wired truth, re-sited the 503 clause onto its unit pin (oracle api → test) with live scoring not-applicable on a stock boot so a working 2xx is never mis-scored as a regression, reworded step 7 to match, and pointed the wired-boot introspection happy path at the new integration-system.external-schema-introspection item",
+          "ref": "claude/new-session-0pv25p"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.external-schema-introspection",
+      "title": "External-datasource schema introspection happy path: remote-tables lists live tables with columnCount (?schema= honoured since #7955), object-draft renders a reviewable *.object.ts, both route spellings answer as one operation behind the platform auth floor",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin — authenticated AND holding manage_platform_settings (the admin spelling's capability gate, #9391/#9593)",
+        "a second authenticated persona holding NO capability, plus an anonymous probe (for the auth-floor clause)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the shipped read-only SQLite external datasource showcase_external (examples/app-showcase/src/system/datasources/showcase-external.datasource.ts) with its boot-provisioned fixture DB (external-fixture.ts — customers/orders, 5 columns each)",
+          "os dev wiring: ExternalDatasourceServicePlugin AND registerDatasourceAdminRoutes are both wired unconditionally by packages/cli/src/commands/serve.ts (:2966-2979, :3013+), so both route spellings are live on a stock boot"
+        ],
+        "knownGaps": [
+          "live ?schema= NARROWING is not observable on the stock fixture: SQLite introspection returns bare, unqualified table names (sql-driver.ts:9661 introspectSchema reads sqlite_master), so no table carries an attributable schema and the service filter (external-datasource-service.ts:137 — skips only when `tableSchema && tableSchema !== opts.schema`) has nothing to exclude. A live ?schema=<x> therefore returns the SAME full set as no filter — indistinguishable from the pre-#7955 dropped-query bug — so the narrowing clause is scored by the pinned twin-equivalence test (schema-qualified postgres fake), never by the live SQLite read; a schema-qualified (postgres) external fixture would make it live-scoreable",
+          "the stock fixture's clean text/number/date columns may legitimately produce an EMPTY draft.review[] (notes fire only for unrecognised or lossy type mappings, external-datasource-service.ts:216-228) — an empty array is a pass, not a missing feature"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated via os dev; sign in as the admin holding manage_platform_settings; also mint an authenticated session holding no capability",
+        "GET /api/v1/datasources/showcase_external/remote-tables — record the table set with per-table columnCount",
+        "repeat with ?schema=main and with a repeated ?schema=a&schema=b — record status + set for each (see knownGaps for what SQLite can and cannot show here)",
+        "GET /api/v1/datasources/showcase_external/external/tables (the twin spelling) — compare the set against step 2",
+        "POST /api/v1/datasources/showcase_external/object-draft with body { \"table\": \"customers\" }, and the twin POST /api/v1/datasources/showcase_external/external/tables/customers/draft with body {} — record both drafts",
+        "write draft.source to a scratch file and typecheck it (it imports only a type from @objectstack/spec/data) — the compilable-*.object.ts check",
+        "run the pinned suites: packages/rest/src/remote-tables-twin.equivalence.test.ts (the #7955 request-shape cases + the #9686/#9593 admission cases)",
+        "replay remote-tables + object-draft with NO credential (expect 401 on BOTH spellings), then as the no-capability session (expect 403 on the ADMIN spelling only — the federation spelling serves, the pinned #9593 divergence)"
+      ],
+      "acceptance": [
+        {
+          "clause": "remote-tables lists the real remote tables with a per-table columnCount: GET /api/v1/datasources/showcase_external/remote-tables → 200 with customers and orders, columnCount 5 each (the fixture DDL — external-fixture.ts CUSTOMER_TABLE/ORDER_TABLE)",
+          "oracle": "api",
+          "verify": "the response body's tables[] against the fixture tables; columnCount matches the 5-field DDL of each",
+          "evidence": "the remote-tables response"
+        },
+        {
+          "clause": "?schema= is HONOURED, not silently dropped — the #7955 fix (assert the FIXED behavior; do not re-file the old bug): ?schema= narrows to that remote schema, an empty/absent ?schema= is no filter, a repeated ?schema=a&schema=b reaches the handler as an array and degrades to NO FILTER (never a 500, never filtering by an arbitrary one of the two) — identically on both spellings",
+          "oracle": "test",
+          "verify": "remote-tables-twin.equivalence.test.ts '#7955' describe: ?schema=public narrows to public.* on both spellings, absent/empty = unfiltered, repeated key = unfiltered, all statuses equal. Live on the SQLite fixture assert only the degradation contract (?schema=<x> and repeated ?schema both answer 200 with the full set) and record that live narrowing is unobservable here (knownGaps)",
+          "evidence": "the test run output + the live ?schema= responses"
+        },
+        {
+          "clause": "object-draft returns a reviewable, compilable draft: 200 with draft.definition (name, label, datasource, external.remoteName, fields incl. primaryKey from the introspected PK) and draft.source — a *.object.ts module whose FIRST line is exactly '// Generated by `os datasource introspect` (ADR-0015). Review before committing.' (external-datasource-service.ts:465) and which typechecks — plus a draft.review[] array whose entries flag unrecognised/lossy type mappings (may be empty on the clean fixture)",
+          "oracle": "api",
+          "verify": "the draft body fields + the source header string + a scratch typecheck of draft.source; review[] present as an array",
+          "evidence": "the draft response + the typecheck output"
+        },
+        {
+          "clause": "the two route spellings stay one operation: GET /datasources/:name/remote-tables ≡ GET /datasources/:name/external/tables and POST /datasources/:name/object-draft {table} ≡ POST /datasources/:name/external/tables/:remote/draft — same service methods (IExternalDatasourceService.listRemoteTables / generateObjectDraft), same sets/drafts, same 400 EXTERNAL_DATASOURCE_ERROR refusal contract (#4249/#4264)",
+          "oracle": "test",
+          "verify": "remote-tables-twin.equivalence.test.ts (named as the twin pin at external-datasource-routes.ts:126) — plus a live spot-check that both spellings return the same table set on showcase_external",
+          "evidence": "the test run output + the paired live reads"
+        },
+        {
+          "clause": "the auth floor holds, with its documented asymmetry: an anonymous caller is refused 401 UNAUTHENTICATED on BOTH spellings (admin: requireDatasourceAdmin/#9391; federation: refuseAnonymous/#9686 — fail-closed, before any service lookup so an anonymous probe cannot learn what is wired); an authenticated caller WITHOUT manage_platform_settings is refused 403 PERMISSION_DENIED naming the capability on the ADMIN spelling only, while the federation spelling serves — a DELIBERATE, pinned divergence (#9593), not a hole to file",
+          "oracle": "api",
+          "verify": "the four probes of step 8 against admin-routes.ts:361-420 (401 then capability 403) and external-datasource-routes.ts refuseAnonymous (401 only, capability check deliberately absent per its #9593 note); the divergence case is pinned in the twin test's 'WHO may ask' describe",
+          "evidence": "the 401/403/200 responses"
+        }
+      ],
+      "negative": [
+        "an introspection-route refusal carrying DATASOURCE_ADMIN_ERROR — or a 503 naming datasource-admin — is the #4249/#4225 mis-attribution regressed: FAIL",
+        "a 200 to an anonymous caller on either spelling is a security FAIL (RUNNER rule 2's authz carve-out governs the report)",
+        "POST /:name/object-draft without body.table → 400 'Body field \"table\" is required.' (admin-routes.ts:616), never a 500",
+        "a 500 on any ?schema= shape (including the repeated key) is a FAIL against the degrade-to-no-filter contract both spellings pin"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/remote-tables-twin.equivalence.test.ts (#7955 request-shape + #9686/#9593 admission, driven through the real HonoHttpServer over the real ExternalDatasourceService) + packages/services/service-datasource/src/__tests__/admin-routes.test.ts — the LIVE-mount half (real showcase fixture, real sqlite introspection) is not pinned, drive os dev for it"
+      },
+      "source": [
+        "packages/services/service-datasource/src/admin-routes.ts:517-560 (remote-tables + the #7955 coercion comment), :611-623 (object-draft), :361-420 + :261 (requireDatasourceAdmin — 401 floor then manage_platform_settings 403, #9391/#9593)",
+        "packages/rest/src/external-datasource-routes.ts:26-28, :215-260 (the twin family GET /external/tables + POST .../draft; anonymous-deny floor #9686; capability gate deliberately absent — the file's own #9593 note)",
+        "packages/services/service-datasource/src/external-datasource-service.ts:137 (listRemoteTables schema filter + allowedSchemas), :183 (generateObjectDraft), :445-481 (renderObjectSource; :465 the generated header)",
+        "packages/drivers/driver-sql/src/sql-driver.ts:9661 (introspectSchema; SQLite branch reads sqlite_master → bare unqualified table names)",
+        "examples/app-showcase/src/system/datasources/ (showcase-external.datasource.ts + external-fixture.ts)",
+        "SURFACE NOTE (why api, not mixed): admin-routes.ts:517's comment names a Studio 'sync objects' consumer, but no such consumer was located — the only live callers found are the two CLI commands os datasource list-tables / os datasource introspect (packages/cli/src/commands/datasource/list-tables.ts, introspect.ts — both call the /external/tables spellings), covered by cli.datasource-introspect-codegen (authored in this same sweep). Same #9386/#9417 correction as external-datasource-federated-read rev 2"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-20",
+          "change": "new item from the scoped scan-functionality (扫描功能) coverage sweep: the introspection HAPPY PATH was uncovered — datasource-admin-lifecycle proves only the unwired-503 arm (and since serve.ts:2966 wires federation unconditionally, that arm is unit-pin territory on a stock boot). Covers remote-tables + object-draft on the shipped SQLite fixture, the #7955 ?schema= fix (asserted as fixed, live-limited on SQLite — see knownGaps), twin-spelling equivalence, and the #9391/#9686/#9593 auth floor incl. its pinned divergence",
+          "ref": "claude/new-session-0pv25p"
+        }
+      ]
+    },
+    {
+      "id": "integration-system.external-schema-drift-gate",
+      "title": "Boot-time external-schema drift gate (ADR-0015 §5.2 Gate 2): onMismatch defaults to 'fail' and refuses boot naming the object and mismatched column; 'warn' proceeds logging the diff; 'ignore' is silent; a partial metadata read withholds the all-clear instead of faking one",
+      "since": "v16",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "operator — boots os dev / os serve and reads the boot log / exit; no in-app persona needed"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "serve.ts wires createExternalValidationPlugin unconditionally in the ADR-0015 federation block (packages/cli/src/commands/serve.ts:2984-2993), so the kernel:ready gate runs on every stock boot where @objectstack/runtime + the federation service import cleanly",
+          "the shipped external datasource + fixture DB (showcase_external — IN SYNC by construction, provisioned idempotently each boot by external-fixture.ts)"
+        ],
+        "knownGaps": [
+          "NO stock drift fixture exists — drift must be INDUCED, and only in a scratch copy: the fixture DB is re-provisioned in-sync each boot, and showcase_external deliberately declares onMismatch:'warn' (showcase-external.datasource.ts:40) precisely so drift can never brick the stock showcase. To induce: work in a scratch app/worktree copy, alter the fixture DB between boots (prefer a column TYPE change — the idempotent provisioning initObjects re-runs at every boot and may heal an added/dropped column; verify the induced drift survives the re-run before scoring) or bind a scratch federated object to a missing/mismatched table. Without an induced drift, the live arms of clauses 1-3 are blocked(fixture) and the unit pins are the fallback evidence",
+          "the 'fail'-DEFAULT arm additionally needs a datasource that OMITS external.validation.onMismatch (the `?? 'fail'` default, external-validation-plugin.ts:331; the metadata-read-failure catch at :333 also defaults 'fail') — stock showcase never exercises it live",
+          "clause 5's partial-read arm (a degraded metadata loader) is not reasonably inducible live — it is scored via its pin (list-diagnosed-consumer-sweep.test.ts), declared here rather than pretending a loader-outage fixture exists"
+        ]
+      },
+      "steps": [
+        "boot stock showcase; capture the in-sync all-clear info line '[external-validation] all federated objects match their remote schema' with its objects count",
+        "in a scratch copy, induce a surviving drift (see knownGaps) under the stock 'warn' policy; boot; capture the '[external-validation] external schema drift' warn (datasource/object/diffs) and that boot COMPLETES",
+        "same drift with the scratch datasource's external.validation.onMismatch OMITTED (and again with explicit 'fail'); boot; capture the abort — ExternalSchemaMismatchError, message 'Object '<o>' does not match its remote table on datasource '<d>':' plus per-diff lines naming the column",
+        "same drift under onMismatch:'ignore'; boot; confirm completion with NO drift warn",
+        "set external.validation.checkOnBoot:false on the drifted scratch datasource and boot: the kernel:ready scan STILL runs (checkOnBoot has no runtime consumer) — record the declared≠enforced finding, do not score the scan-running as a bug",
+        "declare external.validation.checkIntervalMs on a datasource and confirm the armed-timer log '[external-validation] armed background drift check' (the event-emission arm is unit-pinned)",
+        "run the pins: packages/runtime/src/external-validation-plugin.test.ts and the '#6504 … boot gate' describe in packages/runtime/src/list-diagnosed-consumer-sweep.test.ts"
+      ],
+      "acceptance": [
+        {
+          "clause": "the DEFAULT is 'fail' and it refuses boot: with drift present and onMismatch undeclared (or explicit 'fail'), boot aborts with ExternalSchemaMismatchError whose message names the object, the datasource, and the mismatched column per diff line (renderDiffMessage) — the highest-consequence branch here: a mis-typed federation must not come up serving garbage",
+          "oracle": "log",
+          "verify": "the induced-drift boot's abort output against external-errors.ts:155-183; the default pinned at external-validation-plugin.ts:331 (and :333 — an unreadable datasource definition ALSO defaults 'fail'). Unit fallback: external-validation-plugin.test.ts 'throws … default (fail) policy' + 'defaults to fail when the datasource definition is unavailable'",
+          "evidence": "the boot abort log (or the unit-test output when the live arm is blocked(fixture))"
+        },
+        {
+          "clause": "'warn' proceeds and logs: the same drift under onMismatch:'warn' (the stock showcase policy) completes boot and logs '[external-validation] external schema drift' carrying datasource, object, and the structured diffs",
+          "oracle": "log",
+          "verify": "boot completes (server answers /ready) AND the warn line is present with the diff payload",
+          "evidence": "the boot log excerpt + the completed-boot proof"
+        },
+        {
+          "clause": "'ignore' is silent: the same drift under onMismatch:'ignore' completes boot with no drift warn at all (external-validation-plugin.ts:215)",
+          "oracle": "log",
+          "verify": "grep the boot log — no '[external-validation]' drift warn; boot completed",
+          "evidence": "the (absence in the) boot log + completed-boot proof"
+        },
+        {
+          "clause": "checkOnBoot is DECLARED-but-UNENFORCED — assert the actual behavior and record the gap: the spec declares validation.checkOnBoot defaulting true (datasource.zod.ts:313) and docs/liveness claim it gates the boot scan, but the plugin reads only onMismatch/checkIntervalMs (its DatasourceDef, external-validation-plugin.ts:124-133; no consumer of checkOnBoot exists under packages/ outside spec + test fixtures) — so with checkOnBoot:false the kernel:ready scan STILL runs. The run must verify still-runs and record the declared≠enforced finding (ADR-0049 enforce-or-remove shape) — neither re-filing 'checkOnBoot broken' without checking for an existing card, nor scoring the scan-running as a regression",
+          "oracle": "log",
+          "verify": "boot the drifted scratch fixture with checkOnBoot:false — the gate still warns/aborts per onMismatch; run record carries the finding",
+          "evidence": "the boot log + the recorded finding"
+        },
+        {
+          "clause": "partial-read honesty (#6504): when the federated-object listing was degraded, the gate WITHHOLDS the clean all-clear and warns that it 'swept an INCOMPLETE object set … the onMismatch gate could not have fired for them' (external-validation-plugin.ts:113-121) — silence and nothing-to-find are never conflated; a throwing verdict probe reports 'could not be determined', never a fabricated failure; a complete read still gets the plain all-clear info line",
+          "oracle": "test",
+          "verify": "list-diagnosed-consumer-sweep.test.ts:334-380 ('the ADR-0015 boot gate must not announce an all-clear over an incomplete sweep') — all four cases; live induction of a loader outage is out of scope (knownGaps)",
+          "evidence": "the test run output"
+        },
+        {
+          "clause": "the periodic re-check is observational, never fatal: a datasource declaring external.validation.checkIntervalMs arms an unref'd background timer that emits one external.schema.drift kernel event per drifted object and never throws or aborts the process (external-validation-plugin.ts:239-317)",
+          "oracle": "test",
+          "verify": "external-validation-plugin.test.ts 'background drift detection' describe (one event per drifted object, cross-datasource isolation); live: the 'armed background drift check' log line on a declaring boot",
+          "evidence": "the test run output + the armed-timer log line"
+        }
+      ],
+      "negative": [
+        "a drifted boot under the 'fail' default that comes up serving anyway is the highest-consequence FAIL of this item — the gate's whole purpose",
+        "an all-clear info line emitted while the metadata read was degraded is the #6504 conflation — FAIL",
+        "an abort message naming the wrong datasource/object, or omitting the per-column diff, is a FAIL against renderDiffMessage",
+        "a background drift check that throws or kills the process is a FAIL (drift past boot is observational by design)",
+        "the plugin must NO-OP silently (debug log only) when the external-datasource service is absent — an abort or error on a federation-free boot is a FAIL"
+      ],
+      "traps": [
+        "stale-dist",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/external-validation-plugin.test.ts (fail-default / warn / ignore / default-when-unreadable + drift-event emission) + packages/runtime/src/list-diagnosed-consumer-sweep.test.ts:334 (#6504 withheld all-clear) — the LIVE boot-abort arm is not pinned; an induced-drift boot is required for it"
+      },
+      "source": [
+        "packages/runtime/src/external-validation-plugin.ts:147-227 (Gate 2 kernel:ready validation; :188 runValidation; :224-226 the fail throw), :325-335 (resolveOnMismatch — `?? 'fail'` at :331, catch → 'fail' at :333), :78-122 (announceAllClear #6504; :113-121 the INCOMPLETE-sweep warn), :239-317 (background drift checks + external.schema.drift events)",
+        "packages/spec/src/shared/external-errors.ts:155-183 (renderDiffMessage + ExternalSchemaMismatchError — datasource, object, per-column diffs)",
+        "packages/cli/src/commands/serve.ts:2966-2993 (ADR-0015 federation block — ExternalDatasourceServicePlugin + createExternalValidationPlugin wired unconditionally, best-effort dynamic import)",
+        "packages/spec/src/data/datasource.zod.ts:301-318 (validation policy schema; checkOnBoot declared, default true — the declared≠enforced finding of clause 4; the liveness ledger note packages/spec/liveness/datasource.json claiming it 'gates the boot-time one' is contradicted by source)",
+        "examples/app-showcase/src/system/datasources/showcase-external.datasource.ts:40 (stock policy onMismatch:'warn' — deliberate, per its own comment)",
+        "docs/adr/0015-external-datasource-federation.md §5.2"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-20",
+          "change": "new item from the scoped scan-functionality (扫描功能) coverage sweep: the boot-time drift gate — a 'fail' DEFAULT that can refuse boot, the sweep's highest-consequence uncovered branch — had no checklist coverage. Fixture honesty declared up front: no stock drift fixture exists (stock showcase is in-sync AND deliberately 'warn'), so drift is induced in a scratch copy or the arms fall back to the unit pins. Also records clause 4's finding: checkOnBoot is declared in spec (default true) but read by no runtime code — the scan runs regardless",
+          "ref": "claude/new-session-0pv25p"
         }
       ]
     },

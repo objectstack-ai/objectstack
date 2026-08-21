@@ -67,6 +67,16 @@
  *     (Same paradigm as `sys_setting`'s identity-index migration, which hands
  *     back the duplicate list rather than applying a keep-one rule.)
  *
+ * ## The receipt (#9451, maintainer ruling 2026-08-20)
+ *
+ * An applied run also records itself in the `sys_migration` deployment ledger.
+ * A repair that rewrites rows and leaves only a `logger.info` line behind cannot
+ * answer "was my data rewritten, and when, and which objects" once that line has
+ * scrolled or the container has been replaced — and the healthy path is silent
+ * by design, so absence of a message is not evidence either way. See the receipt
+ * section further down for the destination, the field reading, and why it is
+ * best-effort.
+ *
  * ## Dialects (#9381)
  *
  * Every statement here is compiled for the dialect the seam is connected to.
@@ -99,6 +109,7 @@
 
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
+import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
 import type { IndexMigrationLogger } from './partial-index-probe.js';
 
 /** The driver-private counter table (`SqlDriver.SEQUENCES_TABLE`). */
@@ -215,6 +226,19 @@ export interface SeedTenancySeam {
    * `ANSI_QUOTES` would want too).
    */
   client?: string;
+  /**
+   * The engine the exec was resolved FROM, narrowed to what the durable receipt
+   * needs (#9451). `undefined` on a host that is not an engine — a hand-built
+   * seam in a test, a raw-SQL probe — where there is no ledger to write.
+   *
+   * It travels on the seam for the same reason `client` does: so a caller
+   * cannot take the write path without also taking the path that records it.
+   * The two are not symmetric, though, and the difference is worth stating —
+   * losing `client` compiles SQL for the wrong dialect and fails LOUDLY, while
+   * losing this one would only mean the repair goes back to leaving no trace,
+   * which is silent and is exactly the defect #9451 exists to remove.
+   */
+  ledger?: SeedTenancyLedger;
 }
 
 /**
@@ -260,10 +284,20 @@ export function resolveSeedTenancySeam(engine: unknown): SeedTenancySeam | undef
   }
   if (!canRun(driver)) return undefined;
   const client = resolveClientName(driver);
+  // Resolved from the ENGINE, not from the driver the exec came from: the
+  // ledger row is written through the object layer (`sys_migration` is a
+  // registered object with a kernel-injected tenant column and generated
+  // timestamps), never as raw SQL against a table this module would then have
+  // to spell for three dialects.
+  const ledger = resolveSeedTenancyLedger(engine);
   if (typeof driver.execute === 'function') {
-    return { exec: (sql: string, params?: unknown[]) => driver.execute(sql, params ?? []), client };
+    return {
+      exec: (sql: string, params?: unknown[]) => driver.execute(sql, params ?? []),
+      client,
+      ledger,
+    };
   }
-  return { exec: (sql: string) => driver.raw(sql), client };
+  return { exec: (sql: string) => driver.raw(sql), client, ledger };
 }
 
 /**
@@ -544,6 +578,249 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// ── The durable receipt (#9451, maintainer ruling 2026-08-20: 「A″-2 写进
+//    sys_migration(推荐)」) ────────────────────────────────────────────────
+//
+// Everything above rewrites stored rows and then says so with ONE `logger.info`
+// line. Once that line has scrolled — or the container has been replaced — the
+// question "was my data rewritten, and when, and which objects" has no answer
+// anywhere in the deployment. Worse, the healthy path (`no-split`) is silent by
+// design, so absence-of-message is not evidence either: a silent boot and a boot
+// that never reached the probe read identically.
+//
+// The fix is a row in the ledger that already answers exactly this question for
+// every other data migration — `sys_migration`, "one row per DATA migration,
+// recording whether THIS deployment has run it". Three properties made it the
+// ruled destination over the alternatives:
+//
+//   - it is writable AND readable at `kernel:ready`, the trigger point that
+//     covers every EXISTING deployment. (`SettingsService`, the previously
+//     ruled destination, is not: it resolves there with no engine bound, so
+//     `set()` answers "resolved" while nothing reaches the database — a receipt
+//     that reports success and persists nothing is the very defect this card
+//     exists to remove. Measured; recorded separately as #10159.)
+//   - its API surface is read-only (`apiMethods: ['get', 'list']`), so the
+//     receipt cannot be edited back through the shipped routes;
+//   - its row contract lives in `@objectstack/spec/system`, which this package
+//     already depends on — so the row is written against the CONTRACT and needs
+//     no new dependency on `@objectstack/platform-objects` (where the
+//     `recordDataMigrationRun` helper lives). That was the explicit shape of
+//     the ruling: A″-2, not A″-1.
+//
+// ⛔ Written on the `applied` branch only. `no-split` stays silent by design —
+// a row per healthy boot would be a ledger of non-events, and the card argues
+// for the silence rather than against it.
+
+/**
+ * Well-known migration id for this repair's ledger row.
+ *
+ * Deliberately spelled HERE and not in `@objectstack/spec/system` beside
+ * `FILE_REFERENCES_MIGRATION_ID` / `VALUE_SHAPES_MIGRATION_ID`. Those two are
+ * there because they are read across packages — a consumer gates its behaviour
+ * on them, so the id has to be the same string in the writer and in every
+ * reader. This one gates nothing: it is a record for an operator, written in
+ * one place and read by a human (or a `SELECT`). Publishing it into the shared
+ * contract would declare a coordination point that does not exist.
+ */
+export const SEED_TENANCY_MIGRATION_ID = 'seed-tenancy-backfill';
+
+/**
+ * The engine surface the receipt needs, duck-typed — the same shape
+ * `MigrationFlagEngine` names in `@objectstack/platform-objects`, restated
+ * structurally rather than imported.
+ *
+ * Restating four method signatures is the price of the ruled route, and it is
+ * paid deliberately: importing the helper would add a workspace dependency
+ * `metadata-protocol → platform-objects`, which is the option the maintainer
+ * declined. The row shape itself is NOT restated — that comes from
+ * {@link DataMigrationFlag} in `@objectstack/spec/system`, so the two writers
+ * cannot disagree about what a ledger row is.
+ */
+export interface SeedTenancyLedger {
+  getObject(name: string): unknown;
+  find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
+  insert(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
+  update(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
+}
+
+/**
+ * The ledger seam on an engine, or `undefined` where the host is not one.
+ *
+ * Resolved from the SAME engine handle {@link resolveSeedTenancySeam} already
+ * takes, and carried on the seam beside the exec — so a caller cannot obtain
+ * the repair's write path without also obtaining its receipt path. That is the
+ * structural half: a third call site added later gets the receipt by
+ * construction instead of by remembering, and losing it takes a hand-built
+ * seam rather than a forgotten argument.
+ */
+export function resolveSeedTenancyLedger(engine: unknown): SeedTenancyLedger | undefined {
+  const candidate = engine as any;
+  for (const method of ['getObject', 'find', 'insert', 'update']) {
+    if (typeof candidate?.[method] !== 'function') return undefined;
+  }
+  return candidate as SeedTenancyLedger;
+}
+
+/**
+ * The ledger row for one applied run — pure, so the reading below is testable
+ * without an engine (Prime Directive #2).
+ *
+ * ## The field reading, stated because the ledger's fields are gate-bearing
+ *
+ * `verified_at` and `blocking` are what OTHER migration ids are gated on, so a
+ * new id owes an explicit reading of both:
+ *
+ *  - **`verified_at: null`.** The column means "when the self-check last
+ *    PASSED", and this repair has no self-check — it stamps rows and merges a
+ *    counter, it does not re-scan the store to prove the result. A timestamp
+ *    here would be a certificate nothing earned. Null is also the fail-safe
+ *    direction: `isDataMigrationFlagVerified` reads it as "not verified", which
+ *    is what an unscanned deployment is. What the row DOES assert lives in
+ *    `last_run_at` / `applied_at` / `details`.
+ *  - **`blocking: 0`, always.** Blocking means "the gate must stay closed", and
+ *    this repair gates no consumer — there is no behaviour anywhere waiting on
+ *    this id. A non-zero count here would be a signal with no receiver.
+ *  - **`advisory`** carries the collision count: identifiers already minted on
+ *    both sides of the split are exactly what the column is for — findings that
+ *    "need a modelling decision, never block the gate". They are reported and
+ *    never renumbered (2026-08-15 ruling), so they need an operator, not a gate.
+ *
+ * Verified by enumeration rather than assumed: every consumer of this ledger
+ * (`ObjectQL.readMigrationFlagVerified`, `recordObservedDeviation`,
+ * `retractCreationAttestation`, and `platform-objects`' `readDataMigrationFlag`)
+ * reads `where: { id }, limit: 1`. There is no bulk or aggregate read of
+ * `sys_migration` anywhere in the repo, so no reading of these fields under a
+ * NEW id can reach another id's gate.
+ *
+ * `deviation_observed_at` / `deviation_detail` are left untouched: they belong
+ * to ADR-0104's escape-hatch protocol, which nothing here participates in, and
+ * writing a column no path ever reads is the declared-≠-enforced shape.
+ */
+export function buildSeedTenancyReceipt(
+  result: SeedTenancyBackfillResult,
+  now: string,
+): DataMigrationFlag {
+  return {
+    id: SEED_TENANCY_MIGRATION_ID,
+    last_run_at: now,
+    applied_at: now,
+    verified_at: null,
+    blocking: 0,
+    advisory: result.collisions.length,
+    details: JSON.stringify({
+      status: result.status,
+      objectsStamped: result.objectsStamped,
+      organizationId: result.organizationId,
+      // `object.field`, not the whole split rows: the operator needs to know
+      // WHICH objects were touched, and the counter values are a snapshot of a
+      // state this run has already destroyed.
+      splits: result.splits.map((s) => `${s.object}.${s.field}`),
+      collisions: result.collisions.map((c) => `${c.object}.${c.field}=${c.value}`),
+    }),
+  };
+}
+
+/**
+ * Upsert the receipt row. Throws on failure — the caller is the one place that
+ * decides what a failed receipt means, and it must not be decided twice.
+ *
+ * Named in `DURABILITY_CRITICAL_CALLEES`
+ * (`scripts/check-durability-degradation-log-level.mjs`): if this write is lost,
+ * the repair still rewrote the rows and every log line still reads clean, while
+ * the only durable record that it happened is simply absent — the #4420 shape
+ * on this card's own subject.
+ */
+async function persistSeedTenancyReceiptRow(
+  ledger: SeedTenancyLedger,
+  flag: DataMigrationFlag,
+): Promise<'inserted' | 'updated'> {
+  const context = { isSystem: true };
+  const rows = await ledger.find(DATA_MIGRATION_FLAG_OBJECT, {
+    where: { id: flag.id },
+    limit: 1,
+    context,
+  });
+  const row: Record<string, unknown> = { ...flag, updated_at: flag.last_run_at };
+  // A re-run overwrites its own row rather than appending: the ledger's grain is
+  // one row per migration, and `sys_migration_journal` is where per-RUN history
+  // lives. Idempotence makes this rare — after a successful repair the split
+  // probe finds nothing and later boots return `no-split` — but a run that could
+  // only stamp some objects leaves a split behind, and the next boot's row
+  // should describe the LATEST attempt.
+  if (rows?.[0]?.id === flag.id) {
+    await ledger.update(DATA_MIGRATION_FLAG_OBJECT, row, { context });
+    return 'updated';
+  }
+  await ledger.insert(DATA_MIGRATION_FLAG_OBJECT, { ...row, created_at: flag.last_run_at }, { context });
+  return 'inserted';
+}
+
+/**
+ * Record one applied run in the deployment ledger — best effort, never fatal.
+ *
+ * `best-effort-never-fails-boot` is a ruling (2026-08-15) and it constrains the
+ * shape here: this cannot rethrow, because it runs inside a `kernel:ready` hook
+ * and inside the `sys_organization` create handoff, and neither may be broken by
+ * bookkeeping. So the failure is paid for at `error` instead — per AGENTS.md's
+ * degradation rule, a write that claims to persist and does not, on a system
+ * that keeps looking healthy, is the `error` case.
+ *
+ * ⛔ The loud log is spelled INLINE rather than through `logProblem()` next
+ * door, deliberately: `check:durability-log-level` follows same-FILE helpers
+ * only, so routing this catch through another module would make the gate read
+ * it as a silent swallow — and, worse, `logProblem` degrades to `warn` on a
+ * host with no `error` sink, which is the quiet this rule exists to forbid.
+ */
+export async function recordSeedTenancyReceipt(
+  seam: SeedTenancySeam | undefined,
+  result: SeedTenancyBackfillResult,
+  logger?: SeedTenancyLogger,
+): Promise<void> {
+  const ledger = seam?.ledger;
+  const notRecorded =
+    `[metadata-protocol] the seed/API tenancy repair (#8686) ran and rewrote stored rows, but this ` +
+    `deployment has NO durable record that it did`;
+  if (!ledger) {
+    // Functional absence, not a durability failure: this host is not an engine
+    // (a raw seam built by hand, a test double), so there is no ledger to miss.
+    // `warn` per AGENTS.md — the system is visibly smaller, not silently lying.
+    logger?.warn?.(
+      `${notRecorded} — no engine was resolved beside the raw-SQL seam, so ${DATA_MIGRATION_FLAG_OBJECT} ` +
+        `could not be written. Capture this boot's log before restarting (#9451).`,
+    );
+    return;
+  }
+  try {
+    if (!ledger.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
+      logger?.warn?.(
+        `${notRecorded} — ${DATA_MIGRATION_FLAG_OBJECT} is not registered on this kernel, so the ` +
+          `deployment ledger does not exist here. Compose PlatformObjectsPlugin (it carries the ledger ` +
+          `every served kernel gets) or capture this boot's log before restarting (#9451).`,
+      );
+      return;
+    }
+    const flag = buildSeedTenancyReceipt(result, new Date().toISOString());
+    const outcome = await persistSeedTenancyReceiptRow(ledger, flag);
+    logger?.info?.(
+      `[metadata-protocol] seed/API tenancy repair recorded in ${DATA_MIGRATION_FLAG_OBJECT} ` +
+        `(id '${SEED_TENANCY_MIGRATION_ID}', ${outcome}) — the run survives this process (#9451).`,
+      { id: SEED_TENANCY_MIGRATION_ID, outcome, details: flag.details },
+    );
+  } catch (e: unknown) {
+    const detail = e instanceof Error ? e.message : String(e);
+    const message =
+      `${notRecorded}: writing ${DATA_MIGRATION_FLAG_OBJECT} failed (${detail}). The repair itself ` +
+      `SUCCEEDED and is not retried — the rows already carry the organization and the '${GLOBAL_TENANT}' ` +
+      `counter is already gone, so the next boot finds no split and will not write this receipt either. ` +
+      `Nothing else reports it: capture this boot's log NOW, before the container is replaced. Fix: make ` +
+      `${DATA_MIGRATION_FLAG_OBJECT} writable on this deployment (it is provisioned by ` +
+      `PlatformObjectsPlugin) and verify with ` +
+      `SELECT * FROM ${DATA_MIGRATION_FLAG_OBJECT} WHERE id = '${SEED_TENANCY_MIGRATION_ID}' (#9451).`;
+    if (logger?.error) logger.error(message, e instanceof Error ? e : new Error(detail));
+    else logger?.warn?.(message, { error: detail });
+  }
+}
+
 /**
  * Repair the seed/API tenancy split (#8686).
  *
@@ -558,6 +835,8 @@ function toNumber(value: unknown): number {
  * Takes the SEAM — exec plus dialect — rather than a bare exec (#9381). Every
  * statement below is compiled for `seam.client`, so the pair has to arrive
  * together or the statements would be spelled for a dialect nobody checked.
+ * The seam also carries the engine handle the receipt is written through
+ * (#9451), for the same structural reason.
  */
 export async function backfillSeedTenancy(
   seam: SeedTenancySeam | undefined,
@@ -772,5 +1051,16 @@ export async function backfillSeedTenancy(
     );
   }
 
-  return { status: 'applied', splits, collisions, objectsStamped, organizationId };
+  const result: SeedTenancyBackfillResult = {
+    status: 'applied',
+    splits,
+    collisions,
+    objectsStamped,
+    organizationId,
+  };
+  // The receipt is written for EVERY applied run, including one where every
+  // stamp failed (`objectsStamped === 0`). "A run happened here and moved
+  // nothing" is an answer to the card's question; the absence of a row is not.
+  await recordSeedTenancyReceipt(seam, result, logger);
+  return result;
 }

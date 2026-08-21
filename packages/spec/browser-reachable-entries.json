@@ -1,0 +1,33 @@
+{
+  "_comment": "The DECLARED browser-reachable export surface of @objectstack/spec (#10199), and the contract half of check:browser-reachable-entries. The 2026-08-20 maintainer ruling on #10096 minted the standing principle 「浏览器可达的 spec 导出面必须 schema-free」: an export surface browser/client consumers reach carries vocabulary — maps, folds, enums, pure predicates — without linking the zod schema/validation machinery. This file says WHICH entries make that promise; the gate reads the BUILT bundle each one resolves to and proves the promise. Every subpath in package.json's exports map must appear in exactly one of the three sections below — an entry nobody classified fails the gate's reconciliation rather than quietly dropping out of coverage (the check:generated ledger pattern). Hand-maintained on purpose, like dual-source-exports.baseline.json next door: promoting an entry to browserReachable is a CONTRACT decision a maintainer makes, not something a gen: command should be able to grant. The gate is additive/shrink-only — an unlisted entry is unjudged, so no weakening question arises.",
+  "browserReachable": {
+    "./meta-spelling": {
+      "why": "The reference pattern the ruling shipped (#10096): the /meta URL-spelling contract as vocabulary — one frozen map, one fold, two refusal predicates — with the map derived at BUILD time by gen:meta-url-spelling so no schema graph is linked. Reaching the same four symbols through ./shared cost a browser consumer +246.9 KB minified / +69.7 KB gzipped.",
+      "externals": []
+    }
+  },
+  "_unjudgedComment": "Entries this gate asserts NOTHING about. They are not declared browser-reachable, so linking zod is not a defect here — these are the server/build-time surfaces. Listing them is what makes the reconciliation two-directional: a new exports-map subpath cannot land without someone deciding which list it belongs in. Moving one UP to browserReachable is the only direction this file is meant to travel, and it is a maintainer decision plus a passing gate, never a ledger edit alone.",
+  "unjudged": [
+    ".",
+    "./ai",
+    "./api",
+    "./automation",
+    "./cloud",
+    "./contracts",
+    "./data",
+    "./identity",
+    "./integration",
+    "./kernel",
+    "./qa",
+    "./security",
+    "./shared",
+    "./studio",
+    "./system",
+    "./ui"
+  ],
+  "_notAModuleComment": "Exports-map subpaths that resolve to something other than a JS module, so there is no module graph to walk and no zod link to look for. A separate section from `unjudged` because the two say different things to a reader: `unjudged` means 'a module we chose not to judge', this means 'not a module at all'. The gate refuses to scan these rather than silently reporting them clean.",
+  "notAModule": [
+    "./openapi.json",
+    "./package.json"
+  ]
+}

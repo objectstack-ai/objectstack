@@ -396,6 +396,60 @@ export function buildRuntimeWriteSnapshots(args: {
   return { baseline, candidate };
 }
 
+/**
+ * The collection-resident stack keys whose TOP-LEVEL index the gate rewrites
+ * to a name key before findings leave it (#10064).
+ *
+ * These are the collections a written item lands INSIDE (`TYPE_TO_STACK_KEY`
+ * routes `object` / `permission` / `book` writes into them) — so a finding's
+ * `objects[417]` is an offset into this gate's per-write snapshot, an
+ * in-memory array the caller has never seen and cannot enumerate. Every other
+ * write type is the sole member of its own collection (`flows[0]` IS this
+ * write, trivially stable), and `datasets` is context-only — no write type
+ * maps into it — so both keep their positional spelling.
+ */
+const NAME_KEYED_STACK_KEYS = ['objects', 'permissions', 'books'] as const;
+
+/**
+ * Machine names safe to splice into a dotted path. Matches the spec's
+ * machine-name shape (`snake_case`; see `FieldSchema.name` in
+ * `packages/spec`) with room for legacy capitalisation — anything else keeps
+ * the positional spelling rather than minting an unparseable path.
+ */
+const PATH_SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const TOP_LEVEL_INDEX = /^(objects|permissions|books)\[(\d+)\](.*)$/;
+
+/**
+ * `objects[417].sharingModel` → `objects.acme_invoice.sharingModel` (#10064).
+ *
+ * The maintainer-ruled wire shape for collection-resident findings: the
+ * top-level collection index no caller can resolve is replaced by the entry's
+ * NAME, read from the same candidate snapshot the finding was produced
+ * against. Nested positions (`.indexes[1]`, `.actions[0]`) stay positional on
+ * purpose — within one named item they index the author's own document, which
+ * the receiver holds and can resolve.
+ *
+ * Fallback is the positional spelling, never a hole: an entry that is missing,
+ * unnamed, or whose name will not splice into a dotted path keeps the index.
+ *
+ * Applied AFTER the differential, not before it: the fingerprint diff keys on
+ * the rules' raw positional paths, where two entries can never collide — two
+ * stored items that (illegitimately) share a name must not have their distinct
+ * findings merged or cancelled by the rewrite.
+ */
+function nameKeyFindingPath(path: string, candidate: AnyRec): string {
+  const m = TOP_LEVEL_INDEX.exec(path);
+  if (!m) return path;
+  const [, stackKey, index, rest] = m;
+  if (!(NAME_KEYED_STACK_KEYS as readonly string[]).includes(stackKey!)) return path;
+  const collection = candidate[stackKey!] as readonly unknown[] | undefined;
+  const entry = collection?.[Number(index)];
+  const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;
+  if (typeof name !== 'string' || !PATH_SAFE_NAME.test(name)) return path;
+  return `${stackKey}.${name}${rest}`;
+}
+
 function runRules(
   rules: readonly AuthoringRule[],
   stack: AnyRec,
@@ -469,9 +523,22 @@ export function runRuntimeAuthoringRules(args: {
   });
   if (!snapshots) return empty;
 
-  const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest };
+  // [#9313] `runtimeWriteType` tells a registry-of-registries entry (the
+  // reference-integrity suite) which per-write snapshot it is judging, so it
+  // can dispatch its MEMBERS as this gate dispatches entries. CLI callers
+  // never set it; see `AuthoringRuleContext`.
+  const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest, runtimeWriteType: args.type };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
-  const added = runRules(rules, snapshots.candidate, ctx).filter((f) => !before.has(fingerprint(f)));
+  const added = runRules(rules, snapshots.candidate, ctx)
+    .filter((f) => !before.has(fingerprint(f)))
+    // [#10064] The wire shape: collection-resident findings key their
+    // top-level collection entry by NAME, not by this gate's private snapshot
+    // index. Rewritten only on what leaves the gate — the differential above
+    // ran on the rules' raw positional paths.
+    .map((f) => {
+      const path = nameKeyFindingPath(f.path, snapshots.candidate);
+      return path === f.path ? f : { ...f, path };
+    });
 
   return {
     errors: added.filter((f) => f.severity === 'error'),

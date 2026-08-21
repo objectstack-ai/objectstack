@@ -530,8 +530,10 @@ export function checkSearchableFieldList(
 
 /**
  * Validate every `searchableFields` declaration in the stack — the object's own
- * (the canonical set, ADR-0061) and the list views that narrow it. Returns
- * findings (empty = clean).
+ * (the canonical set, ADR-0061) and the list views that narrow it, including a
+ * flattened standalone list overlay authored as a `views[]` entry itself
+ * (#9313 — the `PUT /api/v1/meta/view` shape the runtime publish gate
+ * snapshots). Returns findings (empty = clean).
  *
  * The react page surface (`<ListView searchableFields={…}>`) is deliberately
  * NOT walked here: its declaration lives inside JSX source, and
@@ -610,6 +612,30 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     // The aggregate's own binding is the fallback for a list view that declares
     // none — the same resolution order `validate-list-view-mode` reads.
     const viewObject = strName(view.objectName) ?? strName(view.object);
+
+    // ── [#9313] The SELF rung: a flattened standalone list overlay ──
+    //
+    // A `views[]` entry that IS a single list view — `ViewMetadataSchema`'s
+    // list-overlay member, the shape a standalone list view takes through
+    // `PUT /api/v1/meta/view` and the shape the runtime publish gate
+    // snapshots as `views: [item]`. Recognised exactly as the sort axis
+    // recognises it (`validate-sortable-fields.ts` carries the full note):
+    // `viewKind: 'list'` (required on the overlay arm since #7741, refused by
+    // name on the strict container schema) with no nested `config` (that
+    // shape is a ViewItem RECORD — its `config.searchableFields` is a
+    // different rung, deliberately not walked here). A `narrowing`, like
+    // every list-view surface: the overlay's set is echoed verbatim as the
+    // `$searchFields` override and judged by the #4254 ingress gate.
+    if (view.viewKind === 'list' && !isRec(view.config)) {
+      check(
+        view.searchableFields,
+        listViewObject(view) ?? viewObject,
+        `view "${viewLabel}" (flattened list overlay)`,
+        `views[${vi}].searchableFields`,
+        'list-view searchableFields',
+        'narrowing',
+      );
+    }
 
     if (isRec(view.list)) {
       check(

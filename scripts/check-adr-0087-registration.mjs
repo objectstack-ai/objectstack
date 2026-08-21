@@ -305,6 +305,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -3640,6 +3641,9 @@ function selfTest() {
     };
     const copy = 'scripts/check-adr-0087-registration.mjs';
     w(copy, readFileSync(fileURLToPath(import.meta.url), 'utf8'));
+    // The entry guard is imported from `scripts/invoked-as.mjs`, so the sibling
+    // travels with the copy or the fixture dies on ERR_MODULE_NOT_FOUND.
+    w('scripts/invoked-as.mjs', readFileSync(new URL('./invoked-as.mjs', import.meta.url), 'utf8'));
     w(
       'importer.mjs',
       "import { readDisposition } from './scripts/check-adr-0087-registration.mjs';\n" +
@@ -3710,7 +3714,7 @@ function selfTest() {
 // the I1/I2 self-test assertions pin BOTH halves of the separation -- silent as
 // an import, unchanged as an entry point.
 
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
   const readFlag = (name) => {
     const i = argv.indexOf(name);

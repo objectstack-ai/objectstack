@@ -74,10 +74,11 @@
 // remaining sections still key on the declared level.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { classifyRange, clampSummary } from './objectui-changeset-digest.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const FRAMEWORK_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -615,6 +616,6 @@ function selfTest() {
   return 0;
 }
 
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   process.exit(has('--self-test') ? selfTest() : main());
 }

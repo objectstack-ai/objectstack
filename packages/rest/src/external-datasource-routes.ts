@@ -90,12 +90,55 @@ export interface ExternalDatasourceRoutesOptions {
    *
    * Absent ⇒ the gate FAILS CLOSED (401). `isSystem` is never resolved from
    * inbound HTTP.
+   *
+   * [#9901] `systemPermissions` is the resolver's aggregate of every permission
+   * set the caller holds — the SAME field the sibling `package-routes.ts` gate,
+   * the `/meta` REST gate and the declared admin twin
+   * (`service-datasource/src/admin-routes.ts`) each read. It was already
+   * supplied at run time by the composition, which types this option as
+   * `PackageRoutesOptions['resolveExecutionContext']`; only this local
+   * declaration narrowed it away, so the capability gate below reads the
+   * platform's one capability resolution rather than a second reading of
+   * `sys_*`.
    */
   resolveExecutionContext?: (req: any) => Promise<{
     userId?: string | null;
     isSystem?: boolean;
+    systemPermissions?: string[];
   } | undefined>;
 }
+
+/**
+ * [#9901] The capability the federation family's READ routes require:
+ * `GET /external/tables` and `POST /external/tables/:remote/draft`.
+ *
+ * It is `manage_platform_settings` because these two routes are the DECLARED
+ * TWINS of `GET /:name/remote-tables` and `POST /:name/object-draft` on the
+ * admin spelling, which measured exactly this capability in #9593
+ * (`DATASOURCE_ADMIN_CAPABILITY`). One operation reached through two mounted
+ * routes cannot admit two different sets of callers — that asymmetry is what
+ * this card closes, and `remote-tables-twin.equivalence.test.ts` is where the
+ * two spellings are compared rather than merely each pinned.
+ *
+ * Maintainer ruling, 2026-08-20 (verbatim: 「其他接受你的建议。」): the
+ * federation family is NOT deliberately the lower-privilege door.
+ */
+export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
+
+/**
+ * [#9901] The capability the federation family's WRITE routes require:
+ * `POST /external/tables/:remote/import` and `POST /external/refresh-catalog`.
+ *
+ * Not the read capability, and deliberately so: these two have no twin on the
+ * admin spelling to converge with, and what they do is CREATE METADATA — the
+ * import mounts a live runtime-origin federated object, the refresh rewrites
+ * the cached catalog snapshot. `manage_metadata` is this package's established
+ * gate for exactly that (`package-routes.ts`, whose write arm requires it for
+ * `POST /packages/publish` and `DELETE /packages/:id`), so the split follows
+ * the platform's existing division rather than inventing a second policy for
+ * this family.
+ */
+export const FEDERATION_WRITE_CAPABILITY = 'manage_metadata';
 
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
@@ -106,9 +149,10 @@ export function registerExternalDatasourceRoutes(
   const ext = `${basePath}/datasources/:name/external`;
 
   /**
-   * [#9686] The authentication floor for this whole family. Answers
-   * `401 UNAUTHENTICATED` and returns `true` when the caller must be refused,
-   * so every handler opens with `if (await refuseAnonymous(req, res)) return;`.
+   * [#9686 authentication, #9901 capability] The admission floor for this whole
+   * family. Answers `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED` and
+   * returns `true` when the caller must be refused, so every handler opens with
+   * `if (await refuseFederationRequest(req, res, '<kind>')) return;`.
    *
    * ## Why this registrar needs its own line
    *
@@ -150,20 +194,96 @@ export function registerExternalDatasourceRoutes(
    * `503` which services a deployment has wired, and — for the two routes that
    * write — so the refusal provably precedes the write rather than following it.
    *
-   * Authentication and nothing more: whether these routes should FURTHER
-   * require a capability is the separately-ruled question #9593 asks of the
-   * admin family, and is deliberately absent here.
+   * ## [#9901] …and a CAPABILITY above it, on four of the five routes
+   *
+   * #9686 left this family gated on authentication alone and pointed the
+   * capability question at #9593, which answered it for the admin half only.
+   * The residue was a governance asymmetry rather than an oversight: an
+   * authenticated caller holding no platform capability was refused live
+   * remote-schema introspection at `GET /:name/remote-tables` and SERVED the
+   * same operation at `GET /:name/external/tables`. Maintainer ruling,
+   * 2026-08-20 (verbatim: 「其他接受你的建议。」): tighten this family — reads
+   * on {@link FEDERATION_READ_CAPABILITY}, writes on
+   * {@link FEDERATION_WRITE_CAPABILITY}.
+   *
+   * ## One resolution, two decisions — deliberately not two guards
+   *
+   * The identity and the held capabilities come out of the SAME
+   * `resolveExecutionContext` call, the shape the declared admin twin took for
+   * the same reason: splitting this into an authentication guard followed by a
+   * capability guard would resolve one request twice, and two resolutions of
+   * one request can disagree — the second read is a fresh set of `sys_*`
+   * queries against a store another request may have written in between.
+   *
+   * The order is fixed, anonymous first. A caller with no identity must be told
+   * it has no identity, not that its (empty) capability set is insufficient —
+   * the latter is both wrong and a hint that the credential was read and
+   * rejected on other grounds.
+   *
+   * ## The refusal code, and why it is not this package's other spelling
+   *
+   * `403 PERMISSION_DENIED` — the STANDARD-catalog code for its status, which
+   * `HttpStatusErrorCodeMap` names for 403. Deliberately NOT `FORBIDDEN`, which
+   * the sibling `package-routes.ts` emits: that spelling is a grandfathered
+   * pre-gate synonym (ADR-0112 D3's `STANDARD_SYNONYM_WAIVERS`), and the waiver
+   * schema's own words are that it "keeps a WIRE VALUE registered; it does not
+   * endorse the spelling for new code". It is also the code the declared admin
+   * twin answers, which the twin-equivalence suite compares directly: the read
+   * routes must agree with it on status AND machine-readable code, not merely
+   * both be "not 200".
+   *
+   * ## `isSystem` is not a capability bypass here
+   *
+   * The anonymous decision reads it because `shouldDenyAnonymous` does; the
+   * capability decision reads the HELD SET only, exactly as the admin twin
+   * does. An `isSystem` arm would be a SECOND policy beside the capability, and
+   * — since `isSystem` is never resolved from inbound HTTP — one no wire caller
+   * could ever take, so it would be unfalsifiable divergence from the twin.
+   *
+   * ## `'authenticated'`: the one route the ruling does not name
+   *
+   * `POST /external/validate` has no twin on the admin spelling, creates no
+   * metadata, and is NOT one of the four routes the 2026-08-20 ruling
+   * enumerates. It keeps the #9686 authentication floor and says so with its
+   * own kind rather than silently inheriting a neighbour's gate — an un-ruled
+   * route that shared a constant would read as ruled. Filed separately rather
+   * than decided here.
    */
-  const refuseAnonymous = async (req: any, res: any): Promise<boolean> => {
-    let authz: { userId?: string | null; isSystem?: boolean } | undefined;
+  const refuseFederationRequest = async (
+    req: any,
+    res: any,
+    kind: 'read' | 'write' | 'authenticated',
+  ): Promise<boolean> => {
+    let authz:
+      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[] }
+      | undefined;
     try {
       authz = await options.resolveExecutionContext?.(req);
     } catch {
-      // An identity that could not be resolved is not an identity.
+      // An identity that could not be resolved is not an identity, and grants
+      // that could not be read are not grants.
       authz = undefined;
     }
     if (shouldDenyAnonymous({ userId: authz?.userId, isSystem: authz?.isSystem, method: req?.method })) {
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
+      return true;
+    }
+    if (kind === 'authenticated') return false;
+    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
+    const held = Array.isArray(authz?.systemPermissions) ? authz.systemPermissions : [];
+    if (!held.includes(required)) {
+      // The capability's name and nothing else. A refused caller needs to know
+      // which grant to ask an administrator for; it must not learn whether the
+      // named datasource exists or which services this deployment wired —
+      // which is also why this runs BEFORE the service lookup below.
+      sendError(
+        res,
+        403,
+        'PERMISSION_DENIED',
+        kind === 'write'
+          ? `Creating metadata from an external datasource requires the \`${FEDERATION_WRITE_CAPABILITY}\` capability.`
+          : `Introspecting an external datasource requires the \`${FEDERATION_READ_CAPABILITY}\` capability.`,
+      );
       return true;
     }
     return false;
@@ -218,7 +338,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables`,
       metadata: { summary: 'List remote tables on an external datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseAnonymous(req, res)) return;
+        if (await refuseFederationRequest(req, res, 'read')) return;
         const svc = externalService();
         if (!svc?.listRemoteTables) return unavailable(res);
         try {
@@ -237,7 +357,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables/:remote/draft`,
       metadata: { summary: 'Generate an Object draft from a remote table', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseAnonymous(req, res)) return;
+        if (await refuseFederationRequest(req, res, 'read')) return;
         const svc = externalService();
         if (!svc?.generateObjectDraft) return unavailable(res);
         try {
@@ -262,7 +382,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/tables/:remote/import`,
       metadata: { summary: 'Import a remote table as a federated object', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseAnonymous(req, res)) return;
+        if (await refuseFederationRequest(req, res, 'write')) return;
         const svc = externalService();
         if (!svc?.importObject) return unavailable(res);
         try {
@@ -289,7 +409,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/refresh-catalog`,
       metadata: { summary: 'Refresh the external datasource catalog snapshot', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseAnonymous(req, res)) return;
+        if (await refuseFederationRequest(req, res, 'write')) return;
         const svc = externalService();
         if (!svc?.refreshCatalog) return unavailable(res);
         try {
@@ -307,7 +427,7 @@ export function registerExternalDatasourceRoutes(
       path: `${ext}/validate`,
       metadata: { summary: 'Validate the federated objects on a datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseAnonymous(req, res)) return;
+        if (await refuseFederationRequest(req, res, 'authenticated')) return;
         const svc = externalService();
         if (!svc?.validateAll) return unavailable(res);
         try {

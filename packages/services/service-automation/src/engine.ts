@@ -1134,6 +1134,27 @@ export interface SuspendedRunStore {
 }
 
 /**
+ * Persisted claim ledger for trigger dispatch idempotency (#10220).
+ *
+ * `claim(key)` is check-and-record: `true` means the caller now owns this
+ * dispatch key and should launch the flow; `false` means some earlier sweep —
+ * possibly in a previous process lifetime — already dispatched it. Backed by
+ * `sys_flow_dispatch` in production (see `ObjectStoreFlowDispatchStore`), so
+ * dedup survives kernel rebuild.
+ */
+export interface FlowDispatchStore {
+    claim(key: string): Promise<boolean>;
+}
+
+/**
+ * TTL for the engine's IN-PROCESS dispatch-claim fallback (#10220). Every
+ * dispatch key embeds a calendar day, so a key stops being producible once its
+ * sweep day has passed; 48h comfortably outlives any key's claimable lifetime
+ * while keeping the fallback map bounded.
+ */
+export const IN_PROCESS_DISPATCH_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
+
+/**
  * Lift the `{ dialect, source }` envelopes the flow schema derives for edge
  * `condition`s back onto the conversion output — and take nothing else with
  * them (#4454).
@@ -1304,6 +1325,25 @@ export class AutomationEngine implements IAutomationService {
      * duplicate `resume(runId)` can't re-enter and double-run side effects.
      */
     private resuming = new Set<string>();
+    /**
+     * Optional persisted dispatch-claim ledger (#10220). When set, `claim()`
+     * checks-and-records against `sys_flow_dispatch` so trigger dispatch dedup
+     * survives kernel rebuild; when absent, `claim()` degrades to the
+     * in-process map below — honestly, with a one-time warning.
+     */
+    private flowDispatchStore: FlowDispatchStore | null = null;
+    /**
+     * In-process dispatch-claim fallback: key → claim time (epoch ms). Used
+     * when no persisted ledger is attached, and per-key when the ledger
+     * errors. Entries expire after {@link IN_PROCESS_DISPATCH_CLAIM_TTL_MS}.
+     */
+    private readonly inProcessDispatchClaims = new Map<string, number>();
+    /**
+     * Whether this engine has already said its dispatch dedup is in-process
+     * only (#10220). Once per instance: a silent fallback hides a permanently
+     * weakened guarantee, but repeating it every sweep tick is log spam.
+     */
+    private dispatchClaimDegradationWarned = false;
 
     constructor(logger: Logger, store?: SuspendedRunStore, options?: AutomationEngineOptions) {
         this.logger = logger;
@@ -1320,6 +1360,71 @@ export class AutomationEngine implements IAutomationService {
      */
     setSuspendedRunStore(store: SuspendedRunStore): void {
         this.store = store;
+    }
+
+    /**
+     * Attach (or replace) the persisted {@link FlowDispatchStore} (#10220).
+     * Used by the service plugin once the ObjectQL engine is available and
+     * `sys_flow_dispatch` is registered.
+     */
+    setFlowDispatchStore(store: FlowDispatchStore): void {
+        this.flowDispatchStore = store;
+    }
+
+    /**
+     * Claim a trigger dispatch key (#10220): `true` = the caller owns this
+     * dispatch and should launch the flow; `false` = it was already dispatched
+     * (this sweep, an earlier sweep, or a previous process lifetime).
+     *
+     * Exposed on the automation service surface so triggers — which resolve
+     * `automation` structurally and never learn the table name — can dedup
+     * their dispatches against the persisted `sys_flow_dispatch` ledger.
+     *
+     * Degradation contract (both halves deliberate):
+     *  - No persisted ledger attached → in-process dedup, with a ONE-TIME
+     *    warning that the guarantee is weakened (a rebuild can re-dispatch).
+     *  - Persisted ledger ERRORS → availability over strict-once: the failure
+     *    is logged and the claim falls back to the in-process check for that
+     *    key, which returns `false` only when THIS process already dispatched
+     *    it — so a store outage never blocks a dispatch, and never double-fires
+     *    within one process lifetime either.
+     */
+    async claim(key: string): Promise<boolean> {
+        if (this.flowDispatchStore) {
+            try {
+                return await this.flowDispatchStore.claim(key);
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] flow-dispatch claim '${key}' failed against the persisted ledger — ` +
+                        `falling back to in-process dedup for this key (availability over strict-once: ` +
+                        `the dispatch proceeds unless this process already made it; a kernel rebuild may re-dispatch it). ` +
+                        `The store failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+                return this.claimInProcess(key);
+            }
+        }
+        if (!this.dispatchClaimDegradationWarned) {
+            this.dispatchClaimDegradationWarned = true;
+            this.logger.warn(
+                '[automation] no persisted flow-dispatch ledger (no ObjectQL engine, or sys_flow_dispatch not registered) — ' +
+                    'trigger dispatch dedup is IN-PROCESS ONLY and will NOT survive a kernel rebuild: ' +
+                    'the same record/window can be re-dispatched after a restart.',
+            );
+        }
+        return this.claimInProcess(key);
+    }
+
+    /** In-process half of {@link claim}: TTL-pruned check-and-record. */
+    private claimInProcess(key: string): boolean {
+        const now = Date.now();
+        const cutoff = now - IN_PROCESS_DISPATCH_CLAIM_TTL_MS;
+        for (const [k, t] of this.inProcessDispatchClaims) {
+            if (t < cutoff) this.inProcessDispatchClaims.delete(k);
+        }
+        if (this.inProcessDispatchClaims.has(key)) return false;
+        this.inProcessDispatchClaims.set(key, now);
+        return true;
     }
 
     /**

@@ -60,8 +60,9 @@
 //   node scripts/check-skill-frame-sync.mjs [--self-test]
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -856,6 +857,6 @@ function main() {
 // idiom as scripts/objectui-changeset-digest.mjs, which is imported the same way
 // by scripts/objectui-range.mjs (and was by check-objectui-pin-fresh.mjs, until
 // #10134 deleted it — the idiom is what carries over, not the importer).
-if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) {
+if (isEntrypoint(import.meta.url)) {
   main();
 }

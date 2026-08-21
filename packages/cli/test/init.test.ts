@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, renderPnpmWorkspaceYaml } from '../src/commands/init';
+import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, SCAFFOLD_ALLOWED_PEER_VERSIONS, renderPnpmWorkspaceYaml } from '../src/commands/init';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -115,6 +115,60 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
     expect(yaml).toMatch(/^ {2}- better-sqlite3$/m);
     // No `packages:` key — this is a settings file, not a workspace declaration.
     expect(yaml).not.toMatch(/^packages:/m);
+  });
+});
+
+// A brand-new scaffold's first `pnpm install` reported two unmet peers, on the
+// one screen where a newcomer decides whether this project is solid, with
+// nothing they did to cause it (#10326). Both ranges belong to third-party
+// packages we cannot edit, so the remedy is pnpm's scoped `allowedVersions` —
+// and it must travel INSIDE the scaffold, because a `peerDependencyRules` block
+// in this repo's own pnpm-workspace.yaml does not ship with published packages.
+describe('benign peer-skew declarations (#10326)', () => {
+  // Comments in the rendered YAML explain these keys; they must not be what
+  // satisfies an assertion about the keys themselves.
+  const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
+
+  it('widens better-auth\'s stale better-sqlite3 peer rather than pinning ours back', () => {
+    // better-auth 1.7.1 peers `^12.0.0` while the tree resolves 13.x. The peer
+    // is OPTIONAL and governs one configuration only — a raw better-sqlite3
+    // `Database` passed to better-auth's `database` option — which ObjectStack
+    // never does (AuthManager passes an ObjectQL adapter factory). Measured on
+    // the configuration it does govern, 1.7.1 behaves identically on 13.0.3 and
+    // 12.11.1, so 13 is right and the upstream range is stale.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['better-auth>better-sqlite3']).toBe('13');
+    expect(settings).toMatch(/^ {4}'better-auth>better-sqlite3': '13'$/m);
+  });
+
+  it('accepts the single better-call copy @better-auth/scim resolves to', () => {
+    // scim is held at 1.7.0-rc.1 on purpose; the rc peers an EXACT
+    // `better-call@1.3.7` while better-auth depends on 1.4.0. A better-auth
+    // plugin must share the HOST's better-call instance, so one 1.4.0 copy is
+    // the correct tree. Retires with the scim rc pin.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
+    expect(settings).toMatch(/^ {4}'@better-auth\/scim>better-call': '1\.4\.0'$/m);
+  });
+
+  it('renders the rules under peerDependencyRules.allowedVersions', () => {
+    expect(settings).toMatch(/^peerDependencyRules:$/m);
+    expect(settings).toMatch(/^ {2}allowedVersions:$/m);
+  });
+
+  it('scopes every rule to one declaring package, never a bare peer name', () => {
+    // A bare `better-sqlite3: '13'` would silence that peer for every package
+    // declaring it — including one whose complaint would be real.
+    const keys = Object.keys(SCAFFOLD_ALLOWED_PEER_VERSIONS);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) {
+      expect(key, `"${key}" must be spelled <declaring package>><peer>`).toContain('>');
+    }
+  });
+
+  it('emits nothing at all when the caller supplies no rules', () => {
+    // The block is data-driven, so an empty map must not leave a dangling
+    // `allowedVersions:` header claiming a declaration that is not there.
+    const bare = renderPnpmWorkspaceYaml(SCAFFOLD_BUILT_DEPENDENCIES, {});
+    expect(bare).not.toMatch(/^peerDependencyRules:$/m);
   });
 });
 

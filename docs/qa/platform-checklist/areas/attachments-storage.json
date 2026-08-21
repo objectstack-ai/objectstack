@@ -61,6 +61,37 @@
         "The SDK helper `meta.saveItem(type, name, item)` does NOT send the `?package=` query — it PUTs the bare path (packages/client/src/index.ts:701-707). Steps 2-4 must therefore be issued as raw HTTP with the query string appended, or the scratch objects land outside the package and the teardown above will not take them with it.",
         "Field-level detail of the two personas' permission sets (which verbs each set grants) is recorded here as intent, not as a verbatim payload: run #7635 provisioned them through a runtime permission-set/position binding whose exact set body was not captured in the run record. Replay step 6 by the stated OUTCOME (read-not-edit for A, baseline-only for B) and verify it directly, rather than trusting a payload nobody pinned."
       ]
+    },
+    "qa-media-constraints": {
+      "title": "Scratch object qa_media carrying FIELD-level accept/maxSize (plus an extension-only accept field)",
+      "why": "The showcase declares accept/maxSize ONLY on action params (examples/app-showcase/src/ui/actions/index.ts:334,337 — the dialog-widget/ADR-0059 upload-guard lane), never on an object FIELD, so the server-side record-write re-enforcement (field-accept-maxsize-server-enforced) has no stock target: without this recipe every clause of that item is blocked(fixture) on every run. Landing one constrained field in the showcase seeds proper would retire this recipe.",
+      "provenance": "authored from source in the 2026-08-20 scoped scan-functionality sweep (claude/new-session-0pv25p); call shapes copied from qa-scratch-authz (#7670), constraint keys from the FieldSchema declaration — not yet proven by a live run",
+      "app": "showcase",
+      "requires": [
+        "an admin session that holds the `manage_metadata` capability — same gate as qa-scratch-authz (PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1, packages/rest/src/rest-route-ledger.ts)",
+        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/packages",
+          "body": { "manifest": { "id": "com.objectstack.qa.media", "name": "QA media-constraints fixture", "version": "1.0.0", "type": "app" }, "enableOnInstall": true },
+          "expect": "2xx with the installed package echoed back. The id is deliberately DISTINCT from qa-scratch-authz's com.objectstack.qa.attachments so the two recipes install and tear down independently. Re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately, never by reflex.",
+          "source": "same grounding as qa-scratch-authz step 1: packages/rest/src/rest-route-ledger.ts:312 note; body shape pinned in packages/client/src/client.test.ts:2144-2166"
+        },
+        {
+          "step": 2,
+          "call": "PUT /api/v1/meta/objects/qa_media?package=com.objectstack.qa.media",
+          "body": { "name": "qa_media", "label": "QA Media", "sharingModel": "public_read_write", "fields": { "name": { "type": "text", "label": "Name", "required": true }, "poster": { "type": "image", "label": "Poster", "accept": ["image/png", "image/jpeg"], "maxSize": 1048576 }, "doc": { "type": "file", "label": "Doc", "accept": [".pdf"] } } },
+          "expect": "2xx. `poster` is the MIME-entry + maxSize probe; `doc` (accept = ['.pdf'] ONLY, no maxSize) is the extension-entry probe whose dotless-filename hole is a documented boundary of the enforcement. `enable.files` is deliberately ABSENT: field-owned files ride file-reference-lifecycle.ts (activeFileFields keys on file-class field types), not the #2727 sys_attachment opt-in gate, so the object needs no attachments enablement.",
+          "source": "accept/maxSize are declared FieldSchema keys since ADR-0104 D3 wave 2 (packages/spec/src/data/field.zod.ts:876-883 — 'Offered to the file picker AND enforced on write'); authoring-call shape identical to qa-scratch-authz step 2 (meta.ts:262,319 for ?package=); file-class field set is FILE_REFERENCE_TYPES = image/file/avatar/video/audio (packages/spec/src/data/field-value.zod.ts:146-148)"
+        }
+      ],
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.media — or discard the isolated file DB, the cheaper path an isolated boot makes free.",
+      "knownGaps": [
+        "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem` drops `?package=` (packages/client/src/index.ts:701-707) — issue step 2 as raw HTTP or the object lands outside the package and the teardown misses it.",
+        "Unlike qa-scratch-authz this recipe has NOT yet been proven by a live run — it is derived from the same authoring path the proven recipe uses plus the FieldSchema declaration. If step 2 4xxs on the constraint keys, re-read field.zod.ts:876-883 before assuming the recipe rotted; a parse-time strip of accept/maxSize would itself be a finding (the pre-#4001 silent-strip class)."
+      ]
     }
   },
   "items": [
@@ -697,6 +728,108 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "clause 3 restated against ADR-0104 D3 after run #7635 scored it `partial` on a product that is CORRECT: the clause demanded a resolved stored-file object with receipt.name and an absolute http(s) url, but D3 makes the stored form the bare opaque sys_file id and the resolved shape the read/expand form only — so the item was asserting a contract the ADR had already retired from the write path. The clause now asserts the opaque id plus the field-ownership stamp (ref_object/ref_id/ref_field/acl) that proves the reference is managed rather than a placeholder, the step text and title follow, a negative pins the drift itself so a future run does not re-score the shipped shape as a defect, and source cites the ADR + the storage-routes.ts line documenting the id. Checklist mirrors the product; no product change", "ref": "#7669" }
+      ]
+    },
+    {
+      "id": "attachments-storage.field-accept-maxsize-server-enforced",
+      "title": "A field's declared accept/maxSize is re-enforced SERVER-SIDE on record write — the control the client widget check explicitly is not — with the declared missing-metadata and dotless-extension holes scored as documented boundaries",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai) — the check is a declaration constraint, not an authz gate: it binds every caller identically, so no restricted persona is needed"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the qa_media scratch object with field-level accept/maxSize (see provisioning) — no stock showcase object declares either",
+          "the storage service live at the default base — presign/complete is how the probe sys_file rows are minted, and their mime_type/size are the DECLARED values the check reads (storage-routes.ts:241-243,255)",
+          "a system-write channel to CLEAR mime_type and size on one committed sys_file row for the missing-metadata clause — the presign door refuses a body without mimeType/size (400 INVALID_REQUEST, storage-routes.ts:242-243), so a metadata-less row cannot be minted through the API; without the system write that one clause is blocked(fixture)"
+        ],
+        "provisioning": {
+          "use": "qa-media-constraints",
+          "why": "every clause of this item runs against qa_media.poster (MIME accept + maxSize) and qa_media.doc (extension-only accept). Without the recipe the ENTIRE item is blocked(fixture): the showcase's only accept/maxSize declarations sit on action params, which never reach this seam."
+        },
+        "knownGaps": [
+          "FIXTURE GAP (why the recipe exists): the showcase declares accept/maxSize only on ACTION PARAMS (examples/app-showcase/src/ui/actions/index.ts:334,337) — that lane feeds the dialog widget and the ADR-0059 Confirm-while-uploading guard pinned by records-forms.upload-guard-blocks-confirm, and never reaches assertFileConstraints, which fires on OBJECT-FIELD references at record write. No showcase object field carries either key, so on stock seeds this item cannot run at all. Landing one constrained field in the showcase seeds would retire the qa-media-constraints recipe.",
+          "CONTENT-SNIFFING BOUNDARY (record so runs do not score it as a leak): enforcement is DECLARATION-based, never content-based. sys_file.mime_type is taken verbatim from the client's own request body on both upload doors — presigned (storage-routes.ts:241-243 destructure, :255 persisted, :267 even echoed back as the upload content-type header) and chunked (:342-344, :359) — and nothing on the upload path sniffs magic bytes (no file-type/sniffing code exists in service-storage; measured by search, only fs.readdir withFileTypes matches). A caller may therefore upload arbitrary bytes while declaring image/png and pass every accept test. That is the boundary of what the platform claims; a run demonstrating it records a documented-boundary observation, never a FAIL of this item.",
+          "WIRE-ENVELOPE (per source, unmeasured — the run must record what it sees): FileConstraintError declares `code: 'ERR_FILE_CONSTRAINT'` (registered, packages/spec/src/api/error-code-ledger.zod.ts:320) but NO `status`/`statusCode` (file-reference-lifecycle.ts:168-173), and rest's classifyDataError has no ERR_FILE_CONSTRAINT branch — so the declared-status passthrough never fires and the refusal should exit the /api/v1/data door through the sanitized 500 INTERNAL_ERROR terminal (packages/rest/src/error-response.ts UNCLASSIFIED_FAULT), the field/accept prose reaching the server LOG rather than the body. Its sibling FileFieldBulkWriteError documents `status: 400` as exactly what prevents that promotion (file-reference-lifecycle.ts:181-191), and #7525 fixed the same shape for statusCode-declaring hooks. Consequence for scoring: the enforcement clauses pass on the NO-ROW oracle regardless of envelope; a measured sanitized 500 is a wire-contract finding to EXTRACT as its own card, and a measured 4xx carrying ERR_FILE_CONSTRAINT means the product improved — revise clause 2."
+        ]
+      },
+      "steps": [
+        "replay the qa-media-constraints recipe (or verify qa_media already exists from this boot)",
+        "as admin, mint probe files via presign → PUT bytes → complete: (A) a small PDF declared mimeType 'application/pdf', size ~10KB; (B) a file declared mimeType 'image/png' with size 2097152 (> poster's 1048576 maxSize — size is the DECLARED value; the actual bytes need not be that large); (C) a compliant control declared 'image/png', size ~10KB; (D) filename 'README' (no dot), any mimeType; (E) filename 'report.txt', mimeType 'text/plain'",
+        "POST /api/v1/data/qa_media { name: 'accept-probe', poster: <A> } and capture the refusal; list qa_media where name='accept-probe' → must be empty; read sys_file A in stored form → ref_id must still be null (the throw lands before the claim)",
+        "POST /api/v1/data/qa_media { name: 'size-probe', poster: <B> } and capture the refusal + the empty re-list",
+        "POST /api/v1/data/qa_media { name: 'control', poster: <C> } → 2xx; read sys_file C: ref_object='qa_media', ref_field='poster', ref_id=<the record>",
+        "update path: PUT/PATCH the 'control' record swapping poster to <A> → capture the refusal; re-read the record → poster unchanged (the check also rides beforeUpdate, file-reference-lifecycle.ts:676)",
+        "capture the server log around each refusal: the FileConstraintError text names the field and the accept list ('not permitted by the accept list declared for...') or the byte counts ('exceeds the maximum size declared for...'); record the WIRE status + code each refusal actually surfaced with",
+        "documented hole 1 (missing metadata): system-write one committed sys_file clearing mime_type AND size to null, then POST it into poster → the write SUCCEEDS (file-reference-lifecycle.ts:255-257 — 'missing metadata is not evidence of a violation'; the maxSize guard at :267 and the mime read at :277 both require the value to be present)",
+        "documented hole 2 (extension-only accept vs dotless name): POST { doc: <D> } → SUCCEEDS — accept ['.pdf'] against a name with no dot leaves testable empty and the check exits before judging (:285-289); contrast POST { doc: <E> } → REFUSED ('report.txt' HAS an extension, so the .pdf entry is testable and mismatches, :238) — the contrast proves the hole is the dotless case, not a dead extension arm",
+        "boundary demonstration (optional): upload PDF bytes declared as image/png within maxSize → POST into poster → passes; record as documented-boundary, per knownGaps"
+      ],
+      "acceptance": [
+        {
+          "clause": "a direct API write referencing a committed sys_file whose mime_type violates the field's declared accept is REFUSED and persists nothing: no qa_media row, and the sys_file row stays unclaimed (ref_id null) — the widget check is 'a convenience rather than a control — any caller talking to the API directly bypasses it' (file-reference-lifecycle.ts:247-249), and this server re-check is the control",
+          "oracle": "api",
+          "verify": "the POST answers non-2xx; a scoped re-list of qa_media returns zero rows; the stored-form sys_file read shows ref_id still null",
+          "evidence": "the refusal body + the empty list + the sys_file read"
+        },
+        {
+          "clause": "a reference whose sys_file size exceeds the field's declared maxSize is refused identically, no row written (assertFileConstraints, file-reference-lifecycle.ts:267-274)",
+          "oracle": "api",
+          "verify": "same triple as clause 0 for the oversized probe",
+          "evidence": "the refusal body + the empty list"
+        },
+        {
+          "clause": "the refusal is attributable to the constraint: the server log carries the FileConstraintError prose naming the FIELD and the accept list (or the declared byte counts), and the run RECORDS the wire status/code it measured. Per source the expected current wire shape is the sanitized 500 INTERNAL_ERROR with the prose withheld from the body (ERR_FILE_CONSTRAINT is ledgered but the error declares no HTTP status and classifyDataError has no branch for it — see knownGaps): that measured 500 does NOT fail this clause; it is extracted as a wire-contract card. A 4xx carrying ERR_FILE_CONSTRAINT and the prose means the envelope improved — revise this clause with the measurement",
+          "oracle": "log",
+          "verify": "log excerpt around the refusal shows the constraint message ('not permitted by the accept list declared for' / 'exceeds the maximum size declared for') naming the field; the run record states the measured HTTP status + body code beside it",
+          "evidence": "log excerpt + the measured wire status/code"
+        },
+        {
+          "clause": "the UPDATE path is equally gated: swapping a compliant record's poster to the violating fileId is refused and the stored value is unchanged (applyCopyOnClaim runs in beforeUpdate too, file-reference-lifecycle.ts:676)",
+          "oracle": "api",
+          "verify": "the update answers non-2xx and a re-read shows the original poster value",
+          "evidence": "the refusal + the re-read"
+        },
+        {
+          "clause": "the compliant control passes and is CLAIMED: a file satisfying both declarations writes normally and its sys_file row is stamped ref_object='qa_media'/ref_field='poster'/ref_id=<record> — without this positive side, every refusal above would be equally satisfied by a write path that is simply broken",
+          "oracle": "api",
+          "verify": "the control POST answers 2xx and the sys_file read shows the ownership stamp",
+          "evidence": "the 2xx + the stamped row read"
+        },
+        {
+          "clause": "DOCUMENTED BOUNDARY, scored as a pass: a sys_file with NO mime_type cannot fail an accept test and one with NO size cannot fail maxSize — the metadata-less reference is ACCEPTED by design ('missing metadata is not evidence of a violation', file-reference-lifecycle.ts:255-257; guards at :267 and :277/:285-288 each require the datum to be present). A run tempted to score this as an enforcement leak is pointed here instead",
+          "oracle": "api",
+          "verify": "after the system write clears mime_type and size, the same POST that clause 0 saw refused now answers 2xx",
+          "evidence": "the cleared sys_file read + the 2xx"
+        },
+        {
+          "clause": "DOCUMENTED BOUNDARY, scored as a pass, with its live contrast: an accept list of ONLY extension entries judged against a filename with no dot yields testable.length === 0 and the check exits without judging (file-reference-lifecycle.ts:285-289) — the dotless write into doc (accept ['.pdf']) SUCCEEDS by design, while the dotted mismatch ('report.txt') is refused, proving the extension arm itself is alive and only the dotless case is the declared hole",
+          "oracle": "api",
+          "verify": "POST with the dotless-name file answers 2xx; POST with the .txt-named file is refused with no row",
+          "evidence": "both responses + the one empty re-list"
+        }
+      ],
+      "negative": [
+        "a qa_media row created holding the violating reference is THE fail this item exists for — it means the only guard is the client widget, the exact 'declared but not enforced' state ADR-0104 removes (file-reference-lifecycle.ts:251-253)",
+        "a refusal that still claimed the file (sys_file ref_id stamped despite the non-2xx) is a FAIL — the rejection must be authoritative, not cosmetic (same rule as attach-requires-parent-edit)",
+        "⛔ NOT failures: the missing-metadata pass (clause 5) and the dotless-extension pass (clause 6) — both are the source's own documented boundaries; and arbitrary BYTES passing under a compliant declared mimeType is the declaration-based content boundary in knownGaps, not a bypass",
+        "⛔ NOT a violation probe: a random/unknown id token in the field passes untouched BY DESIGN — an id matching no sys_file row is treated as an external/legacy value and skipped before any constraint is read (file-reference-lifecycle.ts:421-423); probe with a REAL committed sys_file or the run measures nothing"
+      ],
+      "traps": ["absence-inference", "wrong-panel"],
+      "automated": { "kind": "unit", "ref": "packages/services/service-storage/src/file-reference-lifecycle.test.ts ('accept / maxSize enforcement' describe, :906-1006) — HANDLER-DIRECT: drives the hook through a fake engine, covering the semantics of clauses 0/1/4/5/6 (rejection, per-entry vocabulary, missing-metadata pass, no-constraints pass) at the unit level. It is NOT evidence about the wired REST lane or the wire envelope (clause 2), and per the attach-requires-parent-edit clause-3 lesson a handler-direct green can coexist with different wired behaviour — the dogfood lane has NO pin for this seam, which is precisely why this item exists." },
+      "source": [
+        "packages/services/service-storage/src/file-reference-lifecycle.ts:243-257 (the rationale: the widget check is a convenience, the server re-check is the control; missing metadata is not evidence of a violation), :259-298 (assertFileConstraints — maxSize guard :267-274, testable filter + early return :276-289, accept mismatch throw :291-296), :229-241 (matchesAcceptEntry — exact MIME / type\\/* wildcard / .ext-against-NAME vocabulary), :421-427 (the check rides copy-on-claim in the before hooks — beforeInsert :622, beforeUpdate :676 — and unknown ids are skipped at :423)",
+        "packages/spec/src/data/field.zod.ts:876-883 (accept/maxSize declared on FieldSchema, 'Offered to the file picker AND enforced on write') + packages/spec/liveness/field.json (both keys `live` with this enforcement as evidence)",
+        "packages/services/service-storage/src/storage-routes.ts:241-243,:255,:267 (presigned) and :342-344,:359 (chunked) — mime_type/size persisted VERBATIM from the client body: the declaration-based boundary in knownGaps",
+        "packages/spec/src/api/error-code-ledger.zod.ts:320 (ERR_FILE_CONSTRAINT registered) vs file-reference-lifecycle.ts:168-173 (no status declared) vs packages/rest/src/error-response.ts classifyDataError (no branch, declared-status passthrough skipped, UNCLASSIFIED_FAULT terminal) — the clause-2 wire analysis; file-reference-lifecycle.ts:181-191 (FileFieldBulkWriteError's `status: 400` note is the in-module precedent for what a 4xx exit requires)",
+        "packages/services/service-storage/CHANGELOG.md 17.0.0-rc.0 (changeset fe67e34, ADR-0104 D3 wave 2 PR-5a) — grounds since: v17",
+        "records-forms.upload-guard-blocks-confirm owns the CLIENT half (ADR-0059 dialog guard over ACTION-PARAM accept/maxSize, examples/app-showcase/src/ui/actions/index.ts:334,337). Cross-reference, do not duplicate — that item never touches this record-write seam"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-20", "change": "new item from the scoped scan-functionality sweep (扫描功能): the server-side re-enforcement of field accept/maxSize had NO coverage on either lane — the only pinned guard is the client dialog's (records-forms.upload-guard-blocks-confirm), which the enforcement source itself calls 'a convenience rather than a control'. Authored with the qa-media-constraints recipe (no stock showcase field declares either key), the two source-documented holes (missing metadata, dotless-name vs extension-only accept) as documented-boundary passes, the declaration-based content boundary recorded so runs do not score sniffing absence as a leak, and the per-source wire-envelope analysis (ERR_FILE_CONSTRAINT ledgered but status-less → sanitized 500 expected) carried as a knownGap for the run to measure rather than rediscover", "ref": "claude/new-session-0pv25p" }
       ]
     }
   ]

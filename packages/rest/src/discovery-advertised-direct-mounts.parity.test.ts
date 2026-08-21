@@ -143,8 +143,16 @@ function boot(opts: {
     // authorized caller reaches it in production, keeping this test's subject
     // (does the advertised URL resolve and answer in the mounted table) intact.
     // The gate itself is pinned in `package-envelope.conformance.test.ts`.
+    // [#9901] `manage_platform_settings` joins the set for the same reason:
+    // the federation family's read routes now carry a capability gate too, and
+    // the advertised `…/external/tables` URL is driven below. Without it that
+    // probe would read a 403 and this pin's subject (does the advertised URL
+    // resolve and answer in the mounted table) would quietly become an authz
+    // assertion. That gate is pinned in
+    // `external-datasource-routes-auth-guard.test.ts`.
     resolveExecutionContext: async () => ({
-      userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+      userId: 'u_pkg',
+      systemPermissions: ['manage_metadata', 'studio.access', 'setup.access', 'manage_platform_settings'],
     }),
     enableProjectScoping: opts.enableProjectScoping,
     projectResolution: opts.projectResolution,

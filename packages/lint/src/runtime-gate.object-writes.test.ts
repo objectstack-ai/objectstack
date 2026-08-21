@@ -285,3 +285,88 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     expect(advisory!.severity).toBe('warning');
   });
 });
+
+/**
+ * #10064 — the WIRE spelling of a collection-resident finding's path.
+ *
+ * Maintainer ruling (issue #10064, 2026-08-20): key the top-level collection
+ * entry by NAME (`objects.acme_invoice.sharingModel`), never by the gate's
+ * private per-write snapshot index — `buildRuntimeWriteSnapshots` appends the
+ * written item to an in-memory array the caller has never seen, so
+ * `objects[417]` resolves against nothing a Studio / MCP / REST receiver
+ * holds. Single-member write types keep their trivially-stable positional
+ * form (`flows[0]…` — pinned in `runtime-gate.test.ts`), and nested positions
+ * within one named item stay positional (they index the author's own
+ * document).
+ */
+describe('collection-resident finding paths are name-keyed on the wire (#10064)', () => {
+  /** Stored siblings so the written item does NOT land at snapshot index 0. */
+  const SIBLINGS = [
+    { name: 'sib_alpha', sharingModel: 'private', fields: { owner: { type: 'text' } } },
+    { name: 'sib_beta', sharingModel: 'private', fields: { owner: { type: 'text' } } },
+  ];
+
+  it('an object refusal keys the written object by NAME even when siblings occupy the low indexes', () => {
+    // `security-owd-unset` paths at the whole-object `sharingModel` slot. The
+    // written item sits at snapshot index 2 (after two stored siblings) — the
+    // pre-#10064 wire spelling was `objects[2].sharingModel`, an offset into
+    // the gate's private snapshot.
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'acme_invoice', label: 'Invoice', fields: {} },
+      context: { objects: SIBLINGS },
+    });
+    const owd = result.errors.find((f) => f.rule === 'security-owd-unset');
+    expect(owd, JSON.stringify(result.errors)).toBeDefined();
+    expect(owd!.path).toBe('objects.acme_invoice.sharingModel');
+  });
+
+  it('EVERY added finding on the write is name-keyed, not only the first', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'acme_invoice', label: 'Invoice', fields: {} },
+      context: { objects: SIBLINGS },
+    });
+    for (const f of [...result.errors, ...result.advisories]) {
+      expect(f.path, `${f.rule} leaked a snapshot index: ${f.path}`).not.toMatch(/^objects\[\d+\]/);
+    }
+  });
+
+  it('a name that cannot splice into a dotted path keeps the positional spelling — fallback, never a hole', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'bad name!', label: 'Broken', fields: {} },
+      context: { objects: SIBLINGS },
+    });
+    const owd = result.errors.find((f) => f.rule === 'security-owd-unset');
+    expect(owd, JSON.stringify(result.errors)).toBeDefined();
+    expect(owd!.path).toBe('objects[2].sharingModel');
+  });
+
+  it('a permission write name-keys findings attributed to CONTEXT objects too', () => {
+    // The pre-#8309 phantom shape re-used as a path probe: a permission write
+    // judged with objects but no sibling permission sets attributes a
+    // `security-master-detail-ungranted` advisory to the DETAIL OBJECT — a
+    // context entry, not the written item. Its top-level index is equally a
+    // snapshot offset, so it is equally name-keyed.
+    const objects = [
+      { name: 'shop_invoice', sharingModel: 'private', fields: { owner: { type: 'text' } } },
+      {
+        name: 'shop_invoice_line',
+        sharingModel: 'private',
+        fields: {
+          invoice: { type: 'master_detail', reference: { object: 'shop_invoice' } },
+        },
+      },
+    ];
+    const result = runRuntimeAuthoringRules({
+      type: 'permission',
+      item: { name: 'shop_clerk', label: 'Clerk', objects: { shop_invoice: { read: true } } },
+      context: { objects },
+    });
+    const phantom = [...result.errors, ...result.advisories]
+      .find((f) => f.rule === 'security-master-detail-ungranted');
+    expect(phantom, JSON.stringify([...result.errors, ...result.advisories])).toBeDefined();
+    expect(phantom!.path).toMatch(/^objects\.shop_invoice_line(\.|$)/);
+  });
+});

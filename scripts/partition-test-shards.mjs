@@ -14,17 +14,17 @@
 // EITHER shard. Three workspace packages have exactly one test file today, so
 // the passthrough route is a silent-coverage-loss machine, not an option.
 //
-// Each package's weight is its test-file count. That is a deliberate proxy:
-// suite wall-clock is dominated by fixed per-file cost (module-graph
-// re-execution per file under isolation -- same measurement objectui's CI
-// documents), so file count tracks duration far better than package count.
-// Packages are placed heaviest-first into the lightest bin (LPT greedy), with
-// all ties broken by name, so every shard computes the identical split from
-// the same input without coordinating.
+// Each package's weight is its MEASURED `turbo run test` duration, in seconds,
+// read from scripts/test-shard-timings.json. Packages are placed heaviest-first
+// into the lightest bin (LPT greedy), with all ties broken by name, so every
+// shard computes the identical split from the same input without coordinating.
 //
-// HOW WELL THAT PROXY HOLDS, MEASURED (2026-08-20, queue builds, not a guess).
-// Per-package durations read out of the turbo task groups in `merge_group` CI
-// logs, against each package's weight in the same tree:
+// ── WHY NOT TEST-FILE COUNT, WHICH THIS USED TO WEIGH (#10472) ─────────────
+//
+// The old weight was each package's test-file count, on the theory that fixed
+// per-file cost dominates so file count tracks duration. Measured against real
+// queue builds, that proxy holds to about +-20% on most packages and is off by
+// ~2.8x on ONE of them:
 //
 //   @objectstack/cli                135 files   548.6s / 474.4s   ~3.5-4.1 s/file
 //   @objectstack/spec               414 files   496.4s            ~1.20 s/file
@@ -33,23 +33,35 @@
 //   @objectstack/client              24 files    34.7s            ~1.45 s/file
 //   @objectstack/example-showcase    21 files    21.6s            ~1.03 s/file
 //
-// So the proxy tracks within roughly +-20% across the big packages and is off
-// by ~2.8x on ONE of them (@objectstack/cli). The binning is not the problem:
-// on the full package list a queue build hands this script, the three bins come
-// out 783/783/782 -- a one-file spread across 2348, far inside LPT's <=4/3
-// bound. Duration spread between shards in the same builds was up to 3.4x, and
-// that gap is the proxy's, not the algorithm's.
+// LPT cannot correct an input that wrong, and the bins were never the defect:
+// on a full package list the six file-count bins came out within a file or two
+// of each other, and the SAME six shards ran 5.0/6.2/6.3/13.6/6.3/9.0 minutes
+// in run 32428961038 -- a 2.7x spread, with one shard setting the whole
+// workflow's 14.7-minute wall. An algorithm that balances perfectly is exactly
+// as unbalanced as the quantity it is handed.
 //
-// ⛔ THE HARD LIMIT, AND THE REASON RE-WEIGHTING ALONE CANNOT MEET #4859.
+// So the quantity handed to it is now the duration itself. The dataset is
+// GENERATED, never hand-written -- see scripts/measure-test-shard-timings.mjs
+// for the two refresh paths and for why a cached (replayed) task is refused
+// rather than recorded as a ~0s weight.
+//
+// ⛔ THE HARD LIMIT THAT SURVIVES THE RE-WEIGHTING, AND BOUNDS THE SHARD COUNT.
 // Sharding is BY PACKAGE, so a shard can never finish faster than its single
-// heaviest package. Two packages are already over #4859's "Test Core 最慢分片
-// <= ~7min" threshold on their own: @objectstack/spec at 496s (8m16s) and
-// @objectstack/cli at 548s (9m09s). Measured consequence -- in run
-// 32352993803, Test Core shard 1 took 8m17.77s wall and @objectstack/spec's own
-// suite accounted for 8m16.4s of it: the shard IS that one package. No weight
-// function and no shard count changes that; only splitting those suites below
-// package granularity, or moving the threshold, does. Anyone arriving here to
-// swap the weight input should read that bound first (#10149).
+// heaviest package. That floor does not move when the weights get better; what
+// moves is that the split now RESPECTS it instead of blundering into it.
+// Measured, so it is not a theoretical bound: in run 32352993803 Test Core
+// shard 1 took 8m17.77s wall and @objectstack/spec's own suite accounted for
+// 8m16.4s of it -- the shard IS that one package. Only splitting such a suite
+// below package granularity moves that number (#10149, and #4859's "slowest
+// shard <= ~7min" line is still under it for exactly this reason). Raising the
+// shard count lowers the mean while that floor stays exactly where it is, so
+// past a point MORE shards make the max/mean ratio WORSE, not better. And the
+// ratio is what the acceptance bound is written in, so "add shards until it
+// balances" is not merely ineffective here -- it moves the number the wrong
+// way while looking like progress. #10472 asked for 6 -> 8
+// to be considered and the measured answer was no -- see SHARD_COUNT below,
+// where the self-test now pins that arithmetic so the next person gets the
+// answer from a failing assertion instead of from a CI run.
 //
 // Run-to-run variance is a SEPARATE and equally large effect, and it is not
 // placement: this job's Turbo cache key is namespaced per shard
@@ -64,6 +76,10 @@
 //     [--exclude <pkg>]...
 //   node scripts/partition-test-shards.mjs --self-test
 //
+// The weight dataset is scripts/test-shard-timings.json, regenerated by
+// scripts/measure-test-shard-timings.mjs. It is required, not optional: this
+// script refuses to shard rather than fall back to the old file-count proxy.
+//
 // <turbo-ls.json> is the output of `turbo ls [--affected] --output=json`
 // (shape: {packages:{count,items:[{name,path}]}}; `turbo ls` is marked
 // experimental, so the payload is asserted loudly in readPackageItems() below
@@ -77,7 +93,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
+
+// The Test Core shard count, and the ONLY place it is reasoned about.
+// ci.yml spells it three more times (the matrix, the `name:`, and `--shard
+// N/6`); the self-test below reads that workflow back and fails on drift,
+// because a partitioner splitting into a different number of bins than the
+// matrix declares is not a red step anywhere -- it is packages that no shard
+// runs.
+export const SHARD_COUNT = 6;
+
+// The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
+// It is a RATIO, not a wall-clock target, which is what makes it stable as the
+// suite grows -- and what makes "just add more shards" the wrong reflex, since
+// more shards shrink the denominator while the heaviest package holds the
+// numerator up.
+export const MAX_SHARD_OVER_MEAN = 1.3;
 
 // Where a `packages.items[].path` actually points.
 //
@@ -103,7 +137,7 @@ export function packageDir(itemPath) {
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'coverage', '.turbo', '.next']);
 
-function countTestFiles(dir) {
+export function countTestFiles(dir) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -119,6 +153,86 @@ function countTestFiles(dir) {
     }
   }
   return n;
+}
+
+// The measured dataset, read once. Absent or unreadable is a REFUSAL, not a
+// fallback to the old file-count weighting: a partitioner that silently
+// reverted to the proxy would re-open #10472's imbalance while every step
+// stayed green, which is precisely the failure class this file is built
+// against. A missing dataset is a five-second fix; an invisible re-imbalance
+// cost a 14.7-minute critical path for as long as nobody measured it.
+let timingsCache = null;
+export function loadTimings(timingsPath = TIMINGS_PATH) {
+  if (timingsCache && timingsCache.path === timingsPath) return timingsCache.value;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(timingsPath, 'utf8'));
+  } catch (cause) {
+    throw new Error(
+      `${timingsPath}: the measured per-package test durations could not be read (${cause.message}). ` +
+        'Regenerate with scripts/measure-test-shard-timings.mjs -- see its header for the two ' +
+        'refresh paths. Refusing to shard on an unmeasured weight.'
+    );
+  }
+  const packages = parsed?.packages;
+  const rate = parsed?.secondsPerTestFileFallback;
+  if (!packages || typeof packages !== 'object' || Array.isArray(packages)) {
+    throw new Error(`${timingsPath}: expected {packages:{"<name>":<seconds>}} -- got ${JSON.stringify(packages)}`);
+  }
+  if (typeof rate !== 'number' || !(rate > 0)) {
+    throw new Error(`${timingsPath}: secondsPerTestFileFallback must be a positive number, got ${JSON.stringify(rate)}`);
+  }
+  for (const [name, seconds] of Object.entries(packages)) {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+      throw new Error(`${timingsPath}: ${name} is weighed ${JSON.stringify(seconds)}, which is not a duration`);
+    }
+  }
+  timingsCache = { path: timingsPath, value: { packages, rate } };
+  return timingsCache.value;
+}
+
+// One package's weight, in seconds, and the ONE place the measured/estimated
+// distinction is made.
+//
+// A package the dataset has never seen -- a brand new one, or one added since
+// the last refresh -- is ESTIMATED from its test-file count at the dataset's
+// own median seconds-per-file, not dropped and not weighed zero. Zero is the
+// dangerous answer here: it is a real weight for a package with no tests, so a
+// weight-0 unmeasured package is indistinguishable from a correctly-empty one,
+// and a new heavy suite would pile onto whichever bin happened to be lightest
+// while reading as free. The estimate is the old proxy, used only where there
+// is nothing better, and `report` counts how often that happens so a dataset
+// drifting out of date is visible in the CI log rather than inferred later.
+export function weighPackage(name, dir, timings) {
+  if (Object.hasOwn(timings.packages, name)) {
+    return { seconds: timings.packages[name], measured: true };
+  }
+  return { seconds: countTestFiles(dir) * timings.rate, measured: false };
+}
+
+// Turn `turbo ls` items into weighted items, and the ONLY path that decides
+// what a package weighs in a real run.
+//
+// It is exported and factored out of main() for one reason: the self-test can
+// then assert on the SAME code the shards run. The pins that only exercised
+// partition() could not see a revert of the weight SOURCE -- partition is
+// handed weights and respects them faithfully whatever they mean, so a main()
+// that went back to passing test-file counts would satisfy every one of them
+// while re-opening #10472 exactly. The end-to-end pin in selfTest() below
+// calls THIS function, which is why it can tell duration from count.
+export function weighItems(items, excluded, timings, label = 'package list') {
+  const weighted = [];
+  let estimated = 0;
+  for (const it of items) {
+    if (typeof it?.name !== 'string' || typeof it?.path !== 'string') {
+      throw new Error(`${label}: package entry missing name/path: ${JSON.stringify(it)}`);
+    }
+    if (excluded.has(it.name)) continue;
+    const { seconds, measured } = weighPackage(it.name, packageDir(it.path), timings);
+    if (!measured) estimated++;
+    weighted.push({ name: it.name, weight: seconds });
+  }
+  return { weighted, estimated };
 }
 
 // LPT greedy: heaviest package into the currently lightest bin. Deterministic:
@@ -138,6 +252,19 @@ export function partition(items, shardCount) {
     bins[best].total += it.weight;
   }
   return bins;
+}
+
+// The one summary statistic #10472's acceptance criterion is written in.
+// `floor` is the heaviest single package: sharding is BY PACKAGE, so no split
+// at any shard count can put max below it, and comparing it to the mean says
+// whether the bound is even reachable before anyone tries to reach it.
+export function balanceOf(bins, items = null) {
+  const totals = bins.map((b) => b.total);
+  const sum = totals.reduce((a, b) => a + b, 0);
+  const mean = sum / bins.length;
+  const max = Math.max(...totals);
+  const floor = items ? Math.max(0, ...items.map((i) => i.weight)) : null;
+  return { totals, sum, mean, max, min: Math.min(...totals), ratio: mean === 0 ? 1 : max / mean, floor };
 }
 
 // Reads the package list out of a `turbo ls --output=json` payload, asserting
@@ -262,7 +389,160 @@ function selfTest() {
     process.chdir(cwdBefore);
   }
 
-  console.log('partition-test-shards: self-test OK');
+  // ── THE BALANCING PINS (#10472) ─────────────────────────────────────────
+  //
+  // Everything above pins that the split is a correct, deterministic, total
+  // cover of its input. None of it noticed that the six bins it produced ran
+  // 5.0/6.2/6.3/13.6/6.3/9.0 minutes, because a perfectly-balanced split of the
+  // WRONG quantity satisfies every one of those assertions. These five pin the
+  // quantity and the outcome.
+
+  // 1. The weight is TIME, not file count -- stated as a case where the two
+  //    answers DIFFER, which is the only kind of case that can catch a revert.
+  //    Read the four items as four packages with the same test-file count, one
+  //    of them 6x slower per file. Weighed by count they are four equal items,
+  //    so any balanced split puts two in each bin and `slow` shares one.
+  //    Weighed by time, `slow` outweighs the other three together and lands
+  //    alone. Asserting it is alone asserts the weight is duration.
+  const byTime = partition(
+    [mk('slow', 600), mk('x', 100), mk('y', 100), mk('z', 100)],
+    2
+  );
+  const slowBin = byTime.find((bin) => bin.names.includes('slow'));
+  if (slowBin.names.length !== 1) {
+    throw new Error(`weight: the 600s package was co-scheduled with ${slowBin.names.join('+')} -- is the weight a count again?`);
+  }
+
+  // 2. The committed dataset, split at the shard count CI actually uses, meets
+  //    the acceptance bound. This is the pin that fails when a suite grows
+  //    heavy enough to re-imbalance the matrix, and it fails on the PR that
+  //    refreshes the timings rather than three weeks later in a queue build.
+  const ciYml = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  // The pin has to bin what CI actually bins, so the exclusions come from the
+  // workflow rather than from a second list here. Without this the pin has a
+  // live trap in it: @objectstack/dogfood is a ~7.5-minute suite that Test Core
+  // never runs (the dedicated Dogfood job does), and the day someone refreshes
+  // the dataset from a local run that forgot `--filter=!@objectstack/dogfood`,
+  // the balance assertion would fail over a package no shard was ever going to
+  // execute.
+  const ciExcludes = new Set([...ciYml.matchAll(/--exclude\s+(@[\w./-]+)/g)].map((m) => m[1]));
+  if (ciExcludes.size === 0) throw new Error('ci.yml: no --exclude found for the partitioner invocation');
+  const timings = loadTimings();
+  const datasetItems = Object.entries(timings.packages)
+    .filter(([name]) => !ciExcludes.has(name))
+    .map(([name, weight]) => mk(name, weight));
+  if (datasetItems.length < 20) {
+    throw new Error(`dataset: only ${datasetItems.length} package(s) measured -- that is not the workspace`);
+  }
+  const real = partition(datasetItems, SHARD_COUNT);
+  const balance = balanceOf(real, datasetItems);
+  if (balance.ratio > MAX_SHARD_OVER_MEAN) {
+    throw new Error(
+      `balance: at ${SHARD_COUNT} shards the heaviest bin is ${balance.ratio.toFixed(2)}x the mean ` +
+        `(${balance.max.toFixed(0)}s vs ${balance.mean.toFixed(0)}s), past the ${MAX_SHARD_OVER_MEAN}x bound. ` +
+        'Bins: ' + balance.totals.map((t) => t.toFixed(0)).join('/') + 's.'
+    );
+  }
+
+  // 3. The bound is REACHABLE at this shard count -- the arithmetic #10472
+  //    asked about when it floated 6 -> 8. No split can put the heaviest bin
+  //    below the heaviest single package, so once that package exceeds
+  //    1.3x the mean, raising the shard count cannot help and every further
+  //    shard makes it worse by shrinking the mean. Pinning it here means the
+  //    next person to reach for more shards gets the answer from a failing
+  //    assertion naming the floor, not from a CI run that quietly misses the
+  //    target.
+  if (balance.floor > MAX_SHARD_OVER_MEAN * balance.mean) {
+    throw new Error(
+      `balance: the heaviest single package is ${balance.floor.toFixed(0)}s against a ${balance.mean.toFixed(0)}s mean, ` +
+        `so NO split at ${SHARD_COUNT} shards can meet ${MAX_SHARD_OVER_MEAN}x. Splitting that suite below package ` +
+        'granularity, not a different shard count, is the only thing that moves this.'
+    );
+  }
+
+  // 4. The shard count is spelled in ci.yml too, and drift there is silent:
+  //    a partitioner cutting six bins for a five-job matrix simply loses a
+  //    sixth of the workspace, with every step green. Read it back.
+  const declaredMatrix = /^\s*shard:\s*\[([^\]]*)\]/m.exec(ciYml);
+  if (!declaredMatrix) throw new Error('ci.yml: could not find the Test Core shard matrix to compare against');
+  const matrixSize = declaredMatrix[1].split(',').filter((s) => s.trim() !== '').length;
+  if (matrixSize !== SHARD_COUNT) {
+    throw new Error(`ci.yml: the shard matrix declares ${matrixSize} shards, this script splits into ${SHARD_COUNT}`);
+  }
+  if (!ciYml.includes(`--shard \${{ matrix.shard }}/${SHARD_COUNT}`)) {
+    throw new Error(`ci.yml: the partitioner is not invoked with --shard <n>/${SHARD_COUNT}`);
+  }
+  if (!ciYml.includes(`--total ${SHARD_COUNT}`)) {
+    throw new Error(`ci.yml: the shard attestation does not declare --total ${SHARD_COUNT}`);
+  }
+
+  // 5. An unmeasured package is ESTIMATED, never silently free. A new package
+  //    with real tests and no dataset entry must still carry weight, or the
+  //    first shard to receive it absorbs it invisibly.
+  const fakeTimings = { packages: { known: 42 }, rate: 2 };
+  const specDir = packageDir('packages/spec');
+  if (weighPackage('known', specDir, fakeTimings).seconds !== 42) throw new Error('weight: a measured package was re-estimated');
+  if (!weighPackage('known', specDir, fakeTimings).measured) throw new Error('weight: a measured package was not reported as measured');
+  const estimate = weighPackage('brand-new', specDir, fakeTimings);
+  if (estimate.measured) throw new Error('weight: an unmeasured package claimed to be measured');
+  if (estimate.seconds !== hereWeight * 2) throw new Error(`weight: estimate was ${estimate.seconds}, expected ${hereWeight * 2}`);
+  if (weighPackage('measured-empty', specDir, { packages: { 'measured-empty': 0 }, rate: 2 }).seconds !== 0) {
+    throw new Error('weight: a package measured at 0s was re-estimated instead of trusted');
+  }
+
+  // 6. END-TO-END: the weight a REAL RUN gives a REAL package is its measured
+  //    duration, not its test-file count. Pins 1 and 5 each cover half of this
+  //    and neither covers the join: pin 1 proves partition() respects the
+  //    magnitudes it is handed, pin 5 proves weighPackage() reads the dataset
+  //    -- but a main() that simply stopped calling weighPackage and passed
+  //    countTestFiles again would keep both of them green while restoring
+  //    #10472's imbalance in full. So this asserts through weighItems(), the
+  //    single path main() weighs by.
+  //
+  //    The case is an INVERSION measured in this very dataset, which is what
+  //    makes it able to fail: @objectstack/example-todo runs LONGER than
+  //    @objectstack/core (33.77s vs 16.40s) out of FEWER test files (4 vs 36).
+  //    Whichever quantity is in force decides the order, and the two answers
+  //    are opposite -- so this assertion cannot be satisfied by both.
+  const invA = '@objectstack/example-todo';
+  const invB = '@objectstack/core';
+  const invAPath = 'examples/app-todo';
+  const invBPath = 'packages/core';
+  if (Object.hasOwn(timings.packages, invA) && Object.hasOwn(timings.packages, invB)) {
+    const inv = weighItems(
+      [
+        { name: invA, path: invAPath },
+        { name: invB, path: invBPath },
+      ],
+      new Set(),
+      timings,
+      'inversion pin'
+    ).weighted;
+    const [wA, wB] = [inv.find((i) => i.name === invA), inv.find((i) => i.name === invB)];
+    const [fA, fB] = [countTestFiles(packageDir(invAPath)), countTestFiles(packageDir(invBPath))];
+    // Guard the fixture itself: if the inversion ever stops being an inversion
+    // (files rebalance, a suite is split), this pin silently stops testing
+    // anything, so say so rather than passing vacuously.
+    if (!(fA < fB)) {
+      throw new Error(
+        `inversion pin: ${invA} no longer has fewer test files than ${invB} (${fA} vs ${fB}), ` +
+          'so this case can no longer tell duration from count. Pick a new inversion pair from the dataset.'
+      );
+    }
+    if (!(wA.weight > wB.weight)) {
+      throw new Error(
+        `weight: ${invA} weighed ${wA.weight} and ${invB} weighed ${wB.weight}, but ${invA} is the ` +
+          `SLOWER suite (${timings.packages[invA]}s vs ${timings.packages[invB]}s) with FEWER test files ` +
+          `(${fA} vs ${fB}). The run is weighing test-file count again -- that is #10472.`
+      );
+    }
+  }
+
+  console.log(
+    `partition-test-shards: self-test OK (${datasetItems.length} measured packages, ${SHARD_COUNT} shards, ` +
+      `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
+      `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s)`
+  );
 }
 
 function main() {
@@ -293,21 +573,34 @@ function main() {
 
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
   const items = readPackageItems(parsed, listPath);
-  const weighted = [];
-  for (const it of items) {
-    if (typeof it?.name !== 'string' || typeof it?.path !== 'string') {
-      throw new Error(`${listPath}: package entry missing name/path: ${JSON.stringify(it)}`);
-    }
-    if (excluded.has(it.name)) continue;
-    weighted.push({ name: it.name, weight: countTestFiles(packageDir(it.path)) });
-  }
+  const timings = loadTimings();
+  const { weighted, estimated } = weighItems(items, excluded, timings, listPath);
   const bins = partition(weighted, shardCount);
   const mine = bins[shardIndex - 1];
+  const { max, mean, ratio } = balanceOf(bins);
+  // Printed on every shard, not just the imbalanced one, and printed as the
+  // RATIO the acceptance bound is written in: the per-shard numbers alone never
+  // said whether the split was balanced, which is why #10472's imbalance had to
+  // be found by reading six job durations side by side after the fact.
   console.error(
     `shard ${shardSpec}: ${mine.names.length}/${weighted.length} packages, ` +
-      `weight ${mine.total} (all bins: ${bins.map((b) => b.total).join('/')})`
+      `${mine.total.toFixed(1)}s predicted (all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s; ` +
+      `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
+      `${weighted.length - estimated} measured, ${estimated} estimated from test-file count)`
   );
   for (const name of mine.names) console.log(name);
 }
 
-main();
+// Entry-point guard, not decoration: scripts/measure-test-shard-timings.mjs
+// imports countTestFiles from here, and an unguarded `main()` would run the
+// argument parser (and exit 1 on "no shard given") on that import.
+//
+// Through `isEntrypoint`, never a hand-typed `process.argv[1]` comparison:
+// node resolves symlinks for the module graph but leaves `argv[1]` as typed,
+// so the hand-rolled form answers `false` through a symlink and this script
+// does NOTHING -- exit 0, no output, which here means a shard that printed no
+// package list. `check:entry-guard` enforces the single spelling; see
+// scripts/invoked-as.mjs for the measured failure modes.
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

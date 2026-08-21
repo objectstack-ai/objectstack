@@ -183,7 +183,13 @@ export interface AuthoringFinding {
   rule: string;
   /** Human-readable location, e.g. `object "leave_request"`. */
   where: string;
-  /** Config path, e.g. `objects[3].sharingModel`. */
+  /**
+   * Config path, e.g. `objects[3].sharingModel`. Positional as RULES emit it;
+   * on the runtime gate's wire surface the top-level collection index of a
+   * collection-resident finding is rewritten to the entry's NAME
+   * (`objects.acme_invoice.sharingModel`) — see `nameKeyFindingPath` in
+   * `runtime-gate.ts` (#10064).
+   */
   path: string;
   /** What is wrong. */
   message: string;
@@ -268,6 +274,19 @@ export type AuthoringRuleInputTier = 'normalized' | 'parsed';
 export interface AuthoringRuleContext {
   /** ADR-0080 SDUI component manifest, when the project ships one. */
   sduiManifest?: unknown;
+  /**
+   * [#9313] The singular metadata type of the per-write snapshot being judged
+   * — set by the runtime publish gate (`runtime-gate.ts`) on every gated
+   * write, ABSENT on the three CLI commands (`runAuthoringRules` never sets
+   * it). Exists for the one entry that is itself a registry: the
+   * reference-integrity suite dispatches its MEMBERS by this
+   * (`ReferenceIntegrityRule.runtimeTypes`), because the entry-level
+   * `runtimeTypes` can only say which writes reach the suite, not which
+   * members can judge a partial per-write snapshot without inventing
+   * findings. No other rule reads it, and none should without the same
+   * argument.
+   */
+  runtimeWriteType?: string;
 }
 
 export interface AuthoringRule {
@@ -640,9 +659,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // collection in the snapshot and return nothing, and the two that would
     // load `typescript` need a hook/action/react body the snapshot never
     // carries — which is what `runtime-lazy-deps.test.ts` pins.
+    //
+    // [#9313] `view` joins, and the granularity decision #4463 P2 reserved is
+    // taken HERE, in writing: the entry-level `runtimeTypes` says which WRITES
+    // dispatch the suite, and the suite's own per-member `runtimeTypes`
+    // (`ReferenceIntegrityRule`, default `['flow']`) says which MEMBERS judge
+    // that snapshot — the gate passes the written type through
+    // `ctx.runtimeWriteType`. A `view` write therefore reaches exactly the two
+    // members that judge a list view's field references and resolve only
+    // against the `objects` collection the snapshot carries
+    // (`validateSearchableFields`, `validateSortableFields`). The whole suite
+    // is NOT the right granularity for this door, measured not assumed, and
+    // the crossing fails differently per body shape — both ways wrong:
+    // `validateActionNameRefs` (error-tier) resolves `views[].list` /
+    // `views[].listViews.*` action names against `stack.actions`, a collection
+    // no per-write snapshot carries, so on a CONTAINER view write it would
+    // refuse every stack-level action the body names (measured:
+    // `action-name-undefined` on the snapshot shape, clean on the full stack)
+    // — RUNTIME_NEEDS_FULL_SNAPSHOT's exact sentence, on the hottest write
+    // type the gate has. On a FLATTENED overlay it has no rung at all, so the
+    // crossing would be a silent no-op that reads as coverage — the very shape
+    // #9313 was filed about. Flow snapshots are unchanged: every member keeps
+    // the default `flow` declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow'],
-    run: (stack) => validateReferenceIntegrity(stack),
+    runtimeTypes: ['flow', 'view'],
+    run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
   // is `z.record(z.string(), z.unknown())` and ADR-0089 D3a strictness does not

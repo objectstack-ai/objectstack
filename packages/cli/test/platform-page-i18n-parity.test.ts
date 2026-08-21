@@ -83,7 +83,20 @@ describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
     }
   });
 
-  it('translates every page in every shipped locale (no silent English fallback)', () => {
+  it('carries an entry for every page in every shipped locale (key sets, not leaf copy)', () => {
+    // Scope, stated because this title used to promise “no silent English
+    // fallback” — a guarantee the assertion below does not make. What it
+    // compares is the SET OF PAGE NAMES under each locale’s `pages` against
+    // `en`’s: an entry exists per page per locale, and no locale carries one
+    // `en` lacks. It says nothing about the copy INSIDE an entry, which may
+    // legitimately be the English source text — that is what the extractor
+    // writes for an untranslated key under `--fill=default`, and under #8765’s
+    // ruled Option B a leaf whose recorded source hash disagrees with the
+    // current source is deliberately served as the source string (see
+    // `platform-objects/src/apps/translations/source-hash.ts`, whose header
+    // names this test as a key-set claim its fallback must not disturb).
+    // Requiring each locale’s leaf to DIFFER from `en` is a coverage claim of
+    // its own, not a restatement of this one.
     const locales = Object.keys(SetupAppTranslations as Record<string, unknown>);
     expect(locales).toContain(EN);
     expect(locales.length).toBeGreaterThan(1);

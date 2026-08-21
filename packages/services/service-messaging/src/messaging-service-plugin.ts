@@ -378,11 +378,52 @@ export class MessagingServicePlugin implements Plugin {
         }
     }
 
-    /** Stop the dispatcher loop + retention sweep on shutdown. */
-    async stop(): Promise<void> {
+    /**
+     * The kernel's teardown hook (`Plugin.destroy`, core `types.ts`) — the ONLY
+     * teardown entry point `ObjectKernel.performShutdown()` and
+     * `LiteKernel.destroy()` invoke.
+     *
+     * [#9371] IT USED TO BE `stop()`, WHICH NOTHING CALLED. The method below
+     * carried the docblock "Stop the dispatcher loop … on shutdown" and was
+     * correct in every respect except its NAME: `Plugin` declares `destroy?()`
+     * and no `stop()`, so the kernel walked past this plugin at shutdown and
+     * both `setInterval` dispatchers went on ticking after `await
+     * kernel.shutdown()` resolved. `start()` `unref()`s the timers, so a
+     * long-lived process still EXITS — which is exactly why this stayed
+     * invisible in production and surfaced somewhere else entirely.
+     *
+     * WHERE IT SURFACED. Under vitest the worker process is very much alive
+     * during teardown, so a tick fires after the test file is over, reads
+     * `sys_notification_delivery` / `sys_http_delivery` through a driver the
+     * suite already disconnected, and `SqlDriver`'s console fallback warns.
+     * `console.*` inside a worker is an RPC to the main process
+     * (`onUserConsoleLog`); one created after `rpcDone()` has taken its
+     * snapshot is rejected by vitest's `$rejectPendingCalls` as
+     * `EnvironmentTeardownError: [vitest-worker]: Closing rpc while
+     * "onUserConsoleLog" was pending`. Nobody awaits that promise, so it lands
+     * as an UNHANDLED REJECTION and fails the run — with every test passing.
+     * That is #9371: `examples/app-showcase` green at 334/334 and 337/337, exit
+     * 1, a merge-queue eviction each time. The window is the duration of
+     * `rpcDone()`, which is why it only ever fired on a loaded queue runner and
+     * never on the PR-side run of the identical diff.
+     *
+     * So this is a teardown-contract fix, not a test fix: a plugin that owns
+     * timers must release them on the hook the kernel actually calls.
+     */
+    async destroy(): Promise<void> {
         await this.dispatcher?.stop();
         this.dispatcher = undefined;
         await this.httpDispatcher?.stop();
         this.httpDispatcher = undefined;
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class and removing it would break any embedder that learned to
+     * call it precisely BECAUSE the kernel never did. Callers should prefer
+     * kernel shutdown; direct callers keep working.
+     */
+    async stop(): Promise<void> {
+        await this.destroy();
     }
 }

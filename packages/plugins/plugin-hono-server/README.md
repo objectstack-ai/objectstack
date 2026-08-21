@@ -28,7 +28,7 @@ kernel.use(new HonoServerPlugin({
   }
 }));
 
-await kernel.start();
+await kernel.bootstrap();
 ```
 
 ## CORS Configuration

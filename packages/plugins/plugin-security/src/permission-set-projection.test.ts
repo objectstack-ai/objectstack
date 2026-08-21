@@ -1046,6 +1046,66 @@ describe('reconcilePermissionSetProjection', () => {
     expect(firstFailure!.meta?.name).toBe('broken_set');
   });
 
+  it('[#9748] the reconcile SUMMARY also reaches a sink with NO `error` — at warn, not in silence', async () => {
+    // #9657 repaired the FIRST-FAILURE line above; this summary sits outside
+    // any `catch`, so the durability gate could not see it and it kept the
+    // `logger?.error?.(…)` spelling. Against a `{ info, warn }` sink the repair
+    // therefore made the split WORSE, not better: the first failure survived at
+    // `warn` while the TOTAL — how many definitions will not survive a
+    // re-provision — vanished, and the `info` "reconciled" line is skipped too,
+    // so the sink heard neither. That silence is the reassuring half-truth this
+    // rule exists to remove, arrived at from the other side.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push({
+      id: 'ps_bad', name: 'broken_set', managed_by: 'admin', active: true,
+      label: 'Broken Set', object_permissions: JSON.stringify({ ticket: { allowRead: 'yes-please' } }),
+    });
+    ql.permRows.push({
+      id: 'ps_bad2', name: 'broken_set_2', managed_by: 'admin', active: true,
+      label: 'Broken Set 2', object_permissions: JSON.stringify({ ticket: { nonsense: true } }),
+    });
+    const logs: Array<{ level: string; msg: string; meta?: any }> = [];
+    const logger = {
+      info: (m: string, meta?: any) => logs.push({ level: 'info', msg: m, meta }),
+      warn: (m: string, meta?: any) => logs.push({ level: 'warn', msg: m, meta }),
+    };
+
+    const out = await reconcilePermissionSetProjection(protocol, { ql, logger });
+
+    expect(out.backfillFailed).toBe(2);
+    const summary = logs.filter((l) => /FAILED backfill/.test(l.msg));
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.level).toBe('warn');
+    expect(summary[0]!.msg).toMatch(/2 FAILED backfill/);            // the COUNT is the whole point
+    expect(summary[0]!.msg).toMatch(/will not survive a re-provision/);
+    expect(summary[0]!.meta?.failedNames).toEqual(['broken_set', 'broken_set_2']);
+    // and never the reassuring half-truth instead
+    expect(logs.some((l) => /reconciled \(ADR-0094 D4\)/.test(l.msg))).toBe(false);
+  });
+
+  it('[#9748] a sink that HAS `error` still gets the summary at error, not downgraded', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push({
+      id: 'ps_bad', name: 'broken_set', managed_by: 'admin', active: true,
+      label: 'Broken Set', object_permissions: JSON.stringify({ ticket: { allowRead: 'yes-please' } }),
+    });
+    const logs: Array<{ level: string; msg: string; meta?: any; cause?: Error }> = [];
+    const logger = {
+      info: (m: string, meta?: any) => logs.push({ level: 'info', msg: m, meta }),
+      warn: (m: string, meta?: any) => logs.push({ level: 'warn', msg: m, meta }),
+      error: (m: string, cause?: Error, meta?: any) => logs.push({ level: 'error', msg: m, cause, meta }),
+    };
+
+    await reconcilePermissionSetProjection(protocol, { ql, logger });
+
+    const summary = logs.filter((l) => /FAILED backfill/.test(l.msg));
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.level).toBe('error');
+    expect(summary[0]!.meta?.failedNames).toEqual(['broken_set']);
+  });
+
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {
     const ql = makeQl();
     const declared = { member_default: envBody({ name: 'member_default', systemPermissions: ['declared.baseline'] }) };

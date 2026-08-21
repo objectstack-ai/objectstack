@@ -75,9 +75,10 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const DEFAULT_REF = 'origin/main';
 /** Slack applied below `--since` when deepening, absorbing commit-date skew. */
@@ -504,7 +505,7 @@ function selfTest() {
   return failures === 0 ? 0 : 1;
 }
 
-const invokedDirectly = existsSync(process.argv[1] || '') && new URL(import.meta.url).pathname === process.argv[1];
+const invokedDirectly = isEntrypoint(import.meta.url);
 if (invokedDirectly) {
   process.exit(main(process.argv.slice(2)) || 0);
 }

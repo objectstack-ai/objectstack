@@ -37,10 +37,31 @@ export interface TimeRelativeDataEngine {
     getObject?(name: string): unknown;
 }
 
+/**
+ * The slice of the automation service this trigger needs for dispatch
+ * idempotency (#10220): claim a dispatch key against the persisted
+ * `sys_flow_dispatch` ledger. `true` = this caller owns the dispatch; `false` =
+ * an earlier sweep (possibly in a previous process lifetime) already made it.
+ * Typed structurally — like {@link TimeRelativeDataEngine} — so this plugin
+ * never learns the ledger's table name and takes no build dependency on
+ * `@objectstack/service-automation`.
+ */
+export interface FlowDispatchClaimSurface {
+    claim(key: string): Promise<boolean>;
+}
+
 /** Job-name namespace so time-relative sweeps never collide with plain schedule jobs. */
 const JOB_PREFIX = 'flow-time-relative';
 
 const MS_PER_DAY = 86_400_000;
+
+/**
+ * TTL for the trigger's IN-PROCESS claim fallback (#10220): every dispatch key
+ * embeds a calendar day, so no key is producible more than ~48h after it was
+ * first claimable — pruning at that age keeps the fallback map bounded without
+ * ever forgetting a key a sweep could still produce.
+ */
+const LOCAL_CLAIM_TTL_MS = 48 * 60 * 60 * 1000;
 
 /** A closed, inclusive instant window `[gte, lte]` as ISO-8601 strings. */
 export interface DateWindow {
@@ -80,21 +101,54 @@ function addUtcDays(d: Date, n: number): Date {
  * `date` field (compared as `YYYY-MM-DD` after the driver truncates) is inclusive.
  */
 export function computeDateWindows(desc: TimeRelativeDescriptor, now: Date): DateWindow[] {
+    return computeWindowClaimScopes(desc, now).map((s) => s.window);
+}
+
+/**
+ * A date window paired with the **claim scope** naming its identity for the
+ * dispatch dedup key (#10220, maintainer ruling 2026-08-20).
+ */
+export interface WindowClaimScope {
+    window: DateWindow;
+    /**
+     * Window-identity fragment of the dispatch key — what makes a re-scan of
+     * the SAME window dedup while a genuinely new window fires again:
+     *
+     * - offset mode → `<windowDay>:offset<n>`: the window day is the date the
+     *   record's field must fall on, so editing the field to a new day (or a
+     *   different offset matching) yields a new key and legitimately re-fires.
+     *   Re-scans of one window all derive the same day → deduped.
+     * - range mode → `<sweepDay>:within<n>`: keyed on the SWEEP day, not the
+     *   (constant) field value, so the documented `withinDays` semantic —
+     *   "fires every day the record stays in range" — remains true: each new
+     *   day is a new key, but never twice in one day.
+     */
+    scope: string;
+}
+
+/**
+ * {@link computeDateWindows}, with each window's claim scope (#10220). One
+ * derivation for both so the matching rule and the dedup key can never drift.
+ */
+export function computeWindowClaimScopes(desc: TimeRelativeDescriptor, now: Date): WindowClaimScope[] {
     const today = startOfUtcDay(now);
 
     if (desc.offsetDays && desc.offsetDays.length > 0) {
         return desc.offsetDays.map((offset) => {
             const day = addUtcDays(today, offset);
-            return { gte: startOfUtcDay(day).toISOString(), lte: endOfUtcDay(day).toISOString() };
+            const window = { gte: startOfUtcDay(day).toISOString(), lte: endOfUtcDay(day).toISOString() };
+            return { window, scope: `${window.gte.slice(0, 10)}:offset${offset}` };
         });
     }
 
     const n = desc.withinDays ?? 0;
-    if (n >= 0) {
-        return [{ gte: startOfUtcDay(today).toISOString(), lte: endOfUtcDay(addUtcDays(today, n)).toISOString() }];
-    }
-    // Negative: window extends into the past, still anchored to (and including) today.
-    return [{ gte: startOfUtcDay(addUtcDays(today, n)).toISOString(), lte: endOfUtcDay(today).toISOString() }];
+    const sweepDay = today.toISOString().slice(0, 10);
+    const window: DateWindow =
+        n >= 0
+            ? { gte: startOfUtcDay(today).toISOString(), lte: endOfUtcDay(addUtcDays(today, n)).toISOString() }
+            // Negative: window extends into the past, still anchored to (and including) today.
+            : { gte: startOfUtcDay(addUtcDays(today, n)).toISOString(), lte: endOfUtcDay(today).toISOString() };
+    return [{ window, scope: `${sweepDay}:within${n}` }];
 }
 
 /**
@@ -147,17 +201,29 @@ export class TimeRelativeTrigger implements FlowTrigger {
     private readonly now: () => Date;
     /** flowName → job name registered for it, so stop() can cancel it. */
     private readonly bound = new Map<string, string>();
+    /** Dispatch-idempotency claim surface (#10220), resolved lazily per sweep. */
+    private readonly getClaimSurface: () => FlowDispatchClaimSurface | null;
+    /**
+     * In-process claim fallback when no claim surface resolves (#10220):
+     * key → claim time (epoch ms), TTL-pruned. Dedups re-scans within THIS
+     * process only — which is why falling to it is warned once, below.
+     */
+    private readonly localClaims = new Map<string, number>();
+    /** Whether the in-process-only dedup degradation has been said (once). */
+    private claimDegradationWarned = false;
 
     constructor(
         getJobService: () => JobServiceSurface | null,
         getDataEngine: () => TimeRelativeDataEngine | null,
         logger: TriggerLogger,
         now: () => Date = () => new Date(),
+        getClaimSurface: () => FlowDispatchClaimSurface | null = () => null,
     ) {
         this.getJobService = getJobService;
         this.getDataEngine = getDataEngine;
         this.logger = logger;
         this.now = now;
+        this.getClaimSurface = getClaimSurface;
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
@@ -265,11 +331,11 @@ export class TimeRelativeTrigger implements FlowTrigger {
             return;
         }
 
-        const windows = computeDateWindows(desc, this.now());
+        const scopes = computeWindowClaimScopes(desc, this.now());
         const seenIds = new Set<unknown>();
-        const matched: Array<Record<string, unknown>> = [];
+        const matched: Array<{ record: Record<string, unknown>; claimKey: string | null }> = [];
 
-        for (const window of windows) {
+        for (const { window, scope } of scopes) {
             if (matched.length >= maxRecords) break;
             const where = buildWindowWhere(desc, window);
             const rows =
@@ -286,7 +352,11 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     if (seenIds.has(id)) continue;
                     seenIds.add(id);
                 }
-                matched.push(row);
+                // #10220 — dispatch key: the MATCHED WINDOW's identity + the
+                // record. A row without an id can't be keyed; it is dispatched
+                // unconditionally, exactly as it was never dedupable before.
+                const claimKey = id != null ? `time-relative:${flowName}:${scope}:${String(id)}` : null;
+                matched.push({ record: row, claimKey });
                 if (matched.length >= maxRecords) break;
             }
         }
@@ -300,7 +370,16 @@ export class TimeRelativeTrigger implements FlowTrigger {
 
         let launched = 0;
         let failed = 0;
-        for (const record of matched) {
+        let deduped = 0;
+        for (const { record, claimKey } of matched) {
+            // #10220 — idempotency gate: launch only if this (flow, record,
+            // window) key has not been dispatched before. A re-scan of the same
+            // window (denser schedule, kernel rebuild + persisted ledger,
+            // future catch-up sweep) skips instead of re-minting.
+            if (claimKey != null && !(await this.claimDispatch(flowName, claimKey))) {
+                deduped++;
+                continue;
+            }
             try {
                 const ctx: AutomationContext = {
                     record,
@@ -326,8 +405,54 @@ export class TimeRelativeTrigger implements FlowTrigger {
         }
 
         this.logger.debug?.(
-            `[time-relative] flow '${flowName}' swept '${desc.object}': ${matched.length} matched, ${launched} launched, ${failed} failed`,
+            `[time-relative] flow '${flowName}' swept '${desc.object}': ${matched.length} matched, ${launched} launched, ${deduped} already dispatched, ${failed} failed`,
         );
+    }
+
+    /**
+     * Claim one dispatch key (#10220): `true` = launch, `false` = an earlier
+     * sweep already dispatched this (flow, record, window).
+     *
+     * Degradation contract:
+     *  - Claim surface resolves (the automation service's `claim()`, backed by
+     *    the persisted `sys_flow_dispatch` ledger) → its answer is used; if the
+     *    CALL throws, the failure is logged and the dispatch proceeds —
+     *    availability over strict-once: a broken ledger must never silently
+     *    swallow reminders.
+     *  - No claim surface (automation service missing, or one predating
+     *    `claim()`) → in-process dedup only, warned ONCE: a silent fallback
+     *    would hide that the once-per-window guarantee no longer survives a
+     *    kernel rebuild.
+     */
+    private async claimDispatch(flowName: string, key: string): Promise<boolean> {
+        const surface = this.getClaimSurface();
+        if (surface && typeof surface.claim === 'function') {
+            try {
+                return await surface.claim(key);
+            } catch (err) {
+                this.logger.warn(
+                    `[time-relative] flow '${flowName}' dispatch-claim failed for key '${key}' — dispatching anyway ` +
+                        `(availability over strict-once; the same window may re-fire until the claim store recovers): ${errMessage(err)}`,
+                );
+                return true;
+            }
+        }
+        if (!this.claimDegradationWarned) {
+            this.claimDegradationWarned = true;
+            this.logger.warn(
+                `[time-relative] no dispatch-claim surface (automation service missing or without claim()) — ` +
+                    `sweep dedup is IN-PROCESS ONLY and will NOT survive a kernel rebuild: ` +
+                    `the same record/window can re-fire after a restart.`,
+            );
+        }
+        const now = this.now().getTime();
+        const cutoff = now - LOCAL_CLAIM_TTL_MS;
+        for (const [k, t] of this.localClaims) {
+            if (t < cutoff) this.localClaims.delete(k);
+        }
+        if (this.localClaims.has(key)) return false;
+        this.localClaims.set(key, now);
+        return true;
     }
 
     stop(flowName: string): void {

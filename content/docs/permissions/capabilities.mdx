@@ -1,0 +1,240 @@
+---
+title: "Declaring Capabilities"
+description: "How a package DEFINES an authorization capability with defineCapability — the declaration half of ADR-0066 D1 — and how that name travels from source to the sys_capability catalogue to a permission-set grant to a requiredPermissions check."
+---
+
+# Declaring Capabilities
+
+Every other page in this module is about **consuming** a capability: granting
+one through a permission set, requiring one on an object or an action, reading
+one back in an access matrix. This page is about the other end — how a package
+**defines** the capability in the first place, and what happens to that name
+afterwards.
+
+<Callout type="warn">
+**Two arrays, similar words, unrelated vocabularies.** A stack can carry both
+`capabilities:` and `requires:`. They have nothing to do with each other, and
+picking the wrong one produces metadata that validates and then does nothing.
+Read the next section before you write either.
+</Callout>
+
+## `capabilities:` is not `requires:`
+
+|  | `capabilities: [...]` | `requires: [...]` |
+|:--|:--|:--|
+| **Declares** | An **authorization** capability this package *offers* | A platform **service** this package *needs* |
+| **Answers** | "What new privilege can an administrator now grant?" | "What must be installed for this app to boot?" |
+| **Vocabulary** | Author-chosen names, `^[a-z][a-z0-9_.]*$` — `export_data`, `billing.refund` | A **closed** vocabulary: canonical kebab-case tokens from `PLATFORM_CAPABILITY_TOKENS` — `ai`, `automation`, `hierarchy-security` |
+| **Entry shape** | `defineCapability({ name, label, description, scope })` (`CapabilityDeclarationSchema`) | A plain `string` |
+| **Unknown value** | There is no "unknown" — you are minting the name | A `defineStack` **error** at authoring time (a typo, or a token no runtime provides) |
+| **Consumed by** | `systemPermissions` (grant) and `requiredPermissions` (requirement), by name string | The runtime capability loader, which resolves each token to a service plugin |
+| **When it bites** | Never at boot — an ungranted capability is simply held by nobody | **Fail-fast at startup**: a declared-but-missing provider aborts boot instead of degrading silently |
+| **Spec** | ADR-0066 D1 | Platform service vocabulary — see the [CLI reference](/docs/deployment/cli) |
+
+The word "capability" is doing double duty across two protocols, which is why
+this trap is easy to fall into and expensive to leave in place. The one-line
+test: **`capabilities:` is about people, `requires:` is about packages.** If the
+sentence you are trying to write ends in "…may do this", it belongs in
+`capabilities:`. If it ends in "…must be installed", it belongs in `requires:`.
+
+## The whole loop
+
+Each of the other pages in this module shows one segment of this. End to end, a
+capability name travels through five stations:
+
+```
+  ① DECLARE          capabilities: [defineCapability({ name: 'export_data' })]
+        │                                            packages/<your-app>/src
+        ▼
+  ② REGISTER         AppPlugin → metadata.registerInMemory('capability', name)
+        │                                     (also: **/*.capability.ts files)
+        ▼
+  ③ SEED             bootstrapDeclaredCapabilities → sys_capability row
+        │                        managed_by: 'package' + package_id provenance
+        ▼
+  ④ GRANT            permission set: systemPermissions: ['export_data']
+        │                                       assigned to positions / users
+        ▼
+  ⑤ CHECK            resource: requiredPermissions: ['export_data']
+                                     AND-gated ahead of any CRUD grant
+```
+
+1. **Declare** — `defineCapability(...)` on the stack's `capabilities` array,
+   or a `*.capability.ts` / `*.capability.yml` file the filesystem loader globs.
+2. **Register** — at boot, `AppPlugin` puts each stack-declared capability into
+   the metadata registry under the `capability` kind, so boot seeders and
+   runtime resolvers can list it.
+3. **Seed** — `bootstrapDeclaredCapabilities` (in `@objectstack/plugin-security`)
+   reads them back and upserts each one into `sys_capability` with
+   `managed_by: 'package'` and `package_id` provenance. This is what makes the
+   capability *attributable* and package uninstall well-defined.
+4. **Grant** — an administrator (or a permission set your package ships) lists
+   the name in [`systemPermissions`](/docs/permissions/permission-metadata#system-permissions).
+5. **Check** — a resource lists the name in `requiredPermissions`, and the
+   evaluator AND-gates it against the union of `systemPermissions` across the
+   caller's resolved permission sets.
+
+Stations ④ and ⑤ are covered in depth by
+[Permission Sets](/docs/permissions/permission-sets) and
+[Authorization Architecture](/docs/permissions/authorization). Everything below
+is about ① – ③.
+
+## The declaration shape
+
+{/* os:check */}
+```typescript
+import { defineCapability } from '@objectstack/spec';
+
+export const ExportDataCapability = defineCapability({
+  name: 'export_data',
+  label: 'Export Data',
+  description: 'Bulk-export records to CSV/XLSX.',
+  scope: 'org',
+});
+```
+
+Collect the declarations on the stack, next to the permission set that grants
+them:
+
+```typescript
+import { defineStack } from '@objectstack/spec';
+import { ExportDataCapability } from './capabilities/export-data.capability';
+
+export default defineStack({
+  manifest: { name: 'billing', namespace: 'billing', version: '1.0.0' },
+  capabilities: [ExportDataCapability],                   // ← ① DEFINE
+  permissions: [
+    { name: 'billing_admin', systemPermissions: ['export_data'] },  // ← ④ GRANT
+  ],
+  // and on a resource:  requiredPermissions: ['export_data']       // ← ⑤ REQUIRE
+});
+```
+
+### Fields
+
+| Field | Type | Required | Notes |
+|:--|:--|:--|:--|
+| `name` | `string` | ✅ | The contract. `^[a-z][a-z0-9_.]*$` — lowercase, digits, `_` and `.` |
+| `label` | `string` | optional | Shown in Setup. Defaults to a humanized `name` |
+| `description` | `string` | optional | What holding the capability permits |
+| `scope` | `'platform' \| 'org'` | optional | Defaults to `'platform'`. `org` = scoped to the caller's organization |
+| `packageId` | `string` | optional | Author-declared fallback provenance (ADR-0086 D3). Normally the registry stamps this for you |
+
+The shape is **strict**: an unrecognised key is a parse error at authoring
+time, not a silently dropped field. Three near-miss keys get a named refusal
+rather than a generic one, because each is a real inversion of the three-way
+separation — `permissionSets` (a capability never names its own holders),
+`requiredPermissions` (that is the requirement side, authored on the resource)
+and `inputs` (a capability is a name, not a contract). The full generated field
+reference lives in [Security schemas](/docs/references/security).
+
+## The name is the contract
+
+Resolution is **by string, everywhere**. `systemPermissions` and
+`requiredPermissions` both carry plain names, and the evaluator compares them as
+plain names. Three consequences worth internalising before you pick one:
+
+- **Your name lands in the same flat namespace as the platform's own.** There
+  is no per-package prefixing applied for you. Namespace it yourself —
+  `billing.refund` reads unambiguously; `refund` will collide with somebody.
+- **A typo fails closed, and quietly.** `mange_users` is a perfectly valid
+  capability name; it is simply held by nobody, so the caller is denied. That is
+  the safe direction, but nothing about the denial says the name exists nowhere.
+  The authoring lint `validateCapabilityReferences` (ADR-0066 ⑨) closes part of
+  this gap: it resolves every `requiredPermissions` reference against the
+  capabilities known at author time and **warns** on the unresolved ones. It is
+  a warning, not an error, because a single package's lint cannot see
+  capabilities declared by *other* installed packages. `systemPermissions` is
+  deliberately not flagged — that is the declaration side.
+- **Renaming a shipped capability is a breaking change** for every permission
+  set and every resource that references the old string, including ones in other
+  packages you cannot see.
+
+You cannot take a platform name. A declaration whose `name` collides with a
+curated platform capability (`manage_users`, `manage_metadata`,
+`setup.access`, …) is refused loudly at boot — those are platform-owned.
+
+## What the seeder does, and what it refuses
+
+`bootstrapDeclaredCapabilities` runs on `kernel:ready` and is idempotent: it
+re-seeds on every boot, so the row always reflects the shipped declaration. Four
+outcomes are refusals rather than writes, and each one leaves the capability
+behaving differently:
+
+| Situation | Outcome |
+|:--|:--|
+| No resolvable owning package (`_packageId` and `packageId` both absent) | **Refused — no row is written.** The declaration is inert |
+| Name collides with a curated platform capability | Refused; the platform keeps its own definition |
+| A row already exists owned by a **different** package | Skipped loudly; a package never writes into a foreign record |
+| A row was authored by an administrator (`managed_by: 'admin'`) | Never clobbered |
+
+A pre-existing `managed_by: 'platform'` row for a *non-curated* name is a
+different case: that is the untitled placeholder the old implicit back-door
+derived from whatever a permission set happened to reference, and an explicit
+declaration **claims** it — upgrading the row to package provenance with your
+authored label, description and scope. The provenance and composition rules
+behind that behaviour are set out in
+[Package capability declaration](/docs/permissions/authorization#package-capability-declaration-adr-0066-d1).
+
+<Callout type="info">
+**The `sys_capability` row is a catalogue, not a gate.** It carries the label,
+the scope and the provenance that make a capability reviewable, attributable and
+uninstallable — but no authorization check reads it. Permission-set grants and
+resource `requiredPermissions` match capability names **as strings**; the only
+production readers of the table are the two boot seeders. The row's `active`
+flag is a catalogue/visibility flag with no authorization effect: clearing it
+revokes nothing. Withdraw a capability by withdrawing the **grant**.
+</Callout>
+
+## `capability` is code-only
+
+`capability` is a registered metadata kind, and its registry entry declares
+`allowRuntimeCreate: false` **and** `allowOrgOverride: false`. Together those
+are the code-only declaration, so:
+
+```
+PUT /api/v1/meta/capability/:name
+  → 403  NOT_CREATABLE
+    "Metadata type 'capability' is code-only: the metadata-type registry
+     declares allowRuntimeCreate=false and allowOrgOverride=false, so it
+     cannot be created through the runtime metadata API … on any kernel.
+     Declare it in source (**/*.capability.ts) and redeploy."
+```
+
+The refusal fires **before** the body is validated, on every kernel, in draft
+mode as well as active. This is deliberate and follows straight from the
+three-way separation: an administrator minting a brand-new capability at runtime
+has no counterpart in it — nothing in code would ever *require* the name, so the
+result is an unreferenced grant target sitting in the live authorization
+namespace. `job` and `agent` carry the same pair for the same reason.
+
+Two things this does **not** close:
+
+- **The package-declaration channel is untouched.** `AppPlugin` registers stack
+  `capabilities[]` through the in-memory registry and the filesystem loader
+  globs `filePatterns`; neither goes through the runtime write door.
+- **`supportsOverlay: false`** — a capability is a name, a label and a scope;
+  there is no merge semantic, and a per-organization overlay of a
+  package-shipped declaration could re-scope `org` → `platform`.
+
+`OS_METADATA_WRITABLE=capability` remains the one documented operator escape
+hatch (ADR-0005). Behind it the write is judged by `CapabilityDeclarationSchema`
+and a malformed body is rejected with `422 invalid_metadata` — it is not a way
+to store arbitrary JSON on the authorization surface.
+
+## Checklist
+
+- [ ] Name is namespaced and lowercase, and does not shadow a platform capability
+- [ ] `label` and `description` are written for the administrator who will grant it in Setup
+- [ ] `scope` is `org` unless the privilege really is platform-wide
+- [ ] The declaration is reachable from the stack (`capabilities: [...]`) or a `*.capability.ts` file
+- [ ] The package resolves an owning package id — otherwise the seeder writes no row
+- [ ] Something actually **requires** the name (`requiredPermissions`), and something **grants** it (`systemPermissions`)
+
+## See also
+
+- [Authorization Architecture](/docs/permissions/authorization#the-three-way-separation-adr-0066) — capability / assignment / requirement, and the enforcement chain
+- [Permission Sets](/docs/permissions/permission-sets) — the granting half
+- [Permission Metadata](/docs/permissions/permission-metadata#system-permissions) — `systemPermissions` in a permission-set body
+- [Access Recipes](/docs/permissions/access-recipes) — worked end-to-end scenarios
+- [Security schemas](/docs/references/security) — generated field reference

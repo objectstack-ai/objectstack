@@ -56,9 +56,12 @@ itself ships: ObjectStack builds and publishes an **official runtime image**
 on every framework release — `ghcr.io/objectstack-ai/objectstack`, Node 22 +
 `@objectstack/cli` + `os start`, running as a non-root user with a built-in
 health check and `OS_ARTIFACT_PATH` / `OS_PORT=8080` preset. Image tags mirror
-`@objectstack/cli` versions (`17.0.0`, `17.0`, `17`, `latest`) and the image is
-published multi-arch (amd64/arm64); the rolling `17.0` / `17` / `latest` tags
-move with every stable publish, while a prerelease gets only its exact tag.
+`@objectstack/cli` versions: a stable publish pushes that exact version as
+`X.Y.Z` and moves `latest` and the matching `X.Y` / `X` tags onto it, while a
+prerelease gets only its exact tag. The image is published multi-arch
+(amd64/arm64). Only the exact tag is immutable — a rolling tag stops moving as
+soon as no later publish matches it, so `X.Y` freezes when the next minor ships
+and `X` when the next major does.
 **Pin the exact version in production**, matching the CLI version in your
 `package.json`.
 

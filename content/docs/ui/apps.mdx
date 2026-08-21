@@ -108,9 +108,10 @@ A fourth optional field composes with any **list** landing (`viewName`,
   (e.g. the create dialog is already open on arrival). The name must resolve to
   an action defined in the stack — `defineStack` and lint reject a reference to
   nothing — and it cannot be combined with `recordId` (a record detail has no
-  list toolbar to auto-run). The slot is declared contract-first: until the
-  shell consumes it, lint's liveness advisory tells you the auto-run does not
-  fire from this declaration yet.
+  list toolbar to auto-run). The console shell consumes the declared slot: the
+  navigation renderer encodes it onto the list href and the shell runs it once
+  on arrival, through the ordinary execute path — so param dialogs, confirms
+  and entitlement gates all still apply.
 
 ```typescript
 { id: 'nav_envs', type: 'object', label: 'Environments', objectName: 'sys_environment',

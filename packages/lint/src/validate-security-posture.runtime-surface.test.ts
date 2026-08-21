@@ -204,7 +204,11 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     });
     expect(real.errors.map((f) => f.rule)).toEqual([SECURITY_OWD_UNSET]);
     expect(real.errors[0].severity).toBe('error');
-    expect(real.errors[0].path).toBe('objects[0].sharingModel');
+    // [#10064] The wire path keys the collection entry by NAME, not by the
+    // gate's private snapshot index (which would have read `objects[0]` here
+    // only because the context is empty — with 400 stored objects it would
+    // have been `objects[400]`, an index no caller can resolve).
+    expect(real.errors[0].path).toBe('objects.new_object.sharingModel');
     expect(real.rulesRun).toContain('validateSecurityPosture');
 
     // And the same write with the OWD authored is clean — the refusal is

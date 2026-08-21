@@ -88,6 +88,45 @@ const writeFixtureFile = (file: string, content: string) => {
   fs.writeFileSync(file, content);
 };
 
+/**
+ * Copy `absFile` into the fixture at the SAME repo-relative position, then do
+ * the same for every RELATIVE import it makes, transitively.
+ *
+ * Hand-listing the file was the bug: this fixture used to copy exactly one
+ * named script, and when `sync-template-versions.mjs` gained an
+ * `import { isEntrypoint } from './invoked-as.mjs'` (#10086) the copy began
+ * throwing ERR_MODULE_NOT_FOUND on its first statement — both when imported
+ * (`loadSync`) and when spawned. Nothing in this file mentioned the sibling, so
+ * nothing here had to be edited for it to break.
+ *
+ * Deriving the closure removes the class rather than the instance: the NEXT
+ * sibling import someone adds to a copied script travels on its own. Copying
+ * the whole `scripts/` tree would also work, but it is 6 MB and 207 files for a
+ * closure that is currently two; and a directory SYMLINK is not an option here
+ * because node resolves symlinks for the module graph, so the script would
+ * resolve its repo root to the real checkout instead of this fixture — which is
+ * the very thing the copy exists to prevent.
+ */
+const copyWithLocalImports = (absFile: string, seen = new Set<string>()): void => {
+  if (!fs.existsSync(absFile)) return;
+  const real = fs.realpathSync(absFile);
+  if (seen.has(real)) return;
+  seen.add(real);
+
+  const rel = path.relative(repoRoot, real);
+  // Only files inside the checkout have a meaningful position in the fixture.
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return;
+
+  const source = fs.readFileSync(real, 'utf8');
+  writeFixtureFile(path.join(fixture, rel), source);
+
+  const specifiers = [
+    ...source.matchAll(/\bfrom\s+'(\.[^']*)'/g),
+    ...source.matchAll(/\bimport\s*\(\s*'(\.[^']*)'/g),
+  ];
+  for (const m of specifiers) copyWithLocalImports(path.resolve(path.dirname(real), m[1]), seen);
+};
+
 beforeAll(() => {
   fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-template-versions-9554-'));
 
@@ -95,7 +134,7 @@ beforeAll(() => {
   // (`dirname(dirname(import.meta.url))`), so a copy two levels above the
   // template tree makes the fixture a complete, self-consistent checkout.
   fixtureScript = path.join(fixture, 'scripts', 'sync-template-versions.mjs');
-  writeFixtureFile(fixtureScript, fs.readFileSync(SYNC_SCRIPT, 'utf8'));
+  copyWithLocalImports(SYNC_SCRIPT);
 
   writeFixtureFile(
     path.join(fixture, 'packages', 'create-objectstack', 'package.json'),

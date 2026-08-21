@@ -34,8 +34,13 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { MYSQL_CELL } from './live-dialect-matrix.testkit.js';
 
-const URL = process.env.OS_TEST_MYSQL_URL;
+// The cell, not `process.env.OS_TEST_MYSQL_URL`: the env var is one value for
+// the whole process, so a config built from it puts this file in the same
+// database as every other live file. `MYSQL_CELL.config()` derives a per-FILE
+// database from vitest's own `testPath` (#9350).
+const URL = MYSQL_CELL.url;
 const TABLE = 'os3942_probe';
 
 const MIDDAY = '2026-03-20T12:34:56.789Z';
@@ -43,7 +48,7 @@ const MIDDAY = '2026-03-20T12:34:56.789Z';
 const BOUNDARY = '2026-03-20T20:00:00.000Z';
 
 /** A driver whose connection this suite does NOT pin, to read raw server state. */
-const rawDriver = () => new SqlDriver({ client: 'mysql2', connection: URL });
+const rawDriver = () => new SqlDriver(MYSQL_CELL.config());
 
 describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   let driver: SqlDriver;
@@ -57,7 +62,7 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   });
 
   beforeEach(async () => {
-    driver = new SqlDriver({ client: 'mysql2', connection: URL });
+    driver = new SqlDriver(MYSQL_CELL.config());
     await driver.execute(`drop table if exists ${TABLE}`);
     await driver.initObjects([
       { name: TABLE, fields: { label: { type: 'string' }, at: { type: 'datetime' } } },
@@ -172,7 +177,7 @@ describe.skipIf(!URL)('MySQL TIMESTAMP → DATETIME(3) migration (#3942)', () =>
     ]);
     await legacy.disconnect();
 
-    driver = new SqlDriver({ client: 'mysql2', connection: URL });
+    driver = new SqlDriver(MYSQL_CELL.config());
   });
 
   afterEach(async () => {
@@ -248,7 +253,7 @@ describe.skipIf(!URL)('os migrate plan lists the MySQL widening (#3954)', () => 
       ]);
     }
     await legacy.disconnect();
-    driver = new SqlDriver({ client: 'mysql2', connection: URL });
+    driver = new SqlDriver(MYSQL_CELL.config());
   });
 
   afterEach(async () => {
