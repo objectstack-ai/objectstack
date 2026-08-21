@@ -56,7 +56,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`chart.zod.ts`](src/ui/chart.zod.ts) | | **Charts**. Visualization configurations (Bar, Pie, Line, etc.). |
 | [`widget.zod.ts`](src/ui/widget.zod.ts) | | **Widgets**. Reusable UI components for dashboards and pages. |
 | [`component.zod.ts`](src/ui/component.zod.ts) | | **Components**. Low-level component definitions. |
-| [`theme.zod.ts`](src/ui/theme.zod.ts) | | **Theming**. Color palettes and visual styling rules. |
 
 ---
 

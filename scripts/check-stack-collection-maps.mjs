@@ -410,11 +410,13 @@ const SITES = [
     waivers: [
       {
         direction: 'extra',
-        keys: ['triggers', 'workflows'],
+        keys: ['triggers', 'workflows', 'themes'],
         reason:
           'DRIFT, and NOT removable from here: this enum is an ACCEPTANCE face — dropping a member changes '
           + 'what a published artifact may declare, a protocol-breaking change owing an ADR-0087 conversion. '
-          + 'Recorded so the enum stops reading as an answerable enumeration (#6242 row 5).',
+          + 'Recorded so the enum stops reading as an answerable enumeration (#6242 row 5). `themes` joined '
+          + 'the row at #10485 (carrier retired, ADR-0049): a previously published artifact may still '
+          + 'declare the category, so the member leaves through its own reviewed diff, not this gate.',
       },
       {
         direction: 'missing',

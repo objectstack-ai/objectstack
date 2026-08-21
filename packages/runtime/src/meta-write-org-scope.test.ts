@@ -327,8 +327,9 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         expect(declaresOrgOverride('views')).toBe(declaresOrgOverride('view'));
         expect(declaresOrgOverride('flows')).toBe(declaresOrgOverride('flow'));
         // A runtime-registered type with no registry entry has no per-org read
-        // channel either, so it is env-wide too.
-        expect(declaresOrgOverride('theme')).toBe(false);
+        // channel either, so it is env-wide too. (`webhook` took this slot
+        // from `theme` at #10485 — the retired kind left the contract.)
+        expect(declaresOrgOverride('webhook')).toBe(false);
         // No active org in, no org out — for every type.
         expect(organizationIdForMetaWrite('view', undefined)).toBeUndefined();
     });

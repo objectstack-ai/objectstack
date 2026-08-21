@@ -46,9 +46,10 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
   it('folds every manifest spelling to exactly the singular it folded to before', () => {
     // The manifest map is the complete population of spellings that resolved at
     // the `/meta` boundary before this change, so quantifying over it IS the
-    // non-breaking proof. It includes six that name PLUGIN kinds with no static
-    // registry entry (`themes`, `webhooks`, `connectors`, `sharingRules`,
-    // `ragPipelines`, `analyticsCubes`) — a purely registry-derived map would
+    // non-breaking proof. It includes five that name PLUGIN kinds with no static
+    // registry entry (`webhooks`, `connectors`, `sharingRules`,
+    // `ragPipelines`, `analyticsCubes`; `themes` was the sixth until #10485
+    // retired its carrier out of the map) — a purely registry-derived map would
     // have dropped those, which is why the derived limb is unioned rather than
     // substituted.
     for (const [plural, singular] of Object.entries(PLURAL_TO_SINGULAR)) {
@@ -62,14 +63,17 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
     }
   });
 
-  it('carries the six plugin-kind spellings that no registry derivation could produce', () => {
+  it('carries the five plugin-kind spellings that no registry derivation could produce', () => {
     // Named explicitly because losing them is the specific regression the
     // union-vs-pure-derivation choice was made to avoid, and a reader needs to
     // see the population rather than infer it.
     const registryTypes = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     const pluginOnly = Object.entries(PLURAL_TO_SINGULAR).filter(([, s]) => !registryTypes.has(s));
+    // `themes` left this list at #10485 (ADR-0049 — the carrier retired, so
+    // `/meta/theme` now earns `unrecognisedMetaTypeRefusal`'s verdict; pinned
+    // in the #8421 block at the bottom of this file).
     expect(pluginOnly.map(([p]) => p).sort()).toEqual(
-      ['analyticsCubes', 'connectors', 'ragPipelines', 'sharingRules', 'themes', 'webhooks'],
+      ['analyticsCubes', 'connectors', 'ragPipelines', 'sharingRules', 'webhooks'],
     );
     for (const [plural, singular] of pluginOnly) {
       expect(canonicalMetaUrlType(plural)).toBe(singular);
@@ -158,11 +162,15 @@ describe('#7894 — the refusal limb is narrow by construction', () => {
     // misspellings of DECLARED types and none of these is one. Read it as a
     // statement about `metaUrlSpellingRefusal`, not about the whole boundary:
     // `saveMetaItem` now also consults `unrecognisedMetaTypeRefusal`, under
-    // which the six mapped kinds below stay writable and the six unmapped
+    // which the five mapped kinds below stay writable and the six unmapped
     // names no longer are. That narrowing is pinned, deliberately visible, in
-    // the `#8421` block at the bottom of this file.
+    // the `#8421` block at the bottom of this file. (`theme` moved from this
+    // list to the refused side at #10485 — its carrier retired out of the map,
+    // so it is no longer "a spelling that worked before" for this verdict:
+    // `metaUrlSpellingRefusal` still answers null for it, but the #8421
+    // verdict now refuses it, pinned below.)
     for (const kind of [
-      'theme', 'sharing_rule', 'webhook', 'rag_pipeline', 'analytics_cube', 'connector',
+      'sharing_rule', 'webhook', 'rag_pipeline', 'analytics_cube', 'connector',
       'my_plugin_kind', 'address', 'status', 'kudos', 'analysis', 'series',
     ]) {
       expect(metaUrlSpellingRefusal(kind), `${kind} must not be refused`).toBeNull();
@@ -216,13 +224,14 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
 
   it('accepts every manifest spelling AND the singular each one folds to', () => {
     // The direction that matters most, and the one a registry-quantified
-    // refusal would get wrong: six of these singulars — `theme`, `webhook`,
+    // refusal would get wrong: five of these singulars — `webhook`,
     // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` — are
     // PLUGIN kinds with no static registry entry at all. Refusing them would
-    // break `PUT /meta/theme/dark`, the exact operation the plugin path exists
-    // to serve, which is the failure #8421's measurement disqualified option C
-    // for. Accepting the singular is not decoration: `themes` folds to `theme`,
-    // and a boundary that refused the fold's own output would be incoherent.
+    // break `PUT /meta/webhook/stripe`, the exact operation the plugin path
+    // exists to serve, which is the failure #8421's measurement disqualified
+    // option C for. Accepting the singular is not decoration: `webhooks` folds
+    // to `webhook`, and a boundary that refused the fold's own output would be
+    // incoherent.
     for (const [plural, singular] of Object.entries(PLURAL_TO_SINGULAR)) {
       expect(unrecognisedMetaTypeRefusal(plural), `${plural} works today`).toBeNull();
       expect(
@@ -232,13 +241,23 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
     }
   });
 
-  it('carries the six plugin kinds by NAME, since quantification hides them', () => {
+  it('carries the five plugin kinds by NAME, since quantification hides them', () => {
     const declared = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     for (const kind of [
-      'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'theme', 'webhook',
+      'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'webhook',
     ]) {
       expect(declared.has(kind), `${kind} must NOT be in the static registry`).toBe(false);
       expect(unrecognisedMetaTypeRefusal(kind), `${kind} must stay accepted anyway`).toBeNull();
+    }
+  });
+
+  it('[#10485] `theme` left the contract with its carrier — refused by name', () => {
+    // The retired kind's whole exit path: the `themes: 'theme'` fold left
+    // `PLURAL_TO_SINGULAR`, so both spellings now earn the #8421 verdict
+    // instead of the pre-#10194 store-anything branch.
+    for (const spelling of ['theme', 'themes']) {
+      const verdict = unrecognisedMetaTypeRefusal(spelling);
+      expect(verdict, `${spelling} must be refused`).not.toBeNull();
     }
   });
 

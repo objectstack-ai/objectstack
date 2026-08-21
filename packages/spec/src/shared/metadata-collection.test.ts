@@ -247,7 +247,7 @@ describe('MAP_SUPPORTED_FIELDS', () => {
     expect(MAP_SUPPORTED_FIELDS).toContain('dashboards');
     expect(MAP_SUPPORTED_FIELDS).toContain('reports');
     expect(MAP_SUPPORTED_FIELDS).toContain('actions');
-    expect(MAP_SUPPORTED_FIELDS).toContain('themes');
+    // 'themes' left the list at #10485 (ADR-0049 — carrier retired).
     expect(MAP_SUPPORTED_FIELDS).toContain('flows');
     expect(MAP_SUPPORTED_FIELDS).toContain('positions');
     expect(MAP_SUPPORTED_FIELDS).toContain('permissions');

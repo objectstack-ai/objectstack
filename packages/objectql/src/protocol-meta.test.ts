@@ -1555,6 +1555,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // to take one from — #6242 row 2), so it carries the pure
         // no-schema fall-through control below. Each newly-bound type's own
         // behaviour, door and 422 both, is pinned in the tests below.
+        //
+        // [#10485] `theme` then left the CONTRACT ITSELF (ADR-0049 — the
+        // `themes` carrier and `ThemeSchema` retired; the `themes: 'theme'`
+        // fold left `PLURAL_TO_SINGULAR`), so it is no longer a URL-map-only
+        // kind at all: both halves of its old pair now earn the #8421
+        // unrecognised refusal, pinned once below; `webhook` carries the
+        // two-halves door pin for the class.
         // ───────────────────────────────────────────────────────────────
 
         it('accepts brand-new plugin-registered type (no static registry entry)', async () => {
@@ -1755,16 +1762,23 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // change that quietly CLOSED the door fails the "accepts" half.
         // ───────────────────────────────────────────────────────────────
 
-        it('accepts a spec-valid `theme` item (write door unchanged by the schema binding)', async () => {
+        // [#10485] `theme` left this pair: the carrier retired out of the
+        // spelling contract, so BOTH halves now earn the #8421 unrecognised
+        // refusal before any schema is consulted — pinned once below. The
+        // still-bound `webhook` door keeps the two-halves pin alive for the
+        // #6245 class.
+        it('accepts a spec-valid `webhook` item (write door unchanged by the schema binding)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
             const result = await scoped.saveMetaItem({
-                type: 'theme',
-                name: 'my_theme',
+                type: 'webhook',
+                name: 'my_hook',
                 item: {
-                    name: 'my_theme',
-                    label: 'My Theme',
-                    colors: { primary: '#3b82f6' },
+                    name: 'my_hook',
+                    label: 'My Hook',
+                    object: 'task',
+                    triggers: ['create'],
+                    url: 'https://example.com/hook',
                 },
                 organizationId: 'org_alpha',
             });
@@ -1772,25 +1786,38 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect(result.success).toBe(true);
         });
 
-        it('refuses a spec-INVALID `theme` item with 422 instead of storing it unvalidated', async () => {
+        it('refuses a spec-INVALID `webhook` item with 422 instead of storing it unvalidated', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
-            // The exact body the old "plugin-registered types" case above used
-            // to save with `success: true`: `tokens` is an ALIAS of
-            // `customVars` (so the strict surface names the real key), and the
-            // required `colors` block is missing. Stored verbatim, this is the
-            // theme that fails at RENDER — the console's own styling surface —
-            // with nothing at the write point to say so.
+            // Required keys missing (`object`, `triggers`, `url`): stored
+            // verbatim this is the webhook that never fires, with nothing at
+            // the write point to say so.
             await expect(
                 scoped.saveMetaItem({
-                    type: 'theme',
-                    name: 'my_theme',
-                    item: { name: 'my_theme', label: 'Test', tokens: {} },
+                    type: 'webhook',
+                    name: 'my_hook',
+                    item: { name: 'my_hook', label: 'Test' },
                     organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({
                 code: 'INVALID_METADATA',
                 status: 422,
+            });
+        });
+
+        it('[#10485] refuses `theme` outright — the retired kind is no longer addressable', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'theme',
+                    name: 'my_theme',
+                    item: { name: 'my_theme', label: 'My Theme', colors: { primary: '#3b82f6' } },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_REQUEST',
+                status: 400,
             });
         });
 

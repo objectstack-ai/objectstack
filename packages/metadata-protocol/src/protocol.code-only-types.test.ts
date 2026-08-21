@@ -396,14 +396,15 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
             // `getMetaTypes()` synthesises those with allowRuntimeCreate:true;
             // the write gate must keep agreeing with what it advertises.
             const { protocol, rows } = makeProtocol(undefined);
-            // [#10194] `theme` resolves a schema through UNREGISTERED_KIND_SCHEMAS
-            // now, so the probe body must be spec-valid — the door under test
+            // [#6245] `webhook` resolves a schema through UNREGISTERED_KIND_SCHEMAS,
+            // so the probe body must be spec-valid — the door under test
             // (authorization) is unchanged, but a malformed body would 422
-            // before proving anything about it.
+            // before proving anything about it. (`theme` was the specimen until
+            // #10485 retired that kind out of the spelling contract.)
             const result = await protocol.saveMetaItem({
-                type: 'theme',
-                name: 'rc3_probe_theme',
-                item: { name: 'rc3_probe_theme', label: 'Probe', colors: { primary: '#3b82f6' } },
+                type: 'webhook',
+                name: 'rc3_probe_webhook',
+                item: { name: 'rc3_probe_webhook', label: 'Probe', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
             });
             expect(result.success).toBe(true);
             expect(metaRows(rows).length).toBe(1);
@@ -496,9 +497,10 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                 item: { name: 'rc3_receipt_view', object: 'task', events: ['beforeUpdate'] },
             },
             {
-                type: 'theme', // no static registry entry (plugin-registered)
-                // [#10194] spec-valid body — theme resolves a schema now.
-                item: { name: 'rc3_receipt_view', label: 'Receipt', colors: { primary: '#3b82f6' } },
+                type: 'webhook', // no static registry entry (plugin-registered)
+                // [#6245] spec-valid body — webhook resolves a schema.
+                // (`theme` was the specimen until #10485 retired that kind.)
+                item: { name: 'rc3_receipt_view', label: 'Receipt', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
             },
         ];
 
