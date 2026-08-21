@@ -76,6 +76,7 @@
 
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const REPO_ROOT = new URL('../../', import.meta.url);
 
@@ -272,5 +273,10 @@ function selfTest() {
   console.log(`✓ check-skill-line-ratchet self-test: ${cases.length} cases pass.`);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) selfTest();
 else run();
