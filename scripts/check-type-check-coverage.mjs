@@ -172,6 +172,30 @@
 //               made of -- and when the delta cannot be attributed, say so in
 //               the note rather than inventing composition.
 //
+//               LOWERING desynchronises the composition too, and for a long
+//               time this paragraph only said "raise". It was written that way
+//               because a note describing a pile LARGER than what exists reads
+//               as misleading in the safe direction -- but a note that itemises
+//               34 + 24 + 34 above a field reading 89 does not mislead safely,
+//               it CONTRADICTS ITS OWN FIELD, and nothing mechanical read the
+//               prose to say so. Two instances were repaired by hand on the
+//               same day: service-automation opening `code-tier 5.` over
+//               `errors: 3` (#10721), and metadata itemising 92 over
+//               `errors: 89` (#10775). Neither repair closed the class, because
+//               `--lower` MINTS it -- it rewrites the digits and carries the
+//               note through untouched, so the sanctioned one-command way to
+//               close a surplus was also the way to desynchronise a note
+//               (#10722).
+//
+//               So the rule has a mechanical half in both places now. A leading
+//               tier itemisation must sum to `errors` (COMPOSITION, below), and
+//               `--lower` writes `compositionAt` beside the number it lowers so
+//               the itemisation says out loud which pile it still describes.
+//               Raising a count still means rewriting the note: `compositionAt`
+//               may only ever declare a pile LARGER than the field, so it
+//               cannot launder a raise -- and an unattributable delta is still
+//               an admitted gap rather than an invented composition.
+//
 //               One thing to know before re-measuring: a `pull_request` run
 //               compiles your branch MERGED INTO the current main, not your
 //               branch. So the number to record is the one measured on a tree
@@ -1109,6 +1133,177 @@ function workspacePackages() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// COMPOSITION -- does the note agree with the number beside it (#10722)?
+//
+// Each ledger entry pairs a measured `errors` with free prose, and until this
+// block existed nothing read the prose. A note could narrate any count at all,
+// including one its own field contradicts, and every gate stayed green: #7038,
+// #8982, #10721 and #10775 are four hand repairs of that one shape, the last
+// two landed on the same day. Repairing prose a gate never reads does not close
+// a class; this does, from the other end.
+//
+// What is read is deliberately SMALL. A general "does this prose agree with
+// this number" reader is not tractable and must not be attempted -- these notes
+// carry several numbers apiece (`Re-measured 333 at 5ab08428`, `up from 219`,
+// `TS2554 x113`, per-file splits), and only some of them are the entry's total.
+// A rule that guesses wrong produces a FALSE RED ON AN ACCURATE LEDGER, which
+// is strictly worse than the silence it replaces. So it reads exactly one
+// thing -- the house-convention tier itemisation the notes already open with --
+// and abstains, silently, everywhere else:
+//
+//   * the itemisation must be the note's OPENING clause, reachable across a
+//     lead-in that carries no digit and no sentence break (spec-monorepo's
+//     "the workspace root itself: code-tier 4 ..." qualifies);
+//   * a tier counted twice, or a further `code-tier 9`-shaped count ANYWHERE
+//     later in the note, means the note is quoting its own history and the
+//     entry is skipped. metadata-protocol quotes the misleading note #5278
+//     found ("code-tier 9, the rest config-tier and noise") and is skipped for
+//     exactly that reason -- correct entry, no verdict;
+//   * per-code tallies (`TS2835 x67, TS7006 x57, ...`) are NOT summed. They are
+//     partial by construction: plugin-rest's tally sums to 147 and says so in
+//     the same breath ("composition as counted at 153"), so summing them would
+//     red an entry whose author was being precise.
+//
+// FALSE-POSITIVE DIRECTION: an entry whose opening itemisation is deliberately
+// partial, with the remainder described in words rather than digits, would fire
+// wrongly. None exists today -- run over all 33 entries on main at f4e5d916d6,
+// 11 are checked and 0 fire.
+// FALSE-NEGATIVE DIRECTION: everything else, and it is most of the ledger. 21
+// of 33 entries carry no tier itemisation and are unguarded here; 1 more is
+// skipped as ambiguous. That is the intended trade -- a floor under one known
+// class, not a reader of prose.
+//
+// The two instances this was written for both fire, on the trees that carried
+// them: at 699132f259^, service-automation (`code-tier 5` over `errors: 3`) and
+// metadata (34 + 24 + 34 = 92 over `errors: 89`); at 699132f259, metadata
+// alone. Nothing else fires on either tree.
+// ---------------------------------------------------------------------------
+
+/**
+ * Any tier count in either word order, used both to FIND the opening
+ * itemisation and to detect a second one later in the note. Liberal on purpose:
+ * every extra match it makes turns into an abstention, never a verdict.
+ */
+const TIER_COUNT = /(?:code-tier|config-tier|noise)[ \t]+\d|\d[ \t]+(?:code-tier|config-tier|noise)/;
+
+/** One tier term, anchored, in either word order. */
+const TIER_TERM = /^(?:(code-tier|config-tier|noise)[ \t]+(\d+)|(\d+)[ \t]+(code-tier|config-tier|noise))\b/;
+
+/**
+ * The connective glue the notes really use between tier terms, as a CLOSED set:
+ * whitespace, `;`, `,`, `+`, a parenthetical of per-code detail, and the three
+ * words the ledger joins tiers with. Anything outside it ends the itemisation,
+ * which is what keeps the reader inside the opening clause instead of walking
+ * on into the narrative.
+ */
+const TIER_GLUE = /^(?:[\s;,+]|\([^()]*\)|and\b|plus\b|the rest is\b)+/;
+
+/**
+ * The opening tier itemisation of a note, or nothing.
+ *
+ * @param {unknown} note
+ * @returns {{tiers: Map<string, number>, sum: number} | {ambiguous: string} | null}
+ *   `null` when the note states no tier itemisation at all (nothing to check),
+ *   `{ambiguous}` when one is stated but cannot be read with certainty, and the
+ *   tiers plus their sum otherwise.
+ */
+function tierItemisation(note) {
+  if (typeof note !== 'string') return null;
+  const first = note.search(TIER_COUNT);
+  if (first === -1) return null;
+  if (/[\d.]/.test(note.slice(0, first))) {
+    return { ambiguous: 'the text before its first tier count carries a digit or a sentence break' };
+  }
+  let cursor = first;
+  const tiers = new Map();
+  for (;;) {
+    const term = TIER_TERM.exec(note.slice(cursor));
+    if (!term) break;
+    const tier = term[1] ?? term[4];
+    if (tiers.has(tier)) return { ambiguous: `\`${tier}\` is counted twice in its opening itemisation` };
+    tiers.set(tier, Number(term[2] ?? term[3]));
+    cursor += term[0].length;
+    const glue = TIER_GLUE.exec(note.slice(cursor));
+    if (!glue) break;
+    cursor += glue[0].length;
+  }
+  if (tiers.size === 0) return null;
+  if (TIER_COUNT.test(note.slice(cursor))) {
+    return { ambiguous: 'a further tier count appears later in the note, so the opening one may be a quotation of its own history' };
+  }
+  return { tiers, sum: [...tiers.values()].reduce((a, b) => a + b, 0) };
+}
+
+/**
+ * COMPOSITION, over one ledger. Also reconciles `compositionAt` -- the field
+ * `--lower` writes to say which pile the itemisation still describes after the
+ * number moved out from under it.
+ *
+ * @param {string} ledgerName
+ * @param {Record<string, unknown>} entries
+ * @returns {string[]}
+ */
+function compositionProblems(ledgerName, entries) {
+  const problems = [];
+  for (const [name, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const errors = /** @type {{errors?: unknown}} */ (entry).errors;
+    const declared = /** @type {{compositionAt?: unknown}} */ (entry).compositionAt;
+    const itemised = tierItemisation(/** @type {{note?: unknown}} */ (entry).note);
+    const readable = itemised !== null && !('ambiguous' in itemised);
+
+    if (declared !== undefined) {
+      if (!Number.isInteger(declared) || Number(declared) <= 0) {
+        problems.push(
+          `${name}: ${ledgerName} \`compositionAt\` must be the whole number its note's tier itemisation ` +
+            `was tallied at -- got ${JSON.stringify(declared)}.`,
+        );
+        continue;
+      }
+      if (!readable) {
+        problems.push(
+          `${name}: ${ledgerName} declares \`compositionAt: ${declared}\` but its note carries no readable ` +
+            `tier itemisation for that number to describe -- delete the field, or restore the itemisation ` +
+            `it was written for.`,
+        );
+        continue;
+      }
+      if (typeof errors === 'number' && declared === errors) {
+        problems.push(
+          `${name}: ${ledgerName} declares \`compositionAt: ${declared}\`, which is \`errors\` -- the note ` +
+            `is not stale, so the declaration states nothing. Delete the field.`,
+        );
+        continue;
+      }
+      if (typeof errors === 'number' && Number(declared) < errors) {
+        problems.push(
+          `${name}: ${ledgerName} declares \`compositionAt: ${declared}\` BELOW \`errors: ${errors}\`, which ` +
+            `is a RAISED count wearing an unrewritten note. \`compositionAt\` may only ever declare a pile ` +
+            `LARGER than the field -- rewrite the note to match what the pile is now made of, and where the ` +
+            `delta cannot be attributed say so rather than inventing a composition.`,
+        );
+        continue;
+      }
+    }
+
+    if (!readable) continue;
+    const target = declared === undefined ? errors : Number(declared);
+    if (typeof target !== 'number' || itemised.sum === target) continue;
+    const breakdown = [...itemised.tiers].map(([tier, n]) => `${tier} ${n}`).join(' + ');
+    problems.push(
+      `${name}: ${ledgerName} note opens with a tier itemisation summing to ${itemised.sum} (${breakdown}) ` +
+        `while the entry ${declared === undefined ? `records \`errors: ${errors}\`` : `declares \`compositionAt: ${declared}\``} -- ` +
+        `the note contradicts the field beside it, and nothing but this check reads prose, so the ` +
+        `disagreement is invisible everywhere else (#10722). Re-tally the itemisation onto the recorded ` +
+        `number, or -- if the composition genuinely describes the larger pile it was measured at -- record ` +
+        `that size as \`compositionAt\` instead of rescaling a tally nobody re-took. ` +
+        `⛔ Do NOT change \`errors\` to make this agree: that number is the measurement.`,
+    );
+  }
+  return problems;
+}
+
 /**
  * Pure verdict over an observed workspace state; the real run and the
  * self-test both go through here, so the semantics the fixtures prove are the
@@ -1117,9 +1312,9 @@ function workspacePackages() {
  * @param {Array<{name: string, dir: string, scripts: Record<string,string>, hasTsconfig: boolean,
  *                hidesTests?: boolean, testFiles?: number, pinFiles?: string[]}>} packages
  * @param {{name: string, scripts: Record<string,string>}} root
- * @param {{ debt: Record<string, {errors: number, note?: string}>,
+ * @param {{ debt: Record<string, {errors: number, note?: string, compositionAt?: number}>,
  *           exempt: Record<string, string>,
- *           testDebt: Record<string, {errors: number, note?: string}>,
+ *           testDebt: Record<string, {errors: number, note?: string, compositionAt?: number}>,
  *           phantomPins: Record<string, string>,
  *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean }} state
  * @returns {string[]} problems, empty when the ratchet holds
@@ -1315,6 +1510,13 @@ function evaluate(packages, root, state) {
       );
     }
   }
+
+  // COMPOSITION (#10722). Runs over the ledger objects rather than over live
+  // packages: a note contradicting its own field is wrong whether or not the
+  // package it names still exists, and the reconciliation above already fails
+  // an entry naming nothing.
+  problems.push(...compositionProblems('DEBT', state.debt));
+  problems.push(...compositionProblems('TEST_DEBT', state.testDebt));
 
   // RUNNABLE: coverage that nothing executes is not coverage.
   if (!state.turboHasTask) {
@@ -2037,7 +2239,15 @@ function measureLedgers(packages, rootName, state) {
   for (const [name, entry] of Object.entries(state.debt)) {
     const dir = dirOf.get(name);
     if (dir === undefined) continue; // RECONCILED already failed on this one
-    measurements.push({ ledger: 'DEBT', name, dir, recorded: entry.errors ?? 0, actual: measureDebt(dir) });
+    measurements.push({
+      ledger: 'DEBT',
+      name,
+      dir,
+      recorded: entry.errors ?? 0,
+      note: entry.note,
+      compositionAt: entry.compositionAt,
+      actual: measureDebt(dir),
+    });
   }
   for (const [name, entry] of Object.entries(state.testDebt)) {
     const dir = dirOf.get(name);
@@ -2047,6 +2257,8 @@ function measureLedgers(packages, rootName, state) {
       name,
       dir,
       recorded: entry.errors ?? 0,
+      note: entry.note,
+      compositionAt: entry.compositionAt,
       actual: measureTestDebt(dir, hiddenOf.get(name) ?? []),
     });
   }
@@ -2181,8 +2393,20 @@ function evaluateMeasurements(measurements) {
  * writing 0 into the ledger would fail COVERED/TESTS_COVERED on the very next
  * run, turning a free improvement into a broken tree.
  *
- * @param {Array<{ledger: string, name: string, recorded: number, actual: number}>} measurements
- * @returns {{lowerings: Array<{ledger: string, name: string, from: number, to: number}>, graduations: string[]}}
+ * The second "must not" is newer and is the whole of #10722: lowering the digits
+ * ALONE mints a note-vs-field contradiction, because the note's tier itemisation
+ * keeps describing the pile the number just left. So each lowering carries the
+ * declaration that keeps the entry honest -- `declareCompositionAt`, the size
+ * the itemisation was tallied at -- computed HERE, where it is pure and
+ * fixture-testable, rather than inside the rewriter. It is null whenever there
+ * is nothing to declare: no readable itemisation, one that already sums to the
+ * new number, or an entry that has declared its composition size before (the
+ * tally does not move just because the field does).
+ *
+ * @param {Array<{ledger: string, name: string, recorded: number, actual: number,
+ *                note?: unknown, compositionAt?: unknown}>} measurements
+ * @returns {{lowerings: Array<{ledger: string, name: string, from: number, to: number,
+ *            declareCompositionAt: number | null}>, graduations: string[]}}
  */
 function plannedLowerings(measurements) {
   const lowerings = [];
@@ -2193,7 +2417,12 @@ function plannedLowerings(measurements) {
       graduations.push(`${m.name} (${m.ledger})`);
       continue;
     }
-    lowerings.push({ ledger: m.ledger, name: m.name, from: m.recorded, to: m.actual });
+    const itemised = tierItemisation(m.note);
+    const declareCompositionAt =
+      m.compositionAt === undefined && itemised !== null && !('ambiguous' in itemised) && itemised.sum !== m.actual
+        ? itemised.sum
+        : null;
+    lowerings.push({ ledger: m.ledger, name: m.name, from: m.recorded, to: m.actual, declareCompositionAt });
   }
   return { lowerings, graduations };
 }
@@ -2224,14 +2453,24 @@ function ledgerBlockRange(source, ledgerName) {
  * measures in. The tool that took the measurement is the only honest author of
  * the number.
  *
- * Notes are deliberately NOT rewritten. Raising a count demands a rewritten
- * composition (the invariant above says so, and says why); lowering one leaves a
- * note describing a pile LARGER than what exists, which misleads in the safe
- * direction -- and inventing a composition for errors that are gone would be the
- * exact sin that rule was written against.
+ * Notes are still NOT rewritten, and for the reason that has always stood:
+ * inventing a composition for errors that are gone is the exact sin the
+ * invariant above was written against, and this tool knows the new TOTAL but
+ * nothing about which tier gave it up. What changed with #10722 is the claim
+ * that leaving the note alone "misleads in the safe direction". It does not: a
+ * note itemising 34 + 24 + 34 over a field reading 89 CONTRADICTS ITS OWN
+ * FIELD, and every run of this tool minted another one of those. So a lowering
+ * that would strand an itemisation now carries `declareCompositionAt`, and the
+ * rewriter writes it as a `compositionAt` field beside the number -- one
+ * integer, planned upstream in `plannedLowerings()`, inserted next to the digits
+ * the regex has already located rather than spliced into the prose. That keeps
+ * the advertised one-command path FREE (no hand-edit, no red in the next
+ * person's PR) while making the staleness a declared fact that COMPOSITION
+ * reads, instead of a silent one nothing reads at all.
  *
  * @param {string} source
- * @param {Array<{ledger: string, name: string, from: number, to: number}>} lowerings
+ * @param {Array<{ledger: string, name: string, from: number, to: number,
+ *                declareCompositionAt?: number | null}>} lowerings
  * @returns {{source: string, applied: string[], skipped: string[]}}
  */
 function lowerLedgerEntries(source, lowerings) {
@@ -2257,8 +2496,21 @@ function lowerLedgerEntries(source, lowerings) {
       skipped.push(`${l.name}: ${l.ledger} reads ${match[2]}, not the measured-against ${l.from} -- re-measure`);
       continue;
     }
-    out = out.slice(0, block.start) + text.replace(pattern, `$1${l.to}`) + out.slice(block.end);
-    applied.push(`${l.ledger} ${l.name}: ${l.from} -> ${l.to}`);
+    // The declaration goes in as a sibling FIELD, indented like the `errors:` it
+    // follows when the entry is written over several lines and inline when it is
+    // not -- the shape is read off the match rather than assumed, because this
+    // file's ledgers hold both.
+    const declare = typeof l.declareCompositionAt === 'number' ? l.declareCompositionAt : null;
+    const indent = /\n([ \t]*)errors:[ \t]*$/.exec(match[1]);
+    const insert = declare === null ? '' : indent ? `,\n${indent[1]}compositionAt: ${declare}` : `, compositionAt: ${declare}`;
+    out = out.slice(0, block.start) + text.replace(pattern, (_m, head) => `${head}${l.to}${insert}`) + out.slice(block.end);
+    applied.push(
+      `${l.ledger} ${l.name}: ${l.from} -> ${l.to}`
+        + (declare === null
+          ? ''
+          : ` (+ compositionAt: ${declare} -- its note's tier itemisation was tallied at ${declare} and is `
+            + `NOT re-tallied here; re-tally it if you can attribute the delta, then delete the field)`),
+    );
   }
   return { source: out, applied, skipped };
 }
@@ -2473,6 +2725,99 @@ function selfTest() {
       root: okRoot,
       state: { ...okState, ciInvokesRoot: false },
       expect: [/never invokes `typecheck:root`/],
+    },
+    // COMPOSITION (#10722). The fixtures are the real instances, transplanted:
+    // service-automation's `code-tier 5` over `errors: 3`, and metadata's
+    // 34 + 24 + 34 over `errors: 89`.
+    {
+      label: 'a note whose opening tier itemisation contradicts its own field fails COMPOSITION',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 3, note: 'code-tier 5.' } } },
+      expect: [/root: DEBT note opens with a tier itemisation summing to 5 \(code-tier 5\) while the entry records `errors: 3`/],
+    },
+    {
+      label: 'a multi-tier itemisation is summed across the tiers, not read one tier at a time',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: {
+        ...okState,
+        debt: { root: { errors: 89, note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). Re-measured 92 at 5ab08428.' } },
+      },
+      expect: [/summing to 92 \(code-tier 34 \+ config-tier 24 \+ noise 34\)/],
+    },
+    {
+      label: 'the same itemisation agreeing with the field is silent',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: {
+        ...okState,
+        debt: { root: { errors: 89, note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). Re-measured 89 at 4b84834a32, DOWN from 92.' } },
+      },
+      expect: [],
+    },
+    {
+      // The false-positive guard, and the reason the rule abstains rather than
+      // reasons: metadata-protocol's real note quotes the misleading one #5278
+      // found. Reading either count as the entry's own would red a correct
+      // entry, which is worse than the silence this check replaces.
+      label: 'a note quoting its own history is SKIPPED, not guessed at',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: {
+        ...okState,
+        debt: { root: { errors: 63, note: 'code-tier 40 (TS2322 x34); config-tier 10; noise 13. Re-measured 63 -- the entry whose note was most misleading: it read "code-tier 9, the rest config-tier and noise".' } },
+      },
+      expect: [],
+    },
+    {
+      label: 'a note carrying no tier itemisation at all is not a note this check reads',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 53, note: 'TS18046 x51; TS6133 x1; TS2352 x1. Measured 52 at 5ab08428 -> 53 at 34558c2cc.' } } },
+      expect: [],
+    },
+    {
+      label: 'a composition declared stale at the size it was tallied at passes, and the field is what is compared',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 80, compositionAt: 89, note: 'code-tier 30; config-tier 25; noise 34.' } } },
+      expect: [],
+    },
+    {
+      label: 'a declaration that does not match the tally it claims to describe still fails',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 80, compositionAt: 92, note: 'code-tier 30; config-tier 25; noise 34.' } } },
+      expect: [/summing to 89 .* while the entry declares `compositionAt: 92`/],
+    },
+    {
+      label: 'a declaration BELOW the field is a raised count wearing an unrewritten note, and is refused',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 95, compositionAt: 89, note: 'code-tier 30; config-tier 25; noise 34.' } } },
+      expect: [/declares `compositionAt: 89` BELOW `errors: 95`/],
+    },
+    {
+      label: 'a declaration equal to the field states nothing and is refused, so the field only ever shrinks away',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 89, compositionAt: 89, note: 'code-tier 30; config-tier 25; noise 34.' } } },
+      expect: [/declares `compositionAt: 89`, which is `errors`/],
+    },
+    {
+      label: 'a declaration over a note with no readable itemisation describes nothing and is refused',
+      packages: [],
+      root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },
+      state: { ...okState, debt: { root: { errors: 80, compositionAt: 89, note: 'TS18046 x51; TS6133 x1.' } } },
+      expect: [/carries no readable tier itemisation for that number to describe/],
+    },
+    {
+      label: 'COMPOSITION reads TEST_DEBT on the same terms as DEBT',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 3 })],
+      root: okRoot,
+      state: { ...okState, testDebt: { a: { errors: 355, note: 'code-tier 300; config-tier 9; noise 40.' } } },
+      expect: [/a: TEST_DEBT note opens with a tier itemisation summing to 349/],
     },
   ];
 
@@ -3149,7 +3494,33 @@ function selfTest() {
     {
       label: 'a shrunk entry is lowered to its measurement',
       measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42 }],
-      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42 }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42, declareCompositionAt: null }],
+      graduations: [],
+    },
+    {
+      // #10722, the root cause. Without the declaration this plan is the whole
+      // defect: the digits move to 42 and the note keeps itemising 52.
+      label: 'a lowering that would strand a tier itemisation carries the declaration that keeps the entry honest',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42, note: 'code-tier 30; config-tier 12; noise 10.' }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42, declareCompositionAt: 52 }],
+      graduations: [],
+    },
+    {
+      label: 'an itemisation that already sums to the MEASURED number needs no declaration',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42, note: 'code-tier 30; config-tier 10; noise 2.' }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42, declareCompositionAt: null }],
+      graduations: [],
+    },
+    {
+      label: 'an entry that already declared its tally size keeps it — the tally does not move because the field did',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42, compositionAt: 89, note: 'code-tier 30; config-tier 12; noise 47.' }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42, declareCompositionAt: null }],
+      graduations: [],
+    },
+    {
+      label: 'an ambiguous note is declared about by nobody — the planner abstains exactly where the check does',
+      measurements: [{ ledger: 'DEBT', name: 'a', recorded: 52, actual: 42, note: 'code-tier 30; config-tier 12; noise 10. The old note read "code-tier 9".' }],
+      lowerings: [{ ledger: 'DEBT', name: 'a', from: 52, to: 42, declareCompositionAt: null }],
       graduations: [],
     },
     { label: 'a grown entry is never lowered', measurements: [{ ledger: 'DEBT', name: 'a', recorded: 3, actual: 7 }], lowerings: [], graduations: [] },
@@ -3180,6 +3551,7 @@ function selfTest() {
     "    note: 'code-tier 2. An earlier sweep read errors: 99 here, which is prose and not the field.',",
     '  },',
     "  '@objectstack/other': { errors: 5, note: 'x' },",
+    "  '@objectstack/inline': { errors: 9, note: 'code-tier 9.' },",
     '};',
     '',
     'const TEST_DEBT = {',
@@ -3218,6 +3590,38 @@ function selfTest() {
       assert: (out) => out === ledgerFixture,
     },
     {
+      // #10722, both halves meeting. The lowering writes `compositionAt`
+      // beside the number, indented like the `errors:` it follows.
+      label: 'a lowering that would strand a tier itemisation writes the declaration beside the number',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/rest', from: 2, to: 1, declareCompositionAt: 2 }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /const DEBT[\s\S]*?errors: 1,\n    compositionAt: 2,\n    note: 'code-tier 2\./.test(out),
+    },
+    {
+      label: 'a single-line entry takes the declaration inline rather than inventing an indent',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/inline', from: 9, to: 4, declareCompositionAt: 9 }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /'@objectstack\/inline': \{ errors: 4, compositionAt: 9, note: 'code-tier 9\.' \},/.test(out),
+    },
+    {
+      label: 'a lowering with nothing to declare leaves the entry the shape it was',
+      lowerings: [{ ledger: 'DEBT', name: '@objectstack/inline', from: 9, to: 4, declareCompositionAt: null }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /'@objectstack\/inline': \{ errors: 4, note: 'code-tier 9\.' \},/.test(out)
+        && !out.includes('compositionAt'),
+    },
+    {
+      label: 'the declaration lands in the NAMED ledger only, never on the same name in the other one',
+      lowerings: [{ ledger: 'TEST_DEBT', name: '@objectstack/rest', from: 163, to: 144, declareCompositionAt: 163 }],
+      applied: 1,
+      skipped: 0,
+      assert: (out) => /const TEST_DEBT[\s\S]*'@objectstack\/rest': \{ errors: 144, compositionAt: 163, note: 'y' \}/.test(out)
+        && /const DEBT[\s\S]*'@objectstack\/rest': \{\n    errors: 2,\n    note:/.test(out),
+    },
+    {
       label: 'an empty plan leaves the source byte-identical',
       lowerings: [],
       applied: 0,
@@ -3235,6 +3639,37 @@ function selfTest() {
     }
   }
 
+  // #10722 END TO END, over the rewriter's own output rather than over a
+  // regex: lower an entry whose note itemises the pile it is leaving, then read
+  // the rewritten ledger back with the check that guards the real one. WITHOUT
+  // the declaration the result is a freshly minted note-vs-field contradiction
+  // -- which is what every `--lower` run produced before this change, and is
+  // the assertion that fails if either half is ever taken back out.
+  const debtOf = (source) => {
+    const start = source.indexOf('const DEBT = {');
+    const end = source.indexOf('\n};', start);
+    return new Function(`return ${source.slice(source.indexOf('{', start), end + 2)}`)();
+  };
+  const stranded = { ledger: 'DEBT', name: '@objectstack/inline', from: 9, to: 4 };
+  const roundTripCases = [
+    {
+      label: 'lowering the digits ALONE leaves a note contradicting its field — the root cause, pinned',
+      lowering: { ...stranded, declareCompositionAt: null },
+      expect: [/summing to 9 \(code-tier 9\) while the entry records `errors: 4`/],
+    },
+    {
+      label: 'the same lowering, declared, reads back clean through the check that guards the real ledger',
+      lowering: { ...stranded, declareCompositionAt: 9 },
+      expect: [],
+    },
+  ];
+  for (const c of roundTripCases) {
+    const got = compositionProblems('DEBT', debtOf(lowerLedgerEntries(ledgerFixture, [c.lowering]).source));
+    if (got.length !== c.expect.length || !c.expect.every((rx, i) => rx.test(got[i]))) {
+      failures.push(`lowerLedgerEntries round-trip — ${c.label}: expected ${c.expect}, got ${JSON.stringify(got)}`);
+    }
+  }
+
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
@@ -3247,7 +3682,7 @@ function selfTest() {
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
       `built-closure case(s) + ` +
-      `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
+      `${planCases.length + rewriteCases.length + roundTripCases.length} auto-lowering case(s) hold.`,
   );
 }
 
@@ -3272,6 +3707,8 @@ const testDebtErrors = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.erro
 // Counted on this run, not read from the ledger: the file count is the one
 // number here the gate already knows (#5826).
 const testDebtFiles = hiddenTestFiles(packages, TEST_DEBT);
+const declaredStale = [...Object.entries(DEBT), ...Object.entries(TEST_DEBT)]
+  .filter(([, entry]) => typeof entry?.compositionAt === 'number');
 // Both numbers, always. Reporting only the src figure is how the first pass of
 // this gate read as 48/77 green while 568 test files went unchecked.
 console.log(
@@ -3279,7 +3716,17 @@ console.log(
     `(plus the root), ${Object.keys(DEBT).length} in the DEBT ledger (${debtTotal} frozen raw errors, ` +
     `${TRACKING_ISSUE}), ${Object.keys(EXEMPT).length} exempt.\n` +
     `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still hide their own tests from tsc ` +
-    `(${testDebtFiles} files hidden as counted by this run, ${testDebtErrors} frozen raw errors in TEST_DEBT).`,
+    `(${testDebtFiles} files hidden as counted by this run, ${testDebtErrors} frozen raw errors in TEST_DEBT).` +
+    // Printed on a GREEN run, for the same reason the surplus is (#6376): a
+    // declared-stale composition is honest but it is still drift, and a
+    // declaration nobody can see is the half that does the damage. Zero is the
+    // goal; re-tallying an entry and deleting its `compositionAt` gets there.
+    (declaredStale.length === 0
+      ? ''
+      : `\n  composition: ${declaredStale.length} entr(ies) carry a tier itemisation DECLARED stale by ` +
+        `\`compositionAt\` -- ${declaredStale.map(([name, e]) => `${name} (tallied at ${e.compositionAt}, ` +
+          `recorded ${e.errors})`).join(', ')}. Each is a note waiting to be re-tallied onto what its ` +
+        `package now measures (#10722).`),
 );
 
 // MEASURED runs only when asked, and only after the structural verdict above is
@@ -3311,8 +3758,11 @@ if (process.argv.includes('--re-measure')) {
     }
     if (applied.length > 0) {
       console.log(
-        `  Review and commit ${SELF}. Each \`note\` still describes the LARGER pile it was written for; ` +
-          `rewrite the ones you can attribute, and leave the rest rather than inventing a composition.`,
+        `  Review and commit ${SELF}. Each \`note\` still describes the LARGER pile it was written for -- ` +
+          `where that pile was itemised by tier, the \`compositionAt\` written beside the number now says so ` +
+          `out loud, which is what stops the note from quietly contradicting its field (#10722). Re-tally ` +
+          `the ones you can attribute and delete their \`compositionAt\`; leave the rest rather than ` +
+          `inventing a composition.`,
       );
     }
   }
