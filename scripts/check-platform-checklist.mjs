@@ -32,6 +32,11 @@
 //     its oracle — a clause with no oracle is an invitation to tick on vibes,
 //     which is the exact AI-accuracy failure the RUNNER.md protocol exists to
 //     prevent.
+//   - every `traps` entry is a trap RUNNER.md's `### Trap vocabulary` table
+//     actually defines, and every documented trap is used by some item — the
+//     vocabulary is READ from that table, never copied into this file, and a
+//     table this script cannot parse is a refusal rather than an empty
+//     allow-list (see the trap-vocabulary block below for why that matters).
 //
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
@@ -53,6 +58,270 @@ const BLOCKED_BY = new Set(['fixture', 'environment', 'dependency', 'product-bug
 
 const errors = [];
 const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${msg}`);
+
+// ── Trap vocabulary ─────────────────────────────────────────────────────────
+// Every other enum-ish field above is a hardcoded `Set`. `traps` deliberately
+// is NOT, and that choice is the whole design of this block.
+//
+// RUNNER.md rule 3 tells a runner to "check the `traps` field and rule each
+// listed trap out". The definitions that make that instruction executable live
+// in ONE place — RUNNER.md's `### Trap vocabulary` table — and nothing used to
+// hold the items and the table together: the string `traps` did not appear in
+// this file at all. Measured on `main` at 6b0be02209: 19 distinct traps in use
+// across 205 items, 11 documented, 8 used-but-undocumented (#10416 wrote the
+// eight definitions; this check is why they cannot come back). Two drift
+// shapes, and the validator saw neither:
+//
+//   1. a value nobody ever defined, exactly as the eight arrived;
+//   2. a TYPO in a documented one — `hydration-races`, `wrong-persona ` —
+//      which is the likelier and the worse of the two, because it reads as a
+//      documented trap right up until someone greps the table for it.
+//      `hydration-race` is on 79 of the 205 items; one mistyped instance is
+//      simply a twentieth trap that no runner rules out and nobody notices.
+//
+// Both close the same way — check the vocabulary — and a hardcoded `TRAPS` set
+// would close NEITHER honestly: it only moves the drift one level up, between
+// this script and RUNNER.md, with nothing watching that seam either.
+//
+// ## Why the parser carries a positive control that runs on EVERY invocation
+//
+// A markdown-table extractor has one failure mode that matters: it reads zero
+// rows — heading renamed, table moved, a row's backtick spelling changed — and
+// every item then validates against an empty allow-list. Zero violations. A
+// green line indistinguishable from the green a working parse prints. That is
+// the silent-success direction this tree treats as worse than no check at all
+// (#4690), so `extractTrapVocabulary` REFUSES on a table it cannot recognise
+// and never returns an empty vocabulary with no complaint — and a fixture
+// battery proves the refusal still fires.
+//
+// The battery runs inline, on every invocation, not only behind `--self-test`,
+// because a `--self-test` here would otherwise execute NOWHERE: this gate is
+// not CI-wired by maintainer decision (README "Operating cadence"), and its
+// `pnpm` alias lives in root package.json, declared territory of the
+// @changesets/cli v3 lane (#9465) while that runs. A self-test nothing runs is
+// the documented defect of #10574/#10573 — CI enforcing the spelling of a
+// guarantee while never once checking the guarantee still holds. The battery
+// is in-memory string work (~1 ms of a ~270 ms run), so "always" costs nothing
+// worth naming, and its assertion count is printed on the OK line: the green
+// states how many rows it read and that its own control passed.
+
+const RUNNER_FILE = join(ROOT, 'docs/qa/platform-checklist/RUNNER.md');
+const TRAP_HEADING = '### Trap vocabulary';
+
+/**
+ * Extract the trap vocabulary from RUNNER.md's `### Trap vocabulary` table.
+ *
+ * Returns `{ traps, duplicates, refusal }`. A non-null `refusal` means the
+ * table could not be recognised and the caller MUST treat it as a hard
+ * failure. This never returns an empty `traps` with a null `refusal`: an empty
+ * vocabulary and a working parse are not allowed to look alike.
+ */
+function extractTrapVocabulary(md) {
+  const no = (refusal) => ({ traps: [], duplicates: [], refusal });
+  const lines = String(md).split('\n');
+
+  const h = lines.findIndex((l) => l.trimEnd().startsWith(TRAP_HEADING));
+  if (h === -1) {
+    return no(`the "${TRAP_HEADING}" heading is not in the file — renamed, moved or removed. Restore it: this check reads the vocabulary from that table and refuses to guess.`);
+  }
+
+  let i = h + 1;
+  for (; i < lines.length; i++) {
+    if (/^#{1,6}\s/.test(lines[i])) return no(`no markdown table under "${TRAP_HEADING}" — the next heading arrives first`);
+    if (lines[i].trimStart().startsWith('|')) break;
+  }
+  if (i >= lines.length) return no(`no markdown table under "${TRAP_HEADING}" — the file ends first`);
+
+  const header = lines[i].trim();
+  if (!/^\|\s*trap\s*\|/i.test(header)) {
+    return no(`the first table under "${TRAP_HEADING}" is not the trap table — expected a "| trap | … |" header row, found ${JSON.stringify(header.slice(0, 60))}`);
+  }
+  if (!/^\|[\s:|-]+\|$/.test((lines[i + 1] ?? '').trim())) {
+    return no(`the trap table's header row is not followed by a markdown separator row — found ${JSON.stringify((lines[i + 1] ?? '').trim().slice(0, 60))}. This parser cannot read that shape, and reading it wrong would shrink the vocabulary silently.`);
+  }
+
+  const rows = [];
+  const unreadable = [];
+  for (i += 2; i < lines.length && lines[i].trimStart().startsWith('|'); i++) {
+    const m = lines[i].trim().match(/^\|\s*`([^`]+)`\s*\|/);
+    if (m) rows.push(m[1]);
+    else unreadable.push(lines[i].trim().slice(0, 60));
+  }
+
+  if (unreadable.length) {
+    return no(`${unreadable.length} row(s) of the trap table do not name a single backticked trap in the first cell — e.g. ${JSON.stringify(unreadable[0])}. Every row must read "| \`trap-name\` | what it fakes | counter |"; a row this parser cannot read would drop that trap out of the vocabulary without a word.`);
+  }
+  if (rows.length === 0) {
+    return no(`the trap table under "${TRAP_HEADING}" has a header but ZERO rows. An empty vocabulary would make every item's \`traps\` validate against nothing and report zero problems, so this is a refusal — never an empty allow-list.`);
+  }
+
+  const seen = new Set();
+  const duplicates = [];
+  for (const t of rows) {
+    if (seen.has(t)) duplicates.push(t);
+    seen.add(t);
+  }
+  return { traps: [...seen], duplicates, refusal: null };
+}
+
+/** Levenshtein, for the did-you-mean that makes drift shape 2 readable. */
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+function didYouMean(name, vocabulary) {
+  let best = null;
+  let bestD = Infinity;
+  for (const t of vocabulary) {
+    const d = editDistance(name, t);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best !== null && bestD <= 3 ? ` — did you mean \`${best}\`?` : '';
+}
+
+/** Problems with one item's `traps`, as message strings. Pure; battery-tested below. */
+function trapProblems(item, vocabulary) {
+  const out = [];
+  if (item.traps === undefined) return out; // optional field: 8 of 205 items carry none
+  if (!Array.isArray(item.traps)) {
+    out.push(`"traps" must be an array of trap names from RUNNER.md's \`${TRAP_HEADING}\` table`);
+    return out;
+  }
+  const seen = new Set();
+  item.traps.forEach((t, i) => {
+    if (typeof t !== 'string' || !t.trim()) {
+      out.push(`traps[${i}] must be a non-empty string`);
+      return;
+    }
+    if (t !== t.trim()) {
+      out.push(`traps[${i}] ${JSON.stringify(t)} has surrounding whitespace — a padded name is a different string to everyone who greps the table for it`);
+    }
+    const name = t.trim();
+    if (seen.has(name)) out.push(`traps[${i}] \`${name}\` is listed twice`);
+    seen.add(name);
+    if (!vocabulary.has(name)) {
+      out.push(
+        `traps[${i}] \`${name}\` is not in RUNNER.md's \`${TRAP_HEADING}\` table${didYouMean(name, vocabulary)}` +
+          ` — either it is a typo of a documented trap, or it is a new one; document it in that table (name · what it fakes · the counter) before using it, so the runner told to "rule each listed trap out" has something to rule out.`,
+      );
+    }
+  });
+  return out;
+}
+
+/**
+ * The positive control. Proves the extractor reads a good table AND refuses an
+ * empty / renamed / reshaped one, and that the item-side checker catches both
+ * drift shapes. Zero I/O — every subject is a literal fixture.
+ */
+function selfTestTrapVocabulary() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok) => {
+    checked++;
+    if (!ok) failures.push(what);
+  };
+
+  const table = (...rows) => ['prose above', '', `${TRAP_HEADING} (\`traps\` field)`, '', '| trap | what it fakes | counter |', '|---|---|---|', ...rows, '', '## Next section', '| not | a | trap |'].join('\n');
+
+  const good = extractTrapVocabulary(table('| `hydration-race` | empty nav | settle, then read |', '| `stale-dist` | src edits with no effect | rebuild |'));
+  t('P1 a well-formed table yields exactly its rows', good.refusal === null && good.traps.join(',') === 'hydration-race,stale-dist');
+  t('P2 the row scan stops at the table, not at the next table in the file', !good.traps.includes('not'));
+  t('P3 a clean parse reports no duplicates', good.duplicates.length === 0);
+
+  const dup = extractTrapVocabulary(table('| `stale-dist` | a | b |', '| `stale-dist` | c | d |'));
+  t('P4 a trap documented twice is reported', dup.refusal === null && dup.duplicates.join(',') === 'stale-dist' && dup.traps.length === 1);
+
+  // ── the refusals: each of these, returning an empty vocabulary quietly, is
+  //    the fail-open this whole block exists to make impossible ──────────────
+  const refusals = [
+    ['R1 a table with a header and ZERO rows', table()],
+    ['R2 the heading renamed away', table('| `stale-dist` | a | b |').replace(TRAP_HEADING, '### Traps you may hit')],
+    ['R3 no table under the heading (prose, then the next heading)', ['', TRAP_HEADING, '', 'See the skill for the list.', '', '## Next section', ''].join('\n')],
+    ['R4 a row that lost its backticks', table('| `hydration-race` | a | b |', '| stale-dist | c | d |')],
+    ['R5 a different table sitting under the heading', table('| `stale-dist` | a | b |').replace('| trap | what it fakes | counter |', '| oracle | when | why |')],
+    ['R6 an empty file', ''],
+    ['R7 the separator row missing', ['', TRAP_HEADING, '', '| trap | what it fakes | counter |', '| `stale-dist` | a | b |', ''].join('\n')],
+    ['R8 the heading present but the file ends', ['', TRAP_HEADING, ''].join('\n')],
+  ];
+  for (const [what, md] of refusals) {
+    const r = extractTrapVocabulary(md);
+    t(`${what} is REFUSED, not read as an empty vocabulary`, typeof r.refusal === 'string' && r.refusal.length > 0 && r.traps.length === 0);
+  }
+
+  // The invariant behind every refusal above, asserted as an invariant rather
+  // than case by case: no input may yield "nothing to check" without saying so.
+  const allInputs = [...refusals.map(([, md]) => md), table('| `x` | a | b |'), '| trap |\n|---|\n| `y` |'];
+  t(
+    'R9 no input yields an empty vocabulary with no refusal',
+    allInputs.every((md) => {
+      const r = extractTrapVocabulary(md);
+      return r.traps.length > 0 || (typeof r.refusal === 'string' && r.refusal.length > 0);
+    }),
+  );
+
+  // ── the item side: both drift shapes the card names ───────────────────────
+  const vocab = new Set(['hydration-race', 'stale-dist', 'wrong-persona']);
+  t('C1 a documented trap passes', trapProblems({ traps: ['hydration-race'] }, vocab).length === 0);
+  t('C2 an item with no traps is fine (optional field)', trapProblems({}, vocab).length === 0);
+  const invented = trapProblems({ traps: ['totally-invented-trap'] }, vocab);
+  t('C3 drift shape 1 — an undocumented trap is flagged', invented.length === 1 && invented[0].includes('totally-invented-trap'));
+  const typo = trapProblems({ traps: ['hydration-races'] }, vocab);
+  t('C4 drift shape 2 — a TYPO of a documented trap is flagged', typo.length === 1 && typo[0].includes('hydration-races'));
+  t('C5 the typo message names the trap that was meant', typo.length === 1 && typo[0].includes('did you mean `hydration-race`'));
+  const padded = trapProblems({ traps: ['wrong-persona '] }, vocab);
+  t('C6 a trailing-space spelling is flagged, not trimmed away', padded.some((m) => m.includes('whitespace')));
+  t('C7 a non-array "traps" is flagged', trapProblems({ traps: 'hydration-race' }, vocab).length === 1);
+  t('C8 an empty-string trap is flagged', trapProblems({ traps: [''] }, vocab).length === 1);
+  t('C9 a trap listed twice on one item is flagged', trapProblems({ traps: ['stale-dist', 'stale-dist'] }, vocab).some((m) => m.includes('twice')));
+
+  return { checked, failures };
+}
+
+if (process.argv.slice(2).includes('--self-test')) {
+  const r = selfTestTrapVocabulary();
+  if (r.failures.length === 0) {
+    console.log(`✓ check-platform-checklist --self-test: ${r.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one.`);
+    process.exit(0);
+  }
+  console.error(`✗ check-platform-checklist --self-test — ${r.failures.length} failure(s)\n`);
+  for (const f of r.failures) console.error(`  • ${f}`);
+  process.exit(1);
+}
+
+// The extractor's own positive control, before it is trusted with anything.
+const trapControl = selfTestTrapVocabulary();
+if (trapControl.failures.length) {
+  console.error("check-platform-checklist: the trap-vocabulary extractor's own positive control FAILED — this check cannot be trusted, and a green from it would mean nothing.\n");
+  for (const f of trapControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+if (!existsSync(RUNNER_FILE)) {
+  console.error(`check-platform-checklist: missing ${RUNNER_FILE} — the trap vocabulary lives in its "${TRAP_HEADING}" table and \`traps\` has nothing to validate against.`);
+  process.exit(1);
+}
+const trapTable = extractTrapVocabulary(readFileSync(RUNNER_FILE, 'utf8'));
+if (trapTable.refusal) {
+  console.error(`check-platform-checklist: cannot read the trap vocabulary out of docs/qa/platform-checklist/RUNNER.md — ${trapTable.refusal}`);
+  console.error('\nThis is a REFUSAL, not a pass: with no vocabulary, every item\'s `traps` would validate against an empty set and report zero problems.');
+  process.exit(1);
+}
+const TRAPS = new Set(trapTable.traps);
+for (const d of trapTable.duplicates) {
+  err('RUNNER.md', null, `\`${TRAP_HEADING}\` lists \`${d}\` twice — one trap, one row, one definition`);
+}
 
 if (!existsSync(AREAS_DIR)) {
   console.error(`check-platform-checklist: missing ${AREAS_DIR}`);
@@ -119,6 +388,8 @@ for (const file of files) {
     }
 
     if (!Array.isArray(item.steps) || item.steps.length === 0) where('"steps" must be a non-empty array of strings');
+
+    for (const msg of trapProblems(item, TRAPS)) where(msg);
 
     if (item.status === 'retired') {
       if (typeof item.retiredReason !== 'string' || !item.retiredReason) where('retired items must carry "retiredReason"');
@@ -219,6 +490,25 @@ for (const { file, item } of allItems) {
   }
 }
 
+// Trap vocabulary, the other direction. Bidirectional on purpose, mirroring
+// the coverage ratchet's UNCLASSIFIED/ORPHAN pair: a documented trap nobody
+// lists is a definition the runner is never asked to rule out, and the usual
+// reason for one is that the item carrying it was retyped or retired.
+const usedTraps = new Set();
+for (const { item } of allItems) {
+  if (!Array.isArray(item.traps)) continue;
+  for (const t of item.traps) if (typeof t === 'string' && t.trim()) usedTraps.add(t.trim());
+}
+for (const t of TRAPS) {
+  if (!usedTraps.has(t)) {
+    err(
+      'RUNNER.md',
+      null,
+      `\`${TRAP_HEADING}\` documents \`${t}\` but no checklist item lists it — put it on the items it protects, or drop the row; a definition nothing points at is one no run will ever rule out`,
+    );
+  }
+}
+
 // ── Capability-coverage ratchet ─────────────────────────────────────────────
 // "凡是有的能力, 都要测试" made mechanical: the universe of governed metadata
 // kinds is derived from packages/spec/liveness/*.json (the ADR-0049 ledger
@@ -293,4 +583,7 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
-console.log(`check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived.`);
+console.log(
+  `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
+    ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use (extractor control: ${trapControl.checked} assertions).`,
+);
