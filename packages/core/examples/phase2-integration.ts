@@ -7,6 +7,9 @@
  * in a real-world scenario.
  */
 
+import { realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { 
   ObjectKernel,
   PluginHealthMonitor,
@@ -350,8 +353,40 @@ async function example() {
   });
 }
 
-// Run example if this file is executed directly (ES Module compatible)
-// Note: In ES modules, use import.meta.url instead of require.main
-if (import.meta.url === `file://${process.argv[1]}`) {
+// ─── entry guard ───────────────────────────────────────────────────────
+// ⛔ NOT ``import.meta.url === `file://${process.argv[1]}` ``. Node symlink-resolves
+// `import.meta.url` but leaves `process.argv[1]` exactly as the caller typed it, and
+// the template also skips the percent-encoding `pathToFileURL` applies — so that
+// spelling goes INERT (exit 0, no output) through a symlink AND on any checkout path
+// containing a character that needs encoding (a `#` in a parent directory name is
+// enough, with no symlink involved). Compare RESOLVED PATHS, never URL strings.
+//
+// Same predicate as `packages/cli/src/utils/invocation.ts` (`isProcessEntry`) and
+// `scripts/invoked-as.mjs` (`invokedAs`). Spelled out rather than imported because
+// neither home is legally reachable from this file — the PR for #10269 carries the
+// boundary measurement. ⚠️ Two predicates answering this question differently IS the
+// defect this closes; change one, change all of them.
+function isProcessEntry(): boolean {
+  const entryArg = process.argv[1];
+  if (!entryArg) return false; // `node --eval` / the REPL
+  const self = resolve(fileURLToPath(import.meta.url));
+  const entry = resolve(entryArg);
+  // `node <dir>` gives the ENTRY ARGUMENT, and only it, directory resolution.
+  const candidates = [entry, join(entry, 'index.js'), join(entry, 'index.mjs'), join(entry, 'index.ts')];
+  if (candidates.includes(self)) return true;
+  const realSelf = realOrSelf(self);
+  return candidates.some((candidate) => realOrSelf(candidate) === realSelf);
+}
+
+/** `realpathSync`, degrading to the input for a path that cannot be read. */
+function realOrSelf(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+if (isProcessEntry()) {
   example().catch(console.error);
 }
