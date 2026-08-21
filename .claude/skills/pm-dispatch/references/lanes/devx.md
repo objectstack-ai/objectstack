@@ -7,6 +7,7 @@
 - `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、
   `scripts/`(门禁类)、`.github/workflows/`(门禁接线)、`.githooks/`、
   `examples/**` 测试基建面、`docker/README.md`。
+- objectui 的本域面同辖:`.github/`、`scripts/`、构建/发布管线与门禁工具(objectui 卡三流分流,判据见 SKILL.md 多仓协调)。
 - 边界:守护 skills 的门禁脚本在 `scripts/` 下时归本席 —— 判据是**被改文件的路
   径**,SUBJECT 例外与 spec 三面切分在 SKILL.md 域车道表;`.claude/workflows/`
   ≠ `.claude/skills/`;**范围内的文件 ≠ 范围内的卡**,归属按卡的 `domain:*` 判,
@@ -18,8 +19,7 @@
 - `content/docs/releases/**` 是 release-owned,恰两条通道:完整性缺口逐卡批准
   (⛔ 不构成先例);事实错误走专用 docs-only PR。发布页作用域只管 v16 及以后。
 - ⛔ 不做任何发布动作,含改根 `version` 脚本链;**能点绿的门禁不等于该点绿**。
-- governed 面 PR 照 SKILL.md「ACCEPT 之后的路径分叉」:恒 draft、留维护者、看得见
-  地悬着;设计如此的红门禁必须在 PR 上说明红因并声明不修。
+- governed 面 PR 照 SKILL.md「ACCEPT 之后的路径分叉」执行(⛔ 此处不另抄);设计如此的红门禁必须在 PR 上说明红因并声明不修。
 - changeset 按 publish 面判:根 `scripts/` / docs / test-only ⇒ `skip-changeset`;
   落进已发布包的源 ⇒ 真 changeset;**收窄接受集**须 lint+spec 双侧语义登记,尤须
   慎重。
