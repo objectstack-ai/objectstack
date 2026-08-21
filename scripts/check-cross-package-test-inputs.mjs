@@ -254,6 +254,17 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // module's masking behaviour, so a change to it has to re-run cli's suite.
     // The undetected-import spelling is filed separately as #10452; widening a
     // radius by hand is never the reason not to file it.
+    //
+    // Its `.d.mts` sibling is declared for BOTH reasons this roster records. It
+    // is named in that test's prose, and the literal collector takes quoted
+    // paths without parsing, so a mention forces a declaration (the
+    // `check-nul-bytes.mjs` entry above settles that trade the same way:
+    // declaring the file beats rewording a comment to dodge a scanner). It is
+    // also a real input rather than only a mention -- it is what gives
+    // `maskComments` its type, so cli's `tsc --noEmit` verdict is a function of
+    // it. Measured, not assumed: this file arriving on main is exactly what
+    // turned that test's `@ts-expect-error` into a TS2578 and took the
+    // typecheck lanes red on a branch that never touched it.
     globs: [
       'packages/verify/src/**',
       'packages/plugins/plugin-security/src/**',
@@ -267,6 +278,7 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/permissions/authentication.mdx',
       'scripts/check-nul-bytes.mjs',
       'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
     ],
   },
   '@objectstack/lint': {
