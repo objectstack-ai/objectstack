@@ -1283,6 +1283,7 @@
     "api/PublishPackageDraftsResponse:failed",
     "api/PublishPackageDraftsResponse:failedCount",
     "api/PublishPackageDraftsResponse:materializeApplied",
+    "api/PublishPackageDraftsResponse:outcome",
     "api/PublishPackageDraftsResponse:probes",
     "api/PublishPackageDraftsResponse:published",
     "api/PublishPackageDraftsResponse:publishedCount",
