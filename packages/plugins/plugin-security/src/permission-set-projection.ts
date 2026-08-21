@@ -104,7 +104,8 @@ export interface ProjectionLogger {
    *
    * ⛔ Do NOT "simplify" this by making `error` required instead — that
    * forecloses the reduced sinks hosts legitimately pass (#9754 option C,
-   * measured and rejected).   *
+   * measured and rejected).
+   *
    * ⚠️ Call sites still spell the fallback `logger?.warn?.(…)`. That `?.` is not
    * doubt about this declaration — it is the backstop for hosts the TYPE cannot
    * reach (a plain-JS embedder, or a cast). Dropping it was measured: a sink
