@@ -68,11 +68,19 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const openKernels: Array<{ shutdown?: () => Promise<void> }> = [];
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
 afterEach(async () => {
-  while (openDrivers.length) {
-    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
-  }
+  // Kernels first, drivers second: the kernel's own teardown still wants a
+  // live driver to drain against -- that is the rule, regardless of what it
+  // costs on any given day.
+  //
+  // Measured here (#10373): this file's own DATABASE_ERROR lines are all
+  // "no such table" probes against sys_* tables bootShowcaseApprovals()
+  // never provisions, not post-disconnect reads -- swapping the order left
+  // the count unchanged (36 suite-wide / 31 in this file, before and after).
   while (openKernels.length) {
     try { await openKernels.pop()?.shutdown?.(); } catch { /* noop */ }
+  }
+  while (openDrivers.length) {
+    try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
   }
 });
 

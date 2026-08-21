@@ -176,8 +176,8 @@ const result = ApiMethod.parse(data);
 | **searchable** | `boolean` | optional (default: `true`) | Index records for global search |
 | **apiEnabled** | `boolean` | optional (default: `true`) | Expose object via automatic APIs |
 | **apiMethods** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'bulk'>[]` | optional | Whitelist of allowed API operations (six primitives; undefined = all, [] = none) |
-| **files** | `boolean` | optional (default: `false`) | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent |
-| **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object |
+| **files** | `boolean` | optional (default: `false`) | Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments to target this object; otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike. Field.file/Field.image are independent |
+| **feeds** | `boolean` | optional (default: `true`) | Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike |
 | **activities** | `boolean` | optional (default: `true`) | Record activity timeline (sys_activity mirror of CRUD). Default on; explicit false stops mirroring and hides the timeline |
 | **clone** | `boolean` | optional (default: `true`) | Allow record deep cloning |
 
