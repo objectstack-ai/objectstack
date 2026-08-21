@@ -68,8 +68,10 @@ function fakeEngine() {
         registry: { listItems: () => [], getObject: () => undefined },
         async find() { return []; },
         async insert(_o: string, row: AnyRecord) { return { id: 'row_1', ...row }; },
-        async update() { return { affected: 0 }; },
-        async delete() { return true; },
+        // No `update()` / `delete()` on purpose. Nothing on the path under
+        // test writes through them, and a double that declares a write verb
+        // it never serves is a double looser than `ObjectQL` for no reason —
+        // which is the shape `check:engine-double-contract` exists to refuse.
         registerHook() { /* provenance stamp + headers gate */ },
         unregisterHooksByPackage() { return 0; },
     };
