@@ -363,7 +363,12 @@ describe('ObjectKernel', () => {
         // unref'd and never cleared. Two hand-rolled copies of one race, each
         // doing the opposite half, and neither settling the promise the race
         // still held a reaction on — four leaking promises per showcase run.
-        // Both sites now go through `TimeoutGuard`, so these pin the wiring.
+        // Both sites now go through `TimeoutGuard`, so this pins the wiring.
+        //
+        // The companion assertion — that reclaiming the guard did not DISARM
+        // it — is 'still logs the timeout and still forces exit(1) when
+        // shutdown genuinely times out (#5274)' below, which hangs teardown
+        // past `shutdownTimeout` and is unchanged by this fix.
 
         it('leaves no timer armed once shutdown has settled', async () => {
             vi.useFakeTimers();
@@ -398,50 +403,8 @@ describe('ObjectKernel', () => {
             }
         });
 
-        it('still forces exit when teardown hangs past shutdownTimeout', async () => {
-            // The companion to the assertion above, and the one that makes it
-            // safe: reclaiming the guard must not disarm it. Dropping the
-            // `unref()` is what keeps this reachable at all — an unref'd guard
-            // lets an otherwise-idle process exit silently instead of reporting
-            // the timeout.
-            const exitSpy = vi
-                .spyOn(process, 'exit')
-                .mockImplementation((() => undefined) as never);
-
-            try {
-                const k = new ObjectKernel({
-                    logger: { level: 'error' },
-                    gracefulShutdown: false,
-                    skipSystemValidation: true,
-                    shutdownTimeout: 50,
-                });
-                const errorSpy = vi.spyOn(
-                    (k as unknown as { logger: Record<'error', (...a: unknown[]) => void> }).logger,
-                    'error',
-                );
-
-                await k.use({
-                    name: 'hanging-teardown',
-                    version: '1.0.0',
-                    init: async () => {},
-                    // Never settles: `performShutdown()` awaits every destroy().
-                    destroy: () => new Promise<void>(() => {}),
-                } as PluginMetadata);
-
-                await k.bootstrap();
-                await k.shutdown();
-
-                expect(errorSpy).toHaveBeenCalledWith(
-                    'Shutdown timed out — forcing exit',
-                    expect.objectContaining({ message: 'Shutdown timeout exceeded' }),
-                );
-                expect(exitSpy).toHaveBeenCalledWith(1);
-                expect(k.getState()).toBe('stopped');
-            } finally {
-                exitSpy.mockRestore();
-            }
-        }, 2000);
     });
+
 
     describe('Startup Failure Rollback', () => {
         it('should rollback started plugins on failure', async () => {
