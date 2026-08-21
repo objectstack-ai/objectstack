@@ -395,12 +395,23 @@ export function runsOnImport(raw) {
 }
 
 /**
+ * Does this masked source export anything? ONE definition, because the census
+ * below needs the same answer and two spellings of it is how a rule ends up
+ * enforced in one path and not the other — found by ablation: an earlier cut
+ * repeated the test here and in the census, and blinding this copy left the
+ * gate green.
+ */
+export function exportsBindings(code) {
+  return /^export\b/m.test(code);
+}
+
+/**
  * The top-level statements of `source` that would run on `import`, or `[]` when
  * the file exports nothing (nobody can import it) or is already inert.
  */
 export function importUnsafeStatements(source) {
   const code = codeOnly(source);
-  if (!/^export\b/m.test(code)) return [];
+  if (!exportsBindings(code)) return [];
   const guardRe = guardConditionRe(guardAliases(code));
   const found = [];
   for (const s of topLevelStatements(code)) {
@@ -467,7 +478,7 @@ function importSafetyCensus(files) {
   for (const abs of files) {
     const rel = relative(REPO_ROOT, abs);
     const source = readFileSync(abs, 'utf8');
-    if (!/^export\b/m.test(codeOnly(source))) continue;
+    if (!exportsBindings(codeOnly(source))) continue;
     rows.push({ rel, unsafe: importUnsafeStatements(source) });
   }
   return rows;
