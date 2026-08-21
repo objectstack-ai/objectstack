@@ -115,6 +115,7 @@
   `Recovery commit:` 前缀留审计;⚠️ 有的现场 regen 一件没跑,推送前先跑生成物门禁
   别赌;③ 死在源码编辑中途 ⇒ 先读 diff 判完整性 —— docblock 写全动机/失效模式/判
   据的,PM 可代跑终验后提交,写一半意图不明的 ⛔ 不代提交、记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清掉,⛔ 不进 feature PR。
+- **会话从上下文检测不到自己的静默降档**(2026-08-20 实测:一次分诊 fire 两级静默降档 Fable→Opus 5→Opus 4.8,降档横幅只在 UI 侧渲染、会话上下文零信号,子轮开场仍自述「跑在契约复审档」)——服役模型的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(记录最近一轮实际服役者,降档链中途照真);`session_context.model` 是**配置**档不是服役档,⛔ 不作保险丝输入。
 
 ## 闭合关键词解析(PR 正文写侧)
 
@@ -129,6 +130,5 @@
 
 ## 断粮检测与跨墙恢复细则(5 小时用量墙)
 
-原则、定时器选型(⛔ 不用 send_later 链)与恢复 playbook 在主文件;事实补遗:
-`npx ccusage blocks` 容器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余与燃
-烧率;盲区:窗口起点是本地推断的近似值;撞墙时 API 调用失败、宿主报「limit reached, resets at HH:MM」——那一刻可得、记下来。
+原则、定时器选型(⛔ 不用 send_later 链)与恢复 playbook 在主文件;事实补遗:`npx ccusage blocks` 容器内可用(读本地会话记录),报当前 5 小时窗口边界/剩余与燃烧率;
+盲区:窗口起点是本地推断的近似值;撞墙报文形如「limit reached, resets at HH:MM」(重置时刻只在此刻可得 —— 主文件原则的实测形状)。

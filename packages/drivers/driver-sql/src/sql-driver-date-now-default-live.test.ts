@@ -22,9 +22,14 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { MYSQL_CELL, PG_CELL, type DialectCell } from './live-dialect-matrix.testkit.js';
 
-const PG_URL = process.env.OS_TEST_POSTGRES_URL;
-const MY_URL = process.env.OS_TEST_MYSQL_URL;
+// The cells, not `process.env.OS_TEST_*_URL`: an env var is one value for the
+// whole process, so a config built from it puts this file in the same
+// schema/database as every other live file. `cell.config()` derives a per-FILE
+// one from vitest's own `testPath` (#9350).
+const PG_URL = PG_CELL.url;
+const MY_URL = MYSQL_CELL.url;
 const TABLE = 'os4022_probe';
 
 const SHAPE = {
@@ -35,16 +40,12 @@ const SHAPE = {
   },
 } as any;
 
-function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
-  describe.skipIf(!url)(`Field.date NOW() default on live ${dialect} (#4022)`, () => {
+function suite(cell: DialectCell) {
+  describe.skipIf(!cell.available)(`Field.date NOW() default on live ${cell.id} (#4022)`, () => {
     let driver: SqlDriver;
 
     beforeEach(async () => {
-      driver = new SqlDriver(
-        dialect === 'pg'
-          ? { client: 'pg', connection: url }
-          : { client: 'mysql2', connection: url },
-      );
+      driver = new SqlDriver(cell.config());
       await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
       await driver.initObjects([SHAPE]);
     });
@@ -58,12 +59,12 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
       // On MySQL 8.0 reaching this line at all is the compatibility half of the
       // fix — the bare default fails CREATE TABLE there.
       const res: any = await driver.execute(
-        dialect === 'pg'
+        cell.id === 'pg'
           ? `select column_default as d from information_schema.columns
              where table_name = '${TABLE}' and column_name = 'due_on'`
           : `select column_default as d from information_schema.columns
              where table_schema = database() and table_name = ? and column_name = 'due_on'`,
-        dialect === 'pg' ? [] : [TABLE],
+        cell.id === 'pg' ? [] : [TABLE],
       );
       const rows = Array.isArray(res) && Array.isArray(res[0]) ? res[0] : (res?.rows ?? res);
       const def = String((rows[0] as any).d ?? (rows[0] as any).D ?? '').toLowerCase();
@@ -86,5 +87,5 @@ function suite(dialect: 'pg' | 'mysql', url: string | undefined) {
   });
 }
 
-suite('pg', PG_URL);
-suite('mysql', MY_URL);
+suite(PG_CELL);
+suite(MYSQL_CELL);

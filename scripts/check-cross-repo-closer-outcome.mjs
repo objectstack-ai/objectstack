@@ -388,14 +388,32 @@ const FIXED = httpError(503, 'No server is currently available to service your r
 const DENIED = httpError(404, 'Not Found');
 const UNAUTHORIZED = httpError(401, 'Bad credentials');
 
-/** A body carrying the three keyword shapes plus three that must NOT qualify. */
+/**
+ * A body carrying the three keyword shapes plus four that must NOT qualify.
+ *
+ * `CLOSES:` carries the OPTIONAL COLON deliberately, and it is one of the three
+ * targets rather than a fourth (#9755): the colon is therefore load-bearing for
+ * this body's target ARITY, so dropping `:?` from the shipped regex takes P1
+ * from three targets to two instead of leaving the count intact. M15 is that
+ * mutation. Before #9755 this fixture used only the space-separated spelling,
+ * and the consequence was measured rather than assumed -- adding `:?` to the
+ * shipped script moved real behaviour and all 105 assertions stayed green,
+ * because no scenario had ever put a colon in front of a qualified reference.
+ *
+ * That the colon is GitHub's syntax and not a typo is measured too, and in this
+ * repository: PR #10241 merged 2026-08-20T15:10:06Z carrying `Filed, not fixed:
+ * #10240`, and #10240 closed `completed` at 15:10:08Z with its own
+ * `closed_by_pull_requests` naming #10241. So a body spelled this way is a real
+ * closing declaration, and a cross-repo target inside one is a target.
+ */
 const MIXED_BODY = [
   'Fixes objectstack-ai/objectui#456',
-  'CLOSES my-org/some.repo#22',
+  'CLOSES: my-org/some.repo#22',
   'resolved third/party#7',
   '',
   'Part of objectstack-ai/objectui#999 -- a reference, not a close.',
   'Fixes #321 -- bare form, GitHub already handles it.',
+  'Closes: #4500 -- bare form WITH the colon; still GitHub\'s own job, not this one.',
   'Fixes objectstack-ai/objectstack#5 -- same repo, GitHub already closed it.',
 ].join('\n');
 
@@ -464,6 +482,13 @@ export const SCENARIOS = [
       return [
         t(listed.length === 3, `P1 finds exactly the three qualified foreign targets, got ${listed.length}: ${line}`),
         ...FOREIGN.map((k) => t(listed.includes(k), `P1 recognises ${k}`)),
+        // The colon half, named separately so a red says WHICH spelling was
+        // lost rather than only that the count moved (#9755). The target above
+        // is reached through `CLOSES:`; this asserts the separator, and the two
+        // negatives below assert the colon widens the SEPARATOR only and not
+        // the reference scope.
+        t(listed.includes(PR_TARGET), `P1 recognises the optional-colon spelling (\`CLOSES: ${PR_TARGET}\`)`),
+        t(!line.includes('#4500'), 'P1 does not act on the bare `#N` form when it carries the colon either'),
         t(!line.includes('#999'), 'P1 does not treat `Part of` as a closing keyword'),
         t(!line.includes('#321'), 'P1 does not act on the bare `#N` form GitHub already handles'),
         t(!line.includes('objectstack-ai/objectstack#5'), 'P1 skips the qualified SAME-repo reference'),
@@ -1000,6 +1025,18 @@ const MUTATIONS = [
     what: 'the keyword set is narrowed, so `Fixes` and `resolved` stop qualifying',
     from: "const KEYWORDS = 'close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved';",
     to: "const KEYWORDS = 'close';",
+    expect: ['P1'],
+  },
+  {
+    id: 'M15',
+    what: 'the optional colon is dropped, so `Fixes: owner/repo#N` stops being a target (the #9755 defect, restored)',
+    // The anchor is the SEPARATOR alone, not the whole pattern: the reference
+    // half of this regex is the closer's own scope decision (qualified only)
+    // and is pinned by the negatives in P1, while this half is the one that has
+    // to keep agreeing with duplicate-fix-guard.yml. Restoring it to `\\s+` is
+    // exactly the text that shipped before #9755.
+    from: ':?\\\\s+([\\\\w.-]+)',
+    to: '\\\\s+([\\\\w.-]+)',
     expect: ['P1'],
   },
   {

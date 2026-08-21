@@ -2172,9 +2172,12 @@ export default class Serve extends Command {
           } else if (!secret) {
             console.warn(chalk.yellow('  ⚠ AuthPlugin skipped — set OS_AUTH_SECRET to enable authentication in production'));
           } else {
-            const baseUrl = readEnvWithDeprecation('OS_AUTH_URL', 'BETTER_AUTH_URL', { silent: true })
-              ?? process.env.OS_BASE_URL
-              ?? `http://localhost:${port}`;
+            // Resolution is UNCHANGED (same chain, same precedence) — the seam
+            // additionally reports where the value came from and whether it
+            // parses, so an unusable one can be said out loud instead of
+            // vanishing into an empty catch (#10202).
+            const baseUrlResolution = resolveAuthBaseUrl(port);
+            const baseUrl = baseUrlResolution.value;
 
             const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
             if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
@@ -2196,11 +2199,20 @@ export default class Serve extends Command {
               });
             }
             // Always add the configured baseUrl so first-party redirects work.
-            try {
-              const u = new URL(baseUrl);
-              const baseOrigin = `${u.protocol}//${u.host}`;
-              if (!trustedOrigins.includes(baseOrigin)) trustedOrigins.push(baseOrigin);
-            } catch { /* ignore malformed baseUrl */ }
+            // An unusable value is NOT silently dropped (#10202): the catch that
+            // used to stand here was the only witness that the configured base
+            // URL could not be parsed, and it discarded that witness. Boot then
+            // continued with this deployment's own origin missing from the CSRF
+            // allow-list, health/ready still answering 200, and the operator's
+            // first news of it a browser-side 403 INVALID_ORIGIN naming nothing.
+            const unusableBaseUrlDiagnostic = formatUnusableAuthBaseUrlDiagnostic(baseUrlResolution);
+            if (baseUrlResolution.baseOrigin !== null) {
+              if (!trustedOrigins.includes(baseUrlResolution.baseOrigin)) {
+                trustedOrigins.push(baseUrlResolution.baseOrigin);
+              }
+            } else if (unusableBaseUrlDiagnostic) {
+              console.warn(chalk.yellow(unusableBaseUrlDiagnostic));
+            }
             // Preview-mode subdomain wildcards (`<commit>--<pid>.<base>`).
             // Honour `OS_PREVIEW_BASE_DOMAINS` (used by the cloud preview routing)
             // and add `http://*.<base>:*` patterns.
@@ -3821,6 +3833,134 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
       ),
     };
   }
+}
+
+/**
+ * Which env var supplied the auth base URL, in the precedence order `serve`
+ * reads them. `null` in {@link AuthBaseUrlResolution.source} means no variable
+ * was set and the built-in `http://localhost:<port>` default won.
+ */
+export const AUTH_BASE_URL_ENV_NAMES = ['OS_AUTH_URL', 'BETTER_AUTH_URL', 'OS_BASE_URL'] as const;
+export type AuthBaseUrlEnvName = (typeof AUTH_BASE_URL_ENV_NAMES)[number];
+
+/**
+ * What the auth base-URL precedence chain resolved to, and whether that value
+ * is usable as a URL.
+ */
+export interface AuthBaseUrlResolution {
+  /** The resolved value, UNCHANGED — including `''` when a variable is set-but-empty. */
+  value: string;
+  /** The variable that supplied {@link value}, or `null` for the built-in default. */
+  source: AuthBaseUrlEnvName | null;
+  /** `${protocol}//${host}` of {@link value}, or `null` when it will not parse. */
+  baseOrigin: string | null;
+}
+
+/**
+ * Resolve the auth base URL and report BOTH where it came from and whether it
+ * parses (#10202).
+ *
+ * ## Why this is a seam and not three lines inside `run()`
+ *
+ * The chain and the `new URL()` that consumes it used to sit inline, with the
+ * parse wrapped in `try { … } catch { /* ignore malformed baseUrl *\/ }`. That
+ * catch is the defect: it is the ONLY place that learns the configured base URL
+ * is unusable, and it threw the knowledge away. Nothing else in the boot notices
+ * — `/api/v1/health` and `/api/v1/ready` answer `200` and the server serves
+ * every non-auth route normally, so the first symptom reaches the operator as
+ * `403 INVALID_ORIGIN` from a browser, with nothing in the log pointing at the
+ * variable that caused it.
+ *
+ * MEASURED on a real `os serve` boot (`NODE_ENV=production`, `OS_AUTH_URL=`
+ * set-but-empty, no `OS_TRUSTED_ORIGINS`, no `OS_ROOT_DOMAIN`, no preview mode):
+ * health `200`, ready `200`, and `POST /api/v1/auth/sign-in/email` from
+ * `https://app.example.com` answered `403 INVALID_ORIGIN`.
+ *
+ * ## The shape that produces an unusable value
+ *
+ * `readEnvWithDeprecation` returns the preferred variable whenever it is
+ * `!== undefined`, so a **present-but-empty** variable resolves to `''`, not
+ * `undefined`. The chain below then coalesces with `??`, which falls through
+ * only on `null`/`undefined` — never on `''`. So `OS_AUTH_URL=` on its own line
+ * in an env file (or a template rendering an absent key) consults NEITHER
+ * `OS_BASE_URL` nor the `http://localhost:<port>` default, and `new URL('')`
+ * throws.
+ *
+ * The resolution itself is deliberately left EXACTLY as it was — this function
+ * changes only what is known about the result, never what the result is.
+ * Treating empty as unset inside the shared `readEnvWithDeprecation` would
+ * change behaviour for every caller and is a separate, deliberate decision.
+ *
+ * `baseOrigin` is spelled `${protocol}//${host}` rather than `URL.origin`
+ * because that is what the inline code computed, and the two disagree for
+ * non-special schemes (`URL.origin` answers the string `"null"`).
+ */
+export function resolveAuthBaseUrl(port: number | string): AuthBaseUrlResolution {
+  const value = readEnvWithDeprecation('OS_AUTH_URL', 'BETTER_AUTH_URL', { silent: true })
+    ?? process.env.OS_BASE_URL
+    ?? `http://localhost:${port}`;
+
+  // Mirrors readEnvWithDeprecation's own precedence (preferred, then legacy),
+  // for REPORTING only — the value above is what actually takes effect.
+  const env = process.env;
+  const source: AuthBaseUrlEnvName | null =
+    env.OS_AUTH_URL !== undefined ? 'OS_AUTH_URL'
+      : env.BETTER_AUTH_URL !== undefined ? 'BETTER_AUTH_URL'
+        : env.OS_BASE_URL !== undefined ? 'OS_BASE_URL'
+          : null;
+
+  let baseOrigin: string | null = null;
+  try {
+    const u = new URL(value);
+    baseOrigin = `${u.protocol}//${u.host}`;
+  } catch {
+    // Unusable. Reported by formatUnusableAuthBaseUrlDiagnostic — NOT swallowed.
+  }
+
+  return { value, source, baseOrigin };
+}
+
+/**
+ * The boot-time complaint for a base URL that will not parse, or `null` when it
+ * parses fine.
+ *
+ * Names the variable and the value it resolved to, because those are the two
+ * facts the operator cannot recover from the symptom: a `403 INVALID_ORIGIN` in
+ * a browser names neither. The empty case additionally says that empty is not
+ * the same as unset, since the whole trap is that an operator who typed
+ * `OS_AUTH_URL=` believes they have left it unset.
+ *
+ * Returns text rather than printing it so the decision to warn stays at the
+ * call site (and so a test can read the sentence without capturing a stream).
+ */
+export function formatUnusableAuthBaseUrlDiagnostic(
+  resolution: AuthBaseUrlResolution,
+): string | null {
+  if (resolution.baseOrigin !== null) return null;
+
+  const { value, source } = resolution;
+  const shown = JSON.stringify(value);
+  const named = source === null
+    ? `    The built-in default resolved to ${shown}, which is not a usable URL.\n`
+    : value === ''
+      ? `    ${source} is set but EMPTY (${shown}).\n`
+      : `    ${source} is set to ${shown}, which is not a usable URL.\n`;
+
+  const emptyNote = (value === '' && source !== null)
+    ? '    An empty value is NOT the same as an unset one: the fallback chain skips only\n'
+      + `    UNSET variables, so ${source === 'OS_BASE_URL' ? 'the' : 'OS_BASE_URL and the'} built-in`
+      + ' http://localhost:<port> default were never consulted.\n'
+    : '';
+
+  return '\n'
+    + '  ⚠ Auth base URL is unusable — its origin was NOT added to the CSRF allow-list.\n'
+    + named
+    + emptyNote
+    + '    Sign-in and sign-up will answer 403 INVALID_ORIGIN for this deployment\'s own\n'
+    + '    origin, while /api/v1/health and /api/v1/ready keep answering 200.\n'
+    + '    Fix: set OS_AUTH_URL to this deployment\'s public origin (e.g.\n'
+    + '    https://app.example.com), or remove the variable entirely to fall back to\n'
+    + '    OS_BASE_URL / http://localhost:<port>.';
 }
 
 /**

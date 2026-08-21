@@ -89,10 +89,12 @@
  *   0  GREEN         every check-run on the sha completed, none failed.
  *   1  RED           failing checks, and the assertion text was retrieved for
  *                    EVERY one of them. The output is the answer.
- *   2  UNDETERMINED  the walk completed but cannot answer: a failing check whose
- *                    assertion is not retrievable from here, checks still
- *                    running, or zero check-runs on the sha. Zero is not a clean
- *                    repo, it is a broken scan.
+ *   2  UNDETERMINED  the walk cannot answer: a failing check whose assertion is
+ *                    not retrievable from here, checks still running, zero
+ *                    check-runs on the sha, or a mid-walk failure that a fresh
+ *                    probe did NOT trace to the container (a transient 5xx, one
+ *                    404, an unclassifiable shape). Zero is not a clean repo, it
+ *                    is a broken scan.
  *   3  PREREQUISITE NOT MET — no usable transport (no token, exhausted quota,
  *                    unreachable api.github.com, or an authenticated container
  *                    whose REPO-scoped reads are refused). Classified by
@@ -101,6 +103,18 @@
  *                    instrument. Its header states the rule this file inherits —
  *                    a non-zero exit of this kind classifies the ENVIRONMENT,
  *                    not the tree.
+ *
+ *                    Exit 3 promises a CLASSIFIED TRANSPORT VERDICT — NOT that
+ *                    the classification happened before anything was read. It is
+ *                    reached from two places: the probe stage below, and the
+ *                    mid-walk net (#10155), which re-probes when a read fails
+ *                    under a run that had already started and lands here when
+ *                    that fresh reading is itself unusable. An earlier draft of
+ *                    this table promised "decided before anything is read"; that
+ *                    promise was worth less than the guarantee it displaced,
+ *                    because a transport that dies at request 40 classifies the
+ *                    environment exactly as much as one that was dead at
+ *                    request 1.
  *
  * Piping hides all of it (`… | tail` reports the PIPE's status). Read `$?`.
  *
@@ -164,8 +178,16 @@
  * anything is read, or the answer is only a politer wrong one.
  *
  * The remaining uncaught-throw path — a transport failure arriving MID-walk,
- * after the probe passed — is #10155, filed rather than fixed here: it needs an
- * exit-code decision (2 vs 3) that this card did not scope.
+ * after the probe passed — was #10155, and it is now netted rather than open.
+ * The probe cannot cover that case by construction: it fires once, at the
+ * start, so a quota exhausted between it and the last annotations call, an
+ * access that changes under the run, a transient 5xx or a 404 on an
+ * annotations URL all arrive behind it. Every network read after the probe is
+ * therefore wrapped, and the 2-vs-3 question the card left open is answered by
+ * ASKING rather than by picking: the transport is re-probed on the way out and
+ * its fresh verdict chooses — unusable transport is the environment (3),
+ * healthy transport with one failed request is a walk that cannot answer (2).
+ * `midWalkVerdict` carries the reasoning and the self-test drives both branches.
  *
  * ## History — this file reads none, so the shallow clone cannot mislead it
  *
@@ -384,11 +406,24 @@ export function classifyAnnotation(annotation) {
  * `exit-status` is content-free by construction, so a check carrying only
  * those carries nothing — counting it as "an annotation was returned" is how a
  * red gate comes to read as "details recorded elsewhere".
+ *
+ * FOUR answers since #10155, and the fourth is the one the other three were
+ * silently absorbing. `retrievalError` is what the walk records when the
+ * annotations call itself failed, and it leaves behind exactly what a check
+ * that recorded nothing leaves behind: an empty list. Reading that empty list
+ * as `none` printed "the check carried no annotation with any content in it"
+ * over a check measured to carry `annotations_count: 1` — four lines under this
+ * file's own `that is not the same as "the check recorded nothing"`. An absence
+ * of a READING and an absence of EVIDENCE are opposite findings, and the caller
+ * cannot tell them apart from the annotation list alone, so it is passed in.
  */
-export function assertionStatus(annotations) {
+export function assertionStatus(annotations, { retrievalError = null } = {}) {
   const list = annotations ?? [];
   const assertions = list.filter((a) => a.kind === 'assertion');
+  // Content in hand outranks a failed call: a partial retrieval that still
+  // produced the assertion has answered the question this file asks.
   if (assertions.length > 0) return { kind: 'retrieved', assertions, others: [] };
+  if (retrievalError) return { kind: 'unretrievable', assertions: [], others: [], retrievalError };
   const others = list.filter((a) => a.kind !== 'exit-status');
   if (others.length > 0) return { kind: 'no-anchor', assertions: [], others };
   return { kind: 'none', assertions: [], others: [] };
@@ -608,6 +643,134 @@ export function verdictOf({ failing, pending, total }) {
   };
 }
 
+/**
+ * What a transport failure arriving MID-WALK exits as (#10155).
+ *
+ * ## The defect this replaces
+ *
+ * `rest()` throws on any non-ok status and, before this, nothing between it and
+ * the top level caught. Node exits 1 on an uncaught exception, and 1 in the
+ * table above is RED — "the assertion text was retrieved for EVERY failing
+ * check, the output is the answer". So a container that had not read one byte
+ * about the tree handed its caller the code for "the tree is red and here is
+ * the proof", to a caller the header explicitly instructs to branch on `$?`.
+ * Measured on 2026-08-20 against `main` at 2e39181a, probe green and the walk's
+ * first page refused: `Error: GET …/check-runs… -> HTTP 403`, stack trace,
+ * `EXIT=1`.
+ *
+ * ## Why this is a RE-PROBE and not a constant
+ *
+ * The card left exit 2 vs exit 3 open and triage handed the choice down. Both
+ * are honest for SOME mid-walk failure and neither is honest for all of them,
+ * because the causes are not one class:
+ *
+ *   quota exhausted between the probe and the last annotations call, or a
+ *   repo whose access changed under the run   -> the ENVIRONMENT is now unable
+ *                                                to answer. That is exit 3, and
+ *                                                it is exactly what exit 3
+ *                                                means everywhere else here.
+ *   a transient 5xx, a 404 on one annotations URL -> the container is FINE. The
+ *                                                walk simply cannot answer, and
+ *                                                calling the environment broken
+ *                                                would be the same overreach in
+ *                                                the other direction: exit 2.
+ *
+ * So the choice is settled per-occurrence by ASKING, with the instrument this
+ * file already imports: on a mid-walk throw the transport probe is re-run, and
+ * its fresh verdict picks. A fresh reading is what distinguishes a real
+ * transport failure from a transient status on one page — `check-half-states`'s
+ * in-loop net makes the identical call for the identical reason, and this is
+ * that decision reused rather than a second one invented next to it.
+ *
+ * This does change what exit 3 promises. The header used to say exit 3 was
+ * decided "before anything is read"; that sentence is rewritten above, because
+ * the promise worth keeping is that exit 3 means a CLASSIFIED TRANSPORT
+ * VERDICT — not that the classification happened early. An unclassified shape
+ * (`probe === null`, e.g. a repo-scoped 5xx) deliberately falls to 2: the
+ * classifier's narrowness is the point, and a loud undetermined beats a
+ * confident wrong diagnosis about someone's container.
+ *
+ * ## The partial-output invariant
+ *
+ * `read` is the `swept` analogue one file over: the pre-walk probe fires when
+ * nothing has been read, where "nothing was read" is exact, while this net can
+ * fire after some check-runs were already listed. The wording splits on that
+ * count so neither reading can be mistaken for a completed walk — which is the
+ * half of #4690 that survives after the exit code is fixed, since a partial
+ * result that READS complete misleads a human even when `$?` is honest.
+ *
+ * Pure, so `--self-test` drives every branch offline — and since #9898 that
+ * self-test runs in CI.
+ */
+export function midWalkVerdict({ probe = null, error = null, read = null, stage = 'the walk' } = {}) {
+  const readCount = read?.checkRuns ?? 0;
+  const failure = error?.message ?? String(error ?? 'unknown failure');
+
+  const nothingRead =
+    readCount === 0
+      ? [
+          'Nothing was read: no check-run was listed, no annotation was fetched, and no verdict',
+          'about the tree was computed. This result says NOTHING about whether the tree is red or',
+          'green — it is not a red tree and it is not a green one, it is no reading at all.',
+        ]
+      : [
+          `Nothing was judged: the transport failed after ${readCount} check-run(s) had been listed,`,
+          'the rest were never fetched, and no per-check finding was printed. An empty finding list',
+          'here is not a clean tree — the walk stopped, it did not complete.',
+        ];
+
+  if (probe && probe.kind !== 'reachable') {
+    return {
+      verdict: 'PREREQUISITE NOT MET',
+      exit: EXIT_PREREQUISITE_NOT_MET,
+      classified: true,
+      headline: probe.headline,
+      detail: [
+        `The failure: ${failure}`,
+        `It arrived during ${stage}, AFTER the pre-walk probe had passed.`,
+        '',
+        'Re-probed on the way out, and the transport is now classified as unusable, so this is',
+        'the same PREREQUISITE NOT MET the pre-walk probe reports — reached later, meaning the',
+        'transport changed under the run rather than being broken when it started.',
+        ...(probe.detail ?? []),
+        '',
+        ...nothingRead,
+        '',
+        `(Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`,
+      ],
+      fix: probe.fix ?? [],
+    };
+  }
+
+  return {
+    verdict: 'UNDETERMINED',
+    exit: EXIT_UNDETERMINED,
+    classified: false,
+    headline: `${stage} failed and the transport re-probe did NOT classify the container as unusable`,
+    detail: [
+      `The failure: ${failure}`,
+      `It arrived during ${stage}, AFTER the pre-walk probe had passed.`,
+      '',
+      ...(probe === null
+        ? [
+            'The re-probe returned a shape its classifier does not recognise, so the container is',
+            'not vouched for and not blamed either. Report this failure with that reading.',
+          ]
+        : [
+            'The re-probe came back healthy, so this was NOT a container-wide transport failure —',
+            'a transient status on one request, or one URL that answers where the others do not.',
+            'Retrying is reasonable; treating the tree as judged is not.',
+          ]),
+      '',
+      ...nothingRead,
+      '',
+      `(Exit ${EXIT_UNDETERMINED}: UNDETERMINED. Not ${EXIT_RED} — ${EXIT_RED} means the assertion was retrieved`,
+      'for every failing check, which is the opposite of what happened here.)',
+    ],
+    fix: [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Transport — the prerequisite, then the walk.
 // ---------------------------------------------------------------------------
@@ -698,13 +861,21 @@ async function rest(path) {
   return res.json();
 }
 
-/** Every check-run on a sha, paginated. */
-async function checkRunsFor(sha) {
+/**
+ * Every check-run on a sha, paginated.
+ *
+ * `progress` rides in so a page that throws leaves behind how much WAS listed —
+ * the mid-walk net reports that count, and a net that could only say "it broke"
+ * would print the same sentence for "nothing was read" and for "half the tree
+ * was read", which are different facts about how much to distrust.
+ */
+async function checkRunsFor(sha, progress = null) {
   const out = [];
   for (let page = 1; page <= 10; page++) {
     const body = await rest(`/repos/${OWNER_REPO}/commits/${sha}/check-runs?per_page=100&page=${page}`);
     const batch = body?.check_runs ?? [];
     out.push(...batch);
+    if (progress) progress.checkRuns = out.length;
     if (batch.length < 100) break;
   }
   return out;
@@ -773,7 +944,21 @@ async function resolveTarget(argv) {
  * disk.
  */
 async function walk(sha) {
-  const all = await checkRunsFor(sha);
+  // Whatever escapes this function carries how far it got — see `midWalkVerdict`.
+  // The per-check calls below are individually netted already (a failed
+  // annotations fetch is a FINDING, not a crash); what can still throw from
+  // here is the check-run listing itself and the workflow read.
+  const progress = { checkRuns: 0 };
+  try {
+    return await walkInto(sha, progress);
+  } catch (error) {
+    error.read = { ...progress };
+    throw error;
+  }
+}
+
+async function walkInto(sha, progress) {
+  const all = await checkRunsFor(sha, progress);
   const { kept, superseded } = latestPerName(all);
   const failingRuns = kept.filter((c) => c.conclusion === 'failure' || c.conclusion === 'timed_out');
   const pending = kept.filter((c) => c.status !== 'completed').length;
@@ -884,22 +1069,13 @@ function render(result, target) {
       }
     }
 
-    const status = assertionStatus(check.annotations);
-    if (status.kind === 'retrieved') {
-      say('    assertion    RETRIEVED (above, the file-anchored annotation(s))');
-    } else {
-      if (status.kind === 'no-anchor') {
-        say(`    assertion    NO FILE-ANCHORED ASSERTION — but this check carried ${status.others.length} annotation(s)`);
-        say('                 with content, printed above. Read those first: a gate sentence is often the');
-        say("                 whole answer. What is missing is the failing step's own stdout.");
-      } else {
-        say('    assertion    NONE — the check carried no annotation with any content in it.');
-        say('                 (An `exit-status` annotation is the runner saying a command exited');
-        say('                  non-zero; it is not a record of what failed.)');
-      }
-      say("                 That stdout exists only in the Actions log blob, and both log");
-      say("                 endpoints redirect to hosts this session's egress policy denies:");
-      for (const host of LOG_BLOB_HOSTS) say(`                   ${host}  (403 on CONNECT)`);
+    // The retrieval error is handed in, not inferred from the empty list: a
+    // refused annotations call and a check that recorded nothing both leave
+    // `annotations` empty, and only the caller knows which happened.
+    const status = assertionStatus(check.annotations, { retrievalError: check.retrievalError });
+    // Shared by every non-retrieved branch — the local reproduction is just as
+    // useful when the annotations call FAILED as when it came back empty.
+    const sayRepro = () => {
       const repros = check.failedSteps.flatMap((s) => s.repro.map((r) => ({ step: s.name, ...r })));
       if (repros.length > 0) {
         say('    substitute   run the failing step locally — it prints the same assertion:');
@@ -911,6 +1087,37 @@ function render(result, target) {
         say('    substitute   none — the failing step name resolves to no `run:` block in .github/workflows/,');
         say('                 so there is no offline reproduction to offer. Open the job URL above.');
       }
+    };
+
+    if (status.kind === 'retrieved') {
+      say('    assertion    RETRIEVED (above, the file-anchored annotation(s))');
+    } else if (status.kind === 'unretrievable') {
+      // #10155. This row used to fall through to `NONE — the check carried no
+      // annotation with any content in it`, four lines under this same block's
+      // own `that is not the same as "the check recorded nothing"`. The check
+      // may well have carried the assertion; the call for it was refused.
+      say('    assertion    NOT RETRIEVED — the annotations call itself failed (above), so this row');
+      say('                 records nothing about what the check did or did not carry. That is an');
+      say('                 absence of a READING, not an absence of evidence, and the two are');
+      say('                 opposite findings. Re-run when the transport answers.');
+      sayRepro();
+    } else {
+      if (status.kind === 'no-anchor') {
+        say(`    assertion    NO FILE-ANCHORED ASSERTION — but this check carried ${status.others.length} annotation(s)`);
+        say('                 with content, printed above. Read those first: a gate sentence is often the');
+        say("                 whole answer. What is missing is the failing step's own stdout.");
+      } else {
+        say('    assertion    NONE — the check carried no annotation with any content in it.');
+        say('                 (An `exit-status` annotation is the runner saying a command exited');
+        say('                  non-zero; it is not a record of what failed.)');
+      }
+      // Only reachable once the annotations WERE read: the blocked log blob is
+      // the remaining home of the answer. Saying this over a failed retrieval
+      // would blame the egress policy for a refusal that happened on plain REST.
+      say("                 That stdout exists only in the Actions log blob, and both log");
+      say("                 endpoints redirect to hosts this session's egress policy denies:");
+      for (const host of LOG_BLOB_HOSTS) say(`                   ${host}  (403 on CONNECT)`);
+      sayRepro();
     }
     say('');
   }
@@ -1064,7 +1271,7 @@ async function selfTest() {
   t('no steps at all is `unknown`, never `complete`', stepsIntegrity([]).verdict, 'unknown');
   t('a non-array is `unknown`, never a throw', stepsIntegrity(undefined).verdict, 'unknown');
 
-  // -- assertionStatus: three answers, not two ------------------------------
+  // -- assertionStatus: four answers, not two -------------------------------
   t(
     'a file-anchored annotation means the assertion was retrieved',
     assertionStatus([{ kind: 'exit-status' }, { kind: 'assertion', path: 'a.test.ts' }]).kind,
@@ -1091,6 +1298,37 @@ async function selfTest() {
     'the unanchored case carries its annotations out, so the caller can count them',
     assertionStatus([{ kind: 'other', message: 'x' }, { kind: 'exit-status' }]).others.length,
     1,
+  );
+
+  // #10155's partial-output half. A refused annotations call leaves the SAME
+  // empty list a check that recorded nothing leaves, and reading it as `none`
+  // printed "the check carried no annotation with any content in it" over a
+  // check measured to carry `annotations_count: 1`.
+  t(
+    'an annotations call that FAILED is unretrievable, never `none`',
+    assertionStatus([], { retrievalError: 'GET /repos/o/r/check-runs/555/annotations -> HTTP 403' }).kind,
+    'unretrievable',
+  );
+  // The regression pin proper: the same empty list with NO retrieval error is
+  // still `none`. Without this line the case above could pass on a function
+  // that simply renamed `none`, and the distinction — which is the whole fix —
+  // would not be pinned at all.
+  t(
+    'the defect itself: that SAME empty list, with no error recorded, still reads `none`',
+    assertionStatus([]).kind,
+    'none',
+  );
+  t(
+    'the failed call rides out, so the report can print WHY nothing was read',
+    assertionStatus([], { retrievalError: 'HTTP 403' }).retrievalError,
+    'HTTP 403',
+  );
+  // Direction check: content in hand outranks a failed call. A partial
+  // retrieval that still produced the assertion has answered the question.
+  t(
+    'an assertion retrieved despite a recorded error is still RETRIEVED',
+    assertionStatus([{ kind: 'assertion', path: 'a.test.ts' }], { retrievalError: 'HTTP 500' }).kind,
+    'retrieved',
   );
 
   // -- isRosterJob ----------------------------------------------------------
@@ -1268,6 +1506,90 @@ async function selfTest() {
     true,
   );
 
+  // -- midWalkVerdict: the mid-walk net (#10155) ----------------------------
+  // The defect: `rest()` threw on a non-ok status, nothing caught it, and node
+  // exits 1 on an uncaught exception — which THIS FILE'S table calls RED, "the
+  // assertion text was retrieved for EVERY failing check". Measured against
+  // main at 2e39181a with the probe green and the walk's first page refused:
+  // stack trace, EXIT=1. Every pin below exists so that cannot come back.
+  const refusedTransport = { kind: 'repo-scope-refused', headline: 'repo-scoped reads are refused', detail: ['d'], fix: ['f'] };
+  const healthyTransport = { kind: 'reachable', headline: 'api.github.com is reachable', detail: [], fix: [] };
+  const boom = Object.assign(new Error('GET /repos/o/r/commits/abc/check-runs?per_page=100&page=1 -> HTTP 403'), { status: 403 });
+
+  t(
+    'a mid-walk failure whose RE-PROBE says the transport is unusable is the environment: exit 3',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).exit,
+    EXIT_PREREQUISITE_NOT_MET,
+  );
+  t(
+    'a mid-walk failure whose re-probe comes back HEALTHY is a walk that cannot answer: exit 2',
+    midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 12 } }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'an unclassifiable re-probe is not vouched for and not blamed either — exit 2, never 3',
+    midWalkVerdict({ probe: null, error: boom, read: { checkRuns: 3 } }).exit,
+    EXIT_UNDETERMINED,
+  );
+  // The load-bearing pin. Whatever else changes here, no mid-walk failure may
+  // ever exit RED — that collision IS the card, and it is the one assertion
+  // that must survive any future rewording of the branches above.
+  t(
+    'the defect itself: NO mid-walk branch may exit 1/RED, whatever the re-probe said',
+    [refusedTransport, healthyTransport, null].map((probe) =>
+      midWalkVerdict({ probe, error: boom, read: { checkRuns: 7 } }).exit === EXIT_RED),
+    [false, false, false],
+  );
+  t(
+    '...and none of them is GREEN either — "could not read it" is never a clean tree',
+    [refusedTransport, healthyTransport, null].map((probe) =>
+      midWalkVerdict({ probe, error: boom, read: { checkRuns: 7 } }).exit === EXIT_GREEN),
+    [false, false, false],
+  );
+  // The partial-output invariant (`swept`, one file over): the two readings say
+  // DIFFERENT things, because "nothing was read" and "half the tree was read"
+  // are different facts about how much to distrust.
+  t(
+    'a net that fired before anything was listed says nothing was READ',
+    midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 0 } }).detail.join('\n').includes('Nothing was read'),
+    true,
+  );
+  t(
+    '...and one that fired after 12 check-runs says nothing was JUDGED, and counts them',
+    (() => {
+      const d = midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 12 } }).detail.join('\n');
+      return [d.includes('Nothing was judged'), d.includes('12 check-run(s) had been listed')];
+    })(),
+    [true, true],
+  );
+  t(
+    'neither reading can be mistaken for a completed walk',
+    [{ checkRuns: 0 }, { checkRuns: 12 }].map((read) =>
+      midWalkVerdict({ probe: healthyTransport, error: boom, read }).detail.join('\n').includes('not a clean tree')
+      || midWalkVerdict({ probe: healthyTransport, error: boom, read }).detail.join('\n').includes('no reading at all')),
+    [true, true],
+  );
+  t(
+    'the failure that triggered the net is quoted, so the reader is not guessing',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).detail.join('\n').includes('HTTP 403'),
+    true,
+  );
+  t(
+    'the exit-3 branch carries the probe\'s own fix lines rather than inventing new ones',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).fix,
+    ['f'],
+  );
+  t(
+    'a missing read counter degrades to "nothing was read", never to a throw',
+    midWalkVerdict({ probe: healthyTransport, error: boom }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'called with nothing at all it still returns a verdict rather than throwing',
+    midWalkVerdict().exit,
+    EXIT_UNDETERMINED,
+  );
+
   // -- probeTransport: the two stages, and the FOURTH container class -------
   // Measured 2026-08-20 in an agent container whose session holds THIS repo and
   // no other: `/rate_limit` -> 200 with a real quota and `server: github.com`,
@@ -1371,8 +1693,41 @@ async function selfTest() {
     '    UNDETERMINED rather than on GREEN. The transport probe runs its two stages in order: a\n' +
     '    healthy /rate_limit is no longer enough to green a container whose repo-scoped reads are\n' +
     '    refused (the fourth class, measured), the repo read is spent ONLY after stage 1 says\n' +
-    '    reachable, and a repo-scoped 5xx stays unclassified instead of falling back to reachable.',
+    '    reachable, and a repo-scoped 5xx stays unclassified instead of falling back to reachable.\n' +
+    '    And the mid-walk net holds: a transport failure arriving after the probe passed exits 3\n' +
+    '    when a fresh probe classifies the container as unusable and 2 when it does not, NEVER 1 —\n' +
+    '    the RED code that means the assertion was retrieved for every failing check — and never 0;\n' +
+    '    its report says whether nothing was READ or nothing was JUDGED, counting what had been\n' +
+    '    listed, so a stopped walk cannot be mistaken for a completed one; and an annotations call\n' +
+    '    that FAILED is told apart from a check that carried nothing, which the empty list alone\n' +
+    '    cannot distinguish.',
   );
+}
+
+/**
+ * The mid-walk net's printer (#10155). The DECISION is `midWalkVerdict`, pure
+ * and self-tested; what lives here is the one thing it cannot be handed — the
+ * fresh transport reading it needs in order to choose.
+ *
+ * The re-probe is spent only on the failure path, so a healthy run costs
+ * exactly what it always did. If the re-probe cannot itself complete, the
+ * container stays UNCLASSIFIED rather than being blamed: `midWalkVerdict` then
+ * lands on UNDETERMINED, which is the direction that cannot manufacture a
+ * confident wrong claim about someone's environment.
+ */
+async function reportMidWalkFailure(error, stage) {
+  let probe = null;
+  try {
+    ({ verdict: probe } = await probeTransport());
+  } catch {
+    probe = null;
+  }
+  const decision = midWalkVerdict({ probe, error, read: error?.read ?? null, stage });
+  console.error(`\nci-failure: ${decision.verdict} — ${decision.headline}\n`);
+  for (const line of decision.detail) console.error(line ? `  ${line}` : '');
+  for (const line of decision.fix ?? []) console.error(`  fix: ${line}`);
+  console.error("  Piping reports the PIPE's status, so `... | tail` reads green either way. Use `echo \"EXIT=$?\"`.");
+  process.exit(decision.exit);
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,13 +1786,26 @@ if (!invokedDirectly) {
     console.error(`  (Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`);
     process.exit(EXIT_PREREQUISITE_NOT_MET);
   }
-  const target = await resolveTarget(process.argv.slice(2));
+  // Everything from here reads the network, and every read can fail AFTER the
+  // probe above passed (#10155). Uncaught, node exits 1 — which this file's own
+  // table calls RED, "the assertion was retrieved for every failing check".
+  let target;
+  try {
+    target = await resolveTarget(process.argv.slice(2));
+  } catch (error) {
+    await reportMidWalkFailure(error, 'resolving the target commit');
+  }
   if (!target.sha) {
     console.error(`ci-failure: could not resolve a commit to ask about (${target.from}).`);
     console.error(`  (Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`);
     process.exit(EXIT_PREREQUISITE_NOT_MET);
   }
-  const result = await walk(target.sha);
+  let result;
+  try {
+    result = await walk(target.sha);
+  } catch (error) {
+    await reportMidWalkFailure(error, 'the walk');
+  }
   const rendered = render(result, target);
   if (process.argv.includes('--json')) {
     console.log(JSON.stringify({ ...result, target: target.from, verdict: rendered.verdict }, null, 2));

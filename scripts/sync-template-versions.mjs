@@ -397,15 +397,17 @@ function main() {
 // and with it the vitest, on precisely the PR that changes the rewriter.
 //
 // `core` is still false for such a diff; `core` was never widened. What changed
-// is that the `test` job now ORs in a SECOND filter output — `scripts:` /
-// `'scripts/**'` — and skips only when BOTH say false (#9829).
+// is that the `test` job now ORs in a SECOND filter output — `crosspkg:`, which
+// carries `'scripts/**'` among its entries — and skips only when BOTH say false
+// (#9829; the output was named `scripts:` until #10015 generalised it to the
+// other four roots that declare cross-package test inputs).
 //
 // Re-measured against the merged workflow, with picomatch 2.3.1: that is the
 // version dorny/paths-filter@v4's own lockfile resolves and ncc-bundles, NOT the
 // 4.0.5 in this tree — the two agree on these globs, but the action is what
 // runs, so it is the one to quote. For a diff confined to this file:
-// `core=false`, `scripts=true`, so
-// `!cancelled() && (core != 'false' || scripts != 'false')` is TRUE. The job
+// `core=false`, `crosspkg=true`, so
+// `!cancelled() && (core != 'false' || crosspkg != 'false')` is TRUE. The job
 // runs.
 //
 // The job running is necessary, NOT sufficient — the shard tests a FILTERED

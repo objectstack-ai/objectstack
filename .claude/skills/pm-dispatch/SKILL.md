@@ -316,7 +316,7 @@ hold 评论纪律见状态模型,hold 重验只在 `Restart-when:` 命中时发�
 - **置信门(全部成立才可代裁)**:① 四棱同向(全指向同一选项,任何分裂即升级);②不在人工地板上
   ;③ 不收窄、不推翻任何既有维护者裁决;④ 执行是**否决窗口不是许可门**—— 裁定 → 一次标签写入
   换 `needs-user-decision` 为工作态 → 卡上贴四棱块 + 结论 + `auto-adjudicated` 标记 → 轮次报
-  告设**代裁清单**专节(聚合漂移的刹车);⑤ 代裁分析跑在 `claude-fable-5`(与维护者手工流程同档)。
+  告设**代裁清单**专节(聚合漂移的刹车);⑤ 代裁分析跑在 `claude-fable-5`(与维护者手工流程同档),档位同用复审链降档保险丝的机器读数认定 —— 代裁前 `get_session` 读 `external_metadata.last_served_model`(⛔ 自述档位不是读数),≠ 本项档位 ⇒ 本 fire 代裁整体跳过、卡原样留在决策箱走维护者路径(恒安全)。
 - **回翻条款**:代裁卡实施中发现契约终究要动 ⇒ dev 停手,卡回`needs-user-decision` —— 报告分叉,⛔ 永不静默重裁。
 
 ## 执行座位职责
@@ -518,7 +518,7 @@ os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日�
   肢**由声明行承载。档位以 dispatch-gates 常量 `CONTRACT_REVIEW_TIER` 为准(档位单源,⛔ 本文与标签不写模型名,模型升级只改一行一个文件)。派发席职责止于:卡上记一行认定、挂 `needs:contract-review`(标签命名审的对象,恒英文)、停手;⛔ 禁止自查放行。
 - **`needs:contract-review` 复审链**:复审资格双条件,同时满足 —— ① 跑在契约复审档位;② 非该卡派发席(犯规席在结构上无资格补救自己的犯规)。归属:常设 = 分诊席(Routine 模型由维护者在 Routines UI
   钉在契约复审档位),分诊轮新增子轮清该标签 —— 只审契约增量 diff、结论一行写在卡上、清标签后卡方可入队;每小时一轮即天然攒批;过渡期(分诊 Routine 未建成前)由 skills 席代行。**降档保险丝**:
-  子轮开场自检当前模型,非契约复审档位 ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态;契约复审 ⛔ 不适用额度耗尽豁免降档(豁免的对象是派发;复审的存在意义就是补偿一次低于地板的派发)。**载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得没必要」):闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门;挂与清皆按标签纪律的 read-modify-write 硬步骤写。
+  子轮开场**必调一次 `get_session`**(claude-code-remote MCP,无参)读 `external_metadata.last_served_model`,⛔ 自述档位不是读数(静默降档腐蚀的恰是自述;实测与配置档陷阱见 platform-readings);读数 ≠ `CONTRACT_REVIEW_TIER` ⇒ 该子轮整体跳过、标签原样留置 —— 卡在队列外等待是安全态;契约复审 ⛔ 不适用额度耗尽豁免降档(豁免的对象是派发;复审的存在意义就是补偿一次低于地板的派发)。**载体不迁移**(维护者 2026-08-18,原话:「中期把闸门迁到 PR review 的 Request Changes 上 我觉得没必要」):闸门载体保持本标签,⛔ 不迁 PR review / Request Changes、不为迁移留门;挂与清皆按标签纪律的 read-modify-write 硬步骤写。
 - **碰生成物的 PR,入队前先同步 + 整体重生成**(os-regen 驱动零冲突标记地**静默丢掉一侧改动**):
   四步序已机械化 `bash scripts/pm/os-regen-merge.sh`;陷阱、断言措辞与锚点禁令见 landing-operations A。
 - **跟到 MERGED 为止;入队后的看护同归车道 PM 的落地窗口**:验收、首次入队 flip 定点、MERGED 两读

@@ -123,27 +123,113 @@ For the full authoring surface of each, load the matching
 
 ## Reading a project's layout
 
-Metadata is grouped by domain under `src/`. This map lets you navigate any
-ObjectStack project — including one an agent just generated:
+Metadata lives under `src/`, one directory per collection. This map lets you
+navigate any ObjectStack project — including one an agent just generated:
 
 ```
 support-desk/
 ├── objectstack.config.ts     # defineStack() — the single entry point, wires it all
 ├── src/
 │   ├── objects/              # Data models (required)
-│   ├── actions/              # Buttons, bulk operations
+│   ├── datasources/          # External database / API connections
+│   ├── hooks/                # Record lifecycle logic
+│   ├── data/                 # Seed records
 │   ├── views/                # List / form / kanban lenses
+│   ├── pages/                # Standalone custom pages
 │   ├── apps/                 # Navigation shells
+│   ├── actions/              # Buttons, bulk operations
+│   ├── dashboards/           # Analytics boards
+│   ├── reports/              # Saved analytical queries
+│   ├── datasets/             # Semantic-layer datasets
 │   ├── flows/                # Automation logic
-│   ├── dashboards/           # Analytics
+│   ├── functions/            # Named handler callables (code, not metadata)
+│   ├── translations/         # i18n bundles
+│   ├── security/             # Permission sets, positions, sharing rules, capabilities
+│   ├── docs/                 # In-app documentation (Markdown)
 │   └── agents/               # AI agents
 └── test/                     # Tests
+```
+
+No app ships every one of those: it is the union of what `examples/app-todo` and
+`examples/app-crm` lay out flat, plus the directories `os g <type>` writes into.
+A larger app groups the same collections by domain instead —
+`examples/app-showcase` is the reference for that variant:
+
+```
+app-showcase/
+├── objectstack.config.ts
+├── src/
+│   ├── data/                 # objects, extensions, hooks, mappings, analytics, seed
+│   ├── ui/                   # views, pages, apps, actions, dashboards, reports, datasets, themes
+│   ├── automation/           # flows, jobs, webhooks
+│   ├── security/             # permission sets, positions, sharing rules, capabilities
+│   ├── system/               # apis, books, connectors, datasources, emails, server, translations
+│   └── docs/                 # In-app documentation (Markdown)
+└── test/
 ```
 
 Each folder has an `index.ts` barrel that re-exports its metadata; those barrels
 are imported into `objectstack.config.ts`. There is **no filename-suffix magic** —
 metadata is wired in through those explicit imports, so `objectstack.config.ts` is
 the one place that tells you what's actually in the app.
+
+Which is why the directory is a convention and the **`defineStack()` key is the
+contract**: the two trees above disagree about paths and agree exactly about
+keys. So when you are holding a piece of metadata and want to know where it
+goes, start from the key —
+[Where each piece of metadata goes](#where-each-piece-of-metadata-goes) lists
+every one of them.
+
+## Where each piece of metadata goes
+
+Every piece of metadata in an app arrives through one `defineStack()` key. This
+is the full authorable set, ordered data → interface → automation → integration
+→ access → AI — one clause each, and the page to read next:
+
+| `defineStack()` key | Declares | Guide |
+| :--- | :--- | :--- |
+| `objects` | Business objects — tables, fields, validation | [Objects](/docs/data-modeling/objects) |
+| `objectExtensions` | Fields and config merged into an object another package owns | [Reference](/docs/references/data/object) |
+| `datasources` | Connections to external databases and APIs | [External Datasources](/docs/data-modeling/external-datasources) |
+| `datasourceMapping` | Rules routing a package, namespace or object pattern to a datasource | [External Datasources](/docs/data-modeling/external-datasources) |
+| `data` | Seed records loaded at bootstrap | [Seed Data](/docs/data-modeling/seed-data) |
+| `hooks` | Record lifecycle logic on insert / update / delete | [Hooks](/docs/automation/hooks) |
+| `mappings` | Field mappings for data import and export | [Reference](/docs/references/data/mapping) |
+| `analyticsCubes` | Semantic-layer cubes over the object graph | [Reference](/docs/references/data/analytics) |
+| `datasets` | Query-shaped datasets that charts and reports read from | [Analytics](/docs/data-modeling/analytics) |
+| `apps` | Navigation shells — which tabs a user sees | [Apps](/docs/ui/apps) |
+| `views` | List / form / kanban lenses over an object | [Views](/docs/ui/views) |
+| `pages` | Standalone custom pages | [Pages](/docs/ui/pages) |
+| `dashboards` | Chart and metric boards | [Dashboards](/docs/ui/dashboards) |
+| `reports` | Saved analytical queries with grouping and totals | [Reference](/docs/references/ui/report) |
+| `actions` | Buttons and bulk operations, with CEL visibility | [Actions](/docs/ui/actions) |
+| `themes` | Color tokens and branding | [Reference](/docs/references/ui/theme) |
+| `translations` | i18n bundles for labels and messages | [Translations](/docs/ui/translations) |
+| `docs` | In-app Markdown documentation items | [Doc Pages](/docs/ui/doc-pages) |
+| `books` | Ordered navigation spines over those doc items | [Reference](/docs/references/system/book) |
+| `flows` | Automation and approval graphs | [Flows](/docs/automation/flows) |
+| `jobs` | Scheduled and background jobs | [Reference](/docs/references/system/job) |
+| `emailTemplates` | Templates the email service resolves by name and locale | [Reference](/docs/references/system/email-template) |
+| `webhooks` | Outbound HTTP notifications | [Webhooks](/docs/automation/webhooks) |
+| `connectors` | External system connectors a flow can dispatch | [Connectors](/docs/automation/connectors) |
+| `apis` | Declarative REST endpoints under your own namespace | [Reference](/docs/references/api/endpoint) |
+| `positions` | Capability-distribution groups | [Positions](/docs/permissions/positions) |
+| `permissions` | Permission sets — object, field and system grants | [Permission Sets](/docs/permissions/permission-sets) |
+| `capabilities` | Authorization capabilities this package defines | [Reference](/docs/references/security/misc) |
+| `sharingRules` | Record-level sharing beyond the org-wide default | [Sharing Rules](/docs/permissions/sharing-rules) |
+| `agents` | AI agents — platform-internal; third parties extend through `skills` | [Agents](/docs/ai/agents) |
+| `skills` | Reusable AI capability bundles — the extension primitive | [Skills](/docs/ai/skills) |
+| `tools` | Optional AI-presentation refinement over an action or flow | [Reference](/docs/references/ai/tool) |
+
+Rows linked to a **Reference** have no hand-written guide yet — the generated
+schema page is the authority until one lands.
+
+**Not in the table, and why.** `viewItems` and `runtimeModule` are not authorable
+at all (`viewItems` is `z.never()`, the machine-assembled channel for
+runtime-assembled manifests; `runtimeModule` is written by `objectstack build`);
+`manifest`, `i18n`, `api`, `server`, `requires`, `tiers`, `plugins` and
+`devPlugins` configure the stack rather than declare metadata items; and
+`functions` and `onEnable` are code the runtime calls, not metadata it stores.
 
 ## How you verify
 

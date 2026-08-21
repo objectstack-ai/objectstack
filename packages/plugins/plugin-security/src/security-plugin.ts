@@ -61,6 +61,11 @@ import {
 } from './platform-ownership-policies.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
+  unresolvedPostureDenialMessage,
+  unresolvedPostureLogLine,
+  type UnresolvedPostureCause,
+} from './unresolved-posture.js';
+import {
   normalizeTenancyPosture,
   postureEnforcesWall,
   postureUsesUnionScope,
@@ -224,6 +229,19 @@ interface ObjectSecurityMeta {
    * the permissive default withholds the exemption.
    */
   unresolved: boolean;
+  /**
+   * [#10401] WHICH of the two conditions behind {@link ObjectSecurityMeta.unresolved}
+   * this is — the object exists only as an unpublished draft, or its declaration
+   * genuinely cannot be read. Meaningful only when `unresolved` is `true`; absent
+   * (and therefore `'unknown'`) on every resolved posture.
+   *
+   * ⛔ Explanation only. Nothing may branch an ACCESS DECISION on it: both causes
+   * deny, identically and fail-closed, and the probe that produces it is
+   * best-effort by design (see `probeUnpublishedDraft`). Its whole job is to stop
+   * the refusal naming a remedy — "change a sharing rule" — that cannot fix
+   * either condition.
+   */
+  unresolvedCause?: UnresolvedPostureCause;
 }
 
 const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze({
@@ -1386,7 +1404,12 @@ export class SecurityPlugin implements Plugin {
       const secMeta =
         permissionSets.length > 0
           ? await this.getObjectSecurityMeta(opCtx.object)
-          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, fieldMaskingRules: {} as Record<string, FieldMaskingRule>, unresolved: false };
+          // [#10401] `unresolvedCause` is spelled out rather than omitted so this
+          // stand-in and the real posture share one readable shape — the throw
+          // site below reads the key off the union. `undefined` is correct here:
+          // this branch declares `unresolved: false` by fiat (no permission sets
+          // were resolved, so no posture was read), and there is no cause.
+          : { isPrivate: false, tenancyDisabled: false, isBetterAuthManaged: false, requiredPermissions: EMPTY_REQUIRED_PERMISSIONS, fieldRequiredPermissions: {} as Record<string, string[]>, fieldMaskingRules: {} as Record<string, FieldMaskingRule>, unresolved: false, unresolvedCause: undefined as UnresolvedPostureCause | undefined };
 
       // [#3545] Fail CLOSED when the object's own posture could not be resolved.
       // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -1409,15 +1432,31 @@ export class SecurityPlugin implements Plugin {
       // not by the permissive default — which is why the tiered decision recorded
       // for the exposure gate (transient unavailability → fail open) can stay
       // fail-open there while the boundary itself fails closed here.
+      //
+      // [#10401] …and the refusal has to SAY that, because the sentence it used
+      // to carry said something else. "The security posture could not be
+      // resolved" describes an internal security step, so every reader — human
+      // and model — read it as a permissions problem and went hunting for a
+      // sharing rule to change; and it covered two conditions with two
+      // different remedies (an unpublished draft, which is *publish it*, and a
+      // genuinely unreadable declaration, which is not). The DENY is unchanged
+      // — same `PermissionDeniedError`, same `PERMISSION_DENIED`, same 403 —
+      // only the explanation is now honest about which condition this is and
+      // about permissions not being the lever. Wording for both surfaces lives
+      // in `unresolved-posture.ts`; see its header for the measured cost of the
+      // old sentence.
       if (secMeta.unresolved) {
+        const cause: UnresolvedPostureCause = secMeta.unresolvedCause ?? 'unknown';
         ctx.logger.error(
-          `[security] object security posture unresolvable for operation '${opCtx.operation}' on ` +
-            `object '${opCtx.object}' (user ${opCtx.context?.userId ?? 'unknown'}) — ` +
-            `denying request (fail-closed, #3545)`,
+          unresolvedPostureLogLine(
+            opCtx.object,
+            opCtx.operation,
+            String(opCtx.context?.userId ?? 'unknown'),
+            cause,
+          ),
         );
         throw new PermissionDeniedError(
-          `[Security] Access denied: the security posture of object '${opCtx.object}' ` +
-            `could not be resolved for operation '${opCtx.operation}'`,
+          unresolvedPostureDenialMessage(opCtx.object, opCtx.operation, cause),
           { operation: opCtx.operation, object: opCtx.object },
         );
       }
@@ -5545,9 +5584,57 @@ export class SecurityPlugin implements Plugin {
       fieldRequiredPermissions,
       fieldMaskingRules,
       unresolved: !obj,
+      // [#10401] Explanation only, and only on the path that is already
+      // refusing. Both causes deny identically — see the field's TSDoc.
+      ...(obj ? {} : { unresolvedCause: await this.probeUnpublishedDraft(object) }),
     };
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
+  }
+
+  /**
+   * [#10401] Best-effort: is this unresolvable object simply an UNPUBLISHED
+   * draft?
+   *
+   * `sys_metadata` keys a pending edit as `state: 'draft'` and the published
+   * value as `state: 'active'`; an object that exists only as a draft therefore
+   * resolves from neither the live ObjectQL schema nor the metadata service (both
+   * serve published values), which is precisely how it lands on the #3545
+   * fail-closed branch wearing the same sentence as a genuinely missing
+   * declaration.
+   *
+   * Four properties this probe deliberately has:
+   *
+   * - **It runs ONLY on the unresolved path**, i.e. on a request that is already
+   *   being refused. `getObjectSecurityMeta` returns before reaching here on
+   *   every posture that resolves, so no authorized request pays for it. On the
+   *   refusal path it is one indexed `sys_metadata` lookup beside the
+   *   `metadata.get` that path already performs.
+   * - **It uses a SYSTEM context**, so the read short-circuits this very
+   *   middleware at its `isSystem` guard rather than re-entering the posture
+   *   resolution it is being called from.
+   * - **It fails SAFE, in one direction only.** Any failure — no `sys_metadata`
+   *   in this deployment (file-backed metadata, LiteKernel test kernels), an
+   *   unprovisioned store, a driver error — answers `'unknown'` and the caller
+   *   gets the wording that covers both conditions. It can never turn a resolved
+   *   posture into a denial, and it can never turn a refusal into a grant: it is
+   *   read after the deny decision is already made.
+   * - **It is not org-scoped, and the wording is written so it does not need to
+   *   be.** A draft row belonging to another organization would still make
+   *   "a draft declaration exists but no published one" a true statement about
+   *   this runtime, which is all the message claims.
+   */
+  private async probeUnpublishedDraft(object: string): Promise<UnresolvedPostureCause> {
+    if (typeof this.ql?.findOne !== 'function') return 'unknown';
+    try {
+      const row = await this.ql.findOne('sys_metadata', {
+        where: { type: 'object', name: object, state: 'draft' },
+        context: { isSystem: true },
+      });
+      return row ? 'unpublished_draft' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   /**

@@ -27,8 +27,19 @@
     // `dist` typechecks green over an engine contract that has since moved.
     // `pnpm check:type-source-resolution` is the gate; it wants the `paths`
     // rule, not a registry entry.
+    //
+    // Same rule, same reason, for the email plugin: `test/email-template-locale.test.ts`
+    // resolves this app's declared email templates through plugin-email's real
+    // `sys_email_template` loader and its real column mapping. Unaliased, its TYPES
+    // come from `packages/plugins/plugin-email/dist/*.d.ts`, so `tsc --noEmit` would
+    // grade those declarations against whatever was last built rather than against the
+    // locale ladder in this checkout. Bare key, no `*`: a tsconfig `paths` key without
+    // a star is an EXACT match, and the `@objectstack/plugin-email*` spelling would
+    // fold every subpath onto this one target and type-check green against the wrong
+    // module.
     "paths": {
-      "@objectstack/formula": ["../../packages/formula/src/index.ts"]
+      "@objectstack/formula": ["../../packages/formula/src/index.ts"],
+      "@objectstack/plugin-email": ["../../packages/plugins/plugin-email/src/index.ts"]
     }
   },
   // This package took the widened-`include` route rather than a sibling
