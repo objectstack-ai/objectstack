@@ -85,11 +85,16 @@
  * when none does. A harness that cannot reproduce the defect cannot certify the
  * fix.
  *
- * Invoked as `node` rather than through a `pnpm check:*` alias: that alias
- * belongs in root package.json, which is declared territory of the
- * @changesets/cli v3 migration lane (#9465) while it runs -- the same shape as
- * the other `node scripts/...` steps in that lane. dispatch-gates.mjs derives
- * gate families from either spelling.
+ * Invoked as `node scripts/...` rather than through a `pnpm check:*` alias, on
+ * the precedent lint.yml already sets: several gate steps in that job are
+ * invoked directly, and dispatch-gates.mjs derives gate families from either
+ * spelling, so the direct form loses no discovery and adds no key to the root
+ * manifest.
+ *
+ * NOT because root package.json is off limits: the #9465 changeset lane fences
+ * that file's `@changesets/cli` range and its `version` script, not the file,
+ * so a `check:step-collectors` key would have been allowed. Recorded because
+ * the over-broad reading of that fence propagates as a constraint nobody has.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

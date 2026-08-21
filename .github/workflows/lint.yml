@@ -653,11 +653,20 @@ jobs:
       # commands executing when the first fails, 3 of 3 when none does. A harness
       # that cannot reproduce the defect cannot certify the fix.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
-      # belongs in root package.json, declared territory of the @changesets/cli
-      # v3 migration lane (#9465) while it runs — same shape as the other
-      # `node scripts/…` steps in this lane. dispatch-gates.mjs derives gate
-      # families from either spelling. Temp-dir fixtures, no network, ~1 s.
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
+      # on the precedent this job already sets: several gate steps here are
+      # invoked directly, and dispatch-gates.mjs derives gate families from
+      # either spelling, so the direct form loses no discovery and adds no key
+      # to the root manifest.
+      #
+      # ⚠️ NOT because root package.json is off limits. The #9465 changeset lane
+      # fences that file's `@changesets/cli` range and its `version` script — the
+      # parenthetical in the issue body is scoping, not illustrative — and not
+      # the file, so a `check:step-collectors` key would have been allowed. Said
+      # plainly because the over-broad reading is easy to acquire and then
+      # propagates as a constraint nobody actually has, which is this step's own
+      # defect class wearing a different hat: a claim that reads as verified.
+      # Temp-dir fixtures, no network, ~1 s.
       - name: Step-collector gate (self-tests that mask each other)
         run: |
           node scripts/check-step-collectors.mjs --self-test
