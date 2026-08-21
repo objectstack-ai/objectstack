@@ -74,7 +74,7 @@ class FakeJobServicePlugin implements Plugin {
 }
 
 async function bootApprovalsKernel(log: JobLog) {
-  const kernel = new ObjectKernel({ logLevel: 'silent' });
+  const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   openKernels.push(kernel);
 
   await kernel.use(new ObjectQLPlugin());

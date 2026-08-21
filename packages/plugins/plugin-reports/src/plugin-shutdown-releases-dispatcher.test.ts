@@ -161,7 +161,7 @@ async function attachSqlite(objectql: any): Promise<void> {
  * docblock names as the reason the `setInterval` path exists.
  */
 async function bootReportsLiteKernel(): Promise<Booted> {
-  const kernel = new LiteKernel({ logLevel: 'silent' } as any);
+  const kernel = new LiteKernel({ logger: { level: 'silent' } });
   openKernels.push(kernel);
 
   kernel.use(new ObjectQLPlugin());
@@ -174,7 +174,7 @@ async function bootReportsLiteKernel(): Promise<Booted> {
 }
 
 async function bootReportsKernel(extra?: Plugin): Promise<Booted> {
-  const kernel = new ObjectKernel({ logLevel: 'silent' });
+  const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   openKernels.push(kernel);
 
   await kernel.use(new ObjectQLPlugin());
