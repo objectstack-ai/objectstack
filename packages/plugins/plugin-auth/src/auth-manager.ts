@@ -37,6 +37,7 @@ import {
   rotateCallerBearerOnImpersonation,
   withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
+import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
@@ -1703,6 +1704,17 @@ export class AuthManager {
           // the ADMIN's session cookie on every later request, so without
           // rotating that token, `/admin/impersonate-user` is a 200 no-op.
           await rotateCallerBearerOnImpersonation(ctx);
+
+          // ── #10701: a 2FA verification must echo the session it INSTALLED ─
+          // On the enrolment lane `/two-factor/verify-totp` rotates the
+          // caller's session and then echoes the PRE-rotation token — the row
+          // it just deleted. A client that stores it (the console's
+          // `auth-session-token` pattern) is holding a revoked credential, and
+          // because `bearer()` overwrites the request cookie with whatever the
+          // Authorization header carries, presenting it destroys the valid
+          // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
+          // corrects the echoed VALUE only; resolver precedence is untouched.
+          await echoInstalledSessionToken(ctx);
 
           // ── ADR-0069 D2: account lockout (counter) ──────────────────
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
