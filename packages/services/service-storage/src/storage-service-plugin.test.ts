@@ -354,15 +354,22 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     await plugin.start(ctx);
     await ctx._flushReady();
 
-    // Lifecycle hooks (beforeDelete/afterDelete/afterInsert, plus afterUpdate
-    // since #10171 gave the update verb its detach leg) + access hooks
+    // Lifecycle hooks (afterDelete/afterInsert, plus afterUpdate since #10171
+    // gave the update verb its detach leg) + access hooks
     // (beforeInsert/beforeUpdate/beforeDelete, #10091 added the update verb)
     // — see attachment-lifecycle.ts and attachment-access-hooks.ts.
+    //
+    // [#10240] There is exactly ONE `beforeDelete` here, and it is the access
+    // guard's. The lifecycle module used to register a second one purely to
+    // stash file ids for its `afterDelete` — a hand-off a predicate delete
+    // silently dropped, because per-row dispatch gives each row a fresh
+    // context per phase (#5574). The id now comes from `ctx.previous`, so the
+    // registration has no work left and is gone; a second `beforeDelete`
+    // reappearing here means the stash mechanism came back with it.
     expect(hookEvents.sort()).toEqual([
       'afterDelete',
       'afterInsert',
       'afterUpdate',
-      'beforeDelete',
       'beforeDelete',
       'beforeInsert',
       'beforeUpdate',
