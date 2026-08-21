@@ -756,16 +756,37 @@ const PLUGIN_ROUTE_MODULES = {
       'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
   },
 
-  // ── Ruled vendor wire format (2026-08-21, #10554): no entries yet ────────
+  // ── Ruled vendor wire format (2026-08-21, #10554) ────────────────────
   //
-  // The state exists ahead of its first entry, deliberately: this machinery
-  // landed from `main` while the adjudicated body (better-auth's
-  // `{ session, user }` in plugin-auth's reimplemented impersonation handler)
-  // exists only on PR #10352's branch — and an entry for a file the walk
-  // cannot find is an ERROR here (the declared-but-not-found reconciliation
-  // in `audit()`), so the entry lands WITH the file, on that PR, under the
-  // ruling that authorized exactly that one entry. Adding any entry to this
-  // state is ⛔ MAINTAINER-ONLY (#8435) — see the header.
+  // The state's first and only entry, landing WITH the file it was ruled on
+  // (PR #10352) — the machinery arrived from `main` ahead of it because an
+  // entry for a file the walk cannot find is an ERROR here (the
+  // declared-but-not-found reconciliation in `audit()`). The ruling authorized
+  // exactly this one entry; adding or widening any other is
+  // ⛔ MAINTAINER-ONLY (#8435) — see the header.
+
+  // ONE body — the success return of `POST /admin/impersonate-user`, at line
+  // 254: `ctx.json({ session, user })`. It is the ONLY body this file BUILDS
+  // that any counter here reads; the four refusals are
+  // `throw APIError.from(…)`, which this surface does not count — so the
+  // number is the whole visible departure, not a sample of it.
+  //
+  // The shape is not this repo's to change. The endpoint replaces
+  // better-auth's own handler in place on the `admin` plugin's `endpoints`
+  // record and passes the vendor's OpenAPI `metadata` through untouched — a
+  // published schema declaring exactly `{ session, user }` — so enveloping
+  // the body would contradict the schema this same endpoint serves, on top of
+  // breaking the vendor client that parses it and forking from a
+  // contract partner that lives entirely on the vendor's side.
+  'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts': {
+    unenveloped: 1,
+    vendorWire:
+      "better-auth's wire format, ruled outside BaseResponseSchema (2026-08-21, #10554 option A)",
+    note:
+      'vendor: better-auth (1.7.1) — the body is byte-identical to that release\'s own handler return; ' +
+      'reader: authClient.admin.impersonateUser — the vendor client that parses this shape; ' +
+      'partner: /admin/stop-impersonating — the contract partner answering the same bare shape, entirely vendor-side',
+  },
 };
 
 const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
