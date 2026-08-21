@@ -233,7 +233,6 @@ const POSITIVE_CONTROL = {
  * `EmailServicePlugin` / `WebhookOutboxPlugin` spell it `dispose`.
  */
 const KNOWN_TEARDOWN_UNREACHED = [
-  { file: 'packages/metadata/src/plugin.ts', cls: 'MetadataPlugin', alias: 'stop', repair: '#10371' },
   { file: 'packages/plugins/plugin-email/src/email-plugin.ts', cls: 'EmailServicePlugin', alias: 'dispose', repair: '#10371' },
   { file: 'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts', cls: 'WebhookOutboxPlugin', alias: 'dispose', repair: '#10371' },
   { file: 'packages/runtime/src/app-plugin.ts', cls: 'AppPlugin', alias: 'stop', repair: '#10371' },

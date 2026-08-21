@@ -236,6 +236,13 @@ export class MetadataPlugin implements Plugin {
     /** Chokidar watcher on the artifact file (local-file mode) — ADR-0008 PR-8. */
     private artifactWatcher?: { close: () => Promise<void> };
     /**
+     * The context handed to `init()`, retained so `destroy()` can log.
+     * [#10772] `Plugin.destroy()` takes NO argument — it is the kernel's only
+     * teardown hook — so the context the old `stop(ctx)` alias received has to
+     * be captured at init time instead of arriving at teardown time.
+     */
+    private initCtx?: PluginContext;
+    /**
      * The most recently parsed artifact metadata (the plural-field record:
      * `objects`, `views`, `data`, …). Carried on the `metadata:reloaded`
      * payload so runtime consumers can react to collections that never enter
@@ -280,6 +287,9 @@ export class MetadataPlugin implements Plugin {
     }
 
     init = async (ctx: PluginContext) => {
+        // [#10772] Retained for `destroy()`, which the kernel calls with no
+        // context. Assigned before anything that can throw.
+        this.initCtx = ctx;
         ctx.logger.info('Initializing Metadata Manager', {
             root: this.options.rootDir || process.cwd(),
             watch: this.options.watch,
@@ -543,7 +553,22 @@ export class MetadataPlugin implements Plugin {
         }
     }
 
-    stop = async (ctx: PluginContext) => {
+    /**
+     * Teardown — the kernel's ONLY teardown hook.
+     *
+     * [#10772] This body used to be spelled `stop(ctx)`. `Plugin`
+     * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+     * `destroy?()` and no `stop()`, and `ObjectKernel.performShutdown()` /
+     * `LiteKernel.destroy()` walk the plugins in reverse calling
+     * `plugin.destroy()` — so the artifact watcher, the manager and the
+     * repository were all still held after `await kernel.shutdown()` had
+     * RESOLVED. The `start`/`stop` pair read symmetric to a reviewer because
+     * `start()` really is on the interface; only one half was ever called.
+     *
+     * Idempotent: every handle is cleared as it is released, so a second
+     * teardown is a no-op rather than a second close.
+     */
+    destroy = async (): Promise<void> => {
         if (this.artifactWatcher) {
             try { await this.artifactWatcher.close(); } catch { /* noop */ }
             this.artifactWatcher = undefined;
@@ -551,13 +576,26 @@ export class MetadataPlugin implements Plugin {
         try {
             await this.manager.dispose();
         } catch (e: any) {
-            ctx.logger.warn('[MetadataPlugin] manager.dispose() failed', { error: e?.message });
+            this.initCtx?.logger?.warn?.('[MetadataPlugin] manager.dispose() failed', { error: e?.message });
         }
         const repo = this.repository as any;
         if (repo && typeof repo.close === 'function') {
             try { await repo.close(); } catch { /* noop */ }
         }
         this.repository = undefined;
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class: an embedder may have learned to call it directly
+     * precisely BECAUSE the kernel never did, and deleting it would break them.
+     * Still an arrow property, so a detached `const { stop } = plugin` call
+     * keeps working too. The parameter is now optional and ignored —
+     * `destroy()` takes no context, so teardown logs through the context
+     * captured in `init()`.
+     */
+    stop = async (_ctx?: PluginContext): Promise<void> => {
+        await this.destroy();
     }
 
     /**
