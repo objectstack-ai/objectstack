@@ -761,7 +761,47 @@ function lowerWhereFilterArray<T extends object | undefined>(
   return lowered as T;
 }
 
-interface FormulaPlanEntry { name: string; expression: Expression; }
+interface FormulaPlanEntry {
+  name: string;
+  expression: Expression;
+  /**
+   * [#10280] The field's declared `scale`, when it is one this rounding can
+   * honour — see {@link formulaRoundingScale}. `undefined` means "return the
+   * evaluator's value verbatim", which is what every formula did before this.
+   */
+  scale?: number;
+}
+
+/**
+ * `toFixed`'s own domain limit: it throws `RangeError` above 100 fraction
+ * digits. `FieldSchema.scale` is `z.number().int().min(0)` with no upper
+ * bound, so an author CAN declare more — and a display-precision declaration
+ * must never be the reason a read fails.
+ */
+const MAX_FORMULA_SCALE = 100;
+
+/**
+ * [#10280] The `scale` a formula plan entry carries, or `undefined` when the
+ * declaration is not one this rounding can honour.
+ *
+ * Well-formedness is judged with the SAME test the write path uses
+ * (`validateFieldValue`'s `scale` branch: `Number.isInteger(def.scale) &&
+ * def.scale >= 0`), so one malformed declaration cannot mean two things one
+ * layer apart. A malformed `scale` stays UNENFORCED rather than being
+ * interpreted — inventing floor/round semantics for `scale: 2.5` in a consumer
+ * is the guessing PD #12 forbids, and the producer already refuses it
+ * (`FieldSchema.scale` is `z.number().int().min(0)`).
+ *
+ * The upper bound is `toFixed`'s, not a policy: past {@link MAX_FORMULA_SCALE}
+ * the call throws, and asking for more decimal places than an IEEE-754 double
+ * carries is a no-op request either way — so the rounding is skipped and the
+ * value is returned whole.
+ */
+function formulaRoundingScale(def: { scale?: unknown } | undefined): number | undefined {
+  const scale = def?.scale;
+  if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
+  return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+}
 
 function planFormulaProjection(
   schema: any,
@@ -784,7 +824,7 @@ function planFormulaProjection(
       const expr: Expression = typeof def.expression === 'string'
         ? { dialect: 'cel', source: def.expression }
         : def.expression;
-      plan.push({ name: f, expression: expr });
+      plan.push({ name: f, expression: expr, scale: formulaRoundingScale(def) });
       // Pre-compile to surface syntax errors at planning stage rather than
       // per-row eval. Dependency discovery (which fields the formula reads)
       // is no longer used — CEL uses dynamic projection via `record.<field>`.
@@ -1183,6 +1223,12 @@ function undeclaredWriteFieldErrors(
  * the read path (`find` / `findOne`) and, since #5504, the write path's
  * response hydration.
  *
+ * Since #10280 this is also where a formula field's declared `scale` is
+ * applied: the value is rounded on its way onto the record, so every consumer
+ * of every one of those three call sites inherits the same rounded number.
+ * {@link roundFormulaValue} carries the arithmetic and the reason the rounding
+ * belongs at this producer rather than in the validator.
+ *
  * The eval context is built ONCE per call and reused for every row × every
  * formula field, and that is where this function's determinism comes from: one
  * `now`, so a `now()`/`today()` formula cannot drift mid-operation, plus
@@ -1217,6 +1263,61 @@ function undeclaredWriteFieldErrors(
  * `ExecutionContext.timezone` exists — see #1980; this change is independent
  * of timezone.)
  */
+/**
+ * [#10280] Apply a formula field's declared `scale` to the value its
+ * expression just produced.
+ *
+ * ## Why the rounding lives HERE and not in the validator
+ *
+ * `validateFieldValue`'s `scale` branch is the package's only other `.scale`
+ * reader and the tempting seam — and it is the wrong one. That branch enforces
+ * `scale` by REJECTION (`max_scale`) under the maintainer's 2026-08-11 ruling,
+ * because a caller-supplied value has somebody to refuse and silently rounding
+ * it would be silently altering their data. A formula result is
+ * platform-computed: there is nobody to refuse, and the alternative to
+ * rounding is not "the author's exact number", it is fifteen digits of IEEE-754
+ * tail on a record page. Two different values, two different answers, one
+ * declaration — so the rounding is applied at the PRODUCER, on plan entries
+ * that are `type === 'formula'` only, and the rejection path is left
+ * structurally untouched.
+ *
+ * ## The arithmetic
+ *
+ * `Number(v.toFixed(scale))`, the same expression objectui's `computeRow`
+ * (`GridField.tsx`) uses for a grid's client-side computed column, so the two
+ * halves of one platform round a computed number the same way. Per ECMA-262
+ * `toFixed` extracts the sign first and then picks the larger `n` on a tie:
+ * round-half-**away from zero** on the magnitude. Measured, because the
+ * opposite was believed at dispatch time: `2.5 → 3`, `1.25 → 1.3`,
+ * `0.125 → 0.13`, `-1.5 → -2`, `-2.5 → -3`. ⚠️ Negatives round away from zero,
+ * NOT toward `+Infinity`.
+ *
+ * Three guards, each closing a measured failure rather than a hypothetical:
+ *
+ *  - **`typeof value === 'number'`** — a formula legitimately returns a string
+ *    (`"tier:" + record.tier`), a boolean, or `null`, and `'x'.toFixed` does
+ *    not exist. Without this guard one scale-declaring string formula throws
+ *    and takes down every read of every record of that object.
+ *  - **`Number.isFinite`** — `NaN.toFixed(2)` yields the STRING `'NaN'`, and
+ *    `1.0 / 0.0` really does reach here as `Infinity`. Both round-trip through
+ *    `Number(...)` unchanged, so this guard alters no value; it is kept so the
+ *    helper is total by construction rather than by a coincidence of two
+ *    library behaviours. (For `|v| >= 1e21` `toFixed` returns exponential form,
+ *    `'1e+21'`, which `Number()` round-trips losslessly — the rounding degrades
+ *    to a no-op instead of corrupting the value, so that case needs no guard.)
+ *  - **negative zero** — `(-0.001).toFixed(2)` is `'-0.00'` and `Number()`
+ *    makes that `-0`. It JSON-serializes as `0`, but `Intl.NumberFormat`
+ *    formats it as `-0.00`, which would put a brand-new display wart on the
+ *    very record page this issue is about. Normalized to `+0` at the producer,
+ *    where it costs one comparison, rather than in each renderer.
+ */
+function roundFormulaValue(value: unknown, scale: number | undefined): unknown {
+  if (scale === undefined) return value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value;
+  const rounded = Number(value.toFixed(scale));
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
@@ -1231,7 +1332,7 @@ function applyFormulaPlan(
     if (rec == null) continue;
     for (const fp of plan) {
       const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, record: rec });
-      rec[fp.name] = r.ok ? r.value : null;
+      rec[fp.name] = r.ok ? roundFormulaValue(r.value, fp.scale) : null;
     }
   }
 }
