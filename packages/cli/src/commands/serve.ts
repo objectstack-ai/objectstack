@@ -33,15 +33,19 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
 // has to refuse exactly the configurations `makeTransport` cannot build, and
 // two literal lists for one vocabulary is the drift #5094 was filed for. Values
-// only (no plugin class): `os serve` loads `EmailServicePlugin` itself through
-// the capability loop's dynamic import, host copy first.
+// only (no plugin class): the capability loop loads `EmailServicePlugin` itself
+// with a bare `import()`, resolved against THIS CLI's own realpath — its
+// bundled copy always wins, never the host app's. Contrast `importConfigPlugin`
+// below, which IS host-anchored: an app-declared package wins there (#10909).
 import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
 // The SMS provider vocabulary, read from the package that materialises the
 // transports, for the same reason and by the same rule as the mail one above
 // (#5713). `resolveSmsCapabilityArg` has to refuse exactly the tags
 // `makeSmsTransport` cannot build — restating `log`/`aliyun`/`twilio` here would
 // be the second literal #5094 was filed for. Values only (no plugin class): the
-// capability loop dynamic-imports `SmsServicePlugin` itself, host copy first.
+// capability loop dynamic-imports `SmsServicePlugin` itself the same way — a
+// bare `import()` resolved against this CLI's own realpath, so its bundled
+// copy wins, never the host's (#10909).
 import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
