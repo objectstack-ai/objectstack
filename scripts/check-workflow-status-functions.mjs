@@ -76,6 +76,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { LineCounter, isMap, isScalar, parseDocument } from 'yaml';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const WORKFLOW_DIR = '.github/workflows';
 
@@ -600,7 +601,12 @@ jobs:
   console.log(`✓ check-workflow-status-functions --self-test: ${checked} assertions over temp fixture roots (real scan() path)`);
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   selfTest();
 } else if (process.argv.includes('--list')) {
   list();
