@@ -72,7 +72,8 @@
         "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
         "$TURBO_ROOT$/content/docs/deployment/index.mdx",
         "$TURBO_ROOT$/content/docs/permissions/authentication.mdx",
-        "$TURBO_ROOT$/scripts/check-nul-bytes.mjs"
+        "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
       ]
     },
     "@objectstack/lint#test": {
