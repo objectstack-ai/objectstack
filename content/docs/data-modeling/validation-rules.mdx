@@ -91,6 +91,15 @@ These properties apply to **all** field types and are validated by the base `Fie
 
 **Default constraints:** Validated the same as `text` (`maxLength`/`minLength` only). On a generic (non-`better-auth`) object a `password`-typed value is stored **plaintext at rest** but **masked to `••••••••` on read** through the normal query path (ADR-0100) — the engine does not hash or encrypt it. One-way hashing and verification of real login credentials are owned entirely by the auth subsystem (better-auth); its own credential column (`sys_account.password`) is a hashed `Field.text()` column that is exempt from this masking. For a reversible, encrypted-at-rest value on your own objects, use the `secret` type instead.
 
+### `secret`
+
+| Property | Type | Default | Validation Behavior |
+|:---|:---|:---|:---|
+| `maxLength` | `number` | — | Maximum length of the cleartext value |
+| `minLength` | `number` | — | Minimum length of the cleartext value |
+
+**Default constraints:** Reversible, encrypted-at-rest value (DB password, API key, token) — ADR-0100. **Fail-closed:** with no `ICryptoProvider` registered, a write **throws** rather than persisting cleartext. The value is encrypted on write into a `sys_secret` row, only an opaque handle is persisted on the record, and reads are masked. Distinct from `password`, which is plaintext at rest (or one-way hashed inside the auth subsystem).
+
 ---
 
 ## Rich Content Types
@@ -264,6 +273,15 @@ update that omits the field never fails this check, so legacy rows stay editable
 application-level emptiness check is needed.
 </Callout>
 
+### `user`
+
+| Property | Type | Default | Validation Behavior |
+|:---|:---|:---|:---|
+| `multiple` | `boolean` | `false` | `true` stores a JSON array of user ids |
+| `defaultValue` | `'current_user'` | — | Stamps the acting user's id on insert |
+
+**Default constraints:** Person picker — a `lookup` specialized to the built-in `sys_user` object, so `reference` is implied and must not be authored. Stored as a foreign key to `sys_user.id` and resolved through the same `$expand` machinery as `lookup`; with `multiple: true` the stored value is a JSON array of ids.
+
 ### `master_detail`
 
 | Property | Type | Default | Validation Behavior |
@@ -363,6 +381,27 @@ application-level emptiness check is needed.
 | `autonumberFormat` | `string` | — | Display format pattern (e.g., `CASE-{0000}`) |
 
 **Default constraints:** Read-only. Auto-incremented. Cannot be manually set after creation.
+
+---
+
+## Embedded Structured Types
+
+These types store structured values as JSON on the parent row — no separate table and no
+foreign key. Sub-field shapes are declared on the field, and the stored value is validated
+as an open object map (`valueSchemaFor`), so sub-keys are not constrained by the field type
+itself.
+
+### `composite`
+
+**Default constraints:** Single embedded sub-object. Stored as a JSON object map (`Record<string, unknown>`). No per-type config properties.
+
+### `repeater`
+
+**Default constraints:** Repeating embedded sub-object array. Stored as a JSON **array** of object maps (`Array<Record<string, unknown>>`); a non-array value is rejected. No per-type config properties.
+
+### `record`
+
+**Default constraints:** Name-keyed map of embedded sub-objects (`Record<string, SubObject>`) — ADR-0007. Stored as a JSON object map; insertion order is display order. No per-type config properties.
 
 ---
 
@@ -483,6 +522,7 @@ section above). See the
 | `url` | — | Valid URL with protocol |
 | `phone` | — | Permissive character set, not strict E.164 |
 | `password` | — | Validated like `text`; masked on read but plaintext at rest (no hashing/encryption) |
+| `secret` | — | Encrypted at rest via `sys_secret`, masked on read; **fail-closed** — writes throw with no `ICryptoProvider` |
 | `markdown` | — | `maxLength` |
 | `html` | — | Sanitized, `maxLength` |
 | `richtext` | — | Sanitized, `maxLength` |
@@ -499,6 +539,7 @@ section above). See the
 | `radio` | `options` | Single value from options |
 | `checkboxes` | `options` | Array of valid option values |
 | `lookup` | `reference` | Foreign key integrity |
+| `user` | — | Lookup specialized to `sys_user`; `multiple: true` stores an id array |
 | `master_detail` | `reference` | Cascade delete, ownership |
 | `tree` | `reference` | Self-referencing; no automatic cycle check |
 | `image` | — | Common image MIME types; `multiple` for many |
@@ -509,6 +550,9 @@ section above). See the
 | `formula` | `expression` | Read-only, computed at runtime |
 | `summary` | `summaryOperations` | Read-only, roll-up from children |
 | `autonumber` | — | Read-only, auto-incremented |
+| `composite` | — | Single embedded sub-object; stored as a JSON object map |
+| `repeater` | — | Embedded sub-object array; stored as a JSON array of object maps |
+| `record` | — | Name-keyed map of embedded sub-objects (ADR-0007) |
 | `location` | — | Lat: -90–90, Lng: -180–180 |
 | `address` | — | Structured object (street, city, …) |
 | `code` | — | Plain text, `language` for highlighting |
