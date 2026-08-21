@@ -106,13 +106,19 @@ export interface AuthSessionAuditEvent {
 export interface AuthEventAuditLogger {
   error?(msg: string, err?: Error, meta?: Record<string, any>): void;
   /**
-   * The fallback channel for the durability report below. `error` is optional
-   * here, so a sink that has none must still have somewhere to put a lost audit
-   * row — reaching for `error` and finding nothing must degrade to `warn`,
-   * never to silence (#9657). Signature and optionality mirror
-   * `ReadAuditLogger` in `read-audit.ts`, which already declared it.
+   * The GUARANTEED fallback channel for the durability report below. `error` is
+   * optional here, so a sink that has none must still have somewhere to put a
+   * lost audit row — reaching for `error` and finding nothing must degrade to
+   * `warn`, never to silence (#9657).
+   *
+   * This is the sink #9754's body calls the sharpest instance: it declared
+   * `error?` and `debug?` and NO `warn` at all, so the call site below COULD NOT
+   * have been written correctly against the contract it was given. #9750 added
+   * `warn?`, which gave it something to reach for and still no guarantee it was
+   * there; non-optional (#9754) is what makes the silence unrepresentable.
+   * Signature and optionality mirror `ReadAuditLogger` in `read-audit.ts`.
    */
-  warn?(msg: string, meta?: Record<string, any>): void;
+  warn(msg: string, meta?: Record<string, any>): void;
   debug?(msg: string, meta?: Record<string, any>): void;
 }
 

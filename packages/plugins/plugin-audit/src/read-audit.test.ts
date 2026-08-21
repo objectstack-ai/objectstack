@@ -314,10 +314,18 @@ describe('#8992 the write is OFF the request path', () => {
   it('a ledger write failure never reaches the read, and reports once at `error`', async () => {
     const errors: string[] = [];
     const debugs: string[] = [];
+    // Required by `ReadAuditLogger` (#9754/#10556) — and asserted unused below,
+    // so the double pins that `error` is reached for FIRST and `warn` is only
+    // the degrade path.
+    const warns: string[] = [];
     const writer = installReadAuditWriter(engine, {
       objects: ['contact'],
       timers: makeManualTimers(),
-      logger: { error: (m: string) => errors.push(m), debug: (m: string) => debugs.push(m) },
+      logger: {
+        error: (m: string) => errors.push(m),
+        warn: (m: string) => warns.push(m),
+        debug: (m: string) => debugs.push(m),
+      },
     })!;
     // Break the ledger AFTER install, so the probe has already run.
     (engine as any).insert = async () => { throw new Error('no such table: sys_audit_log'); };

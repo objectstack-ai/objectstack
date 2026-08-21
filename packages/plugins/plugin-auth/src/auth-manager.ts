@@ -631,8 +631,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
    * bookkeeping surfaces such as the ADR-0093 membership reconciler. Omitted →
    * those surfaces run silently (they already fail closed to no-op).
+   *
+   * The whole field stays OPTIONAL — omitting it is still a supported posture.
+   * What is no longer representable is supplying a logger that cannot carry a
+   * durability report: `warn` is non-optional because this value is FORWARDED
+   * verbatim into `ReconcileMembershipDeps.logger` (reconcile-membership.ts),
+   * whose sink guarantees that channel under #9754. Measured before tightening:
+   * the only non-test construction site in this repo is `auth-plugin.ts`, which
+   * passes `ctx.logger` — the kernel `Logger`, whose `warn` is already
+   * required — so the in-tree cost is zero. An external embedder handing
+   * `AuthManager` a reduced `{ info }` sink is the one caller this asks to
+   * change, and that is the point: it was the caller silently discarding the
+   * reconciler's reports (#10556).
    */
-  logger?: { info?: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void };
+  logger?: { info?: (msg: string, meta?: any) => void; warn: (msg: string, meta?: any) => void };
 
   /**
    * ADR-0069 D2 — account lockout (anti-brute-force). After this many

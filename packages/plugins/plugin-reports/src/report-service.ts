@@ -218,7 +218,14 @@ export interface ReportServiceOptions {
   engine: ReportEngine;
   email?: ReportEmail;
   clock?: ReportClock;
-  logger?: { info?: (msg: any, ...rest: any[]) => void; warn?: (msg: any, ...rest: any[]) => void; error?: (msg: any, ...rest: any[]) => void };
+  /**
+   * `warn` is GUARANTEED, `error` is not (#9754). Hosts do inject reduced sinks,
+   * so `error` stays optional — but a durability report that degrades to `warn`
+   * needs `warn` to actually be there, and this service degrades to it in eight
+   * places below. The whole `logger` stays optional; what is no longer
+   * representable is a sink that HAS the field and still prints nothing.
+   */
+  logger?: { info?: (msg: any, ...rest: any[]) => void; warn: (msg: any, ...rest: any[]) => void; error?: (msg: any, ...rest: any[]) => void };
   /** Cap rows per report to protect both DB and email size. */
   maxRows?: number;
   /**
@@ -260,7 +267,22 @@ export class ReportService implements IReportService {
   private readonly engine: ReportEngine;
   private readonly email?: ReportEmail;
   private readonly clock: ReportClock;
-  private readonly logger: NonNullable<ReportServiceOptions['logger']>;
+  /**
+   * Optional, and deliberately NOT defaulted to `{}` (#10556).
+   *
+   * `ReportServiceOptions['logger']` guarantees a `warn` channel under #9754, so `{}` stopped being a
+   * legal value of the type — which is the gate working: an empty object is a
+   * sink that declares it can report and then discards everything. The repair
+   * is to say what is TRUE — there may be no logger at all — rather than to
+   * mint a sink that lies. Runtime behaviour is unchanged in both directions:
+   * absent logger and `{}` both printed nothing before, and print nothing now.
+   *
+   * ⛔ What this deliberately does NOT decide: whether an absent host sink should
+   * instead default to a `console`-backed one. That is the open design call the
+   * #9754 ledger records against `plugin-security`'s `= {}` field, and it is a
+   * maintainer decision — not something to settle here to make a checker green.
+   */
+  private readonly logger?: ReportServiceOptions['logger'];
   private readonly maxRows: number;
   private readonly resolveOwnerContext?: OwnerContextResolver;
   private readonly canExportFn?: (object: string, context: unknown) => Promise<boolean>;
@@ -269,7 +291,7 @@ export class ReportService implements IReportService {
     this.engine = opts.engine;
     this.email = opts.email;
     this.clock = opts.clock ?? { now: () => new Date() };
-    this.logger = opts.logger ?? {};
+    this.logger = opts.logger;
     this.maxRows = Math.max(1, opts.maxRows ?? 5000);
     this.resolveOwnerContext = opts.resolveOwnerContext;
     this.canExportFn = opts.canExport;
@@ -306,7 +328,7 @@ export class ReportService implements IReportService {
     try {
       allowed = await this.canExportFn(object, context);
     } catch (err) {
-      this.logger.warn?.('ReportService: canExport check failed — denying export', err);
+      this.logger?.warn?.('ReportService: canExport check failed — denying export', err);
       allowed = false;
     }
     if (!allowed) {
@@ -529,7 +551,7 @@ export class ReportService implements IReportService {
           updated_at: ranAt,
         }, { context: SYSTEM_CTX });
       } catch (err) {
-        this.logger.warn?.('ReportService: failed to stamp last_run_at', err);
+        this.logger?.warn?.('ReportService: failed to stamp last_run_at', err);
       }
     }
 
@@ -688,7 +710,7 @@ export class ReportService implements IReportService {
         const ownerId = report.owner_id;
         const runContext = ownerId && this.resolveOwnerContext
           ? await this.resolveOwnerContext(ownerId).catch((err) => {
-              this.logger.warn?.('ReportService.dispatchDue: owner context resolution failed', err);
+              this.logger?.warn?.('ReportService.dispatchDue: owner context resolution failed', err);
               return null;
             })
           : null;
@@ -742,7 +764,7 @@ export class ReportService implements IReportService {
             });
           }
         } else if (!this.email) {
-          this.logger.warn?.('ReportService.dispatchDue: no email service — schedule fired but mail not sent');
+          this.logger?.warn?.('ReportService.dispatchDue: no email service — schedule fired but mail not sent');
         }
 
         await this.advanceSchedule(schedule, ts);
@@ -753,7 +775,7 @@ export class ReportService implements IReportService {
           last_status: 'failed',
           last_error: String(err?.message ?? err ?? 'unknown').slice(0, 500),
         });
-        this.logger.error?.('ReportService.dispatchDue: schedule failed', err);
+        this.logger?.error?.('ReportService.dispatchDue: schedule failed', err);
       }
     }
     return { fired, failed, skipped };
@@ -778,9 +800,9 @@ export class ReportService implements IReportService {
       try {
         const next = new Cron(cron, { timezone: schedule.timezone || 'UTC' }).nextRun(from);
         if (next) return next;
-        this.logger.warn?.(`ReportService: cron '${cron}' has no next occurrence; falling back to interval`);
+        this.logger?.warn?.(`ReportService: cron '${cron}' has no next occurrence; falling back to interval`);
       } catch (err) {
-        this.logger.warn?.(`ReportService: invalid cron '${cron}'; falling back to interval`, err);
+        this.logger?.warn?.(`ReportService: invalid cron '${cron}'; falling back to interval`, err);
       }
     }
     const interval = schedule.interval_minutes ?? DEFAULT_INTERVAL_MIN;
@@ -805,7 +827,7 @@ export class ReportService implements IReportService {
         id, ...patch, updated_at: this.clock.now().toISOString(),
       }, { context: SYSTEM_CTX });
     } catch (err) {
-      this.logger.warn?.('ReportService: failed to mark schedule', err);
+      this.logger?.warn?.('ReportService: failed to mark schedule', err);
     }
   }
 }
