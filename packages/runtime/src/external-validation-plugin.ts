@@ -178,10 +178,45 @@ export class ExternalValidationPlugin implements Plugin {
     });
   };
 
-  /** Tear down background drift-check timers (idempotent). */
-  stop = (): void => {
+  /**
+   * Tear down background drift-check timers (idempotent) — the kernel's ONLY
+   * teardown hook.
+   *
+   * [#10772] This body used to be spelled `stop()`. `Plugin`
+   * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+   * `destroy?()` and no `stop()`, and `ObjectKernel.performShutdown()` /
+   * `LiteKernel.destroy()` walk the plugins in reverse calling
+   * `plugin.destroy()`. Nothing in the tree ever called `stop()` on a plugin,
+   * and this class's own only caller was `scheduleDriftChecks()` re-arming
+   * itself — so every armed `setInterval` below was STILL ARMED after
+   * `await kernel.shutdown()` had RESOLVED. That is #9371's mechanism
+   * verbatim, and this plugin is one of only two `Plugin` implementations in
+   * the tree that own `setInterval` at all (`ReportsServicePlugin` is the
+   * other, repaired under #10371).
+   *
+   * The timers are `unref`'d, so a long-lived host process still exits and
+   * nothing complains in production — the bill lands in a vitest worker, which
+   * is alive throughout teardown.
+   *
+   * Stays SYNCHRONOUS on purpose: `stop()` was `(): void`, and widening a
+   * public alias to `Promise<void>` would change what an embedder's
+   * non-awaiting call site does.
+   */
+  destroy = (): void => {
     for (const timer of this.driftTimers.values()) clearInterval(timer);
     this.driftTimers.clear();
+  };
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class: an embedder may have learned to call it directly precisely
+   * BECAUSE the kernel never did, and deleting it would break them. Still an
+   * arrow property returning `void`, so both a detached
+   * `const { stop } = plugin` call and a non-awaiting call site keep working
+   * unchanged.
+   */
+  stop = (): void => {
+    this.destroy();
   };
 
   /** Exposed for testing; invoked from the kernel:ready handler. */
@@ -237,7 +272,9 @@ export class ExternalValidationPlugin implements Plugin {
    * don't accumulate.
    */
   async scheduleDriftChecks(ctx: PluginContext): Promise<void> {
-    this.stop();
+    // [#10772] The canonical hook, not the retained alias: `destroy()` is now
+    // where the body lives, and the alias exists only for embedders.
+    this.destroy();
     const metadata = safeGet<MetadataServiceLike>(ctx, 'metadata');
     if (!metadata?.list) return;
 
