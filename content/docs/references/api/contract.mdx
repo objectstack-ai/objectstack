@@ -27,7 +27,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +283 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +284 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112, #9106) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim (#9934). Present exactly when the producer opted in at throw time; consumers render it to end users and keep their generic substitution (#3821) for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -290,6 +290,7 @@ const result = ApiErrorSchema.parse(data);
 * `SCHEDULE_DELETE_FAILED`
 * `SETTINGS_ACTION_FAILED`
 * `SETTINGS_CRYPTO_UNAVAILABLE`
+* `SETTINGS_ENGINE_NOT_BOUND`
 * `SETTINGS_FORBIDDEN`
 * `SETTINGS_LOCKED`
 * `SETTINGS_UNKNOWN_KEY`
