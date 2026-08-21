@@ -485,6 +485,65 @@ preflight() {
   [[ -z "$PREFLIGHT_PROBLEMS" ]]
 }
 
+# --- filter preflight -------------------------------------------------------
+
+# ⛔ `pnpm --filter <name>` EXITS 0 when the filter matches no project (#10853):
+#
+#     $ pnpm --filter @objectstack/adapter-hono test --maxWorkers=2
+#     No projects matched the filters in "/home/user/objectstack"
+#     $ echo $?
+#     0
+#
+# That is the one failure this wrapper is worst placed to let through. Every
+# discipline built on top of it reads the exit code -- `cmd > log 2>&1; ec=$?`,
+# the VERDICT line below, a dev's report saying "suite green, exit 0" -- and all
+# of them would be TRUE AND WORTHLESS, because nothing ran. A whole verification
+# round can be fictitious with every exit code in it genuine. It is the same
+# shape as the `--`-before-vitest-args trap: exit 0, nothing measured, output
+# that reads like success.
+#
+# So the check happens HERE, at the entry point every heavy verify in this
+# container is contracted to come through, and BEFORE the lock is taken: a
+# command that will measure nothing should not spend the fleet's lock to do it.
+#
+# ⚠️ FAIL-OPEN in every direction, deliberately. A wrong refusal would make this
+# wrapper the thing that blocks correct work, while a miss leaves today's
+# behaviour exactly as it is. No node, no resolver on disk, a resolver that
+# errors, a selector that cannot be decided (a glob, a path, an interpolation),
+# or a command that changes directory -- all of them PROCEED. The only refusal
+# is a plain package name that this workspace does not have. The resolver reads
+# `pnpm-workspace.yaml` and the manifests it names and nothing else: no network,
+# no pnpm invocation, no lockfile, so it cannot become the unbounded wait this
+# file exists to prevent.
+#
+# Escape hatch, per call: OS_VERIFY_LOCK_NO_FILTER_CHECK=1.
+filter_preflight() {
+  local label="$1" self_dir resolver out ec line
+
+  [[ "${OS_VERIFY_LOCK_NO_FILTER_CHECK:-}" == "1" ]] && return 0
+  case "$label" in
+    *--filter*) ;;
+    *) return 0 ;;
+  esac
+  command -v node > /dev/null 2>&1 || return 0
+
+  self_dir="$(cd "$(dirname "$SELF")" 2> /dev/null && pwd)" || return 0
+  resolver="${self_dir}/../pnpm-filter-targets.mjs"
+  [[ -f "$resolver" ]] || return 0
+
+  out="$(node "$resolver" --preflight "$label" 2> /dev/null)"
+  ec=$?
+  # Exit 3 is the resolver's ONLY refusal code. Anything else -- 0, a crash, a
+  # missing dependency -- means proceed.
+  [[ "$ec" -eq 3 ]] || return 0
+
+  log "✗ this command would measure NOTHING:"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && log "  $line"
+  done <<< "$out"
+  return 1
+}
+
 # --- modes ------------------------------------------------------------------
 
 usage() {
@@ -498,6 +557,10 @@ usage:
 
 There is deliberately no -w / --timeout: the acquisition budget is capped at the
 call site. OS_VERIFY_LOCK_WAIT may LOWER it; a value above the cap is clamped.
+
+A `pnpm --filter <name>` that matches no project is refused BEFORE the lock is
+taken, because pnpm exits 0 on it and the run would measure nothing (#10853).
+OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips that check for one call.
 Exit 99 means this call never acquired the lock; every run prints a VERDICT line
 — including the refusals: `lock-unusable` (this host cannot operate the lock at
 all) and `usage-error`. A run that prints no verdict is a bug in this script.
@@ -552,6 +615,15 @@ mode_run() {
     done <<< "$PREFLIGHT_PROBLEMS"
     log "VERDICT lock-unusable (exit 99) · never acquired · refused before waiting · nothing was built or tested · ${label}"
     exit 99
+  fi
+
+  # A filter that matches nothing is a CALLER error, not a busy lock, so it
+  # exits 2 (the usage-error code) rather than 99. 99 means "never got a turn"
+  # and invites a retry; retrying this command would just reproduce the same
+  # silent green.
+  if ! filter_preflight "$label"; then
+    log "VERDICT filter-matches-nothing (exit 2) · never acquired · refused before waiting · nothing was built or tested · ${label}"
+    exit 2
   fi
 
   effective_budget
@@ -1124,6 +1196,65 @@ mode_self_test() {
   wait "$holder_pid" 2> /dev/null
   wait
   st_case 'three staggered waiters acquire in arrival order' "$(< "$order")" ABC
+
+  # (h) the filter preflight (#10853). BOTH directions, because a guard shown
+  # only to red could be a guard that reds on everything -- which here would
+  # block the fleet's verification. The commands are `echo`, so what is measured
+  # is the REFUSAL, not pnpm.
+  #
+  # Run from the repo root on purpose: the resolver answers about the workspace
+  # the command would run in, so the case has to put the child in one.
+  local repo_root fp_ran
+  repo_root="$(cd "$(dirname "$SELF")/../.." 2> /dev/null && pwd)"
+  fp_ran="${tmp}/fp-ran"
+
+  : > "$fp_ran"
+  (cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/adapter-hono test; : > '${fp_ran}.dead'") > /dev/null 2>&1
+  st_case 'a filter naming no package is REFUSED (exit 2, not 99 -- retrying cannot help)' "$?" 2
+  st_case 'and the refused command never ran' \
+    "$([[ -e "${fp_ran}.dead" ]] && echo ran || echo 'did not run')" 'did not run'
+  out="$(cd "$repo_root" && bash "$SELF" -c 'echo pnpm --filter @objectstack/adapter-hono test' 2>&1)"
+  st_case 'and the refusal names the selector' \
+    "$([[ "$out" == *'@objectstack/adapter-hono'* ]] && echo yes || echo no)" yes
+  st_case 'and suggests the real package' \
+    "$([[ "$out" == *'@objectstack/hono'* ]] && echo yes || echo no)" yes
+  st_case 'and prints a VERDICT line, like every other refusal here' \
+    "$(printf '%s' "$out" | grep -c 'VERDICT filter-matches-nothing (exit 2)')" 1
+  st_case 'and says nothing was built or tested' \
+    "$([[ "$out" == *'nothing was built or tested'* ]] && echo yes || echo no)" yes
+
+  # The other direction: a REAL package name must sail straight through, run,
+  # and report an ordinary command-exit verdict.
+  : > "${fp_ran}.live"
+  out="$(cd "$repo_root" && bash "$SELF" -c "echo pnpm --filter @objectstack/hono test; : > '${fp_ran}.liveran'" 2>&1)"
+  st_case 'a filter naming a REAL package is not refused' "$?" 0
+  st_case 'and its command actually ran' \
+    "$([[ -e "${fp_ran}.liveran" ]] && echo ran || echo 'did not run')" ran
+  st_case 'and it reports an ordinary command-exit verdict' \
+    "$(printf '%s' "$out" | grep -c 'VERDICT command-exit 0')" 1
+
+  # A selector the resolver refuses to decide must never be refused HERE.
+  (cd "$repo_root" && bash "$SELF" -c 'echo pnpm --filter ./packages/* build') > /dev/null 2>&1
+  st_case 'an undecidable selector (a path glob) proceeds -- fail-open' "$?" 0
+  (cd "$repo_root" && bash "$SELF" -c 'echo pnpm --filter "${PKG}" build') > /dev/null 2>&1
+  st_case 'an interpolated selector proceeds -- the spelling is not the value' "$?" 0
+  (cd "$repo_root" && bash "$SELF" -c 'echo cd elsewhere && echo pnpm --filter @objectstack/adapter-hono build') > /dev/null 2>&1
+  st_case 'a command that changes directory proceeds -- unknown workspace, no verdict' "$?" 0
+  (cd "$repo_root" && bash "$SELF" -c 'echo git fetch --unshallow --filter=blob:none') > /dev/null 2>&1
+  st_case "git's partial-clone --filter is not pnpm's, and proceeds" "$?" 0
+
+  # The escape hatch, and the proof that it is the ONLY thing that changed the
+  # answer: same command, same tree, refused without it.
+  : > "${fp_ran}.hatch"
+  (cd "$repo_root" && OS_VERIFY_LOCK_NO_FILTER_CHECK=1 bash "$SELF" \
+    -c "echo pnpm --filter @objectstack/adapter-hono test; : > '${fp_ran}.hatchran'") > /dev/null 2>&1
+  st_case 'OS_VERIFY_LOCK_NO_FILTER_CHECK=1 lets a deliberate call through' "$?" 0
+  st_case 'and that command really ran' \
+    "$([[ -e "${fp_ran}.hatchran" ]] && echo ran || echo 'did not run')" ran
+
+  # A command with no --filter at all must be untouched by any of this.
+  (cd "$repo_root" && bash "$SELF" -c true) > /dev/null 2>&1
+  st_case 'a command with no --filter is unaffected' "$?" 0
 
   printf '\n'
   if ((st_fail > 0)); then

@@ -1971,6 +1971,37 @@ jobs:
       - name: Read-side tenant chokepoint gate
         run: pnpm check:tenant-chokepoint
 
+      # Every committed `pnpm --filter <name>` must name a real workspace
+      # package (#10853).
+      #
+      # ⛔ `pnpm --filter <name>` EXITS 0 when the filter matches nothing:
+      #
+      #     $ pnpm --filter @objectstack/definitely-not-a-package test; echo $?
+      #     No projects matched the filters in "..."
+      #     0
+      #
+      # So a step here, a package.json script or a `scripts/**` helper can name
+      # a package that does not exist and stay GREEN forever, measuring nothing
+      # and reporting success. `cmd > log 2>&1; ec=$?` captures the 0 perfectly;
+      # the log even says what happened and nothing reads it. Same family as the
+      # `--`-before-vitest-args trap: exit 0, nothing measured, output that reads
+      # like success — #4690, sitting underneath the command used to PROVE
+      # results.
+      #
+      # This gate reads SPELLINGS THAT ARE CHECKED IN, and that is the whole of
+      # its claim. It cannot see a filter an agent types at a prompt, which is
+      # the population that actually bit; that half is covered, only for callers
+      # of the shared verify lock, by `scripts/pm/os-verify-lock.sh`'s filter
+      # preflight. Disjoint populations, neither a substitute for the other.
+      #
+      # Reads package.json, pnpm-workspace.yaml and text under `scripts/**` and
+      # `.github/workflows/**`. No build, no pnpm invocation, no network,
+      # sub-second. The `check:` key runs the shared resolver's --self-test
+      # first, then the gate's, then the gate: a checker whose resolver is
+      # broken has no verdict worth printing.
+      - name: Every committed pnpm --filter names a real package
+        run: pnpm check:pnpm-filter-targets
+
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
