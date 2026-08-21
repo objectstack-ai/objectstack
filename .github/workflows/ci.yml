@@ -696,6 +696,21 @@ jobs:
     # filter-`skipped` (#4928) keep their existing meanings — see the script.
     name: Test Core
     needs: [test, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # What this required aggregate stands in for, stated rather than inferred.
+    # `node scripts/check-aggregator-roster.mjs` asserts MEMBERS + NON_MEMBERS
+    # equals `needs:` EXACTLY, in both directions, so a lane added to this
+    # workflow and forgotten here cannot ride green behind "Test Core" as an
+    # advisory check-run, and a `needs:` entry whose job was deleted cannot
+    # keep being claimed. `filter` is a non-member on purpose: it is consulted
+    # for the #4928 skipped-only-when-filter-succeeded guard, not aggregated —
+    # and having somewhere to SAY that is what stops the roster from being
+    # widened to launder a red. The members are cross-checked against the
+    # `--leg` tokens below, so this declaration cannot drift into a second
+    # source of truth for what check:shard-attestation counts.
+    env:
+      OS_AGGREGATOR_MEMBERS: test
+      OS_AGGREGATOR_NON_MEMBERS: filter
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1280,6 +1295,14 @@ jobs:
     # is why `abandoned` gets counting rather than a place in a word list.
     name: Dogfood Regression Gate
     needs: [dogfood, dogfood-verify, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # Both legs this context covers, named. See test-gate above for the full
+    # note; the same gate asserts this list equals `needs:` in both directions
+    # and equals the `--leg` tokens the verdict actually counts. `filter` is
+    # the #4928 input, not a lane.
+    env:
+      OS_AGGREGATOR_MEMBERS: dogfood dogfood-verify
+      OS_AGGREGATOR_NON_MEMBERS: filter
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10

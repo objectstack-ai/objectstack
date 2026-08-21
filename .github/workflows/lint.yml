@@ -1355,6 +1355,35 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Aggregator roster gate (#10490). Three required contexts are aggregate
+      # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
+      # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
+      # each decides its verdict from what it lists in `needs:`. Nothing held
+      # those rosters to anything. Add a lane to a workflow, forget the
+      # `needs:` line, and the lane's check-run is ADVISORY (only the aggregate
+      # NAME is in the ruleset's required set), so the aggregate goes green
+      # without ever looking at it: a job that appears in the checks list,
+      # appears required, and blocks nothing. Neither existing gate covers it —
+      # `check:required-contexts` pins the aggregate's NAME and job id and says
+      # nothing about `needs:`, and `check:shard-attestation` covers only the
+      # `--leg`-to-`needs:` direction for ci.yml's two.
+      # Each aggregate now DECLARES its membership in job-level
+      # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` (triage's ruling
+      # on the card: an explicit per-aggregator declaration, local to the
+      # workflow file, NOT a repo-wide job-id naming convention), and this gate
+      # asserts declaration == `needs:` in BOTH directions. Every unreadable
+      # state is a refusal rather than a quiet pass — no aggregator found, a
+      # workflow that will not parse, or a roster that resolves to zero members
+      # all exit 1 naming what could not be read (#4690).
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that
+      # alias belongs in root package.json, which is declared territory of the
+      # @changesets/cli v3 migration lane (#9465) while it runs. Reads two YAML
+      # files; sub-second.
+      - name: Aggregator roster gate
+        run: |
+          node scripts/check-aggregator-roster.mjs --self-test
+          node scripts/check-aggregator-roster.mjs
+
       # Required-context name pin (#6865). A GitHub required status check is
       # matched BY CHECK-RUN NAME, and a job's check-run name is its `name:`
       # value — so eight job `name:` literals across this file and ci.yml are
@@ -3104,6 +3133,26 @@ jobs:
       - typecheck-workspace
       - typecheck-debt
       - typecheck-consumers
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────────
+    # The lanes this required aggregate stands in for, named rather than
+    # counted. It replaces the hand-maintained `EXPECTED_LANES = 4` that used to
+    # live in the verdict below: a number covers one aggregate, goes stale the
+    # moment a lane moves, and cannot say WHICH lane went missing.
+    #
+    # Two things read this list, which is why it is real YAML and not a comment:
+    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the lint
+    #     job) asserts it equals this job's `needs:` EXACTLY, in both
+    #     directions. A fifth lane added to this workflow and forgotten here
+    #     would otherwise ride green as an ADVISORY check-run behind the
+    #     required "TypeScript Type Check" context — a job that appears in the
+    #     checks list, appears required, and blocks nothing;
+    #   - the verdict step below (at run time) checks the same equality against
+    #     `toJSON(needs)`, so a drift is red in CI even before the lint job
+    #     reaches it.
+    # This aggregate has no non-member inputs: every job it lists in `needs:` is
+    # a lane whose verdict it carries.
+    env:
+      OS_AGGREGATOR_MEMBERS: typecheck-source-gates typecheck-workspace typecheck-debt typecheck-consumers
     # `always()` is load-bearing and must not become `success()` or the implicit
     # bare condition: with those, a failed lane SKIPS this job, and a skipped
     # required context is not a red — it is an absence, which reads as green in
@@ -3120,10 +3169,12 @@ jobs:
       # Fail-closed, and deliberately NOT a hand-written list of the four lane
       # names. The verdict iterates `toJSON(needs)`, so every job wired into
       # `needs:` above is enforced automatically and none can be forgotten in
-      # the logic here. The lane COUNT is asserted separately as the tripwire
-      # for the other half of that drift: a fifth lane added to the workflow but
-      # never wired into `needs:` would otherwise ride green, unwatched, behind
-      # a required context — the dormant-gate shape this repo keeps paying for.
+      # the logic here. The other half of that drift — a fifth lane added to the
+      # workflow but never wired into `needs:`, which would ride green and
+      # unwatched behind a required context — is caught by comparing `needs:`
+      # against the job's declared ROSTER (#10490). That replaces the hand-
+      # maintained `EXPECTED_LANES` count this step used to carry: a count goes
+      # stale the moment a lane moves and cannot say which lane went missing.
       # Anything that is not exactly `success` fails, `skipped` and `cancelled`
       # included: a lane that never ran has not proved anything.
       - name: Verify every type-check lane succeeded
@@ -3135,14 +3186,26 @@ jobs:
           cat > "$RUNNER_TEMP/verify-lanes.mjs" <<'NODE'
           import { readFileSync } from 'node:fs';
 
-          // Every lane this aggregator is expected to carry. Adding a lane to
-          // `needs:` without bumping this is red on purpose, and so is the
-          // reverse -- the number and the roster have to be changed together.
-          const EXPECTED_LANES = 4;
+          // The roster this aggregator declares, read from the job-level
+          // `OS_AGGREGATOR_MEMBERS` above rather than re-typed here -- one
+          // declaration, two readers (this step, and the static
+          // scripts/check-aggregator-roster.mjs in the lint job).
+          const declared = (process.env.OS_AGGREGATOR_MEMBERS ?? '').trim().split(/\s+/).filter(Boolean);
+          const declaredSet = new Set(declared);
 
           const needs = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/needs.json`, 'utf8'));
           const ids = Object.keys(needs).sort();
           let bad = 0;
+
+          // An empty declaration would make every comparison below trivially
+          // true. Refuse rather than report a green over an unread roster.
+          if (declared.length === 0) {
+            console.log(
+              '::error::this job declares no OS_AGGREGATOR_MEMBERS roster, so there is nothing to hold `needs:` to -- ' +
+                'refusing to report a pass (#4690).',
+            );
+            bad++;
+          }
 
           for (const id of ids) {
             const result = needs[id]?.result ?? '(no result reported)';
@@ -3154,11 +3217,18 @@ jobs:
             bad++;
           }
 
-          if (ids.length !== EXPECTED_LANES) {
+          for (const id of declared.filter((d) => !ids.includes(d))) {
             console.log(
-              `::error::this gate aggregates ${ids.length} lane(s) but expects ${EXPECTED_LANES}: ${ids.join(', ')}. ` +
-                `A lane was added or removed -- update EXPECTED_LANES here AND make sure every lane is listed in ` +
-                `this job's \`needs:\`, or the unlisted one rides green behind a required context.`,
+              `::error::declared lane \`${id}\` is missing from this job's \`needs:\`, so its verdict is NOT aggregated -- ` +
+                `it publishes an advisory check-run and rides green behind a required context.`,
+            );
+            bad++;
+          }
+
+          for (const id of ids.filter((i) => !declaredSet.has(i))) {
+            console.log(
+              `::error::job \`${id}\` is in this job's \`needs:\` but not in the declared roster -- add it to ` +
+                `OS_AGGREGATOR_MEMBERS, or drop it from \`needs:\`.`,
             );
             bad++;
           }
@@ -3167,6 +3237,6 @@ jobs:
             console.log(`check-typecheck-lanes: FAILED (${bad} problem(s) above).`);
             process.exit(1);
           }
-          console.log(`check-typecheck-lanes: OK (${ids.length}/${EXPECTED_LANES} lanes succeeded).`);
+          console.log(`check-typecheck-lanes: OK (${ids.length} declared lane(s) succeeded: ${ids.join(', ')}).`);
           NODE
           node "$RUNNER_TEMP/verify-lanes.mjs"
