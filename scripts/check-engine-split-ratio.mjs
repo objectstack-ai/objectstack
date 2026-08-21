@@ -97,7 +97,13 @@ function arg(argv, name, fallback) {
  */
 export function renderHorizon(horizon) {
   if (!horizon.shallow) return `  history horizon:      complete clone; ref tip ${horizon.tip}`;
-  return `  history horizon:      shallow clone, oldest visible commit ${horizon.floor} (predates the window); ref tip ${horizon.tip}`;
+  // `(predates the window)` is a CLAIM, so it is spelled only when it holds.
+  // Measured while ablating the refusal above: with the guard removed this line
+  // still printed "predates the window" beside a floor that sat inside it —
+  // an annotation written on the assumption that it was reached only after a
+  // pass becomes a false statement the moment anything reaches it otherwise.
+  const placed = horizon.covered ? ' (predates the window)' : ' — INSIDE the window, this metric is not measurable here';
+  return `  history horizon:      shallow clone, oldest visible commit ${horizon.floor}${placed}; ref tip ${horizon.tip}`;
 }
 
 /** The refusal, as words. Pure, so --self-test pins that it names both facts. */
@@ -220,7 +226,11 @@ function selfTest() {
     renderHorizon({ shallow: false, tip: '2026-08-21' }).includes('complete clone')
     && renderHorizon({ shallow: false, tip: '2026-08-21' }).includes('2026-08-21'));
   t('an ALLOWED shallow answer still prints its floor — the number travels with its horizon',
-    renderHorizon({ shallow: true, floor: '2026-06-02', tip: '2026-08-21' }).includes('2026-06-02'));
+    renderHorizon({ shallow: true, covered: true, floor: '2026-06-02', tip: '2026-08-21' }).includes('2026-06-02'));
+  t('and the horizon line never CLAIMS the floor predates the window unless it does',
+    !renderHorizon({ shallow: true, covered: false, floor: '2026-06-02', tip: '2026-08-21' }).includes('predates')
+    && /INSIDE the window/.test(renderHorizon({ shallow: true, covered: false, floor: '2026-06-02', tip: '2026-08-21' })),
+    renderHorizon({ shallow: true, covered: false, floor: '2026-06-02', tip: '2026-08-21' }));
   const refusal = renderRefusal({
     horizon: { reason: 'floor sits INSIDE the window', tip: '2026-08-21', remedy: 'git -C /x fetch --unshallow origin' },
     days: 90,

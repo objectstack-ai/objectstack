@@ -131,8 +131,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
      "$([[ "$(git -C "$tmp/shallow" rev-parse --is-shallow-repository)" == true ]] && echo 1 || echo 0)"
 
   # Wiring: the guard is worthless if section 4 stops calling it.
+  #
+  # The needle is ASSEMBLED from two adjacent literals rather than written out,
+  # and that is load-bearing. Written out, the pattern occurs in this very
+  # assertion, so the grep matches its own source line and the case passes with
+  # section 4 unwired — measured exactly that way while ablating this guard:
+  # the call was deleted, the script still parsed, and the pin printed a tick.
+  # A pin that cannot fail is worse than no pin, because it is believed.
+  needle="elif ! cloud_window""_guard \"\$CLOUD_ROOT\""
   ok "section 4 routes its windowed question through the guard" \
-     "$(grep -q 'cloud_window_guard "$CLOUD_ROOT" "$prev_date"' "${BASH_SOURCE[0]}" && echo 1 || echo 0)"
+     "$(grep -qF "$needle" "${BASH_SOURCE[0]}" && echo 1 || echo 0)" "needle: $needle"
 
   echo
   if [[ "$fails" == 0 ]]; then echo "collect-release-notes --self-test: all cases passed."; else echo "collect-release-notes --self-test: $fails FAILED."; exit 1; fi
