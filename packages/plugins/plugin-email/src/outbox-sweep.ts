@@ -92,7 +92,27 @@ function humanMs(ms: number): string {
  */
 interface SweepLogger {
   info?: (msg: string, meta?: any) => void;
-  warn?: (msg: string, meta?: any) => void;
+  /**
+   * The GUARANTEED channel (#9754). `error` below stays optional — hosts do
+   * inject reduced sinks — so `warn` is where a durability report lands when
+   * `error` is absent, and a fallback that may itself be missing is not a
+   * fallback: `{ info }` alone used to be a legal sink here, and against it the
+   * boot sweep's "N stranded row(s) could NOT be delivered" summary printed
+   * nothing at all. Non-optional is what makes that silence unrepresentable
+   * instead of merely discouraged.
+   *
+   * ⛔ Do NOT "simplify" this by making `error` required instead — that
+   * forecloses the reduced sinks hosts legitimately pass (#9754 option C,
+   * measured and rejected).   *
+   * ⚠️ Call sites still spell the fallback `logger?.warn?.(…)`. That `?.` is not
+   * doubt about this declaration — it is the backstop for hosts the TYPE cannot
+   * reach (a plain-JS embedder, or a cast). Dropping it was measured: a sink
+   * that lies about its shape then throws `logger?.warn is not a function`
+   * INSIDE the per-row durability catch, aborting the very batch this function
+   * promises never to stop. Silence for a lying host is the lesser failure; the
+   * guarantee this member adds is at AUTHORING time, where it belongs.
+   */
+  warn: (msg: string, meta?: any) => void;
   error?: (msg: string, meta?: any) => void;
 }
 
