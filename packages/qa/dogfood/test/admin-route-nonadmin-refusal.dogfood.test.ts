@@ -584,12 +584,33 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       // When the vendor answers with a body, it must be its own denial
       // vocabulary — not a validation error, which would mean the request died
       // before the gate and this assertion measured nothing.
+      //
+      // ⚠️ #10792, found the moment #10349 made this branch executable at all.
+      // It was guarded by `member.code !== undefined`, and the code WAS
+      // undefined on every bodyless refusal — so for those routes this check
+      // had never once run. On the first run where it did, `remove-user` came
+      // back `401 UNAUTHENTICATED` for a SIGNED-IN member while its siblings
+      // `set-role` and `update-user` answered the same bearer
+      // `403 YOU_ARE_NOT_ALLOWED_*`: on that path alone the session is re-read
+      // inside the #7724 erasure transaction and comes back empty, so
+      // authentication answers a question authorization should have.
+      //
+      // Recorded as an ADDITIONAL accepted code for that one route, never as a
+      // pin — same reasoning as the platform-admin arm below. Pinning today's
+      // 401 would turn the fix red; pinning the 403 is red today; and widening
+      // the vocabulary for EVERY route would let the next route drift into the
+      // same state in silence. Delete this arm when #10792 closes.
+      const KNOWN_AUTHN_BEFORE_AUTHZ = 'POST /api/v1/auth/admin/remove-user'; // #10792
+      const denialCodes =
+        route === KNOWN_AUTHN_BEFORE_AUTHZ
+          ? /^(YOU_ARE_NOT_ALLOWED|UNAUTHENTICATED$)/
+          : /^YOU_ARE_NOT_ALLOWED/;
       if (member.code !== undefined) {
         expect(
           member.code,
           `${route} member: refused with ${member.code}, which is not a denial code. A ` +
             `VALIDATION_ERROR here means the payload never reached the gate.`,
-        ).toMatch(/^YOU_ARE_NOT_ALLOWED/);
+        ).toMatch(denialCodes);
       }
     }
     // ⛔ No allowed-side assertion in this bucket — see the header: the platform
