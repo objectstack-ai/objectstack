@@ -305,20 +305,54 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
 
 // ── workspace enumeration ───────────────────────────────────────────────────
 
-/** Directory globs from pnpm-workspace.yaml, which are all `<dir>/*`. */
-const WORKSPACE_PARENT_DIRS = [
-  'packages',
-  'packages/apps',
-  'packages/adapters',
-  'packages/connectors',
-  'packages/drivers',
-  'packages/plugins',
-  'packages/qa',
-  'packages/services',
-  'packages/triggers',
-  'apps',
-  'examples',
+/**
+ * The workspace globs from pnpm-workspace.yaml, spelled AS GLOBS.
+ *
+ * ## Why the `/*` is written out rather than left to the comment (#9955)
+ *
+ * This array IS this gate's declared population: every package it walks lives
+ * directly under one of these parents. `scripts/pm/dispatch-gates.mjs` derives
+ * the gate list a dispatch brief pastes by scanning each gate's module body for
+ * the path literals it operates on — so this array is the only thing that tells
+ * that tool which cards should be sent here.
+ *
+ * Its covering rule refuses a literal with NO path separator (`packages`,
+ * `apps`, `examples`) as too generic, deliberately and measured: admitting bare
+ * top-level words takes that tool from 19k watch-hint pairs to 158k, because
+ * `packages` is a path COMPONENT in dozens of gates that never read the root.
+ * The sanctioned escape is for a gate to declare its own subtree in a spelling
+ * with a separator in it, which is what these entries now do.
+ *
+ * Written as bare directory names, 8 of the 11 entries carried a separator and
+ * 3 did not, so the derivation's answer for this gate was decided by WHERE a
+ * package happens to sit: measured on this tree, 1832 of the 4844 tracked files
+ * under packages/ derived this gate, and the ones that did not were exactly the
+ * flat `packages/<pkg>` layouts plus all of apps/ and examples/. A new test in
+ * a nested package named this gate; the identical test in a flat one did not,
+ * and nothing in the output said so. That is worse than an honest blind spot —
+ * it works for a third of the tree, so it reads as working.
+ *
+ * The dropped `/*` is re-derived below, so the walk is unchanged and there is
+ * no second list to keep in sync. Keep the separator in every entry: a tidy-up
+ * back to bare directory names re-opens the blind spot silently, and the
+ * self-test case at the bottom of this file is what makes that loud instead.
+ */
+const WORKSPACE_PARENT_GLOBS = [
+  'packages/*',
+  'packages/apps/*',
+  'packages/adapters/*',
+  'packages/connectors/*',
+  'packages/drivers/*',
+  'packages/plugins/*',
+  'packages/qa/*',
+  'packages/services/*',
+  'packages/triggers/*',
+  'apps/*',
+  'examples/*',
 ];
+
+/** The parent directories those globs enumerate — each glob minus its leaf. */
+const WORKSPACE_PARENT_DIRS = WORKSPACE_PARENT_GLOBS.map((glob) => glob.replace(/\/\*$/, ''));
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache']);
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
@@ -1313,6 +1347,26 @@ function selfTest() {
     const emptyResult = check(empty, {});
     expect(has(emptyResult.failures, 'the scan is broken'), 'an empty tree did not trip the census guard');
     rmSync(empty, { recursive: true, force: true });
+
+    // ── the declared population must stay READABLE by the dispatch deriver ─
+    //
+    // scripts/pm/dispatch-gates.mjs decides which cards are told to run this
+    // gate by scanning this file's module body for the path literals it
+    // operates on, and its covering rule refuses a literal carrying no path
+    // separator (after the leading ./ or ../ an extractor strips) as too
+    // generic. WORKSPACE_PARENT_GLOBS is this gate's WHOLE declared
+    // population, so an entry that loses its separator takes every package
+    // under that parent out of the derived gate list SILENTLY: the gate keeps
+    // working, CI keeps failing on it, and no dispatch brief sends anyone
+    // here. That is what the bare spelling cost, measured in that constant's
+    // docblock (#9955). Asserted here rather than left to review because the
+    // regression is a tidy-up nobody would flag.
+    for (const glob of WORKSPACE_PARENT_GLOBS) {
+      expect(
+        glob.replace(/^(?:\.\.?(?:\/|$))+/, '').includes('/'),
+        `workspace parent ${glob} carries no path separator, so scripts/pm/dispatch-gates.mjs refuses it as too generic and every package under it drops out of the derived gate list`,
+      );
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
