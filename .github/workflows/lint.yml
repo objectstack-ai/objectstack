@@ -1288,6 +1288,26 @@ jobs:
       - name: Workflow status-function guard
         run: pnpm check:workflow-status-functions
 
+      # Additive-label-write self-test (#10703). `pr-automation.yml` writes this
+      # PR's labels with `scripts/pr-labels.mjs`, whose whole contract is that it
+      # emits POST and targeted DELETE and NEVER a whole-set
+      # `PUT /issues/{n}/labels` -- the verb that erased a seat-applied
+      # `skip-changeset` one second after it was written on PR #10698, turning a
+      # PR that publishes nothing into a false `changeset-check` red. The
+      # self-test pins the pure write-plan builders (asserting no plan any input
+      # can produce carries that verb), the size buckets (`<`, not `<=`, matching
+      # the action it replaced) and the minimatch subset the path matcher
+      # implements -- and it parses the REAL checked-in `.github/labeler.yml`, so
+      # a pattern that drifts outside that subset fails here instead of silently
+      # mislabelling PRs.
+      #
+      # It runs in THIS job and not only in `Check PR Size` because that context
+      # is deliberately excluded from the required set (a `labeled` event
+      # republishes it as `skipped`, which washes green -- see
+      # check-required-contexts.mjs), so a red there blocks nothing.
+      - name: Additive label-write self-test
+        run: node scripts/pr-labels.mjs --self-test
+
       # Cross-repo closer outcome contract (#9595, and #9575 before it).
       # `cross-repo-issue-closer.yml` carries ~150 lines of inline
       # github-script, and it is code nobody has ever seen run: over the 1176
