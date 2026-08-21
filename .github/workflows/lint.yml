@@ -2061,6 +2061,31 @@ jobs:
       - name: Ratchet-remedy authority convention (#8435) across the gate farm
         run: pnpm check:ratchet-remedy-authority
 
+      # The published `skills/**` bundle is loaded WHOLE into customer agent context
+      # windows, so its length is a per-token cost paid again in every customer
+      # session — and until #10473 nothing priced it. The maintainer ruling that
+      # established the principle (2026-08-21, on PR #10402) had no mechanism behind
+      # it, leaving a reviewer's memory as the only control; the `.claude/**` line
+      # ratchet had proven by then that a prose-only length rule gets rediscovered
+      # the expensive way.
+      #
+      # Runs its own --self-test FIRST, then the scan. The self-test is the half that
+      # keeps the scan meaningful: it drives the verdict paths over fixtures, so a
+      # counting or enumeration regression fails here rather than reporting a clean
+      # bundle while measuring nothing. The scan prints the bundle price tag on
+      # SUCCESS as well as failure, which is the visibility half of #10473 — every
+      # PR's log carries each file's distance from its ceiling.
+      #
+      # Invoked as `node`, NOT through an npm script: root package.json is fenced
+      # (#9465), and this gate needs no wiring there — same shape as the two
+      # `node scripts/…` steps earlier in this lane. Static text only, no build, so
+      # it belongs in this pre-build group. No paths filter, for the standard reason:
+      # a filter on skills/** would go dormant on the PR that edits the ceilings.
+      - name: Published skills token ratchet (#10473) + its self-test
+        run: |
+          node scripts/check-skills-token-ratchet.mjs --self-test
+          node scripts/check-skills-token-ratchet.mjs
+
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks
 
