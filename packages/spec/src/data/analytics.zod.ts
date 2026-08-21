@@ -19,6 +19,7 @@ import { FilterConditionSchema } from './filter.zod';
  */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 export const AggregationMetricType = z.enum([
   'count', 
   'sum', 
@@ -71,6 +72,27 @@ export const MetricSchema = lazySchema(() => strictObject(
       + 'registered and the metric computed as if the key had never been written.',
     // `title` is CORRECT one level up (`CubeSchema.title`); a metric spells it `label`.
     aliases: { title: 'label' },
+    guidance: {
+      // REMOVED (#10414, ADR-0049 enforce-or-remove): `filters` was a declared
+      // per-metric raw-SQL filter (`filters: [{ sql }]`) with ZERO consumers —
+      // both SQL strategies aggregate `sql` and never read it, so a
+      // hand-authored condition parsed, registered, and silently returned the
+      // UNFILTERED aggregate under the author's metric name (the #10298 shape,
+      // one level up). What actually filters: the query's `where`, the
+      // condition folded into the metric's own `sql` expression, or an
+      // ADR-0021 dataset measure's structured `filter` (#10411). The nested
+      // `strictObject` the key carried (closed by #4001 batch D) is gone with
+      // it — strictness on a shape nothing reads was fake compliance either way.
+      filters:
+        '`measures.<metric>.filters` was removed in @objectstack/spec 17 (#10414, ADR-0049) — '
+        + 'it never had an effect: no strategy read it (NativeSQLStrategy and ObjectQLStrategy '
+        + 'both aggregate the metric\'s `sql` and ignore `filters`), so an authored '
+        + '`filters: [{ sql: … }]` parsed clean and the query returned the UNFILTERED aggregate. '
+        + 'Delete the key. To filter what a metric measures: filter at query time with `where` '
+        + '(canonical Query DSL FilterCondition), fold the condition into the metric\'s own `sql` '
+        + 'expression, or use an ADR-0021 dataset measure\'s structured `filter`. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    },
   },
   {
     name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique metric ID'),
@@ -82,16 +104,12 @@ export const MetricSchema = lazySchema(() => strictObject(
     /** Source Calculation */
     sql: z.string().describe('SQL expression or field reference'),
 
-    /** Filtering for this specific metric (e.g. "Revenue from Premium Users") */
-    filters: z.array(strictObject(
-      {
-        surface: 'this metric filter',
-        history: 'Until #4001 batch D an undeclared key beside `sql` was silently dropped.',
-      },
-      {
-        sql: z.string(),
-      },
-    )).optional(),
+    // `filters` was REMOVED here (#10414) — see the `guidance` entry above for
+    // the full story and the replacement channels. The raw-SQL fragment shape
+    // (`[{ sql: string }]`) also ran against the platform's structured
+    // `FilterCondition` direction: a raw fragment cannot be parameterized,
+    // re-targeted per driver dialect, or walked by the lint rules
+    // (`packages/lint/src/filter-walk.ts` deliberately never enumerated it).
 
     /** Format for display (e.g. "currency", "percent") */
     format: z.string().optional(),
@@ -162,12 +180,19 @@ export const CubeJoinSchema = lazySchema(() => strictObject(
  * Strict as of #4001 batch D. Doors, measured: `defineCube()` (the factory the
  * showcase example authors through) and `defineStack({ analyticsCubes })` /
  * artifact ingest, both of which parse `StackSchema` → `analyticsCubes[]`.
- * The ADR-0010 protection envelope is deliberately NOT declared here: no
- * protected item re-parses through this schema — `CubeRegistry.register` takes
- * typed objects without a parse, `analytics_cube` resolves no
- * `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s it), and
- * artifact ingest parses the compiled definition BEFORE `applyProtection`
- * stamps `_packageId`/`_provenance` at registration.
+ *
+ * [#10194] This docblock used to say the ADR-0010 protection envelope is
+ * deliberately NOT declared here, on the premise that `analytics_cube`
+ * resolves no `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s
+ * it). #10194 retired that premise: `analytics_cube` is now bound in
+ * `UNREGISTERED_KIND_SCHEMAS`, so `PUT /meta/analytics_cube/:name` parses a
+ * body through THIS schema — and the `getMetaItemLayered` → `saveMetaItem`
+ * round-trip carries the `applyProtection` stamp. The shape is `.strict()`,
+ * so without the envelope spread below the new 422 would fire at the
+ * runtime's own stamp instead of at malformed author input. The other two
+ * observations stand: `CubeRegistry.register` takes typed objects without a
+ * parse, and artifact ingest parses the compiled definition BEFORE
+ * `applyProtection` stamps `_packageId`/`_provenance` at registration.
  */
 export const CubeSchema = lazySchema(() => strictObject(
   {
@@ -212,6 +237,11 @@ export const CubeSchema = lazySchema(() => strictObject(
 
     /** Access Control */
     public: z.boolean().default(false),
+
+    // ADR-0010 — runtime protection envelope (internal — set by loader).
+    // [#10194] See the docblock above for why this spread became load-bearing
+    // the day the `/meta` write door started parsing bodies with this schema.
+    ...MetadataProtectionFields,
   },
 ));
 
@@ -237,9 +267,13 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
     // sorting `orderBy`; the analytics dialect spells it `order`.
     aliases: { orderBy: 'order' },
     guidance: {
+      // The second sentence used to point at the cube metric's own `filters` —
+      // a key #10414 removed (never suggest a key the schema cannot accept;
+      // the `triggerPhrase` lesson in strict-object.ts).
       filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
-        + 'FilterCondition, the same shape find() takes). Per-metric filtering lives on the '
-        + 'cube metric\'s own `filters`.',
+        + 'FilterCondition, the same shape find() takes). There is no per-metric filter key '
+        + 'either (#10414): fold the condition into the metric\'s own `sql` expression, or use '
+        + 'an ADR-0021 dataset measure\'s structured `filter`.',
     },
     // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds
     // only the #3878 `retiredKey` tombstones, and a tombstone must never be

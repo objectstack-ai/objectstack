@@ -88,15 +88,19 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
     expect(reject(ObjectStackDefinitionSchema, stack)).toContain('publik');
   });
 
-  it('`analytics_cube` deliberately resolves NO saveMetaItem schema — the strictness does not ride a door that does not exist', () => {
-    // The metadata bridge registers cubes as `analytics_cube` items, but the
-    // type has no schema entry, so `saveMetaItem` never parses one — which is
-    // also why the ADR-0010 envelope is NOT declared on CubeSchema: no
-    // protected item ever re-parses through it. If this expectation ever
-    // flips, the envelope question must be re-asked before this line is
-    // "fixed" (the webhook precedent: both metadata load paths stamp
-    // `_packageId`/`_provenance` on EVERY type before storage).
-    expect(getMetadataTypeSchema('analytics_cube')).toBeUndefined();
+  it('[#10194] `analytics_cube` now resolves the SAME schema at the saveMetaItem door', () => {
+    // This pin used to assert the opposite — `getMetadataTypeSchema` answering
+    // `undefined` — and its comment demanded that the ADR-0010 envelope
+    // question be re-asked before the line was "fixed". It was: #10194 bound
+    // `analytics_cube` in `UNREGISTERED_KIND_SCHEMAS` (so `PUT
+    // /meta/analytics_cube/:name` stops storing any JSON as `success: true`),
+    // and CubeSchema now declares `...MetadataProtectionFields`, exactly per
+    // the webhook precedent the old comment cited — both metadata load paths
+    // stamp `_packageId`/`_provenance` on EVERY type before storage, so a
+    // strict schema at the overlay door must declare the stamp or 422 the
+    // runtime's own envelope. Identity, not equivalence: the door must parse
+    // with THIS file's CubeSchema, or the two doors drift apart again.
+    expect(getMetadataTypeSchema('analytics_cube')).toBe(CubeSchema);
   });
 
   it('controls parse — these tests fail closed, they do not reject everything', () => {
@@ -141,10 +145,16 @@ describe('#4001 batch D — closed sites reject unknown keys where they live', (
     ).toContain('drillMembers');
   });
 
-  it('`Metric.filters[]` — the nested filter item', () => {
+  // Batch D also closed the nested `Metric.filters[]` item ("this metric
+  // filter"), pinned here as `{ sql: 'x', field: 'y' }` → rejection naming
+  // `field`. #10414 removed `Metric.filters` outright (ADR-0049
+  // enforce-or-remove: no strategy ever read it), so the nested surface no
+  // longer exists — the batch-D verdict for it is SUPERSEDED, not reopened.
+  // The key itself now rejects with the retirement prescription:
+  it('`Metric.filters` — REMOVED (#10414); the key rejects with the prescription, not as a bare unknown', () => {
     expect(
-      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x', field: 'y' }] }),
-    ).toContain('field');
+      reject(MetricSchema, { name: 'm', label: 'M', type: 'count', sql: '*', filters: [{ sql: 'x' }] }),
+    ).toContain('was removed in @objectstack/spec 17 (#10414');
   });
 
   it('`Dimension` — through the cube `dimensions` record', () => {

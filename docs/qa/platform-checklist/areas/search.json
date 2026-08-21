@@ -2,6 +2,59 @@
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "search",
   "title": "Record search — $search executor, field scoping, RLS composition, pinyin recall, freshness",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed) and every call is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted. Shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670).",
+    "qa-contributor-bound-member": {
+      "title": "A CONTRIBUTOR-BOUND member — an identity that reads a strict SUBSET of showcase_invoice rows (fresh sign-up + one sys_user_position row)",
+      "why": "Both-sides RLS needs a persona for whom a specific row is invisible while the object itself is readable. ⚠️ Neither seeded demo persona is that persona, and reaching for them is the trap this recipe closes — measured on 17.1.0 (#10257): Mei (phone.demo@example.com) holds NO position, so showcase_contributor never merges and showcase_invoice answers PERMISSION_DENIED — the OBJECT gate, no rows at all, not a subset; Ada (auditor.demo@example.com) holds `auditor` → showcase_auditor, which carries `showcase_invoice: { allowRead: true, viewAllRecords: true }` — VAMA bypasses record scope entirely, so she sees all 12 — also not a subset. The persona that IS a subset is a member bound to the `contributor` position: showcase_contributor grants read/create/edit on showcase_invoice while the `invoice_own_rows` RLS narrows selects to `owner == current_user.email`, and none of the seeded invoices are owned by a fresh sign-up. Nothing here needs a seed change or a repo file — the whole gap was that the recipe existed only as prose on one item, which is why a runner reached for the demo personas instead and recorded blocked(fixture).",
+      "provenance": "run #7629 (framework, 2026-08-11) drove search.rls-both-personas to 4/4 PASS on exactly this persona — 3 invoices visible to the member vs 15 to admin. Promoted from prose on that one item to a replayable area recipe by the 17.1.0 sweep (#10236 B1); the Mei/Ada measurements above are from #10257.",
+      "app": "showcase",
+      "requires": [
+        "a stock dev boot — the position→permission-set bindings are created automatically at startup on `kernel:bootstrapped`, including ['contributor','showcase_contributor'] (examples/app-showcase/src/security/bind-position-sets.ts, POSITION_PERMISSION_SET_BINDINGS). ⛔ Do NOT hand-create a sys_position_permission_set row: it already exists, and a duplicate proves nothing about the merge",
+        "system-context write access for the position binding (the sys_user_position insert) — the same pattern access-security.json's permission-set items already replay",
+        "an isolated boot (own port + file DB, dogfood §0); export OS_PORT=<port> as well as passing -p (RUNNER.md's connector self-URL fact) so unrelated flow noise does not pollute the run"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/auth/sign-up/email",
+          "body": { "email": "qa-contributor@verify.test", "password": "<a fresh per-run password>", "name": "QA Contributor" },
+          "expect": "2xx with a session for a brand-new principal. This works on a stock dev boot — three identities were minted in one call each in #10257 — so the identity half needs no seed change. Use a UNIQUE email per run: a re-run against a live DB collides on the existing account.",
+          "source": "packages/plugins/plugin-auth (better-auth email sign-up); exercised end-to-end by access-security.record-share-grant-revoke, which was driven on minted A/B/C identities in #10257"
+        },
+        {
+          "step": 2,
+          "call": "resolve the new principal's sys_user id with a system-context read of sys_user by email",
+          "expect": "one row. Needed because step 3 binds by user id, not by email.",
+          "source": "the house pattern access-security.json's items already use ('fresh sign-ups whose sys_user ids are resolved system-side')"
+        },
+        {
+          "step": 3,
+          "call": "insert a sys_user_position row in system context binding that user id to the `contributor` position",
+          "expect": "one row. This is THE step that makes the persona a subset reader: `contributor` resolves to showcase_contributor (auto-bound at boot, see requires), which grants showcase_invoice allowRead/allowCreate/allowEdit, and the RLS rule `invoice_own_rows` (using: `owner == current_user.email`, positions: ['contributor']) narrows every select to rows the caller owns.",
+          "source": "examples/app-showcase/src/security/permission-sets.ts — ContributorPermissionSet.objects.showcase_invoice and rowLevelSecurity['invoice_own_rows']; examples/app-showcase/src/security/positions.ts (the `contributor` position); bind-position-sets.ts for the position→set edge"
+        },
+        {
+          "step": 4,
+          "call": "PROVE THE SUBSET before scoring anything: as the new member, GET /api/v1/data/showcase_invoice (list) and GET /api/v1/data/showcase_invoice/<id of INV-1003>",
+          "expect": "the list answers 200 with ZERO of the twelve seeded invoices — not 403. A 403 means the position binding did not take (the OBJECT gate answered first, which is Mei's shape); a full 12 means it resolved to a VAMA-carrying set (Ada's shape). Both are mis-provisioning, and both would make a later verdict prove the opposite of what it reads. INV-1003 is linus@example.com's and is the canonical invisible row.",
+          "source": "examples/app-showcase/src/data/seed — INV-1001..INV-1012, owners ada@example.com ×5 / linus@example.com ×4 / grace@example.com ×3; ADR-0090 D5: every authenticated member also holds the `everyone` baseline additively, so compute the union before calling a row invisible"
+        },
+        {
+          "step": 5,
+          "call": "give the member a row of their OWN: as the member, POST /api/v1/data/showcase_invoice (contributors hold allowCreate)",
+          "expect": "2xx, and that row IS visible to them on a re-read — turning the subset from empty into a proper non-empty one. This is what makes the restriction provably SUBTRACTIVE rather than a blackout; without it, zero-hits and no-access are indistinguishable.",
+          "source": "ContributorPermissionSet.objects.showcase_invoice.allowCreate === true (permission-sets.ts); the seeded owner emails hold no credential, so borrowing a seeded owner is not an option — this is why the own-row is CREATED"
+        }
+      ],
+      "teardown": "delete the sys_user_position row and the invoice created in step 5, or simply discard the isolated file DB — the cheaper path an isolated boot makes free. The signed-up principal is not otherwise cleaned up; use a unique per-run email so a leftover account never collides.",
+      "knownGaps": [
+        "⚠️ The recipe mechanism is AREA-SCOPED: `provisioning.use` must name a key in the item's OWN area fixtures block (README.md), and the validator does not resolve it either way (deferred at #7716, tracked #7720). records-forms.crud-roundtrip clause 7 needs this same persona and lives in another area file, so it cross-references this recipe by name in its knownGaps instead of `use`-ing it. Replay it from here; do not fork a second copy.",
+        "The persona is a subset reader of showcase_invoice ONLY. showcase_account is public_read_write and showcase_contributor grants plain allowRead on it with no RLS, so a contributor still reads every account row — an item needing an invisible SOURCE row must drive showcase_invoice, not showcase_account.",
+        "showcase_private_note is an EMPTY table for everyone and showcase_account reads identically (15 rows) for admin, Mei and Ada (#10236) — neither is usable as a both-sides RLS control. Recorded so the next runner does not reach for them."
+      ]
+    }
+  },
   "items": [
     {
       "id": "search.cross-field-object-search",
@@ -155,16 +208,20 @@
       "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
-      "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position (invoice_own_rows RLS: owner == current_user.email)"],
+      "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position via the qa-contributor-bound-member recipe (invoice_own_rows RLS: owner == current_user.email) — ⛔ NOT one of the seeded demo personas: Mei holds no position (PERMISSION_DENIED, object gate) and Ada holds auditor with viewAllRecords (all 12). See the recipe."],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "seeded invoices INV-1001..INV-1012 (12 rows) with owner emails (ada@example.com ×5 / linus@example.com ×4 / grace@example.com ×3) none of which belong to the test member — INV-1003 is linus's, which is why it is the invisible row the guard uses",
-          "a signed-up member holding the contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run"
+          "a signed-up member holding the contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run. The full replayable sequence, its premise guard and the two personas that do NOT work now live in the area recipe qa-contributor-bound-member (see fixtures.provisioning)"
         ],
+        "provisioning": {
+          "use": "qa-contributor-bound-member",
+          "why": "supplies the one persona every clause of this item rests on — a reader of a strict SUBSET of showcase_invoice. Without it all four clauses are unscoreable: clause 0 needs a row that is invisible to the member and visible to admin, clause 1 needs a caller-scoped population to reconcile against, and clause 2 needs the member to still find their own row. The 17.1.0 sweep recorded this item blocked(fixture) after driving the seeded demo personas instead — Mei is refused at the object gate and Ada carries viewAllRecords, so neither is a subset — which is the rediscovery this reference exists to stop (#10257)."
+        },
         "knownGaps": [
           "the seeded owner emails are metadata-only (users cannot be seeded; they sign up) — no stock login exists for ada@example.com, so the 'restricted member owns SOME rows' side is produced by having the member CREATE an invoice of their own (contributors hold allowCreate), not by borrowing a seeded owner"
         ]
@@ -217,7 +274,13 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "stale fixture count corrected against the seed (run #7629): the showcase now ships 12 invoices INV-1001..INV-1012, not 8. Three places carried the stale number — the fixtures requirement, the no-count-leakage clause's 'true 8-row population', and the seed source citation. The leakage clause no longer hard-codes a population at all (a run reconciles against the seed and its own created rows, which is what #7629 actually did: 3 visible to the member, 15 to admin); the owner spread is now stated as counts (ada ×5 / linus ×4 / grace ×3) with INV-1003 named as linus's, so the invisible-row premise is checkable without opening the seed. Item substance and all four acceptance clauses are otherwise unchanged — #7629 scored this item 4/4 PASS", "ref": "#7647" },
-        { "revision": 3, "date": "2026-08-18", "change": "bounded clause 2's reconciliation to skip <= the caller's visible count. The page-local total is derived from the RLS-filtered find, so paging past the visible set leaves nothing to reconcile and a runner comparing totals there reads a non-result as a leak. The security property the clause exists for (no count leakage of rows the caller cannot see) is untouched and was observed intact (#9417)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "bounded clause 2's reconciliation to skip <= the caller's visible count. The page-local total is derived from the RLS-filtered find, so paging past the visible set leaves nothing to reconcile and a runner comparing totals there reads a non-result as a leak. The security property the clause exists for (no count leakage of rows the caller cannot see) is untouched and was observed intact (#9417)", "ref": "#9386" },
+        {
+          "revision": 4,
+          "date": "2026-08-21",
+          "change": "promoted the contributor-bound-member provisioning from prose on this item to the replayable area recipe qa-contributor-bound-member, and named the two personas that do NOT satisfy it. The item was recorded blocked(fixture) by the 17.1.0 sweep, which reached for the seeded demo personas: Mei holds no position so showcase_invoice answers PERMISSION_DENIED at the OBJECT gate (no rows at all), and Ada holds auditor whose set carries viewAllRecords so she sees all 12 — neither is the strict subset every clause here rests on. Nothing was actually missing from the fixtures: #7629 drove this item 4/4 PASS on a fresh sign-up bound to `contributor`, whose invoice_own_rows RLS narrows selects to owner == current_user.email. The recipe now carries that sequence with a premise guard that distinguishes all three outcomes (403 = binding did not take, 12 rows = a VAMA set, 0 of 12 = correct), so the mis-provisioning is caught before any verdict rests on it (#10236 B1)",
+          "ref": "#10236"
+        }
       ]
     },
     {

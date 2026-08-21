@@ -2,6 +2,74 @@
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "automation",
   "title": "Automation — flows, triggers, roll-ups",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so several items do not carry drifting copies of the same call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed) and every call is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted. Shape copied from qa-scratch-authz in areas/attachments-storage.json (#7716/#7670).",
+    "qa-flow-status-doors": {
+      "title": "Two scratch probe flows (qa_no_start_node / qa_always_fails) in a scratch package, so every never-dispatched and ran-and-failed row of the #9378 status table has a target",
+      "why": "Stock showcase can reach four rows of the trigger table on its own — 404 (any unheld name), 409 (toggle showcase_urgent_task_alert OFF), 200 success, and 200 PAUSED (showcase_reassign_wizard) — but NOT the two that need a purpose-built definition. 422 FLOW_NO_START_NODE needs a flow whose `nodes` array holds no `start` node, and 400 FLOW_FAILED needs one that reaches a node and fails TERMINALLY: the showcase's only deterministic failure, showcase_resilient_sync, is wrapped in a try_catch that HANDLES it, so the run succeeds and the 400 row is never exercised. Without this recipe those two rows are blocked(fixture) and a regression that reverted either one leaves the area green.",
+      "provenance": "authored from source in the 17.1.0 post-release sweep (#10236); the scratch-package authoring path is the one automation.flow-error-handling already declares ('a writable/scratch package to author the UNPROTECTED probe flow into — the showcase itself ships read-only') and the call shapes are qa-scratch-authz's (#7670). NOT yet proven by a live run — the four stock rows were hand-verified in #10225, these two were not.",
+      "app": "showcase",
+      "requires": [
+        "an admin session holding `manage_metadata` — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough",
+        "an isolated boot (own port + file DB, dogfood §0) — this recipe authors metadata into the running app",
+        "⚠️ export OS_PORT=<port> as well as passing -p <port>, or the showcase's self-pinging connectors dial 3000 and every unrelated flow run in the same boot fails `fetch failed` (RUNNER.md, the isolated-boot/OS_PORT standing fact)"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/packages",
+          "body": {
+            "manifest": { "id": "com.objectstack.qa.automation", "name": "QA automation status fixture", "version": "1.0.0", "type": "app" },
+            "enableOnInstall": true
+          },
+          "expect": "2xx with the installed package echoed back. The id is deliberately distinct from the other QA recipes so this one installs and tears down independently. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately, never by reflex.",
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts:312 note; client `packages.install`); body shape { manifest, enableOnInstall?, overwrite? } pinned in packages/client/src/client.test.ts:2144-2166"
+        },
+        {
+          "step": 2,
+          "call": "PUT /api/v1/meta/flow/qa_no_start_node?package=com.objectstack.qa.automation",
+          "body": {
+            "name": "qa_no_start_node",
+            "label": "QA — no start node",
+            "type": "autolaunched",
+            "status": "active",
+            "nodes": [{ "id": "n1", "type": "end", "label": "End" }],
+            "edges": []
+          },
+          "expect": "2xx. The definition is deliberately AUTHORABLE-but-unexecutable: FlowSchema declares `nodes: z.array(FlowNodeSchema)` with no `.min(1)` and no refinement requiring a `start` member (packages/spec/src/automation/flow.zod.ts:658), and nothing rejects a start-less flow at publish, so this lands. It is the engine that refuses it at DISPATCH — `flow.nodes.find(n => n.type === 'start')` misses and execute() returns { success:false, code:'FLOW_NO_START_NODE' } (packages/services/service-automation/src/engine.ts:3212-3220). ⚠️ If a publish-time structural check lands later this step will start 4xx-ing — that is a FINDING about where the refusal moved, not a rotted recipe.",
+          "source": "flow is NOT in the org-overlay-allowed set (RUNNER.md's overlay fact — view/dashboard/report/translation/email_template only), so the `?package=` route is required exactly as qa-scratch-authz uses it for objects; `?package=` is read as query.package and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts:262,319)"
+        },
+        {
+          "step": 3,
+          "call": "PUT /api/v1/meta/flow/qa_always_fails?package=com.objectstack.qa.automation",
+          "body": {
+            "name": "qa_always_fails",
+            "label": "QA — always fails terminally",
+            "type": "autolaunched",
+            "status": "active",
+            "nodes": [
+              { "id": "start", "type": "start", "label": "Start" },
+              { "id": "boom", "type": "http", "label": "Unroutable", "config": { "method": "POST", "url": "https://api.example.com/v1/qa-always-fails" } }
+            ],
+            "edges": [{ "id": "e1", "source": "start", "target": "boom" }]
+          },
+          "expect": "2xx on the author. On trigger the run DISPATCHES, the http node fails against the unroutable host, and — with no try_catch region and no errorHandling.strategy — the run ends `status: 'failed'`, which is the 400 FLOW_FAILED row. ⚠️ Do NOT wrap it in try_catch: a handled failure is a SUCCESSFUL run and scores the wrong row. The unroutable-host technique (api.example.com) is the one automation.flow-error-handling already relies on for a deterministic failure.",
+          "source": "the 400 row keys on the engine's lifecycle verdict `status: 'failed'`, never on message text (packages/runtime/src/flow-dispatch-status.ts, classifyFlowRefusal); examples/app-showcase/src/automation/flows/index.ts (showcase_resilient_sync) is the precedent for the unroutable host"
+        },
+        {
+          "step": 4,
+          "call": "toggle a stock record-change flow OFF for the 409 row: POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": false}",
+          "expect": "2xx. No authoring needed — the 409 FLOW_DISABLED row is reachable on stock fixtures. ⚠️ Toggle it back ON in teardown: it is the fixture automation.flow-toggle-kill-switch drives, and leaving it off silently changes that item's baseline.",
+          "source": "packages/runtime/src/domains/automation.ts (POST /:name/toggle → engine.toggleFlow); automation.flow-toggle-kill-switch names showcase_urgent_task_alert as the only type:'record_change' flow"
+        }
+      ],
+      "teardown": "POST /api/v1/automation/showcase_urgent_task_alert/toggle {\"enabled\": true} to undo step 4, then DELETE /api/v1/packages/com.objectstack.qa.automation (client `packages.uninstall`, ledgered at rest-route-ledger.ts:317) — or discard the isolated file DB, the cheaper path an isolated boot makes free. The toggle is NOT covered by discarding the DB if you reused a boot, so undo it explicitly.",
+      "knownGaps": [
+        "Same SDK sharp edge as qa-scratch-authz: `meta.saveItem(type, name, item)` does NOT send `?package=` (packages/client/src/index.ts:701-707) — issue steps 2 and 3 as raw HTTP with the query string appended, or the flows land outside the package and the teardown misses them.",
+        "This recipe has NOT been proven by a live run. If step 2 or 3 4xxs on the flow body, re-read the cited schema line before assuming the recipe rotted — a publish-time refusal of a start-less flow would itself be a finding (it would mean the 422 row has moved from dispatch time to author time, which changes what the item is asserting)."
+      ]
+    }
+  },
   "items": [
     {
       "id": "automation.flow-run-step-nesting",
@@ -629,7 +697,7 @@
       "title": "Screen flow round-trip: action trigger → paused run → rendered dialog → resume with inputs → persisted write",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -639,6 +707,9 @@
         "app": "showcase",
         "requires": [
           "the Tasks list row action showcase_bulk_reassign wired to showcase_reassign_wizard (type screen, runAs user; screen node 'collect' with required field new_assignee; downstream update_record)"
+        ],
+        "knownGaps": [
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
@@ -729,6 +800,12 @@
           "date": "2026-08-08",
           "change": "added the FlowRunner cancel-mid-flow clause — dismissing the screen dialog parks the run (still paused, resumable) rather than orphaning/cancelling it; API run state is the oracle",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
         }
       ]
     },
@@ -822,7 +899,7 @@
       "title": "connector_action dispatches through every registered connector kind, and the registry feeds the designer pickers",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -832,10 +909,12 @@
         "app": "showcase",
         "requires": [
           "plugin connectors rest + slack (objectstack.config.ts) and declarative instances showcase_status_api (provider rest) + showcase_mcp_tools (provider mcp, in-repo stdio fixture server) from src/system/connectors/",
-          "the three dispatching flows: showcase_task_completed_rest_ping (rest), showcase_declarative_connector_ping (declarative rest, ADR-0097), showcase_mcp_connector_echo (declarative MCP, #3056)"
+          "the three dispatching flows: showcase_task_completed_rest_ping (rest), showcase_declarative_connector_ping (declarative rest, ADR-0097), showcase_mcp_connector_echo (declarative MCP, #3056)",
+        "⚠️ a boot that EXPORTS OS_PORT=<port> (or SHOWCASE_SELF_URL) as well as passing -p <port> — the declarative instances resolve their baseUrl from the environment, not from the flag, so an isolated boot without it dials 3000 and every declarative dispatch fails `fetch failed` (see knownGaps)"
         ],
         "knownGaps": [
-          "slack DELIVERY is not assertable on stock fixtures — TaskCompletedSlackFlow points at a placeholder channel with no real bot token, so the slack variant is registry-enumeration only"
+          "slack DELIVERY is not assertable on stock fixtures — TaskCompletedSlackFlow points at a placeholder channel with no real bot token, so the slack variant is registry-enumeration only",
+          "`showcase_declarative_connector_ping` failing every record-change firing with `connector_action(showcase_status_api.request) failed: fetch failed` is a BOOT MISCONFIGURATION, not a blocked environment and not a missing stub. The showcase's declarative connector instances dial the running server itself via resolveShowcaseSelfUrl() (examples/app-showcase/src/system/self-url.ts), which reads SHOWCASE_SELF_URL -> OS_PORT -> PORT -> the literal http://127.0.0.1:3000 from the ENVIRONMENT. The CLI's `-p` flag only takes its DEFAULT from OS_PORT and never writes it back (packages/cli/src/commands/serve.ts), so a dogfood-§0 isolated boot on a non-3000 port leaves the connectors dialing 3000 while the server listens elsewhere. Export OS_PORT=<port> (or SHOWCASE_SELF_URL) alongside -p and the variant runs. ⚠️ The string is indistinguishable from a sandbox egress block — that is what makes it expensive: #7516 burned a run proving it was an address problem with a TCP forwarder on 3000, and #7538 fixed the resolution but cannot fix a boot that never exports the variable. Verify by reading the instance baseUrl out of GET /api/v1/automation/connectors BEFORE scoring the variant."
         ]
       },
       "variants": [
@@ -847,6 +926,7 @@
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/connectors — record the descriptor list and each connector's action list (the MCP instance's actions must come from its tools/list handshake)",
+        "premise guard, before scoring any dispatch clause: read the two declarative instances' resolved baseUrl out of that same response and confirm it names the port this boot is listening on — a baseUrl of http://127.0.0.1:3000 against a server on another port means the fixture is misconfigured, and every dispatch below will fail `fetch failed` for that reason alone",
         "POST a showcase_task — fires showcase_declarative_connector_ping and showcase_mcp_connector_echo on create",
         "PATCH the task status→'done' — fires showcase_task_completed_rest_ping",
         "GET each of the three flows' newest run detail; capture the connector step's recorded request and response",
@@ -898,6 +978,12 @@
           "date": "2026-08-07",
           "change": "initial — connector dispatch matrix over the plugin / declarative-rest / declarative-MCP kinds the showcase seeds, with the unregistered-id negative",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-21",
+          "change": "recorded the self-URL boot fact that makes the declarative-rest variant look permanently broken. The 17.1.0 sweep observed showcase_declarative_connector_ping failing `fetch failed` on every firing and read it as a network-restricted runner, i.e. as a fixture/environment gap needing a declared stub. Re-derived from source: it is an ADDRESS problem an isolated boot creates for itself — resolveShowcaseSelfUrl reads OS_PORT/PORT from the environment while the CLI's -p flag only reads that variable as a default and never exports it, so every non-3000 isolated boot dials 3000. The variant is fully runnable with OS_PORT exported; recording it as blocked(environment) or building a stub would have waived a working clause. Added the boot requirement and a pre-scoring baseUrl check, plus a knownGap carrying the discriminator so the next runner does not re-derive it (#10236 A5/B3)",
+          "ref": "#10236"
         }
       ]
     },
@@ -1062,6 +1148,128 @@
           "date": "2026-08-08",
           "change": "initial — pins the /toggle runtime kill switch on a record_change flow: OFF unbinds the trigger so the firing mutation produces no run, ON restores it; runs list + runtime state as oracles",
           "ref": "claude/platform-test-checklist-ocwugl"
+        }
+      ]
+    },
+    {
+      "id": "automation.trigger-status-contract",
+      "title": "The flow-dispatch HTTP status contract: every never-dispatched, ran-and-failed and non-terminal outcome answers its own status + ADR-0112 code, at every door that dispatches a flow",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": ["seeded admin (admin@objectos.ai / admin123)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_reassign_wizard (examples/app-showcase/src/automation/flows/index.ts) — the screen flow whose trigger PAUSES, giving the non-terminal 200 row and every resume arm a live suspension to work against",
+          "showcase_urgent_task_alert — the record-change flow the 409 row toggles OFF (and back ON in teardown)"
+        ],
+        "provisioning": {
+          "use": "qa-flow-status-doors",
+          "why": "unblocks the 422 FLOW_NO_START_NODE and 400 FLOW_FAILED rows of clause 0 and their per-door repeats in clause 2. Without it those two rows are blocked(fixture): stock showcase has no start-less flow, and its one deterministic failure (showcase_resilient_sync) is wrapped in a try_catch that HANDLES the failure, so the run SUCCEEDS and the 400 row is never exercised. The item would score partial with the two most-regressible rows unproven."
+        },
+        "knownGaps": [
+          "The MCP `run_action` bridge shares action-execution.ts's mapper with POST /api/v1/actions/... but is not an HTTP door, so it has no status to observe — clause 2 covers it by asserting the two share ONE mapper (source-level), not by driving MCP."
+        ]
+      },
+      "steps": [
+        "read the table first, from its single definition: packages/runtime/src/flow-dispatch-status.ts (FLOW_NOT_FOUND_STATUS, classifyFlowRefusal, isPausedRun) — it is a module rather than a route mapper precisely because three doors must agree on it, and a second copy of it is a defect by construction. The resume arms are a separate list, read them from packages/runtime/src/domains/automation.ts (the `POST /:name/runs/:runId/resume` branch and its code→status arms)",
+        "boot showcase isolated (dogfood §0) with OS_PORT exported as well as -p (RUNNER.md's connector self-URL fact), sign in as the dev admin, and run the qa-flow-status-doors recipe",
+        "TRIGGER, per row, against BOTH doors — POST /api/v1/automation/:name/trigger and the legacy POST /api/v1/automation/trigger/:name (the shape client.automation.trigger() calls): a name the deployment does not hold; qa_always_fails; the disabled showcase_urgent_task_alert; qa_no_start_node; a flow that succeeds; showcase_reassign_wizard (pauses)",
+        "record for every response the HTTP status AND error.code together — neither alone is the contract, and a run that captured only the status cannot tell 409 FLOW_DISABLED from any other 409",
+        "on the 400 FLOW_FAILED responses, additionally record error.details.errorMessage and error.details.summary (the flow author's own text and the per-node accounting) — they are the documented payload of that row and the console reads them from exactly there",
+        "RESUME: trigger showcase_reassign_wizard to obtain a live paused runId, then drive each refusal arm against POST /api/v1/automation/:name/runs/:runId/resume — a bodyless/valid resume (200, next screen or completion), a resume missing a required screen input (400 INVALID_SCREEN_INPUT), a resume whose signal writes the engine's `$` namespace (400 INVALID_SIGNAL), a resume of an unknown runId (404 RUN_NOT_FOUND), and a resume as a caller who is neither the trigger identity nor a resumeAuthority holder (403 PERMISSION_DENIED)",
+        "after each RETRYABLE refusal, re-read the run and confirm the suspension is STILL PAUSED and a later valid resume still works — 'the refusal left the suspension intact' is half of what those arms mean, and a status alone does not show it",
+        "cross-door: dispatch the SAME disabled flow through POST /api/v1/actions/... with a type:'flow' action and through a declared type:'flow' endpoint, and record what each answers",
+        "capture the per-row × per-door verdict table"
+      ],
+      "acceptance": [
+        {
+          "clause": "every TRIGGER row answers its own status and code, on BOTH trigger routes: 404 (no such flow), 409 FLOW_DISABLED, 422 FLOW_NO_START_NODE, 400 FLOW_FAILED — and a successful run answers 200",
+          "oracle": "api",
+          "verify": "one request per row per route; the observed (status, error.code) pair equals the row in flow-dispatch-status.ts. ⚠️ The dangerous direction is a 200 whose body carries an inner {success:false}: that is the pre-17.1.0 double envelope these rows replaced, and a caller branching on HTTP status alone reads a failed or refused run as a successful one — so a 200 on any of the four refusal rows is a FAIL, not a formatting difference",
+          "evidence": "the per-row per-route status + code table, with one full response body per row"
+        },
+        {
+          "clause": "a PAUSED run is served as the non-terminal state it is — 200 with the engine result carrying runId (and screen) — and is never classified as a refusal",
+          "oracle": "api",
+          "verify": "trigger showcase_reassign_wizard: 200, body carries a runId the resume door accepts. This row is written down on purpose (isPausedRun, #9510): a pause reaching a reader that knows only 'succeeded' and 'failed' is how one defect becomes another, and since #9510 a pause can also arrive through the RETRY path, so it has two producers",
+          "evidence": "the paused trigger response + the runId proven resumable"
+        },
+        {
+          "clause": "the table is a property of the flow-dispatch CONTRACT, not of the trigger route: the other doors that dispatch a flow answer the same (status, code) for the same engine exit",
+          "oracle": "api",
+          "verify": "drive the disabled flow through POST /api/v1/actions/... (type:'flow' action) and a declared type:'flow' endpoint and compare against the trigger doors. This is the exact drift the ruling (maintainer 2026-08-18, 「同意」 on #9446) converged: one exit once had three answers — 409 FLOW_DISABLED at the trigger door, 400 FLOW_FAILED at /actions ('the flow ran and rejected', a false statement about a dispatch that never happened), and 200 for every outcome at the endpoint door. ⚠️ Two divergences are DECLARED and are not findings: an UNCLASSIFIED success:false stays 200 at the trigger door but is refused at /actions, and /actions THROWS where the trigger door RETURNS. Read the module note before scoring a difference",
+          "evidence": "the per-door comparison table + the source citation showing which mapper each door reads"
+        },
+        {
+          "clause": "the 400 FLOW_FAILED row carries the author's own message and the run's per-node accounting where the door documents them — error.details.errorMessage and error.details.summary — and not only a generic message",
+          "oracle": "api",
+          "verify": "the trigger door's 400 body carries both keys; ADR-0112 envelopes carry no `data`, so a producer building its message out of result.error alone drops the author's words silently. #9585 extended this to /actions for this row only, via the typed FlowActionRefusal carrier — so both doors ship the pair HERE while the mechanism stays each door's own",
+          "evidence": "the 400 bodies from both doors, keys shown"
+        },
+        {
+          "clause": "every RESUME refusal answers its own status and code, and the retryable ones LEAVE THE SUSPENSION INTACT: 403 PERMISSION_DENIED, 400 INVALID_SIGNAL, 400 INVALID_SCREEN_INPUT, 409 RESUME_IN_PROGRESS, 503 STORE_UNAVAILABLE all keep the run paused; 404 RUN_NOT_FOUND and 400 FLOW_FAILED are terminal",
+          "oracle": "api",
+          "verify": "per reachable arm: the (status, code) pair, THEN a re-read of the run proving it is still paused and a subsequent valid resume still succeeds. The intact-suspension half is what separates these arms from the terminal ones and no status shows it. 503 STORE_UNAVAILABLE has no stock trigger — record it blocked(fixture) rather than inferring it from the code being registered",
+          "evidence": "per-arm response + the post-refusal run state + the successful later resume"
+        },
+        {
+          "clause": "the two STALE-suspension exits are reported as terminal 404 RUN_NOT_FOUND, not as a business rejection — the flow was deregistered, or the node the run was parked on was edited away under a live pause",
+          "oracle": "api",
+          "verify": "obtain a live pause, then remove the flow (or edit the paused node away) and resume: 404 RUN_NOT_FOUND, with the engine's message naming WHICH of the two it was. The engine classifies both (#8684, producer-first) — the route must not be sniffing summary/durationMs to tell the classes apart",
+          "evidence": "the 404 response + its message"
+        },
+        {
+          "clause": "the SDK surfaces the contract rather than flattening it: client.automation.trigger()/.execute() and .resume() REJECT on every non-2xx, and the rejection carries httpStatus and code",
+          "oracle": "test",
+          "verify": "drive the same rows through @objectstack/client and assert the catch: err.httpStatus ∈ {400,403,404,409,422,503} and err.code is the row's code. Callers used to inspect a RESOLVED {success:false}; the 17.1.0 changesets moved them to a catch, so a resolve on a refusal row is a FAIL of the SDK half of the same contract",
+          "evidence": "the SDK rejection captures, per row"
+        }
+      ],
+      "negative": [
+        "any refusal row answered 200 with an inner {success:false} — the double envelope #3962 ruled out and 17.1.0 removed; this is the load-bearing negative, because it is the shape that reads as success to every status-branching caller",
+        "a never-dispatched exit answered 400 FLOW_FAILED — it states that a run ran and was rejected, which is false, and it tells an operator to debug a run that does not exist",
+        "409 and 422 collapsed into one status — a disabled flow is reversible operational state (enable it and the identical request succeeds, which is what 409 means) while a start-less definition cannot be executed as stored and no retry helps (422); collapsing them tells an operator to flip a switch that will not help",
+        "a PAUSED run answered as a refusal (or as a completed run) — the continuation is persisted and the caller needs the runId",
+        "a retryable resume refusal that CONSUMED the suspension — the status may be right while the run is destroyed",
+        "a door answering from its own reading of the engine result rather than from flow-dispatch-status.ts — even when today's answer happens to match, a second copy of the table is the defect the module exists to prevent"
+      ],
+      "variants": [
+        "trigger · 404 — no such flow (registry probe, before dispatch)",
+        "trigger · 409 FLOW_DISABLED — never dispatched, reversible",
+        "trigger · 422 FLOW_NO_START_NODE — never dispatched, unretryable",
+        "trigger · 400 FLOW_FAILED — ran and was rejected",
+        "trigger · 200 — succeeded",
+        "trigger · 200 PAUSED — non-terminal, runId returned (#9510)",
+        "resume · 403 PERMISSION_DENIED — service-owned suspension, retryable",
+        "resume · 400 INVALID_SIGNAL — signal wrote the engine's $ namespace, retryable",
+        "resume · 400 INVALID_SCREEN_INPUT — bag violates the screen's field contract, retryable",
+        "resume · 409 RESUME_IN_PROGRESS — a concurrent resume holds the run, retryable",
+        "resume · 503 STORE_UNAVAILABLE — durable store unreadable, retryable",
+        "resume · 404 RUN_NOT_FOUND — no such suspension, or a STALE one; terminal",
+        "resume · 400 FLOW_FAILED — the resumed run consumed its pause and failed; terminal",
+        "resume · 200 — completed, or paused again at the next screen"
+      ],
+      "traps": ["wrong-persona", "single-datapoint"],
+      "source": [
+        "packages/runtime/src/flow-dispatch-status.ts — the ONE definition of the trigger-side table (FlowRefusalCode, classifyFlowRefusal, isPausedRun, FLOW_NOT_FOUND_STATUS) and the note on why it is a module rather than a route mapper",
+        "packages/runtime/src/domains/automation.ts — both trigger routes and the resume route's code→status arms",
+        "packages/runtime/src/action-execution.ts and packages/runtime/src/endpoint-executor.ts — the other two doors reading the same table",
+        "packages/services/service-automation/src/engine.ts:3212-3220 — the FLOW_NO_START_NODE exit; the disabled-flow exit stamps FLOW_DISABLED, and neither carries `status`, which is what lets a transport tell a never-dispatched exit from a run that dispatched and failed",
+        "packages/spec/src/contracts/automation-service.ts — AutomationResult.code, the closed union the two trigger-time refusals were added to",
+        "packages/spec/src/api/error-code-ledger.zod.ts — ADR-0112 registration of FLOW_DISABLED / FLOW_NO_START_NODE / FLOW_FAILED to @objectstack/runtime",
+        "packages/client/CHANGELOG.md 17.1.0 (bc6434b resume, 9aa8890 disabled/no-start-node, 48032c9 ran-and-failed) — the three BREAKING changesets whose own status table this matrix is derived from",
+        "packages/runtime/src/domains/automation-trigger-route-status.test.ts, automation-trigger-paused-run.test.ts, endpoint-flow-dispatch-status.test.ts, actions-flow-dispatch-status.test.ts — the per-door pins"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-21",
+          "change": "new — the automation area asserted flow BEHAVIOUR but never the status a caller observes, so a regression reverting any of 17.1.0's three BREAKING status changes left the whole area green (found by the 17.1.0 post-release sweep, #10225). The matrix is derived from the three changesets' own status tables and reconciled against the single runtime definition in flow-dispatch-status.ts, which is wider than the changesets: the same table is now read by /actions, the MCP run_action bridge and declared endpoints, and it carries a sixth NON-TERMINAL row (PAUSED, #9510) the changesets do not tabulate. The 422 arm was expected to be a knownGap; it is not — FlowSchema requires no start node (flow.zod.ts:658, no .min(1), no refinement) and nothing refuses a start-less flow at publish, so the row is authorable through a scratch package and is provisioned by qa-flow-status-doors instead of waived",
+          "ref": "#10236"
         }
       ]
     }

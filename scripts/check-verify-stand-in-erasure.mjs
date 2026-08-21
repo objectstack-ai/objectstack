@@ -73,6 +73,7 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 import { VERIFY_STAND_IN_CHECKS } from '../eslint.config.mjs';
 
@@ -87,13 +88,7 @@ const SOURCE_RE = /\.(ts|tsx|mts|cts)$/;
 // TSX silently loses the angle-bracket assertion spelling — one of the shapes
 // this gate has to see.
 const parse = (file, text) =>
-  ts.createSourceFile(
-    file,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+  parseSourceFile(file, text);
 
 function walkFiles(dir, out = []) {
   let entries;

@@ -83,7 +83,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 
 | File | Sites |
 |---|---|
-| `analytics.zod.ts` | 8 |
+| `analytics.zod.ts` | 7 |
 | `data-engine.zod.ts` | 13 |
 | `datasource.zod.ts` | 6 |
 | `document.zod.ts` | 8 |
@@ -103,7 +103,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `hook-body.zod.ts` | 2 |
 | `hook.zod.ts` | 7 |
 | `mapping.zod.ts` | 3 |
-| `object.zod.ts` | 20 |
+| `object.zod.ts` | 21 |
 | `query.zod.ts` | 5 |
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 1 |

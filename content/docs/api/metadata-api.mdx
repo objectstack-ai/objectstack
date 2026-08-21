@@ -28,13 +28,16 @@ List all items of a metadata type.
 
 | Parameter | Location | Description |
 |:----------|:---------|:------------|
-| `type` | path | Metadata type name, singular or plural — `object` and `objects` address the same type |
+| `type` | path | Metadata type name — the **singular** spelling (`object`, `view`, `flow`) |
 
-Both spellings are accepted and behave **identically**: the same audience gate
-(ADR-0046 §6.7 books/docs), the same RBAC filtering of privileged apps, and the
-same response shaping apply either way. Metadata type names are singular by
-convention (Prime Directive #3) while REST paths are plural, so both forms exist
-in the wild.
+Metadata type names are singular (Prime Directive #3) and this segment is the
+type name itself, so the spelling to send is `object` — never `objects`. The
+plurals elsewhere in this API name something else: a collection of *records*
+(`/data/:object`) or a package-manifest key (`objects: [...]`). Neither carries
+across to a `/meta` type segment.
+
+Listing applies the ADR-0046 §6.7 audience gate to books and docs, RBAC
+filtering to privileged apps, and the usual response shaping.
 
 **Response**: `{ type: "object", items: [{ name: "account", ... }, ...] }`
 

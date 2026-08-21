@@ -1567,6 +1567,21 @@ export function installAuditWriters(
    * unconventional thread_id is allowed through: this is capability
    * gating, not access control, and free-form threads have no object to
    * gate on.
+   *
+   * [#10170] Registered on `beforeUpdate` as well as `beforeInsert`, because
+   * the flag is a property of the TARGET OBJECT — "does this object allow
+   * comments at all" — and not of the verb that made a row target it. On
+   * insert only, a caller who could not *create* a comment on a
+   * `feeds: false` object could *re-thread* an existing one into it, and the
+   * row landed. `comment-access-hooks.ts` authorizes that re-point (#4630:
+   * the new `thread_id`'s parent must be readable) — but that is an ACCESS
+   * check; the capability half was never asked on the update verb.
+   *
+   * On update, an ABSENT `thread_id` means "not a re-thread", and the same
+   * first line returns. That is what keeps an ordinary body/reaction edit on
+   * an existing row working after its object's `enable.feeds` is flipped off:
+   * the narrowing reaches re-points, not every later write to a grandfathered
+   * row.
    */
   const enforceFeedsCapability = async (ctx: HookContext) => {
     const data: any = (ctx.input as any)?.data;
@@ -1585,6 +1600,7 @@ export function installAuditWriters(
     }
   };
   engine.registerHook('beforeInsert', enforceFeedsCapability, { object: 'sys_comment', packageId });
+  engine.registerHook('beforeUpdate', enforceFeedsCapability, { object: 'sys_comment', packageId });
 
   /**
    * `enable.files` server-side enforcement (#2727). The generic Attachments
@@ -1600,11 +1616,26 @@ export function installAuditWriters(
    * store the file URL in the record's own column via service-storage and
    * never create a sys_attachment row, so field-level attachments keep
    * working regardless of this flag.
+   *
+   * [#10170] Registered on `beforeUpdate` as well, for the feeds gate's
+   * reason one object over: `enable.files` says whether attachments may
+   * TARGET this object, so a re-point that makes a row target it is inside
+   * the declaration whether or not a creation happened. On insert only, a
+   * caller barred from *creating* an attachment on a `files: false` object
+   * could *move* an existing one onto it. `attachment-access-hooks.ts`
+   * authorizes the re-point (#10091: the new `parent_object`/`parent_id`
+   * must be editable) — access, again, not capability.
    */
   const enforceFilesCapability = async (ctx: HookContext) => {
     const data: any = (ctx.input as any)?.data;
     const parentObject = data?.parent_object;
-    if (typeof parentObject !== 'string' || parentObject.length === 0) return; // schema requires it; let validation report the miss
+    // Two meanings, one line. On INSERT an absent `parent_object` is a
+    // schema violation — left to validation to report, so the gate never
+    // shadows the real diagnostic. On UPDATE (#10170) it means "this write is
+    // not a re-point", so there is no new target to ask about and the row's
+    // existing parent was already gated when it was created. Either way the
+    // gate has nothing to say.
+    if (typeof parentObject !== 'string' || parentObject.length === 0) return;
     const def = getObjectDef(parentObject);
     if (def?.enable?.files !== true) {
       const err: any = new Error(`File attachments are not enabled for object '${parentObject}' (requires enable.files: true)`);
@@ -1615,6 +1646,29 @@ export function installAuditWriters(
     }
   };
   engine.registerHook('beforeInsert', enforceFilesCapability, { object: 'sys_attachment', packageId });
+  engine.registerHook('beforeUpdate', enforceFilesCapability, { object: 'sys_attachment', packageId });
+
+  /*
+   * [#10170] Why neither `beforeUpdate` registration above declares
+   * `dispatchUnscopedMultiWrite` (#9719, widened to `beforeUpdate` by #9974).
+   *
+   * That flag buys ONE extra dispatch, with the whole-operation context and
+   * before any matched row is resolved, for guards that refuse an operation
+   * SHAPE — "a `multi: true` update with no `where` at all". These two are not
+   * shape guards: they read the PAYLOAD, which the per-row fan-out delivers
+   * verbatim to every matched row (#5574 / ADR-0058 Addendum II D1–D2 builds a
+   * fresh context per row per phase, carrying the same payload object). So an
+   * unscoped multi update that re-points onto a walled parent is already
+   * refused on the first matched row, without the flag — pinned in
+   * `capability-gate-update-verb.test.ts`.
+   *
+   * Declaring it would narrow further than the declaration justifies: the one
+   * case it would ADD is a ZERO-MATCH unscoped write, where nothing is written
+   * and therefore nothing ever comes to target the walled object. Refusing
+   * that is an operation-shape policy — the #4757 `sys_attachment` and #4630
+   * `sys_comment` guards' territory, declared on their own registrations — not
+   * the capability opt-in this card restores.
+   */
 
   /**
    * M10.8: Dedicated hook on `sys_comment` afterInsert that parses the

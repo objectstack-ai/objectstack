@@ -145,8 +145,46 @@ export function stripAnsi(raw) {
 // `@objectstack/spec` reported 415 files and 11045 tests, and the guard said it
 // had reported nothing). The group header is turbo's own statement of whose
 // output follows, so it is read as the primary attribution, not a heuristic.
+//
+//   ⛔ THIRD SHAPE, and it is the one that matters most here: THE FAILING TASK
+//   IS NOT WRAPPED IN A GROUP. Under grouped order turbo folds each task into a
+//   collapsible `::group::`, EXCEPT the task it surfaces as the run's failure --
+//   that one gets a bare, red-coloured header and no `::endgroup::`, so the
+//   failure is readable in the GitHub UI without expanding anything:
+//     `\x1b[;31m@objectstack/example-showcase:test\x1b[;0m`
+//     ` Test Files  21 passed (21)`
+//     `       Tests  342 passed (342)`
+//
+// So the ONE package whose output the guard most needs to grade -- the one that
+// failed -- was the one package it could not attribute. Measured twice, byte for
+// byte: in a controlled 4-package turbo 2.10.10 sandbox, and in the real
+// incident (run 32391924279, `Test Core (3/3)`, job 96499888763, complete
+// 31839-line log, line 23907). In that log the pattern `^<no-space>:test$`
+// matches 24 lines: 23 are `##[group]` headers, and the 24th is this bare one.
+//
+// ⭐ WHAT IT COST, which is the whole reason this file exists. Anonymous
+// summaries put every candidate into the "refuse to guess" backstop below, so
+// Rule A -- the #10032 rule -- was disabled for the failing package on EVERY red
+// shard. That run printed, and it is what a clearance looks like:
+//
+//   check-test-completeness: note: 3 scheduled package(s) could not be matched
+//   to a summary ... @objectstack/runtime, @objectstack/cli,
+//   @objectstack/example-showcase.
+//   check-test-completeness: OK (24 of 29 scheduled package(s) reported ...)
+//
+// The note even names its own cause -- "the log carries a shape neither the
+// `<pkg>:test:` prefix nor turbo's `::group::<pkg>:test` header covers, that is
+// the bug to fix" -- and then exits 0. This is that fix.
+//
+// ⚠ One more measured turbo property, load-bearing for Rule A: `Failed:` names
+// only the task turbo surfaced, NOT every task that failed. With two failing
+// tasks in one run the roster listed one; the other failed inside an ordinary
+// `::group::`. Bare header <=> named in `Failed:` held in every run observed.
 const GROUP_OPEN = /^(?:::group::|##\[group\])(.+?)\s*$/;
 const GROUP_CLOSE = /^(?:::endgroup::|##\[endgroup\])\s*$/;
+// A line that is nothing but `<pkg>:test`. Reached only after the two markers
+// above have had their turn, so a `::group::` header can never land here.
+const BARE_TASK_HEADER = /^(\S+):test$/;
 
 export function parseSummaries(text) {
   const rows = [];
@@ -164,6 +202,20 @@ export function parseSummaries(text) {
       const label = open[1];
       const sep = label.lastIndexOf(':');
       group = sep > 0 && label.slice(sep + 1) === 'test' ? label.slice(0, sep) : null;
+      continue;
+    }
+    // The failing task's bare header. `##[group]` / `::group::` spellings have
+    // already been consumed above, and the guard belts-and-braces that here so a
+    // future marker spelling cannot be read as a package name.
+    const bare = line.match(BARE_TASK_HEADER);
+    if (bare && !bare[1].includes('::') && !bare[1].startsWith('#')) {
+      group = bare[1];
+      continue;
+    }
+    // turbo's end-of-run roster closes the failing task's block, which has no
+    // `::endgroup::` of its own. Nothing after it belongs to any package.
+    if (TASKS.test(line) || FAILED.test(line)) {
+      group = null;
       continue;
     }
     const m = line.match(SUMMARY);
@@ -252,18 +304,39 @@ export function classifyShard({ scheduled, reported, anonymousReports = 0, faile
   // the one error worse than not attributing at all. One candidate is not a
   // guess (there is nothing else it could belong to); more than one is.
   const candidates = expected.filter((name) => !reported.has(name));
+
+  // ⛔ THE BACKSTOP MUST NEVER SWALLOW RULE A. A package turbo named in
+  // `Failed:` is judged even when stray summaries are present, because that
+  // pairing IS the #10032 signature and excusing it is the exact green that
+  // this guard exists to stop -- measured on run 32391924279, where the
+  // backstop turned the failing package into a note and exited 0.
+  //
+  // This cannot cost a green shard: Rule A only fires when turbo already
+  // reported a failed task, so the test step has already failed and the shard
+  // is already red. The worst case is an extra, wrongly-worded paragraph on a
+  // run that was going to be red anyway; the alternative is a clearance on the
+  // one run where the guard had something to say. The wording below stays
+  // honest about which of the two it is.
+  const failedCandidates = candidates.filter((name) => failed.has(name));
+  const otherCandidates = candidates.filter((name) => !failed.has(name));
   let unattributable = [];
   let judged = candidates;
-  if (anonymousReports > 0 && candidates.length === 1) {
-    judged = [];
-  } else if (anonymousReports > 0 && candidates.length > 1) {
-    unattributable = candidates;
-    judged = [];
+  if (anonymousReports > 0) {
+    judged = failedCandidates;
+    if (otherCandidates.length > 1) unattributable = otherCandidates;
   }
 
   for (const name of judged) {
     if (failed.has(name)) {
-      silent.push({ name, why: 'turbo reported this task FAILED, and the log holds no vitest summary for it' });
+      silent.push({
+        name,
+        why:
+          anonymousReports > 0
+            ? `turbo reported this task FAILED, and no summary in this log could be attributed to it ` +
+              `(${anonymousReports} unattributed summary line(s) present -- this log carries a task-header ` +
+              `shape this guard does not understand, so it cannot tell a silent suite from a misread one)`
+            : 'turbo reported this task FAILED, and the log holds no vitest summary for it',
+      });
     } else if (runCompleted === true) {
       silent.push({ name, why: 'the run completed with every task successful, and this package reported nothing' });
     } else {
@@ -499,6 +572,50 @@ function selfTest({ quiet = false } = {}) {
     'grouped: an explicit prefix lost to the enclosing group',
   );
 
+  // -- THE FAILING TASK'S BARE HEADER: turbo's third shape. --
+  // The exact bytes from run 32391924279 / job 96499888763, line 23907 (and
+  // byte-identical in a 4-package turbo 2.10.10 sandbox), followed by the two
+  // summary lines that actually sat under it.
+  const bareFail = stripAnsi(
+    ['\x1B[;31m@objectstack/example-showcase:test\x1B[;0m', ' Test Files  21 passed (21)', '       Tests  342 passed (342)'].join('\n'),
+  );
+  eq(
+    parseSummaries(bareFail).map((r) => [r.pkg, r.kind, r.counted, r.declared]),
+    [['@objectstack/example-showcase', 'Test Files', 21, 21], ['@objectstack/example-showcase', 'Tests', 342, 342]],
+    'bare header: the failing task\'s summary was not attributed to it',
+  );
+  // The next task's group must take over -- the bare block has no ::endgroup::.
+  eq(
+    parseSummaries(['@objectstack/example-showcase:test', '      Tests  342 passed (342)', '::group::@objectstack/runtime:test', '      Tests  10 passed (10)'].join('\n')).map((r) => r.pkg),
+    ['@objectstack/example-showcase', '@objectstack/runtime'],
+    'bare header: attribution leaked into the next task\'s group',
+  );
+  // ...and turbo's own end-of-run roster closes it, so nothing after the
+  // failing block can be charged to the failing package.
+  eq(
+    parseSummaries(['@objectstack/example-showcase:test', 'Failed:    @objectstack/example-showcase#test', '      Tests  5 passed (5)'].join('\n')).map((r) => r.pkg),
+    ['(vitest)'],
+    'bare header: attribution survived turbo\'s Failed: roster',
+  );
+  eq(
+    parseSummaries([' Tasks:    1 successful, 4 total', '      Tests  5 passed (5)'].join('\n')).map((r) => r.pkg),
+    ['(vitest)'],
+    'bare header: a summary after the Tasks roster was attributed',
+  );
+  // A `:build` bare header attributes nothing, exactly like a build group.
+  eq(
+    parseSummaries('@objectstack/spec:build\n      Tests  5 passed (5)').map((r) => r.pkg),
+    ['(vitest)'],
+    'bare header: a bare build header was read as a test header',
+  );
+  // Marker spellings must never be mistaken for a package name, whichever
+  // branch above happens to consume them.
+  eq(parseSummaries('::group::@objectstack/spec:test\n      Tests  5 passed (5)').map((r) => r.pkg), ['@objectstack/spec'], 'bare header: ::group:: fell through to the bare branch');
+  eq(parseSummaries('##[group]@objectstack/spec:test\n      Tests  5 passed (5)').map((r) => r.pkg), ['@objectstack/spec'], 'bare header: ##[group] fell through to the bare branch');
+  // Ordinary prose that merely ends in `:test` needs a space to be safe; a
+  // no-space line is turbo's header and nothing else. Both directions pinned.
+  eq(parseSummaries('see foo:test\n      Tests  5 passed (5)').map((r) => r.pkg), ['(vitest)'], 'bare header: a phrase ending in :test was read as a header');
+
   // -- Anonymous summaries: attribute only when there is nothing to guess. --
   const anon = (over) =>
     classifyShard({
@@ -538,6 +655,56 @@ function selfTest({ quiet = false } = {}) {
     }).silent.map((x) => x.name),
     ['a'],
     'anonymous: the #10032 case stopped being red',
+  );
+
+  // ⭐ THE REGRESSION THIS FIX EXISTS FOR. Run 32391924279 in miniature: three
+  // candidates, one of them named in `Failed:`, and stray summaries present
+  // because the failing task's header was not understood. The backstop used to
+  // excuse ALL THREE and exit 0. Rule A must survive it, naming only the
+  // failed one, and the other two stay ungraded notes rather than reds.
+  const backstop = classifyShard({
+    scheduled: ['showcase', 'runtime', 'cli'],
+    reported: new Set(),
+    anonymousReports: 2,
+    failed: new Set(['showcase']),
+    runCompleted: false,
+    describe: describe({
+      showcase: { hasTestScript: true, testFileCount: 21 },
+      runtime: { hasTestScript: true, testFileCount: 9 },
+      cli: { hasTestScript: true, testFileCount: 9 },
+    }),
+  });
+  eq(backstop.silent.map((s) => s.name), ['showcase'], 'backstop: a FAILED package was excused by the stray-summary backstop');
+  eq(backstop.unattributable, ['runtime', 'cli'], 'backstop: the ungraded non-failed packages were lost');
+  eq(backstop.notReached, [], 'backstop: an ungraded package was also counted as never reached');
+  if (!backstop.silent[0].why.includes('unattributed summary line(s) present')) {
+    throw new Error('backstop: the red overclaims silence when stray summaries are present');
+  }
+  // ...and with no stray summaries the wording goes back to the plain claim.
+  eq(
+    classifyShard({
+      scheduled: ['showcase'],
+      reported: new Set(),
+      anonymousReports: 0,
+      failed: new Set(['showcase']),
+      runCompleted: false,
+      describe: describe({ showcase: { hasTestScript: true, testFileCount: 21 } }),
+    }).silent.map((s) => s.why),
+    ['turbo reported this task FAILED, and the log holds no vitest summary for it'],
+    'backstop: the plain Rule A wording changed',
+  );
+  // A failed package that DID report is still an ordinary failure, strays or not.
+  eq(
+    classifyShard({
+      scheduled: ['showcase', 'runtime'],
+      reported: new Set(['showcase']),
+      anonymousReports: 3,
+      failed: new Set(['showcase']),
+      runCompleted: false,
+      describe: describe({ showcase: { hasTestScript: true, testFileCount: 21 }, runtime: { hasTestScript: true, testFileCount: 9 } }),
+    }).silent,
+    [],
+    'backstop: a reported failure was charged as silent',
   );
 
   if (!quiet) console.log('check-test-completeness: self-test OK');
@@ -627,22 +794,36 @@ function main() {
       console.log(`check-test-completeness: note: ${n} was scheduled but never reached -- the run stopped before it.`);
     }
     if (shard.unattributable.length > 0) {
-      console.log(
-        `check-test-completeness: note: ${shard.unattributable.length} scheduled package(s) could not be ` +
-          `matched to a summary, and the log holds unattributed summaries, so completeness is NOT graded for ` +
-          `them: ${shard.unattributable.join(', ')}. Attributing a stray summary by guesswork would be worse ` +
-          'than this gap. If you are seeing this, the log carries a shape neither the `<pkg>:test:` prefix nor ' +
-          'turbo\'s `::group::<pkg>:test` header covers -- that is the bug to fix.',
-      );
+      const note =
+        `${shard.unattributable.length} scheduled package(s) could not be ` +
+        `matched to a summary, and the log holds unattributed summaries, so completeness is NOT graded for ` +
+        `them: ${shard.unattributable.join(', ')}. Attributing a stray summary by guesswork would be worse ` +
+        'than this gap. None of them was named in turbo\'s `Failed:` roster -- a failed package is judged ' +
+        'even here, never excused. If you are seeing this, the log carries a shape none of the three this ' +
+        'guard knows covers (`<pkg>:test:` prefix, `::group::<pkg>:test` header, bare `<pkg>:test` header) ' +
+        '-- that is the bug to fix.';
+      console.log(`check-test-completeness: note: ${note}`);
+      // A note in a 30k-line log is not seen; that is how the last one sat
+      // unread under a green. An annotation is.
+      if (process.env.GITHUB_ACTIONS === 'true') {
+        console.log(`::warning::check-test-completeness: ${note}`);
+      }
     }
   }
 
   if (holes.length === 0 && silent.length === 0) {
     if (shard) {
-      const expected = shard.scheduledCount - shard.exempt.length - shard.notReached.length;
+      const ungraded = shard.unattributable.length;
+      const expected = shard.scheduledCount - shard.exempt.length - shard.notReached.length - ungraded;
+      // ⛔ NOT "OK" when something went ungraded. The word is the payload: the
+      // whole #10032 family is a green sentence read as a clearance, and
+      // "OK (24 of 29 ... all accounted for)" printed directly under a note
+      // saying three packages were not graded is exactly that sentence.
       console.log(
-        `check-test-completeness: OK (${expected} of ${shard.scheduledCount} scheduled package(s) ` +
-          `reported, ${shard.exempt.length} had nothing to run, ${shard.notReached.length} never reached; ` +
+        `check-test-completeness: ${ungraded > 0 ? 'PARTIAL' : 'OK'} (${expected} of ${shard.scheduledCount} ` +
+          `scheduled package(s) reported, ${shard.exempt.length} had nothing to run, ` +
+          `${shard.notReached.length} never reached` +
+          `${ungraded > 0 ? `, ${ungraded} NOT GRADED` : ''}; ` +
           `${rows.filter((r) => r.kind === 'Tests').reduce((s, r) => s + r.declared, 0)} test(s) declared and all accounted for).`,
       );
       process.exit(0);
@@ -666,9 +847,9 @@ function main() {
   }
 
   if (silent.length > 0) {
-    const were = silent.length === 1 ? 'package was' : 'packages were';
+    const has = silent.length === 1 ? 'package has' : 'packages have';
     console.error(
-      `check-test-completeness: ${silent.length} ${were} scheduled on this shard and reported no vitest summary\n`,
+      `check-test-completeness: ${silent.length} scheduled ${has} no vitest summary this log can account for\n`,
     );
     for (const s of silent) {
       console.error(`  • ${s.name} -- ${s.why}`);
@@ -687,9 +868,15 @@ level before writing a summary, or its captured output was lost.
 Precedent: #10032, where \`Test Core (2/3)\` failed naming
 @objectstack/example-showcase#test and the complete 5083-line job log contained
 no other mention of that package -- no summary, no FAIL, no test name -- while
-this guard printed OK. The mechanism was never reproduced and is still unknown;
-what this red buys is that the next occurrence names itself instead of sending
-triage to a wrong hypothesis.`);
+this guard printed OK. That original zero-output event was never reproduced and
+is still undiagnosed; what this red buys is that the next occurrence names
+itself instead of sending triage to a wrong hypothesis.
+
+⚠ If the reason above cites UNATTRIBUTED summary lines, read this red as "the
+guard could not grade it", not as "the suite printed nothing" -- the summary may
+be sitting in the log under a task header this guard does not parse. Check the
+lines around the package's own header before concluding anything about the
+suite, and fix the header shape here.`);
   }
 
   if (holes.length > 0) {

@@ -1,0 +1,207 @@
+---
+title: Scheduled Jobs
+description: Run a TypeScript function on a cron, interval, or one-off schedule — and decide when a job is the right tool instead of a schedule-triggered flow.
+---
+
+# Scheduled Jobs
+
+A **job** runs one named function in your bundle on a schedule. You declare the
+schedule as metadata; the platform's job service owns the timing, the retries,
+the per-attempt time limit, and the run history.
+
+{/* os:check */}
+```typescript
+import { defineJob } from '@objectstack/spec';
+
+export const HealthSweepJob = defineJob({
+  name: 'nightly_health_sweep',
+  label: 'Nightly Project Health Sweep',
+  description: 'Recomputes project health from budget burn and task progress.',
+  schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
+  handler: 'sweepProjectHealth',
+  retryPolicy: { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 },
+  timeout: 300000,
+});
+```
+
+## Job, or a `schedule`-type flow?
+
+Both run on a timer, so pick deliberately. The decision is **not** about timing
+and **not** about cluster behaviour — those are the same for both, because a
+`schedule`-type flow does not own a timer at all. The automation engine registers
+each schedule-triggered flow as a job named `flow-schedule:<flowName>` and hands
+it to the **same `IJobService`**. Same schedule forms, same adapter, same
+leader election.
+
+What actually differs is *what runs*, *who may change it*, and *what identity its
+writes carry*:
+
+| | `job` | `schedule`-type flow |
+|:---|:---|:---|
+| What runs | one TypeScript function from `defineStack({ functions })` | a node graph — record operations, `notify`, `http`, approvals, subflows |
+| Changeable after deploy | **No.** `job` is `allowRuntimeCreate: false` and `allowOrgOverride: false` — there is no "create job" in Studio and no per-tenant fork | Yes — a new flow can be authored through Studio / `PUT /meta` (`allowRuntimeCreate: true`) |
+| Identity of its data writes | whatever the handler does with the engine it is given | declared by [`runAs`](/docs/automation/flows) — and a `user` run that resolves no trigger user has its data operations **refused**, so a scheduled flow normally declares `runAs: 'system'` |
+| Retry / time limit | `retryPolicy` + `timeout` on the job, honoured by the job adapter | the flow's own error handling |
+| Run history | `sys_job` + `sys_job_run` | `sys_automation_run` |
+
+**Rule of thumb:** if the work is a function you ship and version with your code,
+declare a job. If the work is a sequence of record operations that an
+administrator may reasonably need to re-sequence without a deploy, build a
+schedule-triggered flow.
+
+The "no runtime create" restriction is a consequence, not a policy preference:
+`handler` names a key in the compiled bundle's function table, so a job created
+through the runtime API could only ever name a function that the writer's process
+does not have. Both doors were closed rather than left to fail silently at boot.
+
+## Where a job lives
+
+Two authoring doors, both first-class:
+
+- a `*.job.ts` (or `*.job.yml` / `*.job.json`) file anywhere in the package, or
+- an entry in the `jobs` collection of `defineStack()`.
+
+The handler is wired separately, by name, through `functions`:
+
+```typescript
+export default defineStack({
+  // …
+  functions: {
+    // the key here is what `handler` names
+    sweepProjectHealth: { handler: sweepProjectHealth, effect: 'writes' },
+  },
+  jobs: [HealthSweepJob],
+});
+```
+
+`name` is snake_case and is the job's identity **everywhere** — the scheduling
+key, the `sys_job` row key, and the `jobId` stamped on each execution. There is
+no separate `id` key: it was removed in `@objectstack/spec` 17.0.0 because
+nothing read it, and two jobs differing only in `id` were one job declared twice.
+
+## Schedule forms
+
+`schedule` is a discriminated union on `type`. Three forms, and the schema
+accepts exactly these:
+
+```typescript
+{ type: 'cron', expression: '0 0 * * *', timezone: 'America/New_York' }
+{ type: 'interval', intervalMs: 900000 }
+{ type: 'once', at: '2026-09-01T02:00:00.000Z' }
+```
+
+- **`cron`** — a standard cron expression. `timezone` is an IANA name and
+  defaults to `UTC`. You write the expression as a plain string; the build lowers
+  it into the platform's expression envelope, and the cron adapter hands the
+  source string to the cron engine.
+- **`interval`** — `intervalMs` is a positive integer in **milliseconds**. A
+  fixed delay between fires, not an aligned wall-clock schedule.
+- **`once`** — `at` is an ISO 8601 datetime. A `once` job whose time has already
+  passed when it is registered simply never fires.
+
+Cron needs a cron-capable adapter. The default (`adapter: 'auto'`) selects the
+durable database-backed adapter when an ObjectQL engine is available and routes
+cron schedules to the cron adapter. On a deployment pinned to the in-memory
+interval adapter, a cron schedule is **registered but never executed** — the
+adapter says so at `warn` level on registration, because that is the difference
+between "no cron engine here" and a job that silently never runs.
+
+## The handler, and the ways it can fail to be one
+
+`handler` must match a key of `defineStack({ functions })`. At `kernel:ready`
+the app plugin resolves each job's handler through the bundle's function table
+and calls `IJobService.schedule(...)` with it. Three outcomes at that moment, and
+they are deliberately not the same severity:
+
+| Situation | What happens | Log level |
+|:---|:---|:---|
+| `enabled: false` | not scheduled | `debug` |
+| `handler` names nothing in the function table | **not scheduled** — the job never runs | `warn` |
+| `schedule()` throws | **not scheduled** — a silent outage; the app boots green while the work never runs | `error`, plus a failure counter |
+
+The middle case is the one that has actually bitten this repo: a job declared for
+a long time with no function of that name anywhere in the app was skipped at
+every boot, and the sweep never ran. If a job appears to do nothing, read the
+boot log for its name before reading its schedule.
+
+At run time the handler is invoked with `{ jobId, data }`. What it returns
+decides how the run is recorded:
+
+| The handler… | Recorded as | Retried? |
+|:---|:---|:---|
+| throws / rejects | `failed` (or `timeout`) | yes, per `retryPolicy` |
+| resolves `undefined` or `{ outcome: 'completed' }` | `success` | — |
+| resolves `{ outcome: 'degraded', reason? }` | `degraded` | **no** |
+
+`degraded` means "ran to completion, and its work did not happen" — a store was
+unavailable, zero rows matched a precondition. It is **not** a failure: it never
+retries and it does not bump the job's `failure_count`. A handler that wants the
+run retried must throw.
+
+## Retry and time limit
+
+```typescript
+{ maxRetries: 3, backoffMs: 5000, backoffMultiplier: 2, maxRetryDelayMs: 30000, jitter: true }
+```
+
+Delay before retry *n* is `min(backoffMs * backoffMultiplier^(n-1), maxRetryDelayMs)`,
+optionally jittered. `maxRetries` counts retries **after** the initial attempt and
+is capped at 10.
+
+Two defaults worth knowing before you rely on the block:
+
+- **`maxRetries` defaults to `0`** — declaring `retryPolicy` without stating a
+  count still means *no retry*. State a count to opt in.
+- **`backoffMultiplier` defaults to `1`** — a flat delay, not exponential.
+
+`timeout` is a **per-attempt** limit in milliseconds. An over-limit run is
+recorded with status `timeout` and, being a failure, is retried like any other.
+JavaScript cannot forcibly cancel a running function, so the attempt is
+*abandoned*, not killed — a handler that ignores its own cancellation can still
+be executing after the platform has moved on. Omit `timeout` for no limit.
+
+## Running on more than one node
+
+A scheduled fire is **leader-elected per job**: the node whose scheduler fires
+first takes a per-job cluster lock, and peers that fire the same tick skip the
+run. One nightly job stays one nightly run no matter how many nodes are up, and
+on a single node with no cluster driver the lock is always granted, so nothing
+changes. See [Cluster & Distributed Runtime](/docs/kernel/cluster#5-service-scope-and-leader-election)
+for the primitive this is built on.
+
+Two boundaries on that guarantee:
+
+- It covers **scheduled** fires. A manual `trigger(name)` deliberately bypasses
+  the lock and runs on the node that received the call.
+- The lock makes a fire single-*node*, not single-*flight-forever*: it is a
+  leased lock, so a run that outlives its lease can overlap a later fire.
+
+## Observing runs
+
+With the durable adapter (the default when an ObjectQL engine is present), every
+execution lands in two platform objects you can query, build views on, and report
+from like any other:
+
+- **`sys_job_run`** — one row per attempt: `job_name`, `status`, `started_at`,
+  `completed_at`, `duration_ms`, `attempt` (`1` for the first run, higher for
+  retries and replays), `trigger` (`schedule` | `manual` | `replay`), and `error`.
+- **`sys_job`** — the per-job summary an operator reads first: `last_run_at`,
+  `last_status`, `last_error`, `run_count`, `failure_count`.
+
+`status` and `last_status` are enforced select vocabularies — `running`,
+`success`, `failed`, `timeout`, `degraded`.
+
+⚠️ **Read the status before reading the error column.** A `degraded` run puts its
+`reason` in the same `error` / `last_error` column a failure uses, and leaves
+`failure_count` flat. A column labelled "Error" can therefore hold a non-error
+operator note; gate on `status === 'degraded'` before treating it as a failure.
+
+Per-attempt rows can be switched off in the adapter's options, in which case
+`sys_job_run` stays empty while the `sys_job` summary counters keep updating.
+
+## Related
+
+- **Schema reference:** [Job](/docs/references/system/job) — every field, generated from the spec
+- **Cluster semantics:** [Cluster & Distributed Runtime](/docs/kernel/cluster#5-service-scope-and-leader-election)
+- **The alternative:** [Flows](/docs/automation/flows) for schedule-triggered node graphs
+- **Sending mail from a job:** [`services.email`](/docs/kernel/runtime-services/email-service) and [Email Templates](/docs/automation/email-templates)

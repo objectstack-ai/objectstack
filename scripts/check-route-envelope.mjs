@@ -143,6 +143,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -511,7 +512,7 @@ const DISPATCHER_DOMAINS = {
  *
  * A discovered file absent from the table is an ERROR, never a default.
  *
- * ## Two ways to be held here: tracked drift, or a RULED boundary
+ * ## Three ways to be held here: tracked drift, or one of two RULED boundaries
  *
  * `ratchet` is the first. It is a measured count of bodies that depart from the
  * envelope plus the issue that will drive it to zero, and it says nothing about
@@ -549,6 +550,78 @@ const DISPATCHER_DOMAINS = {
  *
  * The reason is the deliverable. The entry is only where it is written down.
  *
+ * `vendorWire` is the third state, and it arrived with its own maintainer
+ * ruling: 2026-08-21, on #10554 — option A of the escalation recorded on
+ * PR #10352. **A body this repo BUILDS whose shape is a VENDOR's wire format —
+ * required by that vendor's own client library — is outside
+ * `BaseResponseSchema` because the vendor owns the shape.** Surface 2 already
+ * names this class kind 3 ("a foreign wire format a client library requires")
+ * and treats RELAYED instances as by-design invisible to the counters;
+ * `vendorWire` is kind 3's counterpart for the case where such a body becomes
+ * VISIBLE because the handler was reimplemented in-repo, turning a relay into
+ * a built literal. The adjudicated instance is better-auth's
+ * `{ session, user }`: the endpoint passes through the vendor's published
+ * OpenAPI schema declaring exactly that body, the vendor client
+ * (`authClient.admin.impersonateUser`) parses that shape, and the contract
+ * partner (`/admin/stop-impersonating`) — entirely vendor-side, unreachable
+ * from this repo — answers the same bare shape. Enveloping such a body is not
+ * progress: it contradicts the endpoint's own published schema, breaks the
+ * vendor reader, and forks from a partner endpoint this repo cannot convert.
+ * That is also why `vendorWire` is exclusive with `ratchet`: a ratchet asserts
+ * a conversion that is coming, and here the conversion can never honestly
+ * happen.
+ *
+ * Keep the three ruled directions distinct, because each was decided on its
+ * own facts and none is a precedent for the others:
+ *
+ *   #9389 `exempt`   — pre-auth bootstrap, read by OUR OWN SHELLS before any
+ *                      credential exists. The vendor-wire population is the
+ *                      opposite — the adjudicated body serves authenticated
+ *                      platform admins — which is exactly why #9389's closed
+ *                      class could not honestly cover it.
+ *   #9436 (envelope) — discovery bodies READ BY SDKs and codegen, where THIS
+ *                      repo owns the shape and the migration is one additive
+ *                      key. Ruled INTO the envelope. A vendor-wire body fails
+ *                      both conditions: the vendor owns the shape, and no
+ *                      one-key migration exists that the vendor's reader
+ *                      would survive.
+ *   `vendorWire`     — the VENDOR owns the shape and the vendor's client
+ *                      reads it. WHO owns and WHO reads the body decide, the
+ *                      same axis the other two rulings turned on; age and
+ *                      taste decide nothing.
+ *
+ * A `vendorWire` entry is held exactly the way an `exempt` one is: the same
+ * counters, asserted the same way — the boundary is closed at exactly N bodies
+ * in exactly these files, a new vendor-shaped body fails the gate until it is
+ * declared, and adding or widening an entry in this state is ⛔ MAINTAINER-ONLY
+ * (#8435), because it amends a ruling rather than applies one. The `note` is
+ * mandatory and structured, not decoration: it must carry the labelled fields
+ * `vendor:` (whose wire format this is), `reader:` (the vendor client code
+ * that requires the shape) and `partner:` (the vendor-side contract-partner
+ * endpoint(s) that answer the same shape). Labels rather than free prose, so
+ * every claim names something a later reader can go and re-verify still
+ * exists — a vendor-wire entry whose vendor stopped reading the shape is an
+ * entry to delete, and the note is what makes that checkable.
+ *
+ * ## The `const` hoist is the named forbidden move, not a fix
+ *
+ * Every counter on this surface reads the OBJECT LITERAL at the call site, so
+ * hoisting a built body into a `const` and passing the identifier —
+ *
+ *     const BODY = { session, user };   // the same wire bytes
+ *     return c.json(BODY);              // now invisible to every counter
+ *
+ * — turns the gate green with ZERO wire change. For a body this repo only
+ * relays, that invisibility is the design (see above). For a body this repo
+ * BUILDS it is the exact state this gate exists to prevent: the repo still
+ * owns the shape, and the hoist's only effect is to hide it from the auditor.
+ * The move was found, named and refused on PR #10352 (2026-08-21), and the
+ * #10554 ruling writes it down here so the next author who hits this class of
+ * red finds the prohibition before rediscovering the evasion as a fix: when
+ * the red body is a vendor's wire format, the honest paths are the
+ * `vendorWire` state (⛔ MAINTAINER-ONLY — stop and escalate, never
+ * self-serve) or a byte-clean stop-and-report. The hoist is neither.
+ *
  * ## An `exempt` on THIS surface stays COUNTED — unlike surface 1's
  *
  * `hmr-routes.ts` (surface 1) is a whole file that is one dev-only endpoint, so
@@ -571,14 +644,18 @@ const DISPATCHER_DOMAINS = {
  * second path widens a ruled boundary and is therefore not an author's to take;
  * the diagnostics mark it `⛔ MAINTAINER-ONLY` (#8435).
  *
- * `ratchet` and `exempt` are mutually exclusive. A count is either tracked drift
- * heading for zero or a boundary somebody ruled; declaring both says neither.
+ * `ratchet`, `exempt` and `vendorWire` are pairwise exclusive. A count is
+ * tracked drift heading for zero, a pre-auth boundary somebody ruled, or a
+ * vendor-owned shape somebody ruled; an entry declaring two of them at once
+ * says neither, and one body sits on exactly one ruled boundary.
  *
- * Where the ruling is recorded: HERE. This gate names no doc location of its own
- * — the `hmr-routes.ts` precedent's reasoning lives in this file's prose and
- * nowhere else, `content/docs/references/` is generated and must not be
- * hand-edited, and the ruling governs this table rather than the wire format
- * docs. #9389 carries the four-prism analysis and the maintainer's acceptance.
+ * Where the rulings are recorded: HERE. This gate names no doc location of its
+ * own — the `hmr-routes.ts` precedent's reasoning lives in this file's prose
+ * and nowhere else, `content/docs/references/` is generated and must not be
+ * hand-edited, and the rulings govern this table rather than the wire format
+ * docs. #9389 carries the pre-auth four-prism analysis and the maintainer's
+ * acceptance; #10554 and the escalation comment on PR #10352 carry the
+ * vendor-wire ruling's.
  */
 const HONO_CONTEXT_RECEIVERS = new Set(['c', 'ctx']);
 
@@ -679,31 +756,114 @@ const PLUGIN_ROUTE_MODULES = {
     exempt:
       'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
   },
+
+  // ── Ruled vendor wire format (2026-08-21, #10554) ────────────────────
+  //
+  // The state's first and only entry, landing WITH the file it was ruled on
+  // (PR #10352) — the machinery arrived from `main` ahead of it because an
+  // entry for a file the walk cannot find is an ERROR here (the
+  // declared-but-not-found reconciliation in `audit()`). The ruling authorized
+  // exactly this one entry; adding or widening any other is
+  // ⛔ MAINTAINER-ONLY (#8435) — see the header.
+
+  // ONE body — the success return of `POST /admin/impersonate-user`, at line
+  // 254: `ctx.json({ session, user })`. It is the ONLY body this file BUILDS
+  // that any counter here reads; the four refusals are
+  // `throw APIError.from(…)`, which this surface does not count — so the
+  // number is the whole visible departure, not a sample of it.
+  //
+  // The shape is not this repo's to change. The endpoint replaces
+  // better-auth's own handler in place on the `admin` plugin's `endpoints`
+  // record and passes the vendor's OpenAPI `metadata` through untouched — a
+  // published schema declaring exactly `{ session, user }` — so enveloping
+  // the body would contradict the schema this same endpoint serves, on top of
+  // breaking the vendor client that parses it and forking from a
+  // contract partner that lives entirely on the vendor's side.
+  'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts': {
+    unenveloped: 1,
+    vendorWire:
+      "better-auth's wire format, ruled outside BaseResponseSchema (2026-08-21, #10554 option A)",
+    note:
+      'vendor: better-auth (1.7.1) — the body is byte-identical to that release\'s own handler return; ' +
+      'reader: authClient.admin.impersonateUser — the vendor client that parses this shape; ' +
+      'partner: /admin/stop-impersonating — the contract partner answering the same bare shape, entirely vendor-side',
+  },
 };
 
 const EXPRESS_RESPONSE_RECEIVERS = new Set(['res']);
 
 /**
- * Surface 4 (#9813): modules that write express-style `res.json(…)` responses
- * on an `IHttpServer` — the dialect none of the other three surfaces can see.
- * `dispatcher-plugin.ts` served the exact `{ data }` discovery shape #9436 was
- * ruled on for a day with no counter anywhere, because it writes through `res`
- * rather than a Hono context and returns nothing to a central sender.
+ * Surface 4 (#9813, discovered by #9937): modules that write express-style
+ * `res.json(…)` responses — the dialect none of the other three surfaces can
+ * see. `dispatcher-plugin.ts` served the exact `{ data }` discovery shape #9436
+ * was ruled on for a day with no counter anywhere, because it writes through
+ * `res` rather than a Hono context and returns nothing to a central sender.
  *
- * ⚠ ENUMERATED, not discovered. The other populations refuse an undeclared
- * response-writing module; this one audits only the files named here, because
- * a discovery walk for this dialect first needs a read/write discriminator —
- * fetch's `Response.json()` is a zero-argument READ on the same receiver name
- * (`const res = await fetch(…); await res.json()`), and 20 non-test files
- * under packages/ carry the `res.json(` spelling today, most of them fetch
- * readers. Growing the walk is #9937; adding a NEW express-style route module
- * to this table is part of adding the module.
+ * ## Discovered, not enumerated — and what that took
  *
- * Entries carry the same counters, `ratchet`/`exempt`/`note` grammar and
- * audit (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one grammar, two
- * receiver dialects.
+ * #9813 shipped this population ENUMERATED, one file named by hand, because a
+ * discovery walk needs something the other three surfaces never did: a
+ * read/write discriminator. `res.json` is the same spelling in two opposite
+ * roles, and the reading one is the majority of it in this repo —
+ *
+ *     res.json({ success: true, data })      // express WRITE, one argument
+ *     const body = await res.json();         // fetch READ, zero arguments
+ *
+ * — so `discoverExpressRoutes()` keys on TWO facts. The false-positive surface
+ * of each was MEASURED on `origin/main` (736cfb14) before this population was
+ * widened, because the cost of being wrong here is a gate that reddens on
+ * innocent files:
+ *
+ *   argument count ≥ 1   83 of the 301 `res` `.json(…)` calls under `packages/`
+ *                        take no argument, and every one of them is a fetch
+ *                        read (`@objectstack/client` alone carries 68). Dropping
+ *                        this half sweeps in 13 pure-reader files — 65% of the
+ *                        20 files that touch the spelling at all.
+ *   receiver `res`       argument count alone is no better: 11 further files
+ *                        call `Field.json({ … })`, `t.json(c.name)` or
+ *                        `table.json(name)` — object and column DSLs that answer
+ *                        no HTTP request, 15 calls of pure noise.
+ *
+ * Together the two partition the repo cleanly: 218 write calls in 7 files, 83
+ * read calls in 13 others, and NOT ONE file mixes them. Zero false positives,
+ * measured rather than assumed — which is what made widening this population
+ * affordable at all, and what the enumerated table was holding the place for.
+ *
+ * BOTH express spellings are writes, because the second is where the refusals
+ * live: `res.json(body)` (81 calls) and the chained `res.status(400).json(body)`
+ * (137). A walk seeing only the bare form would leave the majority of the
+ * express ERROR surface invisible while reporting itself green — this gate's own
+ * recurring failure, one dialect at a time (#7295, #8884, #9267).
+ *
+ * ## One population, not two
+ *
+ * #9937 asked whether `IHttpServer` route modules and generic express-style
+ * writers are one population or two. ONE — and not as a preference. This is a
+ * source scan, and the repo types its handlers `any` at exactly the seam that
+ * would tell the two apart; `query-allowlist.ts` says so in its own signature
+ * ("`IHttpRequest`-shaped; `any` because `rest-server.ts` types its handlers
+ * that way"). A split by mounting mechanism is not decidable from the source, so
+ * a table claiming it would be claiming something nobody checked. The DIALECT is
+ * the population instead: whoever writes `res.json(…)` is audited, whether that
+ * is a route module, a middleware, or a refusal helper the routes delegate to —
+ * and the first walk found one of each. The table is named for the dialect for
+ * that reason; it was `IHTTP_ROUTE_MODULES` while it held one hand-named
+ * IHttpServer module (#9813).
+ *
+ * Files already audited as surface 1 are excluded, and so is `SHARED_BUILDER`:
+ * both are held there by write-site counts that see these same calls, and no
+ * module is governed by two tables at once. That exclusion is why
+ * `rest-server.ts` (137 of the write calls), `error-response.ts` and
+ * `response-envelope.ts` are absent below rather than unaudited.
+ *
+ * Entries carry the same counters, `ratchet`/`exempt`/`vendorWire`/`note`
+ * grammar and audit (`auditPluginRouteModule`) as PLUGIN_ROUTE_MODULES — one
+ * grammar, two receiver dialects. As on every other discovered surface, a file the walk finds and the
+ * table does not name is an ERROR, never a default.
  */
-const IHTTP_ROUTE_MODULES = {
+const EXPRESS_RESPONSE_MODULES = {
+  // ── Conformant ──────────────────────────────────────────────────────────
+
   // Nine bodies. The two discovery bodies (`/.well-known/objectstack`,
   // unconditional, and the REST-less `${prefix}/discovery` fallback) were
   // enveloped by #9813 under the #9436 maintainer ruling (2026-08-18, option
@@ -716,7 +876,7 @@ const IHTTP_ROUTE_MODULES = {
   //
   // The tenth body — the SSE-fallback `res.json({ events })` this entry
   // ratcheted at `unenveloped: 1` — was resolved by #9936 (2026-08-19, option
-  // B): the count goes to 0 because the JSON literal CEASED TO EXIST, not
+  // B): the count went to 0 because the JSON literal CEASED TO EXIST, not
   // because it moved to a spelling this scanner cannot count. The fallback
   // now implements the IHttpResponse contract's own prescription (#3607,
   // ADR-0076 OQ#10): the same SSE frames, buffered and delivered through
@@ -726,6 +886,45 @@ const IHTTP_ROUTE_MODULES = {
   // result writer's write-less fallback (#9961) took the same shape; its old
   // body was a RELAYED `res.json(result.result)` and thus never counted here.
   'packages/runtime/src/dispatcher-plugin.ts': {},
+
+  // [#9937] FIRST AUDIT — swept in by the walk, verdict conformant. Not a route
+  // module at all: the inbound rate-limit MIDDLEWARE, which answers 429 itself
+  // rather than calling `next()`. Its one hand-built body is
+  // `{ success: false, error: buildApiError({ … }) }` — the same door
+  // `dispatcher-plugin.ts`'s two conformant exits use, so `error` carries the
+  // ADR-0112 `code`/`message` pair by construction. That the counters cannot see
+  // INSIDE `buildApiError(…)` (a call, not a literal) is the deliberate
+  // relayed-body blindness, so read this `{}` for what it is: nothing this file
+  // BUILDS departs from the envelope. It is also the entry that proves the
+  // population is a dialect rather than a mounting mechanism — a name-based or
+  // route-module-based walk would never have reached a middleware.
+  'packages/runtime/src/security/inbound-rate-limit.ts': {},
+
+  // ── Ratchet: real, tracked, NOT blessed ─────────────────────────────────
+  //
+  // [#9937] FIRST AUDIT, both entries. The two shared query-parameter refusal
+  // helpers `rest-server.ts` delegates to. They are the reason this surface had
+  // to grow a walk rather than a longer hand-written list: neither is a route
+  // module, neither follows the `*-routes.ts` convention, both were invisible to
+  // every one of this gate's four surfaces, and both write a REST body a client
+  // reads. Nobody would have thought to enumerate them — which is the whole
+  // argument of #9267 and #7295, arriving a third time.
+  //
+  // What is counted is one body each, and it is one key from conformant: the
+  // 400 they write is ADR-0112-NESTED already (`error: { code, message }`, the
+  // reference shape `security-suggested-bindings-envelope.test.ts` pins the rest
+  // of the family onto) but carries no `success`, so `unwrapResponse` hands it
+  // to callers raw. Measured at first audit, not chosen, and it ticks DOWN only.
+  'packages/rest/src/query-allowlist.ts': {
+    unenveloped: 1,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    note: 'the one 400 `refuseUnknownQueryParams` writes — `{ error: { code: VALIDATION_ERROR, message } }`, nested per ADR-0112 but with no `success` flag above it',
+  },
+  'packages/rest/src/query-multiplicity.ts': {
+    unenveloped: 1,
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    note: 'the one 400 `refuseRepeatedQueryParams` writes — `{ error: { code: VALIDATION_ERROR, message } }`, nested per ADR-0112 but with no `success` flag above it',
+  },
 };
 
 /**
@@ -740,33 +939,94 @@ const IHTTP_ROUTE_MODULES = {
  * express-style `res.json(…)` dialect instead (#9813) — same body grammar,
  * different receiver, so the counters and their meanings are shared.
  *
+ * A zero-argument call on one of those receivers is a READ (`await res.json()`),
+ * counted as `reads` and judged as nothing — the discriminator that let surface
+ * 4 become a walk (#9937). See it inline below for what the argument count buys
+ * and why nothing else can decide it.
+ *
  * @param {string} source TypeScript source text.
  * @param {string} fileName reported in sites.
  * @param {Set<string>} receivers identifiers judged as response receivers.
- * @returns {{bodies: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>}}
+ * @returns {{bodies: number, reads: number, unenveloped: number, errorWithoutMessage: number, errorCodeNotString: number, strayKeys: number, stringError: number, siblingCode: number, sites: Record<string, string[]>, readSites: string[]}}
  */
 export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = HONO_CONTEXT_RECEIVERS) {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = {
     bodies: 0,
+    // Zero-argument `.json()` calls on the SAME receivers: reads, never writes.
+    // Reported so the discriminator's REJECT direction is positively observable
+    // — `bodies: 0` alone cannot tell "this file only reads" from "this receiver
+    // never appears", and a discriminator only ever checked in the accept
+    // direction is the vacuity this gate keeps finding in others (#9937).
+    reads: 0,
     unenveloped: 0, errorWithoutMessage: 0, errorCodeNotString: 0,
     strayKeys: 0, stringError: 0, siblingCode: 0,
     sites: {
       unenveloped: [], errorWithoutMessage: [], errorCodeNotString: [],
       strayKeys: [], stringError: [], siblingCode: [],
     },
+    readSites: [],
   };
   const line = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
   const hit = (key, node) => { found[key] += 1; found.sites[key].push(`${fileName}:${line(node)}`); };
+
+  /**
+   * The receiver identifier a `.json(…)` call is written on, or `undefined`.
+   *
+   * Two spellings, and the second is not optional: `res.status(400).json(body)`
+   * is where the express refusals live (137 of the 218 express write calls under
+   * `packages/` — see the surface-4 header), so a scanner that saw only the bare
+   * receiver would count the successes and miss the errors.
+   *
+   *   `res.json(body)`              — the receiver IS the identifier
+   *   `res.status(400).json(body)`  — one chained setter stands between them
+   *
+   * The chained form is matched on shape rather than on a list of setter names:
+   * over-matching here can only add a call on a receiver this dialect already
+   * claims, and under-matching is the failure this whole surface exists to end.
+   */
+  const receiverName = (expr) => {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (
+      ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+      ts.isIdentifier(expr.expression.expression)
+    ) return expr.expression.expression.text;
+    return undefined;
+  };
+
+  /** `res.status(404).json(body)` names its status in the chain, not as arg 2. */
+  const chainedStatusArg = (expr) => (
+    ts.isCallExpression(expr) && ts.isPropertyAccessExpression(expr.expression) &&
+    expr.expression.name.text === 'status'
+  ) ? expr.arguments[0] : undefined;
 
   const visit = (node) => {
     if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
       node.expression.name.text === 'json' &&
-      ts.isIdentifier(node.expression.expression) &&
-      receivers.has(node.expression.expression.text)
+      receivers.has(receiverName(node.expression.expression))
     ) {
+      // ── The read/write discriminator (#9937) ──────────────────────────────
+      //
+      // `res.json` is one spelling for two opposite acts, and the identifiers
+      // are byte-identical:
+      //
+      //     res.json({ success: true, data })   // express WRITE, one argument
+      //     const body = await res.json();      // fetch READ, zero arguments
+      //
+      // ARGUMENT COUNT decides, and nothing else can: the receiver name is the
+      // same, `await` is optional on the read (14 of the repo's reads are not
+      // awaited in place), and a type-directed answer is not available to a
+      // source scan whose subjects are typed `any`. Measured across `packages/`
+      // before this surface was widened to a walk: 83 zero-argument calls, every
+      // one of them a fetch read, and no file mixing the two.
+      if (node.arguments.length === 0) {
+        found.reads += 1;
+        found.readSites.push(`${fileName}:${line(node)}`);
+        ts.forEachChild(node, visit);
+        return;
+      }
       found.bodies += 1;
       const arg = node.arguments[0];
       // A relayed body (an identifier, a call, a member access) is not one this
@@ -827,7 +1087,9 @@ export function scanHonoRouteSource(source, fileName = 'plugin.ts', receivers = 
             //      one is the shape `packages/adapters/hono` ships, and the
             //      shorthand is why a value-blind scan sees nothing wrong.
             const codeInit = errKeys.get('code');
-            const statusArg = node.arguments[1];
+            // `c.json(body, code)` puts the status second; the express chain
+            // puts it in `res.status(code)`. Same defect, two spellings.
+            const statusArg = node.arguments[1] ?? chainedStatusArg(node.expression.expression);
             if (codeInit && ts.isNumericLiteral(codeInit)) {
               hit('errorCodeNotString', node);
             } else if (
@@ -858,6 +1120,25 @@ const PLUGIN_ROUTE_COUNTERS = {
 };
 
 /**
+ * What a diagnostic has to say differently per receiver dialect: the table the
+ * author must edit, and the write the walk saw. Everything else about the audit
+ * — the counters, the ratchet/exempt grammar, the #8435 authority rule — is one
+ * mechanism over both, which is why `auditPluginRouteModule` takes this rather
+ * than being copied per surface (#9937).
+ */
+const HONO_SURFACE = {
+  table: 'PLUGIN_ROUTE_MODULES',
+  writes: 'Hono responses (`c.json(…)`)',
+  kind: 'plugin-route module',
+};
+
+const EXPRESS_SURFACE = {
+  table: 'EXPRESS_RESPONSE_MODULES',
+  writes: 'express-style responses (`res.json(…)` / `res.status(…).json(…)`)',
+  kind: 'express-style response module',
+};
+
+/**
  * The #8435 authority token. Byte-identical to every instrumented gate's const.
  *
  * Widening a `ratchet` and widening an `exempt` are both remedies that EXPAND a
@@ -866,6 +1147,19 @@ const PLUGIN_ROUTE_COUNTERS = {
  * has amended the ruling rather than applied it.
  */
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * The three labelled fields a `vendorWire` note must carry (2026-08-21 ruling,
+ * #10554): whose wire format this is, which vendor client code requires the
+ * shape, and which vendor-side endpoint(s) answer the same shape. Labels
+ * rather than free prose, so each claim names something a later reader can go
+ * and re-verify still exists — see the surface-3 header.
+ */
+const VENDOR_WIRE_NOTE_FIELDS = ['vendor:', 'reader:', 'partner:'];
+
+/** Does a `vendorWire` note name all three parties the ruling requires? */
+const vendorWireNoteConforms = (note) =>
+  VENDOR_WIRE_NOTE_FIELDS.every((label) => note.toLowerCase().includes(label));
 
 /**
  * Classify one plugin-route module against its declaration.
@@ -880,17 +1174,19 @@ const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
  * scanner would be asserting the easy half.
  *
  * @param {string} file      repo-relative path
- * @param {object|undefined} declared its `PLUGIN_ROUTE_MODULES` entry, if any
+ * @param {object|undefined} declared its declaring table's entry, if any
  * @param {object} got       `scanHonoRouteSource` output for it
+ * @param {{table: string, writes: string, kind: string}} surface which receiver
+ *        dialect's table is speaking — see `HONO_SURFACE` / `EXPRESS_SURFACE`.
  * @returns {string[]} problems, empty when the module is in order
  */
-export function auditPluginRouteModule(file, declared, got) {
+export function auditPluginRouteModule(file, declared, got, surface = HONO_SURFACE) {
   const problems = [];
 
   if (!declared) {
     problems.push(
-      `${file}\n    NOT DECLARED. This file writes Hono responses (\`c.json(…)\`), so it is a\n` +
-      `    plugin-route module — add it to PLUGIN_ROUTE_MODULES in\n` +
+      `${file}\n    NOT DECLARED. This file writes ${surface.writes}, so it is a\n` +
+      `    ${surface.kind} — add it to ${surface.table} in\n` +
       `    scripts/check-route-envelope.mjs. If every body it BUILDS is the declared\n` +
       `    envelope, declare {}. If some are not, declare the CURRENT counts plus a\n` +
       `    \`ratchet\` naming the issue that will fix them, and a \`note\` saying what they\n` +
@@ -900,19 +1196,47 @@ export function auditPluginRouteModule(file, declared, got) {
       `    does not inherit the ruling by resembling it: declaring the counts plus an\n` +
       `    \`exempt\` reason is how it joins, and that is ${RATCHET_AUTHORITY_MARKER} —\n` +
       `    a maintainer widens a ruled boundary, an author enveloping the body does not\n` +
-      `    need anyone's leave.`,
+      `    need anyone's leave.\n` +
+      `    A body this repo BUILDS whose shape is a VENDOR's wire format — required by\n` +
+      `    that vendor's own client library — is the other ruled class (2026-08-21,\n` +
+      `    #10554): it joins by declaring the counts plus a \`vendorWire\` reason and a\n` +
+      `    \`note\` naming \`vendor:\` / \`reader:\` / \`partner:\`, and that too is\n` +
+      `    ${RATCHET_AUTHORITY_MARKER}. Hoisting the body literal into a \`const\` so\n` +
+      `    these counters read it as relayed is the named forbidden move, not a third\n` +
+      `    path — see the header of scripts/check-route-envelope.mjs.`,
     );
     return problems;
   }
 
   // Tracked drift and a ruled boundary are different claims about the same
-  // number, and an entry asserting both asserts neither.
+  // number, and an entry asserting both asserts neither. The three states are
+  // pairwise exclusive — see the header.
   if (declared.ratchet && declared.exempt) {
     problems.push(
       `${file}\n    declares both \`ratchet\` and \`exempt\` — those are exclusive.\n` +
       `    A ratchet says "this is drift and it is heading for zero"; an exempt says\n` +
       `    "this was ruled outside the envelope and is staying". Pick the one that is\n` +
       `    true. See the header of scripts/check-route-envelope.mjs.`,
+    );
+  }
+  if (declared.vendorWire && declared.ratchet) {
+    problems.push(
+      `${file}\n    declares both \`vendorWire\` and \`ratchet\` — those are exclusive.\n` +
+      `    A ratchet asserts a conversion that is coming; a vendor-wire declaration\n` +
+      `    (2026-08-21, #10554) asserts the vendor owns the shape and a conversion can\n` +
+      `    never honestly happen — enveloping it would break the vendor client that\n` +
+      `    reads it. Pick the one that is true. See the header of\n` +
+      `    scripts/check-route-envelope.mjs.`,
+    );
+  }
+  if (declared.vendorWire && declared.exempt) {
+    problems.push(
+      `${file}\n    declares both \`vendorWire\` and \`exempt\` — those are exclusive.\n` +
+      `    They are different rulings over different populations: \`exempt\` is #9389's\n` +
+      `    pre-auth bootstrap boundary (2026-08-17, our own shells before any credential\n` +
+      `    exists), \`vendorWire\` is the vendor wire-format boundary (2026-08-21,\n` +
+      `    #10554, a vendor-owned shape a vendor client requires). One body sits on\n` +
+      `    exactly one ruled boundary — cite the ruling that actually covers it.`,
     );
   }
 
@@ -923,7 +1247,25 @@ export function auditPluginRouteModule(file, declared, got) {
 
     if (got[key] > want) {
       problems.push(
-        declared.exempt
+        declared.vendorWire
+          ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW body outside the envelope\n` +
+            `    in a module whose departures are RULED vendor wire format.\n` +
+            `    ${what}.\n` +
+            `    A vendor-wire declaration is a CLOSED list of the bodies that were measured\n` +
+            `    when the ruling was made (2026-08-21, #10554), not a standing waiver over\n` +
+            `    this file. If this body is NOT a shape a vendor's client library requires,\n` +
+            `    the ruling does not reach it: emit\n` +
+            `    { success: false, error: { code, message } } with an ADR-0112 code, and no\n` +
+            `    number here moves. If it IS one, widening the boundary to cover it is\n` +
+            `    ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option — raising this count\n` +
+            `    amends a maintainer ruling, so it is a decision to take to the maintainer\n` +
+            `    rather than a fix to apply. And hoisting the body literal into a \`const\`\n` +
+            `    so these counters read it as relayed is not a third path: it turns the\n` +
+            `    gate green with zero wire change, and it is the named forbidden move —\n` +
+            `    see the header of scripts/check-route-envelope.mjs.\n` +
+            `    (vendorWire: ${declared.vendorWire})\n` +
+            `    Lines: ${sites}`
+          : declared.exempt
           ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — a NEW body outside the envelope\n` +
             `    in a module whose departures are RULED rather than tracked.\n` +
             `    ${what}.\n` +
@@ -949,7 +1291,16 @@ export function auditPluginRouteModule(file, declared, got) {
     }
 
     problems.push(
-      declared.exempt
+      declared.vendorWire
+        ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
+          `    A vendor-wire declaration is an exact enumeration, so this is a body the\n` +
+          `    reason still describes and the file no longer emits. Lower the count to\n` +
+          `    ${got[key]} and amend the \`vendorWire\` reason and \`note\` to match what is left` +
+          (got[key] === 0 ? `, or drop the entry entirely — nothing departs from the envelope here any more` : '') + `.\n` +
+          `    Shrinking a ruled boundary needs nobody's leave; it is the widening\n` +
+          `    direction that is ${RATCHET_AUTHORITY_MARKER}.\n` +
+          `    Lines: ${sites}`
+        : declared.exempt
         ? `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
           `    A ruled exemption is an exact enumeration, so this is a body the reason still\n` +
           `    describes and the file no longer emits. Lower the count to ${got[key]} and amend\n` +
@@ -960,7 +1311,7 @@ export function auditPluginRouteModule(file, declared, got) {
           `    Lines: ${sites}`
         : `${file}\n    ${key}: found ${got[key]}, declared ${want} — ${want - got[key]} fewer than pinned.\n` +
           `    That is progress, and banking it is the other half of the ratchet: lower the\n` +
-          `    declared number to ${got[key]} in PLUGIN_ROUTE_MODULES so the ground cannot be\n` +
+          `    declared number to ${got[key]} in ${surface.table} so the ground cannot be\n` +
           `    given back` + (got[key] === 0 ? ` (and drop the \`ratchet\`/\`note\` if this was the last one)` : ``) + `.\n` +
           (declared.ratchet ? `    (ratchet for ${declared.ratchet})\n` : '') +
           `    Lines: ${sites}`,
@@ -969,10 +1320,10 @@ export function auditPluginRouteModule(file, declared, got) {
 
   const pinned = Object.keys(PLUGIN_ROUTE_COUNTERS).reduce((n, k) => n + (declared[k] ?? 0), 0);
 
-  if (pinned > 0 && !declared.ratchet && !declared.exempt) {
+  if (pinned > 0 && !declared.ratchet && !declared.exempt && !declared.vendorWire) {
     problems.push(
-      `${file}\n    pins ${pinned} non-conforming body/bodies with neither a \`ratchet\` nor an\n` +
-      `    \`exempt\` reason.\n` +
+      `${file}\n    pins ${pinned} non-conforming body/bodies with neither a \`ratchet\` nor a\n` +
+      `    ruled \`exempt\`/\`vendorWire\` reason.\n` +
       `    A pinned count is tracked drift or a ruled boundary — never a blessing that\n` +
       `    arrived by itself. Name the issue that will drive it to zero, or write the\n` +
       `    reason it is outside the envelope.`,
@@ -983,6 +1334,29 @@ export function auditPluginRouteModule(file, declared, got) {
       `${file}\n    pins ${pinned} non-conforming body/bodies with no \`note\`.\n` +
       `    Say what they are, so the next reader can tell tracked drift from a shape\n` +
       `    somebody decided was fine.`,
+    );
+  }
+  // The vendor-wire note is the ruling's own mandate (2026-08-21, #10554), and
+  // it is structured so the claim stays re-checkable: each labelled party is
+  // something a later reader can go and verify still exists.
+  if (declared.vendorWire && !declared.note) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` with no \`note\`.\n` +
+      `    The ruling (2026-08-21, #10554) makes the note mandatory: it must name the\n` +
+      `    vendor, the vendor client reader that requires the shape, and the\n` +
+      `    contract-partner endpoint(s), as \`vendor: …; reader: …; partner: …\`.\n` +
+      `    A vendor-wire body with none of the three named is unverifiable — nobody\n` +
+      `    can re-check that the vendor's client still reads this shape.`,
+    );
+  } else if (declared.vendorWire && !vendorWireNoteConforms(declared.note)) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` with a \`note\` that does not name all three parties.\n` +
+      `    The note must carry the labelled fields \`vendor:\` (whose wire format this\n` +
+      `    is), \`reader:\` (the vendor client code that requires the shape) and\n` +
+      `    \`partner:\` (the vendor-side contract-partner endpoint(s) answering the same\n` +
+      `    shape). Labels, not free prose, so the triple stays greppable and\n` +
+      `    re-checkable.\n` +
+      `    (note: ${declared.note})`,
     );
   }
   // An exemption with nothing to exempt reads as a standing waiver over whatever
@@ -997,19 +1371,50 @@ export function auditPluginRouteModule(file, declared, got) {
       `    conformant — declare {}.`,
     );
   }
+  // The same standing-waiver shape, spelled with the other ruled state.
+  if (declared.vendorWire && pinned === 0) {
+    problems.push(
+      `${file}\n    declares \`vendorWire\` but pins no non-conforming body.\n` +
+      `    A vendor-wire declaration over nothing is a waiver over whatever this file\n` +
+      `    emits next: the counters would stop meaning anything here the moment a bare\n` +
+      `    body appeared. A module that departs from the envelope in no way these\n` +
+      `    counters can see is conformant — declare {}.`,
+    );
+  }
 
   return problems;
 }
 
 /**
- * Files that write a Hono context response, found by parsing rather than by
- * name — see the header on why.
+ * Files that write a response in one receiver dialect, found by PARSING rather
+ * than by name — see the header on why.
  *
- * Files already audited as surface 1 are excluded so no module is governed by
- * two tables at once.
+ * One walk serves surfaces 3 and 4 (#9937). That is not tidiness: the express
+ * population spent #9813 enumerated, and the argument for widening it was that
+ * it should be protected the way the Hono one already was. Two copies of the
+ * walk would let those two claims drift apart silently — the first divergence
+ * being a blind spot in whichever copy nobody edited.
+ *
+ * `governedElsewhere` names the files another table already holds, so no module
+ * is governed by two tables at once.
+ *
+ * `readers` is the discriminator's REJECT side, reported rather than discarded.
+ * A walk can only ever show its accept side in a green run — the files it swept
+ * in — and a discriminator seen from one side is the vacuity this gate exists to
+ * refuse. These are the files where the same receiver calls `.json()` with NO
+ * argument: fetch readers, deliberately not swept in. If the discriminator ever
+ * stopped telling the two apart, they would arrive as undeclared modules and the
+ * gate would go red naming them, so the number is a live control and not a
+ * decoration.
+ *
+ * @param {Set<string>} receivers the receiver identifiers this dialect writes on
+ * @param {(rel: string) => boolean} governedElsewhere files to leave out
+ * @returns {{writers: string[], readers: string[], readCalls: number}}
  */
-function discoverHonoRoutes() {
-  const out = [];
+function discoverResponseWriters(receivers, governedElsewhere) {
+  const writers = [];
+  const readers = [];
+  let readCalls = 0;
   const skip = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage']);
   const walk = (dir) => {
     for (const entry of readdirSync(dir)) {
@@ -1019,16 +1424,36 @@ function discoverHonoRoutes() {
       if (!entry.endsWith('.ts') || entry.endsWith('.d.ts')) continue;
       if (entry.includes('.test.') || entry.includes('.conformance.')) continue;
       const rel = relative(ROOT, full).split(sep).join('/');
-      if (MODULES[rel]) continue;
+      if (governedElsewhere(rel)) continue;
       const source = readFileSync(full, 'utf8');
       // Cheap text pre-filter, then the AST decides. The pre-filter can only
       // over-select (a mention in a comment), never under-select a real call.
       if (!source.includes('.json(')) continue;
-      if (scanHonoRouteSource(source, rel).bodies > 0) out.push(rel);
+      const got = scanHonoRouteSource(source, rel, receivers);
+      if (got.bodies > 0) writers.push(rel);
+      else if (got.reads > 0) { readers.push(rel); readCalls += got.reads; }
     }
   };
   walk(join(ROOT, 'packages'));
-  return out.sort();
+  return { writers: writers.sort(), readers: readers.sort(), readCalls };
+}
+
+/** Surface 3: the plugin-mounted Hono routes (#9267). */
+function discoverHonoRoutes() {
+  return discoverResponseWriters(HONO_CONTEXT_RECEIVERS, (rel) => Boolean(MODULES[rel])).writers;
+}
+
+/**
+ * Surface 4: the express-style `res.json(…)` writers (#9813 enumerated, #9937
+ * walked). `SHARED_BUILDER` is excluded alongside surface 1's modules — its two
+ * write sites are pinned there exactly, and they are `res.status(…).json(…)`
+ * calls this dialect would otherwise claim a second time.
+ */
+function discoverExpressRoutes() {
+  return discoverResponseWriters(
+    EXPRESS_RESPONSE_RECEIVERS,
+    (rel) => Boolean(MODULES[rel]) || rel === SHARED_BUILDER.file,
+  );
 }
 
 /**
@@ -1038,7 +1463,7 @@ function discoverHonoRoutes() {
  * @returns {{responses: number, ok: number, err: number, privateOk: number, stringError: number, siblingCode: number, sites: string[], stringErrorSites: string[], siblingCodeSites: string[]}}
  */
 export function scanSource(source, fileName = 'module.ts') {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = {
     responses: 0, ok: 0, err: 0, privateOk: 0, stringError: 0, siblingCode: 0,
     sites: [], stringErrorSites: [], siblingCodeSites: [],
@@ -1148,7 +1573,7 @@ export function scanSource(source, fileName = 'module.ts') {
  * @returns {{handBuilt: number, sites: string[]}}
  */
 export function scanDomainSource(source, fileName = 'domain.ts') {
-  const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, source);
   const found = { handBuilt: 0, sites: [] };
 
   const isDispatcherResult = (obj) =>
@@ -1451,29 +1876,29 @@ function audit() {
     }
   }
 
-  // ── The IHttpServer express-style modules (#9813) — enumerated, see table ──
-  const ihttpScans = {};
-  for (const [file, declared] of Object.entries(IHTTP_ROUTE_MODULES)) {
-    let source;
-    try {
-      source = readFileSync(join(ROOT, file), 'utf8');
-    } catch {
+  // ── The express-style `res.json(…)` writers (#9813, walked by #9937) ──────
+  const expressWalk = discoverExpressRoutes();
+  const expressRoutes = expressWalk.writers;
+  const expressScans = {};
+
+  for (const file of expressRoutes) {
+    const declared = EXPRESS_RESPONSE_MODULES[file];
+    const got = declared
+      ? scanHonoRouteSource(readFileSync(join(ROOT, file), 'utf8'), file, EXPRESS_RESPONSE_RECEIVERS)
+      : null;
+    if (got) expressScans[file] = got;
+    problems.push(...auditPluginRouteModule(file, declared, got, EXPRESS_SURFACE));
+  }
+
+  for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
+    if (!expressRoutes.includes(file)) {
       problems.push(
-        `${file}\n    declared in IHTTP_ROUTE_MODULES but not found — moved or deleted?\n` +
-        `    Update the table.`,
+        `${file}\n    declared in EXPRESS_RESPONSE_MODULES but no longer writes an express-style\n` +
+        `    response (\`res.json(…)\` / \`res.status(…).json(…)\`) — moved, deleted, or\n` +
+        `    converted? Update the table. A zero-argument \`res.json()\` is a fetch READ and\n` +
+        `    never counted, so a file that became a client rather than a server lands here.`,
       );
-      continue;
     }
-    const got = scanHonoRouteSource(source, file, EXPRESS_RESPONSE_RECEIVERS);
-    if (got.bodies === 0) {
-      problems.push(
-        `${file}\n    declared in IHTTP_ROUTE_MODULES but no longer writes an express-style\n` +
-        `    response (\`res.json(…)\`) — moved, deleted, or converted? Update the table.`,
-      );
-      continue;
-    }
-    ihttpScans[file] = got;
-    problems.push(...auditPluginRouteModule(file, declared, got));
   }
 
   if (problems.length) {
@@ -1527,14 +1952,15 @@ function audit() {
   const pEntries = Object.entries(PLUGIN_ROUTE_MODULES);
   const pRatcheted = pEntries.filter(([, m]) => m.ratchet);
   const pExempt = pEntries.filter(([, m]) => m.exempt);
+  const pVendor = pEntries.filter(([, m]) => m.vendorWire);
   const totalBodies = honoRoutes.reduce(
     (n, f) => n + scanHonoRouteSource(readFileSync(join(ROOT, f), 'utf8'), f).bodies, 0,
   );
   console.log(
     `✓ Plugin-mounted Hono routes — ${honoRoutes.length} module(s) audited, ` +
     `${totalBodies} hand-built body/bodies (count reported, NOT pinned): ` +
-    `${honoRoutes.length - pRatcheted.length - pExempt.length} conformant, ` +
-    `${pRatcheted.length} ratcheted, ${pExempt.length} exempt`,
+    `${honoRoutes.length - pRatcheted.length - pExempt.length - pVendor.length} conformant, ` +
+    `${pRatcheted.length} ratcheted, ${pExempt.length} exempt, ${pVendor.length} vendor-wire`,
   );
   const pCounts = (m) => Object.keys(PLUGIN_ROUTE_COUNTERS)
     .filter((k) => m[k]).map((k) => `${k} ${m[k]}`).join(', ');
@@ -1543,21 +1969,25 @@ function audit() {
   }
   // The counts belong in the exempt line too: an exemption here is a closed
   // enumeration, and printing it without its number would report the ruling as
-  // the file-level waiver it deliberately is not.
+  // the file-level waiver it deliberately is not. Same for vendor-wire below.
   for (const [file, m] of pExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
+  for (const [file, m] of pVendor) {
+    console.log(`  – vendor wire, closed at ${pCounts(m)}: ${file} — ${m.vendorWire} (${m.note})`);
+  }
 
-  const iEntries = Object.entries(IHTTP_ROUTE_MODULES);
+  const iEntries = Object.entries(EXPRESS_RESPONSE_MODULES);
   const iRatcheted = iEntries.filter(([, m]) => m.ratchet);
   const iExempt = iEntries.filter(([, m]) => m.exempt);
-  const iBodies = Object.values(ihttpScans).reduce((n, s) => n + s.bodies, 0);
+  const iVendor = iEntries.filter(([, m]) => m.vendorWire);
+  const iBodies = Object.values(expressScans).reduce((n, s) => n + s.bodies, 0);
   console.log(
-    `✓ IHttpServer express-style modules — ${iEntries.length} module(s) audited ` +
-    `(ENUMERATED, not discovered — the walk is #9937), ` +
+    `✓ Express-style response modules — ${expressRoutes.length} module(s) discovered and audited ` +
+    `(walked, not enumerated — #9937), ` +
     `${iBodies} hand-built body/bodies (count reported, NOT pinned): ` +
-    `${iEntries.length - iRatcheted.length - iExempt.length} conformant, ` +
-    `${iRatcheted.length} ratcheted, ${iExempt.length} exempt`,
+    `${iEntries.length - iRatcheted.length - iExempt.length - iVendor.length} conformant, ` +
+    `${iRatcheted.length} ratcheted, ${iExempt.length} exempt, ${iVendor.length} vendor-wire`,
   );
   for (const [file, m] of iRatcheted) {
     console.log(`  ⚠ ratchet ${m.ratchet}: ${file} (${pCounts(m)}; ticks down only) — ${m.note}`);
@@ -1565,6 +1995,15 @@ function audit() {
   for (const [file, m] of iExempt) {
     console.log(`  – exempt, closed at ${pCounts(m)}: ${file} — ${m.exempt}`);
   }
+  for (const [file, m] of iVendor) {
+    console.log(`  – vendor wire, closed at ${pCounts(m)}: ${file} — ${m.vendorWire} (${m.note})`);
+  }
+  // The reject side of the discriminator, printed because a walk can otherwise
+  // only ever show what it swept IN — see `discoverResponseWriters`.
+  console.log(
+    `  read/write discriminator: ${expressWalk.readers.length} file(s) skipped as fetch readers ` +
+    `(${expressWalk.readCalls} zero-argument \`res.json()\` call(s), none swept in)`,
+  );
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -1920,6 +2359,224 @@ function selfTest() {
     probs.length === 1 && probs[0].includes('Raising the declared number is not the fix') &&
     !probs[0].includes('CLOSED list'),
     `a ratchet must keep its own diagnostic → ${JSON.stringify(probs)}`,
+  );
+
+  // ── The vendor-wire state (maintainer ruling 2026-08-21, #10554) ──────────
+  //
+  // Surface 2 names this class kind 3 ("a foreign wire format a client library
+  // requires") and treats RELAYED instances as by-design invisible; this state
+  // is kind 3's counterpart for a vendor-shaped body the repo BUILDS. It has
+  // the same closed-list property as the #9389 cases above and is driven
+  // through the same pure function; the fixture is the adjudicated body itself
+  // (better-auth's `{ session, user }`, escalated on PR #10352).
+  const vendorBody = `rawApp.post('/admin/impersonate-user', async (ctx) => ctx.json({ session, user }));`;
+  const vendorRuled = {
+    unenveloped: 1,
+    vendorWire: "better-auth's wire format, ruled outside BaseResponseSchema (2026-08-21, #10554 option A)",
+    note: 'vendor: better-auth; reader: authClient.admin.impersonateUser; partner: /admin/stop-impersonating',
+  };
+  assert(scanOf(vendorBody).unenveloped === 1, 'the fixture must be a bare vendor-shaped body');
+
+  // (1) Accepted at the pinned count, with the conforming three-part note.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(vendorBody));
+  assert(probs.length === 0, `a vendor-wire module at its pinned count must pass → ${JSON.stringify(probs)}`);
+
+  // (2) REJECTED without a note — the ruling makes the note mandatory.
+  probs = auditPluginRouteModule('x.ts', { unenveloped: 1, vendorWire: vendorRuled.vendorWire }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('no `note`'),
+    `vendorWire without a note must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (3) REJECTED with a note that does not name all three parties — free prose
+  // naming nobody re-checkable is the empty gesture the labels exist to refuse.
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, note: 'better-auth needs this shape' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('all three parties'),
+    `a label-less vendorWire note must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (4) REJECTED beside `ratchet` — a conversion that can never happen is not
+  // tracked drift, and an entry claiming both claims neither.
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, ratchet: '#9559' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('vendorWire'),
+    `vendorWire + ratchet must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (5) REJECTED beside `exempt` — one body sits on exactly ONE ruled boundary
+  // (#9389's pre-auth class and this one were ruled on opposite populations).
+  probs = auditPluginRouteModule('x.ts', { ...vendorRuled, exempt: 'pre-auth' }, scanOf(vendorBody));
+  assert(
+    probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('exempt'),
+    `vendorWire + exempt must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (6) WIDENING carries the authority marker (#8435): a second vendor-shaped
+  // body on a ruled entry is a decision for the maintainer, never a number to
+  // raise — and the diagnostic must name the const-hoist as the forbidden move
+  // rather than leave the next author to rediscover it as a fix.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`${vendorBody}\n${vendorBody}`));
+  assert(
+    probs.length === 1 && probs[0].includes('CLOSED list') && probs[0].includes(RATCHET_AUTHORITY_MARKER),
+    `widening a vendor-wire boundary must be ${RATCHET_AUTHORITY_MARKER} → ${JSON.stringify(probs)}`,
+  );
+  assert(
+    probs[0].includes('hoisting'),
+    `the widening diagnostic must name the const-hoist evasion → ${JSON.stringify(probs)}`,
+  );
+
+  // (7) BELOW the count is red in the shrink direction, and shrinking needs
+  // nobody's leave — the marker guards only the widening direction.
+  probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`c.json({ success: true, data });`));
+  assert(
+    probs.length === 1 && probs[0].includes('fewer than pinned'),
+    `a vendor-wire module below its pinned count must fail → ${JSON.stringify(probs)}`,
+  );
+
+  // (8) A vendor-wire declaration over NOTHING is the standing-waiver shape,
+  // refused the same way an empty exempt is.
+  probs = auditPluginRouteModule(
+    'x.ts',
+    { vendorWire: vendorRuled.vendorWire, note: vendorRuled.note },
+    scanOf(`c.json({ success: true, data });`),
+  );
+  assert(
+    probs.length === 1 && probs[0].includes('pins no non-conforming body'),
+    `a vendor-wire declaration over nothing must be refused → ${JSON.stringify(probs)}`,
+  );
+
+  // (9) NEGATIVE: the #9389 exempt diagnostics are untouched by the new state —
+  // an exempt widening still speaks the pre-auth ruling's text, not this one's.
+  probs = auditPluginRouteModule('x.ts', ruled, scanOf(`${preAuth}\n${preAuth}`));
+  assert(
+    probs.length === 1 && probs[0].includes('#9389') && !probs[0].includes('vendorWire'),
+    `the exempt diagnostic must be unchanged by vendorWire → ${JSON.stringify(probs)}`,
+  );
+
+  // ── The read/write discriminator (#9937) — BOTH directions ────────────────
+  //
+  // `res.json` is one spelling for two opposite acts. A discriminator checked
+  // only in the accept direction is a discriminator nobody has tested: it would
+  // pass identically if it accepted EVERYTHING, and this surface's population is
+  // 83 fetch reads to 218 writes, so "accepts everything" means a gate that
+  // reddens on `@objectstack/client`. Both directions, and the reject direction
+  // asserted POSITIVELY — `reads: 1`, not merely `bodies: 0`, which a scanner
+  // that had simply stopped matching the receiver would also produce.
+
+  // ACCEPT — the bare express write.
+  p = scanHonoRouteSource(`res.json({ success: true, data });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 1 && p.reads === 0,
+    `a one-argument res.json must read as a WRITE → ${JSON.stringify(p)}`,
+  );
+
+  // ACCEPT — the chained express write. 137 of the repo's 218 express write
+  // calls are spelled this way, and every refusal among them; a scanner that saw
+  // only the bare form would count the successes and miss the errors.
+  p = scanHonoRouteSource(
+    `res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: m } });`,
+    'x.ts', EXPRESS_RESPONSE_RECEIVERS,
+  );
+  assert(
+    p.bodies === 1 && p.unenveloped === 1 && p.reads === 0,
+    `res.status(n).json(body) must read as a WRITE and be judged → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — the fetch read, in the shape the repo actually writes it. Asserted
+  // as `reads: 1`: the call was SEEN and classified, not missed.
+  p = scanHonoRouteSource(
+    `const r = await fetch(url); const body = await res.json();`,
+    'x.ts', EXPRESS_RESPONSE_RECEIVERS,
+  );
+  assert(
+    p.bodies === 0 && p.reads === 1,
+    `a zero-argument res.json() must read as a READ, seen and skipped → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — and not because of `await`: the unawaited read (14 of the repo's
+  // 83 are written this way, `res.json().then(…)` and friends) is the same call.
+  p = scanHonoRouteSource(`const p2 = res.json().then((b) => b.data);`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 1,
+    `an unawaited zero-argument res.json() is still a READ → ${JSON.stringify(p)}`,
+  );
+
+  // REJECT — the OTHER half of the discriminator, measured to be load-bearing:
+  // 11 files call `Field.json({ … })` / `t.json(c.name)` / `table.json(name)`,
+  // object and column DSLs answering no HTTP request. Argument count alone would
+  // sweep every one of them in. The positive control is the same body one line
+  // down: identical source, express receiver, counted.
+  p = scanHonoRouteSource(`Field.json({ label: 'Config', required: true });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 0,
+    `a non-response receiver must not enter this surface → ${JSON.stringify(p)}`,
+  );
+  p = scanHonoRouteSource(`res.json({ label: 'Config', required: true });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(p.bodies === 1, 'the same body on `res` MUST be counted — otherwise the case above proves nothing');
+
+  // REJECT — a chained zero-argument read (`req.clone().json()`) is neither a
+  // write nor this receiver's read.
+  p = scanHonoRouteSource(`const b = await req.clone().json();`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
+  assert(
+    p.bodies === 0 && p.reads === 0,
+    `a chained request read must stay outside this surface → ${JSON.stringify(p)}`,
+  );
+
+  // The discriminator is dialect-wide, not express-only: a Hono context never
+  // spells a zero-argument write either, and surface 3's counts are unmoved by
+  // it (measured: no `c.json()` takes zero arguments anywhere under packages/).
+  p = scanHonoRouteSource(`const b = await c.json();`);
+  assert(p.bodies === 0 && p.reads === 1, `zero-argument c.json() must not be a body → ${JSON.stringify(p)}`);
+
+  // ── The walk (#9937): reproduce before believing ──────────────────────────
+  //
+  // The enumerated table is now the DECLARED side of a walk, so the first thing
+  // to prove is that the walk still finds what the hand-written list named — on
+  // the real tree, not a fixture. Everything the walk adds beyond that rests on
+  // this: a walk that could not re-find the file somebody had already audited is
+  // not one to trust on the files nobody has.
+  const walked = discoverExpressRoutes();
+  for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
+    assert(
+      walked.writers.includes(file),
+      `the walk must re-find every declared express module — missed ${file} (found: ${walked.writers.join(', ')})`,
+    );
+  }
+  // …and the reject side on the real tree too: the walk must be SKIPPING fetch
+  // readers, not merely failing to find them. Zero here would mean the reject
+  // direction is untested against anything real.
+  assert(
+    walked.readers.length > 0 && walked.readCalls > 0,
+    `the walk must classify real fetch readers, not just miss them → ${JSON.stringify({ readers: walked.readers.length, calls: walked.readCalls })}`,
+  );
+  // The two sets are disjoint by construction — assert it, because the whole
+  // population argument is that no file is both.
+  assert(
+    walked.writers.every((f) => !walked.readers.includes(f)),
+    'no file may be both an express writer and a skipped fetch reader',
+  );
+
+  // An undeclared express writer fails, and the diagnostic must name THIS
+  // surface's table — surface 3's text would send an author to edit the wrong
+  // one, and "the failure text mirrors surface 3's" is the acceptance shape.
+  probs = auditPluginRouteModule(
+    'packages/plugins/plugin-new/src/http.ts',
+    undefined,
+    scanHonoRouteSource(`res.json({ data });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS),
+    EXPRESS_SURFACE,
+  );
+  assert(
+    probs.length === 1 && probs[0].includes('NOT DECLARED') &&
+    probs[0].includes('EXPRESS_RESPONSE_MODULES') && !probs[0].includes('PLUGIN_ROUTE_MODULES'),
+    `an undeclared express writer must fail naming its own table → ${JSON.stringify(probs)}`,
+  );
+  // NEGATIVE: the Hono surface keeps its own text, unchanged by the parameter.
+  probs = auditPluginRouteModule('x.ts', undefined, scanOf(preAuth));
+  assert(
+    probs.length === 1 && probs[0].includes('PLUGIN_ROUTE_MODULES') &&
+    !probs[0].includes('EXPRESS_RESPONSE_MODULES'),
+    `the Hono surface's diagnostic must be unchanged → ${JSON.stringify(probs)}`,
   );
 
   console.log('✓ check-route-envelope self-test passed');

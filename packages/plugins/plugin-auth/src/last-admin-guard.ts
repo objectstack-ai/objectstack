@@ -91,8 +91,11 @@
  *
  * ## What counts as an administrator
  *
- * Exactly what `AuthManager.isOrgOrPlatformAdmin` (the repo's existing
- * admin-gate answer) counts, enumerated in the opposite direction:
+ * The two grades below are what the ADR-0024 `/sso/register` admin gate counted
+ * until #10009 narrowed that gate to platform-admin-only and removed its
+ * `AuthManager.isOrgOrPlatformAdmin` predicate. That predicate is gone; this
+ * guard is unchanged and still counts both, so the definition stands on its own
+ * here, enumerated in the opposite direction:
  *
  *  1. **platform admin** — an UNSCOPED (`organization_id = null`), in-window
  *     (ADR-0091) `sys_user_permission_set` grant of `admin_full_access`. This

@@ -162,14 +162,23 @@ lifecycle: {
   class: 'telemetry',
   retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } },
 }
+
+// TTL that spares terminal rows kept for audit: key on a value's ABSENCE.
+// A tombstone stamps `revoked_at` (and may backdate `expires_at`, making it
+// look maximally expired), so the null predicate is the only property that
+// distinguishes the live rows the TTL should reap.
+lifecycle: {
+  class: 'transient',
+  ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } },
+}
 ```
 
 | Key | Description |
 | :--- | :--- |
 | `class` | Persistence contract (see table below); `record` is the implicit default |
 | `retention.maxAge` | Age-based reap on `created_at` |
-| `retention.onlyWhen` | Row filter the reap is scoped to (per-field equality or `{ $in: [...] }`); rows outside it are retained regardless of age. Incompatible with rotation `storage` and `archive` |
-| `ttl` | Per-row expiry: `field` + `expireAfter` |
+| `retention.onlyWhen` | Row filter the reap is scoped to (per-field equality, `{ $in: [...] }`, or the null predicate `{ $null: true\|false }`); rows outside it are retained regardless of age. Incompatible with rotation `storage` and `archive` |
+| `ttl` | Per-row expiry: `field` + `expireAfter`, plus optional `onlyWhen` — the same row filter (same value union) scoping the TTL reap; rows outside it are retained regardless of expiry, and the same rotation/`archive` incompatibilities apply |
 | `storage` | `{ strategy: 'rotation', shards, unit }` — time-shard + O(1) shard `DROP` (SQLite) |
 | `archive` | Cold-store hand-off: `after` (must equal `retention.maxAge`) + `to` (datasource name) + optional `keep` |
 | `reclaim` | Space reclamation after sweeps (default on for non-`record`) |

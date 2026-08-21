@@ -530,8 +530,11 @@ export function checkSearchableFieldList(
 
 /**
  * Validate every `searchableFields` declaration in the stack — the object's own
- * (the canonical set, ADR-0061) and the list views that narrow it. Returns
- * findings (empty = clean).
+ * (the canonical set, ADR-0061) and the list views that narrow it, including
+ * the two standalone `views[]` shapes the `PUT /api/v1/meta/view` door
+ * carries and the runtime publish gate snapshots: the flattened list overlay
+ * (#9313, top-level set) and the ViewItem record (#10001,
+ * `config.searchableFields` one level down). Returns findings (empty = clean).
  *
  * The react page surface (`<ListView searchableFields={…}>`) is deliberately
  * NOT walked here: its declaration lives inside JSX source, and
@@ -610,6 +613,52 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     // The aggregate's own binding is the fallback for a list view that declares
     // none — the same resolution order `validate-list-view-mode` reads.
     const viewObject = strName(view.objectName) ?? strName(view.object);
+
+    // ── [#9313] The SELF rung: a flattened standalone list overlay ──
+    //
+    // A `views[]` entry that IS a single list view — `ViewMetadataSchema`'s
+    // list-overlay member, the shape a standalone list view takes through
+    // `PUT /api/v1/meta/view` and the shape the runtime publish gate
+    // snapshots as `views: [item]`. Recognised exactly as the sort axis
+    // recognises it (`validate-sortable-fields.ts` carries the full note):
+    // `viewKind: 'list'` (required on the overlay arm since #7741, refused by
+    // name on the strict container schema) with no nested `config` (that
+    // shape is a ViewItem RECORD — judged by its own record rung below since
+    // #10001). A `narrowing`, like
+    // every list-view surface: the overlay's set is echoed verbatim as the
+    // `$searchFields` override and judged by the #4254 ingress gate.
+    if (view.viewKind === 'list' && !isRec(view.config)) {
+      check(
+        view.searchableFields,
+        listViewObject(view) ?? viewObject,
+        `view "${viewLabel}" (flattened list overlay)`,
+        `views[${vi}].searchableFields`,
+        'list-view searchableFields',
+        'narrowing',
+      );
+    }
+
+    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    //
+    // The self rung's structural complement — `ViewMetadataSchema`'s member 1
+    // (`ViewItemWireSchema`, `{ name, object, viewKind: 'list', config }`),
+    // the Studio-saved-view shape through the same door, its set one level
+    // down inside `config`. Recogniser, binding order and the deliberate
+    // non-reading of the record's top level are mirrored from the sort twin
+    // (`validate-sortable-fields.ts`), which carries the full note. A
+    // `narrowing` for the same reason as every list-view surface: the
+    // record's config set is echoed as the `$searchFields` override on that
+    // view's toolbar search and judged by the #4254 ingress gate.
+    if (view.viewKind === 'list' && isRec(view.config)) {
+      check(
+        view.config.searchableFields,
+        listViewObject(view.config) ?? viewObject,
+        `view "${viewLabel}" (ViewItem record)`,
+        `views[${vi}].config.searchableFields`,
+        'list-view searchableFields',
+        'narrowing',
+      );
+    }
 
     if (isRec(view.list)) {
       check(

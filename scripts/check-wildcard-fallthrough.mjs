@@ -78,6 +78,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -295,7 +296,7 @@ function resolveHandler(arg, src) {
 /** Every wildcard mount in one file. */
 function scanFile(file) {
   const text = readFileSync(join(ROOT, file), 'utf8');
-  const src = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const src = parseSourceFile(file, text);
   const sites = [];
 
   const visit = (node) => {
@@ -448,7 +449,7 @@ function audit() {
 
 function selfTest() {
   const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
-  const parse = (code) => ts.createSourceFile('t.ts', code, ts.ScriptTarget.Latest, true);
+  const parse = (code) => parseSourceFile('t.ts', code);
 
   // `isWildcard` — namespace claims vs single paths.
   assert(isWildcard('/api/v1/auth/*'), 'plain wildcard');

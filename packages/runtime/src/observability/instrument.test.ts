@@ -55,6 +55,19 @@ function makeClock() {
     };
 }
 
+/**
+ * The retired name (#9834, ADR-0049 enforce-or-remove). Kept as a LITERAL
+ * rather than a `RUNTIME_METRICS` member on purpose: the constant is gone, so
+ * a member read would not compile, and the thing worth pinning is that nothing
+ * writes this SERIES — which is what an external dashboard keyed on the string
+ * would look for. Any sample under this name is the retirement coming undone.
+ */
+const RETIRED_ERROR_COUNTER = 'http_request_errors_total';
+
+function retiredErrorCounterSamples(m: InMemoryMetricsRegistry) {
+    return m.samples.filter((s) => s.name === RETIRED_ERROR_COUNTER);
+}
+
 describe('instrumentRouteHandler', () => {
     let metrics: InMemoryMetricsRegistry;
     let errorReporter: InMemoryErrorReporter;
@@ -146,7 +159,7 @@ describe('instrumentRouteHandler', () => {
             ).toEqual([15]);
         });
 
-        it('emitHttpRequestsTotal: false suppresses ONLY the request counter — histogram, error counter, reporter and request-id stay on (#9835)', async () => {
+        it('emitHttpRequestsTotal: false suppresses ONLY the request counter — histogram, reporter and request-id stay on (#9835)', async () => {
             // The dispatcher passes this when the transport implements the
             // `IHttpServer.afterResponse` seam, which then owns the counter
             // (#9833's duplicate). Everything else the wrapper emits is NOT
@@ -173,19 +186,20 @@ describe('instrumentRouteHandler', () => {
             ).toEqual([15]);
             expect(res.headers['X-Request-Id']).toBeTruthy();
 
-            // The error counter is likewise ungated.
+            // A throw under the gate: the REPORTER is what survives it. The
+            // error counter used to be asserted here; #9834 retired it, so the
+            // assertion is now that nothing writes that series.
             const throwing = instrumentRouteHandler(
                 'POST',
                 '/boom',
                 async () => {
                     throw new Error('kaboom');
                 },
-                { metrics, emitHttpRequestsTotal: false },
+                { metrics, errorReporter, emitHttpRequestsTotal: false },
             );
             await expect(throwing({ headers: {} }, makeRes())).rejects.toThrow('kaboom');
-            expect(
-                metrics.totalCounter('http_request_errors_total', { route: '/boom' }),
-            ).toBe(1);
+            expect(errorReporter.captured).toHaveLength(1);
+            expect(retiredErrorCounterSamples(metrics)).toEqual([]);
             expect(
                 metrics.totalCounter('http_requests_total', { route: '/boom' }),
             ).toBe(0);
@@ -204,7 +218,7 @@ describe('instrumentRouteHandler', () => {
             ).toBe(1);
         });
 
-        it('emitHttpRequestDurationMs: false suppresses ONLY the histogram — counter, error counter, reporter and request-id stay on (#9834)', async () => {
+        it('emitHttpRequestDurationMs: false suppresses ONLY the histogram — counter, reporter and request-id stay on (#9834)', async () => {
             // The dispatcher passes this once the transport's afterResponse
             // seam has the duration histogram armed on it. The counter is
             // gated by its OWN flag, so a transport that owns one family and
@@ -239,12 +253,10 @@ describe('instrumentRouteHandler', () => {
                 { metrics, errorReporter, emitHttpRequestDurationMs: false },
             );
             await expect(throwing({ headers: {} }, makeRes())).rejects.toThrow('kaboom');
-            // The error counter has NO transport-side emitter to defer to —
-            // the observation carries no throw signal — so it is ungated on
-            // every transport (#9834 reported that fork rather than moving it).
-            expect(
-                metrics.totalCounter('http_request_errors_total', { route: '/boom' }),
-            ).toBe(1);
+            // The error counter had NO transport-side emitter to defer to — the
+            // observation carries no throw signal — and #9834's fork was ruled
+            // RETIRE rather than move, so no emitter is left on any transport.
+            expect(retiredErrorCounterSamples(metrics)).toEqual([]);
             expect(errorReporter.captured).toHaveLength(1);
         });
 
@@ -264,7 +276,7 @@ describe('instrumentRouteHandler', () => {
             ).toEqual([4]);
         });
 
-        it('the two gates are INDEPENDENT — both off leaves request-id, the error counter and the reporter', async () => {
+        it('the two gates are INDEPENDENT — both off leaves request-id and the reporter', async () => {
             const clock = makeClock();
             const wrapped = instrumentRouteHandler(
                 'POST',
@@ -287,9 +299,7 @@ describe('instrumentRouteHandler', () => {
             expect(
                 metrics.histogramValues('http_request_duration_ms', { route: '/both-off' }),
             ).toEqual([]);
-            expect(
-                metrics.totalCounter('http_request_errors_total', { route: '/both-off' }),
-            ).toBe(1);
+            expect(retiredErrorCounterSamples(metrics)).toEqual([]);
             expect(res.headers['X-Request-Id']).toBeTruthy();
             expect(errorReporter.captured).toHaveLength(1);
         });
@@ -311,7 +321,7 @@ describe('instrumentRouteHandler', () => {
             ).toBe(1);
         });
 
-        it('records errors counter and 5xx status on thrown errors', async () => {
+        it('records 5xx status on thrown errors — and emits NO error counter (#9834 retired it)', async () => {
             const wrapped = instrumentRouteHandler(
                 'POST',
                 '/boom',
@@ -321,15 +331,40 @@ describe('instrumentRouteHandler', () => {
                 { metrics, errorReporter },
             );
             await expect(wrapped({ headers: {} }, makeRes())).rejects.toThrow('kaboom');
-            expect(
-                metrics.totalCounter('http_request_errors_total', {
-                    method: 'POST',
-                    route: '/boom',
-                }),
-            ).toBe(1);
+            // The tombstone, on the emission path that used to write it: the
+            // wrapper's own default composition, no gate flags set. This is the
+            // assertion that fails if the emission is ever restored.
+            expect(retiredErrorCounterSamples(metrics)).toEqual([]);
+            // What replaced it as the 5xx signal — same throw, on the family the
+            // TRANSPORT emits for every inbound surface.
             expect(
                 metrics.totalCounter('http_requests_total', { status: '500' }),
             ).toBe(1);
+            expect(errorReporter.captured).toHaveLength(1);
+        });
+
+        it('a THROWN 4xx writes no error counter either — the retired series had no status filter (#9834)', async () => {
+            // Recorded because it is the half of the old population a status-class
+            // replacement would have dropped: the retired counter incremented
+            // unconditionally in the `catch`, so a thrown 400 WAS counted by it.
+            // Nothing counts it now; `http_requests_total{status="400"}` carries
+            // the request, and the reporter deliberately stays out of 4xx.
+            const wrapped = instrumentRouteHandler(
+                'POST',
+                '/validate',
+                async () => {
+                    const err: any = new Error('bad input');
+                    err.statusCode = 400;
+                    throw err;
+                },
+                { metrics, errorReporter },
+            );
+            await expect(wrapped({ headers: {} }, makeRes())).rejects.toThrow('bad input');
+            expect(retiredErrorCounterSamples(metrics)).toEqual([]);
+            expect(
+                metrics.totalCounter('http_requests_total', { status: '400' }),
+            ).toBe(1);
+            expect(errorReporter.captured).toHaveLength(0);
         });
 
         it('uses err.statusCode when present (e.g. 400 from validation)', async () => {

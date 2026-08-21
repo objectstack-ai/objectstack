@@ -92,7 +92,28 @@ function humanMs(ms: number): string {
  */
 interface SweepLogger {
   info?: (msg: string, meta?: any) => void;
-  warn?: (msg: string, meta?: any) => void;
+  /**
+   * The GUARANTEED channel (#9754). `error` below stays optional — hosts do
+   * inject reduced sinks — so `warn` is where a durability report lands when
+   * `error` is absent, and a fallback that may itself be missing is not a
+   * fallback: `{ info }` alone used to be a legal sink here, and against it the
+   * boot sweep's "N stranded row(s) could NOT be delivered" summary printed
+   * nothing at all. Non-optional is what makes that silence unrepresentable
+   * instead of merely discouraged.
+   *
+   * ⛔ Do NOT "simplify" this by making `error` required instead — that
+   * forecloses the reduced sinks hosts legitimately pass (#9754 option C,
+   * measured and rejected).
+   *
+   * ⚠️ Call sites still spell the fallback `logger?.warn?.(…)`. That `?.` is not
+   * doubt about this declaration — it is the backstop for hosts the TYPE cannot
+   * reach (a plain-JS embedder, or a cast). Dropping it was measured: a sink
+   * that lies about its shape then throws `logger?.warn is not a function`
+   * INSIDE the per-row durability catch, aborting the very batch this function
+   * promises never to stop. Silence for a lying host is the lesser failure; the
+   * guarantee this member adds is at AUTHORING time, where it belongs.
+   */
+  warn: (msg: string, meta?: any) => void;
   error?: (msg: string, meta?: any) => void;
 }
 
@@ -224,14 +245,22 @@ export async function sweepStrandedOutbox(
   );
 
   if (result.failed > 0) {
-    logger?.error?.(
+    const summary =
       `EmailServicePlugin: ${result.failed} stranded sys_email row(s) could NOT be delivered by the boot `
       + 'sweep. Those messages were accepted by the platform and have still never reached a recipient; '
       + 'nothing retries them in this process. Fix: read the failures with '
       + "`SELECT id, error FROM sys_email WHERE status = 'failed'`, fix the transport (Settings → Mail), and "
       + 'turn on Settings → Mail → "Durable queue delivery" so future failures are retried and dead-lettered '
-      + 'instead of depending on the next restart.',
-    );
+      + 'instead of depending on the next restart.';
+    // Same defect as the per-row report above, one scope out (#9748). No
+    // `catch` guards this line, so `check:durability-log-level` could not see
+    // it and #9657 left it spelled `logger?.error?.(…)` — which printed
+    // NOTHING against a sink that has only `warn`. Because the per-row line WAS
+    // repaired, such a sink then heard every individual failure and never the
+    // COUNT of accepted mail that reached nobody: the detail and the total
+    // reported through different channels. Fall back to `warn`, not silence.
+    if (logger?.error) logger.error(summary);
+    else logger?.warn?.(summary);
   }
 
   return result;

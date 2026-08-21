@@ -26,6 +26,7 @@ import {
   type SettingsServiceOptions,
   envKeyOf,
   SettingsCryptoUnavailableError,
+  SettingsEngineNotBoundError,
   SettingsForbiddenError,
   SettingsLockedError,
   SettingsValidationError,
@@ -549,6 +550,13 @@ export class SettingsService {
   private readonly reportedCryptoRefusals = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
+  /**
+   * True while a `bindEngine` call is DECLARED-but-not-yet-arrived — the
+   * pre-bind window. See `SettingsServiceOptions.engineBindPending` for why it
+   * is opt-in, and {@link SettingsEngineNotBoundError} for what the window did
+   * before this flag existed.
+   */
+  private engineBindPending: boolean;
   /** Change subscribers, optionally scoped to a namespace. */
   private readonly subscribers = new Set<{
     ns?: string;
@@ -565,6 +573,9 @@ export class SettingsService {
     this.env = opts.env ?? (typeof process !== 'undefined' ? process.env : {});
     this.objectName = opts.objectName ?? DEFAULT_OBJECT;
     this.logger = opts.logger;
+    // An engine handed in at construction is already bound — there is no window
+    // to guard, whatever the caller declared.
+    this.engineBindPending = Boolean(opts.engineBindPending) && !this.engine;
   }
 
   /**
@@ -583,6 +594,9 @@ export class SettingsService {
     },
   ): void {
     this.engine = engine;
+    // The window is over: `upsertRow` now takes its engine branch, so the
+    // pre-bind write guard has nothing left to protect.
+    this.engineBindPending = false;
     if (audit) this.audit = audit;
     if (extras?.secretStore) this.secretStore = extras.secretStore;
     if (extras?.auditWriter) this.auditWriter = extras.auditWriter;
@@ -602,6 +616,43 @@ export class SettingsService {
         at: new Date().toISOString(),
       });
     }
+  }
+
+  /**
+   * Settle the pre-bind window the OTHER way: no engine is coming, and the
+   * in-memory fallback is this deployment's intended store.
+   *
+   * The counterpart to {@link bindEngine}, and the half that keeps the refusal
+   * scoped to a genuine window rather than to "engine-less" in general.
+   * `SettingsServicePlugin` declares `objectql` an OPTIONAL dependency and
+   * degrades on purpose when it is absent ("lean test kernels without an
+   * engine … no sys table, service still up"), so on those kernels the answer
+   * to "is an engine coming?" is legitimately *no* — and it is knowable exactly
+   * once, at the moment the plugin's `kernel:ready` hook fails to resolve
+   * `objectql`. From here on such a service behaves exactly as it did before
+   * the window guard existed.
+   *
+   * Idempotent, and a no-op once an engine is bound.
+   */
+  settleWithoutEngine(): void {
+    this.engineBindPending = false;
+  }
+
+  /**
+   * Refuse a write issued inside the pre-bind window.
+   *
+   * Placed at the very top of the write door, BEFORE the manifest lookup and
+   * the capability gate, because it is a precondition of the SERVICE rather
+   * than a verdict on the request: in the window there is no durable store for
+   * any namespace, any key, or any caller, and answering with a
+   * request-specific error first would describe the wrong problem. There is no
+   * information-disclosure cost to that ordering here — the window closes at
+   * `kernel:ready` and no HTTP socket is open until `kernel:listening`, so no
+   * untrusted caller can reach this branch.
+   */
+  private assertEngineBound(namespace: string, keys: string[]): void {
+    if (!this.engineBindPending || this.engine) return;
+    throw new SettingsEngineNotBoundError(namespace, keys);
   }
 
   /**
@@ -1313,6 +1364,9 @@ export class SettingsService {
     patch: Record<string, unknown>,
     ctx: SettingsContext = {},
   ): Promise<Record<string, ResolvedSettingValue>> {
+    // The pre-bind window: refuse rather than resolve against a store nothing
+    // will ever read. See `assertEngineBound`.
+    this.assertEngineBound(namespace, Object.keys(patch));
     const reg = this.registry.get(namespace);
     if (!reg) throw new UnknownNamespaceError(namespace);
     // [Finding-1] Writing requires the manifest's write capability for an

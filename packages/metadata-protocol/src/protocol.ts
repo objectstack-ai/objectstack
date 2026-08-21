@@ -12,7 +12,11 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError }
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import {
+    evaluateRuntimeAuthoringGate,
+    CLOSURE_CONTEXT_KEY_BY_TYPE,
+    type RuntimePendingDeclarations,
+} from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
 import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
@@ -3920,6 +3924,19 @@ export class ObjectStackProtocolImplementation implements
          * sentinel ⇒ nothing is narrowed.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The declarations this write's own BATCH is publishing
+         * alongside it, when the caller HAS a batch. Only
+         * `publishPackageDrafts` does; every other door writes one item, so its
+         * closure is the live universe and it states nothing here.
+         *
+         * Threaded rather than gathered: the batch's pending drafts are
+         * `sys_metadata` rows the caller has already listed and is about to
+         * consume, and re-deriving them from this side would mean guessing
+         * WHICH batch a write belongs to — which is the question the caller is
+         * the only one holding the answer to.
+         */
+        pending?: RuntimePendingDeclarations;
     }): RuntimeAuthoringIssue[] {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
@@ -4020,6 +4037,9 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
+            // [#10377] The batch's own pending drafts join the four
+            // collections above. Absent on every non-batch door.
+            ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
@@ -5085,7 +5105,11 @@ export class ObjectStackProtocolImplementation implements
      * layer on top of spec validation).
      *
      * `type` may be either a singular (`'view'`) or plural (`'views'`)
-     * identifier; the underlying `getMetaItems` already normalises.
+     * identifier; the underlying `getMetaItems` already normalises. An
+     * UNRECOGNISED spelling of a declared type (`'viewes'`) is refused with
+     * the 400 `getMetaItems` raises for it, not swallowed into a
+     * "scanned 1 type, 0 problems" answer — see the [#8924] note in the
+     * per-type catch below.
      *
      * Implementation note: leverages the `_diagnostics` already
      * decorated onto items by `getMetaItems()` to avoid running
@@ -5183,6 +5207,49 @@ export class ObjectStackProtocolImplementation implements
                 // nobody can re-ask, while a false "real" costs one 503 the
                 // caller can retry.
                 if ((error as { status?: unknown } | null | undefined)?.status === 503) throw error;
+                // [#8924] TWO error classes leave through this catch — the 503
+                // above and the 400 below — under ONE rule: an error the
+                // producer already stamped with a status is a CLASSIFIED
+                // VERDICT, and this sweep may not overrule a verdict into
+                // silence. Everything else is a genuine listing failure nobody
+                // classified, and for those the benign skip below is the ruled
+                // disposition (maintainer, 2026-08-20, option 1).
+                //
+                //  * 503 (#8855, above): the store outage — "whether rows
+                //    exist is UNKNOWN". Swallowing it published an outage as
+                //    "0 problems".
+                //  * 400 (#8924, here): the request-classification refusal
+                //    `canonicalizeMetaRequestType` raises INSIDE `getMetaItems`
+                //    (`status: 400`, `code: 'INVALID_REQUEST'`) for an
+                //    unrecognised spelling of a DECLARED type (`fieldes`,
+                //    `viewes`, `capabilitys`, …). Only the `request.type` arm
+                //    can produce it — the full-sweep arm's `targetTypes` come
+                //    canonical out of the registry — so rethrowing it cannot
+                //    fail a whole-corpus sweep. Swallowing it answered
+                //    `200 {"scannedTypes":1,"stats":{}}` — "scanned 1 type,
+                //    no issues" — to a spelling every sibling `/meta` door
+                //    refuses with a 400 that names both accepted spellings
+                //    (measured: 27 such spellings on a booted kernel, while
+                //    objectui's DiagnosticsPage paints that payload as "All
+                //    clear"). The producer classified the caller's mistake;
+                //    the caller gets to hear it. Declared = enforced.
+                //
+                // What still takes the `continue`: a listing failure with no
+                // status, or any status that is not one of the two verdicts
+                // above (the registry listing is not a guarded read, so its
+                // failures arrive unclassified). That skip is genuine — a
+                // kernel scope that cannot enumerate one type must not fail
+                // the whole governance sweep — and measured to have NO
+                // producer in kernel scope today (six booted scopes, zero
+                // skips), which is exactly why it stays a guard rather than
+                // becoming a payload field (`skippedTypes` was considered and
+                // ruled out as motiveless).
+                //
+                // By `status` and not by `code`, mirroring the 503 test above
+                // and its direction argument: a false "real" is loud and
+                // correctable at the caller; a false "benign" silently
+                // mis-answers a question nobody re-asks.
+                if ((error as { status?: unknown } | null | undefined)?.status === 400) throw error;
                 continue;
             }
             const items: any[] = Array.isArray(listed?.items)
@@ -14398,6 +14465,17 @@ export class ObjectStackProtocolImplementation implements
          * the caller actually has a binding to state.
          */
         packageId?: string | null;
+        /**
+         * [#10377] The OTHER drafts this promotion is part of a batch with,
+         * projected into the gate's context collections. Forwarded verbatim to
+         * {@link assertRuntimeAuthoringRules} — this method computes nothing
+         * from it and holds no opinion about its contents.
+         *
+         * Stated by `publishPackageDrafts` (a package publishes as a unit);
+         * absent on the `publishMetaItem` path, whose batch is one item, so a
+         * "same-batch" closure would be the item itself and change nothing.
+         */
+        pending?: RuntimePendingDeclarations;
     }): Promise<{
         singularType: string;
         orgId: string | null;
@@ -14502,6 +14580,13 @@ export class ObjectStackProtocolImplementation implements
                 // fires while looking like it does. Filed rather than widened
                 // here, because `MetadataItem` is a `packages/spec` contract.
                 ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+                // [#10377] The batch's own pending drafts, when this promotion
+                // is part of one. The package closure above says WHICH packages
+                // this write may resolve against; this says which of its own
+                // package's declarations are in flight beside it — two
+                // different narrowings, both needed for a package to be
+                // judged as a self-consistent unit.
+                ...(request.pending !== undefined ? { pending: request.pending } : {}),
             })
             : [];
 
@@ -14804,6 +14889,155 @@ export class ObjectStackProtocolImplementation implements
         });
         return { drafts };
     }
+
+    /**
+     * [#10377] The batch's own pending declarations, projected into the gate's
+     * context collections — the half of the closure that makes a package
+     * publishable as a SELF-CONSISTENT UNIT.
+     *
+     * ## What was broken
+     *
+     * `assertRuntimeAuthoringRules` resolves every context collection off
+     * `engine.registry`, i.e. the LIVE universe. A draft is not in it — the
+     * write-through runs on `mode: 'publish'` — and the batch's own promotions
+     * do not put it there either, because `applyRegistryWriteThrough` lives in
+     * Phase 2, after the Phase-1 transaction in which every draft is gated and
+     * promoted. So while a batch is being judged NO sibling of that batch is
+     * visible to any other member's gate pass, in ANY order. Measured
+     * 2026-08-21 on a cloud rig: a package carrying `dataset/shyx_customer_ds`
+     * and a `dashboard` whose widget binds it rolled back at the dashboard
+     * with `[widget-dataset-unknown] … does not resolve to a declared
+     * dataset`, on every attempt and under both dataset names the author
+     * tried. The dataset was in the same batch, three rows away.
+     *
+     * ## Why the bodies are read here and not inside the loop
+     *
+     * The promote DELETES the draft row (`repo.promoteDraft` = active-row put +
+     * draft delete), so a body read after the first promotion is a body that
+     * may already be gone — the same reason the seed capture inside Phase 1
+     * reads BEFORE its own promote. Reading the whole set up front also makes
+     * the closure ORDER-INDEPENDENT by construction rather than by luck of
+     * iteration: every member is judged against the same complete set.
+     *
+     * ## Scope, and why no extra filtering is needed
+     *
+     * `drafts` is already exactly this package's pending set — `listDrafts`
+     * narrows by `package_id`, and surfaces env-wide plus own-org rows, which
+     * is precisely the population the caller is about to promote. So the
+     * closure is "this package's own declarations", restated from the list the
+     * batch is defined by, never a second query with a second scope.
+     *
+     * ⛔ Read failures PROPAGATE — a repository that HAS the read and fails it
+     * is a fault, not a miss. This runs before Phase 1's transaction, so
+     * nothing has been written and the publish fails having changed nothing,
+     * and every row read here is a row `promoteDraftForPublish` is about to
+     * read again anyway. Swallowing would silently shrink the closure, which
+     * does not fail open — it manufactures a refusal that names a declaration
+     * the author can SEE in their own package (ADR-0110 D3: a miss and a fault
+     * are different facts). The MISSING-member case is the other fact and is
+     * handled below, loudly and without a throw.
+     *
+     * ## Why the batch's existing enumeration cannot supply the bodies
+     *
+     * `listDrafts` — the read that DEFINES this batch — is a declared header
+     * projection: it maps rows to `(type, name, organizationId, packageId,
+     * updatedAt, updatedBy)` and drops `metadata` on purpose, because its other
+     * caller is the console's "pending changes" list. Widening it would put
+     * every draft BODY on that listing, and it would not even remove the guard
+     * below: the doubles that lack `repo.get` stub `listDrafts` too, so a
+     * body-carrying projection would hand back headers there anyway — degrading
+     * SILENTLY instead of degrading with a reason. So the second read stays,
+     * and the absence of the member it needs is stated rather than assumed.
+     */
+    private async collectBatchPendingDeclarations(
+        drafts: ReadonlyArray<{ type: string; name: string; organizationId: string | null }>,
+    ): Promise<RuntimePendingDeclarations | undefined> {
+        const pending: {
+            objects: unknown[]; permissions: unknown[]; books: unknown[]; datasets: unknown[];
+        } = { objects: [], permissions: [], books: [], datasets: [] };
+        let any = false;
+        for (const d of drafts) {
+            // The canonical fold, same boundary the promote applies: a stored
+            // manifest-plural spelling must route to the same collection its
+            // singular does, or one row's shape would decide whether the
+            // package is judged against itself.
+            const singular = canonicalMetaType(d.type);
+            const key = (CLOSURE_CONTEXT_KEY_BY_TYPE as Record<string, keyof RuntimePendingDeclarations>)[singular];
+            if (!key) continue;
+            const draftOrgId = d.organizationId ?? null;
+            const repo = this.getOverlayRepo(draftOrgId);
+            // ── The repository-shape guard, and why it degrades ALL-OR-NOTHING
+            //
+            // This method introduced the batch door's first dependency on
+            // `repo.get`. `SysMetadataRepository` has always had it, but the
+            // seam is overridable (`getOverlayRepo` is the injection point every
+            // publish double replaces), and the door's only previous body read —
+            // the `seed` capture — fires solely when a seed draft is in the
+            // batch, so a repository shape without `get` had never been asked
+            // for one. Measured: nine `publishPackageDrafts` cases in
+            // `@objectstack/objectql` drive a double declaring `listDrafts`
+            // alone, and this call turned every one of them into
+            // `TypeError: repo.get is not a function` — thrown BEFORE any
+            // promotion, so the batch door died on a shape it used to accept.
+            //
+            // The answer is a declared capability check, not a wider `try`: a
+            // missing member is a fact about the repository, knowable up front,
+            // and it must not read like a failed read. Degrading returns the
+            // closure to its pre-#10377 state (the live universe alone), which
+            // is the safe direction — the gate keeps judging and can only be
+            // MORE strict, never fail open.
+            //
+            // ⛔ All-or-nothing on purpose. Bailing out of the whole collection
+            // rather than skipping this one draft is what keeps the verdict from
+            // depending on WHICH org a draft happens to live in: a partial
+            // closure would resolve some of a package's own names and not
+            // others, which is a third behaviour nobody declared and nobody
+            // could reproduce.
+            if (typeof repo.get !== 'function') {
+                this.warnClosureReadUnavailable(singular, d.name);
+                return undefined;
+            }
+            const ref = {
+                type: singular, name: d.name, org: draftOrgId ?? 'env',
+            } as unknown as Parameters<typeof repo.get>[0];
+            const draft = await repo.get(ref, { state: 'draft' });
+            if (draft?.body === undefined || draft.body === null) continue;
+            pending[key].push(draft.body);
+            any = true;
+        }
+        // Absent, not empty: `undefined` is what keeps a batch with no
+        // closure-relevant drafts byte-identical to the pre-#10377 gate call,
+        // rather than routing it through a merge that would be a no-op.
+        return any ? pending : undefined;
+    }
+
+    /**
+     * [#10377] Say WHY the batch closure degraded — once per process.
+     *
+     * A bare degrade is the failure shape this repo has paid for before: a gate
+     * that quietly stops seeing part of its input reads as "clean", and the
+     * only symptom is a refusal somewhere else that names a declaration the
+     * author can see. So the reason is stated, with the member that was
+     * missing and what the consequence is.
+     *
+     * Deduped because Studio republishes the same package repeatedly and a
+     * repository shape does not change between two publishes — the first line
+     * carries the whole fact, and the hundredth adds nothing.
+     */
+    private warnClosureReadUnavailable(type: string, name: string): void {
+        if (this.closureReadWarned) return;
+        this.closureReadWarned = true;
+        console.warn(
+            `[Protocol] publishPackageDrafts: this overlay repository declares no 'get', so the batch's own `
+            + `pending drafts cannot be read (first reached at ${type}/${name}). Author-time validation falls `
+            + `back to the LIVE declarations only — the pre-#10377 closure — so a draft that references a `
+            + `sibling drafted in the SAME batch may be refused as unresolved. Nothing is published unchecked: `
+            + `the gate still runs, with strictly less resolution context.`,
+        );
+    }
+
+    /** One warn per process for the {@link warnClosureReadUnavailable} degrade. */
+    private closureReadWarned = false;
 
     /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
@@ -15153,6 +15387,14 @@ export class ObjectStackProtocolImplementation implements
         ];
         const seedBodies: unknown[] = [];
 
+        // [#10377] The closure this batch is judged against, read ONCE and
+        // BEFORE any promotion (a promote deletes the draft row it reads).
+        // Every member of the batch is then gated against the same complete
+        // set, which is what makes a dashboard-plus-its-dataset package
+        // publishable in either order — see
+        // {@link collectBatchPendingDeclarations}.
+        const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
         // creates it (revert = soft-remove); true → it edits an existing artifact
@@ -15340,6 +15582,12 @@ export class ObjectStackProtocolImplementation implements
                             // `d.packageId` is the row's own binding, so this
                             // is the listed key restated, never a new one.
                             packageId: d.packageId,
+                            // [#10377] The whole batch's own declarations, so
+                            // this member is judged against the package it is
+                            // being published AS PART OF and not against the
+                            // universe as it stood before the publish started.
+                            ...(pendingDeclarations !== undefined
+                                ? { pending: pendingDeclarations } : {}),
                             ...(request.actor ? { actor: request.actor } : {}),
                             message: `publish app package '${request.packageId}'`,
                         });

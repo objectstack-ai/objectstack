@@ -97,9 +97,10 @@ export const GetAnalyticsMetaRequestSchema = lazySchema(() => z.object({
  * definition's `label`, so it is the display name a dashboard renders.
  *
  * Deliberately narrower than the authoring definitions (`MetricSchema` /
- * `DimensionSchema` in `data/analytics.zod.ts`): `sql`, `filters`,
- * `description`, `granularities` and `format` are dropped by the projection and
- * are NOT reachable through this endpoint (#6442).
+ * `DimensionSchema` in `data/analytics.zod.ts`): `sql`, `description`,
+ * `granularities` and `format` are dropped by the projection and are NOT
+ * reachable through this endpoint (#6442). (`filters` used to head this list;
+ * #10414 removed it from the authoring definition itself.)
  *
  * Module-local, and NOT exported as its own named schema: `CubeMeta` in
  * `contracts/analytics-service.ts` is already THE name for this shape, so a

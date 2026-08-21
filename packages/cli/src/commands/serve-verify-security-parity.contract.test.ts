@@ -39,6 +39,12 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appSecurityPluginOptions, appDefaultPermissionSetName } from '@objectstack/plugin-security';
+// The repo's one comment/code separator (#9367). Typed by the hand-written
+// `scripts/js-comment-mask.d.mts` next to it, so this import needs no
+// suppression and `maskComments` arrives as `(source: string) => string`
+// rather than `any` — which is what makes the `source: string` annotation on
+// BOOT_PATHS below a real check instead of a formality.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,7 +75,7 @@ function readBootPath(relative: string): string {
 }
 
 /**
- * Comments stripped, because this scan is about what the two files DO.
+ * Comments masked, because this scan is about what the two files DO.
  *
  * Both boot sites are heavily commented — with the very construction shapes
  * being asserted about, since each explains what it replaced — so a scan over
@@ -78,19 +84,45 @@ function readBootPath(relative: string): string {
  * comment-inclusive form would forbid the next author from ever *describing*
  * the old wiring, which is the opposite of what these files need.
  *
- * Approximate by design, and safe here: the result feeds nothing but the
- * `new SecurityPlugin(...)` regex below, so a `//` mangled out of a string
- * literal (`'http://localhost:3000'` in `harness.ts`) cannot affect a verdict.
- * Do not reuse this for anything that reads string contents.
+ * This was a private two-regex `stripComments`, block pass first, and this
+ * paragraph used to call it “approximate by design, and safe here”. It was
+ * neither. #9367 converted six `scripts/check-*.mjs` gates off that exact
+ * spelling onto the shared `maskComments`; these scans were outside that
+ * population only because they are tests, and `serve.ts` is the conversion's
+ * textbook subject. Its `5d.` header names the route wildcard
+ * `/api/v1/auth/*`, whose opener starts a PHANTOM block comment running to the
+ * next real terminator — the `webpackIgnore` pragma ten lines below — which
+ * deletes the `hasAuthPlugin` computation and the
+ * `if (!hasAuthPlugin && tierEnabled('auth'))` gate in between. Measured on
+ * this pair at `5c3faa70d`: the naive strip keeps 1895 code-bearing lines of
+ * `serve.ts`, `maskComments` keeps 2141.
+ *
+ * No verdict below moved on the swap. Every construction this file measures
+ * already sat outside the swallowed span, which is what made the divergence
+ * latent rather than live — and is exactly why it had to be closed by hand
+ * rather than by a red build. What the swap buys is that it stays closed: an
+ * assertion added about anything inside that span, or a measured construction
+ * that moves into it, would otherwise go wrong in silence. The separator's own
+ * behaviour is pinned at the bottom of this file, so reverting it is red.
+ *
+ * `maskComments` also BLANKS rather than deletes — every byte offset and line
+ * number survives — which the offset-walking `securityPluginConstructions`
+ * below depends on.
+ *
+ * Named rather than inlined into the `.map()` so that the pin at the bottom of
+ * this file exercises THIS binding. A pin that called `maskComments` directly
+ * would stay green through the one edit it exists to catch — someone restoring
+ * a private strip here — which is the same shape of hole as the mention-is-not-
+ * a-call ablation recorded below.
  */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+function separateCodeFromProse(source: string): string {
+  return maskComments(source);
 }
 
 const BOOT_PATHS: Array<{ label: string; relative: string; source: string }> = [
   { label: 'objectstack serve', relative: 'cli/src/commands/serve.ts' },
   { label: 'verify bootStack', relative: 'verify/src/harness.ts' },
-].map((p) => ({ ...p, source: stripComments(readBootPath(p.relative)) }));
+].map((p) => ({ ...p, source: separateCodeFromProse(readBootPath(p.relative)) }));
 
 /**
  * Every `new SecurityPlugin(...)` construction in a file, with its argument.
@@ -176,5 +208,79 @@ describe('the shared resolution, exercised (#7001)', () => {
     expect(appSecurityPluginOptions({ permissions: [{ name: 'plain' }] })).toBeUndefined();
     expect(appSecurityPluginOptions({})).toBeUndefined();
     expect(appSecurityPluginOptions(undefined)).toBeUndefined();
+  });
+});
+
+/**
+ * The separator beneath the parity scan, pinned — #9367's conversion, arriving
+ * here (#10453).
+ *
+ * ⚠️ The naive strip below is a SPECIMEN of what was replaced, never an
+ * instrument. A future re-derivation grepping this directory for that regex
+ * will land on this block: it is the pin that the file no longer USES it.
+ *
+ * Each case is an ordinary shape carrying a comment opener that is not a
+ * comment, followed by the construction this file measures and a real docblock
+ * for a phantom span to close against. The naive strip's block pass runs first,
+ * so the phantom opens at the opener and closes at the docblock's terminator,
+ * deleting the construction in between: the scan then reports a boot path that
+ * constructs no `SecurityPlugin` at all, and reports it as a clean read. The
+ * masker resolves all four correctly, and the two implementations were checked
+ * byte-for-byte against `@typescript-eslint/parser`'s comment ranges on both
+ * real subjects (0 bytes of disagreement either way), which is what rules out
+ * #10427's open `scanSource` desync for this pair.
+ */
+describe("the parity scan's comment separator is string-aware (#9367)", () => {
+  /** The private two-regex strip this file carried until #10453. Specimen only. */
+  const naiveStrip = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+  const CONSTRUCTION = 'new SecurityPlugin(appSecurityPluginOptions(config));';
+  const DOCBLOCK = '/** a docblock far below, for a phantom span to close against */';
+
+  const DISAGREEMENTS: Array<{ label: string; source: string }> = [
+    {
+      // `serve.ts` carries exactly this today, at its `5d.` header.
+      label: 'a route wildcard in a line comment',
+      source: ['// The Console expects /api/v1/auth/* to be served by better-auth.', CONSTRUCTION, DOCBLOCK].join('\n'),
+    },
+    {
+      label: 'a route wildcard in a string literal',
+      source: ["const authRoutes = '/api/v1/auth/*';", CONSTRUCTION, DOCBLOCK].join('\n'),
+    },
+    {
+      label: 'a comment opener in a template literal',
+      source: ['const route = `${base}/api/v1/auth/*`;', CONSTRUCTION, DOCBLOCK].join('\n'),
+    },
+    {
+      // The nested-template family #10427 measures `scanSource` against. The
+      // masker answers this one correctly; the case it does NOT is a nested
+      // template carrying an ESCAPED backtick, which neither subject of this
+      // scan contains and which is that issue's to close, not this file's.
+      label: 'a comment opener in a template nested inside an interpolation',
+      source: ['const msg = `${globs.map((g) => `<${g}>`).join(", ")} /api/v1/auth/*`;', CONSTRUCTION, DOCBLOCK].join('\n'),
+    },
+  ];
+
+  it.each(DISAGREEMENTS)('$label — the masker keeps the construction', ({ source }) => {
+    expect(securityPluginConstructions(separateCodeFromProse(source))).toEqual(['appSecurityPluginOptions(config)']);
+  });
+
+  it.each(DISAGREEMENTS)('$label — the naive strip loses it', ({ source }) => {
+    // The direction that matters: not a mangled argument, but a boot path that
+    // reads as constructing nothing. Two such paths agree with each other
+    // vacuously, which is the parity claim above passing over no evidence.
+    expect(securityPluginConstructions(naiveStrip(source))).toEqual([]);
+  });
+
+  it('blanks rather than deletes, so the paren walk reads real offsets', () => {
+    // `securityPluginConstructions` slices by offset into the masked text and
+    // the failure it throws names one, so a separator that shortens the file
+    // reports positions that do not exist in it. On the first case the naive
+    // strip does not merely shift offsets — it collapses 185 bytes to nothing.
+    const { source } = DISAGREEMENTS[0];
+    expect(separateCodeFromProse(source)).toHaveLength(source.length);
+    expect(separateCodeFromProse(source).split('\n')).toHaveLength(source.split('\n').length);
+    expect(naiveStrip(source).length).toBeLessThan(source.length);
   });
 });

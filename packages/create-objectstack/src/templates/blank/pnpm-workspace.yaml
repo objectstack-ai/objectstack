@@ -21,3 +21,29 @@ onlyBuiltDependencies:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+
+# Two third-party peer ranges resolve outside what their declaring package
+# states. `pnpm install` reports both as unmet peers — which would be the first
+# thing a brand-new project shows you — and neither is a real incompatibility:
+#
+#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x. That
+#   peer is optional and covers handing better-auth a raw better-sqlite3
+#   `Database`; ObjectStack hands it an ObjectQL adapter instead, so nothing
+#   here goes down that path. Measured on the configuration the range does
+#   cover — better-auth's own Kysely dialect, running its migrations, sign-up,
+#   sign-in and adapter find/update/delete — 1.7.1 behaves identically on
+#   better-sqlite3 13.0.3 and on 12.11.1. The upstream range is stale.
+#
+#   @better-auth/scim (held at a release candidate deliberately, not by
+#   neglect) peers better-call at an exact 1.3.7, while better-auth itself
+#   depends on 1.4.0. A better-auth plugin has to share the host's better-call
+#   instance, so the single 1.4.0 copy is the correct resolution rather than a
+#   skew to repair. This entry retires when SCIM moves off the rc.
+#
+# These suppress the report only: no resolution moves, and the lockfile is
+# byte-identical with and without this block.
+
+peerDependencyRules:
+  allowedVersions:
+    'better-auth>better-sqlite3': '13'
+    '@better-auth/scim>better-call': '1.4.0'

@@ -1,7 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { lintLivenessProperties } from './lint-liveness-properties.js';
+import {
+  lintLivenessProperties,
+  // #10262 test seam — package-internal (not re-exported by `src/index.ts`, not
+  // in the package's `exports` map). See the block below `getNested` in the
+  // source for why this ONE property is tested off the ledger.
+  checkItemAgainstWarnMap,
+  getNested,
+} from './lint-liveness-properties.js';
 
 /**
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
@@ -641,6 +648,110 @@ describe('lintLivenessProperties', () => {
         navItem('nav_accounts', { objectName: 'crm_account', label: 'Accounts' }),
         navItem('nav_leads', { viewName: 'hot_leads' }),
       ]));
+      expect(findings).toEqual([]);
+    });
+  });
+});
+
+// ── #10262: the array fan-out, tested at the WALKER's own level ──────────────
+//
+// Everything above this line is deliberately ledger-driven: it asserts against
+// the REAL ledgers shipped by `@objectstack/spec`, which is what makes those
+// assertions contract tests. This block is the one exception, and the reason is
+// recorded twice over in the comments above.
+//
+// `getNested`'s array fan-out — a dotted warn-map path resolved over an ARRAY
+// container level must visit EVERY element, not just index 0 — is reachable
+// only from a DOTTED warned entry, because `checkItem` takes the
+// `path.includes('.') ? getNested(item, path) : [item[path]]` branch. Its
+// subject was therefore always "whichever row happens to carry `authorWarn`
+// under an array container today", and that is a ledger verdict: verdicts move.
+// Twice a row correctly flipping to `live` deleted this coverage —
+// `dashboard.widgets.colorVariant` (#6774, filed as #7079) and then
+// `app.…navigation.children.runAction` (#10068, filed as #10262) — and as of
+// #10262 every warned entry in all 30 shipped ledgers is top-level, so there is
+// nothing left to re-subject to and no reason to expect a third subject to last.
+//
+// So this block drives the walker with a SYNTHETIC warn map through the
+// package-internal seam (`checkItemAgainstWarnMap`, `getNested` — module
+// exports, not re-exported by `src/index.ts`, not in the package's `exports`
+// map). No ledger flip can empty it. The cost is honest and bounded: these
+// assertions say nothing about which properties the ledger warns on — that
+// stays the job of every other block in this file.
+describe('the array fan-out, against a synthetic warn map (#10262)', () => {
+  const warnOn = (...paths: string[]) =>
+    new Map(paths.map((p) => [p, { authorWarn: true, authorHint: 'synthetic (#10262)' }] as const));
+
+  /** `n` navigation entries; those at `authored` set the warned key. */
+  const navItems = (n: number, authored: number[]) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `nav_${i}`,
+      type: 'object',
+      objectName: 'crm_lead',
+      ...(authored.includes(i) ? { runAction: `create_${i}` } : {}),
+    }));
+
+  describe('getNested', () => {
+    it('resolves one value per element of an array container, in order', () => {
+      expect(getNested({ navigation: navItems(3, [0, 1, 2]) }, 'navigation.runAction'))
+        .toEqual(['create_0', 'create_1', 'create_2']);
+    });
+
+    // The load-bearing shape: a walk that stopped at index 0 returns
+    // `[undefined]` here — one entry, not three — while every fixture that
+    // authors the key on the FIRST element keeps passing. That asymmetry is
+    // exactly why a positive assertion on a single-entry fixture is not a test
+    // of the fan-out (#7079's original reasoning).
+    it('visits elements that do NOT set the key rather than filtering them out', () => {
+      expect(getNested({ navigation: navItems(3, [2]) }, 'navigation.runAction'))
+        .toEqual([undefined, undefined, 'create_2']);
+    });
+
+    it('flattens a trailing array container one step (`nodes.tags` → every tag)', () => {
+      expect(getNested({ nodes: [{ tags: ['a', 'b'] }, { tags: ['c'] }] }, 'nodes.tags'))
+        .toEqual(['a', 'b', 'c']);
+    });
+
+    it('treats a missing parent level as absent instead of throwing', () => {
+      expect(getNested({}, 'navigation.runAction')).toEqual([]);
+      expect(getNested({ navigation: null }, 'navigation.runAction')).toEqual([]);
+    });
+  });
+
+  describe('checkItem via the dotted branch', () => {
+    // The anti-index-0 assertion, restored as a property of the walker: the
+    // warned key is authored on exactly ONE entry of a four-entry container,
+    // and the walk must find it wherever that entry sits. A `getNested` that
+    // stopped at index 0 passes case 0 and fails 1, 2 and 3.
+    it.each([0, 1, 2, 3])('finds a warned key authored on navigation[%i] alone', (index) => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, [index]) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('navigation.runAction');
+      expect(findings[0].where).toBe("app 'crm_app'");
+    });
+
+    it('reports once per (item, path) however many entries author the key', () => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, [0, 1, 2, 3]) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
+      expect(findings).toHaveLength(1);
+    });
+
+    it('stays silent when no entry authors the warned key', () => {
+      const findings = checkItemAgainstWarnMap(
+        'app',
+        { name: 'crm_app', navigation: navItems(4, []) },
+        "app 'crm_app'",
+        warnOn('navigation.runAction'),
+      );
       expect(findings).toEqual([]);
     });
   });

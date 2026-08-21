@@ -82,6 +82,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -393,7 +394,7 @@ function scan(files = discoverFiles()) {
     // would be filtered out here before the AST ever saw it, which is the same
     // silent-hole failure this file's #4772 note is about.
     if (!PREFILTER_TOKENS.some((token) => text.includes(token))) continue;
-    const src = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const src = parseSourceFile(file, text);
     for (const unit of collectPluginUnits(file, src)) {
       units.push({ ...unit, initCalls: initServiceCalls(unit, src) });
     }
@@ -501,7 +502,7 @@ function selfTest() {
   const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
 
   const auditSource = (code) => {
-    const src = ts.createSourceFile('fixture.ts', code, ts.ScriptTarget.Latest, true);
+    const src = parseSourceFile('fixture.ts', code);
     const units = collectPluginUnits('fixture.ts', src).map((u) => ({ ...u, initCalls: initServiceCalls(u, src) }));
     return auditUnits(units);
   };

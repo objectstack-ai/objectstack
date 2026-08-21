@@ -106,8 +106,16 @@ export interface JobRunOutcome {
  *
  * The reporting channel is deliberately opt-in on **both** ends. Consuming it
  * — mapping `degraded` onto a `sys_job_run.status` distinct from `success` —
- * is #5548's half and is **not yet wired**: the shipped adapters currently
- * discard the resolved value, which is precisely why doing so is safe.
+ * is #5548's half, and it is wired: all three shipped adapters
+ * (`cron-job-adapter.ts`, `interval-job-adapter.ts`, `db-job-adapter.ts`) map
+ * a resolved `{ outcome: 'degraded' }` onto a run status distinct from
+ * `success`, the `reason` lands in `error` / `last_error`, and
+ * `failure_count` stays flat — never a retry, never an alert. Both
+ * `sys_job_run.status` and `sys_job.last_status` carry `degraded` in their
+ * ObjectQL-enforced select vocabularies (#7072), which must stay in step with
+ * {@link JobExecutionStatus} in `system/job.zod.ts` — see that type's TSDoc
+ * for the full mapping and the cost of routing `reason` through an "Error"
+ * column.
  */
 export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void | JobRunOutcome>;
 

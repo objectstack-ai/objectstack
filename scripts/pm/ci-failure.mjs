@@ -17,23 +17,69 @@
  * receives the proxy's placeholder token, and every read answers 401 — see
  * "The transport" below before reading an exit 3 as a credential problem.
  *
- * ## Why this is not the log-zip script the card sketched
+ * ## Raw job logs ARE reachable — measured, with boundaries (#10141)
  *
- * #9777 proposed wrapping the run-log archive dance. That shape does not work
- * from here, and the measurement is the design. Taken on 2026-08-19 in an agent
- * container, against a real red run (32204206019):
+ * This file used to assert the opposite, in its header and in its output, and
+ * it built its whole design on it. The original reading was real: on
+ * 2026-08-19, against run 32204206019, both log redirects answered
+ * `connect_rejected … gateway answered 403 to CONNECT` at the session proxy.
+ * What was wrong was FREEZING a per-session environment reading into a source
+ * constant. Re-measured 2026-08-21 in an agent container, against a real red
+ * run (32436724284):
  *
  *   GET /repos/{o}/{r}/actions/jobs/{job}/logs   -> 302 to
- *       productionresultssa8.blob.core.windows.net       -> CONNECT 403
+ *       productionresultssa16.blob.core.windows.net    -> 200, 1,741,198 bytes
+ *       / 17,436 lines for job 96639318058
  *   GET /repos/{o}/{r}/actions/runs/{run}/logs   -> 302 to
- *       results-receiver.actions.githubusercontent.com   -> CONNECT 403
+ *       results-receiver.actions.githubusercontent.com -> 200, a 2,015,644-byte
+ *       zip of 184 entries, 15,676,280 bytes unpacked
  *
- * Both hosts are denied by this session's egress policy (the proxy records
- * `connect_rejected … gateway answered 403 to CONNECT` for each). Raw logs are
- * therefore NOT a foundation any seat-facing tool can stand on, and routing
- * around a policy denial is forbidden. So this walks the surfaces that DO
- * answer, and — this is the load-bearing half — says so out loud when they do
- * not carry the assertion, instead of printing an empty result that reads green.
+ * Egress policy is a per-session fact no source file can know at authoring
+ * time, so this one no longer claims one in EITHER direction: the log is
+ * fetched, and what the response actually said is what gets reported. A
+ * constant reading "reachable" would be the identical defect inverted.
+ *
+ * ## The boundaries — an over-broad correction is the same defect again
+ *
+ *   retention   ~90 days, and past it the API answers 410 with a JSON body, not
+ *               an empty 200. Measured 2026-08-21 by bisection on this repo's
+ *               own runs: 88 days old -> 200 (19,574 bytes); 90, 92, 95 and 174
+ *               days -> 410. An old incident is therefore NOT recoverable this
+ *               way, and this tool must say `expired`, never `nothing was
+ *               recorded` — the same #9747 distinction one layer down.
+ *   redirect    the `Location` is a short-lived Azure SAS URL; both specimens
+ *               measured declared `st`/`se` exactly 10m05s apart. Follow the
+ *               redirect within the same call. Whether a URL captured earlier
+ *               still works is a different question from whether the endpoint
+ *               answers, and only the second one is what this file asks.
+ *   auth        the Authorization header must NOT survive the hop. Measured:
+ *               `curl --location-trusted` -> 401 `InvalidAuthenticationInfo`
+ *               ("the access token was missing or malformed") from Azure, while
+ *               plain `curl -L` and node's fetch both -> 200 because both drop
+ *               the header cross-origin. The SAS query string IS the credential.
+ *   size        no cap observed; largest single job log in the sampled run was
+ *               1,770,448 bytes. Only what this file PRINTS is windowed.
+ *   transport   unchanged, and still the trap documented below: node's fetch
+ *               without --use-env-proxy answers 401 on this endpoint too.
+ *
+ * ## What the false claim cost — why correcting the sentence was not enough
+ *
+ * The claim was load-bearing. `Lint & Repo Gates` and `TypeScript Type Check`
+ * leave annotations with no file anchor, so a walk over them reached the
+ * `no-anchor` / `none` branch of the report, printed "that stdout exists only
+ * in the Actions log blob … 403 on CONNECT", and routed the reader to a LOCAL
+ * RE-RUN of the failing step as the substitute — a different tree, a build
+ * first, and minutes under the shared verify lock, instead of one request.
+ * `verdictOf` then counted that check as not retrievable and the walk exited 2
+ * UNDETERMINED, the code this header instructs callers to branch on. Worked
+ * example, measured on check-run 96639318058: its three annotations were
+ * `Process completed with exit code 2.`, a pnpm `… exited (2)` package pointer,
+ * and `Unused '@ts-expect-error' directive.` carrying `path: .github,
+ * start_line: 42` — a line number with no file. The job log carries the whole
+ * assertion, `src/commands/serve-verify-security-parity.contract.test.ts(42,1):
+ * error TS2578: Unused '@ts-expect-error' directive.` So the log is now fetched
+ * on exactly that branch, a log-derived assertion counts toward RED, and the
+ * local re-run is demoted to what it always was — a substitute.
  *
  * ## The two false-conclusion generators this file is built around
  *
@@ -72,13 +118,17 @@
  *     `.github/workflows/merge-queue-triage.yml` makes for the same reason.
  *
  *   repo gates and tsc — `Lint & Repo Gates`, `TypeScript Type Check`:
- *     exactly ONE annotation, `Process completed with exit code 1.` The
- *     assertion exists only in the blocked log. What IS reachable is the failing
- *     STEP NAME, and every step in this repo's workflows is a named `run:`
- *     block — so the tool resolves the step name against `.github/workflows/*`
- *     offline and prints the command that reproduces the assertion locally
- *     (`Engine test-double contract gate` -> `pnpm check:engine-double-contract`).
- *     That is a substitute for the assertion, and it is reported as a substitute.
+ *     annotations with no file anchor — often just `Process completed with exit
+ *     code 1.` The assertion is in the JOB LOG, and since #10141 the log is
+ *     fetched for exactly this family: one request, and `tsc`'s own
+ *     `<path>(<line>,<col>): error TS….` comes back file-anchored. Two things
+ *     stay as they were, because the log is not always the answer: the failing
+ *     STEP NAME resolves offline against `.github/workflows/*` to the command
+ *     that reproduces it locally (`Engine test-double contract gate` ->
+ *     `pnpm check:engine-double-contract`), and that reproduction is still
+ *     printed — as the substitute it always was, now beneath a retrieved log
+ *     rather than in place of one, and as the whole answer when the log is past
+ *     retention or the request did not complete.
  *
  * ## Exit codes — "I could not retrieve it" is a VERDICT, never a green
  *
@@ -89,10 +139,13 @@
  *   0  GREEN         every check-run on the sha completed, none failed.
  *   1  RED           failing checks, and the assertion text was retrieved for
  *                    EVERY one of them. The output is the answer.
- *   2  UNDETERMINED  the walk completed but cannot answer: a failing check whose
- *                    assertion is not retrievable from here, checks still
- *                    running, or zero check-runs on the sha. Zero is not a clean
- *                    repo, it is a broken scan.
+ *   2  UNDETERMINED  the walk cannot answer: a failing check whose assertion
+ *                    neither its annotations nor its job log yielded, checks
+ *                    still running, zero
+ *                    check-runs on the sha, or a mid-walk failure that a fresh
+ *                    probe did NOT trace to the container (a transient 5xx, one
+ *                    404, an unclassifiable shape). Zero is not a clean repo, it
+ *                    is a broken scan.
  *   3  PREREQUISITE NOT MET — no usable transport (no token, exhausted quota,
  *                    unreachable api.github.com, or an authenticated container
  *                    whose REPO-scoped reads are refused). Classified by
@@ -101,6 +154,18 @@
  *                    instrument. Its header states the rule this file inherits —
  *                    a non-zero exit of this kind classifies the ENVIRONMENT,
  *                    not the tree.
+ *
+ *                    Exit 3 promises a CLASSIFIED TRANSPORT VERDICT — NOT that
+ *                    the classification happened before anything was read. It is
+ *                    reached from two places: the probe stage below, and the
+ *                    mid-walk net (#10155), which re-probes when a read fails
+ *                    under a run that had already started and lands here when
+ *                    that fresh reading is itself unusable. An earlier draft of
+ *                    this table promised "decided before anything is read"; that
+ *                    promise was worth less than the guarantee it displaced,
+ *                    because a transport that dies at request 40 classifies the
+ *                    environment exactly as much as one that was dead at
+ *                    request 1.
  *
  * Piping hides all of it (`… | tail` reports the PIPE's status). Read `$?`.
  *
@@ -164,8 +229,16 @@
  * anything is read, or the answer is only a politer wrong one.
  *
  * The remaining uncaught-throw path — a transport failure arriving MID-walk,
- * after the probe passed — is #10155, filed rather than fixed here: it needs an
- * exit-code decision (2 vs 3) that this card did not scope.
+ * after the probe passed — was #10155, and it is now netted rather than open.
+ * The probe cannot cover that case by construction: it fires once, at the
+ * start, so a quota exhausted between it and the last annotations call, an
+ * access that changes under the run, a transient 5xx or a 404 on an
+ * annotations URL all arrive behind it. Every network read after the probe is
+ * therefore wrapped, and the 2-vs-3 question the card left open is answered by
+ * ASKING rather than by picking: the transport is re-probed on the way out and
+ * its fresh verdict chooses — unusable transport is the environment (3),
+ * healthy transport with one failed request is a walk that cannot answer (2).
+ * `midWalkVerdict` carries the reasoning and the self-test drives both branches.
  *
  * ## History — this file reads none, so the shallow clone cannot mislead it
  *
@@ -182,6 +255,28 @@
  * failing run's jobs, and one annotations call per failing check. Plain REST is
  * 15,000/h and near-idle here; the MCP GitHub tools spend the 5,000/h GraphQL
  * budget, which this lane exhausts repeatedly. No GraphQL is used.
+ *
+ * The job log adds a FOURTH request, and only where the first three failed to
+ * produce a file-anchored assertion — so a run whose annotations already
+ * answered costs exactly what it always did. It is charged twice against the
+ * REST budget (the 302 from api.github.com, then the blob) and it is the only
+ * read here whose response is measured in megabytes rather than kilobytes,
+ * which is why it is conditional rather than routine.
+ *
+ * ## Why not the MCP `get_job_logs` tool
+ *
+ * It works — measured 2026-08-21, job 96639318058, `return_content: true`
+ * returned the content and reported `original_length: 17436`. Two reasons this
+ * file does not use it. It spends the 5,000/h budget this lane already
+ * exhausts, which is the same reason the rest of the file is plain REST. And
+ * its default is `tail_lines: 500` — a WINDOW on the end of the log. The window
+ * is declared (`original_length` rides along), but a reader who takes the
+ * window for the whole log draws conclusions the whole log does not support.
+ * That is the failure #10141 reports being filed from — a windowed summary read
+ * as a complete log, a p1 escalation resting on an occurrence count the full log
+ * did not support. Recorded as that card's reading, NOT re-measured here. This
+ * file reads the whole body, counts over the whole body, and labels every window
+ * it prints as a window.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -211,25 +306,44 @@ export const EXIT_RED = 1;
 export const EXIT_UNDETERMINED = 2;
 
 /**
- * Where an Actions log download redirects, and where this container's egress
- * stops. Measured twice on 2026-08-19 against two different red runs: the
- * job-log redirect named `productionresultssa8` at 03:0x and
- * `productionresultssa1` at 06:14 — the storage-account NUMERAL varies per run,
- * so this is a pattern plus its specimens rather than a closed list. A reader
- * who matched a literal host would conclude the policy had changed on the next
- * numeral.
+ * Where an Actions log download redirects — a reader's orientation, never a
+ * reachability verdict.
  *
- * Both answered `CONNECT tunnel failed, response 403`. `/root/.ccr/README.md`
- * classifies that as an organization egress-policy denial and instructs
- * "do not retry or route around it — report the blocked host", which is why
- * this tool is built on annotations instead of on the log archive #9777
- * sketched. Named so the claim stays falsifiable: if the policy opens, these
- * are the hosts to retry.
+ * The storage-account NUMERAL varies per run (`sa8` and `sa1` on 2026-08-19,
+ * `sa16` on 2026-08-21), so this is a pattern plus its specimens rather than a
+ * closed list; a reader who matched a literal host would conclude the world had
+ * changed on the next numeral.
+ *
+ * ⛔ This list is deliberately NOT consulted to decide anything. It used to be
+ * the "hosts this session's egress policy denies", printed as fact on every
+ * unanchored failure, and that froze one session's proxy reading into source
+ * where nothing could falsify it (#10141). Whether a host answers is settled by
+ * `fetchJobLog` making the request; `classifyLogFetch` names what came back.
+ * `/root/.ccr/README.md` remains the authority for the 403/407 case: report the
+ * blocked host, never retry or route around it — which is exactly what the
+ * `denied` classification does with it.
  */
-export const LOG_BLOB_HOSTS = [
-  'productionresultssa{N}.blob.core.windows.net   (measured 2026-08-19: sa8, sa1)',
+export const LOG_DOWNLOAD_HOSTS = [
+  'productionresultssa{N}.blob.core.windows.net   (specimens: sa8, sa1, sa16)',
   'results-receiver.actions.githubusercontent.com',
 ];
+
+/**
+ * The Actions log retention window, and the status that marks its far side.
+ *
+ * Measured 2026-08-21 by bisecting this repo's own runs: a job 88 days old
+ * answered 200 with 19,574 bytes; jobs 90, 92, 95 and 174 days old each
+ * answered 410 with a JSON body. GitHub's documented default for the setting is
+ * 90 days, and the measurement agrees with it — the number is approximate
+ * because the setting is per-repo and can be changed without telling this file.
+ *
+ * The DISTINCTION is the load-bearing part, not the number: 410 means the
+ * evidence was deleted on schedule, which is a different finding from "the
+ * check recorded nothing" and from "this container cannot reach it". All three
+ * used to render as one sentence.
+ */
+export const LOG_RETENTION_DAYS_APPROX = 90;
+export const LOG_EXPIRED_STATUS = 410;
 
 // ---------------------------------------------------------------------------
 // Pure layer — every judgment lives here so `--self-test` can drive it with the
@@ -365,6 +479,160 @@ export function classifyAnnotation(annotation) {
 }
 
 /**
+ * A job-log line with its runner timestamp removed.
+ *
+ * Every line of a raw job log is prefixed `2026-08-21T01:34:45.6366823Z `. It
+ * is 28 useless columns in front of the one sentence a reader wants, and the
+ * blob is served with a UTF-8 BOM that only `curl` leaves in place (node's
+ * `Response.text()` drops it) — measured as a 3-byte difference between the two
+ * readings of the same job, 1,741,198 vs 1,741,195.
+ */
+export function stripLogTimestamp(line) {
+  return String(line ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r$/, '')
+    .replace(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z /, '');
+}
+
+/**
+ * ONE `##[error]` line from a job log, in `classifyAnnotation`'s vocabulary.
+ *
+ * The vocabulary is shared on purpose: both surfaces carry the same runner
+ * shapes (`Process completed with exit code N.`, `command (<dir>) … exited (N)`,
+ * the roster sentence), and a second set of names for them would be a second
+ * thing to keep true. So anything this function does not itself recognise is
+ * handed to `classifyAnnotation` with an empty `path`.
+ *
+ * What it adds is the one shape the annotations API structurally CANNOT carry
+ * and the log always does — a TEXT-ANCHORED assertion. `tsc` prints
+ * `<path>(<line>,<col>): error <CODE>: <message>` and most other tools print
+ * `<path>:<line>:<col>: …`; the annotation for the very same failure arrives
+ * with `path: '.github'` and a `start_line` belonging to a file it never names.
+ * Measured on check-run 96639318058: the annotation said `start_line: 42` and
+ * only the log said which file line 42 is in.
+ *
+ * Both patterns require a dotted, space-free path so a prose line that happens
+ * to contain `(12,3):` is not promoted to an assertion. Unmatched is `other`,
+ * returned rather than dropped — `classifyAnnotation`'s rule, for its reason.
+ */
+export function classifyLogLine(message) {
+  const text = String(message ?? '');
+  const paren = /^(?<path>[^\s()]+\.[A-Za-z0-9]+)\((?<line>\d+),(?<col>\d+)\):\s+(?:error|warning)\b/.exec(text);
+  if (paren) return { kind: 'assertion', path: paren.groups.path, line: Number(paren.groups.line), message: text };
+  const colon = /^(?<path>[^\s:]+\.[A-Za-z0-9]+):(?<line>\d+):(?<col>\d+)\b/.exec(text);
+  if (colon) return { kind: 'assertion', path: colon.groups.path, line: Number(colon.groups.line), message: text };
+  return classifyAnnotation({ path: '', message: text });
+}
+
+/**
+ * What a retrieved job log says about the failure — four answers, and the
+ * difference between them is again the whole point.
+ *
+ *   anchored     at least one `##[error]` resolves to a file and line. This is
+ *                the assertion, and the reader is done.
+ *   errors-only  `##[error]` lines exist but every one of them is a runner
+ *                shape carrying no content (`Process completed with exit code
+ *                N.`). The stdout that DOES carry it sits immediately above the
+ *                first of them, so that window is returned as `context` —
+ *                measured: this is where a `check:*` gate's own sentences land.
+ *   tail         the log carries no `##[error]` at all. The last non-empty
+ *                lines are returned, LABELLED as a window rather than as an
+ *                answer, because a tail is a guess about where the failure is.
+ *   empty        the log had no content to read.
+ *
+ * Anchoring is on `##[error]`, not on the failing step's name: a raw job log
+ * spells a step as `##[group]Run <first line of the command>`, so step names
+ * are not recoverable from it, while `##[error]` is emitted by the runner
+ * itself and was present on every failing job sampled. Guessing at step
+ * boundaries would put a confident wrong window in front of the reader, which
+ * is the failure mode this file exists to refuse.
+ */
+export function extractLogAssertion(logText, { window = 12 } = {}) {
+  const lines = String(logText ?? '').split('\n').map(stripLogTimestamp);
+  const lineCount = lines.length;
+  const nonEmpty = (s) => s.trim() !== '';
+  if (!lines.some(nonEmpty)) {
+    return { kind: 'empty', errors: [], assertions: [], context: [], lineCount, note: 'the log body was empty' };
+  }
+
+  const errors = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^##\[error\](?<rest>.*)$/.exec(lines[i]);
+    if (m) errors.push({ logLine: i + 1, ...classifyLogLine(m.groups.rest) });
+  }
+  const assertions = errors.filter((e) => e.kind === 'assertion');
+  if (assertions.length > 0) {
+    return {
+      kind: 'anchored',
+      errors,
+      assertions,
+      context: [],
+      lineCount,
+      note: `${assertions.length} file-anchored error line(s) out of ${errors.length} \`##[error]\` line(s)`,
+    };
+  }
+  if (errors.length > 0) {
+    const first = errors[0].logLine - 1;
+    const context = lines.slice(Math.max(0, first - window), first).filter(nonEmpty);
+    return {
+      kind: 'errors-only',
+      errors,
+      assertions: [],
+      context,
+      lineCount,
+      note: `${errors.length} \`##[error]\` line(s), none file-anchored — the ${context.length} line(s) above the first are the stdout`,
+    };
+  }
+  const tail = lines.filter(nonEmpty).slice(-window);
+  return {
+    kind: 'tail',
+    errors: [],
+    assertions: [],
+    context: tail,
+    lineCount,
+    note: `no \`##[error]\` line in ${lineCount} line(s); the last ${tail.length} non-empty line(s) are a WINDOW, not an anchor`,
+  };
+}
+
+/**
+ * What came back from the job-log request — named, never inferred from an empty
+ * body. This is the #9747 rule applied to the surface #10141 opened: `expired`,
+ * `denied`, `absent` and `transport` are four different facts about the world,
+ * and the version of this file that hard-coded one of them printed the same
+ * sentence for all four.
+ *
+ * ⚠️ A CONNECT denial does NOT arrive here as `denied`. The proxy refuses the
+ * tunnel, so node's fetch throws and it lands as `transport` — which is why
+ * that branch, not this one, carries `/root/.ccr/README.md`'s instruction to
+ * report the blocked host rather than route around it. `denied` is reserved for
+ * a status GitHub itself returned.
+ */
+export function classifyLogFetch({ status = null, networkError = null } = {}) {
+  if (networkError) {
+    return {
+      kind: 'transport',
+      note:
+        `the request did not complete (${networkError}) — if this session's egress policy refused the ` +
+        'CONNECT, /root/.ccr/README.md records it and says to report the blocked host, not route around it',
+    };
+  }
+  if (status === 200) return { kind: 'ok', note: 'retrieved' };
+  if (status === LOG_EXPIRED_STATUS) {
+    return {
+      kind: 'expired',
+      note:
+        `HTTP ${LOG_EXPIRED_STATUS} — past the ~${LOG_RETENTION_DAYS_APPROX}-day Actions log retention. ` +
+        'The evidence was deleted on schedule; that is not "the check recorded nothing"',
+    };
+  }
+  if (status === 403 || status === 407) {
+    return { kind: 'denied', note: `HTTP ${status} — GitHub refused this read; report it rather than retrying` };
+  }
+  if (status === 404) return { kind: 'absent', note: 'HTTP 404 — no log under this job id' };
+  return { kind: 'unretrieved', note: `HTTP ${status} — an unclassified status; the log was not read` };
+}
+
+/**
  * What this failing check can tell a reader about WHY it failed — three
  * answers, never two.
  *
@@ -378,20 +646,43 @@ export function classifyAnnotation(annotation) {
  *     an assertion. Reporting that as "not retrievable" would send a reader to
  *     open the log for something already printed two lines above.
  *   `Lint & Repo Gates` — one `Process completed with exit code 1.` and
- *     nothing else. The step's stdout is the answer and it is in the blocked
- *     blob; only here is "could not be retrieved" the whole truth.
+ *     nothing else. The step's stdout is the answer and it is in the job log,
+ *     which #10141 measured to be reachable; so this case is `retrieved` with
+ *     `source: 'job-log'` when the log answers, and only when the log does NOT
+ *     answer — past retention, or a request that did not complete — is "could
+ *     not be retrieved" the whole truth.
  *
  * `exit-status` is content-free by construction, so a check carrying only
  * those carries nothing — counting it as "an annotation was returned" is how a
  * red gate comes to read as "details recorded elsewhere".
+ *
+ * FOUR answers since #10155, and the fourth is the one the other three were
+ * silently absorbing. `retrievalError` is what the walk records when the
+ * annotations call itself failed, and it leaves behind exactly what a check
+ * that recorded nothing leaves behind: an empty list. Reading that empty list
+ * as `none` printed "the check carried no annotation with any content in it"
+ * over a check measured to carry `annotations_count: 1` — four lines under this
+ * file's own `that is not the same as "the check recorded nothing"`. An absence
+ * of a READING and an absence of EVIDENCE are opposite findings, and the caller
+ * cannot tell them apart from the annotation list alone, so it is passed in.
  */
-export function assertionStatus(annotations) {
+export function assertionStatus(annotations, { retrievalError = null, log = null } = {}) {
   const list = annotations ?? [];
-  const assertions = list.filter((a) => a.kind === 'assertion');
-  if (assertions.length > 0) return { kind: 'retrieved', assertions, others: [] };
   const others = list.filter((a) => a.kind !== 'exit-status');
-  if (others.length > 0) return { kind: 'no-anchor', assertions: [], others };
-  return { kind: 'none', assertions: [], others: [] };
+  const assertions = list.filter((a) => a.kind === 'assertion');
+  // Content in hand outranks a failed call: a partial retrieval that still
+  // produced the assertion has answered the question this file asks.
+  if (assertions.length > 0) return { kind: 'retrieved', source: 'annotations', assertions, others: [] };
+  // #10141's half. An annotation-only reading called the two families below
+  // unretrievable and sent the reader off to re-run the step locally; the job
+  // log answers in one request and is checked BEFORE `retrievalError` for the
+  // same reason the line above is — content in hand outranks a failed call, and
+  // which call failed does not change what was retrieved.
+  const fromLog = log?.finding?.assertions ?? [];
+  if (fromLog.length > 0) return { kind: 'retrieved', source: 'job-log', assertions: fromLog, others };
+  if (retrievalError) return { kind: 'unretrievable', source: null, assertions: [], others: [], retrievalError };
+  if (others.length > 0) return { kind: 'no-anchor', source: null, assertions: [], others };
+  return { kind: 'none', source: null, assertions: [], others: [] };
 }
 
 /**
@@ -465,12 +756,16 @@ export function isRosterJob(failedStepNames) {
 /**
  * The `run:` (or `uses:`) body of every workflow step with this exact name.
  *
- * This is the reachable substitute for a blocked log on the gate families: every
- * step in this repo's workflows is a named shell block, so the step name the
- * jobs API DOES return resolves offline to the command that reproduces the
- * assertion locally. `Engine test-double contract gate` resolves to
- * `pnpm check:engine-double-contract`, and running that prints the very text
- * the log blob is withholding.
+ * The OFFLINE substitute for the assertion: every step in this repo's workflows
+ * is a named shell block, so the step name the jobs API returns resolves to the
+ * command that reproduces the failure locally. `Engine test-double contract
+ * gate` resolves to `pnpm check:engine-double-contract`, and running that
+ * prints the same text the job log carries.
+ *
+ * It stays useful now that the log is fetched (#10141) — a reader who has the
+ * assertion usually wants the command next — but it is no longer load-bearing
+ * for RETRIEVAL, and the report no longer offers it as though it were the only
+ * way to see the stdout.
  *
  * A hand-rolled scanner rather than the `yaml` dependency, for the reason
  * `dispatch-gates.mjs` gives for the same choice: this must run from a bare
@@ -589,7 +884,13 @@ export function verdictOf({ failing, pending, total }) {
   if ((total ?? 0) === 0) {
     return { verdict: 'UNDETERMINED', exit: EXIT_UNDETERMINED, why: 'no check-runs on this sha — zero is not a clean tree, it is a scan that found nothing' };
   }
-  const withAssertion = failing.filter((f) => f.assertions.length > 0).length;
+  // Either source counts (#10141). Before the job log was fetched, a check whose
+  // annotations carried no file anchor could only ever be counted as a shortfall,
+  // so `Lint & Repo Gates` and `TypeScript Type Check` forced this whole walk to
+  // exit 2 even when the assertion was one request away.
+  const withAssertion = failing.filter(
+    (f) => (f.assertions?.length ?? 0) > 0 || (f.log?.finding?.assertions?.length ?? 0) > 0,
+  ).length;
   if (failing.length === 0) {
     if (pending > 0) {
       return { verdict: 'UNDETERMINED', exit: EXIT_UNDETERMINED, why: `${pending} check(s) still running — not-red-yet is not green` };
@@ -604,7 +905,135 @@ export function verdictOf({ failing, pending, total }) {
     exit: EXIT_UNDETERMINED,
     why:
       `assertion text retrieved for ${withAssertion} of ${failing.length} failing check(s) — ` +
-      'the rest are not retrievable from this container',
+      'for the rest, neither the annotations nor the job log yielded one (see each row for which)',
+  };
+}
+
+/**
+ * What a transport failure arriving MID-WALK exits as (#10155).
+ *
+ * ## The defect this replaces
+ *
+ * `rest()` throws on any non-ok status and, before this, nothing between it and
+ * the top level caught. Node exits 1 on an uncaught exception, and 1 in the
+ * table above is RED — "the assertion text was retrieved for EVERY failing
+ * check, the output is the answer". So a container that had not read one byte
+ * about the tree handed its caller the code for "the tree is red and here is
+ * the proof", to a caller the header explicitly instructs to branch on `$?`.
+ * Measured on 2026-08-20 against `main` at 2e39181a, probe green and the walk's
+ * first page refused: `Error: GET …/check-runs… -> HTTP 403`, stack trace,
+ * `EXIT=1`.
+ *
+ * ## Why this is a RE-PROBE and not a constant
+ *
+ * The card left exit 2 vs exit 3 open and triage handed the choice down. Both
+ * are honest for SOME mid-walk failure and neither is honest for all of them,
+ * because the causes are not one class:
+ *
+ *   quota exhausted between the probe and the last annotations call, or a
+ *   repo whose access changed under the run   -> the ENVIRONMENT is now unable
+ *                                                to answer. That is exit 3, and
+ *                                                it is exactly what exit 3
+ *                                                means everywhere else here.
+ *   a transient 5xx, a 404 on one annotations URL -> the container is FINE. The
+ *                                                walk simply cannot answer, and
+ *                                                calling the environment broken
+ *                                                would be the same overreach in
+ *                                                the other direction: exit 2.
+ *
+ * So the choice is settled per-occurrence by ASKING, with the instrument this
+ * file already imports: on a mid-walk throw the transport probe is re-run, and
+ * its fresh verdict picks. A fresh reading is what distinguishes a real
+ * transport failure from a transient status on one page — `check-half-states`'s
+ * in-loop net makes the identical call for the identical reason, and this is
+ * that decision reused rather than a second one invented next to it.
+ *
+ * This does change what exit 3 promises. The header used to say exit 3 was
+ * decided "before anything is read"; that sentence is rewritten above, because
+ * the promise worth keeping is that exit 3 means a CLASSIFIED TRANSPORT
+ * VERDICT — not that the classification happened early. An unclassified shape
+ * (`probe === null`, e.g. a repo-scoped 5xx) deliberately falls to 2: the
+ * classifier's narrowness is the point, and a loud undetermined beats a
+ * confident wrong diagnosis about someone's container.
+ *
+ * ## The partial-output invariant
+ *
+ * `read` is the `swept` analogue one file over: the pre-walk probe fires when
+ * nothing has been read, where "nothing was read" is exact, while this net can
+ * fire after some check-runs were already listed. The wording splits on that
+ * count so neither reading can be mistaken for a completed walk — which is the
+ * half of #4690 that survives after the exit code is fixed, since a partial
+ * result that READS complete misleads a human even when `$?` is honest.
+ *
+ * Pure, so `--self-test` drives every branch offline — and since #9898 that
+ * self-test runs in CI.
+ */
+export function midWalkVerdict({ probe = null, error = null, read = null, stage = 'the walk' } = {}) {
+  const readCount = read?.checkRuns ?? 0;
+  const failure = error?.message ?? String(error ?? 'unknown failure');
+
+  const nothingRead =
+    readCount === 0
+      ? [
+          'Nothing was read: no check-run was listed, no annotation was fetched, and no verdict',
+          'about the tree was computed. This result says NOTHING about whether the tree is red or',
+          'green — it is not a red tree and it is not a green one, it is no reading at all.',
+        ]
+      : [
+          `Nothing was judged: the transport failed after ${readCount} check-run(s) had been listed,`,
+          'the rest were never fetched, and no per-check finding was printed. An empty finding list',
+          'here is not a clean tree — the walk stopped, it did not complete.',
+        ];
+
+  if (probe && probe.kind !== 'reachable') {
+    return {
+      verdict: 'PREREQUISITE NOT MET',
+      exit: EXIT_PREREQUISITE_NOT_MET,
+      classified: true,
+      headline: probe.headline,
+      detail: [
+        `The failure: ${failure}`,
+        `It arrived during ${stage}, AFTER the pre-walk probe had passed.`,
+        '',
+        'Re-probed on the way out, and the transport is now classified as unusable, so this is',
+        'the same PREREQUISITE NOT MET the pre-walk probe reports — reached later, meaning the',
+        'transport changed under the run rather than being broken when it started.',
+        ...(probe.detail ?? []),
+        '',
+        ...nothingRead,
+        '',
+        `(Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`,
+      ],
+      fix: probe.fix ?? [],
+    };
+  }
+
+  return {
+    verdict: 'UNDETERMINED',
+    exit: EXIT_UNDETERMINED,
+    classified: false,
+    headline: `${stage} failed and the transport re-probe did NOT classify the container as unusable`,
+    detail: [
+      `The failure: ${failure}`,
+      `It arrived during ${stage}, AFTER the pre-walk probe had passed.`,
+      '',
+      ...(probe === null
+        ? [
+            'The re-probe returned a shape its classifier does not recognise, so the container is',
+            'not vouched for and not blamed either. Report this failure with that reading.',
+          ]
+        : [
+            'The re-probe came back healthy, so this was NOT a container-wide transport failure —',
+            'a transient status on one request, or one URL that answers where the others do not.',
+            'Retrying is reasonable; treating the tree as judged is not.',
+          ]),
+      '',
+      ...nothingRead,
+      '',
+      `(Exit ${EXIT_UNDETERMINED}: UNDETERMINED. Not ${EXIT_RED} — ${EXIT_RED} means the assertion was retrieved`,
+      'for every failing check, which is the opposite of what happened here.)',
+    ],
+    fix: [],
   };
 }
 
@@ -698,13 +1127,21 @@ async function rest(path) {
   return res.json();
 }
 
-/** Every check-run on a sha, paginated. */
-async function checkRunsFor(sha) {
+/**
+ * Every check-run on a sha, paginated.
+ *
+ * `progress` rides in so a page that throws leaves behind how much WAS listed —
+ * the mid-walk net reports that count, and a net that could only say "it broke"
+ * would print the same sentence for "nothing was read" and for "half the tree
+ * was read", which are different facts about how much to distrust.
+ */
+async function checkRunsFor(sha, progress = null) {
   const out = [];
   for (let page = 1; page <= 10; page++) {
     const body = await rest(`/repos/${OWNER_REPO}/commits/${sha}/check-runs?per_page=100&page=${page}`);
     const batch = body?.check_runs ?? [];
     out.push(...batch);
+    if (progress) progress.checkRuns = out.length;
     if (batch.length < 100) break;
   }
   return out;
@@ -725,6 +1162,61 @@ async function annotationsFor(checkRunId) {
 async function jobsFor(runId) {
   const body = await rest(`/repos/${OWNER_REPO}/actions/runs/${runId}/jobs?per_page=100&filter=latest`);
   return body?.jobs ?? [];
+}
+
+/**
+ * One job's raw log (#10141) — the request this file used to assert could not
+ * be made.
+ *
+ * Deliberately NOT routed through `rest()`. Three differences, each measured:
+ * the response is `text/plain`, not JSON; a non-ok status here is a FINDING to
+ * classify rather than a throw, because a 410 says the evidence expired and a
+ * throw would say the walk broke; and the 302 leads off `api.github.com`, so
+ * the `authorization` header must not survive the hop — `curl
+ * --location-trusted` was measured returning 401 `InvalidAuthenticationInfo`
+ * from Azure, while the default (drop it) returns 200. `redirect: 'follow'` is
+ * the fetch default and undici strips the header cross-origin for us; it is
+ * spelled out here because the correctness of this call depends on it.
+ *
+ * Returns a record, never throws: the walk must survive a log it could not read.
+ */
+async function fetchJobLog(jobId) {
+  const path = `/repos/${OWNER_REPO}/actions/jobs/${jobId}/logs`;
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, {
+      redirect: 'follow',
+      headers: { accept: 'application/vnd.github+json', ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) },
+    });
+  } catch (error) {
+    const networkError = error?.cause?.message ?? error?.code ?? error?.message ?? 'unknown';
+    return { path, status: null, ok: false, classification: classifyLogFetch({ networkError }), finding: null };
+  }
+  const classification = classifyLogFetch({ status: res.status });
+  if (classification.kind !== 'ok') {
+    return { path, status: res.status, ok: false, classification, finding: null };
+  }
+  let text;
+  try {
+    text = await res.text();
+  } catch (error) {
+    // A 200 whose body then fails to read is still "not read" — netted here so
+    // one unreadable log cannot abort a walk that has already answered for
+    // every other check.
+    const networkError = `the body of a ${res.status} did not read: ${error?.message ?? 'unknown'}`;
+    return { path, status: res.status, ok: false, classification: classifyLogFetch({ networkError }), finding: null };
+  }
+  return {
+    path,
+    status: res.status,
+    ok: true,
+    classification,
+    bytes: Buffer.byteLength(text, 'utf8'),
+    // The body itself is intentionally NOT carried out of this function. It is
+    // megabytes, `--json` would emit all of it, and everything downstream reads
+    // only the finding.
+    finding: extractLogAssertion(text),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -766,14 +1258,29 @@ async function resolveTarget(argv) {
 // ---------------------------------------------------------------------------
 
 /**
- * Three request classes, in order: check-runs for the sha, jobs for each run
- * that owns a failing check, annotations for each failing check. Everything
- * else — which step failed, whether the step list is whole, what command
- * reproduces it — is derived from what those already returned, or read off
- * disk.
+ * Four request classes, in order: check-runs for the sha, jobs for each run that
+ * owns a failing check, annotations for each failing check, and — only for a
+ * failing check whose annotations produced no file-anchored assertion — that
+ * job's raw log (#10141). Everything else — which step failed, whether the step
+ * list is whole, what command reproduces it — is derived from what those
+ * already returned, or read off disk.
  */
 async function walk(sha) {
-  const all = await checkRunsFor(sha);
+  // Whatever escapes this function carries how far it got — see `midWalkVerdict`.
+  // The per-check calls below are individually netted already (a failed
+  // annotations fetch is a FINDING, not a crash); what can still throw from
+  // here is the check-run listing itself and the workflow read.
+  const progress = { checkRuns: 0 };
+  try {
+    return await walkInto(sha, progress);
+  } catch (error) {
+    error.read = { ...progress };
+    throw error;
+  }
+}
+
+async function walkInto(sha, progress) {
+  const all = await checkRunsFor(sha, progress);
   const { kept, superseded } = latestPerName(all);
   const failingRuns = kept.filter((c) => c.conclusion === 'failure' || c.conclusion === 'timed_out');
   const pending = kept.filter((c) => c.status !== 'completed').length;
@@ -806,6 +1313,22 @@ async function walk(sha) {
       retrievalError = error.message;
     }
 
+    // #10141. The job log is spent ONLY where the annotations did not already
+    // yield a file-anchored assertion — a run whose annotations answered costs
+    // what it always did (see "Cost" in the header). A roster job is skipped
+    // too: its log is a verdict about OTHER jobs whose own rows are already in
+    // this walk, so reading it would buy a megabyte of nothing.
+    //
+    // `check.id` is the job id for an Actions check-run — the same equality
+    // `jobsFor` above relies on to pair a check with its job — so this needs no
+    // extra lookup. Where that pairing failed (`job` is null) the id is not
+    // trusted and the log is not fetched: a wrong job id would return SOME
+    // other job's log, which is worse than no log.
+    const annotationAssertions = annotations.filter((a) => a.kind === 'assertion');
+    const roster = isRosterJob(failedSteps.map((s) => s.name));
+    const needsLog = annotationAssertions.length === 0 && !roster && job?.id;
+    const log = needsLog ? await fetchJobLog(job.id) : null;
+
     failing.push({
       name: check.name,
       checkRunId: check.id,
@@ -818,10 +1341,11 @@ async function walk(sha) {
         name: s.name,
         repro: resolveStep(workflows, s.name),
       })),
-      roster: isRosterJob(failedSteps.map((s) => s.name)),
+      roster,
       annotations,
-      assertions: annotations.filter((a) => a.kind === 'assertion'),
+      assertions: annotationAssertions,
       retrievalError,
+      log,
     });
   }
 
@@ -884,22 +1408,46 @@ function render(result, target) {
       }
     }
 
-    const status = assertionStatus(check.annotations);
-    if (status.kind === 'retrieved') {
-      say('    assertion    RETRIEVED (above, the file-anchored annotation(s))');
-    } else {
-      if (status.kind === 'no-anchor') {
-        say(`    assertion    NO FILE-ANCHORED ASSERTION — but this check carried ${status.others.length} annotation(s)`);
-        say('                 with content, printed above. Read those first: a gate sentence is often the');
-        say("                 whole answer. What is missing is the failing step's own stdout.");
-      } else {
-        say('    assertion    NONE — the check carried no annotation with any content in it.');
-        say('                 (An `exit-status` annotation is the runner saying a command exited');
-        say('                  non-zero; it is not a record of what failed.)');
+    // The retrieval error is handed in, not inferred from the empty list: a
+    // refused annotations call and a check that recorded nothing both leave
+    // `annotations` empty, and only the caller knows which happened.
+    const status = assertionStatus(check.annotations, { retrievalError: check.retrievalError, log: check.log });
+
+    // The job-log row (#10141), printed whenever the log was ASKED FOR — so a
+    // reader can tell "the log answered", "the log was past retention" and "the
+    // log was never needed" apart. Silence would collapse all three.
+    const sayLog = () => {
+      const log = check.log;
+      if (!log) return;
+      if (!log.ok) {
+        say(`    job log      NOT RETRIEVED — ${log.classification.kind.toUpperCase()}: ${log.classification.note}`);
+        say(`                 (GET ${log.path}) — an absence of a READING, not an absence of evidence.`);
+        if (log.classification.kind === 'transport' || log.classification.kind === 'denied') {
+          say('                 The download redirects off api.github.com; if a proxy refused the hop,');
+          say('                 the host to report is one of:');
+          for (const host of LOG_DOWNLOAD_HOSTS) say(`                   ${host}`);
+        }
+        return;
       }
-      say("                 That stdout exists only in the Actions log blob, and both log");
-      say("                 endpoints redirect to hosts this session's egress policy denies:");
-      for (const host of LOG_BLOB_HOSTS) say(`                   ${host}  (403 on CONNECT)`);
+      const f = log.finding;
+      say(`    job log      ${f.lineCount} line(s) / ${log.bytes} bytes from ${log.path} — ${f.kind.toUpperCase()}`);
+      say(`                 ${f.note}`);
+      const shown = f.kind === 'anchored' ? f.assertions : f.errors;
+      for (const e of shown.slice(0, 8)) {
+        const head = e.kind === 'assertion' ? `${e.path}${e.line ? `:${e.line}` : ''}` : e.kind;
+        say(`      · log line ${e.logLine}  ${head}`);
+        for (const line of String(e.message).split('\n').slice(0, 6)) say(`          ${line}`);
+      }
+      if (f.context.length > 0) {
+        const what = f.kind === 'tail' ? 'the last non-empty line(s) — a WINDOW, not an anchor' : 'the stdout above the first `##[error]`';
+        say(`      · ${what}:`);
+        for (const line of f.context) say(`          ${line}`);
+      }
+    };
+
+    // Shared by every non-retrieved branch — the local reproduction is just as
+    // useful when the annotations call FAILED as when it came back empty.
+    const sayRepro = () => {
       const repros = check.failedSteps.flatMap((s) => s.repro.map((r) => ({ step: s.name, ...r })));
       if (repros.length > 0) {
         say('    substitute   run the failing step locally — it prints the same assertion:');
@@ -911,6 +1459,60 @@ function render(result, target) {
         say('    substitute   none — the failing step name resolves to no `run:` block in .github/workflows/,');
         say('                 so there is no offline reproduction to offer. Open the job URL above.');
       }
+    };
+
+    sayLog();
+
+    if (status.kind === 'retrieved' && status.source === 'annotations') {
+      say('    assertion    RETRIEVED (above, the file-anchored annotation(s))');
+    } else if (status.kind === 'retrieved') {
+      // #10141: the annotations had no file anchor and the job log did. The
+      // local re-run still follows, because the reader's next move is usually to
+      // run it — but it is no longer offered as the only way to see the stdout.
+      say(`    assertion    RETRIEVED from the JOB LOG (above) — ${status.assertions.length} file-anchored error line(s).`);
+      say("                 The annotations carried no file anchor; this is the failing step's own");
+      say('                 stdout, which is where that family always kept it.');
+      sayRepro();
+    } else if (status.kind === 'unretrievable') {
+      // #10155. This row used to fall through to `NONE — the check carried no
+      // annotation with any content in it`, four lines under this same block's
+      // own `that is not the same as "the check recorded nothing"`. The check
+      // may well have carried the assertion; the call for it was refused.
+      say('    assertion    NOT RETRIEVED — the annotations call itself failed (above), so this row');
+      say('                 records nothing about what the check did or did not carry. That is an');
+      say('                 absence of a READING, not an absence of evidence, and the two are');
+      say('                 opposite findings. Re-run when the transport answers.');
+      sayRepro();
+    } else {
+      if (status.kind === 'no-anchor') {
+        say(`    assertion    NO FILE-ANCHORED ASSERTION — but this check carried ${status.others.length} annotation(s)`);
+        say('                 with content, printed above. Read those first: a gate sentence is often the');
+        say("                 whole answer. What is missing is the failing step's own stdout.");
+      } else {
+        say('    assertion    NONE — the check carried no annotation with any content in it.');
+        say('                 (An `exit-status` annotation is the runner saying a command exited');
+        say('                  non-zero; it is not a record of what failed.)');
+      }
+      // #10141. This block used to assert here that the stdout "exists only in
+      // the Actions log blob" and that both log endpoints redirect to hosts the
+      // egress policy denies — a per-session reading frozen into source, false
+      // when re-measured, and load-bearing: it routed the reader straight past
+      // the one request that answers. What it says now is only what the row
+      // above actually observed.
+      if (check.log?.ok) {
+        say('                 The job log WAS read (above) and carried no file-anchored error line;');
+        say('                 read its `##[error]` lines and stdout window first — for a gate that');
+        say('                 prints prose rather than paths, that IS the assertion.');
+      } else if (check.log) {
+        say('                 The job log is where that stdout lives, and it was not read (above).');
+      } else if (check.roster) {
+        say('                 No job log was fetched: a roster job\'s log is a verdict about the shard');
+        say('                 jobs listed above, whose own rows already carry their assertions.');
+      } else {
+        say('                 No job log was fetched: this check-run could not be paired with a job,');
+        say("                 and a guessed job id would return some OTHER job's log.");
+      }
+      sayRepro();
     }
     say('');
   }
@@ -1064,7 +1666,7 @@ async function selfTest() {
   t('no steps at all is `unknown`, never `complete`', stepsIntegrity([]).verdict, 'unknown');
   t('a non-array is `unknown`, never a throw', stepsIntegrity(undefined).verdict, 'unknown');
 
-  // -- assertionStatus: three answers, not two ------------------------------
+  // -- assertionStatus: four answers, not two -------------------------------
   t(
     'a file-anchored annotation means the assertion was retrieved',
     assertionStatus([{ kind: 'exit-status' }, { kind: 'assertion', path: 'a.test.ts' }]).kind,
@@ -1091,6 +1693,207 @@ async function selfTest() {
     'the unanchored case carries its annotations out, so the caller can count them',
     assertionStatus([{ kind: 'other', message: 'x' }, { kind: 'exit-status' }]).others.length,
     1,
+  );
+
+  // #10155's partial-output half. A refused annotations call leaves the SAME
+  // empty list a check that recorded nothing leaves, and reading it as `none`
+  // printed "the check carried no annotation with any content in it" over a
+  // check measured to carry `annotations_count: 1`.
+  t(
+    'an annotations call that FAILED is unretrievable, never `none`',
+    assertionStatus([], { retrievalError: 'GET /repos/o/r/check-runs/555/annotations -> HTTP 403' }).kind,
+    'unretrievable',
+  );
+  // The regression pin proper: the same empty list with NO retrieval error is
+  // still `none`. Without this line the case above could pass on a function
+  // that simply renamed `none`, and the distinction — which is the whole fix —
+  // would not be pinned at all.
+  t(
+    'the defect itself: that SAME empty list, with no error recorded, still reads `none`',
+    assertionStatus([]).kind,
+    'none',
+  );
+  t(
+    'the failed call rides out, so the report can print WHY nothing was read',
+    assertionStatus([], { retrievalError: 'HTTP 403' }).retrievalError,
+    'HTTP 403',
+  );
+  // Direction check: content in hand outranks a failed call. A partial
+  // retrieval that still produced the assertion has answered the question.
+  t(
+    'an assertion retrieved despite a recorded error is still RETRIEVED',
+    assertionStatus([{ kind: 'assertion', path: 'a.test.ts' }], { retrievalError: 'HTTP 500' }).kind,
+    'retrieved',
+  );
+
+  // -- the job log (#10141) -------------------------------------------------
+  // Fixtures are transcribed from two real failing jobs on run 32436724284 /
+  // 32436578705, fetched 2026-08-21 (see the header). Runner colour escapes are
+  // dropped: this file must stay free of raw control bytes, and no branch here
+  // reads them.
+  t(
+    'the runner timestamp is stripped so the assertion starts at column 1',
+    stripLogTimestamp("2026-08-21T01:34:45.6366823Z ##[error]src/x.ts(42,1): error TS2578: Unused '@ts-expect-error' directive."),
+    "##[error]src/x.ts(42,1): error TS2578: Unused '@ts-expect-error' directive.",
+  );
+  t('a line with no timestamp is returned unchanged', stripLogTimestamp('plain text'), 'plain text');
+  t('the blob BOM is dropped, so the first line is not a phantom mismatch', stripLogTimestamp('﻿2026-08-21T01:33:37.8338519Z hello'), 'hello');
+
+  // The shape the annotations API structurally cannot carry. Its annotation for
+  // this very failure was `path: '.github', start_line: 42` — a line number
+  // with no file.
+  t(
+    "tsc's parenthesised anchor is an assertion, and it keeps the FILE the annotation lost",
+    (() => {
+      const c = classifyLogLine("src/commands/serve-verify-security-parity.contract.test.ts(42,1): error TS2578: Unused '@ts-expect-error' directive.");
+      return [c.kind, c.path, c.line];
+    })(),
+    ['assertion', 'src/commands/serve-verify-security-parity.contract.test.ts', 42],
+  );
+  t(
+    'the colon-separated anchor is an assertion too',
+    (() => {
+      const c = classifyLogLine('packages/spec/src/data/object.zod.ts:118:7  error  Unexpected any');
+      return [c.kind, c.path, c.line];
+    })(),
+    ['assertion', 'packages/spec/src/data/object.zod.ts', 118],
+  );
+  t(
+    'prose that merely contains a (line,col) is NOT promoted to an assertion',
+    classifyLogLine('see the table at (12,3): it is wrong').kind,
+    'other',
+  );
+  t(
+    "the runner's generic marker delegates to classifyAnnotation and stays content-free",
+    classifyLogLine('Process completed with exit code 1.').kind,
+    'exit-status',
+  );
+  t(
+    'a pnpm child-process death is the same package pointer it is in an annotation',
+    classifyLogLine('command (/home/runner/work/objectstack/objectstack/packages/cli) /opt/hostedtoolcache/node/22.23.2/x64/bin/pnpm run typecheck exited (2)').kind,
+    'package-pointer',
+  );
+
+  // Job 96639318058, `Type Check . workspace`: three `##[error]` lines, the
+  // first of them file-anchored. The whole reason this card exists.
+  const anchoredLog = [
+    '2026-08-21T01:34:45.5000000Z > tsc --noEmit',
+    '2026-08-21T01:34:45.6366823Z ##[error]src/commands/serve-verify-security-parity.contract.test.ts(42,1): error TS2578: Unused \'@ts-expect-error\' directive.',
+    '2026-08-21T01:34:45.8945562Z ##[error]command (/home/runner/work/objectstack/objectstack/packages/cli) /opt/hostedtoolcache/node/22.23.2/x64/bin/pnpm run typecheck exited (2)',
+    '2026-08-21T01:34:45.9124311Z ##[error]Process completed with exit code 2.',
+  ].join('\n');
+  t('a log with a file-anchored error line is ANCHORED', extractLogAssertion(anchoredLog).kind, 'anchored');
+  t('...and only the anchored line is counted as the assertion', extractLogAssertion(anchoredLog).assertions.length, 1);
+  t('...while every `##[error]` line is still returned, none dropped', extractLogAssertion(anchoredLog).errors.length, 3);
+  t(
+    '...and the assertion carries the log line number, so a reader can find it in the raw log',
+    // `?.` deliberately: a regression that stops anchoring must be REPORTED by
+    // this harness, not crash it. Measured while ablating the anchor recogniser
+    // — the bare index threw a TypeError, node exited 1 before printing any
+    // verdict, and every pin after this line never ran. One break hid the rest.
+    extractLogAssertion(anchoredLog).assertions[0]?.logLine ?? null,
+    2,
+  );
+
+  // Job 96638884991, `Lint & Repo Gates`: ONE annotation, `Process completed
+  // with exit code 1.`, and 8,888 log lines whose answer is the block sitting
+  // immediately above the single `##[error]`. This is the row that used to
+  // print "that stdout exists only in the Actions log blob".
+  const gateLog = [
+    '2026-08-21T01:31:44.1000000Z     Replace the guard with:',
+    '2026-08-21T01:31:44.2000000Z ',
+    "2026-08-21T01:31:44.3000000Z       import { isEntrypoint } from './invoked-as.mjs';",
+    '2026-08-21T01:31:44.4000000Z  ELIFECYCLE  Command failed with exit code 1.',
+    '2026-08-21T01:31:44.5000000Z ##[error]Process completed with exit code 1.',
+  ].join('\n');
+  t('a log whose only error line is content-free is ERRORS-ONLY, never ANCHORED', extractLogAssertion(gateLog).kind, 'errors-only');
+  t('...it claims no assertion', extractLogAssertion(gateLog).assertions.length, 0);
+  t(
+    '...and it hands back the stdout above the first `##[error]`, which IS the gate answer',
+    extractLogAssertion(gateLog).context,
+    [
+      '    Replace the guard with:',
+      "      import { isEntrypoint } from './invoked-as.mjs';",
+      ' ELIFECYCLE  Command failed with exit code 1.',
+    ],
+  );
+  t(
+    'a log with no `##[error]` at all yields a TAIL, labelled a window rather than an answer',
+    extractLogAssertion('2026-08-21T01:00:00.0000000Z one\n2026-08-21T01:00:01.0000000Z two').kind,
+    'tail',
+  );
+  t(
+    '...and it says so in words, so the window cannot be quoted as an anchor',
+    extractLogAssertion('2026-08-21T01:00:00.0000000Z one').note.includes('WINDOW, not an anchor'),
+    true,
+  );
+  t('an empty body is `empty`, never a throw and never a tail', extractLogAssertion('').kind, 'empty');
+  t('an undefined body is `empty` too', extractLogAssertion(undefined).kind, 'empty');
+
+  // The four ways a log request comes back other than 200. The version of this
+  // file that hard-coded one of them printed the same sentence for all four.
+  t('200 is ok', classifyLogFetch({ status: 200 }).kind, 'ok');
+  t(
+    'a 410 is EXPIRED — the evidence was deleted on schedule, measured at 90+ days',
+    classifyLogFetch({ status: LOG_EXPIRED_STATUS }).kind,
+    'expired',
+  );
+  t(
+    '...and it says retention, not "nothing was recorded" — the #9747 distinction',
+    classifyLogFetch({ status: 410 }).note.includes('retention'),
+    true,
+  );
+  t('a 403 from GitHub is DENIED', classifyLogFetch({ status: 403 }).kind, 'denied');
+  t('a 404 is ABSENT, not denied', classifyLogFetch({ status: 404 }).kind, 'absent');
+  t('an unclassified status is named as unclassified, never assumed', classifyLogFetch({ status: 500 }).kind, 'unretrieved');
+  t(
+    'a request that never completed is TRANSPORT — a CONNECT denial lands here, not on `denied`',
+    classifyLogFetch({ networkError: 'fetch failed' }).kind,
+    'transport',
+  );
+  t(
+    '...and that branch carries the instruction to report the blocked host rather than route around it',
+    classifyLogFetch({ networkError: 'fetch failed' }).note.includes('report the blocked host'),
+    true,
+  );
+
+  // assertionStatus with a log in hand — the routing half of #10141.
+  const logWithAssertion = { ok: true, finding: extractLogAssertion(anchoredLog) };
+  const logWithout = { ok: true, finding: extractLogAssertion(gateLog) };
+  t(
+    'the defect: exit-status-only annotations used to be `none`, with no log consulted',
+    assertionStatus([{ kind: 'exit-status' }]).kind,
+    'none',
+  );
+  t(
+    'the fix: the same annotations, plus a log that anchored, is RETRIEVED',
+    assertionStatus([{ kind: 'exit-status' }], { log: logWithAssertion }).kind,
+    'retrieved',
+  );
+  t(
+    '...and it names the source, so a reader knows which surface answered',
+    assertionStatus([{ kind: 'exit-status' }], { log: logWithAssertion }).source,
+    'job-log',
+  );
+  t(
+    'a file-anchored ANNOTATION still outranks the log — it is already the answer, and cheaper',
+    assertionStatus([{ kind: 'assertion', path: 'a.test.ts' }], { log: logWithAssertion }).source,
+    'annotations',
+  );
+  t(
+    'a log that was read but anchored nothing does NOT manufacture a retrieval',
+    assertionStatus([{ kind: 'exit-status' }], { log: logWithout }).kind,
+    'none',
+  );
+  t(
+    'a log that was not read at all leaves the annotation-only verdict untouched',
+    assertionStatus([{ kind: 'exit-status' }], { log: { ok: false, finding: null } }).kind,
+    'none',
+  );
+  t(
+    'content in hand outranks a failed annotations call, whichever surface produced it',
+    assertionStatus([], { retrievalError: 'HTTP 403', log: logWithAssertion }).kind,
+    'retrieved',
   );
 
   // -- isRosterJob ----------------------------------------------------------
@@ -1267,6 +2070,115 @@ async function selfTest() {
     verdictOf({ failing: [withAssertion, without], pending: 0, total: 18 }).why.includes('1 of 2'),
     true,
   );
+  // #10141: the exit code moved. A check whose annotations carried no anchor
+  // used to force this whole walk to exit 2 no matter what the job log said,
+  // and the job log was never asked.
+  const withLogAssertion = { assertions: [], log: { finding: extractLogAssertion(anchoredLog) } };
+  const withReadButUnanchoredLog = { assertions: [], log: { finding: extractLogAssertion(gateLog) } };
+  t(
+    'an assertion that came from the JOB LOG counts toward RED, same as one from an annotation',
+    verdictOf({ failing: [withLogAssertion], pending: 0, total: 18 }).exit,
+    EXIT_RED,
+  );
+  t(
+    'a log that was read and anchored NOTHING is still a shortfall — UNDETERMINED, not RED',
+    verdictOf({ failing: [withReadButUnanchoredLog], pending: 0, total: 18 }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'a failing check with no log record at all is unchanged: still a shortfall',
+    verdictOf({ failing: [without], pending: 0, total: 18 }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'the shortfall sentence no longer blames the container, which was the false claim',
+    verdictOf({ failing: [withAssertion, without], pending: 0, total: 18 }).why.includes('not retrievable from this container'),
+    false,
+  );
+
+  // -- midWalkVerdict: the mid-walk net (#10155) ----------------------------
+  // The defect: `rest()` threw on a non-ok status, nothing caught it, and node
+  // exits 1 on an uncaught exception — which THIS FILE'S table calls RED, "the
+  // assertion text was retrieved for EVERY failing check". Measured against
+  // main at 2e39181a with the probe green and the walk's first page refused:
+  // stack trace, EXIT=1. Every pin below exists so that cannot come back.
+  const refusedTransport = { kind: 'repo-scope-refused', headline: 'repo-scoped reads are refused', detail: ['d'], fix: ['f'] };
+  const healthyTransport = { kind: 'reachable', headline: 'api.github.com is reachable', detail: [], fix: [] };
+  const boom = Object.assign(new Error('GET /repos/o/r/commits/abc/check-runs?per_page=100&page=1 -> HTTP 403'), { status: 403 });
+
+  t(
+    'a mid-walk failure whose RE-PROBE says the transport is unusable is the environment: exit 3',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).exit,
+    EXIT_PREREQUISITE_NOT_MET,
+  );
+  t(
+    'a mid-walk failure whose re-probe comes back HEALTHY is a walk that cannot answer: exit 2',
+    midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 12 } }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'an unclassifiable re-probe is not vouched for and not blamed either — exit 2, never 3',
+    midWalkVerdict({ probe: null, error: boom, read: { checkRuns: 3 } }).exit,
+    EXIT_UNDETERMINED,
+  );
+  // The load-bearing pin. Whatever else changes here, no mid-walk failure may
+  // ever exit RED — that collision IS the card, and it is the one assertion
+  // that must survive any future rewording of the branches above.
+  t(
+    'the defect itself: NO mid-walk branch may exit 1/RED, whatever the re-probe said',
+    [refusedTransport, healthyTransport, null].map((probe) =>
+      midWalkVerdict({ probe, error: boom, read: { checkRuns: 7 } }).exit === EXIT_RED),
+    [false, false, false],
+  );
+  t(
+    '...and none of them is GREEN either — "could not read it" is never a clean tree',
+    [refusedTransport, healthyTransport, null].map((probe) =>
+      midWalkVerdict({ probe, error: boom, read: { checkRuns: 7 } }).exit === EXIT_GREEN),
+    [false, false, false],
+  );
+  // The partial-output invariant (`swept`, one file over): the two readings say
+  // DIFFERENT things, because "nothing was read" and "half the tree was read"
+  // are different facts about how much to distrust.
+  t(
+    'a net that fired before anything was listed says nothing was READ',
+    midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 0 } }).detail.join('\n').includes('Nothing was read'),
+    true,
+  );
+  t(
+    '...and one that fired after 12 check-runs says nothing was JUDGED, and counts them',
+    (() => {
+      const d = midWalkVerdict({ probe: healthyTransport, error: boom, read: { checkRuns: 12 } }).detail.join('\n');
+      return [d.includes('Nothing was judged'), d.includes('12 check-run(s) had been listed')];
+    })(),
+    [true, true],
+  );
+  t(
+    'neither reading can be mistaken for a completed walk',
+    [{ checkRuns: 0 }, { checkRuns: 12 }].map((read) =>
+      midWalkVerdict({ probe: healthyTransport, error: boom, read }).detail.join('\n').includes('not a clean tree')
+      || midWalkVerdict({ probe: healthyTransport, error: boom, read }).detail.join('\n').includes('no reading at all')),
+    [true, true],
+  );
+  t(
+    'the failure that triggered the net is quoted, so the reader is not guessing',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).detail.join('\n').includes('HTTP 403'),
+    true,
+  );
+  t(
+    'the exit-3 branch carries the probe\'s own fix lines rather than inventing new ones',
+    midWalkVerdict({ probe: refusedTransport, error: boom, read: { checkRuns: 0 } }).fix,
+    ['f'],
+  );
+  t(
+    'a missing read counter degrades to "nothing was read", never to a throw',
+    midWalkVerdict({ probe: healthyTransport, error: boom }).exit,
+    EXIT_UNDETERMINED,
+  );
+  t(
+    'called with nothing at all it still returns a verdict rather than throwing',
+    midWalkVerdict().exit,
+    EXIT_UNDETERMINED,
+  );
 
   // -- probeTransport: the two stages, and the FOURTH container class -------
   // Measured 2026-08-20 in an agent container whose session holds THIS repo and
@@ -1371,8 +2283,46 @@ async function selfTest() {
     '    UNDETERMINED rather than on GREEN. The transport probe runs its two stages in order: a\n' +
     '    healthy /rate_limit is no longer enough to green a container whose repo-scoped reads are\n' +
     '    refused (the fourth class, measured), the repo read is spent ONLY after stage 1 says\n' +
-    '    reachable, and a repo-scoped 5xx stays unclassified instead of falling back to reachable.',
+    '    reachable, and a repo-scoped 5xx stays unclassified instead of falling back to reachable.\n' +
+    '    And the mid-walk net holds: a transport failure arriving after the probe passed exits 3\n' +
+    '    when a fresh probe classifies the container as unusable and 2 when it does not, NEVER 1 —\n' +
+    '    the RED code that means the assertion was retrieved for every failing check — and never 0;\n' +
+    '    its report says whether nothing was READ or nothing was JUDGED, counting what had been\n' +
+    '    listed, so a stopped walk cannot be mistaken for a completed one; and an annotations call\n' +
+    '    that FAILED is told apart from a check that carried nothing, which the empty list alone\n' +
+    '    cannot distinguish. And the job log (#10141) is read as a source rather than asserted\n' +
+    '    away: a file-anchored error line is an assertion and counts toward RED even when the\n' +
+    '    annotations carried none, a log that anchored nothing is still a shortfall rather than a\n' +
+    '    manufactured answer, a 410 is named as expired retention rather than as an absence of\n' +
+    '    evidence, a CONNECT refusal lands as transport with the blocked host to report, and a\n' +
+    '    tail with no `##[error]` in it is labelled a window rather than an anchor.',
   );
+}
+
+/**
+ * The mid-walk net's printer (#10155). The DECISION is `midWalkVerdict`, pure
+ * and self-tested; what lives here is the one thing it cannot be handed — the
+ * fresh transport reading it needs in order to choose.
+ *
+ * The re-probe is spent only on the failure path, so a healthy run costs
+ * exactly what it always did. If the re-probe cannot itself complete, the
+ * container stays UNCLASSIFIED rather than being blamed: `midWalkVerdict` then
+ * lands on UNDETERMINED, which is the direction that cannot manufacture a
+ * confident wrong claim about someone's environment.
+ */
+async function reportMidWalkFailure(error, stage) {
+  let probe = null;
+  try {
+    ({ verdict: probe } = await probeTransport());
+  } catch {
+    probe = null;
+  }
+  const decision = midWalkVerdict({ probe, error, read: error?.read ?? null, stage });
+  console.error(`\nci-failure: ${decision.verdict} — ${decision.headline}\n`);
+  for (const line of decision.detail) console.error(line ? `  ${line}` : '');
+  for (const line of decision.fix ?? []) console.error(`  fix: ${line}`);
+  console.error("  Piping reports the PIPE's status, so `... | tail` reads green either way. Use `echo \"EXIT=$?\"`.");
+  process.exit(decision.exit);
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,13 +2381,26 @@ if (!invokedDirectly) {
     console.error(`  (Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`);
     process.exit(EXIT_PREREQUISITE_NOT_MET);
   }
-  const target = await resolveTarget(process.argv.slice(2));
+  // Everything from here reads the network, and every read can fail AFTER the
+  // probe above passed (#10155). Uncaught, node exits 1 — which this file's own
+  // table calls RED, "the assertion was retrieved for every failing check".
+  let target;
+  try {
+    target = await resolveTarget(process.argv.slice(2));
+  } catch (error) {
+    await reportMidWalkFailure(error, 'resolving the target commit');
+  }
   if (!target.sha) {
     console.error(`ci-failure: could not resolve a commit to ask about (${target.from}).`);
     console.error(`  (Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`);
     process.exit(EXIT_PREREQUISITE_NOT_MET);
   }
-  const result = await walk(target.sha);
+  let result;
+  try {
+    result = await walk(target.sha);
+  } catch (error) {
+    await reportMidWalkFailure(error, 'the walk');
+  }
   const rendered = render(result, target);
   if (process.argv.includes('--json')) {
     console.log(JSON.stringify({ ...result, target: target.from, verdict: rendered.verdict }, null, 2));

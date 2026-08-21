@@ -635,7 +635,7 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `82a94170c`): `containers.tsx:662-665` renders
+     * (`.objectui-sha` = `9a3daf8d3`): `containers.tsx:662-668` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
@@ -1498,7 +1498,7 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `82a94170c`): `containers.tsx:851-853` renders
+     * (`.objectui-sha` = `9a3daf8d3`): `containers.tsx:851-857` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
@@ -1660,7 +1660,44 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
     .optional().default('primary').describe('Button visual variant'),
   size: z.enum(['small', 'medium', 'large'])
     .optional().default('medium').describe('Button size'),
-  icon: z.string().optional().describe('Icon name (Lucide icon)'),
+  /**
+   * Button icon, and the reason this key carries a docblock at all: its
+   * describe used to read `Icon name (Lucide icon)` and nothing more — a
+   * sentence equally true of `page:header`'s `icon` above, which is REFUSED
+   * precisely because no render path reads it. Vocabulary does not separate
+   * the two verdicts; a read point does. That missing separation has already
+   * cost a full dispatch cycle re-deriving a cross-repo read point from
+   * scratch (#9397, closed premise-overtaken), which is why #9881 and #9972
+   * recorded it for the accordion and tab items. This is the same record for
+   * the button.
+   *
+   * The key is LIVE at the objectui pin this repo builds against
+   * (`.objectui-sha` = `9a3daf8d3`): `components/src/renderers/form/
+   * button.tsx:44-47` resolves `schema.icon`, and `:69` / `:71` render it on
+   * either side of the label per `iconPosition` (`mr-2 h-4 w-4` left,
+   * `ml-2 h-4 w-4` right), both suppressed while `loading`.
+   *
+   * ⚠️ The resolution path is NOT `LazyIcon`, the slot the container icons on
+   * this surface use — it is a second, older path with its own normaliser and
+   * its own rename map, and the two accept different spellings:
+   *   - here: `toPascalCase` (splits on `-` only) → a one-entry rename map
+   *     (`Home` → `House`) → `icons[name]` from `lucide-react`
+   *     (`button.tsx:14-27`). An unknown name resolves to `undefined` and the
+   *     button renders with NO icon and no diagnostic anywhere.
+   *   - `LazyIcon` / `getLazyIcon` (`components/src/lib/lazy-icon.tsx:66-92`):
+   *     normalises to kebab-case, checks the name against Lucide's own name
+   *     list, and degrades an unknown name to the `Database` glyph.
+   *   So a spelling that draws an icon in a tab trigger can draw nothing here.
+   *
+   * Also measured at the same pin: the renderer's registration publishes no
+   * `icon` input (`button.tsx:82-98` lists `label`, `variant`, `size`,
+   * `className`), so the Studio block designer does not offer the key.
+   * Unpublished is not unread — the header `icon` above is refused for the
+   * second, not the first, and this docblock exists to hold them apart.
+   */
+  icon: z.string().optional().describe(
+    'Lucide icon name rendered inside the button, left or right of the label per `iconPosition`. Read on this component — the renderer resolves it through `lucide-react`\'s `icons` map using its own PascalCase normaliser and rename map, NOT the `LazyIcon` slot the container icons use; the two paths accept different spellings, and an unknown name here renders nothing rather than a fallback glyph.',
+  ),
   iconPosition: z.enum(['left', 'right'])
     .optional().default('left').describe('Icon position relative to label'),
   disabled: z.boolean().optional().default(false).describe('Disable the button'),
@@ -2100,7 +2137,41 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   label: I18nLabelSchema.optional().describe('Metric label'),
   description: I18nLabelSchema.optional().describe('Helper text under the value'),
   title: I18nLabelSchema.optional().describe('Drill-down panel title; defaults to the metric label'),
-  icon: z.string().optional().describe('Icon name (Lucide)'),
+  /**
+   * Metric tile icon, and the reason this key carries a docblock at all: its
+   * describe used to read `Icon name (Lucide)` and nothing more — a sentence
+   * equally true of `page:header`'s `icon`, which is REFUSED precisely because
+   * no render path reads it. Vocabulary does not separate the two verdicts; a
+   * read point does (#9397 closed premise-overtaken re-deriving one from
+   * scratch; #9881/#9972 recorded the accordion and tab items). This is the
+   * same record for the metric tile.
+   *
+   * The key is LIVE at the objectui pin this repo builds against
+   * (`.objectui-sha` = `9a3daf8d3`), and the chain runs three files:
+   * `plugin-dashboard/src/index.tsx:161` publishes it as a designer input
+   * (`Icon (Lucide name)`) on the registered `object-metric` block;
+   * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
+   * `MetricWidget`; `MetricWidget.tsx:312-321` resolves it via
+   * `getLazyIcon(icon)` — guarded on `typeof icon === 'string'`, because the
+   * React prop also accepts a ready-made node — and `:373-382` draws it in the
+   * tinted square whose colour comes from `colorVariant`.
+   *
+   * ⚠️ Do not re-anchor this to `MetricCard.tsx`. That sibling calls
+   * `getLazyIcon` on line 83 and reads like the same read point, but nothing
+   * on this key's path renders it (its heading key is `title`, this path's is
+   * `label`), so a line cited from it describes a component this key never
+   * reaches.
+   *
+   * Vocabulary is Lucide via the `LazyIcon` module
+   * (`components/src/lib/lazy-icon.tsx:66-80`): kebab-case or PascalCase,
+   * normalised to kebab-case, degrading to the `Database` glyph when the name
+   * is not a real Lucide icon — the same slot the container icons use, and the
+   * opposite failure mode from `element:button`'s `icon`, which takes the older
+   * `icons`-map path and renders nothing at all on an unknown name.
+   */
+  icon: z.string().optional().describe(
+    'Lucide icon name drawn in the metric tile header, inside the `colorVariant`-tinted square. Read on this component — `ObjectMetricWidget` forwards it to `MetricWidget`, which resolves it with `getLazyIcon` (the `LazyIcon` module: kebab-case or PascalCase, degrading to the `Database` glyph on an unknown name).',
+  ),
   colorVariant: z.enum(['default', 'blue', 'teal', 'orange', 'purple', 'success', 'warning', 'danger'])
     .optional().describe('Icon container color variant'),
   aggregate: z.unknown().optional()

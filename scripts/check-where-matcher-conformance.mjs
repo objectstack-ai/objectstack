@@ -223,6 +223,7 @@ import { join, relative, resolve, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -387,7 +388,7 @@ function enclosingParameters(node) {
 export function discoverInSource(text, label) {
   const out = [];
   if (!/Object\.(entries|keys)|\$or|\$and/.test(text)) return out;
-  const sf = ts.createSourceFile(label, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(label, text, ts.ScriptKind.TS);
   const visit = (node) => {
     if (isFn(node) && node.body) {
       const params = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null));

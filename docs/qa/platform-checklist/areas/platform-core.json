@@ -8,7 +8,7 @@
       "title": "Showcase boots clean: health + ready 200, no degraded startup banners, console + app metadata served",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "mixed",
       "preconditions": [
@@ -37,9 +37,9 @@
           "evidence": "the curl output"
         },
         {
-          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear anywhere in the boot log",
+          "clause": "the `Flows:` startup banner reports no ⚠ misauthored flows and no ERROR-level lines appear IN THE BOOT WINDOW — the window is part of the clause, because ordinary caller-error 4xx traffic also logs at ERROR",
           "oracle": "log",
-          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines; seed rejections count as failures (see #3415 — SeedLoader rejections were silent)",
+          "verify": "grep the boot log for '⚠' in the Flows banner and for ERROR lines, SCOPED to the boot window — from process start to the first 200 on /api/v1/health (the same instant clause 0 records as time-to-healthy). ⚠️ A caller-error REFUSAL logs at ERROR level with a full stack BEFORE answering 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER (#10257). So an unscoped grep over a log that also carries the run's own probe traffic reports ERROR lines for requests the platform refused CORRECTLY, and a clean boot reads as a boot failure. Cut the log at the health-green line before grepping, or capture the boot log to its own file before issuing the first request; seed rejections still count as failures (see #3415 — SeedLoader rejections were silent)",
           "evidence": "the grepped log excerpt"
         },
         {
@@ -57,7 +57,7 @@
       ],
       "negative": [
         "any SeedLoader rejection line in the boot log is a FAIL against the seed (RUNNER rule 3: a defect in the fixture is a fail, not a block — #3408/#3415)",
-        "a health 200 with ERROR lines in the log is NOT a clean boot — the log clause fails independently of the probe"
+        "a health 200 with ERROR lines in the BOOT WINDOW is NOT a clean boot — the log clause fails independently of the probe. ⚠️ The converse is equally a defect in the RUN, not the platform: ERROR lines logged AFTER health went green by the run's own 4xx-provoking probes are correct refusals being logged loudly, and filing them as a boot failure is a false P0"
       ],
       "traps": ["seed-data-thin", "stale-dist"],
       "source": [
@@ -69,7 +69,13 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — standing P0 smoke distilled from the dogfood boot protocol", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-18", "change": "corrected the ?id= spelling from the package id com.example.showcase to the app NAME showcase_app in step 6 and clause 3. rest-server.ts filters app documents on a.name === id and App declares no id of its own, so the package-id spelling returns an empty items array — a false-P0 shape (#9334, re-confirmed #9453 CF-1)", "ref": "#9386" }
+        { "revision": 3, "date": "2026-08-18", "change": "corrected the ?id= spelling from the package id com.example.showcase to the app NAME showcase_app in step 6 and clause 3. rest-server.ts filters app documents on a.name === id and App declares no id of its own, so the package-id spelling returns an empty items array — a false-P0 shape (#9334, re-confirmed #9453 CF-1)", "ref": "#9386" },
+        {
+          "revision": 4,
+          "date": "2026-08-21",
+          "change": "scoped clause 2's ERROR-line grep to the boot window and said why. A caller-error refusal logs at ERROR level with a full stack before answering its 4xx — measured on 17.1.0 with a `$fn` filter probe answering 400 INVALID_FILTER — so any clause grepping the whole log for ERROR reads ordinary, correctly-refused 4xx traffic as a boot failure. The clause now names the window (process start to the first health 200, the instant clause 0 already records), prescribes cutting the log there or capturing it before the first request, and the negatives carry both directions so the false P0 is recognisable from either side. The security property is unchanged: a genuine ERROR-during-boot still fails independently of the probe (#10236 A5, measured #10257)",
+          "ref": "#10236"
+        }
       ]
     },
     {
@@ -459,10 +465,10 @@
     },
     {
       "id": "platform-core.builtin-apps-nav-render",
-      "title": "The three built-in apps (Setup / Studio / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored",
+      "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -472,42 +478,43 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the three platform apps ship with @objectstack/platform-objects and register as one-app packages @objectstack/{setup,studio,account} (ADR-0048), so their PACKAGE ids are com.objectstack.setup / com.objectstack.studio / com.objectstack.account — but the App documents themselves are NAMED setup / studio / account (setup.app.ts, studio.app.ts, account.app.ts), and every ?id= below matches the NAME — present on any stock boot, no showcase-specific fixture",
+          "the platform apps ship with @objectstack/platform-objects and are packaged one-app-per-package (ADR-0048) as com.objectstack.setup / com.objectstack.studio / com.objectstack.account — but only TWO of the three are loaded on a stock boot. The ADR-0048 registration loop registers exactly @objectstack/setup and @objectstack/account (packages/plugins/plugin-dev/src/dev-plugin.ts for os dev; packages/cli/src/commands/serve.ts for os serve), so a stock GET /api/v1/meta/app answers showcase_app + setup + account. The App documents are NAMED setup / account (setup.app.ts, account.app.ts) and every ?id= below matches the NAME, never the package id — present on any stock boot, no showcase-specific fixture",
           "a second, non-admin persona: sign up a fresh user in-run to drive the app-level and entry-level permission gates (do not reuse the admin — wrong-persona masks the guard)"
         ],
         "knownGaps": [
-          "the SSO Providers entry (nav_sso_providers → sys_sso_provider) is contributed ONLY when the external-IdP RP is wired (OS_SSO_ENABLED self-host / cloud planAllowsSso — plugin-auth auth-plugin.ts isSsoWired()). On a stock open-framework boot it is ABSENT by design (not gated-and-erroring); assert its absence, never treat it as a missing surface"
+          "the SSO Providers entry (nav_sso_providers → sys_sso_provider) is contributed ONLY when the external-IdP RP is wired (OS_SSO_ENABLED self-host / cloud planAllowsSso — plugin-auth auth-plugin.ts isSsoWired()). On a stock open-framework boot it is ABSENT by design (not gated-and-erroring); assert its absence, never treat it as a missing surface",
+          "Studio is NOT registered on a stock boot, by product decision — this is a carve-out to ASSERT, not a fixture to provision. STUDIO_APP is defined (packages/platform-objects/src/apps/studio.app.ts) and packaged (packages/apps/studio, com.objectstack.studio), but both boot paths deliberately skip it with the identical note: '@objectstack/studio is intentionally NOT default-loaded — the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, so Studio no longer needs to exist as a navigable app tile' (plugin-dev/src/dev-plugin.ts and cli/src/commands/serve.ts, the ADR-0048 app-package loop in each — both register only setup and account). So ?id=studio answering 200 {\\\"items\\\":[]} is the CORRECT observation on every stock boot, not a showcase-specific gap and not a missing built-in. ⛔ Do not install the package to 'restore' it: that changes what the boot ships and is a maintainer decision, not a run's. The prior wave already walked everything reachable here — Setup 43/43 and Account 7/7 destinations, 50/50 ok, zero pageerror (#9453). Studio's own surfaces are covered by area studio-authoring against /_console/studio, not through a nav tile."
         ]
       },
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
-        "GET /api/v1/meta/app?id=studio (studio.app.ts — static nav: Overview, Data Model, User Experience, Logic, Automation, AI, Developer, Integration) and GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups)",
+        "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
         "as admin, hand-walk each destination in each app: navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
-        "Studio detail: confirm each metadata:resource list (object/app/view/page/dashboard/report/dataset/action/hook/flow/agent/tool/skill/email_template) renders, and the component surfaces render (App Builder studio:builder, All Metadata Types metadata:directory, Packages developer:packages, API Console developer:api-console, Flow Runs developer:flow-runs, Public Forms developer:public-forms)",
+        "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
-        "sign in as the plain member: attempt to open Setup (app name setup) and Studio (app name studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
+        "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
         "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk"
       ],
       "acceptance": [
         {
-          "clause": "every merged-nav destination in all three apps renders a real surface for the admin — no pageerror, no 'failed to load', no blank <main>, no placeholder leak; this closes the gap platform-core.nav-surfaces-render leaves (it only sweeps the showcase app)",
+          "clause": "every merged-nav destination in each REGISTERED built-in app (Setup, Account) renders a real surface for the admin — no pageerror, no 'failed to load', no blank <main>, no placeholder leak; this closes the gap platform-core.nav-surfaces-render leaves (it only sweeps the showcase app)",
           "oracle": "screenshot",
-          "verify": "per-destination screenshot (screenshot-first) then DOM mark-check, across Setup + Studio + Account",
+          "verify": "per-destination screenshot (screenshot-first) then DOM mark-check, across Setup + Account — the two built-ins a stock boot registers. Scoring this clause over two apps is FULL coverage of what boots, not a partial: Studio has no merged nav to walk (knownGap)",
           "evidence": "per-app per-destination screenshot set + verdict table"
         },
         {
-          "clause": "the served merged nav matches each app's authored shell + contributions: Setup's group anchors (setup.app.ts) are filled by SETUP_NAV_CONTRIBUTIONS and capability plugins; Studio's static groups (studio.app.ts) are all present; Account's Profile/Inbox/Security/Developer groups present",
+          "clause": "the served merged nav matches each registered app's authored shell + contributions: Setup's group anchors (setup.app.ts) are filled by SETUP_NAV_CONTRIBUTIONS and capability plugins; Account's Profile/Inbox/Security/Developer groups present",
           "oracle": "api",
-          "verify": "the three GET /meta/app payloads list the expected group ids + entries per the app source files",
+          "verify": "the two GET /meta/app payloads list the expected group ids + entries per the app source files",
           "evidence": "the three nav payloads"
         },
         {
-          "clause": "as a plain member, Setup and Studio REFUSE (app-level requiredPermissions setup.access / studio.access) with a named access-denied surface — never a blank shell — while Account OPENS (declares no requiredPermissions, RLS scopes its rows)",
+          "clause": "as a plain member, Setup REFUSES (app-level requiredPermissions setup.access) with a named access-denied surface — never a blank shell — while Account OPENS (declares no requiredPermissions, RLS scopes its rows)",
           "oracle": "screenshot",
-          "verify": "run the two refusals + the Account open as the member persona (wrong-persona trap — do it as the member, not the admin)",
+          "verify": "run the Setup refusal + the Account open as the member persona (wrong-persona trap — do it as the member, not the admin). Studio is excluded deliberately: it is absent for the admin too, so a member-side failure there is not attributable to studio.access",
           "evidence": "three screenshots"
         },
         {
@@ -517,10 +524,10 @@
           "evidence": "the forged response"
         },
         {
-          "clause": "permission-gated ENTRIES are absent from the member's merged nav, not present-and-erroring: JWKS (nav_jwks), API Keys (nav_api_keys) and the manage_platform_settings settings entries do not appear in the member's payload",
+          "clause": "the entry-level gate for Setup's permission-gated entries (nav_api_keys, the manage_platform_settings settings URLs) is enforced ONE LEVEL UP as a whole-app refusal: the member cannot obtain the setup app at all, so those entries are unreachable rather than pruned-from-a-served-nav. Assert the app-level absence; do NOT assert an admin-vs-member entry diff on stock fixtures, because there is no member-side Setup nav to diff",
           "oracle": "api",
-          "verify": "diff of admin vs member /meta/app nav destinations — the gated entries are only in the admin set",
-          "evidence": "the admin-vs-member diff"
+          "verify": "as the member, GET /api/v1/meta/app?id=setup → 200 {\"items\":[]}: no App document is served, so every entry inside it (including nav_api_keys and the manage_platform_settings settings URLs) is unreachable. ⚠️ Do NOT substitute the account app for this: account is the one app a member CAN obtain and it carries no permission-gated entries at all — every one of its entries is gated by requiresObject/requiresService (nav_account_api_keys → sys_api_key, nav_account_sessions → sys_session, nav_account_linked → sys_account, nav_account_approvals → requiresService approvals, nav_account_memberships → requiresService org-scoping; account.app.ts), which are PRESENCE gates that resolve identically for both personas. Admin and member account navs measured identical (7 vs 7) — that is the contract behaving as authored and it proves nothing about permission gating, so scoring the clause off it is a false pass. The prior wave recorded the same shape as a named limitation on its own c4 (#9453)",
+          "evidence": "the member's empty ?id=setup payload, plus the admin-vs-member account nav comparison shown as the CONTROL that carries no gated entries (not as the gate's proof)"
         },
         {
           "clause": "service/object-gated entries resolve to ABSENCE on stock fixtures rather than an entry that can only error: nav_organizations (requiresService org-scoping) absent in single-org mode; nav_business_units (requiresObject sys_business_unit) present only when the object is registered",
@@ -551,7 +558,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — the big built-in-apps nav sweep (Setup/Studio/Account merged nav render + app-level and entry-level gates both-sides), complementing nav-surfaces-render which only walks the showcase app", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-18", "change": "corrected every ?id= from the package id (com.objectstack.setup/.studio/.account) to the App document NAME (setup/studio/account) across steps 0, 1, 7 and clause 4. rest-server.ts matches a.name === id, so the package-id spelling returns an empty items array on every one of them — indistinguishable from a missing built-in app (#9334). Kept the package ids where they are genuinely the subject (the ADR-0048 one-app-package note), spelled as PACKAGE ids", "ref": "#9386" }
+        { "revision": 2, "date": "2026-08-18", "change": "corrected every ?id= from the package id (com.objectstack.setup/.studio/.account) to the App document NAME (setup/studio/account) across steps 0, 1, 7 and clause 4. rest-server.ts matches a.name === id, so the package-id spelling returns an empty items array on every one of them — indistinguishable from a missing built-in app (#9334). Kept the package ids where they are genuinely the subject (the ADR-0048 one-app-package note), spelled as PACKAGE ids", "ref": "#9386" },
+        {
+          "revision": 3,
+          "date": "2026-08-21",
+          "change": "two corrections from the 17.1.0 sweep, both about premises that fail one level up. (1) B2/Studio: the item named THREE built-in apps, so on stock fixtures it could never exceed partial — c0/c1/c2 were blocked(fixture) for one reason. Verified at source rather than assumed: Studio's absence is a deliberate product decision at the BOOT layer, not a showcase choice — both os dev and os serve carry the identical note that @objectstack/studio is intentionally not default-loaded because the console ships a dedicated Studio surface at /_console/studio/<pkg>/<pillar>, and each registers only setup and account. Title, fixtures, steps 1/4/7 and clauses 0/1/2 now describe the two apps a stock boot registers; Studio's absence became an assertion with the carve-out recorded in knownGaps, and its surfaces stay covered by area studio-authoring. (2) A4/clause 4: the clause asked for permission-gated ENTRIES to be absent from the member's merged nav, but the member cannot obtain the setup app at all (GET /meta/app?id=setup → 200 items:[]), so no member-side Setup nav exists to diff — the gate is a whole-app refusal, which clause 3 already proves. Reworded for that case, with the account app named explicitly as a non-substitute: every account entry is gated by requiresObject/requiresService, so admin and member navs are identical (7 vs 7) by construction and scoring the clause off that comparison is a false pass (#10236 A4+B2, measured #10257, same shape as #9453's c4)",
+          "ref": "#10236"
+        }
       ]
     },
     {

@@ -1,0 +1,414 @@
+---
+title: React Pages
+description: Author a page body as real React (kind:'react') or as constrained JSX that is parsed and never executed (kind:'html') — the two source-authoring tiers, and how to choose
+---
+
+# React Pages
+
+Most pages are a **schema tree**: `regions[].components[]` of JSON nodes, described in
+[Page Metadata](/docs/ui/pages). Two page kinds let you write the body as a **source
+string** instead, for layouts and interactions the fixed schema cannot express.
+
+| `kind` | You write | Executed? | Compiled by | Author trust |
+| :--- | :--- | :--- | :--- | :--- |
+| `'html'` | Constrained JSX — registered components plus safe native HTML | **No** — parsed into the SDUI tree at save time | `@objectstack/sdui-parser` | Untrusted authors OK |
+| `'react'` | Real React — hooks, handlers, arbitrary JS | **Yes** — in the app's own React tree | `@object-ui/react-runtime` | First-party only |
+
+Both set `source` and leave `regions` unused. `source` is **authoritative over
+`regions`** on both tiers, and a page with either `kind` and no non-empty `source` is
+rejected by the schema rather than rendering empty. `'jsx'` is a deprecated alias for
+`'html'` that is still accepted and converted at load.
+
+## Choosing between `react` and `html`
+
+The line between them is a **trust boundary**, not a convenience preference.
+
+A `kind:'react'` page's source is transpiled and handed to `new Function(...)` with an
+injected scope. There is **no sandbox**: the code runs in the application's own React
+tree with everything that reach implies. Use it only for source you would accept as a
+pull request.
+
+A `kind:'html'` page's source is **parsed into a schema tree and never executed**. Only
+tags in the public block manifest are accepted, props are checked against each block's
+declared inputs, and an unknown tag is a hard error at save time. That is the tier for
+author- or AI-generated pages you have not reviewed.
+
+<Callout type="warn">
+Reach for `'html'` by default. Reach for `'react'` when the page genuinely needs
+behaviour the schema tree cannot express — local state, computed lists, one block's
+event wiring another block's props — and when you trust whoever wrote it.
+</Callout>
+
+The two tiers also differ in what they give you for layout, in opposite directions:
+
+- **`html`** injects the layout containers. You compose with `<flex direction="col"
+  gap={8}>` and `<grid columns={4} gap={5}>`, and style with a JSON `style` object.
+- **`react`** deliberately does **not** inject layout containers — you have real React,
+  so you compose with ordinary `<div>` and inline `style={{ … }}`.
+
+## The security gate
+
+Because the react tier runs author JavaScript, it is gated by a host capability named
+`react-pages`, which defaults **ON** — the platform's assumption is that page authors
+are reviewed and draft-gated.
+
+A deployment that does not trust its page authors turns the tier off **server-side**:
+
+```bash
+OS_PAGE_REACT=off objectstack start
+```
+
+The server then injects the console's capability-disable flag, and every `kind:'react'`
+page renders an explanatory notice instead of executing. `off`, `0`, `false`, `no` and
+`disabled` are all accepted spellings. `kind:'html'` pages are unaffected — they were
+never executed in the first place, which is the whole point of the split.
+
+## What is in scope
+
+Nothing is imported. A react page's source is evaluated with a closure scope the runtime
+builds for it:
+
+| In scope | What it is |
+| :--- | :--- |
+| `React` | The host's React — call hooks through it, e.g. `React.useState`. |
+| The data blocks | One wrapper component per **public, non-container** registered block. |
+| `Block` | Escape hatch — render any registered component by type. |
+| `useAdapter` | The live data source: `find` / `findOne` / `create` / `update`. |
+| `data`, `variables`, `page` | The page's data, its `variables` map, and its own schema. |
+
+Blocks are referenced by the **PascalCase form of their registered type**: `object-form`
+→ `<ObjectForm>`, `list-view` → `<ListView>`, `object-chart` → `<ObjectChart>`.
+
+The per-block prop lists are **generated** from the spec's block index, so they cannot
+drift out of step with the runtime. Treat the generated file as the authority and read it
+before you write props:
+
+> **[React-tier component contract](https://github.com/objectstack-ai/objectstack/blob/main/skills/objectstack-ui/references/react-blocks.md)**
+> — `skills/objectstack-ui/references/react-blocks.md`, generated from `REACT_BLOCKS` in
+> `@objectstack/spec/ui`. Every prop is tagged `data` (declarative config from the
+> block's spec schema), `binding` (connects the block to data), `controlled` (drive it
+> from React state), or `callback` (a function the block calls).
+
+This page deliberately does not restate those tables. A hand-copied prop table is a new
+place for the contract to rot.
+
+## Blocks take flat props
+
+An injected block folds its JSX props into the block's schema, so you write flat props
+rather than a nested `schema` object:
+
+```jsx
+<ListView objectName="showcase_account" columns={['name', 'status']} navigation={{ mode: 'none' }} />
+```
+
+Function props are passed through as real callbacks — that is how one block drives
+another:
+
+```jsx
+<ListView objectName="showcase_account" onRowClick={(record) => setSelected(record.id)} />
+```
+
+One collision is worth knowing. `type` is the SDUI envelope's component discriminator
+**and** a legitimate prop name on some blocks — a chart's family, for instance. The
+discriminator wins the `type` slot and your value is preserved beside it as `specType`
+for the block to read, so `<ObjectChart type="bar">` works as written.
+
+### `Block` — the escape hatch
+
+Any registered component, including ones outside the curated contract:
+
+```jsx
+<Block type="object-kanban" objectName="showcase_task" />
+```
+
+A kanban, calendar, gantt, timeline or map of an object is also reachable without the
+escape hatch — `<ListView viewType="kanban" …>` selects the visualization directly.
+
+`Block` is **not** a way back to the `record:*` family; see
+[below](#record-blocks-not-in-react).
+
+## Live data
+
+`useAdapter()` returns the same data source the rest of the app queries through. Query
+options are OData-shaped — `$filter`, `$top`, `$skip`, `$select`, `$orderby`, `$search`:
+
+```jsx
+function Page() {
+  const adapter = useAdapter();
+  const [rows, setRows] = React.useState([]);
+
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      const result = await adapter.find('showcase_invoice', {
+        $filter: ['status', '!=', 'paid'],
+        $top: 200,
+      });
+      const records = Array.isArray(result) ? result : (result && result.records) || [];
+      if (alive) setRows(records);
+    })();
+    return () => { alive = false; };
+  }, [adapter]);
+
+  return <ul>{rows.map((r) => <li key={r.id}>{r.name}</li>)}</ul>;
+}
+```
+
+<Callout type="warn">
+The `$` prefixes are load-bearing. An unprefixed `top:` or a `filters:` key is not a
+query option — it is silently dropped, and the query comes back unfiltered or with the
+default page size. There is no error.
+</Callout>
+
+`$filter` takes an ObjectQL filter array: `['field', 'op', value]`, with `and` / `or`
+compounds spelled `['and', [...], [...]]`.
+
+## Styling — a page's source is metadata, not source code [#styling]
+
+<Callout type="warn">
+**Do not write Tailwind utility classes in page source.** A page's `source` is *runtime
+metadata*. The console's Tailwind is JIT-compiled at **build** time by scanning the
+console's own `src` — it never scans your page. There is no safelist. So a utility class
+name in page source produces CSS only if that exact class happens to appear somewhere in
+the console's own source, and otherwise **produces nothing, with no error anywhere**.
+</Callout>
+
+This is the single most expensive mistake on this tier, because the failure mode is a
+page that renders — correct structure, correct data, no styling — and reports nothing.
+It is recorded as an amendment to ADR-0080 under
+[ADR-0065](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0065-sdui-styling-model.md):
+a modal's `bg-black/50` backdrop rendered fully transparent in production.
+
+Style a react page two ways instead:
+
+**1. Layout and chrome — inline `style={{ … }}` with theme tokens.** Colors come from the
+active theme as `hsl(var(--token))`, so the page follows light/dark and any theme the
+deployment installs:
+
+```jsx
+<div
+  style={{
+    background: 'hsl(var(--card))',
+    border: '1px solid hsl(var(--border))',
+    borderRadius: 'var(--radius)',
+    padding: 12,
+    color: 'hsl(var(--foreground))',
+  }}
+>
+  …
+</div>
+```
+
+Common tokens: `--background`, `--foreground`, `--card`, `--muted`,
+`--muted-foreground`, `--border`, `--primary`, `--primary-foreground`, `--destructive`,
+and the spacing/radius tokens `--space-*` and `--radius`.
+
+**2. Overlays — let a block render them.** Never hand-roll a `position: fixed; inset: 0`
+backdrop; render the form in its built-in Sheet or Dialog, which arrives already styled:
+
+```jsx
+<ObjectForm
+  objectName="showcase_account"
+  mode="edit"
+  recordId={selected}
+  formType="drawer"
+  drawerSide="right"
+  open
+  onOpenChange={(o) => { if (!o) setEditing(false); }}
+/>
+```
+
+Omit any pixel width — an author cannot know the client viewport, so the renderer derives
+the size.
+
+Data blocks (`<ListView>`, `<ObjectForm>`, `<ObjectChart>`) bring their own compiled
+styling; you only style the layout around them.
+
+## Accepted source shapes
+
+The page renders the source's **default export**. The runtime inserts an implicit
+`export default` when the source *starts with* JSX, a `function` declaration, `()`, or
+`class`:
+
+```jsx
+function Page() { return <p>hi</p>; }   // ✅ implicit default export
+<p>hi</p>                               // ✅
+() => <p>hi</p>                         // ✅
+
+const Page = () => <p>hi</p>;           // ❌ exports nothing
+```
+
+The `const Page = …` form does **not** get the implicit export — end the source with
+`export default Page;`. Getting this wrong does not render blank silently: the runtime
+throws with a message naming the fix.
+
+## When something throws
+
+Transpile errors, evaluation errors and errors thrown during render all surface in a
+**React page error** panel carrying the message. The error is held until the source or
+its data changes, so it neither flickers nor escapes into the generic renderer error.
+
+Referencing an identifier that is not in scope is the common case, and reads as
+`ReferenceError: <Name> is not defined` — usually a layout container (there are none on
+this tier — use HTML) or a block outside the public registry (use `<Block>`).
+
+## Page state
+
+A react page keeps its own `React.useState` across re-renders and across lazily loaded
+plugin chunks. The parent record on a react page is not a framework concept — it is
+ordinary React state that you pass to blocks as props.
+
+Three things reset that state, all intentional: a change to `source`, a change to the
+page's data or variables, and a **new adapter identity**. The last one is a constraint on
+the host, not on you: recompiling the page is the only way a new adapter reaches the
+blocks inside it, so a host that constructs an adapter inline on every render resets
+every react page on every render. Hosts should provide the adapter from state or a
+module constant.
+
+## `record:*` blocks are not in this tier [#record-blocks-not-in-react]
+
+`<RecordDetails>`, `<RecordHighlights>`, `<RecordRelatedList>`, `<RecordPath>` and the
+rest of the `record:*` family are **record-page composition blocks**. Each one reads its
+record from the shared record context a `type:'record'` page mounts once, and they are
+coupled through it — one fetch, one inline-edit draft, one save bar.
+
+A `kind:'react'` page mounts no such context. Those blocks therefore render empty here
+however you bind them, so they are withdrawn from the tier and using one is an **error**,
+by tag and through `<Block type="record:…">` alike:
+
+```
+  ✗ Author-time rules failed (1 issue)
+  • page "showcase_renewals_pipeline" › <RecordHighlights>: <RecordHighlights> renders "record:highlights", which reads its record from the record context a record page mounts — a kind:'react' page never mounts one, so the block renders empty no matter how it is bound (its objectName/recordId are not read by the renderer).
+      On a react page bind the record yourself: <ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} />, or read the record with useAdapter().findOne and lay the strip out in JSX.
+      rule: react-block-needs-record-context  at pages[27].source
+```
+
+The error names the replacement for the block you reached for, so read the hint rather
+than a table here. In general: on a react page the parent record is React state, so bind
+it with a block that reads its **own** props — `<ObjectForm mode="view" recordId={…}>`
+for a field panel, `<ListView objectName="<child>" filters={['<lookup>', '=', parentId]}>`
+for a related list — or read the record with `useAdapter().findOne` and lay it out in JSX.
+To use the family itself, author the page as `type:'record'` instead.
+
+## How you check your work
+
+Every `kind:'react'` page is parsed and checked at author time. `os validate`,
+`os lint` and `os build` all run the same rule set, so what one accepts the others do
+too:
+
+```bash
+objectstack validate
+```
+
+```
+◆ Validate
+────────────────────────────────────────
+  → Loading configuration...
+  → Validating against ObjectStack Protocol...
+  → Running author-time rules (41)...
+  → Checking capability providers (#3366)...
+  → Checking package docs (ADR-0046)...
+
+  ✓ Validation passed (1523ms)
+```
+
+A **missing required binding** fails the build:
+
+```
+  ✗ Author-time rules failed (1 issue)
+  • page "showcase_renewals_pipeline" › <ObjectChart>: <ObjectChart> is missing the required prop "objectName".
+      Pass objectName={…}. See the react-tier component contract.
+      rule: react-prop-missing-required  at pages[27].source
+```
+
+A **near-miss prop name** is a warning — validation still passes, because the contract's
+data props are a curated subset and arbitrary unknown props are deliberately not flagged:
+
+```
+  ⚠ page "showcase_renewals_pipeline" › <ObjectForm>: <ObjectForm> has prop "onSucces" — did you mean "onSuccess"?
+```
+
+Field-bearing props are resolved against the object each block names, so a column, form
+field or filter naming a field the object does not have is reported too — and a bad
+**filter** position is an error rather than a warning, because the predicate can never
+match and the list comes back indistinguishable from "there is no data". See
+[Validating metadata](/docs/deployment/validating-metadata) §10 and §10b for the full
+rule set.
+
+## A complete page
+
+A master/detail console: a filtered list on the left drives a summary, a chart and a
+related list on the right, with edits in a drawer. Every binding is an ordinary prop —
+there is no record context involved.
+
+{/* os:check */}
+```typescript
+import { definePage } from '@objectstack/spec/ui';
+
+export const RenewalsConsolePage = definePage({
+  name: 'renewals_console',
+  label: 'Renewals Console',
+  type: 'home',
+  kind: 'react',
+  source: `
+function Page() {
+  const [sel, setSel] = React.useState(null);
+  const [editing, setEditing] = React.useState(false);
+
+  return (
+    <div style={{ display: 'flex', height: '100%', gap: 16, padding: 16 }}>
+      <div style={{ width: '50%' }}>
+        <ListView
+          objectName="showcase_account"
+          columns={['name', 'status']}
+          navigation={{ mode: 'none' }}
+          onRowClick={(record) => { setSel(record.id); setEditing(false); }}
+        />
+      </div>
+
+      <div style={{ display: 'flex', width: '50%', flexDirection: 'column', gap: 16 }}>
+        {!sel ? (
+          <div style={{ borderRadius: 'var(--radius)', border: '1px dashed hsl(var(--border))', padding: 24, color: 'hsl(var(--muted-foreground))' }}>
+            Select an account.
+          </div>
+        ) : (
+          <React.Fragment>
+            <ObjectForm objectName="showcase_account" mode="view" recordId={sel} fields={['name', 'status']} />
+            <ObjectChart
+              objectName="showcase_invoice"
+              type="bar"
+              aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}
+              xAxis={{ field: 'status' }}
+              yAxis={[{ field: 'total' }]}
+              title="Invoice value by status"
+            />
+            <ListView objectName="showcase_invoice" filters={['account', '=', sel]} columns={['name', 'status', 'total']} navigation={{ mode: 'none' }} />
+            <button onClick={() => setEditing(true)} style={{ borderRadius: 'var(--radius)', border: '1px solid hsl(var(--border))', background: 'transparent', color: 'hsl(var(--foreground))', padding: '6px 12px', cursor: 'pointer' }}>
+              Edit account
+            </button>
+            {editing ? (
+              <ObjectForm objectName="showcase_account" mode="edit" recordId={sel}
+                formType="drawer" drawerSide="right" open
+                onOpenChange={(o) => { if (!o) setEditing(false); }}
+                onSuccess={() => setEditing(false)}
+                onCancel={() => setEditing(false)} />
+            ) : null}
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+}`,
+});
+```
+
+`<ObjectChart>`'s axes name the **result columns** of its `aggregate`, not fields on the
+object: an inline aggregate returns rows keyed by the raw field names — `status` (its
+`groupBy`) and `total` (its `field`) — which is what `xAxis.field` and `yAxis[].field`
+bind to above. `os validate` checks both halves.
+
+## Related
+
+- [Page Metadata](/docs/ui/pages) — the structured tiers, the Page Properties table, and where `kind` and `source` fit
+- [Validating metadata](/docs/deployment/validating-metadata) — every author-time rule, including §10 and §10b for this surface
+- [Layout DSL](/docs/protocol/objectui/layout-dsl) — the structured mode's regions and 12-column grid

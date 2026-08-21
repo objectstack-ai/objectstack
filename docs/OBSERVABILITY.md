@@ -9,7 +9,6 @@
 `createDispatcherPlugin` automatically instruments every route it mounts with:
 
 - **Request id** propagation: honors incoming `X-Request-Id` (or mints `req_<uuid>`); echoes on the response.
-- **`http_request_errors_total{method,route}`** counter (incremented on thrown errors).
 - **Error reporting** for 5xx (handler-thrown or via `errorResponseBase` side channel).
 
 **`http_requests_total{method,route,status}`** (1 per request) and
@@ -75,8 +74,22 @@ import { RUNTIME_METRICS } from '@objectstack/runtime';
 
 RUNTIME_METRICS.httpRequestsTotal       // 'http_requests_total'
 RUNTIME_METRICS.httpRequestDurationMs   // 'http_request_duration_ms'
-RUNTIME_METRICS.httpRequestErrorsTotal  // 'http_request_errors_total'
 ```
+
+> **⛔ `http_request_errors_total` was RETIRED in 17.2.0 (#9834).** It is no
+> longer declared in `SEMCONV`/`RUNTIME_METRICS` and nothing emits it — a panel
+> or alert keyed on that name reads flat zero, which is the removal, not an
+> outage.
+>
+> **Read the 5xx rate from `http_requests_total{status=~"5.."}` instead**, which
+> the transport emits for *every* inbound surface. The retired counter was
+> declared as a server-wide error signal but incremented only from the
+> dispatcher's per-route wrapper, and only when a handler **threw** — so it
+> missed auth, the REST data API and every error a handler answered politely
+> through `errorResponseBase`, while counting thrown 4xx as errors. The
+> replacement query is both wider and better defined. If what you actually want
+> is the *unhandled-exception* rate rather than the 5xx rate, that signal is the
+> `errorReporter` (below), which still fires on every 5xx throw.
 
 ### `cache_*` — a flat zero means "no configured consumer"
 
@@ -411,7 +424,8 @@ countServerTiming('db', queryMs, 'queries'); // → db;dur=<sum>;desc="<n> queri
 - [ ] Verified 4xx does **not** flood the APM.
 - [ ] Log records include `requestId` field; cross-checked one against the
       response `X-Request-Id` header.
-- [ ] Alerts wired: error rate, p95 latency per route.
+- [ ] Alerts wired: error rate (`http_requests_total{status=~"5.."}` — **not**
+      the retired `http_request_errors_total`, #9834), p95 latency per route.
 - [ ] (Optional) `Server-Timing` verified in DevTools with global mode
       (`serverTiming: true` / `OS_PERF_TIMING=1`) on, confirmed **absent** for a
       normal request, confirmed the per-request `X-OS-Debug-Timing: 1` header

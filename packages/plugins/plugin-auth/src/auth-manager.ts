@@ -37,6 +37,9 @@ import {
   withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
 import {
+  applyPlatformAdminImpersonation,
+} from './admin-impersonate-endpoint.js';
+import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
 } from './invitation-role-cap.js';
@@ -2602,9 +2605,38 @@ export class AuthManager {
         // match ObjectStack's snake_case conventions (ban_reason,
         // ban_expires, impersonated_by). `role` and `banned` are already
         // snake_case-compatible.
-        return admin({
+        const adminPlugin: any = admin({
           schema: buildAdminPluginSchema(),
         });
+
+        // ADR-0068 D2 — re-authorize `/admin/impersonate-user` on ObjectStack's
+        // platform-admin predicate, IN PLACE on this plugin's own endpoints
+        // record. See `admin-impersonate-endpoint.ts` for the measurement that
+        // picked this shape over a second plugin (which boots and serves, but
+        // makes `checkEndpointConflicts` log an error on every start) and over
+        // a raw Hono mount (forbidden: hand-rolled signed cookies, and it would
+        // silently detach the #8243 rotation hook keyed on this path).
+        //
+        // Every OTHER better-auth-native `/admin/*` route still gates on the
+        // legacy scalar and still refuses platform admins — that is the parent
+        // card's remaining surface, deliberately untouched here.
+        const rewired = await applyPlatformAdminImpersonation(
+          adminPlugin,
+          (userId: string) => this.isPlatformAdminUserId(userId),
+        );
+        if (!rewired) {
+          // The vendor renamed or dropped the endpoint. Say so loudly: the
+          // route then falls back to the vendor's own handler, which refuses
+          // every platform admin — a broken button, not an open door.
+          console.error(
+            '[AuthManager] better-auth\'s admin plugin no longer exposes a ' +
+            '`impersonateUser` endpoint at /admin/impersonate-user, so the ' +
+            'ADR-0068 platform-admin authorization could NOT be applied. ' +
+            'Impersonation will refuse every ObjectStack platform admin until ' +
+            'admin-impersonate-endpoint.ts is updated for the new vendor shape.',
+          );
+        }
+        return adminPlugin;
       });
     }
 

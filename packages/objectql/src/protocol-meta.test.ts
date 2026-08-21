@@ -1544,22 +1544,30 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // old specimen: its body (`events`, an alias of `triggers`, plus the
         // non-enum trigger `'x.created'`) is spec-INVALID and now 422s. Kept
         // here it would have flipped this test red for a reason that has
-        // nothing to do with what it proves. `theme` and `policy` still carry
-        // the branch — neither resolves a schema. Each newly-bound type's own
+        // nothing to do with what it proves.
+        //
+        // [#10194] `theme` left it by exactly the webhook rule: it gained a
+        // SCHEMA (not a registry entry), and the old specimen body
+        // (`tokens: {}` — an alias of `customVars`, with the required `colors`
+        // missing) is spec-INVALID and now 422s. `analytics_cube` was bound in
+        // the same change. Of the six URL-map-only kinds, `rag_pipeline` is
+        // now the ONLY one that resolves no schema (it has no stack collection
+        // to take one from — #6242 row 2), so it carries the pure
+        // no-schema fall-through control below. Each newly-bound type's own
         // behaviour, door and 422 both, is pinned in the tests below.
         // ───────────────────────────────────────────────────────────────
 
         it('accepts brand-new plugin-registered type (no static registry entry)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
 
-            const themeResult = await scoped.saveMetaItem({
-                type: 'theme',
-                name: 'my_theme',
-                item: { name: 'my_theme', label: 'Test', tokens: {} },
+            const result = await scoped.saveMetaItem({
+                type: 'rag_pipeline',
+                name: 'my_pipeline',
+                item: { name: 'my_pipeline', label: 'Test' },
                 organizationId: 'org_alpha',
             });
 
-            expect(themeResult.success).toBe(true);
+            expect(result.success).toBe(true);
         });
 
         it('[#8421] CHANGED BEHAVIOUR — `policy` is no longer one of them', async () => {
@@ -1731,6 +1739,91 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                         type: 'criteria',
                         sharedWith: { type: 'team', value: 'sales' },
                     },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
+        });
+
+        // ───────────────────────────────────────────────────────────────
+        // [#10194] `theme` / `analytics_cube` — the two doors #6245 left
+        // open, closed the same way and pinned the same way: the write door
+        // is UNCHANGED (no-static-entry authorization fall-through, verdict
+        // byte-identical), the shape check is new. Both halves per type, so a
+        // change that quietly CLOSED the door fails the "accepts" half.
+        // ───────────────────────────────────────────────────────────────
+
+        it('accepts a spec-valid `theme` item (write door unchanged by the schema binding)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'theme',
+                name: 'my_theme',
+                item: {
+                    name: 'my_theme',
+                    label: 'My Theme',
+                    colors: { primary: '#3b82f6' },
+                },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a spec-INVALID `theme` item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // The exact body the old "plugin-registered types" case above used
+            // to save with `success: true`: `tokens` is an ALIAS of
+            // `customVars` (so the strict surface names the real key), and the
+            // required `colors` block is missing. Stored verbatim, this is the
+            // theme that fails at RENDER — the console's own styling surface —
+            // with nothing at the write point to say so.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'theme',
+                    name: 'my_theme',
+                    item: { name: 'my_theme', label: 'Test', tokens: {} },
+                    organizationId: 'org_alpha',
+                }),
+            ).rejects.toMatchObject({
+                code: 'INVALID_METADATA',
+                status: 422,
+            });
+        });
+
+        it('accepts a spec-valid `analytics_cube` item (write door unchanged by the schema binding)', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            const result = await scoped.saveMetaItem({
+                type: 'analytics_cube',
+                name: 'orders',
+                item: {
+                    name: 'orders',
+                    sql: 'orders',
+                    measures: { count: { name: 'count', label: 'Count', type: 'count', sql: '*' } },
+                    dimensions: { stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' } },
+                },
+                organizationId: 'org_alpha',
+            });
+
+            expect(result.success).toBe(true);
+        });
+
+        it('refuses a spec-INVALID `analytics_cube` item with 422 instead of storing it unvalidated', async () => {
+            mockEngine.findOne.mockResolvedValue(null);
+
+            // `table` is an ALIAS of `sql`, and the required `measures` /
+            // `dimensions` records are missing — the same body `defineStack({
+            // analyticsCubes })` strictly refuses. Stored verbatim, this cube
+            // registers as a semantic layer with no semantics.
+            await expect(
+                scoped.saveMetaItem({
+                    type: 'analytics_cube',
+                    name: 'orders',
+                    item: { name: 'orders', table: 'orders' },
                     organizationId: 'org_alpha',
                 }),
             ).rejects.toMatchObject({

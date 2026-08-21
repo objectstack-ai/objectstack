@@ -190,9 +190,35 @@ jobs:
             // GitHub's own keyword set, restricted to the qualified
             // `owner/repo#N` form — the bare `#N` form already works natively
             // and must not be touched here.
+            //
+            // The `:?` is load-bearing, and MEASURED rather than inherited from
+            // the sibling file's comment (#9755). GitHub's own parser accepts
+            // the colon, so `Fixes: <ref>` is a real closing declaration and not
+            // a typo: PR #10241 merged 2026-08-20T15:10:06Z carrying the
+            // sentence `Filed, not fixed: #10240`, and GitHub closed #10240 as
+            // `completed` at 15:10:08Z — two seconds later, with that issue's
+            // own `closed_by_pull_requests` naming #10241 and nothing else. The
+            // negation in the prose changed nothing, which is the same property
+            // partof-closing-keyword-guard.yml is built on.
+            //
+            // Without the `:?` this job read `Fixes: objectstack-ai/objectui#456`
+            // as `No cross-repository closing keywords in this PR body.` and
+            // took exit path 1 — the quiet green that is indistinguishable from
+            // the ~2300 runs with genuinely nothing to do. A foreign issue is
+            // then lost with no notice on the PR and no annotation anywhere,
+            // which is the exact silent-path shape this file's card family
+            // (#9373 · #9424 · #9575 · #9595 · #9643 · #9711) has been closing
+            // one exit at a time.
+            //
+            // duplicate-fix-guard.yml spells this same keyword-and-separator
+            // prefix, and `scripts/check-closing-keyword-parity.mjs` goes red if
+            // the two ever stop agreeing. NEITHER workflow checks this repo out
+            // — this one deliberately (`pull_request_target`), the guard because
+            // it has no checkout step at all — so they cannot import a shared
+            // module. That gate is what stands in for the import.
             const KEYWORDS = 'close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved';
             const pattern = new RegExp(
-              `\\b(?:${KEYWORDS})\\s+([\\w.-]+)\\/([\\w.-]+)#(\\d+)\\b`,
+              `\\b(?:${KEYWORDS}):?\\s+([\\w.-]+)\\/([\\w.-]+)#(\\d+)\\b`,
               'gi',
             );
 

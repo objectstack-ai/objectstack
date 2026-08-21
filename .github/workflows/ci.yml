@@ -38,9 +38,9 @@ jobs:
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
-      # Gates the `test` job ONLY, ORed with `core` — see the `scripts`
-      # filter below and the `test` job's `if:` (#9829).
-      scripts: ${{ steps.changes.outputs.scripts || 'true' }}
+      # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
+      # filter below and the `test` job's `if:` (#9829, #10015).
+      crosspkg: ${{ steps.changes.outputs.crosspkg || 'true' }}
       # ── THE FILTER CONTRACT, both halves (#4928) ──────────────────────────
       #
       # Half 1 is the `|| 'true'` above: when in doubt, RUN EVERYTHING. It
@@ -110,39 +110,76 @@ jobs:
               - 'scripts/console-spec-probes.mjs'
               - 'scripts/assert-console-spec-injection.mjs'
               - '.github/workflows/ci.yml'
-            # Test inputs that live OUTSIDE every package (#9829). Packages whose
-            # suites read across their own boundary declare that radius in
+            # Test inputs that live OUTSIDE every package (#9829, #10015). Packages
+            # whose suites read across their own boundary declare that radius in
             # scripts/check-cross-package-test-inputs.mjs, and turbo.json mirrors each
-            # as a `$TURBO_ROOT$/…` input. SIX of those declarations are rooted at
-            # `scripts/` — @objectstack/spec (`scripts/**`), @objectstack/cli,
-            # @objectstack/metadata-protocol and create-objectstack (five single
-            # files) — and the step that pulls those packages back into the affected
-            # set, `--union-into` in the `test` job below, is a step INSIDE that job.
-            # So on a `scripts/`-only diff `core` was false, the job never started,
-            # the union never ran, and the declarations bought nothing at PR time:
-            # the merge queue was the first signal, which is the #7802 failure this
-            # whole mechanism exists to prevent. Measured with picomatch, the matcher
-            # dorny/paths-filter uses: a diff confined to
-            # `scripts/sync-template-versions.mjs` yields core=false.
+            # as a `$TURBO_ROOT$/…` input. The step that pulls those packages back into
+            # the affected set, `--union-into` in the `test` job below, is a step
+            # INSIDE that job — so when NO filter matches the changed path the job
+            # never starts, the union never runs, and the declaration buys nothing at
+            # PR time: the merge queue is the first signal, which is the #7802 failure
+            # this whole mechanism exists to prevent.
             #
-            # Deliberately a SEPARATE output rather than a widening of `core`,
-            # because it gates ONE job — the `test` job ORs it with `core`, while
-            # Build Core, Dogfood and Temporal Conformance stay filtered exactly as
-            # they are today. `scripts/**` rather than the six declared paths: the
-            # narrower filter does not exist while @objectstack/spec declares
-            # `scripts/**`, and a hand-kept list of script paths is the failure mode
-            # #7802 recorded ("a list you must remember to update").
-            scripts:
+            # Measured by instantiating every one of turbo.json's `$TURBO_ROOT$`
+            # declarations to a real tracked file and running it through these filters
+            # with picomatch — the matcher dorny/paths-filter uses — under BOTH 2.3.1
+            # (what the action's own lockfile resolves and ncc-bundles) and 4.0.5 (what
+            # this tree resolves); the two agree on every row. On `0bfbeb70c`, 19 of 64
+            # declarations were core=false. #9829 closed the nine rooted at `scripts/`;
+            # the four roots added below are the remaining ten (#10015).
+            #
+            # Deliberately a SEPARATE output rather than a widening of `core`, because
+            # it gates ONE job — the `test` job ORs it with `core`, while Build Core,
+            # Dogfood and Temporal Conformance stay filtered exactly as they are today.
+            # That separation is what makes `content/**` affordable at all. Widening
+            # `core` would put the whole core pipeline on every docs PR; here a
+            # docs-only diff starts Test Core, whose package set is `turbo ls
+            # --affected` (empty for such a diff) UNIONED with the packages whose
+            # declarations matched — so it runs the declaring package, not the
+            # workspace. Measured through the real `--union-into` on all three
+            # content-only commits in the window below: `create-objectstack` alone,
+            # all three times, against a positive control where a
+            # `packages/lint/src/**` diff unions in @objectstack/spec and
+            # @objectstack/core.
+            #
+            # WIDTH, per entry — each is exactly what some package declared, never a
+            # root rounded up:
+            #   `scripts/**` and `content/**` are declared verbatim, by
+            #     @objectstack/spec and create-objectstack respectively, so the
+            #     narrower filter does not exist and a hand-kept list of the paths
+            #     inside them is the failure mode #7802 recorded ("a list you must
+            #     remember to update"). Eight further single-file `scripts/`
+            #     declarations and six narrower `content/docs/…` ones (spec, cli,
+            #     dogfood) sit inside the two.
+            #   The last three are a single file, a single file and a single subtree,
+            #     because that is what the declarations say — NOT `docs/**`,
+            #     `skills/**` or `.github/workflows/**`. Over the last 100 first-parent
+            #     commits of `main` at `0bfbeb70c`, those three roots would newly have
+            #     started Test Core on 5, 2 and 3 commits; the declared paths on ZERO.
+            #
+            # PRICE, re-measured over that same 100-commit window through this matcher:
+            # Test Core scheduling goes 80/100 → 83/100. All three additions are
+            # content-only docs commits, and each runs one package's suite.
+            #
+            # This list is a SECOND recognizer of those declarations and is kept in
+            # step with them BY HAND: nothing fails today when a declaration lands in a
+            # root no entry here covers. Closing that is #10379.
+            crosspkg:
               - 'scripts/**'
+              - 'content/**'
+              - 'docs/audits/2026-07-unknown-key-strictness-ledger.md'
+              - 'skills/objectstack-formula/**'
+              - '.github/workflows/scaffold-e2e.yml'
 
   test:
-    # Sharded 3-way BY PACKAGE: a core-touching PR ran the affected suite
+    # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
     # ~11½ min on one 4-vCPU runner — the longest pole in the whole workflow —
     # and at 2 shards the slower shard still ran ~10 min, keeping merge-queue
     # builds at ~11 min end-to-end (#4859).
-    # scripts/partition-test-shards.mjs splits the package list into three
-    # deterministic, test-file-count-balanced thirds and each shard runs its
-    # slice through turbo. NOT the dogfood
+    # scripts/partition-test-shards.mjs splits the package list into six
+    # deterministic bins balanced on MEASURED per-package test duration
+    # (scripts/test-shard-timings.json, generated — see #10472 below) and each
+    # shard runs its slice through turbo. NOT the dogfood
     # job's vitest --shard passthrough, deliberately: that works for dogfood
     # because it is ONE package with ~60 files, but applied workspace-wide,
     # vitest 4 hard-fails every package with fewer test files than the shard
@@ -150,17 +187,76 @@ jobs:
     # on either shard (three packages have exactly one test file today). See
     # the script header for the verification.
     #
+    # ── WHY SIX AND NOT THREE (#10227) ────────────────────────────────────
+    #
+    # The per-package durations this job's logs print are CONTENDED WALL
+    # CLOCK, not package cost. `--concurrency=4` on a 4-vCPU runner means up
+    # to four suites share four cores, so each averages about one core, and
+    # the contention factor differs per package (measured spread across six
+    # packages: 0.69x-2.05x). Read as cost, those numbers said the two long
+    # poles were inherently over #4859's <=7min (420s) line and that no shard
+    # count could help. Measured like-for-like against the same suites run
+    # ALONE on an idle 4-core box (#10152 / PR #10258), both clear it:
+    #
+    #   @objectstack/cli    548.6s contended   vs  337.13s alone
+    #   @objectstack/spec   496.4s contended   vs  325.31s alone
+    #
+    # So the thing over the line is the co-tenancy, not the suites. More
+    # shards means fewer suites per runner AND four more vCPUs per added
+    # shard, because every shard gets its own runner.
+    #
+    # SIX specifically, and not four or five: sharding is BY PACKAGE, so no
+    # shard can finish faster than its single heaviest package.
+    # `@objectstack/spec` is that package — at five shards or fewer the
+    # partitioner must co-schedule it with others, and at six it very nearly
+    # fills a bin on its own. Six is therefore the smallest count that
+    # isolates the heaviest indivisible suite; past six, spec's shard cannot
+    # improve, only the others can.
+    #
+    # ⚠ THE ARGUMENT ABOVE USED TO BE MADE IN TEST-FILE COUNTS (bins
+    # 415/389/389/389/389/388, spec carrying 415 of ~2360 files). It is now
+    # made in measured seconds, because #10472 replaced the weight input: the
+    # file count was a proxy that ran ~2.8x off on @objectstack/cli, and the
+    # six perfectly count-balanced bins it produced ran 5.0/6.2/6.3/13.6/6.3/
+    # 9.0 min in run 32428961038. The conclusion (six) survived the re-
+    # measurement; only the units it is argued in changed. Weights now come
+    # from scripts/test-shard-timings.json — see partition-test-shards.mjs.
+    #
+    # AND WHY NOT MORE THAN SIX, measured on that dataset (#10472 asked for
+    # 6 -> 8 to be considered). The floor is the heaviest single package, and
+    # it does not move when shards are added, while the mean falls with every
+    # shard — so max/mean, which is what the acceptance bound is written in,
+    # gets WORSE past the point where the floor becomes the max:
+    #
+    #   6 shards -> max 650s  mean 649s  ratio 1.00x
+    #   7 shards -> max 571s  mean 556s  ratio 1.03x
+    #   8 shards -> max 571s  mean 487s  ratio 1.17x
+    #  10 shards -> max 571s  mean 389s  ratio 1.46x
+    #
+    # Eight shards would buy ~79s off the critical path for two more runners'
+    # fixed overhead and a worse balance ratio. The partitioner's self-test
+    # pins this arithmetic so the next person gets the answer from a failing
+    # assertion rather than from a CI run.
+    #
+    # ⚠ THE COST, stated because it is real: per-shard fixed overhead
+    # (checkout + pnpm/Turbo cache restore + install, ~60s measured on run
+    # 32392712980) is paid once PER SHARD, and the merge queue multiplies it
+    # by the speculative build count. Six shards trade roughly 1.7x the
+    # billed runner-minutes for a shorter critical path. `--concurrency=4` is
+    # deliberately UNCHANGED here: narrower shards may well want a lower
+    # value, but moving both at once makes the next measurement unreadable.
+    #
     # Branch protection requires the bare "Test Core" context, which a matrix
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
-    name: Test Core (${{ matrix.shard }}/3)
+    name: Test Core (${{ matrix.shard }}/6)
     needs: filter
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
     # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
     # in, never ANDed: two independent reasons to run this job, and it skips only
     # when BOTH filters explicitly said false, so the contract's "when in doubt,
     # RUN EVERYTHING" posture is unchanged (#9829).
-    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.scripts != 'false') }}
+    if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
     # detector for a #4250-style hang and fires well before this. 30 min is
@@ -173,7 +269,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout repository
@@ -383,7 +479,7 @@ jobs:
             pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
           fi
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
-            --shard ${{ matrix.shard }}/3 --exclude @objectstack/dogfood \
+            --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo "Packages on this shard:"
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -419,7 +515,34 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stall-reports"
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4
+            pnpm turbo run test $FILTERS --concurrency=4 --summarize
+
+      # --summarize above costs nothing at runtime and writes
+      # `.turbo/runs/<id>.json`: one per-task record with the execution window
+      # turbo actually observed. That file IS the balancing input for the next
+      # shard split (scripts/test-shard-timings.json is generated from it), and
+      # publishing it here is what keeps the dataset re-measurable instead of
+      # hand-frozen — refreshing it becomes "download these six artifacts from
+      # any green run and re-run the generator", with no special measurement
+      # run and no CI time spent measuring.
+      #
+      # `if: always()` so a shard that went red still publishes what it timed;
+      # the generator refuses failed and cache-replayed tasks on its own side,
+      # so a partial upload contributes nothing rather than something wrong.
+      #
+      # ⛔ This step must stay ABOVE the attestation pair at the bottom of the
+      # job. check-shard-attestation.mjs requires `--emit` + upload-artifact to
+      # be the job's LAST TWO steps, because anything after them can fail the
+      # job while the credential already counts as a pass (#6082). Adding an
+      # upload here is fine; moving it below them is not.
+      - name: Publish this shard's turbo run summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-core-run-summary-${{ matrix.shard }}-of-6
+          path: .turbo/runs/
+          if-no-files-found: ignore
+          retention-days: 1
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -443,14 +566,39 @@ jobs:
       # (2/3) failed naming @objectstack/example-showcase#test while this guard
       # printed OK, because the failing package was the one that printed
       # nothing — its complete 5083-line job log mentions that package twice,
-      # both times in the error summary, with no vitest output anywhere. The
-      # dichotomy is true again only because green now covers both questions.
+      # both times in the error summary, with no vitest output anywhere.
+      #
+      # ⛔ AND THE REPLACEMENT WAS STILL BLIND, FOR A SECOND REASON — measured
+      # on run 32391924279 (`Test Core (3/3)`, job 96499888763, complete 31839-
+      # line log). Under grouped log order turbo folds each task into a
+      # collapsible `::group::` EXCEPT the one it surfaces as the run's failure,
+      # which gets a bare `<pkg>:test` header instead. The guard read groups and
+      # prefixes but not that third shape, so the FAILING package — the one it
+      # exists to grade — was the one package whose summary it could not
+      # attribute, and its "refuse to guess" backstop then withheld judgement on
+      # every candidate and exited 0. It printed `OK (24 of 29 …)` under a note
+      # naming @objectstack/example-showcase as ungraded: the same green-that-
+      # reads-like-a-clearance, one turn of the screw further out.
+      # ⇒ The guard now knows all three header shapes, a package named in
+      # turbo's `Failed:` roster is judged even when the log holds strays it
+      # cannot place, and an ungraded package downgrades the verdict word from
+      # OK to PARTIAL and raises a ::warning:: annotation. Only with all three
+      # does green cover both questions — which is what makes the dichotomy
+      # above true. ⚠ A red HERE can never turn a green shard red: it needs
+      # turbo to have named a failed task, and that already failed the run.
       #
       # ⚠ The guard does NOT charge a silent package to this shard when turbo
       # simply never reached it — turbo stops scheduling on the first failure,
       # so an ordinary red suite leaves later packages unrun. Those are printed
       # as notes. See the script header for the two exemptions and the two
       # rules that decide red.
+      #
+      # ⚠ NOT diagnosed, by either pass: the original zero-output event itself.
+      # It has never been reproduced. The 2026-08-20 recurrence was NOT one —
+      # that failing suite streamed ~940 lines and a complete summary
+      # (`Test Files 21 passed (21)` / `Tests 342 passed (342)`), and failed on
+      # a vitest teardown error, not on silence. Read a "zero output" claim as
+      # a hypothesis until someone has grepped the WHOLE log for it.
       - name: Test completeness guard
         if: always()
         run: |
@@ -488,7 +636,7 @@ jobs:
           key: ${{ runner.os }}-turbo-${{ github.job }}-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
 
       # ── This shard's positive attestation (#6082) ─────────────────────────
-      # The credential test-gate counts: "shard N of 3 ran, and every step of it
+      # The credential test-gate counts: "shard N of 6 ran, and every step of it
       # passed". These two steps are LAST and carry NO `if:` — that is what
       # makes the statement true, because an unguarded step runs only when every
       # preceding step of the job succeeded, and nothing after them can fail the
@@ -499,13 +647,13 @@ jobs:
       - name: Attest this shard ran and passed
         run: |
           node scripts/check-shard-attestation.mjs --emit \
-            --job test --shard ${{ matrix.shard }} --total 3 \
+            --job test --shard ${{ matrix.shard }} --total 6 \
             --out "$RUNNER_TEMP/shard-attestation"
 
       - name: Publish this shard's attestation
         uses: actions/upload-artifact@v7
         with:
-          name: shard-attest-test-${{ matrix.shard }}-of-3
+          name: shard-attest-test-${{ matrix.shard }}-of-6
           path: ${{ runner.temp }}/shard-attestation/
           if-no-files-found: error
           retention-days: 1
@@ -584,7 +732,7 @@ jobs:
             --dir "$OS_ATTEST_DIR" \
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
-            --leg "test/3:$OS_TEST_RESULT"
+            --leg "test/6:$OS_TEST_RESULT"
 
 
   # ── Temporal conformance against live, non-UTC servers (ADR-0053 D-A3) ─────

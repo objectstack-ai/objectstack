@@ -63,6 +63,25 @@
 // benign and selective controls with it; a fix that only looked like it worked
 // would leave the outage cases green. The two halves are in one file so a
 // future edit that re-widens the catch is a diff nobody can read as harmless.
+//
+// ---------------------------------------------------------------------------
+// [#8924] The SECOND classified verdict: the request-arm 400
+// ---------------------------------------------------------------------------
+// The same catch swallowed one more producer-classified error: the refusal
+// `canonicalizeMetaRequestType` raises inside `getMetaItems` (`status: 400`,
+// `code: 'INVALID_REQUEST'`) for an unrecognised spelling of a DECLARED type.
+// Only the `request.type` arm can reach it — the full-sweep arm's target set
+// comes canonical out of the registry. Measured on a booted kernel before the
+// fix: `GET /api/v1/meta/diagnostics?type=fieldes` answered
+// `200 {"entries":[],"total":0,"scannedTypes":1,"scannedItems":0,"stats":{}}`
+// — "scanned 1 type, no issues" — while the sibling door `/meta/fieldes`
+// refused the same spelling with the 400 that names both accepted spellings.
+// Ruled 2026-08-20 (option 1): rethrow the 400 the same way the 503 is
+// rethrown. The [#8924] describe below pins the refusal, the two spellings
+// that must KEEP answering (a recognised plural, a plural-of-nothing), and —
+// the positive control — that a genuine listing failure still skips even when
+// it wears an unrelated status, so the guard admits exactly the two
+// classified verdicts and never widens into a blanket throw.
 
 import { describe, it, expect, vi } from 'vitest';
 import { ErrorCode } from '@objectstack/spec/api';
@@ -247,5 +266,86 @@ describe('[#8855] the discrimination is selective, not a blanket refusal', () =>
         expect(res.stats.object.packages).toEqual(['crm']);
         expect(res.scannedItems).toBe(1);
         expect(res.scannedTypes).toBe(SWEPT_TYPES.length);
+    });
+});
+
+describe('[#8924] a caller error the producer classified is refused loudly, never published as "0 problems"', () => {
+    /** A healthy engine — the only failure in play is the caller's spelling. */
+    function healthyEngine() {
+        return {
+            registry: emptyRegistry(),
+            find: vi.fn(async () => []),
+            findOne: vi.fn(async () => null),
+        } as any;
+    }
+
+    it("an unrecognised spelling of a declared type rejects with the producer's 400, not 200-with-empty-stats", async () => {
+        const p = new ObjectStackProtocolImplementation(healthyEngine());
+
+        // Before the fix this RESOLVED with
+        // `{ entries: [], total: 0, scannedTypes: 1, scannedItems: 0, stats: {} }`
+        // — the exact payload objectui's DiagnosticsPage renders as "All clear".
+        const caught = await rejection(() => p.getMetaDiagnostics({ type: 'fieldes' }));
+
+        // The ADR-0112 envelope is the contract: code + status, and the code
+        // must be in the declared wire vocabulary.
+        expect(caught?.status).toBe(400);
+        expect(caught?.code).toBe('INVALID_REQUEST');
+        expect(ErrorCode.safeParse(caught?.code).success).toBe(true);
+        // The refusal TEACHES: it names both accepted spellings at the moment
+        // of the mistake. Asserted on top of code+status, never instead.
+        expect(caught.message).toContain("'field'");
+        expect(caught.message).toContain("'fields'");
+    });
+
+    it('a recognised plural still answers — what is refused is the unrecognised spelling, not the plural form', async () => {
+        const p = new ObjectStackProtocolImplementation(healthyEngine());
+
+        const res: any = await p.getMetaDiagnostics({ type: 'fields' });
+        expect(res.total).toBe(0);
+        expect(res.scannedTypes).toBe(1);
+        expect(res.stats.fields).toEqual({ count: 0, locked: 0, packages: [] });
+    });
+
+    it('a name that is a plural of NOTHING still answers benignly — the second verdict (#8421) lives on the mint door, not here', async () => {
+        const p = new ObjectStackProtocolImplementation(healthyEngine());
+
+        // `metaUrlSpellingRefusal('fieldz')` is null: 'fieldz' reaches for no
+        // declared type, so the request-boundary refusal deliberately stays
+        // silent and the sweep answers an honest count-0 entry for it.
+        const res: any = await p.getMetaDiagnostics({ type: 'fieldz' });
+        expect(res.total).toBe(0);
+        expect(res.scannedTypes).toBe(1);
+        expect(res.stats.fieldz).toEqual({ count: 0, locked: 0, packages: [] });
+    });
+
+    it('a genuine listing failure wearing an UNRELATED status still skips — the guard admits exactly the two classified verdicts', async () => {
+        // The positive control for the fix itself, constructed deliberately
+        // because the benign-skip population is empty in kernel scope (six
+        // booted scopes, zero skips) — nothing exercises this by accident.
+        // A widened guard (`if (status)` / rethrow-everything) turns every
+        // benign skip into a sweep failure; this test is what goes red.
+        const unlistable = SWEPT_TYPES.find((t) => t !== 'object')!;
+        const engine = {
+            registry: emptyRegistry({
+                listItems: (type: string) => {
+                    if (type === unlistable) {
+                        throw Object.assign(
+                            new Error(`type ${unlistable} is not listable in this kernel scope`),
+                            { status: 500 },
+                        );
+                    }
+                    return [];
+                },
+            }),
+            find: vi.fn(async () => []),
+            findOne: vi.fn(async () => null),
+        } as any;
+        const p = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await p.getMetaDiagnostics({});
+        expect(res.stats[unlistable]).toBeUndefined();
+        expect(Object.keys(res.stats)).toHaveLength(SWEPT_TYPES.length - 1);
+        expect(res.stats.object).toEqual({ count: 0, locked: 0, packages: [] });
     });
 });

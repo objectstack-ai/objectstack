@@ -290,6 +290,87 @@ describe('failures are loud, counted, and never stop the batch', () => {
     expect(warned[0]).toMatch(/engine exploded/);   // the cause survives the fallback
   });
 
+  it('[#9748] the batch SUMMARY also reaches a sink with NO `error` — at warn, not in silence', async () => {
+    // #9657 repaired the PER-ROW line above; this summary sits outside any
+    // `catch`, so the durability gate could not see it and it kept the
+    // `logger?.error?.(…)` spelling. Against a `{ info, warn }` sink the repair
+    // therefore made the split WORSE, not better: the detail survived at `warn`
+    // while the TOTAL — how many accepted messages never reached anyone —
+    // vanished. The counts and the detail reported through different channels.
+    const engine = fakeEngine([
+      { id: 'row-bad-1', created_at: ago(min(30)) },
+      { id: 'row-bad-2', created_at: ago(min(29)) },
+    ]);
+    const service = fakeService({
+      deliver: () => { throw new Error('engine exploded'); },
+    });
+    const logger = { info: vi.fn(), warn: vi.fn() };
+
+    const res = await sweepStrandedOutbox({ engine, service, logger, now: () => NOW });
+
+    expect(res).toMatchObject({ scanned: 2, failed: 2 });
+    const summary = lines(logger.warn).filter((l) => l.includes('could NOT be delivered'));
+    expect(summary).toHaveLength(1);
+    expect(summary[0]).toMatch(/2 stranded sys_email row\(s\)/);   // the COUNT is the whole point
+    expect(summary[0]).toMatch(/never reached a recipient/);       // consequence survives the fallback
+    expect(summary[0]).toMatch(/Durable queue delivery/);          // and so does the fix
+  });
+
+  it('[#9748] a sink that HAS `error` still gets the summary at error, not downgraded', async () => {
+    // The fallback must not cost a capable sink its level — the reach for
+    // `error` was right; only its absence of a fallback was wrong.
+    const engine = fakeEngine([{ id: 'row-bad-1', created_at: ago(min(30)) }]);
+    const service = fakeService({
+      deliver: () => { throw new Error('engine exploded'); },
+    });
+    const logger = fakeLogger();
+
+    await sweepStrandedOutbox({ engine, service, logger, now: () => NOW });
+
+    expect(lines(logger.error).filter((l) => l.includes('could NOT be delivered'))).toHaveLength(1);
+    expect(lines(logger.warn).filter((l) => l.includes('could NOT be delivered'))).toHaveLength(0);
+  });
+
+  it('[#9754] a sink with NO `warn` cannot be spelled at all — the TYPE forbids the silence', async () => {
+    // THE HARM, reproduced before the fix is believed. Until #9754 every member
+    // of `SweepLogger` was optional, so `{ info }` was a legal sink — and
+    // against it BOTH repaired reports print nothing at all: each reaches for
+    // `error`, finds none, falls back to `warn`, and finds none of that either.
+    // Mail the platform accepted and never delivered, reported to nobody. The
+    // cast below buys exactly what the old contract handed out for free.
+    const engine = fakeEngine([{ id: 'row-bad-1', created_at: ago(min(30)) }]);
+    const service = fakeService({
+      deliver: () => { throw new Error('engine exploded'); },
+    });
+    const silent = { info: vi.fn() };
+
+    const res = await sweepStrandedOutbox({
+      engine,
+      service,
+      logger: silent as unknown as NonNullable<Parameters<typeof sweepStrandedOutbox>[0]['logger']>,
+      now: () => NOW,
+    });
+
+    expect(res).toMatchObject({ scanned: 1, failed: 1 });
+    // Not "logged at the wrong level" — not logged AT ALL, on either report.
+    expect(lines(silent.info).filter((l) => l.includes('could NOT be delivered'))).toHaveLength(0);
+    expect(lines(silent.info).filter((l) => l.includes('engine exploded'))).toHaveLength(0);
+
+    // THE CONTRACT. Without that cast the same sink no longer compiles: `warn`
+    // is non-optional on `SweepLogger` (#9754), so a caller cannot hand over a
+    // sink with nowhere to put a durability report. Restore `warn?` in
+    // outbox-sweep.ts and this directive turns into an "Unused
+    // '@ts-expect-error' directive" error — which is how this assertion proves
+    // it is live rather than decorative.
+    await sweepStrandedOutbox({
+      engine,
+      service,
+      // @ts-expect-error — #9754: a SweepLogger MUST declare a `warn` channel
+      logger: { info: vi.fn() },
+      now: () => NOW,
+    });
+  });
+
   it('propagates a failure of the query itself — the sweep did not happen', async () => {
     const engine = { find: vi.fn(async () => { throw new Error('no such table: sys_email'); }) };
     await expect(sweepStrandedOutbox({ engine, service: fakeService(), now: () => NOW }))

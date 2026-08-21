@@ -36,7 +36,7 @@ export const LIVENESS_EXPERIMENTAL_PROPERTY = 'liveness-experimental-property';
 
 type AnyRec = Record<string, unknown>;
 
-interface LedgerEntry {
+export interface LedgerEntry {
   status?: string;
   authorWarn?: boolean;
   authorHint?: string;
@@ -142,8 +142,11 @@ function checkItem(
  * absent. A container level that is an ARRAY fans out over its elements
  * (e.g. `nodes.outputSchema` on a flow checks every node), returning the
  * list of resolved values.
+ *
+ * Exported as a test seam — see the block below `getNested` for why this one
+ * property cannot stay ledger-driven.
  */
-function getNested(obj: AnyRec, path: string): unknown[] {
+export function getNested(obj: AnyRec, path: string): unknown[] {
   let cur: unknown[] = [obj];
   for (const seg of path.split('.')) {
     const next: unknown[] = [];
@@ -163,6 +166,51 @@ function getNested(obj: AnyRec, path: string): unknown[] {
   // Final level may itself contain arrays-of-values; flatten one step so a
   // trailing array container (e.g. `measures` → each measure) fans out too.
   return cur.flatMap((v) => (Array.isArray(v) ? v : [v]));
+}
+
+/**
+ * ── Test seam (#10262). Package-internal: NOT part of the published surface ──
+ *
+ * `getNested` above and this wrapper are exported for
+ * `lint-liveness-properties.test.ts` to drive the array fan-out against a
+ * SYNTHETIC warn map. They are exported from the MODULE only — neither is
+ * re-exported by `src/index.ts`, and this package's `exports` map publishes
+ * exactly two subpaths (`.` → `dist/index.js`, `./runtime` → `dist/runtime.js`,
+ * both bundled by tsup from those two entries). So no consumer can reach either
+ * symbol and the built `.d.ts` surface is unchanged; the test reaches them the
+ * way every other test in this package reaches its subject, by importing
+ * `./lint-liveness-properties.js` directly.
+ *
+ * WHY the fan-out needs a seam when everything else in this file is (rightly)
+ * ledger-driven: its subject is a ledger VERDICT, and verdicts are supposed to
+ * move. A dotted warn-map path is the only thing that reaches `getNested` at
+ * all — `checkItem` takes the `path.includes('.') ? getNested(item, path) :
+ * [item[path]]` branch — and twice now a row correctly flipping to `live`
+ * deleted the only test of the walk:
+ *
+ *   - #6774 flipped `dashboard.widgets.colorVariant` live → subject lost, filed
+ *     as #7079;
+ *   - #7079 was closed by re-subjecting to `app.…navigation.children.runAction`;
+ *   - #10068 flipped THAT live → subject lost again, and measured across all 30
+ *     shipped ledgers every remaining warned entry is top-level, so there is
+ *     nothing left to re-subject to. Filed as #10262 (this seam).
+ *
+ * A broken walk is invisible without it: a `getNested` that stopped at index 0
+ * "still warns on every single-entry fixture, on every top-level warned key,
+ * and on the first item of every real app", so nothing else in this file would
+ * go red. The seam moves ONLY that one property to the walker's own level;
+ * every other assertion in the test file stays a real contract test against the
+ * shipped ledgers, including the #10068 silence pin and its anti-vacuity guard.
+ */
+export function checkItemAgainstWarnMap(
+  type: string,
+  item: AnyRec,
+  whereBase: string,
+  warnMap: Iterable<readonly [string, LedgerEntry]>,
+): LivenessLintFinding[] {
+  const findings: LivenessLintFinding[] = [];
+  checkItem(type, item, whereBase, new Map(warnMap), findings);
+  return findings;
 }
 
 /**

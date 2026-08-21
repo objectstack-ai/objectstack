@@ -111,6 +111,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -212,7 +213,7 @@ function isScoped(body, name) {
  * green run over a clean tree cannot exercise at all.
  */
 export function analyzeSource(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, text);
   const builders = [];
   const unclassifiable = [];
 

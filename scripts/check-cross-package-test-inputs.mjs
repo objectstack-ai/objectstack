@@ -242,6 +242,31 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // designed trade (over-collection can only widen a radius, never narrow one),
     // and declaring one rarely-touched file is cheaper than teaching the scanner to
     // tell prose from code, or than rewording a comment to dodge a scanner.
+    //
+    // `js-comment-mask.mjs` is the first entry declared for an IMPORT rather than
+    // a file read, and it now has TWO importers:
+    // src/commands/serve-verify-security-parity.contract.test.ts (#10453,
+    // adopting #9367's conversion) and
+    // src/commands/serve-audit-registration.contract.test.ts (#9863) both import
+    // `maskComments` from it to separate code from prose in the boot paths they
+    // scan. This gate did NOT demand the declaration -- its literal collector
+    // recognises path-shaped reads, and a relative import specifier that escapes
+    // the package is not one of the spellings it knows. Declared by hand because
+    // the coupling is real whatever the collector saw: those scans' verdicts are
+    // a function of this module's masking behaviour, so a change to it has to
+    // re-run cli's suite. The undetected-import spelling is filed separately as
+    // #10452; widening a radius by hand is never the reason not to file it.
+    //
+    // Its `.d.mts` sibling is declared for BOTH reasons this roster records. It
+    // is named in that test's prose, and the literal collector takes quoted
+    // paths without parsing, so a mention forces a declaration (the
+    // `check-nul-bytes.mjs` entry above settles that trade the same way:
+    // declaring the file beats rewording a comment to dodge a scanner). It is
+    // also a real input rather than only a mention -- it is what gives
+    // `maskComments` its type, so cli's `tsc --noEmit` verdict is a function of
+    // it. Measured, not assumed: this file arriving on main is exactly what
+    // turned that test's `@ts-expect-error` into a TS2578 and took the
+    // typecheck lanes red on a branch that never touched it.
     globs: [
       'packages/verify/src/**',
       'packages/plugins/plugin-security/src/**',
@@ -254,6 +279,8 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
       'scripts/check-nul-bytes.mjs',
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
     ],
   },
   '@objectstack/lint': {

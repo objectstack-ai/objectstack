@@ -77,18 +77,119 @@ export function sanitizeNamespace(name: string): string {
 export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
 
 /**
- * Render the `pnpm-workspace.yaml` that allowlists native build scripts.
+ * Third-party peer ranges that resolve outside what their declaring package
+ * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
+ * spelling, so each entry widens exactly one declaration and nothing else.
+ *
+ * Both are reported by `pnpm install` on a brand-new scaffold, and neither is a
+ * real incompatibility. They are declared here because that report is the first
+ * thing a newcomer sees, on the one screen where they are deciding whether this
+ * project is solid, and there is nothing they did to cause it.
+ *
+ *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
+ *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
+ *    peer is OPTIONAL and governs one configuration only: a raw better-sqlite3
+ *    `Database` handed to better-auth's `database` option. ObjectStack never
+ *    does that — `AuthManager.createDatabaseConfig()` passes an ObjectQL
+ *    adapter factory. Measured on the configuration the range *does* govern
+ *    (better-auth's own Kysely dialect: migrations, sign-up, sign-in, adapter
+ *    find/update/delete), 1.7.1 behaves identically on better-sqlite3 13.0.3
+ *    and on 12.11.1. So the upstream range is stale and 13 is right — widening
+ *    is the correct remedy, not pinning our own declaration back to 12.
+ *
+ *  - `@better-auth/scim>better-call` — scim is held at `1.7.0-rc.1`
+ *    deliberately (stable 1.7.x ships a whole-model rewrite that is its own
+ *    migration), and the rc peers an exact `better-call@1.3.7` while
+ *    better-auth itself depends on 1.4.0. A better-auth plugin must share the
+ *    HOST's better-call instance, so the single 1.4.0 copy every install
+ *    already resolves is the correct tree, not a skew to repair.
+ *    ⚠️ This entry retires together with the SCIM rc pin — delete both at once.
+ *
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution.
+ */
+export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
+  'better-auth>better-sqlite3': '13',
+  '@better-auth/scim>better-call': '1.4.0',
+};
+
+/**
+ * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
+ * declares the two known-benign peer skews.
  * Kept minimal (no `packages:` key) so it acts purely as a settings file for
  * the single-package scaffold rather than declaring a workspace.
+ *
+ * The allowlist is emitted TWICE, under two keys that no single pnpm version
+ * range reads both of. Measured against a scaffold of this exact shape, one
+ * clean install per pnpm version, each with its own store:
+ *
+ *   pnpm 10.0.0 – 10.25.0   honour `onlyBuiltDependencies`; `allowBuilds`
+ *                           alone leaves the builds unrun (a warning, exit 0).
+ *   pnpm 10.26.0 – 10.34.x  honour either key.
+ *   pnpm 11.x               honour `allowBuilds` ONLY. With
+ *                           `onlyBuiltDependencies` alone, `pnpm install`
+ *                           exits 1 with ERR_PNPM_IGNORED_BUILDS — byte for
+ *                           byte the same failure as approving nothing at
+ *                           all, because pnpm 11 turned an unapproved build
+ *                           script from a warning into a hard error.
+ *
+ * Emitting only the older key is what made a freshly scaffolded project fail
+ * its very first `pnpm install` for every user on pnpm 11. Both lists come
+ * from the same `builtDeps` argument, so the two populations can never be
+ * granted different build permission. This is the shape
+ * `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`
+ * already ships for the other scaffold path.
  */
-export function renderPnpmWorkspaceYaml(builtDeps: string[] = SCAFFOLD_BUILT_DEPENDENCIES): string {
+export function renderPnpmWorkspaceYaml(
+  builtDeps: string[] = SCAFFOLD_BUILT_DEPENDENCIES,
+  allowedPeerVersions: Record<string, string> = SCAFFOLD_ALLOWED_PEER_VERSIONS,
+): string {
+  const peerEntries = Object.entries(allowedPeerVersions);
+
   return [
-    '# Allowlist native dependency build scripts so `pnpm install` compiles',
-    '# them (pnpm 10+ blocks build scripts by default). Without this,',
-    '# better-sqlite3 ships uncompiled and `objectstack serve` fails with',
-    '# "Could not locate the bindings file".',
+    '# pnpm does not run dependency build scripts unless they are approved',
+    '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
+    '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
+    '# error. Without the build, better-sqlite3 can ship without a usable',
+    '# binding and `objectstack serve` fails with "Could not locate the',
+    '# bindings file".',
+    '#',
+    '# Both keys are needed; no single pnpm version range reads both:',
+    '#   allowBuilds             pnpm >= 10.26, and the ONLY key pnpm 11 reads',
+    '#                           — with onlyBuiltDependencies alone pnpm 11',
+    '#                           exits 1 exactly as if nothing were approved.',
+    '#   onlyBuiltDependencies   pnpm 10.0–10.25, which ignore allowBuilds.',
+    '#                           pnpm 11 ignores this key.',
+    '#',
+    '# npm, yarn and bun ignore this file and build native modules anyway.',
     'onlyBuiltDependencies:',
     ...builtDeps.map((d) => `  - ${d}`),
+    '',
+    'allowBuilds:',
+    ...builtDeps.map((d) => `  ${d}: true`),
+    // No rules, no header: a bare `peerDependencyRules:` would advertise a
+    // declaration that is not there.
+    ...(peerEntries.length === 0 ? [] : [
+      '',
+      '# Two third-party peer ranges resolve outside what their declaring package',
+      '# states, and pnpm reports both on a first install. Neither is a real',
+      '# incompatibility:',
+      '#',
+      '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
+      '#   That peer is optional and covers handing better-auth a raw',
+      '#   better-sqlite3 `Database`; ObjectStack hands it an ObjectQL adapter',
+      '#   instead. Measured on the configuration the range does cover,',
+      '#   better-auth 1.7.1 behaves identically on 13.0.3 and on 12.11.1.',
+      '#',
+      '#   @better-auth/scim (held at a release candidate deliberately) peers an',
+      '#   exact better-call 1.3.7, while better-auth itself depends on 1.4.0. A',
+      '#   better-auth plugin has to share the host\'s better-call instance, so',
+      '#   the single 1.4.0 copy is the correct resolution.',
+      '#',
+      '# These suppress the report only — no resolution moves.',
+      'peerDependencyRules:',
+      '  allowedVersions:',
+      ...peerEntries.map(([k, v]) => `    '${k}': '${v}'`),
+    ]),
     '',
   ].join('\n');
 }

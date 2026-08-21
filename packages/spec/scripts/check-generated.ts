@@ -234,6 +234,21 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:dual-source-exports',
     why: 'audits the built .d.ts for same-name exports resolving to DIFFERENT declarations across entry points — baseline is hand-ratcheted, not generated (needs a fresh `pnpm build`)',
   },
+  // #10199, the mechanized form of the 2026-08-20 ruling on #10096. Reads the
+  // built dist like the two above, but the BUNDLES rather than the declarations
+  // — it walks the module graph a consumer's import actually loads and asserts a
+  // declared browser-reachable entry links no zod.
+  //
+  // NO_GENERATOR and not GATED, for `check:dual-source-exports`'s reason exactly:
+  // `browser-reachable-entries.json` is a hand-maintained CONTRACT, not a
+  // projection of the source. A `gen:` that rewrote it would grant
+  // browser-reachability by running a command — which is the one decision the
+  // ruling reserves for a maintainer — and, in the other direction, would
+  // "repair" a violation by silently demoting the entry that broke its promise.
+  {
+    check: 'check:browser-reachable-entries',
+    why: 'audits the built .mjs/.js bundles: a declared browser-reachable entry must link no zod in its module graph — the declared list is a hand-written contract, not generated (needs a fresh `pnpm build`)',
+  },
   // Deliberately NOT beside `check:test-typecheck` in GATED above, and the
   // difference is the whole design of #5475: that gate compares a checked-in
   // artifact (test-typecheck-debt.json) against a fresh tsc run, so it has a
@@ -244,6 +259,24 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   {
     check: 'check:scripts-typecheck',
     why: 'type-checks packages/spec/scripts/** (the generators and gate scripts themselves) under tsconfig.scripts.json — no artifact, and no debt ledger by design (#5475)',
+  },
+  // #10274. Audits this package's own PROSE: a read-point record that says
+  // "`.objectui-sha` = `<sha>`" is asserting the pin this repo builds against,
+  // and #10137 moved the pin under four such records without anything failing.
+  //
+  // NO_GENERATOR, and here the classification is the SAFETY PROPERTY rather than
+  // a bookkeeping choice. The `gen:` a reader would reach for — rewrite each
+  // cited sha to the pin file — is the one operation this gate must never offer:
+  // the sha is not the record, the objectui file:line anchors beside it are, and
+  // they are only true of the tree they were counted in. Regenerating the sha
+  // alone would leave every record CLAIMING the current pin while its anchors
+  // still described the old one, i.e. it would convert a loud "unverifiable" into
+  // a silent lie. #10274 measured that as real, not theoretical: re-measuring the
+  // four records found two anchors that had been wrong since they were written.
+  // A failure here is always a re-measurement, never a command.
+  {
+    check: 'check:objectui-pin-citations',
+    why: 'audits spec source prose: a citation in the asserting spelling (`.objectui-sha` = `<sha>`) must equal the root pin file — no artifact, and deliberately no `gen:`, because rewriting the sha without re-measuring the anchors beside it is the failure mode (#10274)',
   },
 ];
 

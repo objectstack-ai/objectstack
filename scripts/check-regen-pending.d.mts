@@ -11,7 +11,7 @@
 // guard exists to prevent — would type-check clean.
 //
 // Declared rather than inferred (no `allowJs`) because the module sits at the
-// repo root, outside the consuming program's `rootDir`. The surface is two
+// repo root, outside the consuming program's `rootDir`. The surface is three
 // functions with one optional argument; keep this file in step with them by
 // hand, and keep it small enough that doing so stays trivial.
 
@@ -30,3 +30,17 @@ export function distIsStale(specDir?: string): boolean;
  * @param specDir Absolute path to the spec package; defaults to this repo's.
  */
 export function schemaTreeIsStale(specDir?: string): boolean;
+
+/**
+ * Are `packages/spec`'s emitted JS bundles (`dist/**\/*.mjs`, `*.js`) older than
+ * the sources — or than `tsup.config.ts` — they were bundled from? Missing
+ * counts as stale.
+ *
+ * A DIFFERENT axis from `distIsStale`, which measures the `.d.ts` half: the
+ * package's second build pass refreshes declarations without re-emitting any
+ * bundle, so `.d.ts` freshness does not imply bundle freshness. Read the
+ * function's own docblock before reusing it.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ */
+export function bundlesAreStale(specDir?: string): boolean;
