@@ -79,6 +79,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const User = ObjectSchema.create({
   name: 'user',
+  sharingModel: 'private',
   label: 'User',
   icon: 'user',
   
@@ -243,6 +244,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Task = ObjectSchema.create({
   name: 'task',
+  sharingModel: 'private',
   label: 'Task',
   icon: 'check-square',
   
@@ -341,6 +343,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   fields: {
     name: Field.text({ required: true }),
@@ -387,6 +390,7 @@ Follow these strict naming conventions for consistency:
 // ✅ Correct naming
 export const TodoTask = ObjectSchema.create({
   name: 'todo_task',                    // snake_case machine name
+  sharingModel: 'private',              // OWD — required on custom objects
   label: 'Todo Task',
   
   fields: {
@@ -463,6 +467,7 @@ annual_revenue: Field.currency({
 ```typescript
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   
   fields: { /* ... */ },
@@ -486,6 +491,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const ExampleObject = ObjectSchema.create({
   name: 'example_object',           // Required: snake_case
+  sharingModel: 'private',          // Required on custom objects: the OWD baseline
   label: 'Example Object',          // Required: Human-readable
   pluralLabel: 'Example Objects',   // Optional
   icon: 'box',                      // Optional: Lucide icon name

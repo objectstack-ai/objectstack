@@ -142,6 +142,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Task = ObjectSchema.create({
   name: 'todo_task',
+  sharingModel: 'public_read_write',   // OWD — required on every custom object
   label: 'Task',
   pluralLabel: 'Tasks',
   icon: 'check-square',

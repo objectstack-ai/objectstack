@@ -15,6 +15,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
@@ -373,6 +374,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const ProjectTask = ObjectSchema.create({
   name: 'project_task',
+  sharingModel: 'private',
   label: 'Project Task',
   pluralLabel: 'Project Tasks',
   icon: 'check-square',

@@ -26,6 +26,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Order = ObjectSchema.create({
   name: 'order',
+  sharingModel: 'private',
   label: 'Order',
   fields: {
     amount: Field.currency({ label: 'Amount', required: true }),

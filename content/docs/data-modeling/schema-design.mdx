@@ -21,6 +21,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 export const MyObject = ObjectSchema.create({
   // Metadata
   name: 'my_object',              // Machine name (snake_case)
+  sharingModel: 'private',        // OWD baseline — REQUIRED on custom objects
   label: 'My Object',             // Display name
   pluralLabel: 'My Objects',      // Plural form
   icon: 'briefcase',              // Icon identifier
@@ -285,6 +286,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
 
   fieldGroups: [
@@ -404,6 +406,7 @@ here (ADR-0085).
 ```typescript
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',

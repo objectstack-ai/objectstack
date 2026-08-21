@@ -15,6 +15,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Lead = ObjectSchema.create({
   name: 'crm_lead',
+  sharingModel: 'public_read_write',   // OWD — required on every custom object
   label: 'Lead',
   pluralLabel: 'Leads',
   icon: 'funnel',
