@@ -51,11 +51,23 @@ The fastest way to explore all examples at once:
 ```bash
 git clone https://github.com/objectstack-ai/objectstack.git
 cd objectstack
-pnpm install
+pnpm install        # Node 22+, pnpm 8+ (corepack enable)
+pnpm build          # REQUIRED — nothing builds the workspace implicitly
 pnpm dev:showcase   # or: pnpm dev:todo / pnpm dev:crm
 ```
 
 Each script starts one example's dev server. `pnpm dev` is an alias for `pnpm dev:showcase`.
+
+<Callout type="warn">
+  **`pnpm build` is not optional.** The root `dev:*` scripts begin with
+  `node scripts/check-dev-prereqs.mjs`, which refuses to boot an unbuilt workspace —
+  every package's `dist/` entry point has to be on disk. There is no `postinstall`, so
+  `pnpm install` alone leaves the workspace unbuilt. This is the same sequence
+  `README.md` documents.
+
+  `pnpm build` still does not produce the Console SPA at `/_console/` — that is built
+  separately by `pnpm objectui:build`.
+</Callout>
 
 ---
 
@@ -105,6 +117,9 @@ examples/app-todo/
 <Tabs items={['Standalone', 'From Root']}>
 <Tab value="Standalone">
 ```bash
+# From a freshly cloned monorepo, build it once first — `objectstack dev` runs
+# against the workspace's dist/ output and the root prereq gate does not guard
+# this path: pnpm install && pnpm build
 cd examples/app-todo
 pnpm dev
 ```
@@ -281,6 +296,9 @@ profiles, translations, themes, webhooks, and more. Use it as a living reference
 when you want to see how a particular metadata type is authored.
 
 ```bash
+# From a freshly cloned monorepo, build it once first — `objectstack dev` runs
+# against the workspace's dist/ output and the root prereq gate does not guard
+# this path: pnpm install && pnpm build
 cd examples/app-showcase
 pnpm dev
 ```
