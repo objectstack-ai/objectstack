@@ -435,7 +435,6 @@ export function importUnsafeStatements(source) {
  * names itself, which is what stops this from rotting into an allowlist.
  */
 const KNOWN_IMPORT_UNSAFE = new Set([
-  'scripts/ablation-dist-preflight.mjs',
   'scripts/check-changeset-no-major.mjs',
   'scripts/check-dispatcher-error-vocabulary.mjs',
   'scripts/check-driver-memory-census.mjs',
