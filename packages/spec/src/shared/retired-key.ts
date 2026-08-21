@@ -4,13 +4,21 @@
  * Tombstones for RETIRED authorable keys (#3855).
  *
  * Removing a key an author can write has one hard requirement: the removal must
- * be **audible**. None of the schemas that carried a deprecated alias is
- * `.strict()` — `FieldSchema` says so in a comment and records that the trap
- * already bit once (`dataQuality` / `cached` outlived their keys by a release
- * and were silently stripped, #3726 / #3733, the ADR-0104 class). So simply
- * deleting the key from the Zod object does not produce an error; it produces a
- * **silent strip**, which is the exact failure mode #3713 → #3743 → #3838 →
- * #3854 spent four PRs eliminating, reintroduced one layer down.
+ * be **audible**. When these tombstones were introduced, none of the schemas
+ * carrying a deprecated alias was `.strict()`, so deleting the key from the Zod
+ * object produced no error at all — it produced a **silent strip**, the exact
+ * failure mode #3713 → #3743 → #3838 → #3854 spent four PRs eliminating,
+ * reintroduced one layer down. `FieldSchema` recorded the trap biting once
+ * (`dataQuality` / `cached` outlived their keys by a release and were silently
+ * stripped, #3726 / #3733, the ADR-0104 class).
+ *
+ * The #4001 campaign has since closed many of those shapes with `strictObject`,
+ * and on a closed shape a bare deletion is no longer silent — but it is still
+ * not enough, which is why tombstones stay. An unknown-key rejection reports
+ * only that the key is unrecognised; it cannot carry the FROM → TO mapping, the
+ * ADR the removal rests on, or the migration command. **The prescription is the
+ * payload**, so both channels below survive the conversion — and on the shapes
+ * that are still non-strict, the silent strip above is still the alternative.
  *
  * A tombstone keeps the key declared but makes it unwritable, so the removal
  * lands in the two channels an upgrading author — very often an AI (ADR-0033) —

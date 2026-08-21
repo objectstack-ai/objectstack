@@ -973,9 +973,12 @@ const actionObject = () => strictObject({
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.
-   * Tombstoned rather than deleted: `ActionSchema` is not `.strict()`, so a
-   * plain deletion would silently strip the key and the action would bind no
-   * handler at all — the #2169 "Mark Done does nothing" shape, restored.
+   * Tombstoned rather than deleted: `ActionSchema` is `strictObject`, so a
+   * plain deletion would reject the key — but with a generic unknown-key error
+   * that does not name `target`. The prescription is the payload: it carries
+   * the rename, so an author who wrote `execute` is told where the handler ref
+   * goes instead of only that the key is unknown. It also types the key
+   * `never`, so the mistake fails `tsc` before any parse runs.
    */
   execute: retiredKey(
     '`execute` was removed in @objectstack/spec 17 (#3855) — use `target`. ' +

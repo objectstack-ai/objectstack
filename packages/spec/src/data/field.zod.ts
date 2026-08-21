@@ -1177,8 +1177,9 @@ export const FieldSchema = lazySchema(() => strictObject({
   // types, #3726) and `cached`'s (`ComputedFieldCacheSchema` + `ComputedFieldCache`,
   // #3733). Each key was gone from this object while its schema stayed on the
   // published API surface and in the generated reference docs, so an author could
-  // still discover the shape and write it. This object is NOT `.strict()`, so that
-  // write did not fail loudly: it parsed clean and the key was silently stripped —
+  // still discover the shape and write it. This object was NOT `.strict()` then
+  // (#4001 has since closed it), so that write did not fail loudly: it parsed
+  // clean and the key was silently stripped —
   // the same ADR-0104 failure class as the pre-declaration `accept` / `maxSize`
   // above (accepted in source, dropped in the contract, no feedback). Both schemas
   // are removed as of #3733; all five keys are now dead in both layers, as the
@@ -1205,10 +1206,12 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
-   * Tombstoned rather than deleted: `FieldSchema` is deliberately not
-   * `.strict()`, so a plain deletion would silently strip the key and the field
-   * would never be required — the ADR-0104 / #3733 failure class this object
-   * already carries a comment about.
+   * Tombstoned rather than deleted: `FieldSchema` is `strictObject` (#4001), so
+   * a plain deletion would reject the key — but with a generic unknown-key
+   * error that does not name `requiredWhen`. The prescription is the payload:
+   * it carries the rename, so an author who wrote `conditionalRequired` is told
+   * where the CEL predicate goes. It also types the key `never`, so the mistake
+   * fails `tsc` at the authoring site before any parse runs.
    */
   conditionalRequired: retiredKey(
     '`conditionalRequired` was removed in @objectstack/spec 17 (#3855) — use `requiredWhen`. ' +
