@@ -1182,6 +1182,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
       "verb": "delete",
       "pinned": 1
