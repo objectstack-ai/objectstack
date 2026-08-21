@@ -181,6 +181,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 /**
@@ -571,6 +572,106 @@ function triggersOf(doc) {
   if (!doc || typeof doc !== 'object') return undefined;
   const block = doc.on ?? doc[true];
   return block && typeof block === 'object' ? block : undefined;
+}
+
+/**
+ * The flag whose WIRING the pin below judges, as one constant rather than four
+ * regex literals: the recognizer, the two absence assertions and the caller
+ * sweep all have to be asking about the SAME string.
+ */
+const LIVE_READ_FLAG = '--verify-required-set';
+
+/**
+ * The text of a workflow that a RUNNER would ACT ON — every comment gone.
+ *
+ * ## Why this is not one regex
+ *
+ * It was one, and the regex was wrong: `text.split('\n').filter((l) =>
+ * !/^\s*#/.test(l))` drops a line only when its FIRST non-space character is
+ * `#`. A workflow file stacks TWO comment grammars, and a line filter is wrong
+ * about both of them:
+ *
+ *   - YAML's `#` opens a comment at line start OR after whitespace, and does
+ *     NOT open one inside a quoted scalar — so a TRAILING `# ...` survived the
+ *     filter whole, carrying its prose into the match;
+ *   - a `run:` block scalar is not YAML at all, it is SHELL. There `#` opens a
+ *     comment at a word boundary, `#` inside quotes is an argument, and a
+ *     backslash-newline continues the command — none of which a per-line test
+ *     can see. A trailing `# ...` on a live command line survived there too.
+ *
+ * So a comment WARNING people about `--verify-required-set` read as WIRING.
+ * That is not a hypothetical shape, it is the ordinary way anyone documents a
+ * trap, and the neighbouring `ci.yml` block already writes exactly such a
+ * comment for check-shard-attestation's sibling flag. Documenting the trap
+ * re-arms it — the #4890 shape, which is why check-shard-attestation's own
+ * `shellCommands()` drops comments and pins that it does.
+ *
+ * ## Each grammar goes to the thing that knows it
+ *
+ * `yaml.parse` answers the YAML layer: comments are not part of the parsed
+ * document, leading or trailing, while a `#` inside a quoted scalar stays in
+ * the string where it belongs. `shellCommands()` answers the shell layer inside
+ * each `run:` — check-shard-attestation's lexer, IMPORTED rather than re-typed.
+ * Two private comment strippers drifting apart in opposite directions is the
+ * exact history `js-comment-mask.mjs` exists to have ended, and a second
+ * hand-rolled one here would be the third family.
+ *
+ * ## Width is deliberate, and so is where it stops
+ *
+ * Outside a `run:` block this keeps the scalar WHOLE instead of judging what it
+ * would do, so the flag reaching a runner through an `env:` value, a `with:`
+ * input or a matrix entry still reads as wiring. That width is the safe error
+ * direction for an ABSENCE pin: a false red names a file and a line and is
+ * fixed in a minute, while a false green is a gate that quietly stopped
+ * guarding. It is also why this does NOT adopt check-shard-attestation's
+ * stricter `invokesScript()` adjacency test. That test earns its keep there
+ * because `--verify` and `--emit` are flags OTHER programs really take (`git
+ * rev-parse --verify` is what #6589 misread); `--verify-required-set` is spelled
+ * nowhere else in this tree, so adjacency would remove a false positive that
+ * cannot occur while introducing false negatives that can — the flag passed
+ * through a shell variable, or by a spelling of the invocation this file did not
+ * think to enumerate.
+ *
+ * @param {unknown} doc a parsed workflow document
+ * @returns {string} every scalar a runner acts on, joined, comments removed
+ */
+function liveWorkflowText(doc) {
+  const parts = [];
+  const visit = (node) => {
+    if (typeof node === 'string') {
+      parts.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      // Two different keys are spelled `run`. A step's is a COMMAND string and
+      // goes through the shell lexer; `defaults.run` is a mapping (`shell:`,
+      // `working-directory:`) and is ordinary structure. The typeof test is
+      // what tells them apart.
+      if (key === 'run' && typeof value === 'string') parts.push(...shellCommands(value));
+      else visit(value);
+    }
+  };
+  visit(doc);
+  return parts.join('\n');
+}
+
+/**
+ * Does this workflow WIRE UP the live required-set read?
+ *
+ * The question the two absence assertions and the caller sweep in `--self-test`
+ * all ask. A mention in a comment — YAML or shell, leading or trailing — is
+ * prose and answers `false`; a mention anywhere a runner would act on answers
+ * `true`.
+ *
+ * @param {unknown} doc a parsed workflow document
+ */
+function wiresLiveRead(doc) {
+  return liveWorkflowText(doc).includes(LIVE_READ_FLAG);
 }
 
 /**
@@ -2132,10 +2233,9 @@ async function selfTest() {
   // the two-step. Wiring it is a maintainer decision, and it goes red HERE
   // first rather than silently in the queue.
   {
-    const uncommentedYaml = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     for (const [file, text] of Object.entries(sources)) {
       assert(
-        !/--verify-required-set/.test(uncommentedYaml(text)),
+        !wiresLiveRead(parse(text)),
         `wiring: ${file} must not RUN the live required-set read — report-only, off the required path (#9642)`,
       );
     }
@@ -2156,9 +2256,27 @@ async function selfTest() {
     // carries: a second caller appearing in some third workflow is exactly the
     // thing the absences above are guarding against, and they cannot see it.
     const workflowDir = join(root, '.github', 'workflows');
+    // A document this sweep could not READ is not a document with nothing in
+    // it (#4690), and the recognizer now needs a parse to answer at all. So an
+    // unparseable workflow falls back to the widest possible reading — it can
+    // only ever OVER-report a caller, never hide one — and is named as its own
+    // failure rather than silently classified.
+    const unreadable = [];
     const callers = readdirSync(workflowDir)
       .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
-      .filter((f) => /--verify-required-set/.test(uncommentedYaml(readFileSync(join(workflowDir, f), 'utf8'))));
+      .filter((f) => {
+        const text = readFileSync(join(workflowDir, f), 'utf8');
+        try {
+          return wiresLiveRead(parse(text));
+        } catch (error) {
+          unreadable.push(`${f}: ${error.message}`);
+          return text.includes(LIVE_READ_FLAG);
+        }
+      });
+    assert(
+      unreadable.length === 0,
+      `wiring: every .github/workflows document must PARSE before this sweep can classify it — ${JSON.stringify(unreadable)} did not (#4690)`,
+    );
     assert(
       callers.join(',') === PATROL_WORKFLOW,
       `wiring: exactly one workflow runs the live read and it is ${PATROL_WORKFLOW} — found [${callers.join(', ')}] (#9678)`,
@@ -2169,13 +2287,24 @@ async function selfTest() {
     // made this block throw mid-self-test, so the `callers` failure above was
     // recorded and never printed and every later assertion never ran — a stack
     // trace where the gate's own authored verdict belongs (#4690's family). The
-    // downstream cases each carry `patrolPresent` for the same reason: on an
-    // absent file `!/merge_group/` is vacuously true, which is a false green
-    // about a workflow that does not exist.
+    // downstream cases each carry `patrolReadable` for the same reason: on an
+    // absent or unparseable file "it declares no merge_group" is vacuously
+    // true, which is a false green about a workflow that does not exist.
     const patrolPath = join(workflowDir, PATROL_WORKFLOW);
     const patrolPresent = existsSync(patrolPath);
     assert(patrolPresent, `wiring: the standing caller .github/workflows/${PATROL_WORKFLOW} is missing — the live mode is wired nowhere again (#9678)`);
-    const patrolYaml = patrolPresent ? uncommentedYaml(readFileSync(patrolPath, 'utf8')) : '';
+    let patrolDoc;
+    if (patrolPresent) {
+      try {
+        patrolDoc = parse(readFileSync(patrolPath, 'utf8'));
+      } catch {
+        // Named by the `unreadable` assertion above — the patrol lives in the
+        // swept directory — so this stays quiet and the cases below fail on
+        // `patrolReadable` instead of throwing mid-self-test.
+        patrolDoc = undefined;
+      }
+    }
+    const patrolReadable = patrolDoc !== undefined;
     // The mechanical proxy for "never required". Assertion 6 of this pin is
     // that every required context's workflow carries `merge_group:` — without
     // one, the queue build never produces the context and the whole queue
@@ -2183,7 +2312,7 @@ async function selfTest() {
     // therefore CANNOT be validly required-ized, and required-izing it anyway
     // wedges the queue rather than deadlocking a rename two-step quietly.
     assert(
-      patrolPresent && !/^\s{0,4}merge_group\s*:/m.test(patrolYaml),
+      patrolReadable && triggersOf(patrolDoc) !== undefined && !Object.prototype.hasOwnProperty.call(triggersOf(patrolDoc), 'merge_group'),
       `wiring: ${PATROL_WORKFLOW} must declare no merge_group trigger — a workflow without one deadlocks the queue if it is ever required-ized (#9678)`,
     );
     assert(
@@ -2198,8 +2327,169 @@ async function selfTest() {
     // the same character. A rendering change costs the patrol a FALSE ALARM,
     // never a false all-clear — it annotates on the mark's ABSENCE.
     assert(
-      patrolPresent && patrolYaml.includes(REQUIRED_SET_CLEAN_MARK),
+      patrolReadable && liveWorkflowText(patrolDoc).includes(REQUIRED_SET_CLEAN_MARK),
       `wiring: ${PATROL_WORKFLOW} must key its drift annotation on the clean mark ${REQUIRED_SET_CLEAN_MARK} this file renders (#9678)`,
+    );
+
+    // ── the recognizer itself, in BOTH directions ────────────────────────────
+    //
+    // The three assertions above are only as good as `wiresLiveRead`, and what
+    // it replaced was a `/^\s*#/` line filter that dropped a comment only when
+    // its FIRST non-space character was `#`. Two ordinary shapes walked through
+    // it and reddened `Lint & Repo Gates` on prose: a TRAILING comment on an
+    // otherwise-live line, and a trailing SHELL comment inside a `run:` block
+    // scalar. Nothing in the tree spelled either one, so the gate was green and
+    // the trigger was someone WRITING a warning about this very flag — which is
+    // what the neighbouring `ci.yml` block already does for
+    // check-shard-attestation's sibling flag. That script pins its own
+    // `--verify`-in-a-comment fixture for exactly this reason; this is the same
+    // pin for this flag.
+    //
+    // ⭐ Both limbs, always. A comment-stripper that also swallowed the GENUINE
+    // mention would be a strictly worse defect than the false positive it fixes
+    // — the live read wired into a required job, and this gate green about it —
+    // so every "prose" case below is paired with the same text made LIVE and
+    // asserted as wiring. The trailing-comment pair differs by the `#` alone.
+    //
+    // The fixtures are workflow SOURCE and `wired()` is the whole pipeline
+    // under test — parse, then lex each `run:`, then look for the flag. One
+    // seam, so the recognizer can be swapped for the old line filter under
+    // reverse verification without touching a single fixture.
+    const wired = (source) => wiresLiveRead(parse(source));
+    const workflowFixture = (...lines) => lines.join('\n');
+    const stepFixture = (...runLines) =>
+      workflowFixture(
+        'name: fixture',
+        'on:',
+        '  push: {}',
+        'jobs:',
+        '  j:',
+        '    runs-on: ubuntu-latest',
+        '    steps:',
+        '      - name: step',
+        '        run: |',
+        ...runLines.map((line) => `          ${line}`),
+      );
+
+    // (a) the reported defect: a trailing YAML comment on a live line.
+    assert(
+      !wired(
+        workflowFixture(
+          'name: fixture',
+          'on:',
+          '  push: {}',
+          'jobs:',
+          '  j:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          `      - name: step  # never wire ${LIVE_READ_FLAG} into a required job`,
+          '        run: echo hi',
+        ),
+      ),
+      `recognizer: a TRAILING YAML comment naming ${LIVE_READ_FLAG} is prose, not wiring — the line filter this replaced kept the whole line`,
+    );
+    // (b) the one shape the line filter did get right, pinned so it stays right.
+    assert(
+      !wired(
+        workflowFixture(
+          'name: fixture',
+          `# ${LIVE_READ_FLAG} is report-only and must stay off the required path.`,
+          'on:',
+          '  push: {}',
+          'jobs:',
+          '  j:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          '      - name: step',
+          '        run: echo hi',
+        ),
+      ),
+      'recognizer: a whole-line YAML comment is prose',
+    );
+    // (c)/(c′) the trailing SHELL comment inside a `run:` block scalar, and the
+    // same command with the `#` removed. One variable between them.
+    assert(!wired(stepFixture(`ls   # ${LIVE_READ_FLAG}`)), 'recognizer: a TRAILING shell comment inside a run: block scalar is prose');
+    assert(
+      wired(stepFixture(`ls   ${LIVE_READ_FLAG}`)),
+      'recognizer: the SAME command without the `#` is wiring — the pair differs by the comment marker alone',
+    );
+    // (d) documenting the invocation inside a `run:` — the #4890 shape.
+    assert(
+      !wired(stepFixture(`# node scripts/check-required-contexts.mjs ${LIVE_READ_FLAG} would wire this job up`, 'echo documented')),
+      'recognizer: DOCUMENTING the invocation inside a run: block is not making one (the #4890 shape)',
+    );
+    // (e) the genuine article, spelled the way the patrol spells it: the flag
+    // before a backslash continuation, inside a multi-command block.
+    assert(
+      wired(stepFixture('set +e', `node scripts/check-required-contexts.mjs ${LIVE_READ_FLAG} \\`, '  > "$RUNNER_TEMP/required-set.md"')),
+      'recognizer: the patrol’s own spelling — the flag ahead of a backslash continuation — is wiring',
+    );
+    // (f) a quoted `#` is an ARGUMENT. Truncating a command there would hide
+    // real wiring behind a plausible-looking argument, which is the one outcome
+    // worse than the false positive this whole block is about.
+    assert(
+      wired(stepFixture(`node scripts/check-required-contexts.mjs --label 'a # b' ${LIVE_READ_FLAG}`)),
+      'recognizer: a QUOTED `#` inside a run: command is an argument, not a comment',
+    );
+    // (g) the same property one grammar up: `#` inside a quoted YAML scalar
+    // does not open a YAML comment either.
+    assert(
+      wired(
+        workflowFixture(
+          'name: fixture',
+          'on:',
+          '  push: {}',
+          'jobs:',
+          '  j:',
+          '    runs-on: ubuntu-latest',
+          '    steps:',
+          `      - name: "a # ${LIVE_READ_FLAG}"`,
+          '        run: echo hi',
+        ),
+      ),
+      'recognizer: a `#` inside a QUOTED YAML scalar does not open a comment — the mention is live text',
+    );
+    // (h) the width outside `run:`, stated as a pin rather than left to the
+    // docblock: a flag reaching the runner through an `env:` value is wiring,
+    // even though no single command spells it.
+    assert(
+      wired(
+        workflowFixture(
+          'name: fixture',
+          'on:',
+          '  push: {}',
+          'jobs:',
+          '  j:',
+          '    runs-on: ubuntu-latest',
+          '    env:',
+          `      FLAG: ${LIVE_READ_FLAG}`,
+          '    steps:',
+          '      - name: step',
+          '        run: node scripts/check-required-contexts.mjs $FLAG',
+        ),
+      ),
+      'recognizer: the flag reaching a runner through an env: value is wiring — outside a run: block the scalar is kept whole',
+    );
+    // (i) `defaults.run` is a MAPPING, not a command. Handing it to the shell
+    // lexer would drop its keys and could only ever narrow the reading.
+    assert(
+      wired(
+        workflowFixture(
+          'name: fixture',
+          'on:',
+          '  push: {}',
+          'jobs:',
+          '  j:',
+          '    runs-on: ubuntu-latest',
+          '    defaults:',
+          '      run:',
+          `        working-directory: ${LIVE_READ_FLAG}`,
+          '    steps:',
+          '      - name: step',
+          '        run: echo hi',
+        ),
+      ),
+      'recognizer: `defaults.run` is structure, not a command — its scalars are still read',
     );
   }
 
@@ -2263,7 +2553,8 @@ async function selfTest() {
     `✓ check-required-contexts --self-test: ${checked} assertions ` +
       `(rename ablations across both workflows + matrix/continue-on-error/trigger shapes + the shard-name collision + ` +
       `the \`carries\` step-count ban + the instruction-surface stale-name scan (#9491) + ` +
-      `the live required-set diff and its off-the-required-path wiring (#9642) + the #4690 pins).`,
+      `the live required-set diff and its off-the-required-path wiring (#9642), with the comment-vs-code recognizer ` +
+      `pinned in both directions + the #4690 pins).`,
   );
 }
 
