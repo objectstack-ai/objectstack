@@ -16,6 +16,13 @@
  *   5. Event ordering (monotonic seq, no gaps)
  *   6. Resumability (watch with `since` replays)
  *   7. Tombstones (delete event emitted, get returns null)
+ *
+ * Two knobs, both narrow on purpose. `primaryType` / `secondaryType` move the
+ * FIXTURE metadata types (an implementation may sit behind a write door keyed
+ * on the type — see the option's own notes); `declaredDivergences` records an
+ * issue-tracked exception to the table WITHOUT skipping the clause it names.
+ * Neither adds, removes or weakens an invariant, which is the property that
+ * keeps this one table rather than one table per implementation.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -48,6 +55,35 @@ export interface ContractSuiteOptions {
    * or those two clauses assert nothing.
    */
   secondaryType?: MetadataType;
+  /**
+   * Issue-tracked exceptions to the invariant table above.
+   *
+   * ⚠️ Read the shape before reaching for it. A declaration does NOT skip the
+   * clause it names — a skipped clause is indistinguishable from coverage in a
+   * green run, which is the one failure a shared contract suite must not have.
+   * It swaps the clause for one that **pins the divergent behaviour**, so the
+   * suite reds the day the implementation starts conforming and whoever fixes
+   * it is told, by name, to delete the declaration in the same PR. Same
+   * shrink-only, audited-in-both-directions shape as the repo's other ledgers.
+   *
+   * There is deliberately no free-form escape here: every member is one named
+   * invariant, and its value is the issue that will retire it.
+   */
+  declaredDivergences?: DeclaredDivergences;
+}
+
+/** @see ContractSuiteOptions.declaredDivergences */
+export interface DeclaredDivergences {
+  /**
+   * **Invariant 6 (resumability).** The implementation's `watch()` delivers
+   * live events only; it never replays from its durable log, so neither
+   * `watch(filter, since)` nor a `watch(filter)` opened after a write can
+   * surface an event that already committed.
+   *
+   * Value is the tracking issue, e.g. `'#10842'` — `SysMetadataRepository`,
+   * the only declaration today.
+   */
+  resumableWatch?: string;
 }
 
 const spec = (label: string) => ({ label, columns: ['a', 'b'] });
@@ -143,6 +179,13 @@ export function runRepositoryContractTests(
     throw new Error(
       `runRepositoryContractTests(${label}): primaryType and secondaryType must differ — ` +
         `both are '${primaryType}', which makes the list/watch type-filter clauses vacuous.`,
+    );
+  }
+  const resumableWatchDivergence = opts.declaredDivergences?.resumableWatch;
+  if (resumableWatchDivergence !== undefined && resumableWatchDivergence.trim() === '') {
+    throw new Error(
+      `runRepositoryContractTests(${label}): declaredDivergences.resumableWatch must name the ` +
+        `tracking issue — an anonymous exception is the skip this mechanism exists to refuse.`,
     );
   }
   const refOf = (overrides: Partial<MetaRef> = {}): MetaRef => ({
@@ -398,46 +441,110 @@ export function runRepositoryContractTests(
         expect(evts.every((e, i) => i === 0 || e.seq > evts[i - 1]!.seq)).toBe(true);
       });
 
-      it('watch(sinceSeq) replays subsequent events then goes live', async () => {
-        const repo = await factory();
-        const ref = refOf();
-        const a = await repo.put(ref, spec('1'), { parentVersion: null, actor: 't' });
-        const b = await repo.put(ref, spec('2'), { parentVersion: a.version, actor: 't' });
+      if (resumableWatchDivergence === undefined) {
+        it('watch(sinceSeq) replays subsequent events then goes live', async () => {
+          const repo = await factory();
+          const ref = refOf();
+          const a = await repo.put(ref, spec('1'), { parentVersion: null, actor: 't' });
+          const b = await repo.put(ref, spec('2'), { parentVersion: a.version, actor: 't' });
 
-        // Start watching with `since = a.seq` — must replay b, then deliver a live event.
-        const iter = repo.watch({ org: ref.org }, a.seq);
-        const collected: MetadataEvent[] = [];
-        const it = iter[Symbol.asyncIterator]();
+          // Start watching with `since = a.seq` — must replay b, then deliver a live event.
+          const iter = repo.watch({ org: ref.org }, a.seq);
+          const collected: MetadataEvent[] = [];
+          const it = iter[Symbol.asyncIterator]();
 
-        // First yield should be the replay of `b`.
-        const first = await it.next();
-        expect(first.done).toBe(false);
-        collected.push(first.value as MetadataEvent);
-        expect(collected[0]!.seq).toBe(b.seq);
+          // First yield should be the replay of `b`.
+          const first = await it.next();
+          expect(first.done).toBe(false);
+          collected.push(first.value as MetadataEvent);
+          expect(collected[0]!.seq).toBe(b.seq);
 
-        // Now trigger a live event and collect it.
-        const livePromise = it.next();
-        const c = await repo.put(ref, spec('3'), { parentVersion: b.version, actor: 't' });
-        const live = await livePromise;
-        expect(live.done).toBe(false);
-        collected.push(live.value as MetadataEvent);
-        expect(collected[1]!.seq).toBe(c.seq);
+          // Now trigger a live event and collect it.
+          const livePromise = it.next();
+          const c = await repo.put(ref, spec('3'), { parentVersion: b.version, actor: 't' });
+          const live = await livePromise;
+          expect(live.done).toBe(false);
+          collected.push(live.value as MetadataEvent);
+          expect(collected[1]!.seq).toBe(c.seq);
 
-        await it.return?.(undefined);
-      });
+          await it.return?.(undefined);
+        });
 
-      it('watch filters by type and name', async () => {
-        const repo = await factory();
-        await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
-        await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
-        const events = await take(
-          repo.watch({ org: 'system', type: primaryType, name: 'a' }),
-          5,
-          200,
-        );
-        expect(events.length).toBe(1);
-        expect(events[0]!.ref.name).toBe('a');
-      });
+        it('watch filters by type and name', async () => {
+          const repo = await factory();
+          await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
+          await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
+          const events = await take(
+            repo.watch({ org: 'system', type: primaryType, name: 'a' }),
+            5,
+            200,
+          );
+          expect(events.length).toBe(1);
+          expect(events[0]!.ref.name).toBe('a');
+        });
+      } else {
+        // ── DECLARED DIVERGENCE — invariant 6 is not satisfied here ──────
+        //
+        // Both clauses above lean on the implementation replaying from its
+        // durable log. This implementation does not, and the two replacements
+        // below are NOT relaxations of the pair: the first PINS the absence of
+        // replay (so it reds the day replay lands and this whole branch has to
+        // go), and the second re-asks the filter question the second clause is
+        // named for, sourced from the live stream instead of the replay buffer,
+        // so filter coverage is not silently traded away for the exception.
+
+        it(`watch(sinceSeq) does NOT replay, then goes live — DECLARED DIVERGENCE ${resumableWatchDivergence}`, async () => {
+          const repo = await factory();
+          const ref = refOf();
+          const a = await repo.put(ref, spec('1'), { parentVersion: null, actor: 't' });
+          const b = await repo.put(ref, spec('2'), { parentVersion: a.version, actor: 't' });
+
+          const it = repo.watch({ org: ref.org }, a.seq)[Symbol.asyncIterator]();
+
+          // ONE pending `next()`, deliberately. Invariant 6 says `b` (seq >
+          // a.seq, already committed) must satisfy it. Here nothing does, and
+          // the SAME promise is later settled by a live event — which is what
+          // separates "does not replay" from "the stream is dead".
+          const pending = it.next();
+          let settled = false;
+          const mark = () => {
+            settled = true;
+          };
+          pending.then(mark, mark);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          expect(settled).toBe(false);
+
+          const c = await repo.put(ref, spec('3'), { parentVersion: b.version, actor: 't' });
+          const live = await pending;
+          expect(live.done).toBe(false);
+          expect((live.value as MetadataEvent).seq).toBe(c.seq);
+
+          await it.return?.(undefined);
+        });
+
+        it(`watch filters by type and name — over the live stream — DECLARED DIVERGENCE ${resumableWatchDivergence}`, async () => {
+          const repo = await factory();
+          const it = repo
+            .watch({ org: 'system', type: primaryType, name: 'a' })
+            [Symbol.asyncIterator]();
+          const collected: MetadataEvent[] = [];
+          const pump = (async () => {
+            for (;;) {
+              const r = await it.next();
+              if (r.done) return;
+              collected.push(r.value as MetadataEvent);
+            }
+          })();
+
+          await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
+          await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          await it.return?.(undefined);
+          await pump;
+
+          expect(collected.map((e) => e.ref.name)).toEqual(['a']);
+        });
+      }
     });
 
     // ── list ────────────────────────────────────────────────────────

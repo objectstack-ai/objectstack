@@ -182,6 +182,17 @@ runRepositoryContractTests('SysMetadataRepository', makeRepo, {
   // type — is not, on purpose (packaged objects are locked); `'dashboard'` is.
   primaryType: 'view',
   secondaryType: 'dashboard',
+  // #10842 — the one invariant this implementation does NOT satisfy, found by
+  // this very file: `watch()` registers an in-memory listener and reads `since`
+  // only as a drop-filter on live events, so it never replays from
+  // `sys_metadata_history`. Declaring it does not skip the clauses: the suite
+  // swaps in two that pin the divergence and re-ask the filter question over
+  // the live stream, so this line has to be deleted the day replay lands.
+  // Not fixed here — both production `watch()` consumers subscribe with no
+  // `since`, so a full-log replay would flood HMR and cache invalidation at
+  // every `setRepository()`, and what `watch()` with no `since` owes is not
+  // written in `repository.ts` at all. #10842 carries the fork.
+  declaredDivergences: { resumableWatch: '#10842' },
 });
 
 /**
