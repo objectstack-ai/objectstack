@@ -1273,6 +1273,7 @@ describe('stack boot', () => {
 | LiteKernel test passes, ObjectKernel boot fails | Test missed a plugin the CLI auto-registers — compare your test's `use()` list against the `os dev` boot log |
 | Hot reload misses new objects | Barrel `src/objects/index.ts` not re-exporting — check the file |
 | Login works but **Setup / Studio missing** | The logged-in user isn't a platform admin. Setup/Studio are gated by `setup.access` / `studio.access` on `admin_full_access`, auto-granted only to the first registered **human** (`bootstrapPlatformAdmin`). The `usr_system` seed identity is skipped, so it can't steal the grant. Either sign up first (`--seed-admin`/`--fresh` does this) or check `sys_user_permission_set` for a cross-tenant (`organization_id = NULL`) `admin_full_access` link on your user. Don't edit nav code first. |
+| A permission set is declared but grants nobody anything | Declaring a set is not assigning it. Assignment is a `sys_user_permission_set` row whose `permission_set_id` is the `sys_permission_set` **record id**, never the set's `name` — see "Assigning a permission set to a user" in **objectstack-data**. |
 
 ---
 

@@ -118,6 +118,75 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
   });
 });
 
+// pnpm 11 honours ONLY `allowBuilds`. Rendering `onlyBuiltDependencies` alone
+// — which is what this scaffolder shipped — makes a brand-new project's very
+// first `pnpm install` exit 1 with ERR_PNPM_IGNORED_BUILDS, byte for byte the
+// same failure as approving nothing at all. Measured one clean install per
+// pnpm version, each with its own store, on a project scaffolded by
+// `objectstack init -t app`:
+//
+//   10.0.0–10.25.0   read onlyBuiltDependencies; allowBuilds alone leaves the
+//                    builds unrun (warning, exit 0)
+//   10.26.0–10.34.x  read either key
+//   11.x             read allowBuilds only; onlyBuiltDependencies alone exits 1
+//
+// So both keys are load-bearing and neither is redundant. The blank template
+// (`packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`)
+// already ships this shape and ratchets it in `template-consistency.test.ts`;
+// these are the mirrored ratchets for the second scaffold path.
+describe('pnpm 11 build approvals in the rendered workspace file', () => {
+  // Strip comments first: the prose above these keys names them, and must not
+  // be what satisfies an assertion about the settings themselves.
+  const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
+
+  const blockOf = (key: string, re: RegExp) =>
+    re.exec(settings)?.[1] ?? `__no ${key} block__`;
+
+  it('sets allowBuilds.<pkg> = true, the only key pnpm 11 reads', () => {
+    const block = blockOf('allowBuilds', /^allowBuilds:\n((?:[ \t]+.*\n?)*)/m);
+    for (const pkg of SCAFFOLD_BUILT_DEPENDENCIES) {
+      expect(
+        new RegExp(`^\\s+${pkg}:\\s*true\\s*$`, 'm').test(block),
+        `allowBuilds must set "${pkg}: true" — pnpm 11 ignores onlyBuiltDependencies ` +
+          'and exits 1 on an unapproved build script',
+      ).toBe(true);
+    }
+  });
+
+  it('keeps listing the same packages under onlyBuiltDependencies for pnpm < 10.26', () => {
+    const block = blockOf('onlyBuiltDependencies', /^onlyBuiltDependencies:\n((?:[ \t]*-.*\n?)*)/m);
+    for (const pkg of SCAFFOLD_BUILT_DEPENDENCIES) {
+      expect(
+        new RegExp(`^\\s*-\\s*${pkg}\\s*$`, 'm').test(block),
+        `onlyBuiltDependencies must list "${pkg}" — pnpm 10.0–10.25 ignore allowBuilds`,
+      ).toBe(true);
+    }
+  });
+
+  it('grants exactly the same set under both keys', () => {
+    // Two hand-maintained lists would drift, and the drift is invisible: each
+    // key is read by a different pnpm population, so a package dropped from one
+    // of them still builds fine on whichever pnpm the author happened to run.
+    const only = [...blockOf('onlyBuiltDependencies', /^onlyBuiltDependencies:\n((?:[ \t]*-.*\n?)*)/m)
+      .matchAll(/^\s*-\s*(\S+)\s*$/gm)].map((m) => m[1]);
+    const allow = [...blockOf('allowBuilds', /^allowBuilds:\n((?:[ \t]+.*\n?)*)/m)
+      .matchAll(/^\s+(\S+):\s*true\s*$/gm)].map((m) => m[1]);
+    expect(allow.sort()).toEqual([...SCAFFOLD_BUILT_DEPENDENCIES].sort());
+    expect(only.sort()).toEqual(allow.sort());
+  });
+
+  it('approves named packages only — never a wildcard', () => {
+    // `allowBuilds` is not a blank cheque: whatever this scaffolder writes
+    // becomes the standing build permission of every project created from it.
+    // A glob would hand arbitrary install-time code execution to any future
+    // transitive dependency, in every new project, silently.
+    for (const pkg of SCAFFOLD_BUILT_DEPENDENCIES) {
+      expect(pkg, 'build approvals must name one package each').not.toMatch(/[*?]/);
+    }
+    expect(settings).not.toMatch(/^\s*['"]?\*/m);
+  });
+});
+
 // A brand-new scaffold's first `pnpm install` reported two unmet peers, on the
 // one screen where a newcomer decides whether this project is solid, with
 // nothing they did to cause it (#10326). Both ranges belong to third-party

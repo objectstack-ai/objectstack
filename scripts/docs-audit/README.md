@@ -100,10 +100,11 @@ Two things it deliberately is **not**:
 
 - **Not a verdict.** The ratio is reported. Failing CI on it would widen the recognizer
   under CI pressure, which the #9747 family declines explicitly. What *does* exit non-zero
-  is `brokenScan` — no ledger found, no tail produced, or a ledger file matching the
-  convention that the row recognizer parses to zero rows. Those cannot fire on a tree where
-  the scan works at all, and each of them otherwise reports `0 of 0 unreachable`, which is
-  arithmetically true and reads exactly like a healthy bridge.
+  is `brokenScan` — no ledger found, no tail produced, a ledger file matching the
+  convention that the row recognizer parses to zero rows, or a **partial read** (next
+  section). Those cannot fire on a tree where the scan works at all, and each of them
+  otherwise reports `0 of 0 unreachable`, which is arithmetically true and reads exactly
+  like a healthy bridge.
 - **Not a fix for the 176.** The card measured the causes and they are unrelated: ~97 rows
   have no static registration of any shape in `packages/**` (better-auth mounts the auth
   table; the runtime dispatcher matches `cleanPath` with `===`), ~50 have a `path:` literal
@@ -115,6 +116,42 @@ Two things it deliberately is **not**:
 Half the blind spot is load-bearing: **88 of the 176** unreachable rows name a client
 method that at least one hand-written page carries (31 distinct pages, `api/client-sdk.mdx`
 among them), so the silence is not an empty region.
+
+### A PARTIAL ledger read is a verdict too (#9896)
+
+The row recognizer reads **single-quoted** values only, and the `rowsParsed === 0` guard
+above is the all-or-nothing case. The likelier shape is a ledger that parses *almost*
+completely — and it used to render exactly like a complete one. Measured on `a718ee3dd` by
+respelling **one** row of `i18n-route-ledger.ts`:
+
+| ledger written as | client-bound rows | verdict | exit |
+| --- | --- | --- | --- |
+| all single-quoted (today, all 7 ledgers) | 221 | none | 0 |
+| one row backtick-quoted `route:` | **220** | none *(now: `PARTIAL read … 2 of 3`)* | 0 → **1** |
+| one row backtick-quoted `client:` | **220** | none *(now: `PARTIAL read … 2 of 3 client`)* | 0 → **1** |
+| one `route:` backtick-quoted in `rest-route-ledger.ts` | **221** ⚠️ | none *(now: `PARTIAL read … 95 of 96`)* | 0 → **1** |
+
+The last row is why the verdict keys on the **declined spelling** and not on a shortfall:
+the row window is delimited by the same single-quote-only lead, so a declined row does not
+close the *previous* row's window and the row before it **inherits the declined row's
+client**. Backtick-quoting `GET /api/v1/meta` moved `meta.getTypes` onto the server-only
+`GET /api/v1/docs` while `clientRows` stayed 221 — a count comparison is blind to it.
+
+A template literal is the realistic spelling: the formatter rewrites double quotes back to
+single, but leaves `` route: `${base}/locales` `` alone, and that is the natural shape the
+moment anyone interpolates a base path into a row.
+
+So both halves of the fraction now print on every run — `ledger rows read … 259 of 259
+declared` — and a declined declaration is a `brokenScan` verdict that **names the entry**
+(`line 96: route: \`GET /api/v1/i18n/locales\``). The recognizer itself is untouched: this
+reports its narrowness, it does not widen it, and `--self-test` pins the population at its
+old value so a silent widening fails there.
+
+⚠️ **Boundary, declared not discovered:** a `route:` whose value is not a string literal at
+all (`route: ROUTES.health`) is invisible to the recognizer *and* to this counter — the only
+exact discriminator against the `route: string;` member each ledger's own entry interface
+declares is the opening quote. Pinned in `--self-test`; filed separately rather than papered
+over with a heuristic.
 
 ### What it cannot see is reported, never implied
 

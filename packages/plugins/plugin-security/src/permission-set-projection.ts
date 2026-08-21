@@ -92,7 +92,29 @@ export async function tryUpdate(ql: any, object: string, data: any): Promise<boo
 
 export interface ProjectionLogger {
   info?: (m: string, meta?: Record<string, any>) => void;
-  warn?: (m: string, meta?: Record<string, any>) => void;
+  /**
+   * The GUARANTEED channel (#9754). `error` below stays optional — hosts do
+   * inject reduced sinks — so `warn` is where a durability report lands when
+   * `error` is absent, and a fallback that may itself be missing is not a
+   * fallback: `{ info }` alone used to be a legal sink here, and against it the
+   * reconcile summary's "N FAILED backfill(s)" printed nothing at all, while
+   * the `info` "reconciled" line was skipped too — the sink heard neither.
+   * Non-optional is what makes that silence unrepresentable instead of merely
+   * discouraged.
+   *
+   * ⛔ Do NOT "simplify" this by making `error` required instead — that
+   * forecloses the reduced sinks hosts legitimately pass (#9754 option C,
+   * measured and rejected).
+   *
+   * ⚠️ Call sites still spell the fallback `logger?.warn?.(…)`. That `?.` is not
+   * doubt about this declaration — it is the backstop for hosts the TYPE cannot
+   * reach (a plain-JS embedder, or a cast). Dropping it was measured: a sink
+   * that lies about its shape then throws `logger?.warn is not a function`
+   * INSIDE the per-row durability catch, aborting the very batch this function
+   * promises never to stop. Silence for a lying host is the lesser failure; the
+   * guarantee this member adds is at AUTHORING time, where it belongs.
+   */
+  warn: (m: string, meta?: Record<string, any>) => void;
   /**
    * Durability-degradation channel (AGENTS.md "Degradation log levels", #4632):
    * a metadata write that was supposed to land and did not is an `error`, not a
@@ -809,6 +831,10 @@ export function createPermissionSetWriteThrough(
           // NOTHING against a sink that has only `warn` — the durability
           // degradation described above would then be reported by nobody at all
           // (#9657). Reach for `error`, fall back to `warn`, never to silence.
+          // The fallback itself is now GUARANTEED BY THE TYPE: `warn` is
+          // non-optional on `ProjectionLogger` (#9754), so no TS caller can
+          // hand over a sink this line evaporates against. The `?.` below is
+          // the backstop for untyped hosts only — see the interface.
           if (logger?.error) logger.error(message, e as Error, { name: row.name });
           else logger?.warn?.(message, { name: row.name, error: String((e as Error)?.message ?? e) });
         }
@@ -1040,6 +1066,10 @@ export async function reconcilePermissionSetProjection(
           // NOTHING against a sink that has only `warn` — the durability
           // degradation described above would then be reported by nobody at all
           // (#9657). Reach for `error`, fall back to `warn`, never to silence.
+          // The fallback itself is now GUARANTEED BY THE TYPE: `warn` is
+          // non-optional on `ProjectionLogger` (#9754), so no TS caller can
+          // hand over a sink this line evaporates against. The `?.` below is
+          // the backstop for untyped hosts only — see the interface.
           if (logger?.error) logger.error(message, e as Error, { name: row.name });
           else logger?.warn?.(message, { name: row.name, error: String((e as Error)?.message ?? e) });
         }
@@ -1076,6 +1106,9 @@ export async function reconcilePermissionSetProjection(
     // the `else` below is skipped too, so such a sink heard neither the count
     // nor the reassuring "reconciled" line, while the first-failure report
     // (repaired by #9657) still arrived. Fall back to `warn`, not silence.
+    // The fallback itself is now GUARANTEED BY THE TYPE: `warn` is
+    // non-optional on `ProjectionLogger` (#9754). The `?.` is the backstop for
+    // untyped hosts only — see the interface.
     if (logger?.error) logger.error(summary, undefined, summaryMeta);
     else logger?.warn?.(summary, summaryMeta);
   } else {

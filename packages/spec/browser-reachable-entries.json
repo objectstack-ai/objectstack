@@ -4,6 +4,10 @@
     "./meta-spelling": {
       "why": "The reference pattern the ruling shipped (#10096): the /meta URL-spelling contract as vocabulary — one frozen map, one fold, two refusal predicates — with the map derived at BUILD time by gen:meta-url-spelling so no schema graph is linked. Reaching the same four symbols through ./shared cost a browser consumer +246.9 KB minified / +69.7 KB gzipped.",
       "externals": []
+    },
+    "./contracts": {
+      "why": "Filed as #10397: links no zod incidentally (12.7 KB, zero externals, both format halves) and objectui's client-shipped code already reaches it at real non-test sites — app-shell's ScreenView.tsx and metadata-admin/external/api.ts, components' ShareDialog.tsx, auth's types.ts, plus core, data-objectstack and types re-exporting the same symbols. Declaring it converts the accident into a promise: the gate now goes red the day a schema import lands in this entry's module graph.",
+      "externals": []
     }
   },
   "_unjudgedComment": "Entries this gate asserts NOTHING about. They are not declared browser-reachable, so linking zod is not a defect here — these are the server/build-time surfaces. Listing them is what makes the reconciliation two-directional: a new exports-map subpath cannot land without someone deciding which list it belongs in. Moving one UP to browserReachable is the only direction this file is meant to travel, and it is a maintainer decision plus a passing gate, never a ledger edit alone.",
@@ -13,7 +17,6 @@
     "./api",
     "./automation",
     "./cloud",
-    "./contracts",
     "./data",
     "./identity",
     "./integration",

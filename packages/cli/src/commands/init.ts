@@ -117,6 +117,27 @@ export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
  * declares the two known-benign peer skews.
  * Kept minimal (no `packages:` key) so it acts purely as a settings file for
  * the single-package scaffold rather than declaring a workspace.
+ *
+ * The allowlist is emitted TWICE, under two keys that no single pnpm version
+ * range reads both of. Measured against a scaffold of this exact shape, one
+ * clean install per pnpm version, each with its own store:
+ *
+ *   pnpm 10.0.0 – 10.25.0   honour `onlyBuiltDependencies`; `allowBuilds`
+ *                           alone leaves the builds unrun (a warning, exit 0).
+ *   pnpm 10.26.0 – 10.34.x  honour either key.
+ *   pnpm 11.x               honour `allowBuilds` ONLY. With
+ *                           `onlyBuiltDependencies` alone, `pnpm install`
+ *                           exits 1 with ERR_PNPM_IGNORED_BUILDS — byte for
+ *                           byte the same failure as approving nothing at
+ *                           all, because pnpm 11 turned an unapproved build
+ *                           script from a warning into a hard error.
+ *
+ * Emitting only the older key is what made a freshly scaffolded project fail
+ * its very first `pnpm install` for every user on pnpm 11. Both lists come
+ * from the same `builtDeps` argument, so the two populations can never be
+ * granted different build permission. This is the shape
+ * `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml`
+ * already ships for the other scaffold path.
  */
 export function renderPnpmWorkspaceYaml(
   builtDeps: string[] = SCAFFOLD_BUILT_DEPENDENCIES,
@@ -125,12 +146,26 @@ export function renderPnpmWorkspaceYaml(
   const peerEntries = Object.entries(allowedPeerVersions);
 
   return [
-    '# Allowlist native dependency build scripts so `pnpm install` compiles',
-    '# them (pnpm 10+ blocks build scripts by default). Without this,',
-    '# better-sqlite3 ships uncompiled and `objectstack serve` fails with',
-    '# "Could not locate the bindings file".',
+    '# pnpm does not run dependency build scripts unless they are approved',
+    '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
+    '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
+    '# error. Without the build, better-sqlite3 can ship without a usable',
+    '# binding and `objectstack serve` fails with "Could not locate the',
+    '# bindings file".',
+    '#',
+    '# Both keys are needed; no single pnpm version range reads both:',
+    '#   allowBuilds             pnpm >= 10.26, and the ONLY key pnpm 11 reads',
+    '#                           — with onlyBuiltDependencies alone pnpm 11',
+    '#                           exits 1 exactly as if nothing were approved.',
+    '#   onlyBuiltDependencies   pnpm 10.0–10.25, which ignore allowBuilds.',
+    '#                           pnpm 11 ignores this key.',
+    '#',
+    '# npm, yarn and bun ignore this file and build native modules anyway.',
     'onlyBuiltDependencies:',
     ...builtDeps.map((d) => `  - ${d}`),
+    '',
+    'allowBuilds:',
+    ...builtDeps.map((d) => `  ${d}: true`),
     // No rules, no header: a bare `peerDependencyRules:` would advertise a
     // declaration that is not there.
     ...(peerEntries.length === 0 ? [] : [

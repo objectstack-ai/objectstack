@@ -540,7 +540,6 @@
     "data/Mapping:targetObject",
     "data/Mapping:upsertKey",
     "data/Metric:description",
-    "data/Metric:filters",
     "data/Metric:format",
     "data/Metric:label",
     "data/Metric:name",

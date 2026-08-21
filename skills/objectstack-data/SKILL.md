@@ -593,13 +593,52 @@ export const salesUser = definePermissionSet({
     contact: { allowRead: true },
   },
 });
+
+// Register it on the stack root under `permissions` — NOT `permissionSets`:
+// defineStack({ permissions: [salesUser], ... })
 ```
 
+- **Stack key: `permissions`.** The collection is named for the metadata kind,
+  not for the factory, so `definePermissionSet()` output goes into
+  `defineStack({ permissions: [...] })`. `permissionSets:` is **refused at
+  load** — the top level is strict, so the stack fails with an
+  `Unrecognized key(s) on this stack definition` error naming the key, never a
+  silent drop. `ObjectStackDefinitionSchema`
+  (`node_modules/@objectstack/spec/src/stack.zod.ts`) is the enumeration of
+  record; `objectstack-platform` lists every top-level key.
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
 - Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
 - Combine with `enable.apiMethods` to also restrict the HTTP surface.
+
+### Assigning a permission set to a user
+
+Declaring a set grants nobody anything — an assignment is **data**: one row in
+the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
+carrying `user_id`, `permission_set_id`, and an optional `organization_id`
+(`null` = every org context). Optional `valid_from` / `valid_until` bound a
+half-open window checked at resolution time; `granted_by` is stamped by the
+gate on insert — never author it.
+
+⚠️ **`permission_set_id` takes the `sys_permission_set` RECORD ID, not the set's
+`name`.** Grants resolve by loading `sys_permission_set` **by `id`**, so a `name`
+in that field matches nothing, raises no error, and silently grants nothing.
+Declared sets are upserted by `name` with a **generated** `id` on `kernel:ready`
+(ADR-0086 D5) — that id differs per environment, so resolve it first.
+
+Assignment is therefore two calls, both `POST /api/v1/data/{object}`
+(`…/query` with a QueryAST body for the read): look up the set's `id` in
+`sys_permission_set` by `name`, then insert
+`{ user_id, permission_set_id, organization_id }` into
+`sys_user_permission_set`. Only a tenant admin — or a delegated `adminScope`
+carrying `manageAssignments` for that set and user (ADR-0090 D12) — may write
+it; plain CRUD bits on the table are not enough.
+
+**Grant looks inert?** Check in order: a `name` in `permission_set_id`; the set
+is `active: false`; the validity window has passed; `organization_id` mismatch.
+`GET /api/v1/security/explain?object=&operation=&userId=` answers from the
+enforcing code path (explaining another user needs `manage_users`).
 
 ### Access depth (scope-depth) — the ERP "see my unit / my unit and below" axis
 

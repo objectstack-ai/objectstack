@@ -386,6 +386,50 @@ jobs:
       - name: Release-rehearsal clone preflight self-test
         run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
+      # Shallow-history guard self-tests (#9902). Three seat-run tools ask
+      # WINDOWED history questions (`--since` over a branch), and a shallow
+      # clone answers those from whatever part of the window is present, exits
+      # 0, and prints no warning. Agent containers clone shallow, and all three
+      # run from a seat rather than from CI — every workflow that reads history
+      # already checks out with `fetch-depth: 0`, which is precisely why the
+      # exposure survived: CI is not where these run.
+      #
+      # Measured in one container on 2026-08-21 (graft floor 2026-06-02):
+      # `check-governed-merges` rendered `✅ clean window` for a window in which
+      # GitHub lists 38 commits touching `docs/adr/**` and 13 touching
+      # `AGENTS.md`; `check-engine-split-ratio --days 90` — the workflow's own
+      # invocation — printed a 98.1% ADR trigger metric over a denominator 17
+      # commits short, one of whose members was the graft boundary commit
+      # itself (it carries the whole tree, so a truncated window does not just
+      # lose data points, it fabricates one).
+      #
+      # What runs here is the self-tests, not the live tools: the live tools
+      # judge whatever clone they are pointed at, and a CI checkout's depth is
+      # the workflow's business, not a verdict this job can hold. Each pins BOTH
+      # directions on real temp-git fixtures — a window crossing the floor is
+      # refused, and a still-shallow clone whose floor PREDATES the window is
+      # answered untouched, because the predicate is the floor rather than
+      # `--is-shallow-repository` and a guard that refused provably-correct
+      # answers would only train bypass.
+      #
+      # `git-history.mjs` is listed first and deliberately: it is the shared
+      # predicate all three call, it shipped for #9878 with a self-test that
+      # until now NOTHING in this repo ran, and an unrun self-test is a phantom
+      # check — the AGENTS.md rule about `@ts-expect-error` in an uncompiled
+      # file, wearing a different hat. Invoked as `node`/`bash` rather than
+      # through `pnpm check:*`: that alias belongs in root package.json, which
+      # is declared territory of the @changesets/cli v3 migration lane (#9465)
+      # while it runs. Temp-dir fixtures, no network, ~6 s in total.
+      #
+      # (`check-governed-merges.mjs`'s own cases run in the
+      # `pnpm check:pm-governed-merges` step above, which is already its
+      # self-test.)
+      - name: Shallow-history guard self-tests
+        run: |
+          node scripts/pm/git-history.mjs --self-test
+          node scripts/check-engine-split-ratio.mjs --self-test
+          bash scripts/collect-release-notes.sh --self-test
+
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
       # and it is the enforcement of a rule that used to live only in prose: the
@@ -2103,6 +2147,34 @@ jobs:
       - name: Check every shipped template manifest satisfies TemplateManifestSchema
         run: pnpm --filter @objectstack/spec check:template-manifests
 
+      # [#10274] The read-point records in packages/spec/src cite the objectui
+      # commit their file:line anchors were counted in — "the objectui pin this
+      # repo builds against (`.objectui-sha` = `<sha>`)". That sentence is what
+      # makes a record RE-CHECKABLE, and it is the entire justification #9881 /
+      # #9972 were filed on after #9397 spent a full dispatch cycle re-deriving
+      # one read point from scratch.
+      #
+      # Nothing linked the sentence to the pin file. #10137 bumped `.objectui-sha`
+      # and four records went on naming a pin this repo does not build against —
+      # not WRONG (the anchors held) but UNVERIFIABLE, which is the exact state
+      # they were written to end. Prose has no dependency edge, so the class
+      # recurs silently on every bump. This gate is the edge.
+      #
+      # It checks only the ASSERTING spelling. `.objectui-sha` pin `<sha>` is a
+      # dated record of where a past measurement was taken (#5010 absorbed at
+      # `09987b68`, a renderer's branch semantics at `665661ab0932`) and a later
+      # bump does not falsify it; forcing those forward would demand re-measuring
+      # settled history on every bump. A sha named in NEITHER spelling fails
+      # loudly rather than being skipped — an unrecognised spelling is how a
+      # source scan loses a citation silently.
+      #
+      # Reads `src/` and the root pin file only — no build — so it belongs in
+      # this pre-build source-audit group. Unfiltered and required: a paths
+      # filter on packages/spec/** would go dormant on exactly the PR that moves
+      # `.objectui-sha`, which is the PR this exists to catch.
+      - name: Check spec pin citations still name the pin this repo builds against
+        run: pnpm --filter @objectstack/spec check:objectui-pin-citations
+
   # Lane 2 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the
   # contract, and is the thing the merge queue actually requires — read it
@@ -2439,6 +2511,36 @@ jobs:
       # Measured cost of the re-measure itself: ~4 min, sequential by design
       # (parallel tsc processes trade wall clock for an OOM risk on a job that
       # has just built the whole workspace).
+      #
+      # ⚠️ NOT a duplicate of the closure build the gate below runs itself
+      # (#8331). `check:type-check-debt` calls `refreshBuiltClosure()` in
+      # scripts/check-type-check-coverage.mjs, which runs this exact command
+      # with these exact filters — but it runs it AFTER the `unbuiltClosure()`
+      # refusal, never before, and that order is deliberate and documented
+      # there: the refusal owns the NOTHING-IS-BUILT case (one ledgered
+      # package's 7-task closure built cold measured 3m2s, on a gate people run
+      # before pushing), the refresh owns only the PRESENT-BUT-STALE case
+      # (#8271). So the gate cannot rescue a closure member no earlier step
+      # built — it refuses, naming the command this step runs.
+      #
+      # What that leaves is measured, not assumed. Of the 55 workspace packages
+      # in the ledgered dependency closure (the gate's own enumeration, on an
+      # unbuilt worktree), `Build workspace packages` above already covers 54
+      # through `./packages/*`. The 55th is `@objectstack/service-knowledge`
+      # (packages/services/, pulled in by the ledgered `knowledge-ragflow`), and
+      # it arrives here only through `./examples/*^...` — because
+      # `examples/app-todo` happens to depend on it, the same accident #3037
+      # records one step above. Delete this step and the lane's green starts
+      # depending on that one manifest: drop the dependency there and
+      # `check:type-check-debt` refuses in CI, with a remedy message naming the
+      # command this step no longer runs.
+      #
+      # The drift #8331 was filed on — one precondition owned in two places — is
+      # LOUD in both directions now that the gate refreshes with its OWN
+      # filters: a narrower filter here ends in that refusal, a wider one in
+      # extra cache hits. Neither can make CI measure a different world than a
+      # local run, which is what #8271 was. Cost of keeping it: 9.5s of turbo
+      # cache hits (70/70) against this lane's ~249s.
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 

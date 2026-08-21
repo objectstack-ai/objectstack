@@ -5,6 +5,7 @@
     "connect-mcp",
     "agents",
     "actions-as-tools",
+    "tools",
     "knowledge-rag",
     "natural-language-queries",
     "skills",

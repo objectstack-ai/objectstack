@@ -41,6 +41,11 @@ export {
   // it. Exported so an in-process caller can branch on the refusal (there is no
   // dedicated wire code for it yet; see the class doc).
   SettingsCryptoUnavailableError,
+  // The pre-bind write refusal. Exported for the same reason: an in-process
+  // caller that runs during boot branches on `code` to tell "too early"
+  // apart from "locked" / "invalid", and the class carries the 503 itself
+  // because no HTTP door can reach it (see the class doc).
+  SettingsEngineNotBoundError,
   SettingsLockedError,
   SettingsValidationError,
   UnknownKeyError,

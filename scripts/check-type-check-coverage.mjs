@@ -752,7 +752,10 @@ const TEST_DEBT = {
       + '110 -> 109 here (#9694): src/managed-extension-fields.test.ts held the package\'s only '
       + 'TS1470 -- an `import.meta.url` seed in a package that is CJS-typed and therefore forbids '
       + 'the meta-property under module: NodeNext -- and now seeds from `__dirname`, which '
-      + 'type-checks here AND is one of the two seeds check:cross-package-test-inputs recognises, so '
+      + 'type-checks here AND is a seed spelling check:cross-package-test-inputs resolves -- the '
+      + 'current set is that gate\'s published RECOGNISED_PATH_SPELLINGS, printed verbatim in its '
+      + 'failure text, and is deliberately not restated as a count here because a count drifts '
+      + 'silently (it has been widened twice, #8995 and #9763) -- so '
       + 'that file\'s repo-wide *.object.ts walk stays visible to the gate holding plugin-auth\'s '
       + 'declared input radius. It contributes nothing to this pile any more.',
   },

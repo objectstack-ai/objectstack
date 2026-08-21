@@ -305,19 +305,29 @@ const COVERED_OBJECTS: readonly string[] = [
  *    only shrink.
  *    `__dirname` type-checks under the package's own config and is defined at
  *    runtime by vitest's transform (verified, not assumed).
- *  - `check:cross-package-test-inputs` recognises exactly two seeds —
- *    `dirname(fileURLToPath(import.meta.url))` and `__dirname` — when it
- *    detects statically that a test escapes its package. This file's walk of
- *    `PACKAGES_DIR` below is the ONLY escaping read the gate can see in
- *    plugin-auth, so it is what holds the package's declared radius
- *    (`packages/**\/*.object.ts`) and the matching `turbo.json` inputs.
- *    Deriving the root any other way — the `findUp` walk from `process.cwd()`
- *    that `rate-limit-storage-isolation.test.ts` and
- *    `member-role-canonical.test.ts` use — makes this radius INVISIBLE to that
- *    gate, which then reports the declaration as stale and asks for its
- *    removal. Losing it would put this sweep back in #7802's blind spot:
- *    turbo would replay a cached green for a diff that changed another
- *    package's object file. Measured both ways.
+ *  - `check:cross-package-test-inputs` detects an escaping read STATICALLY, by
+ *    resolving the seed expression, and `__dirname` is one of the spellings it
+ *    resolves. Which spellings those are is published rather than restated
+ *    here: `RECOGNISED_PATH_SPELLINGS` in the detector, printed in its failure
+ *    text and mirrored in AGENTS.md. Read it there — the set has been widened
+ *    twice (#8995, #9763) since this note was first written, and a count
+ *    copied into a comment goes stale silently while the published list cannot.
+ *    This file's walk of `PACKAGES_DIR` below is what holds the
+ *    `packages/**\/*.object.ts` half of plugin-auth's declared radius and the
+ *    matching `turbo.json` inputs: it is the only escaping read in this package
+ *    that reaches an object file anywhere in the tree. Deriving the root any
+ *    other way — the `findUp` walk from `process.cwd()` that
+ *    `member-role-canonical.test.ts` uses — makes this radius INVISIBLE to
+ *    that gate, and note what that does NOT do any more: since #10161 gave
+ *    plugin-auth a second visible escaping test
+ *    (`rate-limit-storage-isolation.test.ts`, whose roster is the two consumer
+ *    directories, not this glob), the package no longer goes stale-empty, so
+ *    the gate stays GREEN and this glob is simply held by nothing. Measured on
+ *    ceb33a9f12 by reseeding this file from `process.cwd()`: `--list-escapes`
+ *    dropped this file and `--verify` still exited 0. Losing the seed would put
+ *    this sweep back in #7802's blind spot with no gate reporting it: turbo
+ *    would replay a cached green for a diff that changed another package's
+ *    object file.
  */
 const HERE = __dirname;
 /** …/packages/plugins/plugin-auth/src → repo root */

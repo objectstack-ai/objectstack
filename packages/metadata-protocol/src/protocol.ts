@@ -5105,7 +5105,11 @@ export class ObjectStackProtocolImplementation implements
      * layer on top of spec validation).
      *
      * `type` may be either a singular (`'view'`) or plural (`'views'`)
-     * identifier; the underlying `getMetaItems` already normalises.
+     * identifier; the underlying `getMetaItems` already normalises. An
+     * UNRECOGNISED spelling of a declared type (`'viewes'`) is refused with
+     * the 400 `getMetaItems` raises for it, not swallowed into a
+     * "scanned 1 type, 0 problems" answer — see the [#8924] note in the
+     * per-type catch below.
      *
      * Implementation note: leverages the `_diagnostics` already
      * decorated onto items by `getMetaItems()` to avoid running
@@ -5203,6 +5207,49 @@ export class ObjectStackProtocolImplementation implements
                 // nobody can re-ask, while a false "real" costs one 503 the
                 // caller can retry.
                 if ((error as { status?: unknown } | null | undefined)?.status === 503) throw error;
+                // [#8924] TWO error classes leave through this catch — the 503
+                // above and the 400 below — under ONE rule: an error the
+                // producer already stamped with a status is a CLASSIFIED
+                // VERDICT, and this sweep may not overrule a verdict into
+                // silence. Everything else is a genuine listing failure nobody
+                // classified, and for those the benign skip below is the ruled
+                // disposition (maintainer, 2026-08-20, option 1).
+                //
+                //  * 503 (#8855, above): the store outage — "whether rows
+                //    exist is UNKNOWN". Swallowing it published an outage as
+                //    "0 problems".
+                //  * 400 (#8924, here): the request-classification refusal
+                //    `canonicalizeMetaRequestType` raises INSIDE `getMetaItems`
+                //    (`status: 400`, `code: 'INVALID_REQUEST'`) for an
+                //    unrecognised spelling of a DECLARED type (`fieldes`,
+                //    `viewes`, `capabilitys`, …). Only the `request.type` arm
+                //    can produce it — the full-sweep arm's `targetTypes` come
+                //    canonical out of the registry — so rethrowing it cannot
+                //    fail a whole-corpus sweep. Swallowing it answered
+                //    `200 {"scannedTypes":1,"stats":{}}` — "scanned 1 type,
+                //    no issues" — to a spelling every sibling `/meta` door
+                //    refuses with a 400 that names both accepted spellings
+                //    (measured: 27 such spellings on a booted kernel, while
+                //    objectui's DiagnosticsPage paints that payload as "All
+                //    clear"). The producer classified the caller's mistake;
+                //    the caller gets to hear it. Declared = enforced.
+                //
+                // What still takes the `continue`: a listing failure with no
+                // status, or any status that is not one of the two verdicts
+                // above (the registry listing is not a guarded read, so its
+                // failures arrive unclassified). That skip is genuine — a
+                // kernel scope that cannot enumerate one type must not fail
+                // the whole governance sweep — and measured to have NO
+                // producer in kernel scope today (six booted scopes, zero
+                // skips), which is exactly why it stays a guard rather than
+                // becoming a payload field (`skippedTypes` was considered and
+                // ruled out as motiveless).
+                //
+                // By `status` and not by `code`, mirroring the 503 test above
+                // and its direction argument: a false "real" is loud and
+                // correctable at the caller; a false "benign" silently
+                // mis-answers a question nobody re-asks.
+                if ((error as { status?: unknown } | null | undefined)?.status === 400) throw error;
                 continue;
             }
             const items: any[] = Array.isArray(listed?.items)

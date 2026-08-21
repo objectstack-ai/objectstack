@@ -279,6 +279,7 @@ import ts from 'typescript';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(ROOT, 'scripts', 'engine-double-contract.baseline.json');
 const PINNED_LEDGER_PATH = join(ROOT, 'scripts', 'engine-double-contract.pinned.json');
+const SEAM_LEDGER_PATH = join(ROOT, 'scripts', 'engine-double-contract.seams.json');
 const SCAN_ROOTS = ['packages', 'examples'];
 
 /**
@@ -1385,8 +1386,14 @@ function censusReport() {
 //      body records the change as landed. A function returning nothing cannot
 //      commit that error however missing the row was.
 //
-// Four seams, zero exemptions, and no ledger -- which is the whole reason this
-// invariant is worth having and the per-double one was not.
+// A handful of seams, zero exemptions and no DEBT ledger -- which is the whole
+// reason this invariant is worth having and the per-double one was not. The
+// live count is deliberately not written here: `--write` keeps the population
+// in `engine-double-contract.seams.json` and every run prints it, because every
+// figure this file's prose once carried about its own corpus drifted unnoticed
+// (#9943). ⚠️ That population ledger (#9708, below) is not an exemption ledger
+// and reads the opposite way to the DEBT baseline: it records WHICH seams
+// exist, never that any of them is accepted as looser than this invariant asks.
 //
 // ## What the seams must reach, and why it is REFUSAL rather than "probe"
 //
@@ -1445,6 +1452,56 @@ function censusReport() {
 // seam list actually went both-directions complete. `refusal !== 'shared'`
 // now fails on EITHER a local mint or no refusal at all: a future fifth seam
 // that reinvents the envelope reddens here instead of shipping unnoticed.
+//
+// ## The POPULATION is ratcheted (#9708), and what deciding that cost
+//
+// Everything above judges the seams the scan DISCOVERS. Until #9708 nothing
+// judged the discovery itself except `SEAMS_DISCOVERED`, which fires at ZERO
+// and never at one-fewer-than-yesterday -- and `REFUSES` iterates the
+// discovered set, so a seam that LEAVES the set is judged by nothing at all.
+// Measured by ablation: deleting the whole `remove()` seam from
+// `packages/mcp/src/stdio-data-bridge.ts` took the census down by one and left
+// this script printing OK, exit 0. That is #9680's blind spot exactly, one
+// population over.
+//
+// The card refused to inherit #9680's answer by reflex, so "should a vanished
+// seam be an error, a ledger row, or a distinct verdict" was decided on a
+// MEASUREMENT rather than a preference. This file's own `scanAllSeams`,
+// unmodified, was replayed over 58 daily trees of `origin/main` -- one commit
+// per day, 2026-06-25 through 2026-08-21:
+//
+//    3  MEMBERSHIP changes in 58 days: 2026-06-28 the protocol seams moved
+//       package (objectql -> metadata-protocol); 2026-07-27 `callData` moved
+//       file (http-dispatcher.ts -> action-execution.ts); 2026-08-12 the MCP
+//       stdio bridge ARRIVED, +2 seams
+//    2  further changes were refusal-state transitions (local -> shared), which
+//       SHARED_ONLY already governs and this ledger deliberately does not
+//    0  outright departures: every row that left a key reappeared under another
+//       one in the same sample, so no seam has yet left the population
+//
+// One event a fortnight, and a legitimate one costs a single `--write` commit.
+// Against that, the loss it closes is a site of the #4435/#5138/#5581/#7867
+// family -- four SHIPPED instances of a receipt answered for a write that
+// touched zero rows -- silently ceasing to be judged. Cheap ratchet, expensive
+// miss, so it is built rather than left as a printed integer.
+//
+// What that buys, beyond the ablation the card measured: the ledger is also the
+// scan's ANCHOR. `SEAMS_DISCOVERED` only notices a scan that breaks COMPLETELY;
+// a scan that drifts off one seam -- the shape a rename or a two-hop options
+// build produces -- keeps the other rows and passes it. The ledger names each
+// row, so partial drift reddens with the row's own identity in the message.
+//
+// ⚠️ What this does NOT do is widen the population, and the scope is worth
+// stating because a census scoped by the wrong instrument holds a blind spot no
+// amount of re-running finds (#8999): `productionFiles()` walks `packages/`
+// only, while the DOUBLE side of this gate walks `SCAN_ROOTS` (`packages`,
+// `examples`). MEASURED 2026-08-21 with the same walk widened to `examples`,
+// `apps`, `skills` and `scripts`: the SAME rows, zero extra -- a controlled
+// zero, since the widened walk still finds all of the known ones rather than
+// silently returning nothing. Filed as #10496 rather than folded in here: a
+// seam landing in an example app tomorrow is outside this population and
+// therefore outside its ledger too, and that is a scope decision rather than a
+// governance one.
 
 /** Where the repo's ONE not-found envelope may be imported from (#7867). */
 const ENVELOPE_MODULES = [
@@ -1467,6 +1524,19 @@ const ENVELOPE_SYMBOLS = new Set(['recordNotFoundError']);
  * one, kept so a consumer re-inventing them is still judged.
  */
 const RECEIPT_KEYS = new Set(['success', 'record', 'deleted', 'updated', 'removed']);
+
+/**
+ * The verbs the seam scan reads.
+ *
+ * Named rather than spelled inline in `scanSeams` because the seam ledger
+ * (#9708) has to reject an entry naming a verb this scan never reaches -- such
+ * a row can never lose its seam, so it would record a population nothing
+ * checks. That check and the scan must read ONE constant or they can disagree.
+ * It is deliberately its own set and not `SCANNED_VERBS`: that one is derived
+ * from `SLICES`, which is the TEST DOUBLE side, and the two populations are
+ * free to diverge.
+ */
+const SEAM_VERBS = new Set(['update', 'delete']);
 
 /** Production sources: the seams live in `src`, never in a test. */
 function productionFiles() {
@@ -1743,7 +1813,7 @@ function scanSeams(fileName, text) {
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
       && ts.isIdentifier(n.expression.name)) {
       const verb = n.expression.name.text;
-      if (verb === 'update' || verb === 'delete') {
+      if (SEAM_VERBS.has(verb)) {
         const fn = enclosingFunction(n);
         if (fn) {
           const bindings = localWhereIdBindings(fn);
@@ -1813,6 +1883,258 @@ function scanAllSeams() {
   }
   return found;
 }
+
+// ── The SEAM POPULATION ledger (#9708) ──────────────────────────────────────
+//
+// Why the population is ratcheted at all, the 58-day measurement that chose
+// this shape over a bare verdict, and what it deliberately leaves outside are
+// in the CONSUMER SEAMS header above. The mechanism here is #9680's, re-keyed
+// for this population: rows carry identity, only `--write` moves them, and a
+// row that disappears names itself instead of shrinking an integer.
+
+/**
+ * The (file, fn, verb) key for every map in this section.
+ *
+ * Keyed on the FUNCTION and not on the file alone, because `callData` is one
+ * function holding both a by-id update and a by-id delete while
+ * `stdio-data-bridge.ts` holds two different functions: a file-keyed ledger
+ * could not separate "one of this file's two seams left" from "the file
+ * changed shape". `JSON.stringify` of the triple for the reason `pairKey`
+ * gives -- no separator to collide on.
+ *
+ * Deliberately NOT keyed on the LINE. A seam's line moves on every edit above
+ * it, so a line-keyed ledger would demand a regeneration for changes that
+ * touched no seam, and a ledger regenerated reflexively is a number nobody
+ * reads -- the state this card exists to leave.
+ */
+const seamKey = (file, fn, verb) => JSON.stringify([file, fn, verb]);
+
+/**
+ * Every function-ish NAME a source file declares.
+ *
+ * Its whole job is to separate "the function was renamed or deleted" from "the
+ * function is still there and the scan stopped reading it as a seam" -- two
+ * losses that want opposite remedies, and the second is the blind spot this
+ * ledger exists for.
+ *
+ * So it has to reach every shape a live seam actually takes, and they are not
+ * all one shape: `callData` is a top-level `export async function`, while
+ * `protocol.updateData`/`deleteData` and the MCP bridge's `update`/`remove`
+ * are OBJECT LITERAL methods -- which neither `localFunctions` (top-level
+ * bindings) nor `classMethods` (class bodies) sees. A walker missing them
+ * would classify every loss as `function-removed`: the quieter story, told
+ * about the louder defect. The self-test drives it against the real tree for
+ * exactly that reason.
+ */
+function declaredFunctionNames(sourceFile) {
+  const names = new Set();
+  const nameText = (nm) => (nm && (ts.isIdentifier(nm) || ts.isStringLiteral(nm)) ? nm.text : null);
+  const visit = (n) => {
+    if (ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) {
+      const nm = nameText(n.name);
+      if (nm) names.add(nm);
+    }
+    if (ts.isPropertyAssignment(n) || ts.isPropertyDeclaration(n) || ts.isVariableDeclaration(n)) {
+      const nm = nameText(n.name);
+      if (nm && n.initializer
+        && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))) names.add(nm);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sourceFile);
+  return names;
+}
+
+/** The disk half of the above: does `file` still declare a function named `fn`? */
+function fileDeclaresFunction(file, fn) {
+  const abs = join(ROOT, file);
+  if (!existsSync(abs)) return false;
+  const sf = ts.createSourceFile(file, readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  return declaredFunctionNames(sf).has(fn);
+}
+
+/**
+ * The discovered seam population as (file, fn, verb, seams) rows, sorted for a
+ * stable diff.
+ *
+ * Counted per key rather than recorded as membership, for `censusPinned`'s
+ * reason at this population's grain: two same-named functions in one file
+ * (an object literal and a class, say) share a key, and membership alone could
+ * not tell that one of them stopped being a seam.
+ */
+function censusSeams(seamFiles) {
+  const counts = new Map();
+  for (const { file, seams } of seamFiles) {
+    for (const s of seams) {
+      const k = seamKey(file, s.fn, s.verb);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
+  const rows = [...counts].map(([k, seams]) => {
+    const [file, fn, verb] = JSON.parse(k);
+    return { file, fn, verb, seams };
+  });
+  rows.sort((a, b) => (a.file !== b.file ? a.file.localeCompare(b.file)
+    : a.fn !== b.fn ? a.fn.localeCompare(b.fn) : a.verb.localeCompare(b.verb)));
+  return rows;
+}
+
+/**
+ * The seam ledger. A missing file reads as empty so a fresh checkout
+ * bootstraps through `--write` rather than crashing, exactly as `readBaseline`
+ * and `readPinnedLedger` do.
+ */
+function readSeamLedger() {
+  if (!existsSync(SEAM_LEDGER_PATH)) return { entries: [] };
+  return JSON.parse(readFileSync(SEAM_LEDGER_PATH, 'utf8'));
+}
+
+/**
+ * Which world a lost seam is in. A pure function so the self-test can drive
+ * all four without a filesystem full of fixtures.
+ *
+ * Order matters: a file that is gone cannot also have "renamed a function", so
+ * disk is asked first; then whether the function is declared at all, which is
+ * the ordinary refactor; then whether the scan still reads ANY seam under that
+ * name. That last split is the point of the whole classifier -- a function
+ * that is still on disk under its own name and no longer discovered is the one
+ * loss that may mean the scan drifted rather than the seam left.
+ */
+function classifySeamLoss({ onDisk, fnDeclared, discovered }) {
+  if (!onDisk) return 'file-removed';
+  if (!fnDeclared) return 'function-removed';
+  if (discovered === 0) return 'unrecognised';
+  return 'sites-removed';
+}
+
+const SEAM_REGEN = 'node scripts/check-engine-double-contract.mjs --write';
+
+/**
+ * SEAMS_RETAINED's errors, as a pure function of the census and the ledger.
+ *
+ * `onDisk` and `fnDeclared` are injected so the self-test can drive every loss
+ * world without creating and deleting real files.
+ */
+function seamsRetainedErrors(census, ledger, ledgerExists, onDisk, fnDeclared) {
+  const errors = [];
+
+  // Bootstrap, for `retainedErrors`' reason: without it a missing artifact
+  // reports one "not in the ledger" error per seam and buries the one-line fix.
+  if (!ledgerExists) {
+    return [
+      `SEAMS_RETAINED: ${relative(ROOT, SEAM_LEDGER_PATH)} is missing. That file IS the consumer-seam `
+        + 'population; without it this gate is back to printing an integer nobody compares, which is '
+        + `the #9708 defect. Bootstrap it with \`${SEAM_REGEN}\` and commit it.`,
+    ];
+  }
+
+  const found = new Map(census.map((r) => [seamKey(r.file, r.fn, r.verb), r.seams]));
+  const recorded = new Map();
+
+  for (const entry of ledger.entries ?? []) {
+    if (!SEAM_VERBS.has(entry.verb)) {
+      errors.push(
+        `SEAMS_RETAINED: seam-ledger entry for ${entry.file} names verb ${JSON.stringify(entry.verb)}, `
+          + `which the seam scan does not read (known: ${[...SEAM_VERBS].join(', ')}). An entry no scan `
+          + 'reaches can never lose its seam, so it records a population that cannot be checked — fix '
+          + 'the verb or delete the entry.',
+      );
+      continue;
+    }
+    recorded.set(seamKey(entry.file, entry.fn, entry.verb), entry.seams);
+  }
+
+  // ── The loss direction: a seam the ledger records that the scan no longer sees.
+  for (const [k, was] of recorded) {
+    const [file, fn, verb] = JSON.parse(k);
+    const now = found.get(k) ?? 0;
+    if (now >= was) continue;
+
+    const world = classifySeamLoss({
+      onDisk: onDisk(file),
+      fnDeclared: fnDeclared(file, fn),
+      discovered: now,
+    });
+    const head = `SEAMS_RETAINED [${verb}]: ${file}`;
+
+    if (world === 'file-removed') {
+      errors.push(
+        `${head} is gone from disk, and the seam ledger still records ${fn}() there as a by-id `
+          + `${verb} seam. A deleted source file is a LEGITIMATE decrease: run \`${SEAM_REGEN}\` and `
+          + 'commit the ledger. There is no number to choose and no judgement to make — the diff '
+          + 'records which seam left, which is the review signal a printed census could never carry.',
+      );
+    } else if (world === 'function-removed') {
+      errors.push(
+        `${head} is still on disk but declares no function named ${fn}() any more, while the seam `
+          + `ledger records a by-id ${verb} seam there. A rename or a refactor is a legitimate `
+          + 'decrease and the ordinary case — but read the new spelling first and confirm it still '
+          + 'refuses before it answers, because while it is outside the population nothing in this '
+          + `gate is judging it. Then run \`${SEAM_REGEN}\` and commit, so the ledger diff records `
+          + 'the move rather than absorbing it.',
+      );
+    } else if (world === 'unrecognised') {
+      errors.push(
+        `${head} still declares ${fn}(), and the seam scan no longer reads a by-id ${verb} seam in `
+          + 'it. This is the loss this ledger exists for, and the one to READ before regenerating. '
+          + 'Either the by-id write or the receipt genuinely went away — in which case the function '
+          + 'is no longer a seam and the decrease is real — or the seam is still there in a spelling '
+          + 'the three conjuncts no longer match, in which case REFUSES has silently stopped judging '
+          + 'it and the next change that drops its refusal ships unseen (#4435/#5138/#5581/#7867 are '
+          + 'four shipped instances of exactly that). If it still performs a by-id write on a '
+          + 'caller-supplied id and still answers a receipt, teach the scan its spelling and add the '
+          + `case to \`--self-test\`; do NOT run \`${SEAM_REGEN}\`, which would record the blind spot `
+          + 'as intended.',
+      );
+    } else {
+      errors.push(
+        `${head} holds ${now} function(s) named ${fn}() performing a by-id ${verb} seam, down from `
+          + `the ${was} the seam ledger records. Same-named functions in one file share a ledger row, `
+          + 'so one of them stopped being a seam while another still is — read which, then either '
+          + `restore it or run \`${SEAM_REGEN}\` and commit so the diff records the loss.`,
+      );
+    }
+  }
+
+  // ── The growth direction: a seam the ledger does not yet know about.
+  //
+  // An error rather than a silent accept, for `retainedErrors`' reason: a
+  // ledger touched only on removals is never touched at all, and every seam
+  // that arrived after it was written would sit outside the ratchet forever —
+  // this card's blind spot, re-opened on the newest code. Measured over the 58
+  // days to 2026-08-21, two seams ARRIVED and none left, so the growth
+  // direction is the one that actually fires.
+  for (const row of census) {
+    const was = recorded.get(seamKey(row.file, row.fn, row.verb));
+    if (was === undefined) {
+      errors.push(
+        `SEAMS_RETAINED [${row.verb}]: ${row.file} — ${row.fn}() performs a by-id ${row.verb} on a `
+          + 'caller-supplied id and answers a receipt, and the seam ledger does not record it. A NEW '
+          + 'seam is not a defect and nothing is wrong with your change: SHARED_ONLY above has '
+          + 'already judged whether it refuses. The ledger just has to learn the seam exists, or its '
+          + `disappearance is the one thing this gate will not see. Run \`${SEAM_REGEN}\` and commit.`,
+      );
+    } else if (row.seams > was) {
+      errors.push(
+        `SEAMS_RETAINED [${row.verb}]: ${row.file} now holds ${row.seams} by-id ${row.verb} seam(s) `
+          + `named ${row.fn}(), ledger records ${was}. The population grew, which is not a problem in `
+          + `itself — run \`${SEAM_REGEN}\` and commit so the new seam is ratcheted too.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+const SEAM_LEDGER_COMMENT =
+  'GENERATED — the consumer-seam population of check-engine-double-contract.mjs (#9708). Regenerate '
+  + 'with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one '
+  + '(file, fn, verb) the seam scan discovers: a by-id write on a caller-supplied id, in a function '
+  + 'that answers a receipt. It records WHICH seams exist — never that any of them is accepted as '
+  + 'looser than the SHARED_ONLY invariant asks, which is what the shrink-only '
+  + 'engine-double-contract.baseline.json is for. A row that disappears is a seam that left the '
+  + 'population, and while it is outside REFUSES nothing judges it: read a removal in this file\'s '
+  + 'diff as a governance loss and check it was intended.';
 
 // ── Baseline ────────────────────────────────────────────────────────────────
 
@@ -2312,7 +2634,9 @@ function audit() {
   // rather than a quiet zero: REFUSES iterates the discovered set, so a scan
   // that silently stops matching (a seam refactored to a shape the three
   // conjuncts no longer read) makes this script print OK while checking
-  // nothing. Four seams is what the tree measured; zero is a broken scan.
+  // nothing. A non-empty population is what every tree since #8194 has
+  // measured, and SEAMS_RETAINED below names each member; zero is a broken
+  // scan, which is why the two verdicts are separate rather than one.
   if (seamCount === 0) {
     errors.push(
       'SEAMS_DISCOVERED: the consumer-seam scan found no by-id write seam anywhere in '
@@ -2345,7 +2669,22 @@ function audit() {
     }
   }
 
-  return { slices, baseline, errors, seamFiles, seamCount, census, pinnedLedger };
+  // SEAMS_RETAINED (#9708) — the discovered seam population is enumerated, not
+  // counted. Runs AFTER SHARED_ONLY because it judges a different thing: that
+  // one asks whether each discovered seam refuses, this one asks whether the
+  // set of discovered seams is still the set the repo agreed to. Without it a
+  // seam leaving the set is judged by nothing, since REFUSES only ever iterates
+  // what discovery hands it.
+  const seamCensus = censusSeams(seamFiles);
+  errors.push(...seamsRetainedErrors(
+    seamCensus,
+    readSeamLedger(),
+    existsSync(SEAM_LEDGER_PATH),
+    (file) => existsSync(join(ROOT, file)),
+    fileDeclaresFunction,
+  ));
+
+  return { slices, baseline, errors, seamFiles, seamCount, seamCensus, census, pinnedLedger };
 }
 
 const PINNED_LEDGER_COMMENT =
@@ -2367,7 +2706,7 @@ const PINNED_LEDGER_COMMENT =
  * regenerate, rather than meeting it in review — or not at all.
  */
 function writeLedger() {
-  const { slices } = audit();
+  const { slices, seamFiles } = audit();
   const census = censusPinned(slices);
   const before = readPinnedLedger();
   const was = new Map((before.entries ?? []).map((e) => [pairKey(e.file, e.verb), e.pinned]));
@@ -2399,10 +2738,55 @@ function writeLedger() {
     `\ncheck-engine-double-contract --write: ${census.length} (file, verb) row(s), `
       + `${gains} added or grown, ${losses.length} lost.\n`,
   );
+
+  writeSeamLedger(seamFiles);
+}
+
+/**
+ * Regenerate the SEAM POPULATION ledger (#9708).
+ *
+ * Written by the SAME `--write` as the pinned ledger, deliberately: two
+ * regeneration commands for one gate is how a second artifact goes stale while
+ * every message about it says "run --write". It prints its losses first, for
+ * `writeLedger`'s reason — the author reads which seam left at the moment they
+ * record the loss, rather than meeting it in review or not at all.
+ */
+function writeSeamLedger(seamFiles) {
+  const census = censusSeams(seamFiles);
+  const before = readSeamLedger();
+  const was = new Map((before.entries ?? []).map((e) => [seamKey(e.file, e.fn, e.verb), e.seams]));
+  const now = new Map(census.map((r) => [seamKey(r.file, r.fn, r.verb), r.seams]));
+
+  const losses = [];
+  for (const [k, n] of was) {
+    const after = now.get(k) ?? 0;
+    const [file, fn, verb] = JSON.parse(k);
+    if (after < n) losses.push(`[${verb}] ${file} — ${fn}(): ${n} seam(s) -> ${after}`);
+  }
+  const gains = [...now].filter(([k, n]) => n > (was.get(k) ?? 0)).length;
+
+  writeFileSync(
+    SEAM_LEDGER_PATH,
+    `${JSON.stringify({ $comment: SEAM_LEDGER_COMMENT, entries: census }, null, 2)}\n`,
+  );
+
+  if (losses.length) {
+    console.log(`  ⛔ RECORDING ${losses.length} SEAM LOSS(ES) — read these before you commit:`);
+    for (const l of losses) console.log(`     - ${l}`);
+    console.log('     Each line is a consumer seam this gate will no longer judge. If the function');
+    console.log('     is still performing a by-id write and still answering a receipt, it left the');
+    console.log('     population because the SCAN stopped reading it — fix the scan, not the ledger.');
+  } else {
+    console.log('  No seam losses — this regeneration only records new seams.');
+  }
+  console.log(
+    `\ncheck-engine-double-contract --write: ${census.length} seam row(s), `
+      + `${gains} added or grown, ${losses.length} lost.\n`,
+  );
 }
 
 function report() {
-  const { slices, baseline, errors, seamFiles, seamCount, census } = audit();
+  const { slices, baseline, errors, seamFiles, seamCount, seamCensus, census } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -2421,6 +2805,26 @@ function report() {
     `consumer seams: ${seamCount} in ${seamFiles.length} source file(s) — ${shared} refusing through `
       + `recordNotFoundError, ${local} through a locally minted error, `
       + `${seamCount - shared - local} not refusing at all.`,
+  );
+
+  // The seam list, refusal spelling included, printed on EVERY run — green or
+  // red. It used to print only after the failure branch below, which made the
+  // whole population invisible exactly when a reader was looking hardest; the
+  // UNRECOGNISED verdict states the same reasoning a few lines down. Since
+  // #9708 it is also the list a SEAMS_RETAINED error is about, so a reader
+  // meeting one needs it in front of them rather than after an exit.
+  for (const { file, seams } of seamFiles) {
+    for (const s of seams) {
+      console.log(`  seam [${s.refusal ?? 'NONE'}]  ${file}:${s.line}  ${s.fn}() — by-id ${s.verb}`);
+    }
+  }
+  // Say that the population is RATCHETED, not merely printed — the distinction
+  // #9680 had to add on the pinned side for the same reason: before it, the
+  // count was the only trace a vanished member left and a reader had no way to
+  // tell a checked number from a reported one.
+  console.log(
+    `consumer-seam population: ${seamCensus.length} row(s), ratcheted against the SEAMS ledger `
+      + '(#9708) — a seam that leaves the population names itself.',
   );
   console.log('');
 
@@ -2455,17 +2859,6 @@ function report() {
   for (const { slice, found } of slices) {
     for (const f of found.filter((f) => f.doubles.some((d) => d.pinned))) {
       console.log(`  pinned [${slice.verb}]  ${f.file}`);
-    }
-  }
-
-  // The seam list is printed in full, refusal spelling included. It is four
-  // rows, it is the whole subject of the #8194 invariant, and a `local` row is
-  // how the one remaining divergence stays visible without a ledger entry
-  // pretending it is accepted.
-  if (seamFiles.length) console.log('');
-  for (const { file, seams } of seamFiles) {
-    for (const s of seams) {
-      console.log(`  seam [${s.refusal ?? 'NONE'}]  ${file}:${s.line}  ${s.fn}() — by-id ${s.verb}`);
     }
   }
 
@@ -3421,6 +3814,151 @@ class Svc {
     dcount([['y.test.ts', 'delete', 1]]), onDisk);
   expect('a SWAP (one pin lost, one gained, total unchanged) is reported both ways',
     swap.length === 2 && anyOf(swap, 'x.test.ts') && anyOf(swap, 'y.test.ts'));
+
+
+  // ── SEAMS_RETAINED (#9708): the seam POPULATION is enumerated, not counted ──
+  //
+  // Same plan as RETAINED above: the invariant is built from pure functions, so
+  // every loss world is driven without creating and deleting real files, and
+  // each assertion has a control that fails if the predicate under it started
+  // approving everything.
+  const seamLedgerOf = (rows) => ({ entries: rows.map(([file, fn, verb, seams]) => ({ file, fn, verb, seams: seams ?? 1 })) });
+  const seamCensusOf = (rows) => rows.map(([file, fn, verb, seams]) => ({ file, fn, verb, seams: seams ?? 1 }));
+  const declared = () => true;
+  const notDeclared = () => false;
+
+  // The census reads the scan's own output shape, and it must carry IDENTITY:
+  // a ledger holding a total could not express the move this population has
+  // actually made twice (2026-06-28, 2026-07-27 — see the header), where one
+  // key leaves and another arrives with the count unchanged.
+  const twoSeamFiles = [{ file: 'a.ts', seams: [{ fn: 'f', verb: 'update' }, { fn: 'f', verb: 'delete' }] }];
+  expect('censusSeams keys on (file, fn, verb), so one function with two verbs is two rows',
+    censusSeams(twoSeamFiles).length === 2);
+  expect('censusSeams counts same-named functions in one file into one row',
+    censusSeams([{ file: 'a.ts', seams: [{ fn: 'f', verb: 'update' }, { fn: 'f', verb: 'update' }] }])
+      .length === 1
+    && censusSeams([{ file: 'a.ts', seams: [{ fn: 'f', verb: 'update' }, { fn: 'f', verb: 'update' }] }])[0].seams === 2);
+  expect('censusSeams rows carry file identity, not just a total',
+    censusSeams(twoSeamFiles)[0].file === 'a.ts' && typeof censusSeams(twoSeamFiles)[0].fn === 'string');
+  expect('censusSeams does NOT record the line, so an unrelated edit above a seam cannot churn the ledger',
+    Object.keys(censusSeams([{ file: 'a.ts', seams: [{ fn: 'f', verb: 'update', line: 42 }] }])[0])
+      .includes('line') === false);
+
+  // ── The four loss worlds, each separated from its neighbours.
+  expect('a seam file gone from disk classifies as file-removed',
+    classifySeamLoss({ onDisk: false, fnDeclared: false, discovered: 0 }) === 'file-removed');
+  expect('a live file no longer declaring the function classifies as function-removed',
+    classifySeamLoss({ onDisk: true, fnDeclared: false, discovered: 0 }) === 'function-removed');
+  expect('a function still declared and no longer discovered classifies as unrecognised',
+    classifySeamLoss({ onDisk: true, fnDeclared: true, discovered: 0 }) === 'unrecognised');
+  expect('fewer discovered than recorded, with the name still there, classifies as sites-removed',
+    classifySeamLoss({ onDisk: true, fnDeclared: true, discovered: 1 }) === 'sites-removed');
+
+  // ── The clean direction, first: without it every assertion below could pass
+  // on a function that always errors (#4118's twin).
+  const cleanSeamLedger = seamLedgerOf([['a.ts', 'f', 'update']]);
+  const cleanSeamCensus = seamCensusOf([['a.ts', 'f', 'update']]);
+  expect('a seam ledger matching the census is silent',
+    seamsRetainedErrors(cleanSeamCensus, cleanSeamLedger, LEDGER_OK, onDisk, declared).length === 0);
+
+  // ── Each loss world reaches its OWN message, and never a neighbour's.
+  const seamFileGone = seamsRetainedErrors([], cleanSeamLedger, LEDGER_OK, noDisk, notDeclared);
+  expect('a deleted source file is reported as a legitimate decrease',
+    seamFileGone.length === 1 && anyOf(seamFileGone, 'gone from disk')
+      && anyOf(seamFileGone, 'LEGITIMATE decrease'));
+
+  const seamFnGone = seamsRetainedErrors([], cleanSeamLedger, LEDGER_OK, onDisk, notDeclared);
+  expect('a renamed-away function is reported as a rename, on a file still on disk',
+    seamFnGone.length === 1 && anyOf(seamFnGone, 'declares no function named')
+      && !anyOf(seamFnGone, 'gone from disk'));
+
+  // ⚠️ THE DELIVERABLE'S PROOF (#9708's whole point): the function is still
+  // there, under its own name, and the scan no longer reads a seam in it. This
+  // is the world where a regeneration would record a blind spot as intended,
+  // so the message must refuse the remedy the other three offer.
+  const seamUnread = seamsRetainedErrors([], cleanSeamLedger, LEDGER_OK, onDisk, declared);
+  expect('a seam the scan stopped reading, on a function still declared, is reported as unrecognised',
+    seamUnread.length === 1 && anyOf(seamUnread, 'still declares')
+      && anyOf(seamUnread, 'the loss this ledger exists for'));
+  expect('the unrecognised message REFUSES the regeneration remedy (the other three offer it)',
+    anyOf(seamUnread, 'do NOT run') && !anyOf(seamUnread, 'LEGITIMATE decrease'));
+
+  const seamSitesGone = seamsRetainedErrors(seamCensusOf([['a.ts', 'f', 'update', 1]]),
+    seamLedgerOf([['a.ts', 'f', 'update', 2]]), LEDGER_OK, onDisk, declared);
+  expect('one of two same-named seams leaving is reported at that grain',
+    seamSitesGone.length === 1 && anyOf(seamSitesGone, 'down from the 2'));
+
+  // ── The growth direction — the one measured to fire most often (2 arrivals,
+  // 0 departures in the 58 days to 2026-08-21).
+  const seamNew = seamsRetainedErrors(cleanSeamCensus, seamLedgerOf([]), LEDGER_OK, onDisk, declared);
+  expect('a seam the ledger does not record is reported',
+    seamNew.length === 1 && anyOf(seamNew, 'does not record it'));
+  expect('a new seam is not reported as anyone’s mistake',
+    anyOf(seamNew, 'nothing is wrong with your change'));
+
+  const seamGrew = seamsRetainedErrors(seamCensusOf([['a.ts', 'f', 'update', 2]]), cleanSeamLedger,
+    LEDGER_OK, onDisk, declared);
+  expect('a file holding MORE seams than the ledger records is reported',
+    seamGrew.length === 1 && anyOf(seamGrew, 'The population grew'));
+
+  // ── A MOVE — the shape this population has actually taken twice — must be
+  // reported from both ends, or a rename reads as a silent swap.
+  const seamMoved = seamsRetainedErrors(seamCensusOf([['b.ts', 'f', 'update']]), cleanSeamLedger,
+    LEDGER_OK, onDisk, notDeclared);
+  expect('a seam that MOVED file is reported as both a loss and an arrival',
+    seamMoved.length === 2 && anyOf(seamMoved, 'a.ts') && anyOf(seamMoved, 'b.ts'));
+
+  // ── Bootstrap: one error for a missing artifact, not one per seam.
+  const seamMissing = seamsRetainedErrors(
+    seamCensusOf([['a.ts', 'f', 'update'], ['b.ts', 'g', 'delete']]),
+    seamLedgerOf([]), false, onDisk, declared);
+  expect('a missing seam ledger reports exactly one bootstrap error',
+    seamMissing.length === 1 && anyOf(seamMissing, 'is missing'));
+
+  // ── An entry naming a verb the seam scan never reads can never lose its
+  // seam, so it would record a population nothing checks.
+  const seamBadVerb = seamsRetainedErrors([], seamLedgerOf([['a.ts', 'f', 'destroy']]),
+    LEDGER_OK, onDisk, declared);
+  expect('a seam-ledger entry naming an unread verb is rejected',
+    seamBadVerb.length === 1 && anyOf(seamBadVerb, 'the seam scan does not read'));
+  expect('an unread-verb entry is not ALSO reported as a lost seam',
+    !anyOf(seamBadVerb, 'gone from disk') && !anyOf(seamBadVerb, 'still declares'));
+
+  // ── The declaration walker, which is what separates `function-removed` from
+  // `unrecognised`. Both directions on every shape a LIVE seam takes, because
+  // a walker blind to one of them would classify that seam's loss as the
+  // quieter story — and the classifier would still look healthy.
+  const namesOf = (src) => declaredFunctionNames(
+    ts.createSourceFile('d.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS));
+  expect('declaredFunctionNames reads a top-level function declaration (`callData`s shape)',
+    namesOf('export async function callData(deps) { return 1; }').has('callData'));
+  expect('…an OBJECT LITERAL method (`protocol.updateData` / the MCP bridge’s shape)',
+    namesOf('const bridge = { async remove(object, id) { return 1; } };').has('remove'));
+  expect('…a class method',
+    namesOf('class C { async updateData(r) { return 1; } }').has('updateData'));
+  expect('…and an arrow bound to a const',
+    namesOf('const deleteData = async (r) => r;').has('deleteData'));
+  expect('…and does NOT answer for a name the file never declares (the control)',
+    !namesOf('const bridge = { async remove(object, id) { return 1; } };').has('updateData'));
+
+  // ⚠️ The anti-vacuity control the #8999 lesson asks for, and the reason it is
+  // driven against the REAL tree rather than fixtures: every fixture above is
+  // one I wrote to match the walker. If the walker stopped reading the live
+  // seams' shapes, `function-removed` would become the permanent verdict — the
+  // wrong remedy attached to the wrong story, on every loss. So: every row the
+  // scan discovers today must have its function findable in its own file.
+  for (const { file, seams } of seamFiles) {
+    for (const s of seams) {
+      expect(`the declaration walker finds ${s.fn}() in ${file} — else every loss reads as a rename`,
+        fileDeclaresFunction(file, s.fn));
+    }
+  }
+
+  // ⛔ Deliberately NOT asserted here: that the ledger on disk MATCHES the tree.
+  // That is the verdict of the run this self-test gates, and duplicating it
+  // would make a genuine seam removal surface as a self-test failure — the
+  // least legible message available, and the reason the double half of this
+  // file states the same exclusion.
 
   // ── The UNRECOGNISED census (#9747) ────────────────────────────────────────
   //
