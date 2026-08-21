@@ -466,7 +466,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/objectui-range.mjs',
   'scripts/pm/check-governed-prose.mjs',
   'scripts/pm/check-label-desc-cap.mjs',
-  'scripts/pm/check-skill-id-lint.mjs',
   'scripts/pm/check-skill-line-ratchet.mjs',
   'scripts/qa/qa-rollup.mjs',
   'scripts/ts-parse.mjs',
