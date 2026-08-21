@@ -71,12 +71,134 @@ const STALL_CEILING_MS = 20_000;
 /** The seeded row `list('object')` must come back with. */
 const SEEDED_NAME = 'thing';
 
+/** The one table the BARE case's stalled read is issued against. */
+const STALLED_OBJECT = 'sys_metadata';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [#10380] The BARE case's expected error output: WITHHELD from the shared
+//          log, and ASSERTED instead
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// This test PASSES, and its subject is a failure — so it printed three
+// ERROR-shaped features into the shared `Test Core` log on every run:
+//
+//   1. knex's own  `Acquire connection error: …` (+ a `tarn/PendingOperation`
+//      stack), from the client's logger;
+//   2. the driver's `[sql-driver] DATABASE_ERROR — the backend refused a read
+//      on 'sys_metadata'…`, from `SqlDriver.backendStatementFault`;
+//   3. the engine's `ERROR Find operation failed {"object":"sys_metadata",…}`
+//      one frame up (`engine.ts`), carrying the same fault as a stack.
+//
+// Turbo interleaves package logs without attribution, so in that shard log
+// these are indistinguishable from a real failure. Not a hypothetical: they
+// were lifted VERBATIM into a p1 flake signature (#10293) and sent a whole
+// dispatch cycle at the wrong mechanism. Expected-failure noise from a green
+// test is a diagnosis tax on every future red shard.
+//
+// ⛔ What this is NOT is a mute. Silencing alone would make this file BLIND:
+// if the stall ever stopped happening, the log would go quiet and NOTHING
+// would notice — a live pin quietly demoted to a decoration. So each sink
+// below does two things instead of one:
+//
+//   * it withholds ONLY the expected fault — named table AND named reason.
+//     Any other table, any other reason, any other level and any other logger
+//     method is forwarded to the real console untouched;
+//   * it COUNTS what it withheld, and the tests assert the counts. BARE
+//     asserts all three channels fired; AMBIENT asserts that none did, which
+//     is a new false-negative guard in its own right — an ambient read that
+//     silently started stalling would otherwise have its evidence swallowed.
+//
+// ⛔ The pin's own assertions are untouched by all of this. Nothing below
+// reads or relaxes them; this is the console side-effect only.
+
+/** Per-channel tally of what the fixture withheld from the shared log. */
+interface WithheldNoise {
+  /** knex's acquire-timeout notice. */
+  knexAcquire: number;
+  /** The driver's read-exit envelope for {@link STALLED_OBJECT}. */
+  driverRefusal: number;
+  /** The engine frame above it. */
+  engineFind: number;
+}
+
+/**
+ * The three predicates, each pinned to BOTH the table and the reason.
+ *
+ * `engineFind` is deliberately the narrowest of the three: it fires only for a
+ * frame sitting directly above a driver refusal this fixture already
+ * recognised (`pendingRefusals`), so an identically-shaped engine error that
+ * did NOT come from the expected stall still reaches the log with its frame
+ * intact.
+ */
+function newNoiseCapture() {
+  const withheld: WithheldNoise = { knexAcquire: 0, driverRefusal: 0, engineFind: 0 };
+  /** Recognised driver refusals not yet consumed by their engine frame. */
+  let pendingRefusals = 0;
+
+  return {
+    withheld,
+
+    /**
+     * knex's `log.warn`. `SqlDriverConfig` is `Knex.Config &` extras and the
+     * constructor forwards everything it does not itself consume, so this
+     * arrives at knex's `Logger` untouched. ⛔ Only `warn` is overridden —
+     * knex's `debug` / `error` / `deprecate` keep their defaults.
+     */
+    knexWarn: (message: unknown): void => {
+      const line = typeof message === 'string' ? message : String(message);
+      // knex's default `warn` sink is `console.log`; forwarding at `warn` is
+      // if anything louder, never quieter.
+      if (/^Acquire connection error:/.test(line) && /timed out/i.test(line)) {
+        withheld.knexAcquire += 1;
+        return;
+      }
+      console.warn(line);
+    },
+
+    /**
+     * The driver's sink, mirroring the default's `{ warn, error }` shape so
+     * `logDurabilityFailure` still finds an `error` channel to fall back to.
+     */
+    driverLogger: {
+      warn: (msg: string, meta?: unknown): void => {
+        const line = String(msg);
+        if (
+          line.includes(`the backend refused a read on '${STALLED_OBJECT}'`) &&
+          /Timeout acquiring a connection/i.test(line)
+        ) {
+          withheld.driverRefusal += 1;
+          pendingRefusals += 1;
+          return;
+        }
+        console.warn(msg, meta ?? '');
+      },
+      error: (msg: string, meta?: unknown): void => console.error(msg, meta ?? ''),
+    },
+
+    /**
+     * The engine's `error` channel, reached through a Proxy so every OTHER
+     * logger method stays the engine's own.
+     */
+    engineError: (msg: string, err?: unknown, meta?: unknown): boolean => {
+      if (pendingRefusals === 0 || msg !== 'Find operation failed') return false;
+      if ((meta as { object?: string } | undefined)?.object !== STALLED_OBJECT) return false;
+      const detail = String((err as { message?: string } | undefined)?.message ?? '');
+      if (!detail.includes(`refused to run this query for object '${STALLED_OBJECT}'`)) return false;
+      pendingRefusals -= 1;
+      withheld.engineFind += 1;
+      return true;
+    },
+  };
+}
+
 interface Fixture {
   engine: ObjectQL;
   driver: SqlDriver;
   loader: DatabaseLoader;
   /** Every `driver.find` the fixture has observed, and whether it carried a transaction. */
   reads: () => Array<{ object: string; hasTx: boolean }>;
+  /** [#10380] What this fixture withheld from the shared log, per channel. */
+  withheld: WithheldNoise;
 }
 
 let fixture: Fixture | null = null;
@@ -92,13 +214,24 @@ afterEach(async () => {
 });
 
 async function boot(): Promise<Fixture> {
+  // [#10380] Installed BEFORE the driver exists, because knex's logger is
+  // baked into the client at construction.
+  const noise = newNoiseCapture();
+
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
     useNullAsDefault: true,
     // See the header: shortens the wait, not the shape.
     acquireConnectionTimeout: ACQUIRE_MS,
+    // [#10380] Channel 1 of 3 — knex's own `Acquire connection error`.
+    log: { warn: noise.knexWarn },
   });
+  // [#10380] Channel 2 of 3 — the driver's read-exit envelope. Assignment
+  // rather than a constructor option because `logger` is a protected field
+  // with a `console` default; this is the idiom the field's own doc comment
+  // names ("Tests inject a spy") and that ~20 sibling driver suites use.
+  (driver as unknown as { logger: unknown }).logger = noise.driverLogger;
   await driver.initObjects([SysMetadataObject as any]);
 
   // Seeded through the driver rather than the engine: `sys_metadata` is
@@ -113,6 +246,19 @@ async function boot(): Promise<Fixture> {
   });
 
   const engine = new ObjectQL();
+  // [#10380] Channel 3 of 3 — the engine frame above the driver's exit. A
+  // Proxy on `error` ALONE, the idiom `engine-readonly-when-parent.test.ts`
+  // established: every other logger method resolves to the engine's own.
+  const engineLogger = (engine as any).logger;
+  (engine as any).logger = new Proxy(engineLogger, {
+    get: (target: any, key: string) =>
+      key === 'error'
+        ? (msg: string, err?: unknown, meta?: unknown) => {
+            if (noise.engineError(msg, err, meta)) return;
+            target.error(msg, err, meta);
+          }
+        : target[key],
+  });
   engine.registerDriver(driver, true);
   await engine.init();
   // The engine's own proxy, not `engine.registry.registerObject` — the registry
@@ -146,6 +292,7 @@ async function boot(): Promise<Fixture> {
         object: call[0] as string,
         hasTx: (call[2] as { transaction?: unknown } | undefined)?.transaction !== undefined,
       })),
+    withheld: noise.withheld,
   };
   return fixture;
 }
@@ -167,7 +314,7 @@ function assertEffectiveTimeout(driver: SqlDriver): void {
 
 describe('#7842 metadata list under an open transaction: ambient vs bare (real ObjectQL + real SqlDriver)', () => {
   it('AMBIENT — a transaction opened via engine.transaction() is threaded onto the loader read, which completes', async () => {
-    const { engine, driver, loader, reads } = await boot();
+    const { engine, driver, loader, reads, withheld } = await boot();
     assertEffectiveTimeout(driver);
 
     const before = reads().length;
@@ -207,10 +354,18 @@ describe('#7842 metadata list under an open transaction: ambient vs bare (real O
     // And it did not stall on the way: the whole ambient case finishes inside
     // the acquire bound the bare case exhausts.
     expect(elapsed).toBeLessThan(STALL_CEILING_MS);
+
+    // ── [#10380] The capture's own anti-vacuity guard, on the side that is
+    // expected to be SILENT. The ambient path must produce none of the three
+    // features — so if it ever started stalling, the sinks installed for the
+    // bare case would swallow the evidence and this case would still pass on
+    // the assertions above. Asserting the absence closes that.
+    expect(withheld, 'the AMBIENT path must emit no expected-failure noise at all')
+      .toEqual({ knexAcquire: 0, driverRefusal: 0, engineFind: 0 });
   });
 
   it('BARE — a transaction opened directly on the driver is invisible to the ambient store, and the loader read stalls out connection acquisition', async () => {
-    const { engine, driver, loader, reads } = await boot();
+    const { engine, driver, loader, reads, withheld } = await boot();
     assertEffectiveTimeout(driver);
 
     const before = reads().length;
@@ -259,6 +414,20 @@ describe('#7842 metadata list under an open transaction: ambient vs bare (real O
       const bare = reads().slice(before).filter((r) => r.object === 'sys_metadata');
       expect(bare.length).toBeGreaterThan(0);
       expect(bare.every((r) => !r.hasTx)).toBe(true);
+
+      // ── [#10380] The capture is a PIN, not a mute. These three lines used
+      // to reach the shared `Test Core` log out of a PASSING test and were
+      // read there as a real failure; they are withheld now, and asserted
+      // here instead. If the stall stops happening, the log goes quiet AND
+      // these go red — which is exactly the failure mode a bare `console`
+      // mute would have hidden. One assertion per channel so a silent one
+      // names itself.
+      expect(withheld.knexAcquire, "knex's acquire-timeout notice was never emitted")
+        .toBeGreaterThan(0);
+      expect(withheld.driverRefusal, `the driver's read refusal for '${STALLED_OBJECT}' was never emitted`)
+        .toBeGreaterThan(0);
+      expect(withheld.engineFind, "the engine's 'Find operation failed' frame was never emitted")
+        .toBeGreaterThan(0);
     } finally {
       await driver.rollback(trx);
     }

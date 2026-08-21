@@ -107,6 +107,18 @@
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
+// `globToRegExp` decides whether a declared input glob really covers a coupling,
+// so this gate and `check-cross-package-test-inputs` MUST agree about turbo's
+// glob semantics -- `**` spans whole segments, `*` stays inside one.
+//
+// It used to be hand-copied into this file, with the reason recorded in the
+// copy: that module "runs its gate at load time -- importing it would execute a
+// second gate as a side effect of classifying". That was true, and it is no
+// longer: the module's dispatch is behind `isEntrypoint(import.meta.url)`, so
+// importing it is silent and exit-neutral. The reason for the copy is gone, so
+// the copy is too -- one implementation, and no way for the two gates to drift
+// apart on the semantics that decide both their verdicts.
+import { globToRegExp } from './check-cross-package-test-inputs.mjs';
 import { join, resolve, relative, dirname, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -307,40 +319,6 @@ function packagesWithExampleInputs() {
     if (globs.length) declared.set(taskId.slice(0, -'#test'.length), globs);
   }
   return declared;
-}
-
-/**
- * Turbo input-glob semantics: `**` spans whole segments, `*` stays inside one.
- *
- * Mirrored from `globToRegExp` in `check-cross-package-test-inputs.mjs` rather
- * than imported, because that module runs its gate at load time -- importing it
- * would execute a second gate as a side effect of classifying. The duplication
- * is pinned by `--self-test` on both sides; the two must agree, since this is
- * the check that decides whether a declared radius really covers a coupling.
- */
-function globToRegExp(glob) {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        if (glob[i + 2] === '/') {
-          re += '(?:[^/]+/)*';
-          i += 2;
-        } else {
-          re += '.*';
-          i += 1;
-        }
-      } else {
-        re += '[^/]*';
-      }
-    } else if ('.+?^${}()|[]\\/'.includes(c)) {
-      re += `\\${c}`;
-    } else {
-      re += c;
-    }
-  }
-  return new RegExp(`^${re}$`);
 }
 
 /**

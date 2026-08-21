@@ -3148,6 +3148,39 @@ function selfTest() {
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
+  // The sixth instance of the class (#10648), and the worst-shaped one: three
+  // of check-doc-authoring's four roots were bare words (`.claude` survived on
+  // the dotted-dir arm alone), while its SKIP_PATHS carried separators and were
+  // taken. Five of the six paths it declared were therefore EXCLUSIONS, and 383
+  // of its 389 walked files were declared by nothing. The failure printed as a
+  // populated `names:` column, which reads as "declared, just not relevant to
+  // you" rather than as a blind spot — the reason it survived five same-class
+  // fixes without being noticed.
+  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'));
+  // One case per declared root, because a single one passes for a declaration
+  // that dropped the other three — which is the exact shape being fixed. Each
+  // path is reachable ONLY through its root's subtree spelling, never through a
+  // SKIP_PATHS literal.
+  t('the doc-authoring gate reaches the live docs corpus it declares', docAuthoringHints.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
+  t('and the top-level docs guides, which are files rather than a subtree', docAuthoringHints.some((h) => hintCovers(h, 'docs/protocol-upgrade-guide.md')));
+  // ⚠️ This one case does NOT pin the declaration, and says so rather than
+  // reading as though it does: `.claude` is a top-level DOTTED dir, which
+  // `looksPathy` admits and `hintCovers` does not refuse, so the bare ROOTS
+  // entry reaches this path on its own. Measured — deleting `.claude/**` from
+  // the gate leaves this case green, exactly the way check-nul-bytes survives
+  // the ablation above. What it pins is that `.claude` stays reachable AT ALL;
+  // the declaration itself is pinned in the gate's own self-test, which
+  // requires a subtree spelling for every separator-less ROOT.
+  t('and the agent operating manual it took in for the same reason', docAuthoringHints.some((h) => hintCovers(h, '.claude/agents/os-dev.md')));
+  t('and the published skills catalog', docAuthoringHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
+  t('and the content tree', docAuthoringHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  // The negative half, load-bearing for a declaration spanning four roots: a
+  // gate named on EVERY card is the louder version of naming none. These are
+  // the three biggest trees in the repo and none of them is corpus.
+  t('and claims nothing under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  t('nor under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !docAuthoringHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+
   // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
   // only literals were its own baseline artifact and the ref it diffs against,
   // so it scored `silent` for every card in the tree while being REQUIRED in

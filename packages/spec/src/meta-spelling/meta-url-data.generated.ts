@@ -24,6 +24,7 @@ export const META_URL_TO_SINGULAR: Readonly<Record<string, string>> = Object.fre
   "reports": "report",
   "datasets": "dataset",
   "actions": "action",
+  "themes": "theme",
   "flows": "flow",
   "jobs": "job",
   "positions": "position",

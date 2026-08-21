@@ -365,7 +365,7 @@ Permission sets that use the **hierarchy-relative depth scopes** (`own_and_repor
 `@objectstack/security-enterprise`. The open edition ships no resolver, so those scopes
 **fail closed to `own`** — they never widen visibility without it. A grant written to let
 managers read their reports' audit rows will, on an open build, show them only their own.
-See [Access depth](https://docs.objectstack.ai/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
+See [Access depth](https://objectstack.ai/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1).
 
 `sys_comment`'s record-level edit gates resolve the `sharing` service lazily; without it
 those checks degrade to parent-record read visibility. If the engine exposes no middleware
@@ -419,6 +419,6 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [@objectstack/plugin-security](../plugin-security/) — permissions, RLS and field-level security
 - [@objectstack/plugin-auth](../plugin-auth/) — the caller of the `audit` slot's auth-event ingress
-- [`services.audit` reference](https://docs.objectstack.ai/docs/kernel/runtime-services/audit-service) — the slot's
+- [`services.audit` reference](https://objectstack.ai/docs/kernel/runtime-services/audit-service) — the slot's
   full event shape, its never-throws failure posture, and why `SettingsAuditSink.record()`
   is not this slot

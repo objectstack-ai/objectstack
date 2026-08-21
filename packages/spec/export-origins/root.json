@@ -155,6 +155,7 @@
     "defineSharingRule": "src/security/sharing.zod.ts#defineSharingRule (function)",
     "defineSkill": "src/ai/skill.zod.ts#defineSkill (function)",
     "defineStack": "src/stack.zod.ts#defineStack (function)",
+    "defineTheme": "src/ui/theme.zod.ts#defineTheme (function)",
     "defineTool": "src/ai/tool.zod.ts#defineTool (function)",
     "defineTranslationBundle": "src/system/translation.zod.ts#defineTranslationBundle (function)",
     "defineView": "src/ui/view.zod.ts#defineView (function)",

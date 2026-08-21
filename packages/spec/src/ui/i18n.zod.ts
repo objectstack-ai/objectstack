@@ -97,15 +97,20 @@ import { strictObject } from '../shared/strict-object';
  * pages) uses `en` / `zh-CN` / `ja-JP` / `es-ES`, so the constraint costs no
  * real authoring surface.
  *
- * What it rejects is the retired SHAPE, not a list of banned words: the
- * key-reference form always carried `defaultValue` (required on the old
- * `I18nObjectSchema`), which cannot be a language tag. A hypothetical map whose
- * only key is a bare three-letter `key` still parses, because nothing
- * distinguishes it from a language subtag without an ISO-639 registry — and a
- * hand-curated deny-list of English words that "look like" tags would be a
- * claim about languages this schema has no business making.
+ * The two retired spellings are rejected BY NAME, in any combination
+ * (#10492). An earlier revision of this comment argued the opposite — that the
+ * key-reference form "always carried `defaultValue`" and a lone three-letter
+ * `key` was indistinguishable from a language subtag — and that reasoning left
+ * an enforcement hole in the #5055 retirement: `{ key: 'common.save' }` alone
+ * parsed as a "language `key` locale map" and then rendered the raw dotted key
+ * on screen (the resolvers' last resort is the first string value — see the
+ * message below), while the emitted type had already made the same spelling a
+ * compile error (#9925's `key?: never` limb). Runtime and type axis now refuse
+ * the same two names. This is not a deny-list of English words that "look
+ * like" tags — it is exactly the two spellings #5055 retired, nothing else:
+ * `deu`, `fra`, or any other real three-letter subtag still parses.
  */
-const INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
+const INLINE_LOCALE_KEY = /^(?!(?:key|defaultValue)$)(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
 
 /**
  * The emitted type of an inline locale map — hand-tied, because the key regex
@@ -137,7 +142,8 @@ const INLINE_LOCALE_KEY = /^(default|[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
  * ruling offered both and asked for a measured pick): a template-literal key
  * cannot express "2–3 letters", so its letter-union approximation both ADMITS
  * the lone `key` (three lowercase letters parse as a language subtag pattern —
- * the same boundary the runtime doc below records) and explodes tsc (the
+ * the boundary the runtime refinement also had until #10492 closed it by name)
+ * and explodes tsc (the
  * 26-letter probe did not finish; a 12-letter scale took 16s where this shape
  * takes 2s), while a branded key breaks every existing object literal. The
  * narrowing is deliberately exactly the measured harm class, not BCP-47
@@ -189,7 +195,8 @@ export const InlineLocaleMapSchema: z.ZodType<
   z.string().regex(
     INLINE_LOCALE_KEY,
     'an inline label map is keyed by BCP-47 locale tags (`en`, `zh-CN`, …) or `default` — '
-    + 'not by `key`/`defaultValue`, which was the retired key-reference form (#5055) and resolves to nothing',
+    + 'never by `key`/`defaultValue`, the retired key-reference form (#5055): nothing looks the key up, '
+    + 'so both resolvers fall through to the first string value and the raw key is rendered on screen',
   ),
   z.string(),
 ).describe('Inline locale map: BCP-47 tag → translated string'));
