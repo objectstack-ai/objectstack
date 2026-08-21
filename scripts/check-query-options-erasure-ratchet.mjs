@@ -102,6 +102,7 @@ import {
   collectFatalMessages,
   guardAdoptionProblems,
   lintFilesStrict,
+  lintFilesUnguarded,
   lintTextStrict,
   lintTextUnguarded,
 } from './eslint-fatal-guard.mjs';
@@ -360,6 +361,124 @@ const GUARD_ADOPTION_CASES = [
   // The mask, on the new test too: prose about a bare call is not a bare call.
   ['a commented-out lintText is not a lintText',
     [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// was: ' + FIXTURE_COUNT], []],
+];
+
+// ── Guard-closure fixtures (#10625) ───────────────────────────────────────
+//
+// Every case above is one file's text, which is exactly the bound this set
+// exists to close: a gate that moved its counting into a sibling module
+// presents a gate file with no banned shape in it, and passes all four tests
+// on whatever strict call it kept. Measured against the checker as #10599 left
+// it, the first case below came back with ZERO problems.
+//
+// TWO decoy disciplines apply here, and they are NOT the same rule:
+//
+//   • CALL shapes still take the `+` split. The bans read `stripComments`,
+//     which keeps string literals (#10598), so a contiguous `.lintFiles` + `(`
+//     in this file is a decoy in the live-tree scan of this very gate.
+//   • SPECIFIERS do not, and must not be "made consistent" with them. The
+//     closure walk is literal-AWARE — an import spelling inside a string is
+//     skipped, which is the only reason scripts/invoked-as.mjs (which writes
+//     `await import(${…})` into a template) is not read as a computed import
+//     of its own. The `a specifier inside a string is not an import` case
+//     below is that behaviour asserted, and it needs the specifier spelled
+//     contiguously to mean anything.
+const FAKE_GATE = 'scripts/__closure_fixture_gate__.mjs';
+const FAKE_HELPER = 'scripts/__closure_fixture_helper__.mjs';
+const FAKE_DEEPER = 'scripts/__closure_fixture_deeper__.mjs';
+const FIXTURE_IMPORT_HELPER = "import { measure } from './__closure_fixture_helper__.mjs';";
+const FIXTURE_IMPORT_DEEPER = "import { count } from './__closure_fixture_deeper__.mjs';";
+const FIXTURE_DELEGATE = 'const second = await measure(eslint, code);';
+const FIXTURE_IMPORT_FILES_DECLARED = "import { lintFilesUnguarded } from './eslint-fatal-guard.mjs';";
+const FIXTURE_CALL_FILES_DECLARED =
+  "const [r] = await lintFilesUnguarded" + "(eslint, [TARGET], { why: 'ground truth' });";
+
+/** A gate that is itself guarded, and hands a second population to a helper. */
+const DELEGATING_GATE = [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_IMPORT_HELPER, FIXTURE_DELEGATE];
+
+const VIA_CLOSURE = "is in the gate's local import closure";
+
+/**
+ * The closure walk in both directions, over synthetic file TREES.
+ *
+ * `[name, files, expected]`, where `files` maps a repo-relative path to its
+ * source lines and each `expected` entry is the list of needles ONE problem
+ * must carry — the file it names and which test fired, because a case that
+ * only counts problems cannot tell a right answer from a coincidence.
+ */
+const GUARD_CLOSURE_CASES = [
+  // THE REPRODUCTION. Zero problems before this card.
+  ['the counted call moved one import out',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    [[FAKE_HELPER, RAW_CALL, VIA_CLOSURE]]],
+  // …and the same move with the other method, which is #10599's hole one
+  // indirection further out.
+  ['a second population counted through lintText, one import out',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_COUNT] },
+    [[FAKE_HELPER, BARE_TEXT, VIA_CLOSURE]]],
+  // The positive control. A zero-hit result over the reject cases means
+  // nothing without a helper that is supposed to come back clean and does.
+  ['a guarded helper is guarded',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT] },
+    []],
+  // The declaration, one import out: the shape scripts/eslint-stack-headroom.mjs
+  // uses for its canary. Without this the only way to keep a legitimate raw
+  // call green is a hand-kept exemption list, which is the thing a derived
+  // closure was chosen to avoid.
+  ['a declared non-measurement in a helper is not a finding',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_IMPORT_FILES_DECLARED, FIXTURE_CALL_FILES_DECLARED] },
+    []],
+  // Transitive, not one level: the walk is what makes the population derived,
+  // and a one-level walk would just move the same bound to the second hop.
+  ['a raw call two imports out',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_IMPORT_DEEPER, 'export const measure = count;'],
+      [FAKE_DEEPER]: [FIXTURE_CALL_RAW] },
+    [[FAKE_DEEPER, RAW_CALL]]],
+  // The guard module is not in anyone's closure. It holds the raw calls BY
+  // DESIGN, and — the trap — its own `lintFilesStrict(` definition would
+  // answer an armed test that is supposed to be about a call somewhere else.
+  ['the guard module itself is never scanned',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT],
+      'scripts/eslint-fatal-guard.mjs': [FIXTURE_CALL_RAW, FIXTURE_COUNT] },
+    []],
+  // The mask, on the WALK rather than on the bans: a commented-out import
+  // does not put a file in the closure, so the raw call in it is not this
+  // gate's problem. Under-masking here fabricates a finding out of prose.
+  ['a commented-out import does not reach the helper',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// ' + FIXTURE_IMPORT_HELPER],
+      [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    []],
+  // The literal direction of the same question — the scripts/invoked-as.mjs
+  // shape, which is in BOTH gates' real closures today.
+  ['a specifier inside a string is not an import',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT,
+      'const template = ' + JSON.stringify(FIXTURE_IMPORT_HELPER) + ';'],
+    [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    []],
+  // Where the walk STOPS being decidable, it says so rather than reporting a
+  // closure it cannot claim to have walked. This is the one bound that the
+  // three cards before this one each discovered the expensive way.
+  ['a computed specifier is reported, not passed over',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, 'const m = await import(specifier);'] },
+    [[FAKE_GATE, 'cannot resolve']]],
+  // A closure member that is not there at all: the walk's own blind spot,
+  // reported for the same reason a missing GATE is.
+  ['an unresolvable import is reported',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_IMPORT_HELPER] },
+    [[FAKE_HELPER, 'unreadable']]],
+  // `path.resolve` clamps at `/`, so an import walking out of the repo used to
+  // come back as a file at the top of it. The bans cannot cover what is not in
+  // the tree, so the honest answer is to name it.
+  ['an import that leaves the repository is reported',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, "import { x } from '../../outside.mjs';"] },
+    [[FAKE_GATE, 'outside the repository']]],
+  // A cycle must terminate and must report the raw call exactly once.
+  ['a cycle in the closure terminates',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_CALL_RAW, "import { gate } from './__closure_fixture_gate__.mjs';"] },
+    [[FAKE_HELPER, RAW_CALL]]],
 ];
 
 async function selfTest() {
@@ -623,6 +742,26 @@ async function selfTest() {
         threw instanceof TypeError && /requires `why`/.test(threw?.message ?? ''),
         `lintTextUnguarded must refuse an undeclared call (threw: ${threw?.message ?? 'nothing'})`,
       );
+
+      // The `lintFiles` twin, same bargain (#10625). It exists because the
+      // bans now reach a gate's whole import closure, and the closure module
+      // that lints raw for a real reason needs the same way to say so a gate
+      // has. If it can be called without naming one, it is not a declaration.
+      let filesThrew = null;
+      try {
+        await lintFilesUnguarded({ lintFiles: async () => [parses] }, [LINT_TARGET], {});
+      } catch (err) { filesThrew = err; }
+      assert(
+        filesThrew instanceof TypeError && /requires `why`/.test(filesThrew?.message ?? ''),
+        `lintFilesUnguarded must refuse an undeclared call (threw: ${filesThrew?.message ?? 'nothing'})`,
+      );
+      const declared = await lintFilesUnguarded({ lintFiles: async () => [broken] }, [LINT_TARGET], {
+        why: 'self-test: proves a declared call passes the fatal STRAIGHT through',
+      });
+      assert(
+        Array.isArray(declared) && declared.length === 1 && declared[0] === broken,
+        'lintFilesUnguarded must return what ESLint returned, fatals and all — it adds no behaviour',
+      );
     }
 
     // A guard imported once is not a guard still called — proved in both
@@ -633,6 +772,27 @@ async function selfTest() {
       assert(
         problems.length === expected.length && expected.every((e) => problems.some((p) => p.includes(e))),
         `guard adoption, ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(problems)}`,
+      );
+    }
+
+    // The same sentence about the FILES the tests are applied to (#10625).
+    // Every case above is one file's text; a measurement moved into a sibling
+    // module is invisible to all four of them, so the population is walked
+    // rather than listed — and that walk gets asserted in both directions for
+    // the same reason the tests themselves do.
+    for (const [name, files, expected] of GUARD_CLOSURE_CASES) {
+      const problems = checkGuardAdoption('/__fixture_root__', {
+        gates: [FAKE_GATE],
+        readFile: (file) => {
+          const lines = files[file];
+          if (lines === undefined) throw new Error(`ENOENT: ${file}`);
+          return lines.join('\n');
+        },
+      });
+      assert(
+        problems.length === expected.length &&
+          expected.every((needles) => problems.some((p) => needles.every((n) => p.includes(n)))),
+        `guard closure, ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(problems)}`,
       );
     }
 
@@ -725,8 +885,9 @@ async function selfTest() {
     `✓ self-test: ${reports.length} reporting shape(s), ${silent.length} silent counterpart(s), ` +
     `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s), ` +
     `fatal-parse guard proved both ways over real ESLint output, every counted lint call in both ` +
-    `gates routed through it (adoption proved both ways over ${GUARD_ADOPTION_CASES.length} synthetic ` +
-    `gate source(s), files AND text), ` +
+    `gates AND in the closures they import routed through it (adoption proved both ways over ` +
+    `${GUARD_ADOPTION_CASES.length} synthetic gate source(s), files AND text, and the closure walk ` +
+    `over ${GUARD_CLOSURE_CASES.length} synthetic tree(s)), ` +
     `and ${HEADROOM_CANARY_FILE} parses at --stack-size=${PARSER_STACK_SIZE_KB} through this gate's own channel.`,
   );
 }
