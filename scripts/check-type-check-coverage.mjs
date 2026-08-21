@@ -91,6 +91,38 @@
 //               NAMED in the typecheck script chain: a config no script invokes
 //               reads as coverage and delivers none, which is this gate's own
 //               subject matter.
+//   SOURCES_COVERED
+//               a package that DECLARES a `typecheck` script has no directory of
+//               non-test source sitting outside every tsc program that script
+//               runs, or the directory carries an UNCHECKED_SOURCE_DEBT entry
+//               below (#10756).
+//
+//               The layer above is package-granular and this one is not, which
+//               is the whole gap. COVERED asks "does a `typecheck` script
+//               exist"; it cannot see a package that has one whose tsconfig
+//               `include` omits an entire source directory.
+//               `@objectstack/objectql` passed as covered with
+//               `packages/objectql/scripts/**` -- a compatibility checker with a
+//               documented CLI, imported by one of its own tests -- in no
+//               program its `typecheck` ran, and a `number` initialised with a
+//               string could sit in that directory without moving the gate.
+//
+//               NOT the same invariant as TESTS_COVERED, and worth saying why
+//               it is not folded into it: that one decides per test FILE, and a
+//               non-test module is hidden by the same `include` for the same
+//               reason while belonging to neither ledger --
+//               `packages/cli/test/helpers/serve-process.ts` is the measured
+//               instance. The AGENTS.md rule both generalise ("never `exclude`
+//               tests from a package's tsconfig") is written about a file glob,
+//               so it does not reach a directory no `include` ever named.
+//
+//               Scoped to SUBDIRECTORIES: a package-root tool config
+//               (`vitest.config.ts`, `tsup.config.ts`) is unchecked TypeScript
+//               too, but it is one repo-wide convention across 42 packages
+//               rather than 42 decisions, and the census that seeded this
+//               invariant kept the two apart -- 54 root configs, 11 files in a
+//               source directory. The exclusion is argued in full, both ways,
+//               on UNCHECKED_SOURCE_DEBT below.
 //   PINS_CHECKED
 //               a test file containing a `@ts-expect-error` directive sits
 //               inside a tsc program, or is listed in PHANTOM_PIN_DEBT below.
@@ -361,6 +393,12 @@ const SOURCE_FILE = /\.([cm]?ts|tsx)$/;
 // or PINS_CHECKED would fire on documentation.
 const PIN_DIRECTIVE = /^[ \t]*(?:\/\/|\/\*|\*)[ \t]*@ts-expect-error\b/m;
 const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
+// The in-tree precedent SOURCES_COVERED's remedy points at: the sibling config
+// that put `packages/spec/scripts/**` into a program, named in that package's
+// `typecheck` script. Its own header states this defect class in the words the
+// finding later used ("the directory was never INCLUDED by anything"), which is
+// why the remedy names a file rather than describing a shape (#10756).
+const SPEC_SCRIPTS_PRECEDENT = 'packages/spec/tsconfig.scripts.json';
 
 // A path in the root program whose edits move the `@objectstack/spec-monorepo`
 // count below, declared as a bare, whole-literal path so the dispatch
@@ -647,12 +685,17 @@ const TEST_DEBT = {
       + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
   },
   '@objectstack/objectql': {
-    errors: 355,
+    errors: 354,
     note: 'code-tier 300 (TS2339 x115, TS2554 x113 wrong arity, TS2345 x24, TS2749 x14, TS2322 x14, '
-      + 'TS18048 x8, TS2353 x4, plus 8 singletons); config-tier 9 (TS2550 x8, `Array.prototype.at` '
-      + 'against a `lib` older than es2022; TS6059 x1, src/dry-run-hash-compat.test.ts importing '
-      + 'scripts/dry-run-hash-compat.ts from outside rootDir); noise 46 (TS7006 x36, TS6133 x9, '
-      + 'TS6196 x1). RE-TALLIED from tsc at the 355 below (62b2655d8) -- not the older composition '
+      + 'TS18048 x8, TS2353 x4, plus 8 singletons); config-tier 8 (TS2550 x8, `Array.prototype.at` '
+      + 'against a `lib` older than es2022); noise 46 (TS7006 x36, TS6133 x9, '
+      + 'TS6196 x1). LOWERED 355 -> 354 in #10779, and the note RE-TALLIED rather than declared stale '
+      + 'because the delta is exactly attributable: the retired error is the TS6059 this itemisation '
+      + 'used to name (src/dry-run-hash-compat.test.ts importing scripts/dry-run-hash-compat.ts from '
+      + 'outside rootDir), which was never this package\'s debt -- it was the generated re-measure '
+      + 'project billing objectql for its own `rootDir`, and no author here could have retired it by '
+      + 'fixing code. config-tier 9 -> 8 is that one line leaving. '
+      + 'RE-TALLIED from tsc at the 355 below (62b2655d8) -- not the older composition '
       + 'rescaled: the previous tally was taken at 333 and summed to 297, so it never described this '
       + 'entry at its recorded size. What moved between the two is not uniform growth -- TS2554 93 -> '
       + '113 and TS2345 19 -> 24 rose while TS7006 47 -> 36 FELL, and TS2339 is x115 in both tallies. '
@@ -839,15 +882,20 @@ const TEST_DEBT = {
       + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/lint': {
-    errors: 19,
-    note: 'TS7006 x11, TS2835 x5, TS6059 x3, re-tallied from tsc at the 19 below -- not the older '
+    errors: 16,
+    note: 'TS7006 x11, TS2835 x5, re-tallied from tsc at the 16 below -- not the older '
       + 'composition rescaled. Per file: src/validate-semantic-roles.test.ts x5, '
-      + 'src/validate-dashboard-action-refs.test.ts x4, src/validate-translatable-sections.test.ts x3, '
+      + 'src/validate-dashboard-action-refs.test.ts x4, '
       + 'src/validate-filter-tokens.test.ts x3, src/validate-capability-references.test.ts x3, '
       + 'src/validate-managed-api-methods.test.ts x1. The 5 TS2835 are one per file and all the same '
-      + "shape -- the test's own relative import of the module under test, missing its `.js`. All 3 "
-      + 'TS6059 sit in validate-translatable-sections.test.ts, which still imports contact.object.ts, '
-      + 'contact.view.ts and system/translations/index.ts from examples/app-showcase. '
+      + "shape -- the test's own relative import of the module under test, missing its `.js`. "
+      + 'LOWERED 19 -> 16 in #10779, re-tallied rather than declared stale because the delta is exactly '
+      + 'attributable: the 3 that left are the TS6059 this itemisation used to list, all of them in '
+      + 'validate-translatable-sections.test.ts, which imports contact.object.ts, contact.view.ts and '
+      + 'system/translations/index.ts from examples/app-showcase -- outside this package entirely. They '
+      + 'were never this package\'s debt; they were the generated re-measure project reporting on its '
+      + 'own inherited `rootDir`, and no author here could have retired them by fixing lint. That file '
+      + 'held exactly those 3 and so leaves the per-file list altogether. '
       + 'Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file outside rootDir, a class the pre-#5278 '
       + 'note did not list) -> 32 (e8db1a230), and RECORDED 42 was a bootstrap margin (+10 over that 32). '
       + 'THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 42 -> 20 against a measured 20 at '
@@ -900,6 +948,100 @@ const TEST_DEBT = {
 // route for the next such finding; PINS_CHECKED going red is.
 const PHANTOM_PIN_DEBT = {};
 
+// Repo-relative DIRECTORY -> why a package that advertises a `typecheck` script
+// still has real source in here that no tsc program reads. SOURCES_COVERED's
+// ledger (#10756).
+//
+// The hole this closes, stated as the finding did: `check:type-check-coverage`
+// was PACKAGE-granular on the source layer. It asked whether a package declares
+// a `typecheck` script, and could not see a package that declares one whose
+// tsconfig `include` omits an entire source directory. `@objectstack/objectql`
+// passed as COVERED with `packages/objectql/scripts/**` -- a compatibility
+// checker with a documented CLI, imported by one of its own tests -- in no
+// program its `typecheck` runs. `packages/spec/tsconfig.scripts.json` had
+// already written the same observation down for itself in #5475 ("the directory
+// was never INCLUDED by anything ... `check:type-check-coverage` could not even
+// count it"); this is that observation turned into the count.
+//
+// SAME CLASS AS TESTS_COVERED, one level up, and deliberately its own invariant
+// rather than a widening of it. TESTS_COVERED asks a per-FILE question about
+// test files; a non-test module is hidden by the same `include` for the same
+// reason and shows up in neither ledger. The AGENTS.md rule these generalise --
+// never `exclude` tests from a package's tsconfig -- is written about a file
+// glob, so it does not reach a whole directory that no `include` ever named.
+//
+// THE CENSUS, on main @ 5886ee6d22, since the shape of this ledger is an answer
+// to it. Over the 64 packages the headline calls covered, 65 non-test `.ts`
+// files sit outside every program that accounts for them:
+//
+//   54  package-root tool configs -- `vitest.config.ts` x32, `tsup.config.ts`
+//       x16, `objectstack.config.ts` x5, `vitest.integration.config.ts` x1
+//   11  files in a SOURCE DIRECTORY -- `scripts/i18n-extract.config.ts` x8,
+//       `packages/objectql/scripts/dry-run-hash-compat.ts`,
+//       `packages/plugins/plugin-auth/examples/basic-usage.ts`,
+//       `packages/cli/test/helpers/serve-process.ts`
+//
+// This invariant governs the SECOND group only, which is why the observation
+// half takes files at `depth > 0`. The line is drawn there on evidence rather
+// than convenience, and the evidence cuts both ways, so both halves are here:
+//
+//   FOR -- the 54 are one repo-wide convention, not 42 independent decisions.
+//   Every package's `include` is `src/**/*`; a tool config sits at the package
+//   root because that is where its tool looks for it, and it is loaded by that
+//   tool rather than imported by the package. Ledgering them would seed 42
+//   entries that all say the same sentence, and a ledger whose every line is
+//   identical is one nobody reads -- which is the failure mode #4311's own
+//   header warns about ("a ledger that can only accrete rots into a list nobody
+//   trusts").
+//
+//   AGAINST -- a `vitest.config.ts` is unchecked TypeScript exactly as much as
+//   `scripts/dry-run-hash-compat.ts` is, and this line can be walked around by
+//   moving a file UP into the package root. That is a real hole and it is left
+//   open knowingly, not overlooked: closing it is a decision about 42 packages'
+//   conventions rather than about this gate, and it is filed as its own card
+//   rather than decided here by whoever happened to be holding this one.
+//
+// SHRINK-ONLY and CLOSED to new entries, like PHANTOM_PIN_DEBT above. A package
+// that grows a new unread source directory fails SOURCES_COVERED; it does not
+// get a line here. The repair is the supported one this repo already has a
+// precedent for -- a sibling `tsconfig.scripts.json` NAMED in the `typecheck`
+// script (`packages/spec`, #5475) -- and then the entry goes, which RECONCILED
+// forces anyway.
+//
+// SEEDED AT 10, from the census above minus the one entry this gate's own PR
+// repaired: `packages/objectql/scripts` -- the directory the finding was filed
+// about -- now has `packages/objectql/tsconfig.scripts.json` named in that
+// package's `typecheck` script, and type-checks clean. Each remaining reason
+// carries what the directory MEASURES, taken with the package's own config and
+// `rootDir` neutralised (it emits nothing) against a built dependency closure on
+// main @ 5886ee6d22. Those counts are prose, deliberately: nothing here compares
+// them, and a number this gate does not read must not look like one it does.
+const UNCHECKED_SOURCE_DEBT = {
+  'packages/cli/test': 'One non-test module, `test/helpers/serve-process.ts`, the spawn harness the '
+    + '`os serve` e2e tests share. It measures 0 errors on its own, and it is not separate debt: it '
+    + 'sits inside the hidden test tree already measured by TEST_DEBT[\'@objectstack/cli\'] (56 of '
+    + 'that package\'s 110 test files are outside `include`). Repairing it means repairing that '
+    + 'layer, so this entry graduates with the TEST_DEBT one rather than before it.',
+  'packages/plugins/plugin-auth/examples': 'One file, `basic-usage.ts`, and it does not compile: '
+    + '1 x TS2307 for `@objectstack/plugin-hono-server`, which this package declares in NO dependency '
+    + 'block. The census\'s only instance of source in no tsc program AT ALL rather than merely '
+    + 'outside its own package\'s -- nothing imports it, tsup builds only `src`. Repair is a manifest '
+    + 'change or a rewrite, tracked in #10869.',
+  'packages/platform-objects/scripts': '`i18n-extract.config.ts`, 1 x TS2883: the inferred type of '
+    + 'its `default` export names a hash-suffixed internal chunk of `@objectstack/spec`\'s dist '
+    + '(`state-machine.zod-<hash>`), so it is non-portable by construction. One of 8 identical '
+    + 'instances, tracked as one class in #10868.',
+  'packages/plugins/plugin-approvals/scripts': '`i18n-extract.config.ts`, 3 x TS2883 '
+    + '(`FormFieldInput`, `NavigationItemInput`, `StateNodeConfig` through @objectstack/spec dist '
+    + 'chunks). See #10868.',
+  'packages/plugins/plugin-audit/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+  'packages/plugins/plugin-security/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+  'packages/plugins/plugin-sharing/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+  'packages/plugins/plugin-webhooks/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+  'packages/services/service-messaging/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+  'packages/services/service-realtime/scripts': '`i18n-extract.config.ts`, 3 x TS2883. See #10868.',
+};
+
 /**
  * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
  * skipped rather than treated as the end of the list: stopping early would
@@ -948,17 +1090,30 @@ function readTsconfig(dir, file) {
   const roots = Array.isArray(include) && include.length > 0
     ? [...new Set(include.map((g) => g.split('*')[0].replace(/\/$/, '')).filter((p) => !p.includes('..')))]
     : [''];
+  const exclude = parsed.exclude ?? [];
   return {
     file,
     roots,
-    excludesTests: (parsed.exclude ?? []).some((pattern) => TEST_GLOB.test(pattern)),
+    excludesTests: exclude.some((pattern) => TEST_GLOB.test(pattern)),
+    // The NON-test exclusions, as path prefixes, for SOURCES_COVERED (#10756).
+    // TESTS_COVERED never needed these -- an `exclude` that hides a test file
+    // names it with a test glob, which `excludesTests` already answers -- but a
+    // source directory can be subtracted by a plain path (`src/templates`), and
+    // reading `include` alone would call such a file covered while tsc never
+    // opens it.
+    excludedPrefixes: exclude
+      .filter((pattern) => !TEST_GLOB.test(pattern))
+      .map((pattern) => pattern.split('*')[0].replace(/\/$/, ''))
+      .filter((prefix) => prefix !== '' && !prefix.includes('..')),
   };
 }
 
 /** Is `rel` (posix, relative to the package) inside this config's program? */
 function configCovers(config, rel) {
   if (config.excludesTests && TEST_FILE.test(rel)) return false;
-  return config.roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`));
+  const under = (base) => base === '' || rel === base || rel.startsWith(`${base}/`);
+  if ((config.excludedPrefixes ?? []).some((prefix) => under(prefix))) return false;
+  return config.roots.some(under);
 }
 
 /**
@@ -1024,11 +1179,40 @@ function accountedPrograms(configs, invoked) {
  * could not express -- `packages/cli` puts 54 of its 110 test files under
  * `include` and 56 outside it, and the honest number is 56, not 0 and not 110.
  *
- * @param {string[]} testRels package-relative posix paths of every test file
+ * Asked about SOURCE files too since #10756, which is why it is named for files
+ * rather than for tests: the question "does any program that accounts for this
+ * package read this file" is the same question whichever layer the file is in,
+ * and answering it in two places would let the two answers drift.
+ *
+ * @param {string[]} rels package-relative posix paths
  * @returns {string[]} the unread ones, in walk order
  */
-function unreadTests(testRels, programs) {
-  return testRels.filter((rel) => !programs.some((c) => configCovers(c, rel)));
+function unreadFiles(rels, programs) {
+  return rels.filter((rel) => !programs.some((c) => configCovers(c, rel)));
+}
+
+/**
+ * Is this file one SOURCES_COVERED asks about (#10756)?
+ *
+ * Three exclusions, each load-bearing:
+ *
+ *   `depth > 0`   the package-root line. A `vitest.config.ts` beside the
+ *                 manifest is a tool's entry point, not a directory of source,
+ *                 and the census kept the two apart -- 54 root configs against
+ *                 11 files in a source directory. Argued both ways on
+ *                 UNCHECKED_SOURCE_DEBT.
+ *   `.d.ts`       a declaration file STATES types rather than being checked for
+ *                 them, so "no program reads it" is not the same finding.
+ *   test files    TESTS_COVERED's subject, decided per file over there. Counting
+ *                 them here too would bill one hidden file to two ledgers.
+ *
+ * @param {string} name basename
+ * @param {number} depth 0 at the package root
+ */
+function isUncheckedSourceCandidate(name, depth) {
+  if (depth === 0) return false;
+  if (!SOURCE_FILE.test(name) || TEST_FILE.test(name)) return false;
+  return !name.endsWith('.d.ts');
 }
 
 /**
@@ -1066,6 +1250,7 @@ function testCoverage(dir, scripts) {
   // hidden-file count is no longer confined to the include roots, because a
   // file outside them is precisely the case this invariant had been missing.
   const testRels = [];
+  const sourceRels = [];
   const pinned = new Set();
   const walk = (abs, rel, depth) => {
     let entries = [];
@@ -1084,22 +1269,43 @@ function testCoverage(dir, scripts) {
       } else if (TEST_FILE.test(entry.name)) {
         testRels.push(childRel);
         if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
+      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
+        sourceRels.push(childRel);
       }
     }
   };
   walk(join(ROOT, dir), '', 0);
 
-  const hiddenTests = unreadTests(testRels, accountedPrograms(configs, invoked));
+  const hiddenTests = unreadFiles(testRels, accountedPrograms(configs, invoked));
   // PINS_CHECKED stays anchored to the INVOKED programs, not the accounted
   // ones: a pin's whole job is to go red in a check somebody runs, and the
   // `--re-measure` path a DEBT number comes from is not that check.
-  const pinFiles = unreadTests([...pinned], invoked).map((rel) => posix.join(dir, rel));
+  const pinFiles = unreadFiles([...pinned], invoked).map((rel) => posix.join(dir, rel));
+
+  // SOURCES_COVERED (#10756), asked ONLY of a package that declares a
+  // `typecheck` script. A DEBT package's answer is already "nothing reads this
+  // package", which its own ledger owns; asking again here would bill the same
+  // hole to two ledgers and make the smaller one unreadable. The subject is a
+  // package the coverage headline counts as COVERED.
+  const uncheckedByDir = new Map();
+  if (scripts.typecheck !== undefined) {
+    for (const rel of unreadFiles(sourceRels, accountedPrograms(configs, invoked))) {
+      const top = rel.slice(0, rel.indexOf('/'));
+      uncheckedByDir.set(top, (uncheckedByDir.get(top) ?? 0) + 1);
+    }
+  }
 
   return {
     hidesTests: hiddenTests.length > 0,
     testFiles: hiddenTests.length,
     hiddenTests,
     pinFiles: pinFiles.sort(),
+    // Repo-relative, one entry per top-level directory, with the file count
+    // DERIVED on this run and never written down anywhere -- #5826's ruling for
+    // the test layer applies here for the same reason.
+    uncheckedSources: [...uncheckedByDir]
+      .map(([top, files]) => ({ dir: posix.join(dir, top), files }))
+      .sort((a, b) => a.dir.localeCompare(b.dir)),
   };
 }
 
@@ -1376,6 +1582,30 @@ function evaluate(packages, root, state) {
       }
     }
 
+    // SOURCES_COVERED (#10756). A package that ADVERTISES a `typecheck` script
+    // and keeps a whole source directory outside every program that script
+    // runs. The observation half asks this only of such packages, so no DEBT
+    // package reaches here.
+    for (const { dir, files } of pkg.uncheckedSources ?? []) {
+      if (!Object.hasOwn(state.uncheckedSources, dir)) {
+        problems.push(
+          `${dir}: ${files} non-test source file(s) here sit outside every tsc program that ` +
+            `\`${pkg.name}\`'s \`typecheck\` script runs, while that script is what makes the package ` +
+            `count as COVERED -- so the gate reports green over a directory nothing type-checks ` +
+            `(${TRACKING_ISSUE}). Add a sibling \`tsconfig.scripts.json\` and NAME it in the \`typecheck\` ` +
+            `script (the ${SPEC_SCRIPTS_PRECEDENT} pattern), or widen \`include\` to reach the directory. ` +
+            `⛔ Widening \`include\` on the BUILD config is not the same repair: it puts the directory in ` +
+            `front of the emit too, and \`rootDir\` will reject it. UNCHECKED_SOURCE_DEBT in ${SELF} is ` +
+            `closed to new entries.`,
+        );
+      } else if (!String(state.uncheckedSources[dir] ?? '').trim()) {
+        problems.push(
+          `${dir}: UNCHECKED_SOURCE_DEBT entry has no reason -- say why this directory is still ` +
+            `outside every program, or put it in one.`,
+        );
+      }
+    }
+
     if (script !== undefined) {
       // REAL: the script must put tsc in front of the package's sources.
       if (!/\btsc\b/.test(script)) {
@@ -1511,6 +1741,21 @@ function evaluate(packages, root, state) {
     }
   }
 
+  // RECONCILED for SOURCES_COVERED, on the same terms (#10756). An entry lives
+  // only while its directory really is unread: once a `tsconfig.scripts.json`
+  // names it -- or the directory is deleted, or the package stops declaring a
+  // `typecheck` script and moves into DEBT -- the line is a claim about nothing.
+  const uncheckedSeen = new Set(packages.flatMap((p) => (p.uncheckedSources ?? []).map((u) => u.dir)));
+  for (const dir of Object.keys(state.uncheckedSources)) {
+    if (!uncheckedSeen.has(dir)) {
+      problems.push(
+        `UNCHECKED_SOURCE_DEBT entry for "${dir}" is no longer unread source (a tsc program reads it ` +
+          `now, or the directory is gone) -- delete it from ${SELF}. That is the ratchet: this list ` +
+          `only shrinks.`,
+      );
+    }
+  }
+
   // COMPOSITION (#10722). Runs over the ledger objects rather than over live
   // packages: a note contradicting its own field is wrong whether or not the
   // package it names still exists, and the reconciliation above already fails
@@ -1565,6 +1810,27 @@ function hiddenTestFiles(packages, testDebt) {
     (sum, pkg) => (Object.hasOwn(testDebt, pkg.name) ? sum + (pkg.testFiles ?? 0) : sum),
     0,
   );
+}
+
+/**
+ * The source layer's headline figure, DERIVED on every run for the same reason
+ * the test layer's is (#5826): this gate already walks the files to decide
+ * SOURCES_COVERED, so a copy in the ledger would be a second source of truth
+ * that drifts with nothing comparing it.
+ *
+ * @returns {{dirs: number, files: number}}
+ */
+function uncheckedSourceLayer(packages, ledger) {
+  let dirs = 0;
+  let files = 0;
+  for (const pkg of packages) {
+    for (const entry of pkg.uncheckedSources ?? []) {
+      if (!Object.hasOwn(ledger, entry.dir)) continue;
+      dirs++;
+      files += entry.files;
+    }
+  }
+  return { dirs, files };
 }
 
 // ---------------------------------------------------------------------------
@@ -1910,10 +2176,44 @@ function refreshBuiltClosure() {
   }
 }
 
-/** @param {string} output */
-function countTscErrors(output) {
+/**
+ * TS6059 -- "File X is not under 'rootDir'" -- which is counted for a package's
+ * OWN config and never for the generated re-measure project (#10779).
+ *
+ * The asymmetry is the whole point, so it is stated rather than implied. A
+ * TS6059 from `measureDebt` is tsc reading the config the package ships, and
+ * that config governs a real emit (`dev` runs `tsc -w`), so the diagnostic is
+ * about the package. A TS6059 from `measureTestDebt` is tsc reading a project
+ * this file invented seconds earlier, purely to ask a question about the test
+ * layer, under `--noEmit` where there is no output layout for `rootDir` to
+ * protect -- `remeasureProject`'s docstring rules that counting it would be
+ * "measuring the tape measure", and that ruling is what this implements.
+ *
+ * Dropped at COUNT time rather than prevented at config time because the
+ * preventive shape cannot be written correctly: it would mean choosing a
+ * `rootDir` wide enough for every file tsc pulls in transitively, which is not
+ * knowable before running tsc, and the obvious guess (the package directory)
+ * MEASURED as a ratchet break on `packages/rest`, whose own config widens
+ * `rootDir` past it on purpose. See the ⛔ paragraph in `remeasureProject`.
+ *
+ * ⛔ This does not hide a real error from any ledger. The generated project is
+ * built for TEST_DEBT alone; nothing else reads it, and no package's own
+ * `typecheck` goes through it.
+ */
+const TSC_ROOTDIR_DIAGNOSTIC = /\berror TS6059\b/;
+
+/**
+ * @param {string} output
+ * @param {{dropRootDirDiagnostics?: boolean}} [options] set only by the
+ *   generated re-measure project -- see `TSC_ROOTDIR_DIAGNOSTIC`.
+ */
+function countTscErrors(output, { dropRootDirDiagnostics = false } = {}) {
   let n = 0;
-  for (const line of output.split(/\r?\n/)) if (TSC_ERROR_LINE.test(line)) n++;
+  for (const line of output.split(/\r?\n/)) {
+    if (!TSC_ERROR_LINE.test(line)) continue;
+    if (dropRootDirDiagnostics && TSC_ROOTDIR_DIAGNOSTIC.test(line)) continue;
+    n++;
+  }
   return n;
 }
 
@@ -1925,9 +2225,10 @@ function countTscErrors(output) {
  * @param {string} project path to a tsconfig -- repo-relative for the ledgered
  *   packages' own configs, absolute for the generated re-measure project, which
  *   lives outside the repo entirely
+ * @param {{dropRootDirDiagnostics?: boolean}} [options]
  * @returns {number}
  */
-function tscErrorCount(project) {
+function tscErrorCount(project, options = {}) {
   const bin = join(ROOT, 'node_modules', '.bin', 'tsc');
   if (!existsSync(bin)) {
     throw new Error(`--re-measure needs the workspace's own tsc at ${bin}; run \`pnpm install\` first.`);
@@ -1942,11 +2243,16 @@ function tscErrorCount(project) {
   if (TSC_SETUP_ERROR.test(output)) {
     throw new Error(`tsc could not read ${project} -- the measurement is invalid, not zero:\n${output.trim()}`);
   }
-  const errors = countTscErrors(output);
+  const errors = countTscErrors(output, options);
   // Exit 0 means a clean program; anything else must have produced diagnostics
   // we recognised. If it did not, tsc failed in a way this parser cannot see,
   // and reporting 0 would quietly hand the package a graduation certificate.
-  if (run.status !== 0 && errors === 0) {
+  //
+  // Read BEFORE the TS6059 drop, deliberately. A project whose only diagnostics
+  // are dropped ones is a program tsc did read and understand, so it must reach
+  // the `return 0` below -- refusing there would turn "this test layer is clean
+  // apart from an artefact of our own generated config" into a hard crash.
+  if (run.status !== 0 && countTscErrors(output) === 0) {
     throw new Error(
       `tsc exited ${run.status} for ${project} but printed no recognisable diagnostics -- ` +
         `refusing to record 0:\n${output.trim().slice(0, 2000)}`,
@@ -2089,6 +2395,36 @@ function defaultTypeRoots(pkgAbs, rootAbs) {
  * protect, so a TS6059 here is a diagnostic about this generated config rather
  * than about the package, and counting it would be measuring the tape measure.
  *
+ * That reasoning does not depend on how the file entered the program, and the
+ * `unreachable.length > 0` guard below does (#10779). Dropping the test globs
+ * from `exclude` is ALSO a widening: a test it re-admits can import a module
+ * from outside `rootDir`, tsc pulls that module in transitively, and the TS6059
+ * it then reports is a statement about this generated config in exactly the
+ * sense the paragraph above rules on -- but the guard bills it to the package,
+ * because `unreachable` was empty and no widening had been "done" by this code.
+ * Measured on main @ 5886ee6d22: `@objectstack/objectql` has all 225 of its
+ * test files under `src/`, so `unreachable` was empty, the generated project
+ * inherited `rootDir: "src"`, and `src/dry-run-hash-compat.test.ts` importing
+ * `../scripts/dry-run-hash-compat` billed the frozen 355 for one TS6059 that no
+ * author of that package could ever retire by fixing code.
+ *
+ * ⛔ The remedy is NOT to set `compilerOptions.rootDir = pkgAbs` unconditionally
+ * here, which is the shape this reads as wanting. That was implemented and
+ * MEASURED, and it raises a ledger count: `pkgAbs` is wider than the `src` most
+ * of these packages declare, but it is NARROWER than a package that has
+ * deliberately widened its own. `packages/rest` sets `rootDir: ".."` because a
+ * `paths` rule redirects `@objectstack/metadata-protocol` to the producer's
+ * SOURCE, putting a sibling package's files in the program (#9960, which paid
+ * to remove exactly these); pinning that back to the package directory
+ * re-created them, and `@objectstack/rest` went 155 -> 175 (+20 x TS6059) on a
+ * shrink-only ledger. A "neutralisation" that can narrow is not one.
+ *
+ * So the diagnostic is dropped where it is counted rather than legislated away
+ * here -- see `countTscErrors`. That is complete where a `rootDir` value cannot
+ * be: it holds for every shape a package's own config declares, including ones
+ * no rule here could predict, and it leaves each package's own `rootDir` -- the
+ * one that governs its real emit -- untouched.
+ *
  * @param {object} input
  * @param {string} input.pkgAbs absolute, posix-separated package directory
  * @param {string} input.rootAbs absolute, posix-separated repo root
@@ -2161,7 +2497,7 @@ function measureTestDebt(dir, hiddenTests = []) {
   const configPath = join(holder, REMEASURE_CONFIG);
   writeFileSync(configPath, `${JSON.stringify(project, null, 2)}\n`);
   try {
-    return tscErrorCount(configPath);
+    return tscErrorCount(configPath, { dropRootDirDiagnostics: true });
   } finally {
     rmSync(holder, { force: true, recursive: true });
   }
@@ -2527,6 +2863,7 @@ function observed() {
       exempt: EXEMPT,
       testDebt: TEST_DEBT,
       phantomPins: PHANTOM_PIN_DEBT,
+      uncheckedSources: UNCHECKED_SOURCE_DEBT,
       turboHasTask: Object.hasOwn(turbo.tasks ?? {}, 'typecheck'),
       ciInvokesTask: /turbo run typecheck/.test(lintYml),
       ciInvokesRoot: /typecheck:root/.test(lintYml),
@@ -2546,7 +2883,7 @@ function selfTest() {
     name: 'root',
     scripts: { typecheck: 'turbo run typecheck', 'typecheck:root': 'tsc --noEmit' },
   };
-  const okState = { debt: {}, exempt: {}, testDebt: {}, phantomPins: {}, turboHasTask: true, ciInvokesTask: true, ciInvokesRoot: true };
+  const okState = { debt: {}, exempt: {}, testDebt: {}, phantomPins: {}, uncheckedSources: {}, turboHasTask: true, ciInvokesTask: true, ciInvokesRoot: true };
   const cases = [
     {
       label: 'covered package passes',
@@ -2584,6 +2921,59 @@ function selfTest() {
       root: okRoot,
       state: { ...okState, testDebt: { a: { tests: 7, errors: 9 } } },
       expect: [/a: TEST_DEBT entry carries a hand-written `tests` count/],
+    },
+    {
+      label: 'an unread source directory in a COVERED package fails SOURCES_COVERED',
+      packages: [
+        pkg('a', {
+          scripts: { typecheck: 'tsc --noEmit' },
+          uncheckedSources: [{ dir: 'packages/a/scripts', files: 2 }],
+        }),
+      ],
+      root: okRoot,
+      state: okState,
+      expect: [/packages\/a\/scripts: 2 non-test source file\(s\) here sit outside every tsc program/],
+    },
+    {
+      label: 'an UNCHECKED_SOURCE_DEBT entry covers it, but only with a reason',
+      packages: [
+        pkg('a', {
+          scripts: { typecheck: 'tsc --noEmit' },
+          uncheckedSources: [{ dir: 'packages/a/scripts', files: 2 }],
+        }),
+        pkg('b', {
+          scripts: { typecheck: 'tsc --noEmit' },
+          uncheckedSources: [{ dir: 'packages/b/examples', files: 1 }],
+        }),
+      ],
+      root: okRoot,
+      state: {
+        ...okState,
+        uncheckedSources: { 'packages/a/scripts': 'measured: 3 x TS2883.', 'packages/b/examples': '  ' },
+      },
+      expect: [/packages\/b\/examples: UNCHECKED_SOURCE_DEBT entry has no reason/],
+    },
+    {
+      // RECONCILED, the half that keeps the list shrink-only. Without it the
+      // ledger outlives the repair and reads as a worklist that never ends --
+      // the failure this repo keeps paying for, per PHANTOM_PIN_DEBT above.
+      label: 'an UNCHECKED_SOURCE_DEBT entry whose directory is now read fails RECONCILED',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, uncheckedSources: [] })],
+      root: okRoot,
+      state: { ...okState, uncheckedSources: { 'packages/a/scripts': 'measured: 3 x TS2883.' } },
+      expect: [/UNCHECKED_SOURCE_DEBT entry for "packages\/a\/scripts" is no longer unread source/],
+    },
+    {
+      // The scope line. A DEBT package's uncovered source is already owned by
+      // DEBT ("nothing reads this package"), so billing it here too would put
+      // one hole in two ledgers. The observation half enforces this by asking
+      // only of packages with a `typecheck` script; this pins that a package
+      // WITHOUT one is not dragged in by some later refactor of evaluate().
+      label: 'a DEBT package is not also billed for unread source',
+      packages: [pkg('a', { scripts: {}, uncheckedSources: [] })],
+      root: okRoot,
+      state: { ...okState, debt: { a: { errors: 4 } } },
+      expect: [],
     },
     {
       label: 'a pin in a file no tsc program compiles fails PINS_CHECKED',
@@ -2868,6 +3258,34 @@ function selfTest() {
     { label: 'an exclusion does not touch non-test sources', config: srcNoTests, rel: 'src/a.ts', expect: true },
     { label: 'no include walks the whole package', config: whole, rel: 'test/a.test.ts', expect: true },
     { label: 'a root prefix must match a path SEGMENT', config: src, rel: 'srcfixtures/a.test.ts', expect: false },
+    // #10756. A source directory can be subtracted by a PLAIN PATH exclusion
+    // rather than a test glob (`packages/create-objectstack` excludes
+    // `src/templates`), and reading `include` alone would call such a file
+    // covered while tsc never opens it.
+    {
+      label: 'a plain-path exclusion takes a source file back out of the program',
+      config: { file: 'tsconfig.json', roots: ['src'], excludesTests: false, excludedPrefixes: ['src/templates'] },
+      rel: 'src/templates/blank/index.ts',
+      expect: false,
+    },
+    {
+      label: 'that exclusion leaves the rest of the include root alone',
+      config: { file: 'tsconfig.json', roots: ['src'], excludesTests: false, excludedPrefixes: ['src/templates'] },
+      rel: 'src/engine.ts',
+      expect: true,
+    },
+    {
+      label: 'a plain-path exclusion must match a path SEGMENT too',
+      config: { file: 'tsconfig.json', roots: ['src'], excludesTests: false, excludedPrefixes: ['src/temp'] },
+      rel: 'src/templates/blank/index.ts',
+      expect: true,
+    },
+    {
+      label: 'a config carrying no excludedPrefixes at all still reads (older fixtures, real configs with no exclude)',
+      config: src,
+      rel: 'src/engine.ts',
+      expect: true,
+    },
   ];
   for (const c of coverCases) {
     const got = configCovers(c.config, c.rel);
@@ -2912,9 +3330,33 @@ function selfTest() {
     },
   ];
   for (const c of unreadCases) {
-    const got = unreadTests(c.testRels, c.programs);
+    const got = unreadFiles(c.testRels, c.programs);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
-      failures.push(`unreadTests — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+      failures.push(`unreadFiles — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // SOURCES_COVERED's file-level predicate (#10756). Each exclusion is a way
+  // this invariant can be silently wrong: lose `depth > 0` and 42 packages'
+  // tool configs flood the ledger, lose the test check and one hidden file is
+  // billed to two ledgers, lose `.d.ts` and the gate reports a finding about a
+  // file that states types rather than being checked for them.
+  const sourceCandidateCases = [
+    { label: 'a module in a subdirectory is the subject', name: 'dry-run-hash-compat.ts', depth: 1, expect: true },
+    { label: 'the same module at the package root is not', name: 'dry-run-hash-compat.ts', depth: 0, expect: false },
+    { label: 'a package-root tool config is out of scope by the depth rule', name: 'vitest.config.ts', depth: 0, expect: false },
+    { label: 'the SAME tool config inside a directory IS in scope', name: 'i18n-extract.config.ts', depth: 1, expect: true },
+    { label: 'a test file belongs to TESTS_COVERED, not here', name: 'engine.test.ts', depth: 1, expect: false },
+    { label: 'a spec file likewise', name: 'engine.spec.tsx', depth: 2, expect: false },
+    { label: 'a declaration file states types rather than being checked for them', name: 'globals.d.ts', depth: 1, expect: false },
+    { label: 'a .mts module counts', name: 'check-liveness.mts', depth: 1, expect: true },
+    { label: 'a .tsx module counts', name: 'panel.tsx', depth: 1, expect: true },
+    { label: 'a non-TypeScript file is not source for this purpose', name: 'README.md', depth: 1, expect: false },
+  ];
+  for (const c of sourceCandidateCases) {
+    const got = isUncheckedSourceCandidate(c.name, c.depth);
+    if (got !== c.expect) {
+      failures.push(`isUncheckedSourceCandidate — ${c.label}: expected ${c.expect}, got ${got}`);
     }
   }
 
@@ -3188,10 +3630,69 @@ function selfTest() {
       output: 'Checked 40 files, no error TS reported by the previous run.',
       expect: 0,
     },
+    // TS6059 in the GENERATED re-measure project (#10779). Both directions,
+    // because each is a way this can be silently wrong: still counting it bills
+    // a package for a diagnostic about a config this file wrote, and dropping
+    // it everywhere would blind `measureDebt` to a real property of a config
+    // the package ships and emits from.
+    {
+      label: 'TS6059 counts for a package\'s own config, which is what DEBT measures',
+      output: "packages/a/src/x.test.ts(5,51): error TS6059: File '/r/packages/a/scripts/y.ts' is not under 'rootDir'.",
+      expect: 1,
+    },
+    {
+      label: 'TS6059 does NOT count in the generated re-measure project -- measuring the tape measure',
+      output: "packages/a/src/x.test.ts(5,51): error TS6059: File '/r/packages/a/scripts/y.ts' is not under 'rootDir'.",
+      options: { dropRootDirDiagnostics: true },
+      expect: 0,
+    },
+    {
+      label: 'dropping TS6059 leaves every other diagnostic in the generated project counted',
+      output:
+        "packages/a/src/x.test.ts(5,51): error TS6059: File '/r/packages/a/scripts/y.ts' is not under 'rootDir'.\n" +
+        'packages/a/src/x.test.ts(9,1): error TS2345: Argument of type X.\n' +
+        "packages/a/src/z.test.ts(2,2): error TS6059: File '/r/packages/a/scripts/w.ts' is not under 'rootDir'.\n" +
+        'packages/a/src/z.test.ts(4,4): error TS7006: Parameter implicitly any.',
+      options: { dropRootDirDiagnostics: true },
+      expect: 2,
+    },
+    {
+      label: 'a TS6059 elaboration line is not counted twice when the drop is off',
+      output:
+        "packages/a/src/x.test.ts(5,51): error TS6059: File '/r/packages/a/scripts/y.ts' is not under 'rootDir'.\n" +
+        "  'rootDir' is expected to contain all source files.\n",
+      expect: 1,
+    },
   ];
   for (const c of countCases) {
-    const got = countTscErrors(c.output);
+    const got = countTscErrors(c.output, c.options);
     if (got !== c.expect) failures.push(`countTscErrors — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
+  // The generated project is the ONLY caller that drops TS6059, and that is a
+  // property of the wiring rather than of the counter -- so it is pinned on the
+  // wiring. A `measureTestDebt` that stopped passing the flag, or a
+  // `measureDebt` that started, would leave every case above green.
+  {
+    const src = readFileSync(join(ROOT, SELF), 'utf8');
+    // Matched as a CALL, not as the bare option name: the fixtures above spell
+    // that name too, and a scan that counted those would report 6 and fail on
+    // its own test data.
+    const dropCallers = [...src.matchAll(/tscErrorCount\([^)]*\{ dropRootDirDiagnostics: true \}/g)].length;
+    if (dropCallers !== 1) {
+      failures.push(
+        `#10779 wiring — ${dropCallers} call site(s) in ${SELF} ask \`tscErrorCount\` to drop TS6059; ` +
+          'exactly one may, and it is the generated re-measure project. A second caller would be ' +
+          "measuring a package's own shipped config with the tape measure's allowance.",
+      );
+    }
+    if (!/return tscErrorCount\(configPath, \{ dropRootDirDiagnostics: true \}\)/.test(src)) {
+      failures.push(
+        `#10779 wiring — \`measureTestDebt\` no longer asks \`tscErrorCount\` to drop TS6059, so the ` +
+          'generated project is billing packages for its own `rootDir` again (objectql measured 355 ' +
+          'that way and 354 without).',
+      );
+    }
   }
 
   // BUILT CLOSURE (#6376). The precondition is only worth having if it can tell
@@ -3678,7 +4179,7 @@ function selfTest() {
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
-        + derivedCases.length} observation case(s) + ` +
+        + derivedCases.length + sourceCandidateCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
       `built-closure case(s) + ` +
@@ -3707,6 +4208,7 @@ const testDebtErrors = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.erro
 // Counted on this run, not read from the ledger: the file count is the one
 // number here the gate already knows (#5826).
 const testDebtFiles = hiddenTestFiles(packages, TEST_DEBT);
+const sourceLayer = uncheckedSourceLayer(packages, UNCHECKED_SOURCE_DEBT);
 const declaredStale = [...Object.entries(DEBT), ...Object.entries(TEST_DEBT)]
   .filter(([, entry]) => typeof entry?.compositionAt === 'number');
 // Both numbers, always. Reporting only the src figure is how the first pass of
@@ -3717,6 +4219,13 @@ console.log(
     `${TRACKING_ISSUE}), ${Object.keys(EXEMPT).length} exempt.\n` +
     `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still hide their own tests from tsc ` +
     `(${testDebtFiles} files hidden as counted by this run, ${testDebtErrors} frozen raw errors in TEST_DEBT).` +
+    // The THIRD layer, printed for the reason the second one is: a package can
+    // be COVERED, have every test in a program, and still keep a whole source
+    // directory out of both (#10756). Reporting only the first two figures is
+    // how that stayed invisible.
+    `\n  source layer: ${sourceLayer.dirs} directory(ies) of non-test source in ` +
+    `${Object.keys(UNCHECKED_SOURCE_DEBT).length} ledgered entr(y/ies) sit outside every tsc program ` +
+    `their package's own \`typecheck\` runs (${sourceLayer.files} files as counted by this run).` +
     // Printed on a GREEN run, for the same reason the surplus is (#6376): a
     // declared-stale composition is honest but it is still drift, and a
     // declaration nobody can see is the half that does the damage. Zero is the
