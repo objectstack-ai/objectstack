@@ -1,0 +1,14 @@
+---
+"@objectstack/rest": patch
+---
+
+**Additive:** `POST /meta/:type/:name/publish` now accepts `?package=<id>`, so a single-item draft→active promotion can state the package it belongs to (#10063).
+
+#9612 taught the runtime publish gate to narrow `objects` to the written item's package closure, but only for callers that can NAME a package. Of the three write doors that reach the gate, `saveMetaItem` (`?package=` on the `PUT` door) and `publishPackageDrafts` (the batch names it) both did; the single-item promotion door named nothing — so every HTTP-driven promotion, which is exactly Studio's designer save→publish loop on every edit, handed the gate the whole tenant. The protocol half already existed and was waiting: `promoteDraftForPublish` declares `packageId?: string | null` and threads it into both the gate and `repo.promoteDraft`. Only the REST caller was mute.
+
+- **Wire spelling:** `?package=<id>`, deliberately the same parameter name and the same normalisation the `PUT` door states it with — `all` and the empty value mean "env-local overlay, no package", not a package literally named `all`. One value, one spelling across both steps of the save→publish loop.
+- **Multiplicity:** a repeated `?package=a&package=b` is refused `400 VALIDATION_ERROR` in the ADR-0112 nested envelope, via the shared `refuseRepeatedQueryParams` rule the sibling doors already carry; a single occurrence encoded as a one-element array is unwrapped and accepted. Previously the parameter was ignored outright on this route, so no caller relying on a documented behaviour changes.
+- **Ordering:** the read sits AFTER the `manage_metadata` capability gate, so an uncapable caller still gets `403` rather than a `400` that would let it probe the shape of the surface.
+- **Absent behaviour is unchanged, deliberately down to key presence.** The key is omitted from the `publishMetaItem` request when no package is stated, rather than passed as `undefined`. `promoteDraftForPublish` forwards to `repo.promoteDraft` on `'packageId' in request` — the KEY, not the value — because `null` there is a meaningful scope (pin the lookup to the unbound row) while an absent key means "match any package". A present-and-`undefined` key would therefore coerce to `null` downstream and stop package-bound drafts from being found, answering `no_draft` on a path this change was not supposed to touch.
+
+⚠️ **The acceptance criterion is that the narrowing is now REACHABLE from HTTP, not that publishing got faster.** Package-closure narrowing has a second, independent gate this change does not touch: `narrowObjectsToPackageClosure` keeps any object carrying no `_packageId` provenance, unconditionally, and a tenant-authored overlay corpus carries none. On such a corpus supplying the package still narrows nothing. On a provenance-stamped corpus the shipped deriver measures 421 objects → 45. Both gates must hold; this closes the caller-side one.

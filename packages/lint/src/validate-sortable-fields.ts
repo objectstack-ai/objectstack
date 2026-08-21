@@ -81,7 +81,16 @@
  *
  *   - `objects[].listViews.<key>.sort` — built-in named list views;
  *   - `views[].list.sort` — a `defineView` aggregate's default list;
- *   - `views[].listViews.<key>.sort` — its named list views.
+ *   - `views[].listViews.<key>.sort` — its named list views;
+ *   - `views[].sort` on a FLATTENED LIST OVERLAY (#9313) — a `views[]` entry
+ *     that IS a single list view (`viewKind: 'list'`, no nested `config`,
+ *     no container slots): `ViewMetadataSchema`'s list-overlay member, the
+ *     shape a standalone list view takes through `PUT /api/v1/meta/view` —
+ *     the only door a Studio tenant or an MCP/AI author has. The runtime
+ *     publish gate builds its per-write snapshot as `views: [item]`, so
+ *     without this rung the dispatch widening (#9313's other half) would be
+ *     a silent no-op that reads as coverage. See the self rung note at the
+ *     walk below for how the shape is recognised.
  *
  * NOT walked, each verified against the schema rather than assumed:
  *
@@ -110,16 +119,17 @@
  *     `ReportSchema.order[].by`. Judging those needs the dataset's measure
  *     index, which is `validateChartBindings`' family, not this one.
  *
- * Two more list-shaped surfaces carry a `sort` and are deliberately left to
- * their owners, exactly as the search axis leaves the react page surface to
+ * One more list-shaped surface carries a `sort` and is deliberately left to
+ * its owner, exactly as the search axis leaves the react page surface to
  * `validate-react-page-props`: page/component `sort`
- * (`ui/page.zod.ts`, `ui/component.zod.ts` — `walkPageComponents`' territory)
- * and the flattened standalone list overlay the metadata door accepts
- * (`ViewMetadataSchema`'s list-overlay member, top-level `sort`). The overlay
- * reaches the runtime publish gate rather than a stack walk, and the
- * reference-integrity suite's runtime dispatch is `runtimeTypes: ['flow']`
- * today — widening it is #4463 P2's decision, not this rule's, and the SEARCH
- * axis has the identical gap.
+ * (`ui/page.zod.ts`, `ui/component.zod.ts` — `walkPageComponents`' territory).
+ * The flattened standalone list overlay used to be listed here too — the
+ * #4463 P2 gap this module's first landing recorded — and is walked since
+ * #9313 (the self rung above). Its sibling shape, a standalone ViewItem
+ * RECORD (`{ name, object, viewKind, config }` — `config.sort` one level
+ * down), is NOT walked here: #9313's scope is the flattened overlay, and the
+ * record shape is recorded as its own follow-up rather than silently ridden
+ * along.
  *
  * ── Skips, matching the search axis one for one (ADR-0072 D1) ────────────
  *
@@ -429,6 +439,35 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     // The aggregate's own binding is the fallback for a list view that declares
     // none — the same resolution order `validateSearchableFields` reads.
     const viewObject = strName(view.objectName) ?? strName(view.object);
+
+    // ── [#9313] The SELF rung: a flattened standalone list overlay ──
+    //
+    // A `views[]` entry that IS a single list view — `ViewMetadataSchema`'s
+    // list-overlay member (`ListViewSchema.extend(flattenedViewOverlayFields())`),
+    // the shape a standalone list view takes through `PUT /api/v1/meta/view`
+    // and the shape the runtime publish gate snapshots as `views: [item]`.
+    // Recognised by the wire schema's own structural discrimination:
+    // `viewKind: 'list'` (REQUIRED on the overlay arm since #7741, and a key
+    // the strict container schema refuses by name, so a container can never
+    // match) with no nested `config` (a body carrying one is a ViewItem
+    // RECORD, whose `config.sort` is a different rung — deliberately not
+    // walked here, see the module note). `view-walk.ts` established the same
+    // `self` rung for the section-carrying shapes; this is its list twin.
+    //
+    // The binding order matches every other list-view rung: the overlay's own
+    // `data.object` (ADR-0047 explicit retarget) ahead of its required
+    // top-level `object`. A console personalization PUT arrives with
+    // `sort: [{ id, field, order }]` rows carrying objectui's row `id`
+    // (#5074) — `readSortKeys` reads `field` and ignores the decoration.
+    if (view.viewKind === 'list' && !isRec(view.config)) {
+      check(
+        view.sort,
+        listViewObject(view) ?? viewObject,
+        `view "${viewLabel}" (flattened list overlay)`,
+        `views[${vi}].sort`,
+        'list-view sort',
+      );
+    }
 
     if (isRec(view.list)) {
       check(

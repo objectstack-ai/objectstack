@@ -38,6 +38,8 @@ That one definition is enough to get a persisted table, CRUD + query endpoints, 
 - **A compiled query AST** — queries are JSON documents validated against the protocol, then compiled by a driver into native queries with joins, aggregations, window functions, HAVING, and subqueries. The [query cheat sheet](/docs/data-modeling/queries) covers the syntax; the [spec](/docs/protocol/objectql/query-syntax) is normative.
 - **Four database drivers in this repo** — `driver-sql` (PostgreSQL / MySQL / SQLite via Knex), `driver-mongodb`, `driver-memory` (in-memory, for tests and demos), and `driver-sqlite-wasm` (SQLite in the browser / WebContainers). The same model runs unchanged on any of them.
 - **External datasource federation** — introspect an existing external database, import selected tables into the catalog, and query them alongside native objects ([External Datasources](/docs/data-modeling/external-datasources)).
+- **Composable ownership** — one package owns an object, and any other package can merge fields, validation rules, and indexes into it without forking the definition ([Object Extensions](/docs/data-modeling/object-extensions)).
+- **Repeatable bulk import** — a named mapping projects someone else's column headers and codes onto your fields, and the import endpoint applies it by name ([Import Mappings](/docs/data-modeling/import-mappings)).
 
 ## What's in this module
 
@@ -47,11 +49,13 @@ That one definition is enough to get a persisted table, CRUD + query endpoints, 
   <Card href="/docs/data-modeling/fields" title="Fields" description="Field metadata and configuration" />
   <Card href="/docs/data-modeling/field-types" title="Field Types" description="Gallery of every field type with examples" />
   <Card href="/docs/data-modeling/relationships" title="Relationships & Lookups" description="Lookup, master-detail, and cross-object modeling" />
+  <Card href="/docs/data-modeling/object-extensions" title="Object Extensions" description="Add fields, validations, and indexes to an object another package owns" />
   <Card href="/docs/data-modeling/validation" title="Validation" description="Validation metadata and CEL rule authoring" />
   <Card href="/docs/data-modeling/formulas" title="Expressions (CEL)" description="Formula fields and computed logic" />
   <Card href="/docs/data-modeling/queries" title="Queries" description="Query syntax quick reference" />
   <Card href="/docs/data-modeling/indexing" title="Database Indexing" description="Index configuration and performance" />
   <Card href="/docs/data-modeling/seed-data" title="Seed Data & Fixtures" description="Ship demo and reference data with your app" />
+  <Card href="/docs/data-modeling/import-mappings" title="Import Mappings" description="Named column-to-field projections applied by the import endpoint" />
   <Card href="/docs/data-modeling/external-datasources" title="External Datasources" description="Federate external databases into the model" />
   <Card href="/docs/data-modeling/drivers" title="Database Drivers" description="Configure SQL, MongoDB, in-memory, and WASM drivers" />
   <Card href="/docs/data-modeling/analytics" title="Analytics Datasets" description="Model datasets for dashboards and reports" />

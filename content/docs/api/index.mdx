@@ -80,6 +80,7 @@ surface (OAuth flows, sessions, providers) and
 - [Data API](/docs/api/data-api) — CRUD, batch operations, record cloning, and analytics queries
 - [Metadata & Package API](/docs/api/metadata-api) — object schemas, metadata types, UI views, and package management
 - [Plugin Endpoints](/docs/api/plugin-endpoints) — auth, workflow, realtime, and other plugin-provided routes
+- [Declarative Endpoints](/docs/api/declarative-endpoints) — publish an HTTP endpoint of your own as metadata (`apis:`)
 - [Client SDK](/docs/api/client-sdk) — the official TypeScript client
 - [Environment Routing](/docs/api/environment-routing) — routing requests across environments
 - [Data Flow](/docs/api/data-flow) — how a request travels through the stack
@@ -87,6 +88,10 @@ surface (OAuth flows, sessions, providers) and
 - [Error Handling (Server)](/docs/api/error-handling-server) — raising and shaping errors on the server
 - [Error Catalog](/docs/api/error-catalog) — the full list of error codes
 - [Wire Format](/docs/api/wire-format) — request/response envelopes on the wire
+
+The two endpoint pages are easy to confuse: **Plugin Endpoints** is a catalog of routes the
+platform serves for you once a plugin is installed, while **Declarative Endpoints** is how you
+declare a route of your own, under your app's namespace, for callers outside the platform.
 
 Spec: [HTTP API](/docs/protocol/kernel/http-protocol), [Real-Time Protocols](/docs/protocol/kernel/realtime-protocol)
 
@@ -248,6 +253,11 @@ See the [Protocol Reference](/docs/references/api/protocol) for the full list of
     href="/docs/api/data-api" 
     title="Data API"
     description="CRUD, batch operations, and analytics endpoints"
+  />
+  <Card 
+    href="/docs/api/declarative-endpoints" 
+    title="Declarative Endpoints"
+    description="Expose your app to outside callers by declaring an endpoint as metadata"
   />
   <Card 
     href="/docs/api/client-sdk" 

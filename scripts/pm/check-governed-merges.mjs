@@ -103,6 +103,38 @@
  * found" and "nothing was looked at" are different facts and this sweep is
  * required to keep them apart.
  *
+ * ## A TRUNCATED history is the same fact, and it used to be invisible (#9902)
+ *
+ * "Nothing was looked at" has a third form that no missing-checkout test
+ * catches: the checkout is present and healthy, and its history simply stops
+ * inside the window. `git log --since` answers from whatever part of the
+ * window is present, **exits 0, and prints no warning**. Agent containers
+ * clone shallow, and the real sweep is a seat command (CI runs only
+ * `--self-test`), so that is where this sweep actually runs.
+ *
+ * Measured in one such container, 2026-08-21, graft floor 2026-06-02, window
+ * 2026-05-23 → the floor:
+ *
+ *   | reading                                    | governed merges reported |
+ *   |--------------------------------------------|--------------------------|
+ *   | this sweep, before this guard               | **0** — and it rendered  |
+ *   |                                             | `✅ clean window`, exit 0 |
+ *   | truth (GitHub commit list, same window)     | 38 commits touched       |
+ *   |                                             | `docs/adr/**`, 13 touched |
+ *   |                                             | `AGENTS.md`              |
+ *
+ * The green tick printed over ~40 governed merges, and the line above it said
+ * `✓ audited`. Under-enumeration is the one direction this list must never be
+ * wrong in — a short list reads as COMPLIANCE. So a repo whose history does
+ * not cover the window is UNAUDITED, exactly like an absent checkout, and the
+ * ✅ cannot print at all. The predicate is `historyHorizon()` in
+ * `git-history.mjs` (shared, so it cannot drift from the other adopters); it
+ * asks whether the floor predates the window rather than whether the clone is
+ * shallow, so a shallow container with enough depth — the common case, since
+ * the default window is 24h — still sweeps exactly as before, with no fetch.
+ * Deepening is never done here: this sweep reads four checkouts it does not
+ * own, so the remedy is printed as a command for the operator to run.
+ *
  * ## Institutional memory — why governed surfaces are guarded at all
  *
  * This history moved here from the retired gate's header when the gate
@@ -252,6 +284,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { historyHorizon } from './git-history.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -467,6 +500,25 @@ function git(root, args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+/**
+ * Why a repo with a truncated history is UNAUDITED rather than swept. Pure, so
+ * `--self-test` pins the words: this reason is the only thing standing between
+ * a short list and a maintainer reading it as a clean window.
+ */
+export function truncatedHorizonReason({ ref, horizon }) {
+  return (
+    `cannot audit the whole window on ${ref} — ${horizon.reason}. ` +
+    `Enumerating anyway would UNDER-report, and a short governed-merge list reads as COMPLIANCE: ` +
+    `the merges below the boundary are invisible to \`git log\`, which reports no error (#9902). ` +
+    `Remedy: ${horizon.remedy}`
+  );
+}
+
+/** The horizon an audited repo was swept against, for the report line. */
+export function describeHorizon(horizon) {
+  return horizon.shallow ? `shallow, oldest visible ${horizon.floor} (predates the window)` : 'complete clone';
+}
+
 /** First-parent mainline commits of `ref` since `sinceIso`, newest first. */
 export function mainlineCommits(root, ref, sinceIso) {
   const out = git(root, ['log', '--first-parent', `--since=${sinceIso}`, '--format=%H%x09%cI%x09%s', ref]);
@@ -600,7 +652,7 @@ export function renderReport({ sinceIso, repos, scanned, entries, lookups }) {
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).`;
   const auditedLines = audited.map(
-    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.quiet ? ' — none in window; if that tip predates your last fetch, run `git fetch origin main` there' : ''}`,
+    (r) => `  ✓ audited  ${r.slug} — tip ${r.tip ? `${r.tip.sha.slice(0, 9)} @ ${r.tip.date}` : '(unknown)'}; ${r.scanned ?? 0} mainline commit(s) in window${r.horizon ? `; history ${r.horizon}` : ''}${r.quiet ? ' — none in window; if that tip predates your last fetch, run `git fetch origin main` there' : ''}`,
   );
   const unauditedLines = unaudited.map((r) => `  ⚠️  UNAUDITED  ${r.slug} — ${r.reason}`);
   const unauditedNote =
@@ -753,6 +805,15 @@ async function main() {
     try {
       const [sha, date] = git(repo.path, ['log', '-1', '--format=%H%x09%cI', ref]).trim().split('\t');
       repo.tip = { sha, date };
+      // Before enumerating: can this checkout SEE the whole window? A short
+      // answer here reads as compliance, so it must not be produced at all.
+      const horizon = historyHorizon({ cwd: repo.path, ref, sinceMs: Date.parse(sinceIso) });
+      if (!horizon.covered) {
+        repo.status = 'unaudited';
+        repo.reason = truncatedHorizonReason({ ref, horizon });
+        continue;
+      }
+      repo.horizon = describeHorizon(horizon);
       commits = mainlineCommits(repo.path, ref, sinceIso);
     } catch (error) {
       repo.status = 'unaudited';
@@ -804,7 +865,7 @@ async function main() {
       JSON.stringify(
         {
           since: sinceIso,
-          repos: repos.map((r) => ({ id: r.id, slug: r.slug, path: r.path, status: r.status, reason: r.reason, tip: r.tip ?? null, scanned: r.scanned ?? 0 })),
+          repos: repos.map((r) => ({ id: r.id, slug: r.slug, path: r.path, status: r.status, reason: r.reason, tip: r.tip ?? null, horizon: r.horizon ?? null, scanned: r.scanned ?? 0 })),
           scanned,
           complete,
           channelsTried: channels.map((c) => c.id),
@@ -965,6 +1026,51 @@ function selfTest() {
   assert('an-unaudited-repo-never-renders-as-a-clean-window', !withAbsent.includes('✅') && withAbsent.includes('UNAUDITED') && withAbsent.includes('NOT a clean window'), withAbsent);
   assert('and-the-clean-case-does-print-the-tick', clean.includes('✅'), clean);
   assert('the-unaudited-line-names-the-repo-and-the-reason', withAbsent.includes('objectstack-ai/cloud') && withAbsent.includes('no git checkout'), withAbsent);
+
+  // ── a truncated history is UNAUDITED, not a clean sweep (#9902) ───────────
+  //
+  // The measured shape: a window crossing this container's graft floor swept
+  // ONE mainline commit, found no governed surface on it, and rendered
+  // `✅ clean window` over ~40 governed merges that GitHub lists for the same
+  // window. The tick is what a maintainer reads, so the assertions below are
+  // on the tick and on the direction the reason names, not on the phrase.
+  const truncated = truncatedHorizonReason({
+    ref: 'origin/main',
+    horizon: {
+      reason: "this clone is shallow and its oldest visible commit on 'origin/main' is 2026-06-02, which sits INSIDE the window",
+      remedy: 'git -C /w/objectstack fetch --unshallow origin',
+    },
+  });
+  assert('a-truncated-horizon-reason-names-the-ref-and-the-floor', truncated.includes('origin/main') && truncated.includes('2026-06-02'), truncated);
+  assert('and-it-names-the-DIRECTION-under-enumeration-reads-as-compliance', /COMPLIANCE/.test(truncated), truncated);
+  assert('and-it-carries-a-runnable-remedy', truncated.includes('fetch --unshallow'), truncated);
+  const withTruncated = renderReport({
+    sinceIso: '2026-05-23T00:00:00Z',
+    repos: [{ ...allAudited[0], status: 'unaudited', reason: truncated, scanned: 1 }, ...allAudited.slice(1)],
+    scanned: 1,
+    entries: [],
+    lookups: 0,
+  });
+  assert('a-repo-whose-history-stops-inside-the-window-never-renders-the-green-tick',
+    !withTruncated.includes('✅') && withTruncated.includes('UNAUDITED') && withTruncated.includes('NOT a clean window'), withTruncated);
+  assert('and-the-sweep-says-which-repo-could-not-see-the-window', withTruncated.includes('objectstack-ai/objectstack') && withTruncated.includes('INSIDE the window'), withTruncated);
+
+  // The other leg, and the one a bare `--is-shallow-repository` guard would
+  // have broken: a shallow checkout deep enough for the window sweeps as
+  // normal, and its answer carries the floor it was computed against.
+  assert('a-shallow-clone-whose-floor-predates-the-window-describes-itself-as-such',
+    describeHorizon({ shallow: true, floor: '2026-06-02' }) === 'shallow, oldest visible 2026-06-02 (predates the window)');
+  assert('a-complete-clone-says-so-instead', describeHorizon({ shallow: false, floor: null }) === 'complete clone');
+  const sweptShallow = renderReport({
+    sinceIso: '2026-08-20T00:00:00Z',
+    repos: allAudited.map((r) => ({ ...r, horizon: describeHorizon({ shallow: true, floor: '2026-06-02' }) })),
+    scanned: 12,
+    entries: [],
+    lookups: 0,
+  });
+  assert('an-audited-repo-prints-the-horizon-it-was-swept-against',
+    sweptShallow.includes('history shallow, oldest visible 2026-06-02'), sweptShallow);
+  assert('and-a-covered-shallow-sweep-is-still-allowed-to-be-clean', sweptShallow.includes('✅'), sweptShallow);
   const noPr = classifyCommit({ sha: 'd'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'chore: direct push' }, ['AGENTS.md'], GOVERNED_REPOS[0]);
   const loud = renderReport({ sinceIso: '2026-08-17T00:00:00Z', repos: allAudited, scanned: 3, entries: [noPr], lookups: 0 });
   assert('a-pr-less-mainline-commit-is-its-own-loud-entry', loud.includes('NO PR NUMBER IN SUBJECT'), loud);

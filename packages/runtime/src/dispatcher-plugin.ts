@@ -82,10 +82,15 @@ export interface DispatcherPluginConfig {
      * Observability wiring. All fields optional; defaults are noop
      * (zero overhead, no behavior change).
      *
-     *   - `metrics`: registry receiving `http_requests_total`,
-     *     `http_request_duration_ms`, `http_request_errors_total` for
-     *     every route this plugin mounts. Plug in `prom-client` /
+     *   - `metrics`: registry receiving `http_requests_total` and
+     *     `http_request_duration_ms`. Both are emitted by the TRANSPORT
+     *     through the `IHttpServer.afterResponse` seam when it offers one, so
+     *     they cover every inbound request on the server rather than only the
+     *     routes this plugin mounts; on a transport without the seam this
+     *     plugin emits them for its own routes instead. Plug in `prom-client` /
      *     `@opentelemetry/api-metrics` / your own adapter.
+     *     (`http_request_errors_total` was retired by #9834 — read the 5xx rate
+     *     from `http_requests_total{status=~"5.."}`.)
      *
      *   - `errorReporter`: invoked on 5xx responses with the thrown
      *     error and `{ requestId, method, route }`. Plug in Sentry /

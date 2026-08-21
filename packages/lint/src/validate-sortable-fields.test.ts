@@ -263,6 +263,87 @@ describe('validateSortableFields — the surfaces it walks', () => {
   it('returns nothing for an empty stack', () => {
     expect(validateSortableFields({})).toEqual([]);
   });
+
+  // ── [#9313] the SELF rung: a flattened standalone list overlay ──
+  //
+  // The `PUT /api/v1/meta/view` shape (`ViewMetadataSchema`'s list-overlay
+  // member): a raw ListView config at the TOP of the `views[]` entry, with
+  // `object` + `viewKind: 'list'` required (#7741). The runtime publish gate
+  // snapshots a `view` write as `views: [item]`, so this rung is the half of
+  // #9313 that makes the dispatch widening mean anything.
+
+  it('walks a flattened list overlay\'s top-level `sort` (#9313)', () => {
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'crm_lead.hot',
+          object: 'crm_lead',
+          viewKind: 'list',
+          type: 'grid',
+          columns: ['name'],
+          // The console-decorated row shape a personalization PUT persists
+          // (#5074): `id` is objectui's randomUUID and must not confuse the read.
+          sort: [{ id: 'a2b4c86e-9313-4111-8111-000000000001', field: 'score', order: 'desc' }],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(findings[0].where).toBe('view "crm_lead.hot" (flattened list overlay)');
+    expect(findings[0].path).toBe('views[0].sort[0]');
+  });
+
+  it('honors the overlay\'s `data.object` retarget over its top-level `object` (#9313)', () => {
+    const findings = validateSortableFields({
+      objects: [
+        { name: 'crm_lead', fields: { name: { type: 'text' } } },
+        { name: 'crm_task', fields: { age: { type: 'formula' } } },
+      ],
+      views: [
+        {
+          name: 'crm_lead.tasks',
+          object: 'crm_lead',
+          viewKind: 'list',
+          data: { provider: 'object', object: 'crm_task' },
+          sort: [{ field: 'age', order: 'desc' }],
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('crm_task');
+  });
+
+  it('does NOT read a ViewItem record\'s top level as an overlay (#9313)', () => {
+    // `{ viewKind, config }` is the RECORD shape — its sort lives in `config`,
+    // a rung this rule deliberately does not walk (recorded scope, see the
+    // module note). The structural guard is `config` being a record, mirroring
+    // the wire schema's own member discrimination.
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        {
+          name: 'crm_lead.pipeline',
+          object: 'crm_lead',
+          viewKind: 'list',
+          config: { type: 'grid', columns: ['name'], sort: [{ field: 'score', order: 'desc' }] },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('a form overlay has no sort surface and is not judged (#9313)', () => {
+    // `FormViewSchema` tombstones `sort` — a related list sorts by its own
+    // list view's sort — so the rung keys on `viewKind: 'list'` alone.
+    const findings = validateSortableFields({
+      objects: [{ name: 'crm_lead', fields }],
+      views: [
+        { name: 'crm_lead.edit', object: 'crm_lead', viewKind: 'form', sort: 'score desc' },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
 });
 
 describe('checkSortDeclaration — the shared core', () => {

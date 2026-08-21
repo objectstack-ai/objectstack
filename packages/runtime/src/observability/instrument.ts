@@ -61,9 +61,9 @@ export interface InstrumentOptions {
      * (the docs' p95 guidance wants the request's latency, not one layer's
      * share of it), but it is a change a dashboard can see.
      *
-     * NOT gated by either flag, on any transport: request-id echo, the error
-     * counter and the error reporter. The transport seam emits none of them —
-     * the observation carries no throw signal at all — so they always stay on.
+     * NOT gated by either flag, on any transport: request-id echo and the error
+     * reporter. The transport seam emits neither — the observation carries no
+     * throw signal at all — so they always stay on.
      */
     emitHttpRequestDurationMs?: boolean;
 }
@@ -80,8 +80,10 @@ export interface InstrumentOptions {
  *      transport owns that family (see
  *      {@link InstrumentOptions.emitHttpRequestsTotal} and
  *      {@link InstrumentOptions.emitHttpRequestDurationMs}).
- *   5. On thrown errors, emit `http_request_errors_total` and call
- *      `errorReporter.captureException` for 5xx.
+ *   5. On thrown errors, record the status (`err.statusCode ?? 500`, which
+ *      reaches `http_requests_total{status}`) and call
+ *      `errorReporter.captureException` for 5xx. No error COUNTER is emitted:
+ *      `http_request_errors_total` was retired by #9834.
  *   6. When the handler catches its own error and calls
  *      `errorResponseBase` (which leaves a side-channel
  *      `res.__obsRecordedError`), still call the error reporter.
@@ -138,7 +140,12 @@ export function instrumentRouteHandler(
         } catch (err: any) {
             threw = true;
             status = err?.statusCode ?? 500;
-            metrics.counter(RUNTIME_METRICS.httpRequestErrorsTotal, { method, route });
+            // `http_request_errors_total` was emitted here until #9834 retired
+            // it (ADR-0049 enforce-or-remove, maintainer ruling 2026-08-20).
+            // ⛔ Do not re-add it. The throw is still fully reported: `status`
+            // lands on `http_requests_total{status}` in the `finally` below —
+            // which the TRANSPORT emits for every inbound surface — and 5xx
+            // still reaches the error reporter two lines down.
             if (status >= 500) {
                 safeReport(errorReporter, err, { requestId, method, route });
             }

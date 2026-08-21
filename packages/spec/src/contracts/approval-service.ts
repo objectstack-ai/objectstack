@@ -83,6 +83,22 @@ export const APPROVAL_STATUS_LABELS = {
 /** Live request row. */
 export interface ApprovalRequestRow {
   id: string;
+  /**
+   * Tenancy placement stamp (#10331): the organization the request belongs
+   * to. `plugin-approvals` writes it on the inserted `sys_approval_request`
+   * row at submit time — resolved as
+   * `context.organizationId ?? context.tenantId ?? input.organizationId ?? null`
+   * — and its read mapping (`rowFromRequest`) returns it on every service
+   * read. The field was always on the wire; this declaration types it so
+   * consumers (and tests pinning org placement) read it without casting past
+   * the contract.
+   *
+   * Optional-nullable: rows written before the stamp existed carry no value,
+   * and a submit whose context resolves no org stamps `null` — "owned by no
+   * organization", which org-scoped reads treat as globally visible rather
+   * than tenant-owned.
+   */
+  organization_id?: string | null;
   /** Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals. */
   process_name: string;
   object_name: string;
@@ -364,6 +380,20 @@ export interface ApprovalActionAttachment {
 export interface ApprovalActionRow {
   id: string;
   request_id: string;
+  /**
+   * Tenancy placement stamp (#10331), same semantics as
+   * {@link ApprovalRequestRow.organization_id}: every `sys_approval_action`
+   * insert site in `plugin-approvals` stamps the owning request's org (or
+   * `null` when none resolved), so the persisted row always carries it.
+   *
+   * Read-path caveat, measured at declaration time: the service's
+   * `rowFromAction` mapping does not surface it, so rows returned by
+   * `listActions` currently omit the field — it is populated when a persisted
+   * row is read directly off the engine (the pattern org-placement tests
+   * use). Declared optional-nullable for that gap as well as for pre-stamp
+   * rows.
+   */
+  organization_id?: string | null;
   step_name?: string;
   step_index?: number;
   action: ApprovalActionKind;
