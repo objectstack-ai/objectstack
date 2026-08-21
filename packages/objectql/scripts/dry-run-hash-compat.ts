@@ -30,7 +30,6 @@
 
 import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { hashSpec } from '@objectstack/metadata-core';
 
 export interface LegacyMetadataRow {
@@ -269,14 +268,30 @@ export function formatReport(report: DryRunReport): string {
 // enough, with no symlink involved). Compare RESOLVED PATHS, never URL strings.
 //
 // Same predicate as `packages/cli/src/utils/invocation.ts` (`isProcessEntry`) and
-// `scripts/invoked-as.mjs` (`invokedAs`). Spelled out rather than imported because
-// neither home is legally reachable from this file — the PR for #10269 carries the
-// boundary measurement. ⚠️ Two predicates answering this question differently IS the
-// defect this closes; change one, change all of them.
+// `scripts/invoked-as.mjs` (`invokedAs`) — both legs identical: realpath for the
+// symlink, directory resolution for `node <dir>`. Spelled out rather than imported
+// because neither home is legally reachable from this file — the PR for #10269
+// carries the boundary measurement. ⚠️ Two predicates answering this question
+// differently IS the defect this closes; change one, change all of them.
+//
+// ⚠️ ONE spelling DIVERGES from those two, and the divergence is FORCED — do not
+// "restore consistency" here: the self-path seed is `__filename`, NOT
+// `fileURLToPath(import.meta.url)`. `packages/objectql/package.json` declares no
+// `"type"`, so under the repo-wide `module: NodeNext` every file in this package
+// compiles as COMMONJS, and `import.meta` in a CommonJS-format file is a hard
+// compile error (TS1470). This file IS inside a tsc program despite the package's
+// own `include` naming only `src/**/*`: `src/dry-run-hash-compat.test.ts` imports
+// it, and the TEST_DEBT re-measure in `scripts/check-type-check-coverage.mjs`
+// type-checks the tests — so the ESM seed costs a ratchet failure on a ledger that
+// may only shrink. The PREDICATE is untouched by this: `invokedAs(entryArg,
+// selfPath)` is the shared core and it takes a PATH, `isEntrypoint(import.meta.url)`
+// is merely the ESM way to seed it, and `__filename` is the CommonJS way — node's
+// CJS loader hands it an absolute path that is ALREADY symlink-resolved and
+// percent-decoded, which is exactly the property the guard rests on.
 function isProcessEntry(): boolean {
     const entryArg = process.argv[1];
     if (!entryArg) return false; // `node --eval` / the REPL
-    const self = resolve(fileURLToPath(import.meta.url));
+    const self = resolve(__filename);
     const entry = resolve(entryArg);
     // `node <dir>` gives the ENTRY ARGUMENT, and only it, directory resolution.
     const candidates = [entry, join(entry, 'index.js'), join(entry, 'index.mjs'), join(entry, 'index.ts')];
