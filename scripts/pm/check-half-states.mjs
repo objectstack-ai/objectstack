@@ -355,6 +355,29 @@
  *       readings rather than diagnosing one. Report-only like everything here:
  *       the remedy is a dispatch or a withdrawn claim, never a label written
  *       from this script.
+ *   H21 an OPEN PULL REQUEST whose body binds a closing keyword to a `#N` the
+ *       body never declared itself `Part of`, inside a SENTENCE that reads as
+ *       not closing it ("Filed, not fixed: #10240", "out of scope: closes
+ *       #N"). H7's own rationale covers this whole class while H7's predicate
+ *       covers one spelling of it — H7 is bound to a `Part of #N` declaration
+ *       and a body that declares `Part of` for nothing is silent by
+ *       construction, however plainly it says the card stays open. Measured
+ *       specimen (#10392): PR #10241 carried no `Part of` and the sentence
+ *       "Filed, not fixed: #10240"; #10240 closed `completed` two seconds
+ *       after that merge and read as finished until a human reopened it a day
+ *       later. ⛔ The trigger is the NEGATION WINDOW and never keyword
+ *       presence: 277 of the 300 most recently merged bodies carry a closing
+ *       keyword bound to a number (301 matches), so a presence rule would
+ *       report every correct PR in the corpus. The negation is the author's
+ *       own statement of intent contradicting the instruction beside it, which
+ *       is what makes accident separable from intent at all. The window is a
+ *       SENTENCE, measured: widening it to the whole body turns 0 false
+ *       positives into 13, all of them one legitimate fourteen-card close
+ *       (#10714). Disjoint from H7 by construction — a number already declared
+ *       `Part of` is H7's row and is skipped here. Report-only, and
+ *       deliberately not imported by the blocking gate that reuses H7's
+ *       predicate: widening the class must not silently widen a check that
+ *       fails builds.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -2920,6 +2943,190 @@ export function h20DispatchedNoBranchRef(issue, claim, refStates, nowMs = Date.n
 }
 
 // ---------------------------------------------------------------------------
+// H21 — a closing keyword bound to `#N` inside a sentence that NEGATES it
+// (#10392). H7's rationale, minus H7's `Part of` precondition.
+//
+// ## The gap, and the card it cost
+//
+// H7's header states the rule in fully general terms — GitHub's parser "matches
+// the keyword plus the number and ignores the surrounding prose entirely,
+// negations and modals included, so the sentence an author writes to PREVENT an
+// auto-close is exactly what performs it on merge". The PREDICATE behind that
+// sentence is narrower than the sentence: it is bound to a `Part of #N`
+// declaration and fires only when the same `#N` carries both. A body that
+// declares `Part of` for nothing is silent by construction, however plainly it
+// says it is not closing the card.
+//
+// Measured specimen — PR #10241, merged 2026-08-20T15:10:06Z. Its body carries
+// no `Part of` anywhere and this sentence under `## Out of scope`:
+//
+//     Filed, not fixed: #10240 — the same leak through the **delete** verb.
+//
+// Issue #10240 closed `completed` at 15:10:08Z — two seconds later — with a
+// closing-link summary naming #10241 and nothing else. #10240 is a genuine
+// unfixed defect (attachment tombstoning no-ops on a predicate delete); it read
+// as finished until a human reopened it a day later. The author wrote the
+// sentence to record that the card was deliberately LEFT OPEN, and the sentence
+// closed it. H7 was silent, exactly as designed.
+//
+// ## Why this is a window and not "flag every closing keyword"
+//
+// The naive widening is not available and the corpus says so quantitatively: a
+// PR cannot declare which cards it intends to close except BY using the keyword,
+// so a rule over keyword-presence alone cannot separate intent from accident.
+// Over the 300 most recently merged PR bodies (below), 277 carry a closing
+// keyword bound to a number and there are 301 such matches — flagging keyword
+// presence would produce 301 findings, every one of them a correct PR.
+//
+// The negation is what makes the two separable, because it is the AUTHOR'S OWN
+// statement of intent sitting in the same sentence as the instruction that
+// contradicts it. That is a contradiction internal to one sentence, which is
+// the same shape H7 already reports across `Part of` and a keyword.
+//
+// ## The window bound is load-bearing — measured, not assumed
+//
+// Corpus (2026-08-21, this change's own stage-1 measurement): the 300 most
+// recently merged PRs into `main`, bodies as the API returns them,
+// 2026-08-19T15:13:23Z … 2026-08-21T19:11:30Z, 2,564,259 body characters, no
+// empty bodies. Read through `stripMarkdownCode`, exactly as H7 reads.
+//
+//   window scope             flagged / 301 keyword matches
+//   sentence (this rule)       1   — PR #10241, the specimen. 0 false positives.
+//   paragraph                  1   — same single hit
+//   whole body before match   14   — 13 false positives
+//   anywhere in body         301   — the naive shape; useless
+//
+// All 13 whole-body false positives are ONE PR (#10714) which legitimately
+// closes fourteen cards with a wall of `Fixes #N` lines and merely contains a
+// negation word somewhere earlier in a long body. A body-scoped negation check
+// would red-flag the most correct multi-close PR in the corpus thirteen times.
+// That is why the window is a sentence and why it is stated in code rather than
+// left to a reviewer's judgement.
+//
+// The result is not clean for lack of opportunity, which is the failure mode a
+// 0-of-301 number invites: the same corpus carries 116 sentences in exactly the
+// deliberate-non-closure register this rule reads — `## Out of scope`,
+// "filed, not fixed here", "#N is not addressed here", "#N remains open". The
+// register is everywhere; only one author put a closing keyword next to the
+// number. Two near-misses are worth naming because they are the specimen's
+// wording almost exactly and are correctly clean: #10876's "## Out of scope —
+// filed, not repaired here" and #10851's "filed, not fixed here" — neither
+// binds a keyword to a number.
+//
+// Second corpus, a different surface and the same answer: all 1,418 squash
+// commit messages on `main` (2026-08-11 … 2026-08-21) — a surface GitHub's
+// closing-keyword parser also reads — carry 228 keyword+`#N` matches across 197
+// commits and produce 0 flags. That arm contributes no true positive either:
+// commit messages here do not carry the `## Out of scope` register at all.
+//
+// ## Report-only, and deliberately NOT wired to the blocking gate
+//
+// `scripts/check-partof-closing-keyword.mjs` imports `h7PartOfWithClosingKeyword`
+// and FAILS a PR on it. This predicate is deliberately a separate function that
+// that gate does not import, so widening the class cannot silently widen a
+// blocking check. Report-only first is the commissioned order (#10392 triage,
+// 2026-08-21): measure, ship the row, and let a promotion to blocking be its own
+// decision with these numbers in hand. Nothing about this file's report-only
+// contract changes, and the existing patrol workflow already calls the sweep, so
+// no workflow edit is part of this.
+//
+// ## Disjoint from H7 by construction
+//
+// A number already declared `Part of #N` is H7's row and is skipped here, so the
+// two never double-report one number. H7 keeps that class whether or not the
+// sentence is negated (its own self-test pins a negated `Part of` body as an H7
+// finding); this rule takes the class H7 cannot see — a keyword bound to a
+// number the body never declared itself part of.
+// ---------------------------------------------------------------------------
+
+/**
+ * The negation / filing markers, EXACTLY as measured above.
+ *
+ * The set is pinned to the measured one on purpose: a marker added later
+ * without re-running the corpus would inherit a "0 false positives" number it
+ * was never measured under. Each was also measured ALONE against both corpora
+ * and each is independently clean; `not` and `filed` are the two that fire on
+ * the specimen.
+ *
+ * The bare noun `file`/`files` is deliberately NOT a marker although it too
+ * measured clean. It carries no negation or filing sense — "this file fixes
+ * #123" is a normal, correct close — and it is one of the most common nouns in
+ * this repo's prose, so it is the marker most likely to turn into a false
+ * positive on a corpus this one did not sample.
+ */
+const NEGATED_CLOSE_MARKER_RE =
+  /\b(?:not|cannot|never|no longer|filed|filing|out of scope|rather than|instead of|without|remains open)\b|\bn't\b/i;
+
+/**
+ * The start offset of the sentence containing `idx`.
+ *
+ * Boundaries are sentence-ending punctuation, a blank line (paragraph break),
+ * and a markdown structural line start (heading, list item, table row, block
+ * quote). A PLAIN single newline is deliberately NOT a boundary: PR bodies are
+ * soft-wrapped but commit messages in this repo are hard-wrapped at ~72
+ * columns, so prose sentences routinely span lines there, and treating every
+ * newline as a break would blind the window on exactly the second corpus.
+ *
+ * Exported for the self-test: the window is the whole design, so it is pinned
+ * directly rather than only through the predicate's verdict.
+ */
+export function sentenceStartOffset(text, idx) {
+  const head = String(text ?? '').slice(0, idx);
+  let best = 0;
+  for (const re of [
+    /[.!?][)\]"'`]*[ \t\n]/g,
+    /\n[ \t]*\n/g,
+    /\n[ \t]*(?:#{1,6}\s|[-*+]\s|\d+\.\s|\||>)/g,
+  ]) {
+    let m;
+    while ((m = re.exec(head)) !== null) {
+      const end = m.index + m[0].length;
+      if (end > best) best = end;
+    }
+  }
+  return best;
+}
+
+/**
+ * H21 — null when clean, else the finding sentence.
+ *
+ * Reads the same code-stripped text H7 reads, so a keyword quoted in backticks
+ * or parked in a fence is not a finding here either — the measured reason is in
+ * `stripMarkdownCode`.
+ */
+export function h21NegatedClosingKeyword(pr) {
+  const body = pr?.body ?? '';
+  const text = stripMarkdownCode(body);
+  const declared = partOfTargets(body);
+  const hits = [];
+  for (const m of text.matchAll(closingKeywordRe())) {
+    const [full, keyword, number] = m;
+    if (declared.has(number)) continue; // H7 owns that number
+    const start = sentenceStartOffset(text, m.index);
+    if (!NEGATED_CLOSE_MARKER_RE.test(text.slice(start, m.index))) continue;
+    hits.push({
+      keyword,
+      number,
+      sentence: text.slice(start, m.index + full.length).replace(/\s+/g, ' ').trim(),
+    });
+  }
+  if (hits.length === 0) return null;
+  return hits
+    .map(
+      (h) =>
+        `body carries \`${h.keyword} #${h.number}\` in a sentence that reads as NOT closing it — ` +
+        `"${h.sentence}". GitHub's closing-keyword parser matches the keyword plus the number and ` +
+        `ignores the surrounding prose entirely, negations included, so merging this closes ` +
+        `#${h.number} and the sentence written to prevent that is what performs it. The measured ` +
+        `specimen (PR #10241, "Filed, not fixed: #10240") closed a genuine unfixed card two seconds ` +
+        `after merge, and a closed card reads as finished. Reword so no closing keyword sits next ` +
+        `to that number — "#${h.number} is not addressed here" / "out of scope: #${h.number}" / ` +
+        `"#${h.number} remains open" — or put the keyword in backticks.`,
+    )
+    .join('; ');
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -4054,15 +4261,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
     throw lastHoldError;
   }
 
-  // H7 + H12 — the PR side. Listed straight from `/pulls` rather than filtered
-  // out of the label pages above: PRs carry no `pm:*` label, so the issue sweep
-  // cannot see them (it discards them explicitly). Drafts are INCLUDED for H7 —
-  // a draft is exactly where that is still cheap to fix — and excluded by
-  // H12's own predicate (drafts are parked deliberately).
+  // H7 + H12 + H21 — the PR side. Listed straight from `/pulls` rather than
+  // filtered out of the label pages above: PRs carry no `pm:*` label, so the
+  // issue sweep cannot see them (it discards them explicitly). Drafts are
+  // INCLUDED for H7 and H21 — a draft is exactly where that is still cheap to
+  // fix, and both rows are only fixable while the PR is open, because the
+  // damage is done by the merge — and excluded by H12's own predicate (drafts
+  // are parked deliberately).
   for (const pr of await listOpenPullRequests()) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
+    const negated = h21NegatedClosingKeyword(pr);
+    if (negated) findings.push([pr, 'H21', negated]);
     const orphan = h12OrphanLanding(pr);
     if (orphan) findings.push([pr, 'H12', orphan]);
   }
@@ -4641,6 +4852,113 @@ function selfTest() {
     null,
   );
   t('H7: a fenced-only keyword is not a finding', h7PartOfWithClosingKeyword(pr('Part of #5\n\n```\nFixes #5\n```')), null);
+
+  // -- H21: a closing keyword inside a sentence that negates it (#10392) -----
+  // The positive fixture is the REAL specimen sentence, byte-for-byte from PR
+  // #10241's body, and the negative fixtures are real sentences from the same
+  // 300-body corpus the stage-1 measurement read — including the two that are
+  // the specimen's wording almost exactly and must stay clean.
+
+  // ★ Specimen — PR #10241 (merged 2026-08-20T15:10:06Z). No `Part of`
+  // anywhere in the body; #10240 closed `completed` two seconds later.
+  const pr10241 = pr(
+    '## Out of scope\n\n' +
+      'Filed, not fixed: #10240 — the same leak through the **delete** verb. ' +
+      '`beforeDelete`→`afterDelete` hands ids over on the context stash, which the ' +
+      'measurement above shows is lost on the predicate path.',
+  );
+  const fired21 = h21NegatedClosingKeyword(pr10241);
+  t('H21: the #10241 specimen FIRES', typeof fired21, 'string');
+  t('H21: …and names the card it will close', fired21.includes('`fixed #10240`'), true);
+  t('H21: …and quotes the offending sentence back', fired21.includes('Filed, not fixed: #10240'), true);
+  t('H21: …and says the parser ignores the negation', fired21.includes('negations included'), true);
+  t('H21: …and offers the safe rewordings', fired21.includes('#10240 is not addressed here'), true);
+  // H7 is silent on this body — the gap that made the row necessary. If this
+  // ever inverts, H21 is redundant rather than merely quiet.
+  t('H21: …and H7 is silent on it (the gap this row exists for)', h7PartOfWithClosingKeyword(pr10241), null);
+
+  // The window. `not` and `filed` both fire on the specimen; each marker was
+  // measured alone against both corpora.
+  t('H21: a bare negated close fires', typeof h21NegatedClosingKeyword(pr('This does not fix #77.')), 'string');
+  t('H21: "out of scope" fires', typeof h21NegatedClosingKeyword(pr('Out of scope: closes #77.')), 'string');
+  t('H21: "no longer" fires', typeof h21NegatedClosingKeyword(pr('#77 is no longer in scope, so this closes #77 only on paper.')), 'string');
+
+  // ⛔ The rule is the negation window, never keyword presence. 277 of 300
+  // measured bodies carry a plain closing keyword and every one is correct.
+  t('H21: a plain `Fixes #N` is clean', h21NegatedClosingKeyword(pr('Fixes #10171')), null);
+  t(
+    'H21: a fourteen-card close list is clean (the #10714 shape)',
+    h21NegatedClosingKeyword(pr('Fixes #10581\nFixes #10582\nFixes #10583')),
+    null,
+  );
+  // …and it stays clean even when the body says "not" somewhere ELSE. This is
+  // the measured 13-false-positive case a body-scoped window produces.
+  t(
+    'H21: a negation elsewhere in the body does not reach the keyword',
+    h21NegatedClosingKeyword(pr('This does not touch the loader.\n\n### Closing lines\n\nFixes #10581')),
+    null,
+  );
+
+  // Real corpus near-misses — the specimen's register, no keyword bound to a
+  // number. These are the 116-sentence population the row must not report.
+  t(
+    'H21: "#N is not addressed here" is clean (the advised spelling)',
+    h21NegatedClosingKeyword(pr('#10526 is not addressed here — spec-side, another lane.')),
+    null,
+  );
+  t(
+    'H21: "#N remains open" is clean',
+    h21NegatedClosingKeyword(pr('out of scope for it — #10368 remains open and untouched.')),
+    null,
+  );
+  t(
+    'H21: the #10876 near-miss ("filed, not repaired here") is clean',
+    h21NegatedClosingKeyword(pr('## Out of scope — filed, not repaired here\n\nThe loader half stays open.')),
+    null,
+  );
+  t(
+    'H21: the #10851 near-miss ("filed, not fixed here") is clean',
+    h21NegatedClosingKeyword(pr('## The divergence the suite found — filed, not fixed here')),
+    null,
+  );
+
+  // Disjoint from H7: a number already declared `Part of` is H7's row.
+  t(
+    'H21: a `Part of #N` body is H7\'s row, not this one',
+    h21NegatedClosingKeyword(pr('Part of #77\n\nThis does not fix #77.')),
+    null,
+  );
+  t(
+    'H21: …while a DIFFERENT number in the same body is still this row\'s',
+    typeof h21NegatedClosingKeyword(pr('Part of #77\n\nFiled, not fixed: #88.')),
+    'string',
+  );
+
+  // Code stripping — inherited from H7, so a quoted keyword is not a finding.
+  t('H21: a keyword in backticks is clean', h21NegatedClosingKeyword(pr('Filed, not `fixed #10240`.')), null);
+  t('H21: a fenced keyword is clean', h21NegatedClosingKeyword(pr('not fixed:\n\n```\nFixes #10240\n```')), null);
+  t('H21: gerunds are not closing keywords', h21NegatedClosingKeyword(pr('This is not fixing #77.')), null);
+  t('H21: empty / missing body', h21NegatedClosingKeyword(pr(undefined)), null);
+
+  // The window itself, pinned directly — it is the whole design. Asserted as
+  // the TEXT the marker scan actually sees, not as an offset: the offset is an
+  // implementation detail, while "the previous sentence is not in the window"
+  // is the property the 13-false-positive measurement turns on.
+  const win = (text, idx) => text.slice(sentenceStartOffset(text, idx), idx);
+  t('H21 window: a sentence break bounds it', win('No. Fixes #1', 4), '');
+  t('H21 window: a blank line bounds it', win('not here\n\nFixes #1', 10), '');
+  // The structural boundary lands after the markdown marker, so the window is
+  // the heading's / item's own text — and the sentence BEFORE it is excluded.
+  t('H21 window: a heading line bounds it', win('not here\n## H\nFixes #1', 14), 'H\n');
+  t('H21 window: a list item bounds it', win('not here\n- item\nFixes #1', 16), 'item\n');
+  // ⛔ A plain newline is NOT a boundary: commit messages here are hard-wrapped
+  // at ~72 columns, so a sentence routinely spans lines on that corpus.
+  t('H21 window: a soft-wrapped newline does NOT bound it', sentenceStartOffset('not\nhere', 8), 0);
+  t(
+    'H21: …so a hard-wrapped negated close still fires',
+    typeof h21NegatedClosingKeyword(pr('Filed, not\nfixed: #10240')),
+    'string',
+  );
 
   // -- H8: delivering PR merged, card still `pm:dispatched` (#8683) ----------
   // Fixtures reuse H7's extractor pins, so the stripping and per-number-
