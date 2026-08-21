@@ -621,6 +621,41 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # Docs frontmatter parses (#10493). Nothing local YAML-parsed these pages.
+      # The one gate that reads them line by line — `check:doc-anchors` below —
+      # deliberately BLANKS the frontmatter block ("preserving line count"),
+      # which is right for heading ids and left the closest thing to a
+      # frontmatter reader as the thing that erases it. So "every page's
+      # frontmatter parses" had exactly one owner: the `Build Docs` job in
+      # ci.yml, a full `next build` on a 30-minute-timeout runner that exists
+      # only in CI and is path-filtered besides. A page landed whose unquoted
+      # `description` contained `apis: `, YAML read the colon-plus-space as the
+      # start of a nested mapping, and that build was what said so.
+      #
+      # This reads the corpus with the docs build's OWN extractor regex and the
+      # same `yaml` parser fumadocs resolves, and types the two keys
+      # `pageSchema` declares (`title: z.string()` required,
+      # `description: z.string().optional()` typed when present) — not a schema
+      # of its own: the shape one character from the original defect PARSES and
+      # yields an object, and only the type assertion sees it.
+      #
+      # Population is the WHOLE corpus, generated `references/**` included,
+      # because that is what `Build Docs` parses; scoping to the hand-written
+      # half would leave 214 of 403 pages carrying the gap this closes. Every
+      # unread state is a refusal rather than a quiet pass — an absent root, a
+      # tree resolving to zero pages, or a page that cannot be read all exit 1
+      # naming what could not be read (#4690 / #7484).
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the aggregator-roster step below: that alias belongs in root
+      # package.json, declared territory of the @changesets/cli v3 migration
+      # lane (#9465) while it runs. Dependency-free filesystem read, sub-second
+      # over the whole corpus.
+      - name: Docs frontmatter parses
+        run: |
+          node scripts/check-doc-frontmatter.mjs --self-test
+          node scripts/check-doc-frontmatter.mjs
+
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
       # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
