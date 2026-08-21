@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
+import { dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
@@ -193,13 +194,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
         await this.engine.update(
             this.objectName,
             { status: 'pending', claimed_by: null, claimed_at: null },
-            {
-                where: {
-                    status: 'in_flight',
-                    claimed_at: { $lt: now - opts.claimTtlMs },
-                },
-                multi: true,
-            },
+            // Environment-wide by design: recovers rows a crashed node abandoned,
+            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherSweepOptions({
+                status: 'in_flight',
+                claimed_at: { $lt: now - opts.claimTtlMs },
+            }),
         );
 
         // 2. Pick candidate ids.
@@ -221,7 +221,9 @@ export class SqlHttpOutbox implements IHttpOutbox {
         await this.engine.update(
             this.objectName,
             { status: 'in_flight', claimed_by: opts.nodeId, claimed_at: now },
-            { where: { id: { $in: ids }, status: 'pending' }, multi: true },
+            // Environment-wide by design: the dispatcher drains every
+            // organization's queue. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherSweepOptions({ id: { $in: ids }, status: 'pending' }),
         );
 
         // 4. Read back the rows we actually own.
