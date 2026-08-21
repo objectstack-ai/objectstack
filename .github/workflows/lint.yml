@@ -184,11 +184,45 @@ jobs:
       # `ts-parse` spawns ~20 real node children (~10 s measured, and the spawns
       # are the point — they pin that a caller's try/catch cannot swallow the
       # refusal); the other two are in-process fixtures, ~0.5 s combined.
+      #
+      # ⭐ Collected rather than sequenced, for the reason spelled out at the
+      # `Shallow-history guard self-tests` step below (#10814): under `bash -e` a
+      # bare sequence stops at the first failure, so a red `ts-parse` would leave
+      # the entry-predicate and comment-mask self-tests UNRUN while the log shows
+      # only the one failure. `ts-parse` is both the slowest of the three and the
+      # one that spawns real children, so it is the likeliest to be red —
+      # precisely the masking direction. The three modules are independent of one
+      # another, so collecting loses nothing.
       - name: scripts/ shared-module self-tests (parse · entry predicate · comment mask)
         run: |
-          node scripts/ts-parse.mjs --self-test
-          node scripts/invoked-as.mjs --self-test
-          node scripts/js-comment-mask.mjs --self-test
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # self-test runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success. Both directions are pinned
+          # by `node scripts/check-step-collectors.mjs --self-test`, which extracts
+          # THIS block from THIS file and drives it under `bash -e` with stubs.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/ts-parse.mjs --self-test
+          run_self_test node scripts/invoked-as.mjs --self-test
+          run_self_test node scripts/js-comment-mask.mjs --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "scripts/ shared-module self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "scripts/ shared-module self-tests — all three ran and passed"
 
       # Every `scripts/**` entry guard goes through ONE predicate (#10086).
       # The hand-typed forms of "did node run me, or did someone import me?"
@@ -527,11 +561,107 @@ jobs:
       # (`check-governed-merges.mjs`'s own cases run in the
       # `pnpm check:pm-governed-merges` step above, which is already its
       # self-test.)
+      #
+      # ⭐ The three run through a COLLECTOR rather than as a bare sequence
+      # (#10814). A `run:` block is executed by `bash -e`, so the first non-zero
+      # exit aborts the STEP and every command after it is never reached —
+      # neither green nor red, and nothing in the log tells those apart. Not
+      # hypothetical here: while `git-history.mjs --self-test` was red on `main`
+      # for ~10 h on 2026-08-21 (#10807), the two self-tests listed after it did
+      # not execute in CI once — on the step that gates every PR. Both were
+      # green, so that time the mask hid nothing; the compounding shape is that a
+      # SECOND regression can land unnoticed while the first is red, and then
+      # reads as though the fix broke it. #4690 one level up: a partial result
+      # that reads like a complete one.
+      #
+      # These three are INDEPENDENT — none is a precondition for reading the
+      # next — which is what makes collecting correct HERE and
+      # abort-on-first-failure correct in this job's many
+      # `<gate> --self-test` + `<gate>` steps, where the self-test IS the
+      # precondition for trusting the run after it. The census behind that
+      # distinction: of 200 `run:` steps in lint.yml + ci.yml, 21 hold two or
+      # more substantive commands, and exactly two were independent self-tests
+      # sequenced together — this step and the `scripts/` shared-module step
+      # above. Every other one is a precondition or a dependency, where the
+      # abort is the correct semantics.
+      #
+      # ⛔ Not one step per self-test: a plain step split does not fix this at
+      # all — Actions skips a job's remaining steps once a step fails, so the
+      # mask survives the split verbatim. Restoring it would take an `if:` on
+      # each gate step, and a condition is a way for a PR to arrange that a gate
+      # does not run on it (the reason the required-context pin step carries
+      # none). Both gates that read step structure were checked and would
+      # TOLERATE a split — `check-shard-attestation` scans ci.yml only, and
+      # `check-required-contexts` pins job-level properties plus the one
+      # `check:required-contexts` step — so this is a choice on the merits,
+      # not a constraint.
       - name: Shallow-history guard self-tests
         run: |
-          node scripts/pm/git-history.mjs --self-test
-          node scripts/check-engine-split-ratio.mjs --self-test
-          bash scripts/collect-release-notes.sh --self-test
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # self-test runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success. Both directions are pinned
+          # by `node scripts/check-step-collectors.mjs --self-test`, which extracts
+          # THIS block from THIS file and drives it under `bash -e` with stubs.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/pm/git-history.mjs --self-test
+          run_self_test node scripts/check-engine-split-ratio.mjs --self-test
+          run_self_test bash scripts/collect-release-notes.sh --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Shallow-history guard self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Shallow-history guard self-tests — all three ran and passed"
+
+      # Step-collector gate (#10814) — the guard over the two steps above, and
+      # over any step that grows their shape later. It has a static half and a
+      # dynamic half, and the dynamic one is the load-bearing part:
+      #
+      # STATIC: one `run:` block invoking `--self-test` on TWO OR MORE DISTINCT
+      # scripts must route them through a collector. Distinct scripts testing
+      # themselves are independent by construction, so there is no reading under
+      # which a failure in one should skip the others. Deliberately narrow: it
+      # does NOT flag `<gate> --self-test` + `<gate>`, this job's dominant shape,
+      # where the abort IS the point (a checker whose self-test failed has no
+      # verdict worth printing), nor ci.yml's `mkdir -p` / `psql ALTER SYSTEM`
+      # dependency sequences. Swept when it was written: 343 `run:` steps across
+      # 26 workflows, exactly 2 matched, both of them above.
+      #
+      # DYNAMIC: nothing static can tell a collector that PROPAGATES the exit
+      # code from one that swallows it, and the swallowing kind is worse than
+      # the masking it replaces — a green step over a red self-test, which from
+      # outside is indistinguishable from success. So `--self-test` extracts each
+      # live block out of THIS file and runs it as `bash -e <file>` — the same
+      # invocation Actions uses — against stubs with controlled exit codes, and
+      # reads "did this command run" from the STUB's own side effect rather than
+      # from the block's output, so the block cannot vouch for itself. Both
+      # directions are pinned in every position, and the same command list is
+      # also driven through the PRE-FIX bare sequence, which must mask — 1 of 3
+      # commands executing when the first fails, 3 of 3 when none does. A harness
+      # that cannot reproduce the defect cannot certify the fix.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
+      # belongs in root package.json, declared territory of the @changesets/cli
+      # v3 migration lane (#9465) while it runs — same shape as the other
+      # `node scripts/…` steps in this lane. dispatch-gates.mjs derives gate
+      # families from either spelling. Temp-dir fixtures, no network, ~1 s.
+      - name: Step-collector gate (self-tests that mask each other)
+        run: |
+          node scripts/check-step-collectors.mjs --self-test
+          node scripts/check-step-collectors.mjs
 
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
