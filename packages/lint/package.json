@@ -23,7 +23,8 @@
     "dev": "tsc -w",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check:doc-formula-expressions": "node scripts/check-doc-formula-expressions.mjs --self-test && node scripts/check-doc-formula-expressions.mjs"
+    "check:doc-formula-expressions": "node scripts/check-doc-formula-expressions.mjs --self-test && node scripts/check-doc-formula-expressions.mjs",
+    "check:doc-security-posture": "node scripts/check-doc-security-posture.mjs --self-test && node scripts/check-doc-security-posture.mjs"
   },
   "dependencies": {
     "@objectstack/formula": "workspace:*",

@@ -3343,6 +3343,28 @@ jobs:
       - name: Check docs formula examples are valid CEL
         run: pnpm --filter @objectstack/lint run check:doc-formula-expressions
 
+      # The AUTHOR-TIME-LINT half of the same surface (#10618). check:skill-examples
+      # proves an `os:check` block COMPILES; it cannot prove `os validate` accepts
+      # what the block constructs, because the lint rules judge VALUES, not types:
+      # `sharingModel` is `.optional()` with no `.default()`, so omitting it
+      # type-checks clean while `os validate` rejects the object as severity:
+      # 'error' (SECURITY_OWD_UNSET — the ADR-0090 D1 authored-baseline rule).
+      # That is how 22 canonical docs examples across 12 pages shipped a shape
+      # the platform's own gate rejects (#10581; fixed by the #10714 sweep, plus
+      # 8 more this gate's first run found on pages outside that sweep's scope).
+      #
+      # The verdict is `validateSecurityPosture` imported from @objectstack/lint —
+      # the same gating-tier registry entry `os validate` / `os compile` and the
+      # runtime publish gate run — never a lookalike, so the docs are gated by
+      # the rule rather than a dialect of it. Same home and reasoning as its
+      # CEL neighbour directly above. The constructed `ObjectSchema.create`
+      # literal is STATICALLY evaluated (never executed), with per-fact
+      # conservatism: a verdict is only trusted where its facts are statically
+      # known, so `Field.*` factory calls and dynamic values can never turn
+      # into a false red. Self-test first, both directions.
+      - name: Check docs object examples pass the os validate security posture
+        run: pnpm --filter @objectstack/lint run check:doc-security-posture
+
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing
       # regenerated them either, so they rotted three ways at once (#3670):

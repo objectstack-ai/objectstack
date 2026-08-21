@@ -134,6 +134,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 
 export const greetingLogObject = ObjectSchema.create({
   name: 'greeting_log',
+  sharingModel: 'private',
   label: 'Greeting Log',
   fields: {
     recipient: { label: 'Recipient', type: 'text', required: true },
