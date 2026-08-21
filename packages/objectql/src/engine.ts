@@ -11543,6 +11543,20 @@ export class ObjectQL implements IObjectQLEngine {
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
       query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object));
       this.rejectCredentialAggregation(object, query);
+      // [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`,
+      // the contract half of #10413) is a second filter position on this verb,
+      // so it walks through the same refusal doors `where` does at this seam:
+      // the comparand-shape gate (#5869 — a scalar `$in` etc. is refused, not
+      // silently matched against nothing) and the materializable-field gate
+      // (#8296 — a typo'd column would otherwise select ZERO rows for that one
+      // aggregation, silently, which is the same wrong-number shape #10413
+      // measured). The path names which aggregation carries the offending key.
+      for (const [i, agg] of (Array.isArray(query.aggregations) ? query.aggregations : []).entries()) {
+          const aggFilter = (agg as { filter?: unknown })?.filter;
+          if (aggFilter == null) continue;
+          assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
+          assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
+      }
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);
 
@@ -11567,6 +11581,25 @@ export class ObjectQL implements IObjectQLEngine {
         context: mergeReadContext(query?.context, options?.context),
       };
       this.resolveWhereTokens(opCtx.ast as QueryAST, opCtx.context);
+      // [#10576] Filter tokens (`{userId}`-style placeholders, #3810) resolve
+      // in per-aggregation filters exactly as they do in `where` — a filter
+      // position is a filter position, and an unresolved placeholder would be
+      // compared as a literal string, silently selecting zero rows for that one
+      // aggregation. Copy-on-write like `withResolvedWhere`: the entry objects
+      // belong to the caller (view metadata / flow config get reused), so a
+      // resolved filter lands on a copied entry, never written back through.
+      {
+          const astAggs = (opCtx.ast as QueryAST).aggregations;
+          if (Array.isArray(astAggs) && astAggs.some((a) => (a as { filter?: unknown })?.filter != null)) {
+              const tokenCtx = filterTokenContextFrom(opCtx.context);
+              (opCtx.ast as QueryAST).aggregations = astAggs.map((a) => {
+                  const f = (a as { filter?: unknown })?.filter;
+                  if (f == null) return a;
+                  const resolved = resolveFilterTokens(f as any, tokenCtx);
+                  return resolved === f ? a : { ...(a as object), filter: resolved } as typeof a;
+              });
+          }
+      }
 
       await this.executeWithMiddleware(opCtx, async () => {
         const ast = opCtx.ast as QueryAST;
@@ -11600,7 +11633,23 @@ export class ObjectQL implements IObjectQLEngine {
         const tz = query.timezone;
         const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
-        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
+        // [#10576] Per-aggregation filters (`aggregations[].filter`, the
+        // contract half of #10413) force the in-memory path: no driver compiles
+        // a conditional aggregate (SQL `FILTER (WHERE …)` / `CASE WHEN`) from
+        // this key today, and pushing it down would aggregate the UNFILTERED
+        // rows — the silent drop #10413 measured. Same correct-first two-tier
+        // shape as date bucketing and HAVING above: a driver that grows native
+        // support must advertise a capability flag, at which point this fork
+        // becomes its fallback tier. The driver faces also refuse the key
+        // loudly (NOT_IMPLEMENTED/501) if reached directly, so neither seam can
+        // drop it in silence. `{}` counts as no filter (the vacuous-filter
+        // convention `where` / `having` already follow).
+        const hasAggregationFilter = (Array.isArray(ast.aggregations) ? ast.aggregations : [])
+            .some((a) => {
+                const f = (a as { filter?: unknown })?.filter;
+                return f != null && typeof f === 'object' && Object.keys(f).length > 0;
+            });
+        if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory && !hasAggregationFilter) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over
             // the aggregated row's own columns (aggregation aliases + groupBy
             // projections), identically on both paths. No driver implements it

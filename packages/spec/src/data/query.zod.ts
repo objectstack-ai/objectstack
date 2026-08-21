@@ -269,7 +269,20 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
    * every face computes. See {@link AGGREGATION_DISTINCT_REMOVED}.
    */
   distinct: retiredKey(AGGREGATION_DISTINCT_REMOVED),
-  filter: FilterConditionSchema.optional().describe('[EXPERIMENTAL — not enforced] Per-aggregation filter (SQL FILTER (WHERE …)). Neither the SQL builders nor the in-memory fallback applies it (#4286); filter the whole query with `where` instead.'),
+  /**
+   * Per-aggregation filter (SQL `FILTER (WHERE …)` semantics) — ENFORCED since
+   * #10576 (the contract half of #10413's ruling: 「给引擎聚合契约加逐聚合过滤,
+   * 一次修对所有驱动」). The predicate narrows the SOURCE rows this one
+   * aggregation reads — raw column namespace, the `where` operator vocabulary —
+   * while sibling aggregations in the same call keep seeing every row of the
+   * group. `engine.aggregate` lowers filtered aggregations in memory for every
+   * driver (correct-first, the date-bucketing two-tier shape); a driver face
+   * reached directly with one refuses NOT_IMPLEMENTED/501 rather than silently
+   * aggregating the unfiltered rows — the silent drop was #10413's defect.
+   * Over a group whose rows the filter excludes entirely, count/sum answer 0
+   * and avg/min/max answer null (`emptyGroupValueFor`, aggregation-policy.ts).
+   */
+  filter: FilterConditionSchema.optional().describe('Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate (#10576): lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it.'),
 }));
 
 // ─── Joins: REMOVED (#4286, ADR-0049) ────────────────────────────────────────

@@ -903,6 +903,33 @@ function refuseAggregateFunction(func: string): never {
 }
 
 /**
+ * [#10576] An aggregation entry carries a per-aggregation `filter`
+ * (`AggregationNodeSchema.filter`, the contract half of #10413) — the twin of
+ * `driver-sql`'s `unsupportedAggregationFilterError`, first sentence for first
+ * sentence, and the same NOT_IMPLEMENTED/501 class for the same reason: the
+ * spec declares the key, this transport compiles no conditional-aggregate
+ * expression for it, so it is a capability gap in the backend rather than a
+ * mistake in the query. Refused rather than silently aggregating the
+ * UNFILTERED rows — the #10413 defect. Unreachable through `engine.aggregate`
+ * (the engine lowers filtered aggregations in memory for every driver); this
+ * fires only for a caller that reached the transport directly.
+ */
+function refusePerAggregationFilter(alias: string): never {
+  const err = new Error(
+    `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (Turso remote transport). ` +
+    `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
+    `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
+    `aggregations in memory for every driver without native support — route the query through the ` +
+    `engine, or drop the \`filter\` key.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * [#6212] A `groupBy` entry asks for a date BUCKET — the twin of `driver-sql`'s
  * `refuseDateBucketedGroupBy`, first sentence for first sentence, and the same
  * NOT_IMPLEMENTED/501 class for the same reason: `DateGranularity` declares the
@@ -1288,6 +1315,14 @@ export class RemoteTransport {
     // declared; its only writers were the two driver packages' own fixtures.
     const aggregations = query?.aggregations || [];
     for (const agg of aggregations) {
+      // [#10576] A per-aggregation `filter` this transport cannot compile is
+      // refused before any statement is built — silently emitting the
+      // UNFILTERED aggregate is the #10413 defect. `{}` is the vacuous filter,
+      // same convention as `where` / `having`. See
+      // {@link refusePerAggregationFilter}.
+      if (agg.filter && Object.keys(agg.filter).length > 0) {
+        refusePerAggregationFilter(agg.alias ?? agg.field ?? '(unaliased)');
+      }
       // [#5907] The caller's spelling is what the refusal quotes back and what
       // the declared-vocabulary check is judged against.
       //

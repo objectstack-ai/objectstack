@@ -32,10 +32,23 @@
 //     dedupe limb is deleted rather than left unreachable, for the same reason
 //     the retired function arms were. `count_distinct` is unaffected: it
 //     deduplicates inside its own arm, and every SQL face compiles it (#6409).
-//   * `filter: FilterCondition` on aggregations is **not** evaluated here —
-//     the engine routes filtered aggregations through the driver where
-//     possible; the in-memory fallback ignores the per-aggregation filter and
-//     logs a warning if one is present.
+//   * `filter: FilterCondition` on aggregations IS evaluated here — ENFORCED
+//     since #10576 (the contract half of #10413: the ObjectQL analytics path
+//     handed per-measure filters to `engine.aggregate` and they were dropped
+//     with no error, so "won deals" counted every row). The predicate narrows
+//     the SOURCE rows the one aggregation reads — SQL `FILTER (WHERE …)`
+//     semantics — while sibling aggregations in the same call keep the full
+//     bucket. Evaluation is `matchesAggregationFilter` (having-filter.ts): the
+//     same operator vocabulary, ADR-0112 refusal envelope and #5298 null-safe
+//     negation as `having`, over raw rows instead of aggregated ones; an
+//     unknown operator REFUSES rather than silently answering the unfiltered
+//     aggregate. This module used to claim it "logs a warning if one is
+//     present" — it never did; the key was silently ignored on every path,
+//     which is exactly the defect #10413 measured. NOTE this fallback is the
+//     documented LOWERING for every driver: `engine.aggregate` routes any call
+//     whose aggregations carry a filter through here (no driver advertises
+//     native conditional aggregation today), and the driver faces refuse
+//     NOT_IMPLEMENTED/501 if reached directly with one.
 //
 // Date bucketing uses ISO-8601 conventions (weeks start Monday).
 //
@@ -73,6 +86,7 @@
 
 import { calendarPartsInTzOrUtc } from '@objectstack/core';
 import type { QueryAST, GroupByNode, AggregationNode, DateGranularityValue } from '@objectstack/spec/data';
+import { matchesAggregationFilter } from './having-filter.js';
 
 /**
  * Group + aggregate raw rows according to the AST's `groupBy` /
@@ -153,11 +167,24 @@ function projectGroupValue(row: any, g: GroupByNode, timezone?: string): unknown
   return v ?? null;
 }
 
-function aggregateBucket(rows: any[], aggregations: AggregationNode[]): Record<string, any> {
+function aggregateBucket(allRows: any[], aggregations: AggregationNode[]): Record<string, any> {
   const out: Record<string, any> = {};
-  for (const agg of aggregations) {
+  for (const [index, agg] of aggregations.entries()) {
     const alias = agg.alias;
     const fn = agg.function;
+    // [#10576] Per-aggregation filter — SQL `FILTER (WHERE …)` semantics: THIS
+    // aggregation reads only the bucket rows its predicate selects; siblings
+    // keep the full bucket. `{}` is the vacuous filter (same convention as
+    // `where` / `having`). When the predicate excludes every row of a bucket
+    // the arms below already answer the platform's ruled empty-group values —
+    // count/count_distinct/sum → 0, avg/min/max → null — matching
+    // `emptyGroupValueFor` (spec data/aggregation-policy.ts), which exists for
+    // precisely this case (a measure-scoped filter emptying a group the grid
+    // still lists, objectui#3136).
+    const aggFilter = agg.filter;
+    const rows = aggFilter && Object.keys(aggFilter).length > 0
+      ? allRows.filter((row) => matchesAggregationFilter(row, aggFilter, index))
+      : allRows;
     if (fn === 'count') {
       // `*` is the count-all sentinel: the Cube `count` measure and a dataset
       // `count` with no field both compile to `sql: '*'` (→ SQL `COUNT(*)`).

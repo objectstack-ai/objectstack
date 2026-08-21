@@ -55,6 +55,36 @@ export function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#10576] An aggregation entry carries a per-aggregation `filter`
+ * (`AggregationNodeSchema.filter`, the contract half of #10413) — the twin of
+ * `driver-sql`'s `unsupportedAggregationFilterError`, first sentence for first
+ * sentence, and the same NOT_IMPLEMENTED/501 class for the same reason (#5907,
+ * ADR-0112): the spec declares the key, this driver's `performAggregation`
+ * evaluates no per-aggregation predicate, so it is a capability gap in the
+ * backend rather than a mistake in the query. Building the evaluation here is
+ * a capability investment this refusal deliberately is not (#5499 freeze).
+ * Refused rather than silently aggregating the UNFILTERED rows — the #10413
+ * defect. Unreachable through `engine.aggregate` (the engine lowers filtered
+ * aggregations in memory for every driver); this fires only for a caller that
+ * reaches the driver's own aggregation faces directly (`find()` with
+ * aggregations, or `aggregate(AST)`).
+ */
+export function refusePerAggregationFilter(alias: string): never {
+  const err = new Error(
+    `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (driver-memory). ` +
+    `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
+    `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
+    `aggregations in memory for every driver without native support — route the query through the ` +
+    `engine, or drop the \`filter\` key.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`

@@ -62,6 +62,47 @@ import { invalidFilterError } from './filter-comparand-shape.js';
 
 const LOGICAL_OPERATORS = ['$and', '$or', '$not'] as const;
 
+/**
+ * [#10576] Which clause this evaluator is judging — the wording seam that lets
+ * one walker serve two positions honestly.
+ *
+ * This module was written for `having` and its refusals said so in prose
+ * ("Unsupported operator '$x' in `having`. HAVING filters the aggregated
+ * rows…"). The per-aggregation `filter` (`AggregationNodeSchema.filter`, the
+ * contract half of #10413) evaluates the SAME operator vocabulary with the
+ * same #5298 null semantics, but over a different row population — the raw
+ * source rows of one aggregation, not the aggregated result — so reusing the
+ * walker verbatim would refuse an aggregation-filter mistake with a sentence
+ * about a clause the caller never wrote. The clause carries the two strings
+ * that differ; everything the two positions genuinely share (operators,
+ * envelope, null semantics, comparand gates) stays single-sourced.
+ */
+interface FilterClause {
+  /** Root label refusals use for position (`having`, `aggregations[2].filter`). */
+  root: string;
+  /** One-sentence semantics printed before the supported-operator list. */
+  semantics: string;
+}
+
+const HAVING_CLAUSE: FilterClause = {
+  root: 'having',
+  semantics: 'HAVING filters the aggregated rows (aggregation aliases + groupBy projections)',
+};
+
+/**
+ * [#10576] The clause for one `aggregations[i].filter` position. The position
+ * index is baked into `root` so a refusal names WHICH aggregation carries the
+ * offending key — a call can hold several, each with its own filter.
+ */
+export function aggregationFilterClause(index: number): FilterClause {
+  return {
+    root: `aggregations[${index}].filter`,
+    semantics:
+      'A per-aggregation `filter` narrows the SOURCE rows that one aggregation reads '
+      + '(raw column namespace, the `where` operator vocabulary)',
+  };
+}
+
 // [#5702] `$regex` is GONE from this vocabulary. Its arm below ran a real
 // `RegExp` over the aggregated value and answered an ILLEGAL pattern with
 // `return false` — "no rows", silently — which is the pair of defects #4706
@@ -116,6 +157,7 @@ function unknownOperator(
   op: string,
   where: 'logical' | 'condition',
   siblings: readonly string[] = [],
+  clause: FilterClause = HAVING_CLAUSE,
 ): Error {
   // [#5702] A RETIRED spelling gets the spec's prescription rather than the
   // vocabulary list — its author wrote a name this face ANSWERED until #4706,
@@ -131,7 +173,7 @@ function unknownOperator(
         + `whole shape, so this is ONE mistake with ONE fix, not one per key.`
       : '';
     return invalidFilterError(
-      `Filter operator '${op}' in \`having\` is RETIRED and is no longer evaluated.${replacement} `
+      `Filter operator '${op}' in \`${clause.root}\` is RETIRED and is no longer evaluated.${replacement} `
       + `${retired.why}${also}`,
     );
   }
@@ -139,8 +181,7 @@ function unknownOperator(
     ? `${LOGICAL_OPERATORS.join(', ')} (or a column condition)`
     : CONDITION_OPERATORS.join(', ');
   return invalidFilterError(
-    `Unsupported operator '${op}' in \`having\`. HAVING filters the aggregated rows `
-    + `(aggregation aliases + groupBy projections) and supports: ${supported}. `
+    `Unsupported operator '${op}' in \`${clause.root}\`. ${clause.semantics} and supports: ${supported}. `
     + `An unknown operator is refused rather than ignored — ignoring it would silently `
     + `return unfiltered aggregates (#4286, ADR-0078).`,
   );
@@ -230,34 +271,70 @@ export function applyHaving(rows: any[], having: FilterCondition | null | undefi
  * refusal can NAME where the offending key sits. It defaults, so this stays the
  * two-argument function every existing caller (and `applyHaving` below) uses.
  */
-export function matchesHaving(row: Record<string, any>, cond: any, path = 'having'): boolean {
+export function matchesHaving(
+  row: Record<string, any>,
+  cond: any,
+  path = 'having',
+  clause: FilterClause = HAVING_CLAUSE,
+): boolean {
   if (!cond || typeof cond !== 'object') return true;
   for (const [key, value] of Object.entries(cond)) {
     const here = `${path}.${key}`;
     if (key === '$and') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`))) return false;
+      if (!branches.every((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
       continue;
     }
     if (key === '$or') {
       const branches = Array.isArray(value) ? value : [value];
-      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`))) return false;
+      if (!branches.some((c, i) => matchesHaving(row, c, `${here}[${i}]`, clause))) return false;
       continue;
     }
     if (key === '$not') {
-      if (matchesHaving(row, value, here)) return false;
+      if (matchesHaving(row, value, here, clause)) return false;
       continue;
     }
-    if (key.startsWith('$')) throw unknownOperator(key, 'logical');
+    if (key.startsWith('$')) throw unknownOperator(key, 'logical', [], clause);
     // Aggregated rows are flat (aliases + group projections) — direct access,
-    // no dotted-path resolution.
-    if (!checkCondition(row?.[key], value, key, here)) return false;
+    // no dotted-path resolution. [#10576] The per-aggregation filter walks the
+    // same way on purpose: it reads `driver.find()` rows, which are flat too.
+    if (!checkCondition(row?.[key], value, key, here, clause)) return false;
   }
   return true;
 }
 
+/**
+ * [#10576] Evaluate one raw source row against one `aggregations[i].filter`
+ * predicate — the per-aggregation filter of `AggregationNodeSchema` (the
+ * contract half of #10413's ruling), applied by the in-memory aggregation
+ * fallback before the aggregation function reads the row.
+ *
+ * The SAME walker as `matchesHaving`, deliberately: the two positions share
+ * one operator vocabulary, one ADR-0112 refusal envelope, and the #5298
+ * null-safe negation semantics — a predicate moved between a driver `where`,
+ * a `having`, and a per-aggregation `filter` must select rows by one rule.
+ * Only the refusal WORDING differs (see {@link aggregationFilterClause}): an
+ * unknown operator here is refused naming the aggregation position it sits in,
+ * because ignoring it would silently answer the UNFILTERED aggregate — the
+ * precise #10413 defect this key exists to close.
+ */
+export function matchesAggregationFilter(
+  row: Record<string, any>,
+  filter: FilterCondition,
+  index: number,
+): boolean {
+  const clause = aggregationFilterClause(index);
+  return matchesHaving(row, filter, clause.root, clause);
+}
+
 /** One column's condition — implicit equality or an operator object. */
-function checkCondition(value: any, condition: any, field: string, path: string): boolean {
+function checkCondition(
+  value: any,
+  condition: any,
+  field: string,
+  path: string,
+  clause: FilterClause = HAVING_CLAUSE,
+): boolean {
   // Implicit equality (primitives, null, Date, array exact-match) — loose `==`
   // to mirror the Filter Protocol's memory evaluation.
   if (
@@ -355,7 +432,7 @@ function checkCondition(value: any, condition: any, field: string, path: string)
       // answered as "this row does not match", i.e. a silent empty result rather
       // than an error. Retired by #4706; refused by `default:` below.
       default:
-        throw unknownOperator(op, 'condition', keys);
+        throw unknownOperator(op, 'condition', keys, clause);
     }
   }
   return true;
