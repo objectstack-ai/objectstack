@@ -150,6 +150,7 @@ import { join, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { parseSourceFile } from './ts-parse.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = join(ROOT, 'scripts', 'startup-registry-verdict.baseline.json');
@@ -1436,7 +1437,12 @@ function selfTest() {
 }
 
 const args = process.argv.slice(2);
-if (args.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (args.includes('--self-test')) {
     process.exit(selfTest());
 } else {
     const dirFlag = args.indexOf('--packages-dir');
