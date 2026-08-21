@@ -441,7 +441,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-engine-split-ratio.mjs',
   'scripts/check-error-code-casing.mjs',
   'scripts/check-error-status-conformance.mjs',
-  'scripts/check-examples-live-imports.mjs',
   'scripts/check-filter-alias-parity.mjs',
   'scripts/check-nul-bytes.mjs',
   'scripts/check-org-identifier.mjs',

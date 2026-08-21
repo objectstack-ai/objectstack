@@ -122,6 +122,7 @@ import { globToRegExp } from './check-cross-package-test-inputs.mjs';
 import { join, resolve, relative, dirname, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -759,7 +760,12 @@ function selfTest() {
 }
 
 const argv = process.argv.slice(2);
-if (argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (argv.includes('--self-test')) selfTest();
 else if (argv.includes('--list')) list();
 else if (argv.includes('--json')) {
   const { rows, unresolved } = collect();
