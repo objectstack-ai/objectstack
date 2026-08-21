@@ -107,7 +107,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = new URL('..', import.meta.url);
 const DEFAULT_LABELER_CONFIG = fileURLToPath(new URL('.github/labeler.yml', REPO_ROOT));
@@ -767,7 +768,14 @@ async function main() {
 // Only drive the CLI when this file IS the entry point. Importing it (the
 // self-test harness, or an ad-hoc check against a real PR's file list) must not
 // fire a mode off `process.argv` that belongs to the importer.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// `isEntrypoint` is the ONE sanctioned predicate for this in `scripts/**`, and
+// hand-typing the comparison is what check:entry-guard exists to stop. Node
+// resolves symlinks for the module graph but leaves `process.argv[1]` as the
+// caller typed it, so a hand-typed guard answers `false` through a symlink and
+// the script then does NOTHING -- exit 0, no output, which a caller reading the
+// status reads as success.
+if (isEntrypoint(import.meta.url)) {
   main().catch((error) => {
     console.error(`pr-labels: ${error.message}`);
     process.exit(1);
