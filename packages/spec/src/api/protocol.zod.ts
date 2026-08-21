@@ -885,12 +885,30 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     name: z.string().describe('Item name.'),
     error: z.string().describe(
       'What refused it. On a rollback, the causal item carries its real '
-      + 'error and every sibling carries the all-or-nothing explanation.',
+      + 'error and every sibling carries the all-or-nothing explanation. '
+      + 'A refusal that produced structured findings states a one-sentence '
+      + 'HEADLINE here (what failed, where, which rules, how many); the '
+      + 'per-path detail rides `issues[]` instead of being restated in this '
+      + 'string (#10524 — consumers rendering both channels were showing '
+      + 'every finding twice).',
     ),
     code: z.string().optional().describe(
       'Machine code for the refusal class (SCREAMING_SNAKE, ADR-0112 '
       + 'vocabulary) — e.g. a pre-flight violation code, or BATCH_ABORTED '
       + 'on the non-causal items of a rolled-back batch.',
+    ),
+    issues: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+      'The structured findings behind the refusal, when the refusing error '
+      + 'carried them — today the #4463 author-time gate\'s '
+      + 'INVALID_METADATA refusal on the causal item. The producer has '
+      + 'emitted this key since #8333; declaring it (#10524) is what lets a '
+      + 'typed consumer read it back, and what lets `error` stay a headline '
+      + 'without losing the per-path detail. Same element shape as '
+      + '`published[].advisories` and the single-item 422\'s `issues[]` '
+      + '(#4717 — one dialect, declared once). Present ONLY on the causal '
+      + 'item and only when the refusal produced structured findings; '
+      + 'BATCH_ABORTED siblings never carry it. Absent means "this refusal '
+      + 'carried no structured findings", never "no problems".',
     ),
   })).describe(
     'Items that did not publish. Because the batch is all-or-nothing '
@@ -914,11 +932,34 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
     error: z.string().optional().describe(
       'Single failure message, present when the apply failed before the '
-      + 'loader ran (including "no readable seed bodies").',
+      + 'loader ran (including "no readable seed bodies"). When the failure '
+      + 'is the seed bodies\' own schema refusal, this is a one-sentence '
+      + 'headline and the per-path detail rides `issues[]` (#10524).',
     ),
     errors: z.array(z.unknown()).optional().describe(
       'Per-record failures reported by the seed loader, plus any seed-body '
       + 'read failures. May be present and empty on a clean load.',
+    ),
+    issues: z.array(z.object({
+      path: z.string().describe(
+        'Dotted config path inside the submitted seed set (`seeds.0.mode`), '
+        + 'so an author can jump to the offending key. May be empty for a '
+        + 'whole-request finding.',
+      ),
+      message: z.string().describe('What is wrong, in the schema\'s own words.'),
+      code: z.string().optional().describe(
+        'Zod\'s own issue code, verbatim — deliberately NOT the ADR-0114 '
+        + '`fields[]` vocabulary (the #5364 decision: this is a '
+        + 'metadata-authoring diagnostic and its consumers read raw zod '
+        + 'codes; aligning the vocabularies is a separate decision).',
+      ),
+    })).optional().describe(
+      'Structured spec-validation findings behind `error`, present when the '
+      + 'apply was refused by the seed bodies\' own schema — the declared '
+      + '422 `seedRequestValidationError` mints (#8443). The per-path '
+      + 'detail lives HERE, once; `error` stays a one-sentence headline '
+      + '(#10524). Absent on non-validation failures (driver faults, '
+      + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),
   }).optional().describe(
     'Aggregate outcome of materializing EVERY published `seed` body in one '

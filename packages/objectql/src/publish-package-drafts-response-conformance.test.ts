@@ -506,3 +506,134 @@ describe('outcome discriminates the three publish exits (#10462)', () => {
         });
     });
 });
+
+/**
+ * #10524 — declare-then-trim on the batch refusal face.
+ *
+ * The measured defect: the causal `failed[]` entry carried BOTH an `error`
+ * string that inlined the first three findings' prose AND the same findings
+ * structurally under `issues` — undeclared, so every declared parse stripped
+ * the structured half while every console rendered the prose twice. Step 1
+ * declared `issues` on the element (spec #10524); step 2 trimmed the
+ * #4463 gate's message to a headline. These cases pin both halves against
+ * the REAL protocol, and each names its control kind.
+ *
+ * The refusal is real, not synthesized: the same Zod-valid / gate-invalid
+ * broken-CEL approval flow `protocol.runtime-authoring-gate.test.ts` and
+ * `protocol.batch-verb-driver-text.test.ts` use, so the three files agree on
+ * what "a broken flow" is.
+ */
+const brokenApprovalFlow = () => ({
+    name: 'leave_approval',
+    label: 'Leave Approval',
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+            id: 'approve',
+            type: 'approval',
+            label: 'Approve',
+            config: { approvers: [{ type: 'expression', value: 'record.owner ==' }] },
+        },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'approve' }],
+});
+
+describe('failed[].issues — the causal refusal\'s structured findings (#10524)', () => {
+    async function publishBrokenFlow() {
+        const p = await makeProtocol();
+        // Drafts are never gated (#4463 D1), so the broken body stages
+        // cleanly; the promote inside the batch publish is what refuses.
+        await stageDrafts(p, [{ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() }]);
+        return (await p.publishPackageDrafts({ packageId: PKG })) as any;
+    }
+
+    /**
+     * CONTROL WHOSE SUBJECT DOES NOT EXIST PRE-FIX — the step-1 declaration.
+     * The producer has emitted `issues` on the causal element since #8333;
+     * what was missing is this case, which is why the key rode the wire
+     * undeclared. Falsified by ablating the `issues` declaration on the
+     * `failed[]` element (a plain z.object STRIPS what it does not declare,
+     * so the deep-equal below reds); the ablation run — both legs rebuilt,
+     * dist state proven — is reported in the PR.
+     */
+    it('a causal failed[] entry carries issues[] and the declared parse strips none of it', async () => {
+        const raw = await publishBrokenFlow();
+
+        expect(raw.success).toBe(false);
+        expect(raw.outcome).toBe('refused');
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal).toMatchObject({ type: 'flow', name: 'leave_approval' });
+        const issue = causal.issues.find((i: any) => i.rule === 'approval-expression-invalid');
+        expect(issue, `issues: ${JSON.stringify(causal.issues)}`).toBeDefined();
+        expect(issue.path).toBe('flows[0].nodes[1].config.approvers[0].value');
+        expect(issue.message).toMatch(/does not parse as CEL/);
+
+        expect(strippedKeys(raw)).toEqual([]);
+        const parsed = PublishPackageDraftsResponseSchema.parse(raw);
+        const parsedCausal = parsed.failed.find((f) => f.code === 'INVALID_METADATA');
+        expect(parsedCausal?.issues).toEqual(causal.issues);
+        // The full six-key element shape — declaring the card's `{path,
+        // message}` guess instead would strip `rule`/`hint` right here.
+        expect(Object.keys(parsedCausal!.issues![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+    });
+
+    /**
+     * DEFECT CONTROL — red on the pre-fix tree by construction: the gate's
+     * message interpolated `path: [rule] message` for the first three issues
+     * verbatim, so `error` contained every message this loop checks. This is
+     * the card's duplication, asserted directly; no ablation needed.
+     */
+    it('error is a headline: it restates none of the prose issues[] carries', async () => {
+        const raw = await publishBrokenFlow();
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal.issues.length).toBeGreaterThan(0);
+        for (const i of causal.issues) {
+            expect(causal.error).not.toContain(i.message);
+        }
+    });
+
+    /**
+     * PRESERVED-BEHAVIOUR CONTROL — the triage acceptance criterion: a
+     * consumer that renders ONLY `error` (CLI, logs) still learns what
+     * failed, where, under which rule, and how many findings there are.
+     * Green post-fix by construction, so its power to fail is proven by
+     * mutating the fix (dropping the locators or the count from the
+     * headline reds the matching assertion) — the mutation run is reported
+     * in the PR. The `(+N more)` tail's decided fate: replaced by the
+     * leading total count, which subsumes it.
+     */
+    it('a consumer rendering only error still learns what failed, where, and how many', async () => {
+        const raw = await publishBrokenFlow();
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal.error).toContain('flow/leave_approval');
+        expect(causal.error).toContain('failed author-time validation');
+        // The located path stays in the sentence — the #8333 GUARD property,
+        // preserved through the trim…
+        expect(causal.error).toContain('flows[0].nodes[1].config.approvers[0].value');
+        // …with the stable rule id beside it, and the total up front.
+        expect(causal.error).toContain('[approval-expression-invalid]');
+        expect(causal.error).toMatch(/: 1 issue — /);
+    });
+
+    /**
+     * NAMED NON-EFFECT — BATCH_ABORTED siblings never carry `issues` (the
+     * refusal was not theirs), and the refusal face still parses unstripped
+     * beside them.
+     */
+    it('BATCH_ABORTED siblings carry no issues, and the face still conforms', async () => {
+        const p = await makeProtocol();
+        await stageDrafts(p, [
+            { type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() },
+            { type: 'view', name: 'cases', item: viewBody('cases', 'Cases') },
+        ]);
+        const raw: any = await p.publishPackageDrafts({ packageId: PKG });
+
+        const sibling = raw.failed.find((f: any) => f.code === 'BATCH_ABORTED');
+        expect(sibling).toBeDefined();
+        expect('issues' in sibling).toBe(false);
+        expect(strippedKeys(raw)).toEqual([]);
+    });
+});

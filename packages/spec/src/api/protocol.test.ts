@@ -1301,6 +1301,149 @@ describe('PublishPackageDraftsResponseSchema published[].advisories (#9343 — #
   });
 });
 
+/**
+ * #10524 — `failed[].issues`, the structured findings behind a causal refusal,
+ * declared at last. The producer has emitted this key since #8333
+ * (`...(Array.isArray(e?.issues) ? { issues: e.issues } : {})` on the causal
+ * element), but the element declared `type`/`name`/`error`/`code` only — so
+ * the key rode the wire undeclared, was stripped by every declared parse, and
+ * was invisible to the SDK type. Declaring it is step 1 of the card's
+ * declare-then-trim: only once the structured channel is declared may `error`
+ * shrink to a headline without the per-path detail becoming unreadable to
+ * typed consumers.
+ */
+describe('PublishPackageDraftsResponseSchema failed[].issues (#10524 — the causal refusal\'s findings)', () => {
+  const base = {
+    success: false,
+    outcome: 'refused',
+    publishedCount: 0,
+    failedCount: 1,
+    published: [],
+  };
+
+  /** A verbatim-shaped capture of the #4463 gate's refusal finding. */
+  const gateIssue = {
+    rule: 'approval-expression-invalid',
+    path: 'flows[0].nodes[1].config.approvers[0].value',
+    where: 'flow "leave_approval" · node "approve"',
+    message: '\'record.owner ==\' does not parse as CEL.',
+    hint: 'Complete the comparison, e.g. `record.owner == current.id`.',
+    severity: 'error' as const,
+  };
+
+  const causal = (extra?: Record<string, unknown>) => ({
+    type: 'flow', name: 'leave_approval',
+    error: '[invalid_metadata] flow/leave_approval failed author-time validation: '
+      + '1 issue — flows[0].nodes[1].config.approvers[0].value [approval-expression-invalid]',
+    code: 'INVALID_METADATA',
+    ...(extra ?? {}),
+  });
+
+  it('carries a causal refusal\'s issues[] through parse, unstripped', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse({
+      ...base,
+      failed: [causal({ issues: [gateIssue] })],
+    });
+    expect(parsed.failed[0]!.issues).toEqual([gateIssue]);
+  });
+
+  it('is OPTIONAL per element — BATCH_ABORTED siblings and finding-less refusals omit it, and parse fabricates nothing', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse({ ...base, failed: [causal()] });
+    expect(parsed.failed[0]!.issues).toBeUndefined();
+    expect('issues' in parsed.failed[0]!).toBe(false);
+  });
+
+  it('element shape is the ONE declared finding shape — a lossy element is refused, not narrowed', () => {
+    // `RuntimeAuthoringIssueSchema` by reference, not a local re-declaration —
+    // the 2xx advisories[] channels and the refusal channels stay one dialect
+    // (#4717). The card described the shape as `{ path, message }`; the real
+    // emitted shape is the six-key issue, and declaring the narrower guess
+    // would strip `rule`/`hint` at the parse door — the same silent-loss
+    // family this key's declaration closes.
+    const partial = { path: 'flows[0]', message: 'broken' };
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...base,
+        failed: [causal({ issues: [partial] })],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse({
+        ...base,
+        failed: [causal({ issues: gateIssue })],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+/**
+ * #10524 — `seedApplied.issues`, the seed-body schema refusal's structured
+ * findings. `seedRequestValidationError` (#8443) has attached `issues` to its
+ * declared 422 all along, but both catches that surface that refusal onto
+ * `seedApplied` kept only the message — so trimming the message to a headline
+ * without this channel would have deleted the author's per-key detail from
+ * the wire entirely. Element shape is the `zodIssuesToMetadataIssues` entry
+ * (`path` / `message` / zod's own `code`), NOT `RuntimeAuthoringIssueSchema`:
+ * these findings are minted by a zod parse, not by the authoring-rule
+ * registry, and declaring the six-key shape here would refuse every real
+ * emission.
+ */
+describe('PublishPackageDraftsResponseSchema seedApplied.issues (#10524 — the seed refusal\'s findings)', () => {
+  const base = {
+    success: true,
+    outcome: 'published',
+    publishedCount: 1,
+    failedCount: 0,
+    published: [
+      { type: 'seed', name: 'demo_rows', version: 'sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0' },
+    ],
+    failed: [],
+  };
+
+  /** A verbatim-shaped capture of the loader-request parse refusal. */
+  const seedIssue = {
+    path: 'seeds.0.mode',
+    message: 'Invalid enum value. Expected \'insert\' | \'upsert\' | \'ignore\', received \'not-a-real-mode\'',
+    code: 'invalid_enum_value',
+  };
+
+  const refusedApply = (issues?: unknown) => ({
+    ...base,
+    seedApplied: {
+      success: false,
+      error: '[invalid_metadata] the published seed bodies failed spec validation: '
+        + '1 issue — seeds.0.mode [invalid_enum_value]',
+      ...(issues !== undefined ? { issues } : {}),
+    },
+  });
+
+  it('carries the refusal\'s issues[] through parse, unstripped', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse(refusedApply([seedIssue]));
+    expect(parsed.seedApplied!.issues).toEqual([seedIssue]);
+  });
+
+  it('zod\'s `code` is optional per entry — an entry without one still parses', () => {
+    const { code: _dropped, ...noCode } = seedIssue;
+    const parsed = PublishPackageDraftsResponseSchema.parse(refusedApply([noCode]));
+    expect(parsed.seedApplied!.issues).toEqual([noCode]);
+  });
+
+  it('is OPTIONAL — non-validation failures (driver faults, unreadable bodies) omit it, and parse fabricates nothing', () => {
+    const parsed = PublishPackageDraftsResponseSchema.parse(refusedApply());
+    expect(parsed.seedApplied!.issues).toBeUndefined();
+    expect('issues' in parsed.seedApplied!).toBe(false);
+  });
+
+  it('rejects a non-array, so a single issue object cannot masquerade as the list', () => {
+    expect(
+      PublishPackageDraftsResponseSchema.safeParse(refusedApply(seedIssue)).success,
+    ).toBe(false);
+  });
+});
+
 // Deliberately its own import line, matching the file's later blocks: this
 // group pins one change (#9726) and reads as one unit.
 import {

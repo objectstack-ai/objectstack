@@ -635,11 +635,30 @@ export function evaluateRuntimeAuthoringGate(args: {
     if (result.errors.length === 0 && localIssues.length === 0) return { error: null, advisories };
 
     const issues = [...result.errors.map(toIssue), ...localIssues];
-    const summary = issues
+    // [#10524] Two renderings of one array, two audiences — deliberately NOT
+    // one string:
+    //
+    // - `detail` is the WHOLE refusal — path, rule and message prose — and
+    //   goes only where no structured channel exists: the operator's
+    //   un-deduped hatch warn below (#4463 acceptance).
+    // - the thrown 422's `message` is `headline`: what failed, where, which
+    //   rules, how many. Every wire face the message lands on carries the
+    //   SAME `issues` array structurally (`error.details.issues` on the
+    //   single-item 422, `failed[].issues` on the batch response), so
+    //   restating the issue prose in the message made every console render
+    //   each finding twice — the summary-then-bullets duplication this trim
+    //   removes. The leading count subsumes the old `(+N more)` tail; the
+    //   prose lives once, in `issues[]`.
+    const locators = issues
+        .slice(0, 3)
+        .map((i) => `${i.path || i.where || '<root>'} [${i.rule}]`)
+        .join('; ');
+    const headline = `${issues.length} issue${issues.length === 1 ? '' : 's'} — ${locators}`;
+    const detail = issues
         .slice(0, 3)
         .map((i) => `${i.path || i.where || '<root>'}: [${i.rule}] ${i.message}`)
-        .join('; ');
-    const detail = summary + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
+        .join('; ')
+        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
     // The registry's own disclosure, plus the gate-local rule when it was
     // applicable to this type. `rulesRun` exists so a caller can tell "clean"
     // from "nothing ran"; a judgement that can refuse a write and never appears
@@ -668,7 +687,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     }
 
     const err = new Error(
-        `[invalid_metadata] ${args.type}/${args.name} failed author-time validation: ${detail}`,
+        `[invalid_metadata] ${args.type}/${args.name} failed author-time validation: ${headline}`,
     );
     (err as any).code = 'INVALID_METADATA';
     (err as any).status = 422;
