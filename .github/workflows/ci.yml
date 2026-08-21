@@ -403,19 +403,25 @@ jobs:
               # the guard for the day that changes, not the normal path.
               #
               # `git cat-file -e` rather than the more idiomatic strict
-              # `git rev-parse` spelling, and the reason is not style.
-              # check-shard-attestation.mjs classifies a job as an aggregate GATE
-              # when the job's joined `run:` text contains BOTH the string
-              # "check-shard-attestation.mjs" and, as a bare substring, that
-              # script's own dash-dash-verify flag. This job already carries the
-              # first (its --emit step at the bottom), so spelling that flag
-              # anywhere in this step — including in a comment, since comments
-              # are part of `run:` — silently reclassifies the shard job as a
-              # gate. The drift guard then fails with two complaints that name
-              # nothing to do with the real edit ("its job-level if: is not
-              # always()", "never downloads the shard attestations it claims to
-              # count"). Measured both ways on this very change; do not "tidy"
-              # this back.
+              # `git rev-parse --verify` spelling. That is history rather than
+              # style, and it is written down because it used to be a live
+              # hazard: the pre-#6589 check-shard-attestation.mjs classified a
+              # job as an aggregate GATE when the script's basename and its
+              # `--verify` flag merely CO-OCCURRED as substrings anywhere in
+              # the job's joined `run:` text. This job always carries the
+              # basename (its `--emit` step at the bottom), so spelling
+              # `--verify` anywhere in this step — comments included, since
+              # they were part of `run:` — silently reclassified the shard job
+              # as a gate.
+              #
+              # #6589 closed that by construction. Classification is now by
+              # INVOCATION: within one command the flag must follow the
+              # script's own name as an argument, the test is applied per STEP
+              # and never over the job's joined text, and the lexer drops shell
+              # comments — all three pinned by that script's `--self-test`,
+              # which is why this comment can now name the flag at all. Either
+              # spelling is safe here; `git cat-file -e` stays because
+              # churning it would buy nothing.
               if ! git cat-file -e "refs/remotes/origin/$BASE_REF^{commit}" 2>/dev/null; then
                 git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
                   || echo "::warning::Could not fetch origin/$BASE_REF; the merge-base resolution below will decide."
