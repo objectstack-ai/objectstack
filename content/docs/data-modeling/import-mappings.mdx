@@ -1,0 +1,298 @@
+---
+title: Import Mappings
+description: Named, reusable source-column to field projections for CSV/JSON/xlsx import, and the mappingName request that applies one.
+---
+
+# Import Mappings
+
+An **import mapping** is a named, reusable projection from the columns of a source
+file onto the fields of one object. `mapping` is a first-class metadata kind, so a
+mapping either ships inside a package or is saved at runtime — and either way
+`POST /api/v1/data/:object/import` applies it by name with `mappingName`.
+
+Reach for one when the same file shape keeps arriving: a weekly export from another
+system, whose column headers and codes are not yours. For a single ad-hoc file the
+import wizard's inline column rename is enough — the two are different mechanisms with
+different semantics, compared in [Inline `mapping` vs `mappingName`](#inline-mapping-vs-mappingname).
+
+---
+
+## Declaring one in a package
+
+{/* os:check */}
+```typescript
+import { defineMapping } from '@objectstack/spec/data';
+
+export const InquiryFeedMapping = defineMapping({
+  name: 'showcase_inquiry_feed',            // machine id — lowercase snake_case
+  label: 'Inquiry feed (marketing CSV)',
+  sourceFormat: 'csv',
+  targetObject: 'showcase_inquiry',
+  fieldMapping: [
+    { source: 'Full Name', target: 'name' },
+    { source: 'E-mail', target: 'email' },
+    { source: 'Company', target: 'company' },
+    {
+      source: 'Channel',
+      target: 'source',
+      transform: 'map',
+      params: { valueMap: { Webform: 'website', 'Partner Referral': 'referral' } },
+    },
+  ],
+  mode: 'upsert',
+  upsertKey: ['email'],
+});
+```
+
+Register it on the stack alongside the objects it targets:
+
+```typescript
+export default defineStack({
+  manifest: { /* … */ },
+  objects: [Inquiry],
+  mappings: [InquiryFeedMapping],
+});
+```
+
+`defineStack()` validates the mapping while you build, not at first use:
+
+- `targetObject` must name an object the stack defines, otherwise the build fails with
+  `Mapping '<name>' targets object '<object>' which is not defined in objects.`;
+- a `javascript` transform fails the build outright — see
+  [Transformations](#transformations-what-the-server-actually-does).
+
+<Callout type="info">
+  `defineMapping()` parses the config at import time, so a misspelled key
+  (`fields:` instead of `fieldMapping:`, `column:` instead of `source:`) is rejected
+  where you wrote it, with the canonical spelling named in the error. A bare
+  `: Mapping` annotation gets none of that.
+</Callout>
+
+---
+
+## The two ways a mapping comes into being
+
+| Origin | How | Notes |
+|:---|:---|:---|
+| **Shipped in a package** | `defineMapping()` + `defineStack({ mappings })` | Versioned with the package; validated at build time. Packaged mappings are locked against tenant edits. |
+| **Saved at runtime** | `PUT /api/v1/meta/mapping/<name>` | The `mapping` kind is runtime-creatable, which is what lets an import wizard save the column choices a user just made as a reusable artifact. |
+
+Both end up resolvable by the same name. When the import endpoint resolves
+`mappingName` it reads the runtime metadata rows first (org-scoped, then env-wide) and
+falls back to the packaged registry — so a runtime-saved mapping and a packaged one are
+addressed identically by the request.
+
+The `mapping` kind carries no per-organization overlay: there is no tenant-customized
+variant of a packaged mapping. A tenant that needs different columns saves its own
+mapping under its own name.
+
+---
+
+## The shape
+
+| Key | Type | What it does |
+|:---|:---|:---|
+| `name` | `string` (snake_case) | The id `mappingName` resolves. Missing artifact → `404 MAPPING_NOT_FOUND`. |
+| `label` | `string` | Display text in a saved-mapping picker. Falls back to `name`. |
+| `sourceFormat` | `'csv' \| 'json' \| 'xml' \| 'sql'` | Declared payload format, checked against what the request actually sent. Defaults to `csv`. See [the format gate](#rejections-before-any-row-is-read). |
+| `targetObject` | `string` | The object this mapping is for. Must equal the object in the URL. |
+| `fieldMapping` | `ImportFieldMapping[]` | The projection itself — one entry per target field. |
+| `mode` | `'insert' \| 'update' \| 'upsert'` | Supplies the request's `writeMode` when the request omits it. Defaults to `insert`. |
+| `upsertKey` | `string[]` | Supplies the request's `matchFields` when the request omits them. |
+
+Each `fieldMapping` entry:
+
+| Key | Type | What it does |
+|:---|:---|:---|
+| `source` | `string \| string[]` | Source column header(s). An array is only meaningful for `join`. |
+| `target` | `string \| string[]` | Target field name(s). An array is only meaningful for `split`. |
+| `transform` | `TransformType` | Defaults to `'none'`. |
+| `params` | object | Configuration for the transform — `value`, `valueMap`, `separator`. |
+
+The full generated property tables live in the
+[Mapping schema reference](/docs/references/data/mapping).
+
+---
+
+## Transformations: what the server actually does
+
+`TransformType` declares seven values. Five are executed row by row by the import
+path, one is a deliberate pass-through, and one is refused:
+
+| `transform` | Behaviour | `params` it reads |
+|:---|:---|:---|
+| `none` | Copy the source cell to the target field. The default. | — |
+| `constant` | Write a fixed value into the target field, ignoring the source column. | `value` |
+| `map` | Translate the source system's codes into yours. A value with no entry in the table passes through unchanged. | `valueMap` |
+| `split` | Split one column into several fields (`"John Doe"` into `first_name` / `last_name`). Each part is trimmed. | `separator` (default `' '`) |
+| `join` | Compose one field from several columns. Empty and missing cells are dropped before joining. | `separator` (default `' '`) |
+| `lookup` | **Pass-through.** The cell is copied unchanged, and the import's own reference resolution turns the display text into a record id afterwards — see [After the mapping](#after-the-mapping-cell-coercion). | — |
+| `javascript` | **Refused.** There is no server-side sandbox, and silently skipping a declared transform would corrupt data. `defineStack()` fails the build; a runtime-saved mapping is rejected by the import request with `400 UNSUPPORTED_TRANSFORM`. | — |
+
+<Callout type="warn">
+  The `lookup` transform's own `params` keys (`object`, `fromField`, `toField`,
+  `autoCreate`) parse, but the import path reads none of them: reference resolution is
+  driven by the **target object's field definitions**, not by the mapping. Do not write
+  them expecting them to steer anything — tracked as
+  [#10329](https://github.com/objectstack-ai/objectstack/issues/10329).
+</Callout>
+
+For logic beyond these, transform the data before you post it, or model it as a
+[flow](/docs/automation) on the target object.
+
+---
+
+## Applying it: `POST /api/v1/data/:object/import`
+
+The request that makes the mapping worth having is the one that names it:
+
+**`POST /api/v1/data/showcase_inquiry/import`**
+
+```json
+{
+  "format": "csv",
+  "csv": "Full Name,E-mail,Company,Channel\nAda Lovelace,ada@example.com,Analytical Engines,Webform\nAlan Turing,alan@example.com,NPL,Partner Referral\n",
+  "mappingName": "showcase_inquiry_feed"
+}
+```
+
+No `mapping`, no `writeMode`, no `matchFields`: the artifact supplies all three. The
+response is the standard import report — aggregate counters plus one entry per row:
+
+```json
+{
+  "object": "showcase_inquiry",
+  "dryRun": false,
+  "writeMode": "upsert",
+  "total": 2,
+  "ok": 2,
+  "errors": 0,
+  "created": 1,
+  "updated": 1,
+  "skipped": 0,
+  "results": [
+    { "row": 1, "ok": true, "action": "created", "id": "inq_01HQ4A7B9D3F5G8J2K4L" },
+    { "row": 2, "ok": true, "action": "updated", "id": "inq_01HQ3V5K8N2M4P6R7T9W" }
+  ]
+}
+```
+
+`mappingName` works the same way on the three payload shapes the endpoint accepts —
+`format: "csv"` with `csv` text, `format: "json"` with `rows[]`, and `format: "xlsx"`
+with `xlsxBase64` — and on the asynchronous
+`POST /api/v1/data/:object/import/jobs` route, which parses the identical body.
+
+Add `"dryRun": true` to get the same report with nothing persisted; the verdict comes
+from the engine's own write-path validation.
+
+<Callout type="warn">
+  `mappingName` is accepted on the wire but is **not** declared on the SDK's
+  `ImportRequest` type, so `client.data.import(object, { mappingName: '…' })` does not
+  type-check today. Issue the request directly until that is closed —
+  [#10330](https://github.com/objectstack-ai/objectstack/issues/10330).
+</Callout>
+
+### What the artifact contributes to the request
+
+| Request key | When omitted | When present |
+|:---|:---|:---|
+| `writeMode` | Falls back to the artifact's `mode` (when that is `update` or `upsert`). | The request wins. |
+| `matchFields` | Falls back to the artifact's `upsertKey`. | The request wins. |
+
+Everything else on the request — `dryRun`, `runAutomations`, `treatAsHistorical`,
+`trimWhitespace`, `nullValues`, `createMissingOptions`, `skipBlankMatchKey` — belongs
+to the request alone. The mapping declares no error policy and no batch size; error
+handling is per-row and reported per-row, and the write path sizes its own batches.
+
+---
+
+## Inline `mapping` vs `mappingName`
+
+The endpoint accepts two mapping mechanisms and they are **mutually exclusive** —
+sending both is `400 CONFLICTING_MAPPING`.
+
+| | inline `mapping` | `mappingName` |
+|:---|:---|:---|
+| Shape | A flat `{ "<source column>": "<field>" }` rename (or a `sourceField`/`targetField` array) | A registered `mapping` artifact |
+| Transforms | None — rename only | The `fieldMapping` pipeline |
+| Unmapped columns | **Pass through** to the write path under their own header | **Dropped.** The artifact is a strict projection: only mapped targets survive |
+| Lives | In the one request | In a package or in metadata, reusable |
+
+That projection difference is the one to keep in mind: a file from an external system
+routinely carries columns that must not reach the write path, and the artifact path
+guarantees they do not.
+
+---
+
+## Rejections before any row is read
+
+These are whole-request failures — nothing is written, and there is no per-row report:
+
+| Status | `code` | Cause |
+|:---|:---|:---|
+| 404 | `MAPPING_NOT_FOUND` | No mapping artifact is registered under that name. |
+| 400 | `MAPPING_TARGET_MISMATCH` | The artifact's `targetObject` is not the object in the URL. |
+| 400 | `MAPPING_FORMAT_UNSUPPORTED` | The artifact declares `sourceFormat: 'xml'` or `'sql'`; the endpoint accepts csv, json and xlsx payloads only. |
+| 400 | `MAPPING_FORMAT_MISMATCH` | The declared `sourceFormat` contradicts the payload actually sent. A `csv` mapping does apply to an `xlsx` payload — those rows are tabular in the same way — but a `json` mapping does not. |
+| 400 | `UNSUPPORTED_TRANSFORM` | Some entry declares `javascript`, or a transform name the pipeline does not implement. |
+| 400 | `CONFLICTING_MAPPING` | Both `mappingName` and an inline `mapping` were supplied. |
+| 400 | `INVALID_REQUEST` | No recognizable payload, or `writeMode` resolved to update/upsert with no `matchFields` from either the request or the artifact. |
+| 413 | `PAYLOAD_TOO_LARGE` | More than 5,000 rows on the synchronous route. |
+
+---
+
+## Per-row outcomes
+
+Once the mapping is applied, every row gets its own verdict in `results[]`. A row that
+fails does **not** stop the import.
+
+| `action` | `ok` | `code` | Meaning |
+|:---|:---|:---|:---|
+| `created` | `true` | — | Inserted. |
+| `updated` | `true` | — | Matched an existing record and updated it. |
+| `skipped` | `true` | `NO_MATCH` | `writeMode: 'update'` and the match fields matched nothing. Nothing is created. |
+| `skipped` | `true` | `BLANK_MATCH_KEY` | The row's match fields are blank. Upsert creates such a row by default; `update` skips it, and `skipBlankMatchKey: true` skips it in either mode. |
+| `failed` | `false` | `AMBIGUOUS_MATCH` | The match fields matched **more than one** record. Nothing is written for that row. |
+| `failed` | `false` | a field error code | A cell could not be coerced, or the engine rejected the record. `field` names the column and `error` carries the message. |
+
+So "a row that does not match" is not one behaviour but three, chosen by `writeMode`
+and by how many records matched: created (upsert), skipped (update), or failed
+(more than one match).
+
+---
+
+## After the mapping: cell coercion
+
+The mapping decides *which* value lands in *which* field. Converting that value into
+what storage accepts is a separate step that runs afterwards, from the target object's
+own field metadata:
+
+- **booleans** — spreadsheet spellings are accepted on both sides, including
+  non-English and check-mark cells;
+- **numbers**, **dates** and **times** — parsed to storage form; an offset-free
+  datetime cell is read in the importing user's business timezone, which is the same
+  clock the export writes;
+- **select / multiselect** — the human-visible option **label** resolves to the stored
+  option value (the translated label too, when the app is localized);
+- **lookup / master\_detail / user** — the display text resolves to a record **id**.
+  This is what a `lookup` transform is relying on when it copies its cell through.
+
+A field the object does not know is left untouched. A cell that cannot be coerced fails
+its own row with the offending column named.
+
+---
+
+## Size limits
+
+| Route | Ceiling |
+|:---|:---|
+| `POST /api/v1/data/:object/import` | 5,000 rows — the report comes back in the response |
+| `POST /api/v1/data/:object/import/jobs` | 50,000 rows — returns a `jobId`; poll progress and results, and the job can be cancelled or undone |
+
+---
+
+## Related
+
+- **Schema reference:** [Mapping](/docs/references/data/mapping) — every property, generated from the spec
+- **Neighbors:** [Objects](/docs/data-modeling/objects) · [Fields](/docs/data-modeling/fields) · [Seed Data & Fixtures](/docs/data-modeling/seed-data) for bundled data that is not an import
+- **Wire format:** [REST wire format](/docs/api/wire-format)

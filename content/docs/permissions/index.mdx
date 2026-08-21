@@ -50,6 +50,12 @@ grants nothing and is refused at boot. That is an authoring-time build error
 Because AI agents act through the same permission-aware surface, these rules bound
 agent access exactly as they bound users ([Actions as Tools](/docs/ai/actions-as-tools)).
 
+Most of this module is written for the administrator who **consumes** a
+capability — granting it through a permission set, requiring it on a resource.
+The package author's half — how a capability name is DEFINED in the first
+place, and why `capabilities:` and `requires:` are unrelated arrays that read
+alike — is [Declaring Capabilities](/docs/permissions/capabilities).
+
 > **Implementation status — Permission Model v2 (ADR-0090) is live.** REST → ObjectQL propagates a populated `ExecutionContext` (userId, tenantId, positions, permissions, principalKind) into the SecurityPlugin middleware, so CRUD / FLS / RLS checks fire on every authenticated request; authenticated principals implicitly hold the `everyone` position and anonymous principals hold `guest` (D9). The `member_default` baseline is **additive** (D5 — no fallback cliff) and its owner-write policies are domained to `org_member` holders. Tenant isolation is a **Layer 0 tenant wall** (`plugin-security/tenant-layer.ts`, ADR-0095 D1) that AND-composes `organization_id == current_user.organization_id` ahead of and independently of business RLS — the earlier wildcard `tenant_isolation` RLS policy on `member_default` was retired, because as an OR-merged business policy it could be widened. `member_default` still ships the per-object `sys_organization_self` / `sys_user_self` overrides for the global tables that carry no `organization_id` column. SecurityPlugin remains the sole authority for tenant isolation, and analytics auto-bridges to `security.getReadFilter`. **Anonymous traffic is denied by default** (ADR-0056 D2), and public forms self-authorize via a declaration-derived `publicFormGrant`. **An unset OWD fails closed to `private`** (D1) and the D7 publish linter makes it a build error. Criteria sharing rules (with `position` / `unit_and_subordinates` recipients) are live and dogfood-proven; v17 reconciled the authoring surface with the enforced runtime (#1878) — `group` was renamed to the enforced `team`, `business_unit` joined the enum, and owner-type rules and `guest` recipients were pruned rather than left declared-but-skipped ([Sharing Rules](/docs/permissions/sharing-rules#recipient-types)). RBAC-table writes are governed by the delegated-admin gate (D12), and the `security` service answers `explain(request)` per evaluation layer (D6). The Studio RLS visual editor, per-user×org permission cache, and audit UI for denied access are queued. See [Implementation Status](/docs/releases/implementation-status) for the latest matrix.
 
 ## What's in this module
@@ -64,6 +70,7 @@ agent access exactly as they bound users ([Actions as Tools](/docs/ai/actions-as
 - [Sharing Rules](/docs/permissions/sharing-rules)
 - [Field-Level Security](/docs/permissions/field-level-security)
 - [Permission Metadata](/docs/permissions/permission-metadata)
+- [Declaring Capabilities](/docs/permissions/capabilities) - the package author's half: `defineCapability`, and how `capabilities:` differs from `requires:`
 - [Security Permissions Matrix](/docs/permissions/permissions-matrix)
 - [Record-View Auditing](/docs/permissions/record-view-auditing) - who opened which record, and when
 - [Access Recipes](/docs/permissions/access-recipes)

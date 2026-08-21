@@ -34,7 +34,8 @@ export const OpportunityStageHook: Hook = {
 - **Approvals** are flow nodes with approver resolution, approve/reject decisions, and escalation ([Approvals](/docs/automation/approvals)).
 - **Webhooks** deliver events to external systems through a **durable outbox** — exponential/linear/fixed retry with dead-lettering, HMAC signing, and an admin redeliver endpoint ([Webhook Delivery](/docs/automation/webhooks)).
 - **Connectors** package external systems behind named actions that flows dispatch — registered by plugins, or **declared as pure metadata** (`provider: 'rest' | 'openapi' | 'mcp'`) and materialized at boot, with reference-based credentials ([Connectors](/docs/automation/connectors)).
-- **Scheduled jobs** run on `setInterval` or cron via the job service, alongside `schedule`-type flows.
+- **Scheduled jobs** run one named bundle function on a cron, interval, or one-off schedule, with retry, a per-attempt timeout, and cluster leader election — a `schedule`-type flow is registered against the *same* job service, so the choice between them is about what runs, not about timing ([Scheduled Jobs](/docs/automation/jobs)).
+- **Email templates** are named, localizable subject/body metadata resolved by `(name, locale)` at send time — what a flow's `notify` node reaches for when a notification has to be readable in the recipient's language ([Email Templates](/docs/automation/email-templates)).
 
 Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks for *code-level* reactions, and webhooks to *notify the outside world*.
 
@@ -48,6 +49,8 @@ Rule of thumb: model *state* with workflows, model *steps* with flows, use hooks
   <Card href="/docs/automation/approvals" title="Approvals" description="Approval nodes: approvers, decisions, escalation" />
   <Card href="/docs/automation/webhooks" title="Webhook Delivery" description="Durable outbox, retries, HMAC signing" />
   <Card href="/docs/automation/connectors" title="Connectors" description="Declarative rest/openapi/mcp instances, credentialRef auth" />
+  <Card href="/docs/automation/jobs" title="Scheduled Jobs" description="Cron/interval/once schedules, retry, timeout, run history" />
+  <Card href="/docs/automation/email-templates" title="Email Templates" description="Localizable subject/body metadata for outbound mail" />
 </Cards>
 
 ## Related
