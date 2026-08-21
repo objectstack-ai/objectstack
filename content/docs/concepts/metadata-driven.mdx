@@ -470,7 +470,7 @@ export const Account = ObjectSchema.create({
   enable: {
     trackHistory: true,     // Enable field history tracking
     searchable: true,       // Include in global search
-    apiEnabled: true,       // Expose via REST/GraphQL
+    apiEnabled: true,       // Expose object via automatic APIs (REST)
     files: true,            // Enable file attachments
     feeds: true,            // Enable activity feed
     activities: true,       // Enable tasks and events
