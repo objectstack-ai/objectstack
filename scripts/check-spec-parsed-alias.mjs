@@ -94,6 +94,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const SPEC_SRC = join(ROOT, 'packages/spec/src');
@@ -461,7 +462,12 @@ export type Iso0 = Assert<Eq< z.input< typeof M0.ColourSchema >, z.infer< typeof
   console.log('check-spec-parsed-alias --self-test: 18 assertions passed');
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   selfTest();
 } else {
   const pins = readIsomorphicPins(readFileSync(PIN_FILE, 'utf8'));

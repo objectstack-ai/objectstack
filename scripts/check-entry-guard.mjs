@@ -446,7 +446,6 @@ const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-query-options-erasure-ratchet.mjs',
   'scripts/check-quick-reference-counts.mjs',
   'scripts/check-release-page-status.mjs',
-  'scripts/check-spec-parsed-alias.mjs',
   'scripts/check-startup-registry-verdict.mjs',
   'scripts/check-tenant-chokepoint.mjs',
   'scripts/check-test-completeness.mjs',
