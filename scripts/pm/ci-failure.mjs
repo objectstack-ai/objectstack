@@ -2264,6 +2264,51 @@ async function selfTest() {
     ['repo-scope-refused', ['rate:anon', 'repo']],
   );
 
+  // -- renderFixLines: one remedy is one `fix:` marker (#10362) -------------
+  // Driven through the REAL producer, not a hand-written array: what needs
+  // pinning is that this file renders what `classifyTransportProbe` actually
+  // emits. A fixture would only restate the printer's own assumption about the
+  // shape, which is the assumption that was wrong.
+  const refusedFix = classifyTransportProbe({
+    token: 'ghp_x',
+    authed: { status: 200, rateLimitRemaining: 4999 },
+    repo: { status: 403, rateLimitRemaining: 4999 },
+  }).fix;
+  t('the producer still wraps this remedy across several lines', refusedFix.length > 1, true);
+  t(
+    'a multi-line remedy renders with exactly ONE fix: marker',
+    renderFixLines(refusedFix).filter((l) => l.startsWith('  fix: ')).length,
+    1,
+  );
+  t(
+    'its continuations are padded under the marker rather than re-marked',
+    renderFixLines(refusedFix).slice(1).every((l) => l.startsWith('       ') && !l.includes('fix: ')),
+    true,
+  );
+  t('rendering neither adds a line nor drops one', renderFixLines(refusedFix).length, refusedFix.length);
+
+  // The branch that makes re-wrapping unsafe: a copy-pasteable command whose
+  // annotation carries its own indentation and an arrow pointing back at it.
+  const anonFix = classifyTransportProbe({
+    token: 'ghp_x',
+    authed: { status: 401 },
+    anon: { status: 200, rateLimitRemaining: 59 },
+  }).fix;
+  t(
+    'the copy-pasteable command keeps the marked line to itself',
+    renderFixLines(anonFix)[0],
+    '  fix: GITHUB_TOKEN= GH_TOKEN= node scripts/pm/check-half-states.mjs',
+  );
+  t(
+    'the annotation keeps its own indent, so its arrow still points at that command',
+    renderFixLines(anonFix)[1].startsWith('         ↑'),
+    true,
+  );
+
+  t('an empty fix renders nothing at all', renderFixLines([]), []);
+  t('an absent fix renders nothing at all', renderFixLines(undefined), []);
+  t('a one-line remedy is just the marked line', renderFixLines(['do the thing']), ['  fix: do the thing']);
+
   if (failures.length > 0) {
     console.error(`✗ ci-failure --self-test (${failures.length} failure(s)):\n`);
     for (const f of failures) console.error(`  • ${f}`);
@@ -2295,8 +2340,40 @@ async function selfTest() {
     '    annotations carried none, a log that anchored nothing is still a shortfall rather than a\n' +
     '    manufactured answer, a 410 is named as expired retention rather than as an absence of\n' +
     '    evidence, a CONNECT refusal lands as transport with the blocked host to report, and a\n' +
-    '    tail with no `##[error]` in it is labelled a window rather than an anchor.',
+    '    tail with no `##[error]` in it is labelled a window rather than an anchor. And a `fix`\n' +
+    '    renders as the ONE remedy it is: a single `fix:` marker with its continuations padded\n' +
+    '    under it, keeping a copy-pasteable command on a line of its own.',
   );
+}
+
+/**
+ * Render a verdict's `fix` as the ONE remedy it is: the marker goes on the first
+ * line, and every continuation is padded to sit under it (#10362).
+ *
+ * `fix` arrives as the wrapped lines of a single sentence — never as a list of
+ * independent remedies (measured across every branch of
+ * `classifyTransportProbe`). Marking each element `fix:` rendered one remedy as
+ * three, and a reader counting "how many things do I have to do" counted wrong.
+ *
+ * The lines are padded rather than re-flowed because the producer's breaks are
+ * load-bearing in at least one branch: `bad-credential-anon-reachable` is a
+ * copy-pasteable command followed by an annotation carrying its own
+ * indentation, whose `↑` points at the command above it. Joining and
+ * re-wrapping would swallow the command into the prose and leave the arrow
+ * pointing at nothing, so continuations keep their own leading whitespace.
+ *
+ * This is the idiom `check-half-states.mjs` — the file that PRODUCES these
+ * verdicts — already prints with. Both of this file's printers go through here
+ * so the two cannot drift apart again, which is how the second one came to
+ * exist (#10155 matched the entry point's spelling rather than fixing it in an
+ * unrelated PR).
+ *
+ * Presentation only: no exit code, no verdict, no claim about the tree.
+ */
+function renderFixLines(fix) {
+  const lines = fix ?? [];
+  if (lines.length === 0) return [];
+  return [`  fix: ${lines[0]}`, ...lines.slice(1).map((l) => (l ? `       ${l}` : ''))];
 }
 
 /**
@@ -2320,7 +2397,7 @@ async function reportMidWalkFailure(error, stage) {
   const decision = midWalkVerdict({ probe, error, read: error?.read ?? null, stage });
   console.error(`\nci-failure: ${decision.verdict} — ${decision.headline}\n`);
   for (const line of decision.detail) console.error(line ? `  ${line}` : '');
-  for (const line of decision.fix ?? []) console.error(`  fix: ${line}`);
+  for (const line of renderFixLines(decision.fix)) console.error(line);
   console.error("  Piping reports the PIPE's status, so `... | tail` reads green either way. Use `echo \"EXIT=$?\"`.");
   process.exit(decision.exit);
 }
@@ -2377,7 +2454,7 @@ if (!invokedDirectly) {
   if (probe.kind !== 'reachable') {
     console.error(`ci-failure: PREREQUISITE NOT MET — ${probe.headline}`);
     for (const line of probe.detail ?? []) console.error(`  ${line}`);
-    for (const line of probe.fix ?? []) console.error(`  fix: ${line}`);
+    for (const line of renderFixLines(probe.fix)) console.error(line);
     console.error(`  (Exit ${EXIT_PREREQUISITE_NOT_MET}. This classifies the ENVIRONMENT, not the tree.)`);
     process.exit(EXIT_PREREQUISITE_NOT_MET);
   }

@@ -148,4 +148,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
-- [Cache Service](https://docs.objectstack.ai/docs/kernel/contracts/cache-service)
+- [Cache Service](https://objectstack.ai/docs/kernel/contracts/cache-service)

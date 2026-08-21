@@ -44,6 +44,14 @@
  * The `/skills` subpath scopes discovery to the curated, customer-published
  * catalog — repo-internal skills (e.g. under `.claude/skills/`) must never
  * reach scaffolded projects.
+ *
+ * Only THEN is the "Created files" summary printed, and it is a walk of the
+ * finished project directory rather than a list accumulated during the copy
+ * (created-summary.ts carries the measurement). Two of the three write phases
+ * belong to other processes — the package manager and the `skills` CLI — so a
+ * list assembled by this file before they run cannot name what they wrote, and
+ * the version that did so omitted AGENTS.md, both lockfiles and ~1.9 MB of
+ * agent instructions while the same run told the reader to review the skills.
  */
 
 import { Command } from 'commander';
@@ -62,6 +70,7 @@ import {
 } from './rewrite-identity.js';
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
+import { summarizeTree, describeEntry } from './created-summary.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -287,6 +296,75 @@ function writeAgentGuides(targetDir: string, title: string, projectName: string)
   writeIfAbsent(copilotPath, rendered);
 }
 
+// Top-level entry names in `dir`, or an empty set if it does not exist yet.
+// Two snapshots of this are taken during a run: one before anything is
+// written (does the summary get to say "Created files", or did the user
+// scaffold into a directory that already had contents?) and one on either
+// side of the skills step, whose difference is the set of paths the skills
+// installer chose — which is how the security note below points at real paths
+// without this file hard-coding a destination list that belongs to a
+// dependency's release cycle, not to ours.
+function topLevelNames(dir: string): Set<string> {
+  try {
+    return new Set(fs.readdirSync(dir));
+  } catch {
+    return new Set();
+  }
+}
+
+// Print the closing summary of what is now on disk. Derived from a walk of the
+// project directory, so it names what the run ACTUALLY wrote — including the
+// files written by `<pm> install` and by the `skills` installer, neither of
+// which this package can enumerate in advance. See created-summary.ts for the
+// measurement that made a hand-accumulated list untenable.
+function printCreatedSummary(
+  targetDir: string,
+  opts: { wasEmpty: boolean; skillPaths: Set<string> },
+) {
+  const entries = summarizeTree(targetDir);
+  if (entries.length === 0) return;
+
+  console.log(
+    chalk.bold(opts.wasEmpty ? '  Created files:' : '  Project contents:'),
+  );
+  if (!opts.wasEmpty) {
+    console.log(
+      chalk.dim('    (the directory already had contents; this lists all of it)'),
+    );
+  }
+
+  const isSkillPath = (p: string) => opts.skillPaths.has(p.split('/')[0]);
+  const width = Math.min(
+    44,
+    Math.max(...entries.map((e) => e.path.length)) + 2,
+  );
+
+  let flagged = false;
+  for (const entry of entries) {
+    const note = describeEntry(entry);
+    const flag = isSkillPath(entry.path);
+    if (flag) flagged = true;
+    const pad = note || flag ? entry.path.padEnd(width) : entry.path;
+    const line = `    + ${pad}${note ? chalk.dim(note) : ''}`;
+    console.log(chalk.green(line) + (flag ? chalk.yellow('  ⚠ skills') : ''));
+  }
+
+  if (flagged) {
+    // The `skills` CLI closes with "Review skills before use; they run with
+    // full agent permissions." That advice was previously unactionable: it
+    // named no path, and neither did we. Now the paths are on screen directly
+    // above it, and this line ties the warning to them.
+    console.log('');
+    console.log(
+      chalk.yellow("  ⚠ Skill files run with your coding agent's full permissions."),
+    );
+    console.log(
+      chalk.dim('    Review the paths marked ⚠ above before letting an agent use them.'),
+    );
+  }
+  console.log('');
+}
+
 // Create a file only if it does not already exist, atomically — no time-of-check
 // to time-of-use gap between an existence test and the write.
 function writeIfAbsent(filePath: string, contents: string) {
@@ -365,6 +443,13 @@ const program = new Command()
       }
     }
 
+    // Read BEFORE the first write. Scaffolding into the current directory is
+    // the one path that can land in a directory that already had contents
+    // (the emptiness refusal above is `!isCurrentDir`-gated), and the closing
+    // summary is a walk of the directory — so it must know whether it is
+    // entitled to call what it finds "Created files".
+    const targetWasEmpty = topLevelNames(targetDir).size === 0;
+
     try {
       fs.mkdirSync(targetDir, { recursive: true });
 
@@ -372,13 +457,12 @@ const program = new Command()
 
       rewriteProjectIdentity(targetDir, projectName, namespace);
 
-      console.log(chalk.bold('  Created files:'));
-      for (const f of createdFiles.slice(0, 20)) {
-        console.log(chalk.green(`    + ${f}`));
-      }
-      if (createdFiles.length > 20) {
-        console.log(chalk.dim(`    … and ${createdFiles.length - 20} more`));
-      }
+      // Progress, not an inventory. The authoritative list is printed at the
+      // end, once `<pm> install` and the skills installer have also written —
+      // a list printed here cannot name anything either of them creates,
+      // which is precisely how the previous summary came to omit AGENTS.md,
+      // both lockfiles and ~1.9 MB of agent instructions.
+      printSuccess(`Template files written (${createdFiles.length})`);
       console.log('');
 
       if (!options.skipInstall) {
@@ -418,6 +502,13 @@ const program = new Command()
         }
       }
 
+      // Which top-level paths belong to the skills install is measured, not
+      // assumed: `skills add --all` fans the catalog out to every agent
+      // runtime IT knows about (77 at the version measured), so the
+      // destination set moves with that package's releases. Diffing the
+      // directory across the call keeps the ⚠ marks correct without this file
+      // carrying a list it cannot keep current.
+      const beforeSkills = topLevelNames(targetDir);
       if (!options.skipInstall && !options.skipSkills) {
         printStep('Installing AI skills for your coding agent...');
         try {
@@ -434,6 +525,11 @@ const program = new Command()
           console.log('');
         }
       }
+      const skillPaths = new Set(
+        [...topLevelNames(targetDir)].filter((p) => !beforeSkills.has(p)),
+      );
+
+      printCreatedSummary(targetDir, { wasEmpty: targetWasEmpty, skillPaths });
 
       printSuccess('Environment created!');
       console.log('');

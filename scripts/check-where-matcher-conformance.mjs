@@ -223,6 +223,7 @@ import { join, relative, resolve, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile, transpileChecked } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -387,7 +388,7 @@ function enclosingParameters(node) {
 export function discoverInSource(text, label) {
   const out = [];
   if (!/Object\.(entries|keys)|\$or|\$and/.test(text)) return out;
-  const sf = ts.createSourceFile(label, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sf = parseSourceFile(label, text, ts.ScriptKind.TS);
   const visit = (node) => {
     if (isFn(node) && node.body) {
       const params = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null));
@@ -478,7 +479,18 @@ function buildCallable(candidate, dropped = new Set()) {
       `};`;
   }
   const code = `${[...included.values()].join('\n')}\n${definition}\nreturn ${self};`;
-  const js = ts.transpileModule(code, {
+  // The lifted source is SYNTHESISED, so it gets a synthetic name that still
+  // says where it came from — a refusal has to be openable, and pointing at the
+  // real file's line numbers would point at lines this text does not have.
+  //
+  // `transpileChecked` rather than `ts.transpileModule` because the raw call
+  // reports NOTHING without `reportDiagnostics: true` and still returns an
+  // `outputText`: a dropped operand comes back as `return row.a === ;`, which
+  // `new Function` then throws on, and the `catch` in `judge()` below files
+  // that as UNJUDGED — "could not judge this candidate" standing in for "could
+  // not read it". Those are different verdicts and the baseline counts them
+  // differently.
+  const js = transpileChecked(`${candidate.file}#L${candidate.line}.lifted.ts`, code, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, isolatedModules: true },
   }).outputText;
   return { fn: new Function(js)(), included };

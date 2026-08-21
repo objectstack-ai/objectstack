@@ -32,7 +32,7 @@ export const CrmApp = App.create({
 - **Apps** group navigation, branding, and entry points for one audience.
 - **Views** present object records as `grid` (the standard data table), `kanban`, `gallery`, `calendar`, `timeline`, `gantt`, `map`, `chart`, or `tree`. Forms are their own view kind with per-mode layouts ([Views](/docs/ui/views)).
 - **Pages** compose free-form layouts from widgets; **Dashboards** combine charts, reports, and datasets for analytics.
-- **Themes** define palettes, typography, and spacing as metadata — the showcase example ships light and dark theme variants.
+- **Themes** define palettes, a base font family, radii and shadows as metadata — the showcase example ships light and dark theme variants.
 - **Public forms** expose a scoped slice of an object to external audiences through **anonymous entry routes** for public data collection ([Forms](/docs/ui/forms), [public data collection](/docs/ui/public-data-collection)).
 - The **Setup App** — the platform's built-in administration UI — is itself rendered from the same protocol ([Setup App](/docs/ui/setup-app)).
 
@@ -41,8 +41,12 @@ export const CrmApp = App.create({
 <Cards>
   <Card href="/docs/ui/apps" title="Apps" description="App metadata: navigation, branding, entry points" />
   <Card href="/docs/ui/views" title="Views" description="Grid, kanban, calendar, gantt, map, and more" />
+  <Card href="/docs/ui/actions" title="Actions" description="Declarative buttons with server-side behavior" />
   <Card href="/docs/ui/pages" title="Pages" description="Page metadata and layout composition" />
+  <Card href="/docs/ui/react-pages" title="React Pages" description="Page bodies authored as React or constrained JSX" />
   <Card href="/docs/ui/dashboards" title="Dashboards" description="Dashboard metadata, charts, and datasets" />
+  <Card href="/docs/ui/reports" title="Reports" description="Report shapes, dataset binding, and drill-through" />
+  <Card href="/docs/ui/translations" title="Translations" description="Labels and UI text as metadata, one bundle per locale" />
   <Card href="/docs/ui/forms" title="Forms" description="Public and internal form patterns" />
   <Card href="/docs/ui/doc-pages" title="Doc Pages" description="Ship package documentation rendered in the console" />
   <Card href="/docs/ui/setup-app" title="Setup App" description="The built-in administration UI" />

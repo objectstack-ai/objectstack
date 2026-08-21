@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'task', fields: { title: { name: 'title', type: 'text' } } };
@@ -34,13 +35,17 @@ function makeProtocol(rows: Record<string, any> = {}) {
   const store = new Map<string, any>(Object.entries(rows));
   const findOne = vi.fn(async (_object: string, opts: any) => store.get(String(opts?.where?.id)) ?? null);
   const update = vi.fn(async (_object: string, data: any, opts: any) => {
+    assertEngineUpdateDispatch(data, opts);
     const id = String(opts?.where?.id);
     if (!store.has(id)) return null;
     const next = { ...store.get(id), ...data };
     store.set(id, next);
     return next;
   });
-  const del = vi.fn(async (_object: string, opts: any) => store.delete(String(opts?.where?.id)));
+  const del = vi.fn(async (_object: string, opts: any) => {
+    assertEngineDeleteDispatch(opts);
+    return store.delete(String(opts?.where?.id));
+  });
   const engine = {
     registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
     findOne, update, delete: del,

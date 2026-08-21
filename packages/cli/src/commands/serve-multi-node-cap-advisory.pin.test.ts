@@ -49,12 +49,27 @@ const SERVE_SOURCE = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
  * reading `src` also means the pin does not depend on anything being built.
  *
  * ⚠️ Addressed as a repo-relative literal off an escaping `REPO_ROOT` binding
- * on purpose — that is the shape the repo's `check:cross-package-test-inputs`
- * gate can follow. (Its script is named without a repo-relative path here: that
- * gate collects path literals out of a test's source, comments included, and
- * would then require a glob for a file this test never reads.) Spellings it cannot follow (a `new URL('…', import.meta.url)`
- * seed, or a `resolve()` nested straight into the `readFileSync` call) read
- * identically at runtime but produce no binding and therefore no flag, which
+ * on purpose — that is the shape BOTH halves of the repo's
+ * `check:cross-package-test-inputs` gate see. (Its script is named without a
+ * repo-relative path here: that gate collects path literals out of a test's
+ * source, comments included, and would then require a glob for a file this test
+ * never reads.)
+ *
+ * This note used to say the gate could not follow a `new URL('…',
+ * import.meta.url)` seed or a `resolve()` nested straight into the
+ * `readFileSync` call. It follows both, and has since #9763 — both are on its
+ * published `RECOGNISED_PATH_SPELLINGS` list, printed in its failure text, and
+ * each is pinned by a `--self-test` case; measured on ceb33a9f12, both produce
+ * the escape flag. What they miss is the FLAT literal collector, which sees a
+ * path only when the whole repo-relative string sits inside ONE quoted literal
+ * starting at a top-level directory: written ascent-relative, this read's name
+ * would reach the radius roster only through the resolver's reconstruction,
+ * where the spelling below reaches it through both. So keep the whole path in
+ * one literal — but for that reason, not because the alternatives are invisible.
+ *
+ * The spellings that genuinely produce no flag are the ones the detector cannot
+ * resolve at all: a template-literal path, a `findUp` walk from `process.cwd()`,
+ * segments arriving out of a variable or an array. Reaching for one of those
  * would leave this read **undeclared**: `@objectstack/cli` would then be absent
  * from `turbo ls --affected` for a cluster-only change and its `test` cache
  * would not hash this file, so the pin below would sit green through exactly

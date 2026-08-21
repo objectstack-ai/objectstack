@@ -106,6 +106,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SCAN_ROOTS = ['packages', 'examples'];
@@ -183,7 +184,7 @@ function readDescriptor(objectLiteral) {
 
 /** Every `defineActionDescriptor({ ... })` literal in one source text. */
 function scanSource(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, text);
   const found = [];
 
   const visit = (node) => {

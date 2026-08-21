@@ -21,6 +21,7 @@
 // test reads the store back afterwards.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'invoice', fields: { title: { name: 'title', type: 'text' } } };
@@ -47,6 +48,7 @@ function makeStoreEngine(opts: { driverCanTransact?: boolean; hasTransaction?: b
     const handle = { id: 'trx-1' };
 
     const update = vi.fn(async (_object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         const id = options?.where?.id;
         const current = rows.get(id);
         if (!current) throw new Error(`no such record: ${id}`);
@@ -57,6 +59,7 @@ function makeStoreEngine(opts: { driverCanTransact?: boolean; hasTransaction?: b
     });
     // Contract per #4435: `false` is the positive not-found value.
     const del = vi.fn(async (_object: string, options?: any) => {
+        assertEngineDeleteDispatch(options);
         const id = options?.where?.id;
         if (!rows.has(id)) return false;
         rows.delete(id);

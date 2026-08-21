@@ -40,6 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -85,6 +86,7 @@ function makeStoreEngine() {
         return rec;
     });
     const update = vi.fn(async (_object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         const id = options?.where?.id;
         if (data?.title === POISON) throw validationFailure();
         const next = { ...rows.get(id), ...data };
@@ -93,6 +95,7 @@ function makeStoreEngine() {
     });
     // Contract per #4435: `false` is the positive not-found value.
     const del = vi.fn(async (_object: string, options?: any) => {
+        assertEngineDeleteDispatch(options);
         const id = options?.where?.id;
         if (!rows.has(id)) return false;
         rows.delete(id);

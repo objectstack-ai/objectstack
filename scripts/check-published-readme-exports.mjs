@@ -90,12 +90,20 @@
 // naming the build command, never a skip. The gate runs in the workflow job
 // that has already built the workspace, next to the other dist-reading checks.
 //
-// ## The population axis, and the three refusals on it (#9911)
+// ## The population axis, and the FOUR refusals on it (#9911, #10417)
 //
-// Every claim this gate makes is made against a population it narrows in three
-// stages, and a zero at ANY stage means both halves check nothing:
+// Every claim this gate makes is made against a population it narrows in four
+// steps, and a zero at ANY of them means both halves check nothing:
 //
-//   published documents  ->  import statements  ->  workspace type entries
+//   published documents -> import statements -> workspace type entries
+//                                            -> IMPORT-BOUND NAMES
+//
+// The first three are decided from text and the workspace map alone, before a
+// type entry is touched, so they are worded in one place, `populationRefusal`.
+// The fourth cannot be: "did any import bind a name?" is a WHOLE-RUN quantity,
+// answerable only after `analyzeDocument` has read every document, because one
+// binding in the last document settles it. So it is a separate post-pass,
+// `bindingRefusal`, and its argument for being a refusal at all is made there.
 //
 // A green over a zero at any stage is the #4690 claim ("zero is a broken scan,
 // not a clean repo") in three different costumes, so all three are HARD
@@ -145,8 +153,28 @@
 //   backwards; a ceiling-test on them is a coverage ratchet, which is a
 //   different card and wants a population that exists.
 //
-// => `targets.size` is the whole condition, because it is the one quantity that
-// is zero if and only if BOTH halves are structurally vacuous.
+// => `targets.size` is the whole condition FOR THAT STAGE, because it is the
+// last quantity the run can know before it starts reading types.
+//
+// ## The fourth state, one level below `targets` (#10417)
+//
+// `targets.size >= 1` says an entry was REACHED. It does not say a name was
+// BOUND, and the two halves consume bindings, not entries. So there is a state
+// below stage 3 which every one of the three refusals passes:
+//
+//   `import type {} from '@objectstack/spec';` -- one published document, one
+//   import statement, one workspace type entry, and zero bindings. Measured on
+//   the gate with #9911's refusal already in place: `exit 0`, under a green
+//   line reading `1 import statement(s), 1 workspace type entr(ies)` with
+//   `0 documented symbol(s) checked` and `0 ... call(s) checked` beneath it.
+//   `importStatements` and `targets` both stay NON-ZERO through the regression
+//   that produces it, so neither existing refusal can see it.
+//
+// The condition is the CONJUNCTION `symbolChecks === 0 && callChecks === 0`,
+// and the reason it must be a conjunction is #10367 rather than an argument:
+// a namespace import binds a receiver the call-site half reads while ticking
+// `symbolChecks` zero times, so `symbolChecks === 0` alone is a state an
+// entirely healthy tree can be in. See `bindingRefusal`.
 //
 // ## The baseline
 //
@@ -218,12 +246,40 @@
 //   spelled as a consuming alternation instead of a zero-width assertion: the
 //   receiver in `kernel.use(SomePlugin.configure(…))` became unreachable, because
 //   the outer call had already eaten the `(` in front of it. See extractMemberCalls.
+//
+// ## Namespace imports, and why an empty population was WIRED here (#10367)
+//
+//   `import * as spec from '@objectstack/spec'` binds a receiver whose members
+//   are the package's exports, and `hasMember`'s `SymbolFlags.Module` arm has
+//   always been able to answer that. The symbol was never supplied: the only
+//   production caller returned `namespaceSymbol: null` unconditionally, so the
+//   branch that reads it bound nothing on every run this gate has ever made.
+//
+//   Its population is zero TWICE over today, measured with this file's own
+//   `publishedDocs()`: 5 namespace imports across the 60 published documents,
+//   and all 5 are RELATIVE specifiers (`import * as objects from
+//   './src/objects'`) in `packages/cli`, `packages/mcp` and
+//   `packages/spec/prompts` — which `splitSpecifier` turns away before the
+//   branch is reached regardless. So wiring it changed no verdict on this tree.
+//
+//   ⚠️ That looks like the CALL-EXPRESSION RECEIVERS decision above run
+//   backwards, and the difference is what separates the two: there, no rule
+//   EXISTS and writing one would ship an unexercised scanner. Here the rule
+//   already exists, already reads as coverage, and cannot fire — which is the
+//   #4690 shape this file raises to a hard error, not a scope question. The two
+//   honest resolutions were to wire it or to delete it and declare namespace
+//   imports out of scope the way `CHANGELOG.md` and `bash` fences are; what it
+//   could not stay was present, unreachable and reading like coverage. It was
+//   wired because the module symbol is already in `exportsOf`'s cache, and the
+//   `--self-test` exercises the branch in BOTH directions over a fixture, so
+//   the coverage is real at a tree population of 0.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
 import { isEntrypoint } from './invoked-as.mjs';
+import { createProgramChecked } from './ts-parse.mjs';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
 // guard was invoked from.
@@ -772,7 +828,13 @@ const TS_OPTIONS = {
  * each); one shared program parses them once.
  */
 function typeSurface(absEntries) {
-  const program = ts.createProgram([...absEntries], TS_OPTIONS);
+  // `createProgramChecked` rather than `ts.createProgram`: a Program parks its
+  // syntax errors behind a SECOND call, `getSyntacticDiagnostics()`, which this
+  // gate never made. Every checker answer below — "does this type have that
+  // member?", "what does this module export?" — would then be an answer about a
+  // tree the compiler could not read, shaped exactly like an answer about a
+  // tree it could, and this gate's whole job is to trust those answers.
+  const program = createProgramChecked([...absEntries], TS_OPTIONS);
   const checker = program.getTypeChecker();
   const cache = new Map();
   // Shared by both member questions below, so the "not knowable is never a
@@ -806,6 +868,20 @@ function typeSurface(absEntries) {
     return cache.get(abs);
   };
   return {
+    /**
+     * The MODULE symbol of a type entry -- what `import * as ns from 'pkg'`
+     * binds `ns` to. `null` if unreadable, exactly as `exportsOf`.
+     *
+     * Read from the same `cache` `exportsOf` fills, so supplying it to the
+     * namespace branch costs nothing: by the time a caller has an export map
+     * for `abs`, the symbol behind it is already resolved. That cheapness is
+     * the whole reason the branch was wired rather than deleted (#10367) --
+     * `hasMember`'s `SymbolFlags.Module` arm below has always been able to
+     * answer the question; only the symbol was never supplied.
+     */
+    moduleSymbolOf(abs) {
+      return moduleSymbol(abs);
+    },
     /** Exported symbols of a type entry, by name. `null` if unreadable. */
     exportsOf(abs) {
       const sym = moduleSymbol(abs);
@@ -941,8 +1017,21 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
       });
     }
     if (imp.namespaceLocal) {
-      // A namespace binding has no name of its own to verify; its members are
-      // checked by the call-site half against the module's export set.
+      // A namespace binding has no name of its own to verify -- so it is NOT a
+      // `symbolChecks` tick -- and its members are checked by the call-site
+      // half against the module's export set.
+      //
+      // ⛔ `ns` is a real question, not a formality: until #10367 the only
+      // production caller returned `namespaceSymbol: null` unconditionally, so
+      // this branch bound nothing on every run this gate has ever made. It read
+      // as coverage and could not fire -- the shape this file's own header
+      // raises to a hard error (#4690) -- and it stayed invisible because the
+      // tree's namespace imports are all RELATIVE specifiers, which
+      // `splitSpecifier` turns away before the branch is reached. The guard
+      // stays because a target that cannot supply a module symbol must not be
+      // answered with a default: unbound here means the receiver falls into the
+      // `NOT read` count, which is where an unanswerable receiver belongs (the
+      // same asymmetry `hasMemberVia` argues below).
       const ns = target.namespaceSymbol;
       if (ns) {
         bound.set(imp.namespaceLocal, {
@@ -1005,8 +1094,17 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
           `\`${how}\`, but what ${b.imported} (from '${b.specifier}') ` +
           `${b.via === 'instance' ? 'constructs' : 'returns'} has no \`${call.member}\` member ` +
           'in its published types.'
-        : `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
-          `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
+        : b.imported === '*'
+          ? // A namespace binding has no imported NAME, so the arm below would
+            // interpolate the literal `*` and hand the author "but * (from
+            // '@objectstack/spec') has no …". The claim is a different one
+            // anyway: not "this name lacks a member" but "this package does not
+            // export this at all" (#10367).
+            `documents \`${call.object}.${call.member}(…)\` on a namespace import of ` +
+            `'${b.specifier}', but that package's published types export no ` +
+            `\`${call.member}\`.`
+          : `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
+            `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
     });
   }
   if (measured) {
@@ -1157,6 +1255,73 @@ export function populationRefusal({ documents, importStatements, targets }, call
 }
 
 /**
+ * The FOURTH state on the same axis, one level below `targets` (#10417): every
+ * import resolved to a workspace member with a built type entry, and NOT ONE of
+ * them bound a name -- so `symbolChecks` and `callChecks` are both 0, both
+ * halves checked nothing, and until this refusal the run exited 0 under a green
+ * line quoting a real population.
+ *
+ * Why it is NOT a fourth stage of `populationRefusal`. The first three are
+ * decided from text and the workspace map alone, before a type entry is
+ * touched, and each is consulted only because the previous was non-zero. This
+ * one is a WHOLE-RUN quantity: it cannot be known until `analyzeDocument` has
+ * run over every document, because one binding in the last document answers it.
+ * So it is a separate post-pass with its own function, not an `if` bolted onto
+ * an axis whose mutual exclusivity comes from being evaluated in one place.
+ *
+ * ⚠️ WHY THE CONDITION IS A CONJUNCTION, which is the part that is easy to get
+ * wrong. `symbolChecks === 0` alone is NOT vacuity, and #10367 is what proves
+ * it rather than an argument: a namespace import (`import * as spec from
+ * '@objectstack/spec'`) binds a receiver the call-site half then reads, while
+ * ticking `symbolChecks` zero times -- a namespace binding has no imported name
+ * to check against the export map. A run whose published fences documented only
+ * namespace imports would be fully READ and would report `symbolChecks: 0`.
+ * Refusing on either half alone would redden it. Both halves at zero is the one
+ * state in which nothing was read by anything.
+ *
+ * ⚠️ AND WHY IT IS A HARD REFUSAL rather than a printed warning. The header's
+ * rule for this file is that a quantity is refusable when it is zero if and
+ * only if the run is vacuous, and NOT refusable when an ordinary healthy tree
+ * can produce the zero -- which is why `derivedReceivers` is only printed. The
+ * conjunction above passes that test by construction: it is not a proxy for
+ * "did the halves read anything", it is that question. What it costs is a tree
+ * whose published fences document ONLY side-effect and type-only imports; such
+ * a tree has nothing for this gate to check at all, and the honest reply to it
+ * is this sentence, not a silent pass. So the remedy names that case explicitly
+ * and sends it at the fence rather than at the baseline.
+ *
+ * Rendered by a function for the reason the three above are: the counts are
+ * interpolated, so the SOURCE is not evidence about the sentence an author
+ * gets. The self-test asserts the returned text.
+ *
+ * @param {{documents: number, importStatements: number, targets: number,
+ *          symbolChecks: number, callChecks: number}} counts
+ * @param {string} [caller] gate name the refusal is attributed to
+ * @returns {string|null}
+ */
+export function bindingRefusal(
+  { documents, importStatements, targets, symbolChecks, callChecks },
+  caller = SELF,
+) {
+  if (symbolChecks !== 0 || callChecks !== 0) return null;
+  return (
+    `${caller}: read ${documents} document(s), ${importStatements} import statement(s) and ` +
+    `${targets} workspace type entr(ies) — and NOT ONE import bound a name, so both halves ` +
+    `checked nothing: 0 symbol(s) and 0 call site(s) (#4690).\n` +
+    `  The three population refusals above all passed, and that is the point: a resolved ` +
+    `target proves an entry was REACHED, never that a name was BOUND, and the two halves ` +
+    `consume bindings. Everything resolved and nothing bound, which puts the fault in the ` +
+    `BINDING step — a clause shape \`parseImportClause\` stopped returning, or a change to ` +
+    `\`extractImports\` that still finds statements while dropping what they bind.\n` +
+    `  If instead this tree now documents ONLY side-effect (\`import 'pkg'\`) and type-only ` +
+    `(\`import type {} from 'pkg'\`) imports, then there is nothing here for this gate to ` +
+    `check and that is the finding — widen what the fences document, or retire the gate.\n` +
+    `  ⛔ Not a skip, and ${BASELINE_REL} cannot silence it: a baseline mutes findings, and ` +
+    `this run produced none because it read none.`
+  );
+}
+
+/**
  * Pass 1's population: which workspace type entries the READMEs actually reach,
  * and how many import statements were read to find out.
  *
@@ -1235,6 +1400,37 @@ export function publishedDocs(caller = SELF) {
   return { members, byName, docs };
 }
 
+/**
+ * The `analyzeDocument` target for ONE resolved type entry, built from a
+ * `typeSurface`. `null` when the entry cannot be read as a module.
+ *
+ * Lifted out of `run()` for exactly one reason, and it is the reason #10367
+ * existed. `namespaceSymbol` was a hardcoded `null` here for this gate's whole
+ * life, and nothing in the suite could see it: the self-test drives
+ * `analyzeDocument` through a FAKE resolver, so it pins the branch that
+ * CONSUMES the symbol and says nothing about the caller that SUPPLIES it. A
+ * branch is only as exercised as its least-tested end. Exported, this end
+ * becomes assertable against a fake surface, so the same regression cannot ship
+ * silently twice.
+ *
+ * @param surface a `typeSurface`
+ * @param abs     absolute path of the built type entry
+ */
+export function surfaceTarget(surface, abs) {
+  const exports = surface.exportsOf(abs);
+  if (!exports) return null;
+  return {
+    declared: true,
+    exports,
+    // #10367: `null` here made the namespace branch in `analyzeDocument` dead
+    // code at the only production call site. `exportsOf` above has just
+    // resolved this symbol into the shared cache, so reading it back is free.
+    namespaceSymbol: surface.moduleSymbolOf(abs),
+    hasMember: (sym, member) => surface.hasMember(sym, member),
+    hasMemberVia: (sym, member, via) => surface.hasMemberVia(sym, member, via),
+  };
+}
+
 function run() {
   const { byName, docs } = publishedDocs();
 
@@ -1286,20 +1482,12 @@ function run() {
     if (!t) return null;
     if (!t.declared) return { declared: false };
     if (t.missing) return { declared: true, entryMissing: t.missing };
-    const exports = surface.exportsOf(t.abs);
-    if (!exports) {
-      return {
+    return (
+      surfaceTarget(surface, t.abs) ?? {
         declared: true,
         entryMissing: `type entry ${posix.relative(ROOT, t.abs)} could not be read as a module.`,
-      };
-    }
-    return {
-      declared: true,
-      exports,
-      namespaceSymbol: null,
-      hasMember: (sym, member) => surface.hasMember(sym, member),
-      hasMemberVia: (sym, member, via) => surface.hasMemberVia(sym, member, via),
-    };
+      }
+    );
   };
 
   const findings = [];
@@ -1347,6 +1535,22 @@ function run() {
     console.error('');
     return 1;
   }
+
+  // The fourth state on the population axis (#10417), decided only now because
+  // it is the only one that cannot be known earlier: one binding anywhere in the
+  // last document answers it. Placed BELOW the unbuilt branch on purpose — an
+  // unbuilt checkout also reads nothing, and `pnpm build` is the more actionable
+  // sentence for it — and ABOVE the findings report, because both halves reading
+  // nothing is a statement about the SCANNER, and nothing this run says about
+  // the tree can be trusted while it holds.
+  const unbound = bindingRefusal({
+    documents: docs.length,
+    importStatements,
+    targets: targets.size,
+    symbolChecks: measured.symbolChecks,
+    callChecks: measured.callChecks,
+  });
+  if (unbound) throw new Error(unbound);
 
   if (fresh.length === 0 && stale.length === 0) {
     console.log(`✓ check:published-readme-exports — ${header}`);
@@ -1703,6 +1907,12 @@ function selfTest() {
   const target = (names, memberMap = {}, derivedMap = {}) => ({
     declared: true,
     exports: new Map(names.map((n) => [n, fakeSymbol(memberMap[n] ?? [], derivedMap[n])])),
+    // The MODULE symbol, whose members ARE the package's export names — which is
+    // exactly what the real `hasMember` answers for it, through its
+    // `SymbolFlags.Module` arm (`getExportsOfModule(s).some(…)`). Modelling it
+    // as one more `fakeSymbol` keeps the fake's single `hasMember` honest for
+    // both kinds of receiver instead of special-casing the namespace one.
+    namespaceSymbol: fakeSymbol(names),
     hasMember: (sym, m) => sym.__members.has(m),
     hasMemberVia: (sym, m, via) => (via === 'instance' ? sym.__instance : sym.__return).has(m),
   });
@@ -1890,6 +2100,105 @@ function selfTest() {
     'analyzeDocument — a target that CANNOT answer it checks nothing there, and says so',
     { derived: silent.derivedReceivers, checked: silent.callChecks, unread: silent.unreadCalls },
     { derived: 0, checked: 0, unread: 2 },
+  );
+
+  // -- THE NAMESPACE BRANCH (#10367) -------------------------------------------
+  //
+  // `import * as spec from 'pkg'` binds a receiver whose members are the
+  // package's exports. The branch that binds it has been in this file since the
+  // call-site half was written and had NEVER executed: `run()`'s `resolveTarget`
+  // returned `namespaceSymbol: null` unconditionally, and the tree's own five
+  // namespace imports are all relative specifiers, which `splitSpecifier` turns
+  // away first. Population zero twice over — which is why the fixture below is
+  // the only thing that can exercise it, and why "no error" would prove nothing.
+  //
+  // ⭐ So the POSITIVE side is asserted: `spec.defineStack` is a real export and
+  // must be silent, `spec.defineNothing` is not and must be reported. A fixture
+  // that only checked for the absence of findings would pass just as happily on
+  // the dead branch, where nothing is bound and nothing is read.
+  const namespaceCalls = {
+    pkg: '@objectstack/spec',
+    file: 'packages/spec/README.md',
+    text: [
+      '```typescript',
+      "import * as spec from '@objectstack/spec';",
+      'spec.defineStack({});',
+      'spec.defineNothing({});',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a namespace import reports the member the package does NOT export',
+    analyzeDocument(namespaceCalls, resolveFake).map((f) => f.id),
+    ['@objectstack/spec|packages/spec/README.md|member|@objectstack/spec|*.defineNothing'],
+  );
+  // ...and the finding an author reads must not say "but * (from 'pkg') has no
+  // member": a namespace binding has no imported NAME, so it gets the sentence
+  // its own claim deserves. Interpolated, so the source is not evidence.
+  eq(
+    'analyzeDocument — the namespace finding names the PACKAGE, never the `*`',
+    analyzeDocument(namespaceCalls, resolveFake).map((f) => f.text),
+    [
+      "documents `spec.defineNothing(…)` on a namespace import of '@objectstack/spec', " +
+        "but that package's published types export no `defineNothing`.",
+    ],
+  );
+  // ⭐ And the counters, because findings alone cannot tell "checked two calls,
+  // one was wrong" from "bound nothing, read nothing, reported the one thing it
+  // happened to see". Both calls must be READ: 1 import-bound receiver, 2 call
+  // checks, 0 unread.
+  const namespaceRead = blank();
+  analyzeDocument(namespaceCalls, resolveFake, namespaceRead);
+  eq(
+    'analyzeDocument — the namespace receiver is BOUND and both its call sites are read',
+    {
+      symbols: namespaceRead.symbolChecks,
+      receivers: namespaceRead.receivers,
+      checked: namespaceRead.callChecks,
+      unread: namespaceRead.unreadCalls,
+    },
+    // `symbols: 0` is not an omission: a namespace binding has no imported name
+    // to check against the export map, so the IMPORT half has nothing to do
+    // here. That is the state #10417's refusal must not mistake for vacuity.
+    { symbols: 0, receivers: 1, checked: 2, unread: 0 },
+  );
+  // ⛔ THE DEFECT ITSELF, pinned as a control: a target that supplies no module
+  // symbol binds nothing, reads nothing, and the two call sites land in the
+  // `NOT read` count. This is byte-for-byte what every run of this gate did
+  // before #10367 — recorded here so a later edit that drops the wiring fails
+  // loudly instead of quietly returning to it.
+  const noNamespace = { ...resolveFake('@objectstack/spec'), namespaceSymbol: null };
+  const unwired = blank();
+  eq(
+    'analyzeDocument — WITHOUT a module symbol the namespace branch reports nothing (the #10367 defect)',
+    analyzeDocument(namespaceCalls, () => noNamespace, unwired),
+    [],
+  );
+  eq(
+    'analyzeDocument — ...and says so in the counters rather than reading as coverage',
+    { receivers: unwired.receivers, checked: unwired.callChecks, unread: unwired.unreadCalls },
+    { receivers: 0, checked: 0, unread: 2 },
+  );
+  // ⭐ THE OTHER END OF THAT BRANCH, which is where the defect actually lived.
+  // Everything above drives `analyzeDocument` through a FAKE resolver, so it
+  // pins the CONSUMER of the module symbol and would have stayed green for the
+  // gate's whole life — the supplier is what returned `null`. `surfaceTarget`
+  // is the production supplier, so it is asserted here against a fake surface.
+  const fakeSurface = {
+    exportsOf: (abs) => (abs === '/dist/index.d.ts' ? new Map([['defineStack', {}]]) : null),
+    moduleSymbolOf: (abs) => (abs === '/dist/index.d.ts' ? { __module: abs } : null),
+    hasMember: () => true,
+    hasMemberVia: () => true,
+  };
+  eq(
+    'surfaceTarget — the PRODUCTION caller supplies a module symbol, never a `null` (#10367)',
+    surfaceTarget(fakeSurface, '/dist/index.d.ts').namespaceSymbol,
+    { __module: '/dist/index.d.ts' },
+  );
+  eq(
+    'surfaceTarget — an unreadable entry is `null`, never a half-built target',
+    surfaceTarget(fakeSurface, '/dist/missing.d.ts'),
+    null,
   );
 
   // Undeclared subpath: the packaged surface says something the source does not.
@@ -2093,6 +2402,165 @@ function selfTest() {
     [null, null],
   );
 
+  // -- THE FOURTH STATE ON THAT AXIS (#10417) ---------------------------------
+  //
+  // Everything resolves, nothing binds. All three refusals above pass — one
+  // document, one import statement, one workspace type entry — and both halves
+  // still check nothing, which until this refusal exited 0 under a green line
+  // quoting that very population.
+  //
+  // ⭐ The zeros are MEASURED, by the same `reachedTargets` and the same
+  // `analyzeDocument` the run calls. A hand-written `symbolChecks: 0` would pin
+  // the refusal's arithmetic and prove nothing about the scan that produces the
+  // zero — the species of vacuity this whole axis exists to refuse.
+  const bindsNothing = [
+    {
+      pkg: '@objectstack/spec',
+      file: 'packages/spec/README.md',
+      text: [
+        '```typescript',
+        "import type {} from '@objectstack/spec';",
+        '',
+        'widget.render();',
+        'widget.explode();',
+        '```',
+      ].join('\n'),
+    },
+  ];
+  const specWorkspace = new Map([['@objectstack/spec', { dir: 'packages/spec', manifest: {} }]]);
+  const reachedOne = reachedTargets(bindsNothing, specWorkspace);
+  const readNothing = blank();
+  for (const doc of bindsNothing) analyzeDocument(doc, resolveFake, readNothing);
+  // First: the population is REAL by every test that precedes this one. Without
+  // this line the case below would pass on a tree that simply has no imports,
+  // which is stage 2's job and a different remedy.
+  eq(
+    'the fourth state — a real population by all three earlier stages',
+    {
+      imports: reachedOne.importStatements,
+      targets: reachedOne.targets.size,
+      stagedRefusal: populationRefusal({
+        documents: bindsNothing.length,
+        importStatements: reachedOne.importStatements,
+        targets: reachedOne.targets.size,
+      }),
+    },
+    { imports: 1, targets: 1, stagedRefusal: null },
+  );
+  // Second: and both halves read nothing anyway. `unread: 2` is the reject side
+  // asserted positively — the two call sites WERE matched and then turned away
+  // for want of a binding, so this is not an extractor that stopped matching.
+  eq(
+    'the fourth state — both halves check nothing, and the calls were seen and refused',
+    {
+      symbols: readNothing.symbolChecks,
+      checked: readNothing.callChecks,
+      unread: readNothing.unreadCalls,
+    },
+    { symbols: 0, checked: 0, unread: 2 },
+  );
+  const unbound = bindingRefusal(
+    {
+      documents: bindsNothing.length,
+      importStatements: reachedOne.importStatements,
+      targets: reachedOne.targets.size,
+      symbolChecks: readNothing.symbolChecks,
+      callChecks: readNothing.callChecks,
+    },
+    'gate',
+  );
+  if (unbound === null) {
+    failures.push(
+      'a run in which every import RESOLVED and not one BOUND A NAME is not refused. Both\n' +
+        '      halves consume bindings, so both checked nothing — reported as a pass, under a\n' +
+        '      green line quoting a population that is real one level up (#10417/#4690).',
+    );
+  } else {
+    // It must be distinguishable from stage 3 in a CI log: the two send the
+    // reader at different code (workspace resolution vs. the binding step), and
+    // the counts it prints are the ones that are NOT zero.
+    for (const [what, ok] of [
+      ['name the type entries it DID resolve', unbound.includes('1 workspace type entr(ies)')],
+      ['name the imports it read', unbound.includes('1 import statement(s)')],
+      ['say that both halves checked nothing', /both halves\s+checked nothing/.test(unbound)],
+      ['carry the #4690 remedy voice', unbound.includes('(#4690)')],
+      ['point at the BINDING step', /parseImportClause|extractImports/.test(unbound)],
+      ['name the legitimate type-only tree as the other cause', /type-only/.test(unbound)],
+      ['refuse the baseline as a silencer', unbound.includes(BASELINE_REL)],
+    ]) {
+      if (!ok) failures.push(`the fourth population refusal must ${what}.`);
+    }
+    if (unbound === stage3) {
+      failures.push(
+        'the fourth refusal and the third render the SAME sentence. They sit at different\n' +
+          '      levels and send the reader at different code — workspace resolution vs. the\n' +
+          '      binding step — so a CI log that cannot tell them apart costs a debugging cycle.',
+      );
+    }
+  }
+
+  // ⭐ THE REJECT SIDE, in BOTH directions the conjunction has — because a
+  // false RED here is the expensive one: this gate is merge-blocking and its own
+  // remedy refuses the baseline as an escape.
+  //
+  // (a) The import half alone is enough. One bound name, zero call sites.
+  const bindsOne = {
+    pkg: '@objectstack/spec',
+    file: 'packages/spec/README.md',
+    text: ['```typescript', "import { defineStack } from '@objectstack/spec';", '```'].join('\n'),
+  };
+  const importOnly = blank();
+  analyzeDocument(bindsOne, resolveFake, importOnly);
+  eq(
+    'bindingRefusal — an import half that read something is never refused',
+    {
+      measured: { symbols: importOnly.symbolChecks, checked: importOnly.callChecks },
+      refusal: bindingRefusal({
+        documents: 1,
+        importStatements: 1,
+        targets: 1,
+        symbolChecks: importOnly.symbolChecks,
+        callChecks: importOnly.callChecks,
+      }),
+    },
+    { measured: { symbols: 1, checked: 0 }, refusal: null },
+  );
+  // (b) ⭐ ...and the CALL-SITE half alone is too, which is the direction that
+  // makes the conjunction load-bearing rather than stylistic. #10367's namespace
+  // import binds a receiver the call-site half reads while ticking
+  // `symbolChecks` ZERO times — so a tree documenting only namespace imports is
+  // fully read and reports `0 documented symbol(s) checked`. A refusal written
+  // on either half alone would redden it.
+  const namespaceOnly = blank();
+  analyzeDocument(
+    {
+      pkg: '@objectstack/spec',
+      file: 'packages/spec/README.md',
+      text: [
+        '```typescript',
+        "import * as spec from '@objectstack/spec';",
+        'spec.defineStack({});',
+        '```',
+      ].join('\n'),
+    },
+    resolveFake,
+    namespaceOnly,
+  );
+  eq(
+    'bindingRefusal — a namespace-only tree reads with symbolChecks 0 and is never refused',
+    {
+      measured: { symbols: namespaceOnly.symbolChecks, checked: namespaceOnly.callChecks },
+      refusal: bindingRefusal({
+        documents: 1,
+        importStatements: 1,
+        targets: 1,
+        symbolChecks: namespaceOnly.symbolChecks,
+        callChecks: namespaceOnly.callChecks,
+      }),
+    },
+    { measured: { symbols: 0, checked: 1 }, refusal: null },
+  );
+
   // The authority convention (#8435): the baseline path must never be offered
   // as a co-equal author remedy.
   const remedy = freshRemedy();
@@ -2123,10 +2591,16 @@ function selfTest() {
       '  the reject side by COUNT (#9870: an empty bind set is also what a dead matcher\n' +
       '  returns) and the author-facing text: the remedy refuses the baseline, and the green\n' +
       '  line reports what each half READ and how much it could NOT, so a scanned tree and an\n' +
-      '  unread one cannot print the same body. All THREE stages of the population axis are\n' +
-      '  refusals (#9911), the third one over a fixture whose zero is measured by the same\n' +
-      '  `reachedTargets` the run uses — three imports read, three rejected, nothing resolved\n' +
-      '  — with the reject side pinned as a population of ONE going deliberately silent.',
+      '  unread one cannot print the same body. All FOUR steps of the population axis are\n' +
+      '  refusals (#9911, #10417), each over a fixture whose zero is MEASURED by the same\n' +
+      '  `reachedTargets`/`analyzeDocument` the run uses — stage 3 with three imports read,\n' +
+      '  three rejected and nothing resolved; the fourth with one import resolved to a real\n' +
+      '  type entry and NOT ONE name bound — and the reject side of each pinned positively,\n' +
+      '  including the namespace-only tree that reads `symbolChecks: 0` while being fully\n' +
+      '  read, which is why the fourth condition is a conjunction. The namespace branch\n' +
+      '  itself (#10367) is exercised in both directions on a fixture, since the tree\n' +
+      '  population for it is 0: a real export stays silent, an invented one is reported with\n' +
+      '  a sentence naming the PACKAGE, and the unwired shape is pinned as reading nothing.',
   );
 }
 

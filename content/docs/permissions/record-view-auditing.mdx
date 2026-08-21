@@ -68,9 +68,60 @@ that never installs this plugin, producing metadata that *reads* as audited and
 records nothing — and on a compliance surface, a declaration a reviewer mistakes
 for coverage is worse than an absent feature.
 
-The practical consequence is that this is configured **where you compose the
-kernel**. The CLI's `os serve` registers `AuditPlugin` with no options, so a
-stack served that way has record-view auditing off and no knob to turn it on.
+The practical consequence is that this is configured **where the plugin is
+installed**. On the `os serve` boot path that place is your stack's `plugins`
+array — see [Under `os serve`](#under-os-serve) below.
+</Callout>
+
+### Under `os serve`
+
+`os serve` may auto-register `AuditPlugin` for you, and when it does it passes
+**no options** — that instance audits no views. To turn record-view auditing on,
+put your own configured instance in the stack's `plugins` array:
+
+```typescript
+// objectstack.config.ts
+import { defineStack } from '@objectstack/spec';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+
+export default defineStack({
+  manifest: { name: 'my-app', version: '1.0.0' },
+  plugins: [
+    new AuditPlugin({ readAudit: { objects: ['contact', 'account'] } }),
+  ],
+  // objects, apps, views, …
+});
+```
+
+That is a declared contract, not a lucky ordering. The CLI registers its
+option-less instance **before** it walks `plugins`, and registering a plugin
+whose `name` is already taken **overwrites** the earlier registration —
+last-one-wins, identically on both kernels, with a `warn` naming both versions.
+Your configured instance is the one that boots; the CLI's is discarded before it
+ever reaches `init()`, so nothing is started twice and nothing leaks. A line like
+
+```text
+Plugin superseded: 'com.objectstack.audit' — the later registration (v1.0.0)
+REPLACED the earlier one (v1.0.0). Only the later instance is initialized and
+started; the earlier one is discarded without ever running init().
+```
+
+in your boot log **is the opt-in working**, not a misconfiguration. (You will
+not always see it: the CLI's auto-registration is paired with its `AuthPlugin`
+bootstrap, so a stack that supplies its own `AuthPlugin` never gets a second
+audit instance to supersede in the first place.)
+
+<Callout type="warn">
+**There is no stack-config key either.** No `audit:` block in
+`objectstack.config.ts` names the audited objects, deliberately, and for exactly
+the reason there is no object-metadata key: such a key would survive in a
+deployment that never installs `@objectstack/plugin-audit` at all, reading as
+coverage while recording nothing.
+
+`requires: ['audit']` is not a substitute — it makes the plugin's presence a
+hard boot requirement, but it constructs the plugin with no options and offers
+nowhere to name objects. Naming audited objects means constructing the plugin
+yourself, as above.
 </Callout>
 
 ## What counts as a record view

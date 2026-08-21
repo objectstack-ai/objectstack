@@ -31,4 +31,33 @@ declare module 'node:path' {
   export function dirname(path: string): string;
 }
 
-declare const process: { cwd(): string };
+// `test/vitest-console-teardown-race.test.ts` drives a real vitest process over
+// a fixture, because the defect it pins (a console RPC rejected during worker
+// teardown) is only observable as the child's EXIT CODE — it happens after every
+// test in the file has finished, so no in-process assertion can see it.
+// Narrowed to the synchronous form and to the three result members that pin
+// reads: it must not grow into the whole `child_process` surface.
+declare module 'node:child_process' {
+  export function spawnSync(
+    command: string,
+    args: readonly string[],
+    options: {
+      encoding: 'utf8';
+      timeout?: number;
+      env?: Record<string, string | undefined>;
+    },
+  ): { status: number | null; stdout: string | null; stderr: string | null };
+}
+
+// Same pin, one member: it reads the child's reporter output, and vitest
+// colourises that output on any machine `std-env` does not recognise as an
+// agent shell. Stripping is delegated to the platform rather than to a
+// hand-written escape regex, which would have to spell control characters in
+// repo source (`pnpm check:nul-bytes`'s territory).
+declare module 'node:util' {
+  export function stripVTControlCharacters(str: string): string;
+}
+
+// `env` joins `cwd()` for the same pin: the nested run must NOT inherit this
+// process's own `VITEST_*` variables, or the child believes a pool spawned it.
+declare const process: { cwd(): string; env: Record<string, string | undefined> };

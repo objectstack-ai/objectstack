@@ -50,7 +50,7 @@ export const TaskViews = defineView({
       type: 'simple',
       data,
       sections: [
-        { label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
+        { name: 'task', label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
       ],
     },
   },
@@ -388,7 +388,7 @@ formViews: {
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `name` | `string` | Stable identifier (snake_case) for i18n lookup |
+| `name` | `string` | Stable identifier (snake_case) for i18n lookup — resolves `objects.{object}._sections.{name}.label`. **A nameless section renders its authored label in every locale**, so give every section a `name` if the app is localized |
 | `label` | `string` | Section header |
 | `columns` | `1-4` | Grid column count |
 | `collapsible` | `boolean` | Can section be collapsed |

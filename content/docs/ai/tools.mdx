@@ -1,0 +1,218 @@
+---
+title: Tool Records
+description: The three ways a capability reaches an agent, and the narrow case where authoring a tool record is the right answer
+---
+
+# Tool Records
+
+Part of the [AI module](/docs/ai). `tool` is an authorable metadata kind —
+`ToolSchema`, declared as `defineStack({ tools })` — and it is the **least
+likely** answer to "how do I give my agent a new capability".
+
+So this page opens with the decision instead of the shape. If you read only the
+next section and leave, you will be on the right path. The declaration shape is
+further down, for the reader who has already established that they need it.
+
+<Callout type="info">
+**The default third-party path declares no tool records at all.** That is
+[ADR-0109](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0109-ai-tool-authoring-model.md),
+and the `stack.tools` field says so in its own description:
+
+```text
+AI Tool metadata records — optional refinement layer, never required: the
+default path is skills referencing platform tools or materialised action_<name>
+tools (ADR-0109)
+```
+</Callout>
+
+## Three ways a capability reaches an agent
+
+An agent's capability set is the union of its surface-compatible **skills'**
+tools ([ADR-0064](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0064-tool-scoping-to-agent.md)),
+so every one of these is ultimately a name in some skill's `tools[]`. What
+differs is where that name comes from:
+
+| What you want the agent to do | How you get there | Tool record? |
+|:---|:---|:---|
+| Read, query, aggregate, or search — what the platform already does for every app | Name the **platform tool** in your skill: `query_records`, `get_record`, `aggregate_data`, `search_knowledge`, `describe_object`, … | **No** |
+| Run something your app already does — a `script` / `api` / `flow` Action | Opt the Action in with `ai.exposed` + `ai.description`; the runtime materialises one `action_<name>` tool per exposed Action and your skill names that. See [Actions as Tools](/docs/ai/actions-as-tools). | **No** |
+| Reach a system outside your app | Connect it over MCP — see [Connect an MCP Client](/docs/ai/connect-mcp) | **No** |
+| Present an executable to the model *differently* from the way your app runs it | A `tool` record — the optional refinement layer described below | **Yes**, and rarely |
+
+There is a fourth thing authors reach for that is not on this list, because it
+is not a tool at all: *reasoning*. "Analyse the pipeline", "draft this email",
+"score this lead" are things the model does with data it already has. Writing
+them as tool names is the most common authoring mistake on this surface, and it
+produces an assistant that claims abilities it does not have.
+
+### The default path, end to end
+
+Two declarations, no tool record — the Action you already ship for your UI, and
+a skill that names its materialised tool:
+
+{/* os:check */}
+```typescript
+import { defineAction } from '@objectstack/spec/ui';
+import { defineSkill } from '@objectstack/spec/ai';
+
+// 1. An Action the app already has — opted in to AI.
+export const EscalateCaseAction = defineAction({
+  name: 'escalate_case',
+  label: 'Escalate Case',
+  objectName: 'support_case',
+  type: 'flow',
+  target: 'case_escalation_flow',
+  ai: {
+    exposed: true,
+    description: 'Escalates a support case to the on-call queue and notifies the account owner.',
+  },
+});
+
+// 2. The skill names the materialised tool. No defineTool anywhere.
+export const CaseTriageSkill = defineSkill({
+  name: 'case_triage',
+  label: 'Case Triage',
+  surface: 'ask',
+  instructions: 'Read the case and its recent activity, then escalate when the customer is blocked.',
+  tools: ['get_record', 'query_records', 'action_escalate_case'],
+});
+```
+
+The full walkthrough — including the three conditions that decide whether
+`action_<name>` exists at all — is in
+[AI Agents](/docs/ai/agents#a-skill-needs-no-tool-records--name-the-action).
+
+### Why that is the default
+
+- **AI capability ≡ application capability.** The executable, its permission
+  checks and its audit trail are the Action your UI button already runs. There
+  is no second security surface to review, and no way for the agent to do
+  something the app cannot.
+- **One less namespace to get wrong.** A tool record is a second place a name
+  has to stay consistent — and a second place an AI author can invent one.
+- **Unresolved names surface at authoring time.** `os validate` reports a
+  `skill.tools[]` entry that resolves to nothing (`ai-skill-tool-unresolved`,
+  advisory). The rule exists because an app once shipped ten fictional tool
+  names across six skills, every one of them passing validation.
+
+## When a tool record is the right answer
+
+Reach for one only when the **AI-facing surface must differ from the raw
+executable**. ADR-0109 names the qualifying cases:
+
+- **A different LLM-facing description** — the model needs a contract written
+  for it, and the Action's own `ai.description` cannot serve both audiences.
+- **Parameter narrowing** — the Action takes twenty parameters and the agent
+  should see three, or an enum should be tighter for the model than for the API.
+- **Exposing a Flow** — there is no materialised family for flows, only for
+  Actions.
+- **A stable AI-facing name** — decoupled from the Action's name, so renaming
+  the Action does not rename the tool the model was trained against.
+- **Execution policy** — a confirm-before-run flag. Note that
+  `requiresConfirmation` was *removed* from `ToolSchema` as unenforced
+  ([ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md));
+  it returns only together with its enforcement.
+
+If none of those describe your situation, you do not need a tool record. If one
+of them does, read the next callout before you write it.
+
+<Callout type="warn">
+**What a tool record does today.** `ToolSchema` has no `implementation` or
+`handler` field, and no framework executor loads a metadata-authored tool —
+authoring one does **not** make anything runnable. The refinement layer above is
+ADR-0109 *Phase 2*, which is gated on a real refinement need and has not landed:
+`stack.tools` has no runtime reader yet.
+
+What a record does do today is narrower and worth knowing: it survives stack
+composition, it is mirrored into the metadata store for Studio and discovery,
+and its name joins the resolution universe for `skill.tools[]` — so a skill
+naming it validates clean.
+
+When Phase 2 lands, a third-party tool record must carry a `binding`
+(`{ type: 'action' | 'flow', name }`) to the executable it refines. Handlers
+never live on the tool. Write the record as a *view* of something your app
+already executes, and it will still be one.
+</Callout>
+
+## The declaration shape
+
+`ToolSchema` and the `defineTool` factory are exported from
+`@objectstack/spec/ai`. The generated field reference is
+[Tool](/docs/references/ai/tool); the authoring-relevant fields are:
+
+| Field | Required | Meaning |
+|:---|:---|:---|
+| `name` | ✅ | Machine name, `snake_case`, globally unique — this is what a skill's `tools[]` names |
+| `label` | ✅ | Human-readable display name |
+| `description` | ✅ | The text the **model** reads to decide when to call the tool |
+| `parameters` | ✅ | JSON Schema for the tool input — the model generates arguments conforming to it |
+| `outputSchema` | optional | ⚠️ **Experimental, not enforced.** Its top-level keys are folded into the description shown to the model; outputs are never validated against it |
+| `objectName` | optional | The object this tool operates on, when there is exactly one |
+| `protection` | optional | Package-author lock policy ([ADR-0010](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0010-metadata-protection-model.md)) |
+
+The shape is **strict**: an undeclared key is rejected at parse time, not
+stripped. Five keys that were once authorable — `permissions`, `active`,
+`category`, `builtIn` and `requiresConfirmation` — were removed because nothing
+read them, and each rejects today with the prescription for what to write
+instead. If you are porting an older record, the parse error is the instruction.
+
+{/* os:check */}
+```typescript
+import { defineTool, defineSkill } from '@objectstack/spec/ai';
+
+// A refinement: the underlying Action takes the full case payload, but the
+// agent only ever needs the record and a length hint.
+export const SummariseCaseTool = defineTool({
+  name: 'summarise_case',
+  label: 'Summarise Case',
+  description:
+    'Summarise a support case and its recent activity for a human reader. '
+    + 'Use it before escalating, so the summary can be pasted into the handover note.',
+  objectName: 'support_case',
+  parameters: {
+    type: 'object',
+    properties: {
+      caseId: { type: 'string', description: 'Record id of the case to summarise' },
+      length: { type: 'string', enum: ['short', 'detailed'] },
+    },
+    required: ['caseId'],
+  },
+});
+
+// The skill names it exactly the way it names a platform or materialised tool.
+export const CaseHandoverSkill = defineSkill({
+  name: 'case_handover',
+  label: 'Case Handover',
+  surface: 'ask',
+  instructions: 'Summarise before you escalate, and put the summary in the handover note.',
+  tools: ['summarise_case', 'action_escalate_case', 'get_record'],
+});
+```
+
+## How the name is resolved
+
+A `skill.tools[]` entry resolves against three sources, in order:
+
+1. the stack's own `tools[]` names — the refinement records on this page;
+2. the curated registry of tools the platform runtime registers at boot;
+3. the materialised `action_<name>` family, one per AI-exposed Action declared
+   on the stack or on any object.
+
+A trailing wildcard matches every member of that universe sharing the prefix, so
+`action_*` subscribes a skill to all of the app's exposed Actions at once.
+
+**Agents do not name tools.** `agent.tools` was removed in protocol 17: it was
+the one seam that let an agent reach a tool no skill of its surface declared.
+An agent reaches exactly the tools its surface-compatible skills declare
+(ADR-0064), so a tool record becomes reachable by attaching the skill that names
+it, never by listing it on the agent.
+
+---
+
+## See also
+
+- [Actions as Tools](/docs/ai/actions-as-tools) — the default path: an Action materialised as an `action_<name>` tool
+- [AI Agents](/docs/ai/agents) — the two platform agents, and skills as the extension primitive
+- [Connect an MCP Client](/docs/ai/connect-mcp) — reaching tools outside your app
+- [AI Skills System](/docs/ai/skills) — a different layer: the `SKILL.md` knowledge modules that teach a coding assistant to *write* your metadata
+- [Tool reference](/docs/references/ai/tool) — every field, generated from `ToolSchema`

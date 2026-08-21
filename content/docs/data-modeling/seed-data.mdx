@@ -246,6 +246,7 @@ seed value is an **array of natural keys**. Each element resolves independently.
 ```typescript
 const Book = ObjectSchema.create({
   name: 'book',
+  sharingModel: 'private',
   fields: {
     name: Field.text({ label: 'Title', required: true }),
     authors: Field.lookup('author', { label: 'Authors', multiple: true }),

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { runAdminImportUsers, IMPORT_USERS_MAX_ROWS, type IdentityImportDeps } from './admin-import-users.js';
 import type { AdminActor } from './admin-user-endpoints.js';
 
@@ -35,7 +36,10 @@ function makeDeps(opts: {
     const where = q?.where ?? {};
     return existing.filter((u) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return u[k] === v; }));
   });
-  const update = vi.fn(async () => ({}));
+  const update = vi.fn(async (_obj: string, data: any, options?: any) => {
+    assertEngineUpdateDispatch(data, options);
+    return {};
+  });
   const insert = vi.fn(async () => ({}));
   const warn = vi.fn();
   const noteMustChangePasswordIssued = vi.fn();

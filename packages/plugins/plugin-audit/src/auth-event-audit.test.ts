@@ -304,13 +304,20 @@ describe('[#8144] createAuthEventAuditSink writes a login row that names its act
         throw new Error('no such table: sys_audit_log');
       },
     };
-    const logger = { error: vi.fn(), debug: vi.fn() };
+    // `warn` is required by `AuthEventAuditLogger` (#9754/#10556): a sink that
+    // declares an optional `error` must be able to degrade. Present here AND
+    // asserted unused below, which pins the ORDER — `error` first, `warn` only
+    // as the fallback. Before the contract change this double was `{ error,
+    // debug }`, a shape the type accepted and the degrade path could not use.
+    const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
     const sink = createAuthEventAuditSink({ getEngine: () => broken, logger });
 
     await expect(sink.recordAuthEvent({ action: 'login', userId: 'usr_1' })).resolves.toBeUndefined();
     await sink.recordAuthEvent({ action: 'logout', userId: 'usr_1' });
 
     expect(logger.error).toHaveBeenCalledTimes(1);
+    // The fallback stays untouched while `error` exists.
+    expect(logger.warn).not.toHaveBeenCalled();
     const [msg] = logger.error.mock.calls[0];
     // The two things a durability `error` owes, in its first line.
     expect(String(msg)).toContain('INCOMPLETE');

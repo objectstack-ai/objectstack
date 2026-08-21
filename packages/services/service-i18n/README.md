@@ -193,4 +193,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 ## See Also
 
 - [@objectstack/spec/system](../../spec/src/system/) — the `translation` metadata schema
-- [I18n Standard](https://docs.objectstack.ai/docs/protocol/kernel/i18n-standard)
+- [I18n Standard](https://objectstack.ai/docs/protocol/kernel/i18n-standard)

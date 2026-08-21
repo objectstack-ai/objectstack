@@ -304,6 +304,33 @@ function refuseDateBucketedGroupBy(granularity: string): never {
 }
 
 /**
+ * [#10576] An aggregation entry carries a per-aggregation `filter`
+ * (`AggregationNodeSchema.filter`, the contract half of #10413) — the twin of
+ * `driver-sql`'s `unsupportedAggregationFilterError`, first sentence for first
+ * sentence, and the same NOT_IMPLEMENTED/501 class for the same reason (#5907,
+ * ADR-0112): the spec declares the key, this builder emits no conditional
+ * accumulator for it, so it is a capability gap in the backend rather than a
+ * mistake in the query. Refused rather than silently accumulating the
+ * UNFILTERED rows — the #10413 defect. Unreachable through `engine.aggregate`
+ * (the engine lowers filtered aggregations in memory for every driver); this
+ * fires only for a caller that drives the builder or driver directly.
+ */
+function refusePerAggregationFilter(alias: string): never {
+  const err = new Error(
+    `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (driver-mongodb). ` +
+    `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
+    `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
+    `aggregations in memory for every driver without native support — route the query through the ` +
+    `engine, or drop the \`filter\` key.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
+/**
  * [#6850] A `groupBy` entry that is neither half of the declared union.
  *
  * INVALID_QUERY/400 rather than 501: unlike a date bucket this is not a
@@ -386,6 +413,17 @@ export function buildAggregationPipeline(opts: {
 
     // Build accumulators from aggregation descriptors
     for (const agg of opts.aggregations) {
+      // [#10576] A per-aggregation `filter` (`AggregationNodeSchema.filter`,
+      // the contract half of #10413) has no lowering in this builder — a
+      // `$cond`-wrapped accumulator would be one, but building it is a
+      // capability investment this refusal deliberately is not. Refused before
+      // a pipeline exists rather than silently accumulating the UNFILTERED
+      // rows (the #10413 defect). Unreachable through `engine.aggregate`,
+      // which lowers filtered aggregations in memory for every driver; `{}` is
+      // the vacuous filter, same convention as `where` / `having`.
+      if (agg.filter && typeof agg.filter === 'object' && Object.keys(agg.filter).length > 0) {
+        refusePerAggregationFilter(agg.alias ?? agg.field ?? '(unaliased)');
+      }
       groupAccumulators[agg.alias] = buildAccumulator(agg);
     }
 

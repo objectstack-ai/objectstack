@@ -112,6 +112,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -627,10 +628,56 @@ function selfTest(): never {
   // observe the refusal on the real tree is to break the real tree. Both
   // verdicts are pinned: a guard only ever seen green cannot be told apart from
   // one that matches nothing.
+  //
+  // ## Why every mtime below is stamped, the SOURCE's included (#10511)
+  //
+  // The acceptance case used to leave the source at whatever mtime the OS wrote
+  // and stamp only the bundle, with `new Date()`. Those two clocks do not have
+  // the same resolution, and the mismatch runs in the direction that FAILS a
+  // correct tree: `writeFileSync` stamps to the nanosecond (ext4, tmpfs) while
+  // `new Date()` carries whole milliseconds, so `utimesSync(bundle, new Date())`
+  // can land up to 1 ms BEHIND a source written microseconds earlier.
+  // `bundlesAreStale` then reads a bundle touched LATER in wall-clock time as
+  // the older of the two, and "accepts a build newer than its sources" fails.
+  // Measured on this fixture: src mtime `…539.612`, bundle `…539.000`, margin
+  // −0.612 ms.
+  //
+  // Nothing in the old code bought any margin against that — the margin was
+  // whatever the five syscalls in between happened to cost. Cold, that is
+  // 2.5–9.5 ms and the case passes; replayed hot it collapses below 1 ms and
+  // the case fails 378/500. One such run reddened a merge-queue candidate and
+  // evicted a PR that cannot influence this gate.
+  //
+  // So both sides are stamped from ONE integer-millisecond anchor and every
+  // case states its own offset — the discipline `dist-freshness.test.ts` already
+  // applies to this very library ("explicit stamps rather than sleeps … a test
+  // that races them is a test that gets `.skip`ped later").
   const fresh = mkdtempSync(join(tmpdir(), 'os-browser-reachable-fresh-'));
   try {
+    const srcFile = join(fresh, 'src', 'a.ts');
+    const bundleFile = join(fresh, 'dist', 'index.mjs');
+    const configFile = join(fresh, 'tsup.config.ts');
+
+    // `Date.now()` is whole milliseconds, which is exactly the point: every
+    // stamp below is an integer offset from it, so no comparison this fixture
+    // makes ever crosses two timestamp resolutions.
+    const ANCHOR = Date.now();
+    const stamp = (file: string, offsetMs: number): void => {
+      const at = new Date(ANCHOR + offsetMs);
+      utimesSync(file, at, at);
+    };
+    /** The stamps as the rule sees them, so a failure prints the numbers. */
+    const mtimes = (): string =>
+      JSON.stringify({
+        anchor: ANCHOR,
+        srcOffsetMs: statSync(srcFile).mtimeMs - ANCHOR,
+        bundleOffsetMs: existsSync(bundleFile) ? statSync(bundleFile).mtimeMs - ANCHOR : null,
+        configOffsetMs: existsSync(configFile) ? statSync(configFile).mtimeMs - ANCHOR : null,
+      });
+
     mkdirSync(join(fresh, 'src'), { recursive: true });
-    writeFileSync(join(fresh, 'src', 'a.ts'), 'export const a = 1;\n');
+    writeFileSync(srcFile, 'export const a = 1;\n');
+    stamp(srcFile, 0);
 
     const missing = inspectBundleFreshness(fresh, 'check', RERUN);
     check(
@@ -641,9 +688,8 @@ function selfTest(): never {
 
     // A bundle older than the source it claims to describe.
     mkdirSync(join(fresh, 'dist'), { recursive: true });
-    writeFileSync(join(fresh, 'dist', 'index.mjs'), 'export const a = 1;\n');
-    const past = new Date(Date.now() - 60_000);
-    utimesSync(join(fresh, 'dist', 'index.mjs'), past, past);
+    writeFileSync(bundleFile, 'export const a = 1;\n');
+    stamp(bundleFile, -60_000);
 
     const stale = inspectBundleFreshness(fresh, 'check', RERUN);
     check(
@@ -652,19 +698,46 @@ function selfTest(): never {
       JSON.stringify(stale),
     );
 
+    // The reject side at its finest grain, and the case that reddens if anyone
+    // ever settles a flake here by widening the comparison into a tolerance
+    // window: a bundle one millisecond behind its sources IS stale, and a rule
+    // that shrugs at 1 ms answers about the wrong build for as long as the
+    // window lasts. Refusing at 60 s above cannot tell that apart.
+    stamp(bundleFile, -1);
+    const barelyStale = inspectBundleFreshness(fresh, 'check', RERUN);
+    check(
+      'refuses a build ONE MILLISECOND older than its sources',
+      !barelyStale.fresh && barelyStale.state === 'stale',
+      mtimes(),
+    );
+
+    // The boundary itself. `bundlesAreStale` asks whether the sources are NEWER
+    // (`>`), so an exact tie is not "older" and reads fresh. Pinned because its
+    // two neighbours sit one millisecond either side and nothing else in this
+    // file says which way the equality falls.
+    stamp(bundleFile, 0);
+    check(
+      'accepts a build whose mtime EQUALS its newest source (the > boundary)',
+      inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
+    );
+
     // …and passes once the bundle is the newer of the two.
-    const now = new Date();
-    utimesSync(join(fresh, 'dist', 'index.mjs'), now, now);
-    check('accepts a build newer than its sources', inspectBundleFreshness(fresh, 'check', RERUN).fresh);
+    stamp(bundleFile, 60_000);
+    check(
+      'accepts a build newer than its sources',
+      inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
+    );
 
     // The bundler config is an input too: editing it without rebuilding must
     // read as stale, because it decides the entries and the externals.
-    const later = new Date(Date.now() + 60_000);
-    writeFileSync(join(fresh, 'tsup.config.ts'), 'export default {};\n');
-    utimesSync(join(fresh, 'tsup.config.ts'), later, later);
+    writeFileSync(configFile, 'export default {};\n');
+    stamp(configFile, 120_000);
     check(
       'an edited-but-unbuilt tsup.config.ts reads as stale',
       !inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
     );
   } finally {
     rmSync(fresh, { recursive: true, force: true });

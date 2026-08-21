@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel } from './kernel';
 import { ServiceLifecycle, PluginMetadata } from './plugin-loader';
 import type { Plugin, PluginContext } from './types';
+import { recordGuards, stillPinningTheLoop } from './refd-timer-probe.testkit.js';
 
 describe('ObjectKernel', () => {
     let kernel: ObjectKernel;
@@ -240,13 +241,13 @@ describe('ObjectKernel', () => {
     // guards armed is still holding the loop open.
     describe('Startup timeout guards do not outlive the race (#4813)', () => {
         /**
-         * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
-         * resources that are *currently keeping the event loop alive*, which
-         * is precisely the property that made `os migrate` hang ~120s after
-         * printing `✅ Graceful shutdown complete`.
+         * The real value that hung one-shot CLI processes: ObjectQLPlugin's.
+         * It is also what tells these guards apart from every other timer on
+         * the shared loop — see `refd-timer-probe.testkit.ts`, which explains
+         * why these pins name their guards instead of counting the process
+         * (#10685).
          */
-        const refdTimers = () =>
-            process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+        const STARTUP_TIMEOUT = 120_000;
 
         it('leaves no ref\'d timer behind after the plugin wins the race', async () => {
             const plugin: PluginMetadata = {
@@ -254,20 +255,22 @@ describe('ObjectKernel', () => {
                 version: '1.0.0',
                 init: async () => {},
                 start: async () => {},
-                // The real value that hung one-shot CLI processes: ObjectQLPlugin.
-                startupTimeout: 120_000,
+                startupTimeout: STARTUP_TIMEOUT,
             };
 
             await kernel.use(plugin);
 
-            const before = refdTimers();
-            await kernel.bootstrap();
-            const after = refdTimers();
+            const guards = await recordGuards(STARTUP_TIMEOUT, () => kernel.bootstrap());
 
             // Two guards were armed (init + start) and both lost their race.
+            // Pinning the arming keeps the reclaim assertion from passing
+            // vacuously — a zero because nothing was measured rather than
+            // because nothing was left behind.
+            expect(guards).toHaveLength(2);
+
             // While either is still ref'd the process cannot exit for up to
             // `startupTimeout` — 120s of idling after a 3s job.
-            expect(after).toBe(before);
+            expect(stillPinningTheLoop(guards)).toBe(0);
 
             await kernel.shutdown();
         });
@@ -278,20 +281,24 @@ describe('ObjectKernel', () => {
                 version: '1.0.0',
                 init: async () => {},
                 start: async () => {},
-                startupTimeout: 120_000,
+                startupTimeout: STARTUP_TIMEOUT,
             });
 
             for (let n = 0; n < 4; n++) {
                 await kernel.use(makePlugin(n));
             }
 
-            const before = refdTimers();
-            await kernel.bootstrap();
+            const guards = await recordGuards(STARTUP_TIMEOUT, () => kernel.bootstrap());
 
-            // The issue's probe caught exactly this shape: 8 ref'd Timeouts
-            // for 4 plugins (4 init + 4 start). The count must not scale with
-            // the plugin list — it must not grow at all.
-            expect(refdTimers()).toBe(before);
+            // The issue's probe caught exactly this shape: 8 ref'd Timeouts for
+            // 4 plugins (4 init + 4 start). One guard per hook is what the
+            // kernel is SUPPOSED to arm — asserting the arming scales is what
+            // makes the reclaim below mean anything for the fourth plugin.
+            expect(guards).toHaveLength(8);
+
+            // What must not scale with the plugin list is what survives the
+            // race: not one of the eight is still holding the loop open.
+            expect(stillPinningTheLoop(guards)).toBe(0);
 
             await kernel.shutdown();
         });
@@ -357,6 +364,54 @@ describe('ObjectKernel', () => {
             await kernelWithFakeTimers.shutdown();
         });
     });
+
+    describe('The shutdown guard is reclaimed on the same terms (#10604)', () => {
+        // The startup site cleared its timer and never unref'd; this one
+        // unref'd and never cleared. Two hand-rolled copies of one race, each
+        // doing the opposite half, and neither settling the promise the race
+        // still held a reaction on — four leaking promises per showcase run.
+        // Both sites now go through `TimeoutGuard`, so this pins the wiring.
+        //
+        // The companion assertion — that reclaiming the guard did not DISARM
+        // it — is 'still logs the timeout and still forces exit(1) when
+        // shutdown genuinely times out (#5274)' below, which hangs teardown
+        // past `shutdownTimeout` and is unchanged by this fix.
+
+        it('leaves no timer armed once shutdown has settled', async () => {
+            vi.useFakeTimers();
+            try {
+                const k = new ObjectKernel({
+                    logger: { level: 'error' },
+                    gracefulShutdown: false,
+                    skipSystemValidation: true,
+                    shutdownTimeout: 60_000,
+                });
+
+                await k.use({
+                    name: 'reclaimed-shutdown-guard',
+                    version: '1.0.0',
+                    init: async () => {},
+                    start: async () => {},
+                    destroy: async () => {},
+                } as PluginMetadata);
+
+                const before = vi.getTimerCount();
+                await k.bootstrap();
+                await k.shutdown();
+
+                // Before the fix this was `before + 1`: `performShutdown()` won
+                // the race and the 60s guard stayed armed, to fire later against
+                // a kernel already 'stopped'. `unref()` hid it from the event
+                // loop but not from here — which is the distinction this
+                // assertion exists to keep.
+                expect(vi.getTimerCount()).toBe(before);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+    });
+
 
     describe('Startup Failure Rollback', () => {
         it('should rollback started plugins on failure', async () => {

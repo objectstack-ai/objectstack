@@ -308,6 +308,103 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '`deps.error(INTERNAL_ERROR_MESSAGE, 500)` — unconditionally, never `errorFromThrown` (#5085). ' +
             'So the string never lands in an ADR-0112 `error.code`.',
     },
+    // ── [#10352] better-auth's OWN vocabulary, now restamped in-repo ───────
+    //
+    // These four became visible to this scan for the same reason the success
+    // body became visible to `check-route-envelope`: #9968 reimplements the
+    // vendor's `/admin/impersonate-user` handler in this repo — in place, on
+    // the `admin` plugin's own `endpoints` record — so ObjectStack's ADR-0068
+    // platform admin can pass it. Codes that were previously RELAYED from
+    // inside `node_modules` are now stamped by a literal this repo builds. The
+    // refusal SET did not change: three of the four are read at runtime off
+    // `plugin.$ERROR_CODES` and the quoted literal beside each is only the
+    // fallback spelling for a vendor bump that drops the key.
+    //
+    // Why they cannot reach an ADR-0112 `error.code`, verified rather than
+    // inherited: they are thrown as better-auth's `APIError` from inside a
+    // better-auth ENDPOINT, and better-auth answers its own failures with a
+    // `Response` instead of throwing. `AuthManager.handleRequest` returns that
+    // `Response` untouched (it only LOGS `status >= 500`) and
+    // `domains/auth.ts` passes it on as `{ handled: true, result: response }`,
+    // so `errorFromThrown` is never reached. The other direction is closed by
+    // that same file: anything the auth service DOES throw is answered
+    // `deps.error(INTERNAL_ERROR_MESSAGE, 500)` with a status-derived code,
+    // unconditionally (#5085). Same route the IMPERSONATION_ROTATION_FAILED
+    // and YOU_ARE_NOT_ALLOWED_TO_DELETE_THIS_MEMBER rows already document.
+    //
+    // ⚠️ `door: 'none'` here records `none of the three ADR-0112 doors`, NOT
+    // `invisible`: each refusal IS served to the client, in the vendor's flat
+    // `{ message, code }` shape. That this endpoint's bodies are the vendor's
+    // wire rather than this repo's envelope is not inferred here — it is the
+    // 2026-08-21 maintainer ruling (#10554), carried in `check-route-envelope`
+    // as the `vendorWire` entry for this same file.
+    //
+    // ⛔ `pending-registration` would be FALSE for all four. That verdict says
+    // the code belongs in #8846's ledger batch, i.e. that ObjectStack owns it.
+    // These are better-auth's constants; registering them would promote a
+    // vendor spelling into the platform vocabulary every consumer branches on
+    // — what the SANDBOX_AUTHORED_LIMB note refuses for `DUPLICATE`, for the
+    // same reason — and a vendor rename would leave the ledger member
+    // outliving its only producer.
+    {
+        code: 'YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS',
+        file: 'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.1's own admin-plugin vocabulary — verified in the installed vendor at " +
+            '`dist/plugins/admin/error-codes`, spelled there exactly as it is here — and read at runtime ' +
+            'off `plugin.$ERROR_CODES`, never retyped. The caller-side refusal, raised ' +
+            "`APIError.from('FORBIDDEN', notAllowed)` inside a better-auth endpoint, so it leaves as the " +
+            "vendor's own `Response` and never as a throw this repo classifies. See the section note " +
+            'above for the measured path and for why registering a vendor constant would be false.',
+    },
+    {
+        code: 'YOU_CANNOT_IMPERSONATE_ADMINS',
+        file: 'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The target-side twin of the row above, from the same better-auth 1.7.1 file ' +
+            "(`dist/plugins/admin/error-codes`), likewise read off `plugin.$ERROR_CODES` and raised " +
+            "`APIError.from('FORBIDDEN', cannotImpersonateAdmins)`. #9968 makes it reachable for the " +
+            "first time — the vendor gated it on the legacy `user.role` scalar nothing writes post " +
+            "ADR-0068 D2, so the vendor's own promise was inert — but reachable in the vendor's wire " +
+            "shape under the vendor's spelling, which changes nothing about whose vocabulary it is.",
+    },
+    {
+        code: 'FAILED_TO_CREATE_USER',
+        file: 'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.1's BASE_ERROR_CODES member, surfaced through the `admin` plugin's " +
+            "`$ERROR_CODES` and raised `APIError.from('INTERNAL_SERVER_ERROR', failedToCreate)` when the " +
+            'impersonation session cannot be minted. Same vendor, same endpoint and same wire as the two ' +
+            'rows above.',
+    },
+    {
+        code: 'USER_NOT_FOUND',
+        file: 'packages/plugins/plugin-auth/src/admin-impersonate-endpoint.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.1's BASE_ERROR_CODES member, raised `APIError.from('NOT_FOUND', " +
+            'USER_NOT_FOUND)`. The one of the four NOT read off `$ERROR_CODES`, for a reason written at ' +
+            'its declaration site: it lives on the ROOT `better-auth` entry, and importing that entry ' +
+            'makes admin-plugin CONSTRUCTION depend on a module several suites in this package ' +
+            "`vi.mock`, where vitest throws on a missing export and `addOptionalPlugin`'s catch then " +
+            'swallows the whole `admin` plugin — measured. So it is restated as a local constant and ' +
+            "`admin-impersonate-endpoint.test.ts` pins it equal to the vendor's own " +
+            '`BASE_ERROR_CODES.USER_NOT_FOUND`. That pin is what keeps the restatement from drifting ' +
+            "into a code this repo owns by accident: it is still the vendor's string on the vendor's " +
+            'wire, and a vendor rename turns the pin red rather than silently minting a local code.',
+    },
+
     {
         code: 'OS_METADATA_CONVERTED',
         file: 'packages/spec/src/conversions/apply.ts',

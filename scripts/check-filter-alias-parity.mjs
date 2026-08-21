@@ -87,6 +87,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -108,7 +110,7 @@ const FILTER_SLOT = 'where';
 class UnreadableShape extends Error {}
 
 function parse(path, text) {
-    return ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+    return parseSourceFile(path, text);
 }
 
 /** Every node in a subtree, depth-first. */
@@ -647,4 +649,7 @@ function main() {
     process.exit(1);
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

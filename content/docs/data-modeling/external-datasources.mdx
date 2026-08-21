@@ -72,6 +72,7 @@ and `external.columnMap`.
 ```typescript
 export const Customer = ObjectSchema.create({
   name: 'ext_customer',
+  sharingModel: 'private',
   datasource: 'warehouse',
   external: {
     remoteName: 'customers',       // remote TABLE name (object name may differ)
@@ -254,6 +255,10 @@ ObjectSchema.create({ /* ... */ external: { remoteName: 'orders', writable: true
 ```
 
 With either gate off, insert/update/delete on the federated object is rejected.
+
+The `/* ... */` above still has to carry a `sharingModel` — a custom (non-`sys_`) object
+that declares no OWD is an **`os validate` error** (`security-owd-unset`), federated or
+not. See the full object above.
 
 <Callout type="warn">
 **This gate is federation-only — it does nothing on a managed datasource.**

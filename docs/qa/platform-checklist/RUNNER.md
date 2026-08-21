@@ -115,11 +115,31 @@ contradicts it, and correct it here when it does.
   section at all.** `runRlsProofs` runs only behind the flag
   (`packages/cli/src/commands/verify.ts`: `rls: Flags.boolean({ default: false })`, the
   proofs sit inside `if (flags.rls)`, and the report prints `if (rls)`). **Check:** the
-  last block of a bare run is the CRUD summary — `── 15 verified, 0 gaps, 0 FAILED, 1
+  last block of a bare run is the CRUD summary — `── 16 verified, 0 gaps, 0 FAILED, 1
   needs-fixture, 7 skipped` on stock showcase — with no `PROVEN`/`HOLES` line anywhere.
-  Adding `--rls` appends the RLS block: `20 PROVEN (20 consistent, 0 HOLES)` over 23
-  objects, plus `9 of 9 declared position(s) probed`. ⛔ Do not cite plain `verify`
-  output as the oracle for an RLS clause — that run never consulted one.
+  Adding `--rls` appends the RLS block. ⛔ Do not cite plain `verify` output as the
+  oracle for an RLS clause — that run never consulted one.
+
+  **The discriminator is the PRESENCE of a `PROVEN`/`HOLES` line, never its digits.**
+  The counts move with the seed set and are recorded here only as the shape to expect:
+  the CRUD tail read `15 verified` through 2026-08-18 and reads `16` on 17.1.0 because
+  the showcase gained one object (`client-brief.object.ts`, added between the two sweep
+  subjects); a run whose digits differ has a different seed, not a regression. Re-derive
+  the number, do not file it.
+
+  ⚠️ **The `--rls` block prints TWO summary lines in DIFFERENT units — do not compare
+  them.** `formatRlsReport` (`packages/verify/src/rls.ts`) emits a per-persona
+  `── <n> PROVEN (<n> consistent, <n> HOLES) · <n> NOT PROVEN (…)` for the probe
+  persona, then — once position personas have run — a total line
+  `══ all personas: … [unit: one object × persona probe]`. The first counts OBJECTS for
+  one persona; the second counts object × persona PAIRS across all of them, and the
+  source stamps that unit into the line precisely so the two are not read as one number
+  moving. Measured on 17.1.0: the total line reads
+  `all personas: 38 PROVEN (38 consistent, 0 HOLES) · 226 NOT PROVEN`, alongside
+  `9 of 9 declared position(s) probed`. An older note here recorded
+  `20 PROVEN … over 23 objects` — that was the per-persona line, so it is **not
+  comparable** to the total rather than merely stale. Name which of the two lines you
+  are quoting whenever you cite either.
 
 - **Playwright needs an explicit `executablePath` on these containers.**
   `@playwright/test` 1.62.1 resolves chromium build **1234**; only **1194** is installed.
@@ -147,13 +167,45 @@ contradicts it, and correct it here when it does.
   and App declares no `id` of its own. `?id=com.example.showcase` (the package id, from
   `objectstack.config.ts`) returns `{"items":[]}` — which reads exactly like "the app
   metadata is gone", the highest-value false P0 shape there is. Real names: `showcase_app`
-  (showcase), `setup` / `studio` / `account` (platform built-ins). ⚠️ **An empty
-  `items` has two distinct causes** — a wrong spelling, or an app that is genuinely not
-  installed. `studio` is defined (`packages/platform-objects/src/apps/studio.app.ts`) but
-  the showcase does **not** install it, so `?id=studio` is legitimately empty there; a
-  stock admin list is `["showcase_app","setup","account"]`. **Check:** fetch
-  `/api/v1/meta/app` with no query first and read the names it actually returns, then
-  filter.
+  (showcase), `setup` / `account` (the platform built-ins a stock boot registers). ⚠️
+  **An empty `items` has two distinct causes** — a wrong spelling, or an app that is
+  genuinely not registered. `studio` is the standing instance of the second cause: the
+  App document is defined (`packages/platform-objects/src/apps/studio.app.ts`) and
+  packaged (`packages/apps/studio`, `com.objectstack.studio`), but **no stock boot loads
+  it, by design** — both boot paths skip it with the identical note, "`@objectstack/studio`
+  is intentionally NOT default-loaded — the console ships a dedicated Studio surface at
+  `/_console/studio/<pkg>/<pillar>`, so Studio no longer needs to exist as a navigable
+  app tile" (`packages/plugins/plugin-dev/src/dev-plugin.ts`, the ADR-0048 app-package
+  loop; `packages/cli/src/commands/serve.ts`, same loop — both register only
+  `@objectstack/setup` and `@objectstack/account`). So `?id=studio` is legitimately empty
+  on every stock boot, not just on the showcase, and a stock admin list is
+  `["showcase_app","setup","account"]`. ⛔ Do not file the absence as a missing built-in,
+  and do not install the package to "restore" it — that changes what the boot ships.
+  **Check:** fetch `/api/v1/meta/app` with no query first and read the names it actually
+  returns, then filter.
+
+- **An isolated boot on a non-3000 port breaks the showcase's self-pinging connectors
+  unless you export `OS_PORT` — `-p` alone is not enough, and the symptom impersonates an
+  egress block.** The showcase's REST/OpenAPI connector instances point at the running
+  server itself, resolved by `resolveShowcaseSelfUrl()`
+  (`examples/app-showcase/src/system/self-url.ts`) in this order: `SHOWCASE_SELF_URL` →
+  `OS_PORT` → `PORT` → the literal `http://127.0.0.1:3000`. Those are **environment**
+  reads. The CLI's `-p` flag is only a *default sourced from* `OS_PORT`
+  (`packages/cli/src/commands/serve.ts`: `port: Flags.string({ char: 'p', … default:
+  readEnvWithDeprecation('OS_PORT','PORT') ?? '3000' })`) and nothing writes the variable
+  back, so the dogfood §0 isolated boot — `objectstack dev … -p <port>` with the env
+  untouched — listens on `<port>` while every declarative connector dials **3000**. Every
+  dispatch then fails `connector_action(showcase_status_api.request) failed: fetch failed`.
+  ⚠️ **That string is not evidence of a sandbox network restriction**, and reading it as
+  one is the expensive mistake: the module's own header records that #7516 burned a run
+  proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
+  the resolution but could not fix a boot that never exports the variable. **Check:**
+  before scoring any connector clause, `GET /api/v1/automation/connectors` and read the
+  instance `baseUrl` — if it says `:3000` and your server does not listen there, the
+  fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
+  `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
+  record a connector clause as `blocked(environment)` on the strength of `fetch failed`
+  alone.
 
 - **`ss` is not installed in these containers — read liveness with `curl`, never a socket
   table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
@@ -250,6 +302,27 @@ contradicts it, and correct it here when it does.
   by name and exits **1**, where it used to exit **0** in silence — the entry point is
   `packages/cli/bin/run.js`.
 
+- **23 items carry an `automated.ref` that lives ENTIRELY in the `objectui` repo — from
+  this checkout they are neither runnable nor pin-evidenced.** Their refs name only
+  objectui paths (`e2e/live/*.spec.ts`, `e2e/import-console/*`, `e2e/import-harness/*`,
+  and unit suites under `packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
+  `plugin-form`, `fields`, `core`, `app-shell`). This repository builds no console bundle
+  and holds none of those specs, so a run here can neither execute the pin nor cite its
+  output. **Every one of those items now says so in its own `fixtures.knownGaps`** — the
+  rediscovery this fact exists to stop (each sweep re-derived it from scratch). ⚠️ The
+  distinction that matters is *exclusive*: items whose `automated.ref` names an
+  objectui spec **alongside** a framework pin (`packages/qa/dogfood/**`,
+  `packages/objectql/**`) are partly runnable here — run the framework half and score the
+  objectui half separately, never one for the other.
+
+  **Two honest options, and the run record must say which it took:** (a) drive the item
+  **by hand** in the browser against a live boot and score it as a manual browser run —
+  the `automated` field does not make it exempt; or (b) run the pin inside an **objectui
+  checkout at the pinned revision** and cite that output, **naming the revision** (the
+  17.1.0 sweep subject was `9a3daf8d37ad`). ⛔ Never record such an item as covered on the
+  strength of the `automated` field alone: an unrun pin is a claim, not evidence — which
+  is the same "ticking on a label" failure clause-grained acceptance exists to prevent.
+
 ### Trap vocabulary (`traps` field)
 
 | trap | what it fakes | counter |
@@ -265,6 +338,14 @@ contradicts it, and correct it here when it does.
 | `wrong-panel` | feature looks missing on a sibling surface | item's `steps` name the exact surface; check it |
 | `wrong-persona` | admin privileges mask a guard | run guard checks as the non-privileged persona |
 | `absence-inference` | a missing flag/key/script read as a missing capability | follow the forwarding chain to where the default is actually decided, before writing the finding down. A scaffold's bare `objectstack dev` still serves the console: `dev` forwards `--ui` only when set and never forwards a negation, and the default is decided one hop downstream by `serve`'s own `ui` flag (`default: true, allowNo: true`) — so absence means ON. ⛔ The off switch `--no-ui` is `serve`'s and `start`'s; `dev` has no such flag and rejects it (environment facts above) |
+| `auth-state-leak` | a per-persona matrix scored against ONE identity — the previous persona's credentials survived the switch, so a gate reads as holding (or as fallen open) for a caller that never made the request | prove the identity server-side before each cell (the session row, or `GET /auth/get-session`), never from the gesture that was supposed to switch it; give each persona its own session. ⚠️ Both halves have to go: the console's `localStorage` bearer token survives a `clearCookies()` gesture and a form sign-in ALSO sets `better-auth.session_token` (environment facts above), so an "anonymous" or "non-admin" cell can silently still be the admin's |
+| `cache-staleness` | a read answered from a cache instead of re-resolved: the row this run just planted or edited reads back unchanged, or one persona's body is replayed for the next | before scoring, confirm the response carries something this run set (the planted spelling, the new `audience`); re-fetch with a client of its own per persona rather than reusing a response. ⚠️ Two independent read doors disagreeing may be one door's cache rather than the drift the item is hunting |
+| `eventual-consistency` | a deferred write read before it settles — an effect that has not landed yet reads as a refusal, and a state the reconciler is about to fill reads as durable | prove the state from its own record (the session row / session payload), never from the symptom you are about to test; prefer the durable producer over the racy one and record which the verdict rests on; re-read after a settle window before writing an absence down |
+| `clock-skew` | a relative window resolved against a different instant than the expectation was computed from — a run that spans a rollover, or a server clock that is not the runner's | record the wall clock BEFORE the first request and derive every expectation from that one instant; reconcile each preset against a literal-window query computed from the same clock, and re-run any window whose boundary the run crossed |
+| `timezone-boundary` | rows near midnight or a period edge landing on the other side of a calendar window, because the window is anchored in a different zone than the runner assumed | record the zone alongside the clock and compute the expected window in the zone the door resolves in; score against the literal-window query, never against an intuition about "today" |
+| `silent-coercion` | a 200 that reads as the contract holding while the input was converted across types — or the predicate dropped entirely, so the request succeeds meaning something other than what was authored | never score on status alone: compare what came back against what was sent, and the returned row count against the UNFILTERED count — a dropped predicate answers over the full table, which is the dangerous direction |
+| `destructive-in-place` | a clean re-run — the first run already rewrote the input it is judged against, so the second observation describes a different tree | run against a scratch copy / a database you own; checksum (or snapshot) the input before and after and cite the pair; check which arm actually writes before replaying — a preview arm is read-only only until `--apply` |
+| `first-boot-cold-start` | a 404 / empty body / white screen from a first boot still doing its one-time work, read as the first-run-only defect the item exists to hunt | read the boot log and wait for the server's own serving line before the first probe: a never-built tree compiles on the way up (`dev` spawns `os compile` when no `dist/objectstack.json` exists) and seeds admin on a zero-user DB, neither of which a warm re-boot repeats. ⛔ Do not write a first-run defect down before re-probing a warm boot |
 
 ## Run records — the GitHub issue is the report
 
