@@ -640,13 +640,14 @@ describe('validateSortableFields — the provenance verdict (#10474)', () => {
   it('reaches the `defineView` aggregate and standalone list-view rungs too', () => {
     const base = { objects: [externalObject] };
     const sort = [{ field: 'created_at', order: 'desc' }];
-    for (const [label, views] of [
+    const rungs: Array<[string, unknown[]]> = [
       ['aggregate list', [{ name: 'v', objectName: 'showcase_ext_customer', list: { sort } }]],
       ['aggregate listViews', [{ name: 'v', objectName: 'showcase_ext_customer', listViews: { a: { sort } } }]],
       ['flattened overlay', [{ name: 'v', object: 'showcase_ext_customer', viewKind: 'list', sort }]],
       ['ViewItem record', [{ name: 'v', object: 'showcase_ext_customer', viewKind: 'list', config: { sort } }]],
-    ] as const) {
-      const findings = validateSortableFields({ ...base, views: views as unknown[] });
+    ];
+    for (const [label, views] of rungs) {
+      const findings = validateSortableFields({ ...base, views });
       expect(findings.map((x) => x.rule), label).toEqual([SORT_FIELD_UNPROVISIONED]);
     }
   });
