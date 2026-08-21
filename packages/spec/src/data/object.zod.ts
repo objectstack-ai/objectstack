@@ -977,8 +977,20 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   //   age with no row read, so rows the filter protects go down with it.
   // - archive: `reapObject` returns into `archiveObject` before the ttl reap
   //   ever runs, so with `archive` declared the filter guards a code path that
-  //   is never executed (declared ≠ enforced) — while the Archiver itself
-  //   copies and hot-deletes by `created_at` age alone.
+  //   is never executed (declared ≠ enforced). Since [#10347] the Archiver does
+  //   apply the declared ttl window itself — it selects candidates by
+  //   `ttl.field` past `ttl.expireAfter` instead of `created_at` past
+  //   `archive.after` — but its candidate read is that cutoff and nothing else
+  //   (`where: { [ttl.field]: { $lt: cutoff } }`, no `onlyWhen` spread the way
+  //   `reap()` spreads it into its scope), so every due row is copied and
+  //   hot-deleted whether or not the filter names it. That is the whole of what
+  //   [#10347] changed here: the WINDOW an author declares now carries over to
+  //   the Archiver, the FILTER still does not — so the refusal stands, on a
+  //   narrower reason than the "moves rows by age alone" this bullet used to
+  //   give. Whether `onlyWhen` should become meaningful under `archive` (the
+  //   Archiver would have to spread it into the `find` above) is a separate,
+  //   un-taken decision — it widens the accept-set and is not this text's to
+  //   make.
   if (lc.ttl?.onlyWhen && lc.storage?.strategy === 'rotation') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -988,7 +1000,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   if (lc.ttl?.onlyWhen && lc.archive) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs) and the Archiver moves rows by age alone',
+      message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs), and while the Archiver does move rows by the declared ttl cutoff it selects them by that cutoff alone and would archive rows the filter protects',
     });
   }
 }));
