@@ -437,7 +437,6 @@ export function importUnsafeStatements(source) {
 const KNOWN_IMPORT_UNSAFE = new Set([
   'scripts/check-changeset-no-major.mjs',
   'scripts/check-empty-changeset.mjs',
-  'scripts/check-engine-split-ratio.mjs',
   'scripts/check-error-status-conformance.mjs',
   'scripts/check-filter-alias-parity.mjs',
   'scripts/check-org-identifier.mjs',
