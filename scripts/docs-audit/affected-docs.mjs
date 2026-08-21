@@ -1477,6 +1477,15 @@ function declinedIn(s) {
  * all seven ledgers. `outsideCode` is what keeps the fix from trading a phantom row for a
  * new silence — it NAMES every lead the mask dropped, and carries no verdict.
  *
+ * …AND THROUGH BOTH OF #10500'S DISCRIMINATORS, NOT ONE (#10793). `codeOnly` was only half
+ * of the answer: type declarations are CODE, so a literal-union `route: 'GET /a' | 'GET /b'`
+ * TYPE member still minted a row — the identical silent shape arriving through the other
+ * discriminator, with `rows` and `routesDeclared` moving together again so no verdict fired.
+ * The recognizer and the first term of its denominator now skip `typeDeclRegions` the way
+ * `declarationsIn` has since #10500, so the two scans answer "is this in code position?" the
+ * same way instead of drifting while both look right. Delta 0 on all seven ledgers again:
+ * none of them declares a quoted `route:` inside a type declaration.
+ *
  * @returns {{rows: Array<{route: string, client: string|null}>, declined: Array<{key: string, line: number, text: string}>, routesDeclared: number, clientsDeclared: number, outsideCode: Array<{key: string, line: number, text: string}>}}
  */
 function parseLedgerSource(text) {
@@ -1509,13 +1518,39 @@ function parseLedgerSource(text) {
   // one tree where the move is provably free: no ledger quotes a `route:` in prose today,
   // and `rows`, `routesDeclared`, `clientsDeclared` and the 176 UNREACHABLE rows are
   // byte-identical across the change (all seven ledgers, delta 0).
-  // ⛔ ONE of #10500's two discriminators, not both. `typeDeclRegions` is still NOT applied
-  // here, so a literal-union `route: 'GET /a' | 'GET /b'` TYPE member is still read as a row
-  // — the same silent shape, through the other discriminator. Measured on this tree: 0 such
-  // members across all seven ledgers (every one declares `route: string;`). Applying it is a
-  // SECOND population move and wants its own before/after, which is why it is #10793 and not
-  // a rider here.
+  // BOTH OF #10500'S DISCRIMINATORS NOW, NOT ONE (#10793). `codeOnly` blanks comments and
+  // string CONTENTS; it does not blank TYPE DECLARATIONS, and has no reason to — they are
+  // code. So a literal-union `route: 'GET /a' | 'GET /b'` TYPE member was still read as a
+  // ROW: the identical silent shape the paragraph above describes, arriving through the
+  // other discriminator. It stayed silent for the same two reasons — `rows` and
+  // `routesDeclared` moved together, so the partial-read guard saw no gap, and `outsideCode`
+  // could not see it either, because the lead genuinely IS in code position. Measured on the
+  // tree this landed on, one file declaring ONE row:
+  //
+  //     export interface Entry { route: 'GET /api/v1/gone' | 'GET /api/v1/meta'; client: string }
+  //     export const L = [
+  //       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+  //     ];
+  //   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0
+  //
+  // ⛔ A SKIPPED TYPE MEMBER IS SILENT ON PURPOSE, and that is NOT the silence `outsideCode`
+  // exists to break. A prose-quoted lead is a would-be row sitting where the mask says code
+  // is not, so naming it tells the reader something they can act on. A type member is a
+  // correct declaration of a TYPE: the `route: string;` member all seven entry interfaces
+  // declare produces nothing today under the same rule, `declarationsIn` has excluded the
+  // literal-union spelling since #10500, and `--self-test` pins BOTH directions — deleting
+  // the interface changes no count at all. This makes the recognizer agree with the position
+  // the rest of the file already held rather than inventing a second one.
+  //
+  // The population move was priced on the tree where it is provably free: 0 quoted `route:`
+  // or `client:` leads inside a type declaration across all seven ledgers, and
+  // `259 of 259` / `221 of 221` / 176 UNREACHABLE are byte-identical across the change.
   const code = codeOnly(text);
+  // The SECOND discriminator, taken over the already-blanked source — the same call
+  // `declarationsIn` makes, reusing the same region list rather than growing a second idea
+  // of what a type member is.
+  const typeDecls = typeDeclRegions(code);
+  const inTypeDecl = (i) => typeDecls.some(([a, b]) => i >= a && i <= b);
   // The value as WRITTEN. `codeOnly` blanks string CONTENTS, so a capture group taken off
   // `code` is a run of spaces of the right length and never the route. Blanking preserves
   // LENGTH, so cutting the raw text by the masked match's offsets is exact for any content
@@ -1525,6 +1560,9 @@ function parseLedgerSource(text) {
   const routeRe = /route\s*:\s*'([^']+)'/g;
   let m;
   while ((m = routeRe.exec(code)) !== null) {
+    // …and never a TYPE member (#10793). A literal-union member opens with the very quote
+    // this regex reads, which is exactly why `typeDeclRegions` and not a spelling test.
+    if (inTypeDecl(m.index)) continue;
     const rest = code.slice(m.index, routeRe.lastIndex + 1200);
     const nextRoute = rest.slice(1).search(/route\s*:\s*'/);
     const window = nextRoute === -1 ? rest : rest.slice(0, nextRoute + 1);
@@ -1590,7 +1628,13 @@ function parseLedgerSource(text) {
   // denominator that counted prose-quoted leads while the numerator no longer read them
   // would turn this migration into a permanently red ratio on the very files it fixed.
   // Both terms move together, which is the invariant the block above insists on.
-  const routesDeclared = [...code.matchAll(/route\s*:\s*'/g)].length + declined.filter((d) => d.key === 'route').length;
+  //
+  // …and it skips TYPE MEMBERS on the same list the loop above does (#10793). Both terms
+  // move together or the partition `rows + declined === routesDeclared` breaks: a member
+  // counted here but skipped there would read as a row this parse declined to read, and
+  // fire a PARTIAL-read verdict on an accurate ledger.
+  const routesDeclared = [...code.matchAll(/route\s*:\s*'/g)].filter((d) => !inTypeDecl(d.index)).length
+    + declined.filter((d) => d.key === 'route').length;
   const clientsDeclared = rows.filter((r) => r.client).length + declined.filter((d) => d.key === 'client').length;
   declined.sort((a, b) => a.line - b.line || a.key.localeCompare(b.key));
   // THE REPORTING HALF (#10683). The mask closes the phantom-row hole by making a
@@ -2277,6 +2321,103 @@ function selfTest() {
   ].join('\n'));
   check('parseLedgerSource', 'a `route:` inside a string PAYLOAD is not a row', 'row count', 1, payload.rows.length);
   check('parseLedgerSource', 'and it is named, not silently dropped', 'outsideCode', 1, payload.outsideCode.length);
+
+  // ---- A LITERAL-UNION `route:` TYPE MEMBER IS NOT A ROW (#10793) ---------------
+  // The OTHER half of "is this in code position", and the half `codeOnly` cannot answer:
+  // type declarations ARE code, so a member spelled `route: 'GET /a' | 'GET /b'` opens with
+  // the very quote the recognizer reads and used to become a ROW. Silent in the same two
+  // ways as the comment case above — `rows` and `routesDeclared` moved together so the
+  // partial-read guard saw no gap, and `outsideCode` saw nothing either because the lead
+  // really IS in code position. `orphanSource` above pins this exact spelling on the
+  // `client:` key, written there because a literal-union member opens with that quote; this
+  // is the `route:` twin, which had nothing at all keeping it out of the row loop.
+  //
+  // ⚠️ PINNED IN BOTH DIRECTIONS, like the mask cases: a fix that reached the type member by
+  // swallowing the table AFTER it — a brace match that ran away — would pass a test asserting
+  // only that the phantom is gone, while silently dropping all 259 live rows.
+  const typeUnionSource = [
+    "export interface Entry { route: 'GET /api/v1/gone' | 'GET /api/v1/meta'; client: string }",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n');
+  const typeUnion = parseLedgerSource(typeUnionSource);
+  check('parseLedgerSource', 'a literal-union `route:` TYPE member is not a row', 'row count',
+    1, typeUnion.rows.length);
+  check('parseLedgerSource', 'and the row in CODE still is — carrying its VALUE, not the member\'s', 'row',
+    'GET /api/v1/meta → meta.getTypes', `${typeUnion.rows[0]?.route} → ${typeUnion.rows[0]?.client}`);
+  check('parseLedgerSource', 'the denominator drops it too, so no phantom gap opens', 'declared',
+    '1 route / 1 client', `${typeUnion.routesDeclared} route / ${typeUnion.clientsDeclared} client`);
+  check('parseLedgerSource', 'and nothing is billed as declined for it', 'declined',
+    0, typeUnion.declined.length);
+  // THE REJECT SIDE, ASSERTED POSITIVELY — `orphanSource`'s discipline on the other key. A
+  // type member must reach NO report: not `declined` (it is not an unread row) and not
+  // `outsideCode` (it is not prose). "Produces nothing" is correct here and only here,
+  // because it is a declaration of a TYPE and never a table row.
+  check('parseLedgerSource', 'a type member reaches no report at all — it is not an unread row', 'line 1 entries',
+    false, typeUnion.declined.some((d) => d.line === 1) || typeUnion.outsideCode.some((d) => d.line === 1));
+  const typeUnionNoInterface = parseLedgerSource(typeUnionSource.split('\n').slice(1).join('\n'));
+  check('parseLedgerSource', 'and deleting the interface changes NOTHING — it contributed no count',
+    'declared', '1 row / 1 route / 1 client / 0 declined',
+    `${typeUnionNoInterface.rows.length} row / ${typeUnionNoInterface.routesDeclared} route / ${typeUnionNoInterface.clientsDeclared} client / ${typeUnionNoInterface.declined.length} declined`);
+
+  // The expensive shape, as on the comment side: a member that unions a `client:` too used to
+  // mint a FULLY CLIENT-BOUND phantom, which then joined the UNREACHABLE population — no
+  // registrar tail can match a route nobody mounts — and inflated the 176 with no verdict.
+  const typeUnionClient = parseLedgerSource([
+    "export interface Entry { route: 'GET /api/v1/gone'; client: 'meta.getGone' }",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a member unioning a `client:` too mints no client-bound phantom', 'client rows',
+    1, typeUnionClient.rows.filter((r) => r.client).length);
+  check('parseLedgerSource', 'and the surviving row keeps its OWN binding, never the member\'s', 'client',
+    'meta.getTypes', typeUnionClient.rows[0]?.client);
+
+  // `type X = { … }` is the other spelling `typeDeclRegions` recognises, and the recognizer
+  // reads the same region list rather than a second idea of what a type member is.
+  const typeAlias = parseLedgerSource([
+    "export type Entry = { route: 'GET /api/v1/gone' | 'GET /api/v1/meta'; client: string };",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `type X = { … }` member is skipped on the same list', 'row count',
+    1, typeAlias.rows.length);
+  check('parseLedgerSource', 'and its row still reads', 'row', 'GET /api/v1/meta → meta.getTypes',
+    `${typeAlias.rows[0]?.route} → ${typeAlias.rows[0]?.client}`);
+
+  // THE RUNAWAY-BRACE DIRECTION, from the other side: the region ends where the declaration's
+  // brace does, so a table BEFORE a type declaration is read whole and the member after it is
+  // still skipped. The failure this pins is a skip that starts at the member and never ends.
+  const typeUnionTrailing = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    "  { route: 'GET /api/v1/docs', family: 'metadata', disposition: 'server-only' },",
+    '];',
+    "export interface Entry { route: 'GET /api/v1/gone' | 'GET /api/v1/meta'; client: string }",
+  ].join('\n'));
+  check('parseLedgerSource', 'a table BEFORE a type declaration is read whole', 'row count',
+    2, typeUnionTrailing.rows.length);
+  check('parseLedgerSource', 'with both values and the one binding intact', 'rows',
+    'GET /api/v1/meta → meta.getTypes | GET /api/v1/docs → null',
+    typeUnionTrailing.rows.map((r) => `${r.route} → ${r.client}`).join(' | '));
+  check('parseLedgerSource', 'and the trailing member still contributes no count', 'declared',
+    '2 route / 1 client / 0 declined',
+    `${typeUnionTrailing.routesDeclared} route / ${typeUnionTrailing.clientsDeclared} client / ${typeUnionTrailing.declined.length} declined`);
+
+  // The verdict a reader actually sees carries none of it — a ledger whose entry interface
+  // spells its `route:` as a union is an ACCURATE ledger, and reddening CI over it would be
+  // the same false red the type-member exclusion exists to prevent.
+  const typeUnionCov = bridgeCoverageFrom([{ file: 'i-route-ledger.ts', ...typeUnion }], ['/api/v1/meta']);
+  check('bridgeCoverageFrom', 'a type-member lead carries NO broken-scan verdict', 'brokenScan',
+    0, typeUnionCov.brokenScan.length);
+  check('bridgeCoverageFrom', 'and the ratios it must not move are whole', 'read',
+    '1 of 1 route / 1 of 1 client',
+    `${typeUnionCov.rowsParsed} of ${typeUnionCov.routesDeclared} route / ${typeUnionCov.clientRows} of ${typeUnionCov.clientsDeclared} client`);
+  check('bridgeCoverageFrom', 'and it is not billed as a prose lead either', 'leadsOutsideCode',
+    0, typeUnionCov.leadsOutsideCode);
 
   // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
   // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
