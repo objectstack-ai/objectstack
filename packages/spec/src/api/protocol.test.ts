@@ -1058,6 +1058,7 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
   /** A verbatim-shaped capture of a real `publishPackageDrafts` return (happy path). */
   const realResponse = {
     success: true,
+    outcome: 'published',
     publishedCount: 2,
     failedCount: 0,
     published: [
@@ -1074,8 +1075,8 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
     expect(parsed).toEqual(realResponse);
   });
 
-  it('requires the five always-emitted keys — every producer return site sets them', () => {
-    for (const missing of ['success', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
+  it('requires the six always-emitted keys — every producer return site sets them', () => {
+    for (const missing of ['success', 'outcome', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
       const body: Record<string, unknown> = { ...realResponse };
       delete body[missing];
       expect(
@@ -1103,6 +1104,7 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
   it('failed[] carries the refusal shape, code optional — BATCH_ABORTED marks non-causal items', () => {
     const rolledBack = {
       success: false,
+      outcome: 'refused',
       publishedCount: 0,
       failedCount: 2,
       published: [],
@@ -1201,6 +1203,9 @@ describe('PublishPackageDraftsResponseSchema (#9406 — declares the batch publi
   it('leaves every conditional key optional — absent means "did not apply", never "failed"', () => {
     const minimal = {
       success: false,
+      // The exact no-op shape (#10462) — the response class where every
+      // conditional key is naturally absent.
+      outcome: 'nothing_to_publish',
       publishedCount: 0,
       failedCount: 0,
       published: [],

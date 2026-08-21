@@ -15070,6 +15070,20 @@ export class ObjectStackProtocolImplementation implements
         aiModel?: string;
     }): Promise<{
         success: boolean;
+        /**
+         * [#10462] First-class discriminant for WHICH exit answered — the fact
+         * `success` alone cannot carry: a publish with nothing to promote and
+         * a genuine refusal both answer `success: false` (cloud#1488 graded
+         * the former as a rollback and burned two repair rounds on artifacts
+         * that were already correct). Producer invariants, pinned in the
+         * conformance suites: `outcome === 'refused'` if and only if
+         * `failed.length > 0`; `outcome === 'nothing_to_publish'` if and only
+         * if `published.length === 0 && failed.length === 0`; and
+         * `success === (outcome === 'published')` — `success` keeps its exact
+         * pre-#10462 value and is now derivable. Values are lowercase snake,
+         * matching the `sys_metadata_audit` outcome vocabulary.
+         */
+        outcome: 'published' | 'refused' | 'nothing_to_publish';
         publishedCount: number;
         failedCount: number;
         published: Array<{
@@ -15363,6 +15377,10 @@ export class ObjectStackProtocolImplementation implements
             }
             return {
                 success: false,
+                // [#10462] Guarded by `preflightViolations.length > 0`, so
+                // `failed[]` is non-empty by construction — this exit is
+                // always a refusal.
+                outcome: 'refused',
                 publishedCount: 0,
                 failedCount: preflightViolations.length,
                 published: [],
@@ -15767,6 +15785,16 @@ export class ObjectStackProtocolImplementation implements
                     });
             return {
                 success: false,
+                // [#10462] `failedOut` mirrors `ordered` one-to-one, so it is
+                // empty ONLY when the batch had zero drafts — a failure in the
+                // transaction machinery itself over nothing pending. Deriving
+                // the outcome (rather than hard-coding 'refused') keeps the
+                // producer invariant `outcome === 'refused' iff
+                // failed.length > 0` true on every return site; on that edge
+                // "nothing to publish" stays the truthful answer (nothing was
+                // pending, nothing was refused) and the `console.warn` above
+                // remains the record of the machinery failure.
+                outcome: failedOut.length > 0 ? 'refused' : 'nothing_to_publish',
                 publishedCount: 0,
                 failedCount: failedOut.length,
                 published: [],
@@ -15918,8 +15946,32 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0067 D2 — the commit record was written INSIDE the Phase-1
         // transaction above, together with the promotions it describes.
 
+        // [#10462] The no-op exit — a publish with nothing to promote — used
+        // to be the ONLY exit that left no trace at all: no audit row (right:
+        // `sys_metadata_audit` rows are keyed on `(type, name)`, and a batch
+        // with zero items has no honest identity to mint — the limiting case
+        // of the rule both refusal sites already follow) and no log line
+        // (wrong: an operator who reads `success: false` as a refusal goes
+        // looking for a rollback that never happened). `info`, not `warn`:
+        // nothing was claimed persisted and nothing was lost, so this is
+        // neither a durability nor a functional degradation.
+        if (published.length === 0 && failed.length === 0) {
+            console.info(
+                `[Protocol] publishPackageDrafts: nothing to publish for package `
+                + `'${request.packageId}' — no pending drafts were found, and nothing was refused.`,
+            );
+        }
+
         return {
             success: failed.length === 0 && published.length > 0,
+            // [#10462] Derived, never stored: 'refused' the moment anything is
+            // in `failed[]` (defensive — every failure on this route unwinds
+            // through the Phase-1 catch above today), else 'published' iff
+            // something landed, else the no-op. Exactly the three-way fact
+            // `success` compresses into one boolean.
+            outcome: failed.length > 0
+                ? 'refused'
+                : published.length > 0 ? 'published' : 'nothing_to_publish',
             publishedCount: published.length,
             failedCount: failed.length,
             published,

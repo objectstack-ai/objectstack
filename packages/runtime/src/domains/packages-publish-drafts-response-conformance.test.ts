@@ -66,7 +66,9 @@ function makeDoor(opts: {
     apps?: Array<Record<string, unknown>>;
 } = {}) {
     const result = opts.result ?? {
-        success: true, publishedCount: 1, failedCount: 0,
+        // `outcome` (#10462) is REQUIRED on every producer return — a double
+        // without it is a drifted seam, not a minimal one.
+        success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
         published: [{ type: 'flow', name: 'nightly_rollup', version: 'sha256:aa11' }], failed: [],
         probes: { issues: [], checked: { seeds: 0, views: 0, widgets: 0 } },
         commitId: 'cmt_01',
@@ -136,6 +138,10 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         expect(strippedKeys(data)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(data);
         expect(parsed.success).toBe(true);
+        // #10462 — the discriminant crosses the route untouched: the door
+        // mutates the object (seed back-fill, ADR-0045 receipts) but never
+        // this key, and the declared parse does not strip it.
+        expect(parsed.outcome).toBe('published');
         expect(parsed.published[0]!.version).toBe('sha256:aa11');
         // The route-attached ADR-0045 receipt is ON the wire and declared.
         expect(parsed.unhiddenApps).toEqual(['crm', 'ops']);
@@ -168,7 +174,7 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         spyLogs();
         const { data } = await publishDrafts({
             result: {
-                success: true, publishedCount: 1, failedCount: 0,
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
                 published: [{ type: 'seed', name: 'demo_rows', version: 'sha256:bb22' }], failed: [],
                 // NO seedApplied: a custom protocol that does not self-apply.
                 // The door back-fills it via `applyPublishedSeeds`, which — the
