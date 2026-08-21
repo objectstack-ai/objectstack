@@ -26,6 +26,7 @@
 //     the very defect this key closes.
 
 import { describe, it, expect } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 // The #10413 measurement's dataset shape: opportunities with a stage and an
@@ -100,20 +101,23 @@ async function makeEngine(driver: any) {
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject({
+  // Receiver-cast rather than argument-cast: `registerObject`'s later
+  // parameters are irrelevant to these tests, and the argument-cast spelling
+  // still bills the package's TEST_DEBT ratchet a TS2554 arity error.
+  (engine.registry as any).registerObject({
     name: 'crm_opportunity',
     fields: {
       stage: { type: 'text' },
       amount: { type: 'number' },
       region: { type: 'text' },
     },
-  } as any);
+  });
   return engine;
 }
 
 // The #10413 reproduction's three measures, lowered to the contract this card
 // widens: per-aggregation `filter` on the two "won" measures.
-const REPRO_AGGREGATIONS = [
+const REPRO_AGGREGATIONS: NonNullable<EngineAggregateOptions['aggregations']> = [
   { function: 'count', alias: 'opp_count' },
   { function: 'count', alias: 'won_count', filter: { stage: 'closed_won' } },
   { function: 'sum', field: 'amount', alias: 'won_amount', filter: { stage: 'closed_won' } },
@@ -125,7 +129,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
 
     const rows = await engine.aggregate('crm_opportunity', {
       aggregations: REPRO_AGGREGATIONS,
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     // Pre-#10576 (the measured defect): won_count === opp_count === 6 and
     // won_amount summed every row (1970). Honoured, the numbers move.
@@ -138,7 +142,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
 
     const rows = await engine.aggregate('crm_opportunity', {
       aggregations: REPRO_AGGREGATIONS,
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     // The driver's own aggregate() drops the filter (as every real driver
     // did), so the ONLY way these numbers are right is that the engine never
@@ -157,7 +161,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
         { function: 'count', alias: 'opp_count' },
         { function: 'sum', field: 'amount', alias: 'total_amount' },
       ],
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     expect(nativeCalls()).toBe(1); // pushdown exactly as before the widening
     expect(rows).toEqual([{ opp_count: 6, total_amount: 1970 }]);
@@ -169,7 +173,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
 
     const rows = await engine.aggregate('crm_opportunity', {
       aggregations: [{ function: 'count', alias: 'opp_count', filter: {} }],
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     expect(nativeCalls()).toBe(1);
     expect(rows).toEqual([{ opp_count: 6 }]);
@@ -184,7 +188,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
         { function: 'count', alias: 'opp_count' },
         { function: 'sum', field: 'amount', alias: 'won_amount', filter: { stage: 'closed_won' } },
       ],
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     const byRegion = Object.fromEntries(rows.map((r: any) => [r.region, r]));
     expect(byRegion.east).toEqual({ region: 'east', opp_count: 3, won_amount: 500 });
@@ -203,7 +207,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
         { function: 'avg', field: 'amount', alias: 'mean', filter: { stage: 'no_such_stage' } },
         { function: 'max', field: 'amount', alias: 'top', filter: { stage: 'no_such_stage' } },
       ],
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     // `emptyGroupValueFor` (spec data/aggregation-policy.ts): counting or
     // summing no rows is a measured 0; averaging/maximising them has no answer.
@@ -224,7 +228,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
         alias: 'big_closed',
         filter: { $and: [{ stage: { $in: ['closed_won', 'closed_lost'] } }, { amount: { $gte: 50 } }] },
       }],
-    } as any);
+    } satisfies EngineAggregateOptions);
 
     // closed_won 500, closed_won 200, closed_lost 50 — the 20 is excluded.
     expect(rows).toEqual([{ big_closed: 3 }]);
@@ -240,7 +244,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
           { function: 'count', alias: 'opp_count' },
           { function: 'count', alias: 'bad', filter: { amount: { $median: 3 } } },
         ],
-      } as any);
+      } as unknown as EngineAggregateOptions);
     } catch (e) {
       thrown = e as Error & { code?: string; status?: number };
     }
@@ -261,7 +265,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
     try {
       await engine.aggregate('crm_opportunity', {
         aggregations: [{ function: 'count', alias: 'bad', filter: { stage: { $regex: 'won' } } }],
-      } as any);
+      } as unknown as EngineAggregateOptions);
     } catch (e) {
       thrown = e as Error & { code?: string; status?: number };
     }
@@ -279,7 +283,7 @@ describe('engine.aggregate — per-aggregation filter (#10576, the #10413 contra
     try {
       await engine.aggregate('crm_opportunity', {
         aggregations: [{ function: 'count', alias: 'bad', filter: { stage: { $in: 'closed_won' } } }],
-      } as any);
+      } as unknown as EngineAggregateOptions);
     } catch (e) {
       thrown = e as Error & { code?: string; status?: number };
     }
