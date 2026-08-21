@@ -604,19 +604,30 @@ export function selfTest() {
   t('a package that PACKS scripts/ makes its tooling row shipped again',
     tierOf('packages/spec/scripts/build-api-surface.ts', false, packing) === 'shipped',
     tierOf('packages/spec/scripts/build-api-surface.ts', false, packing));
+  // The manifest is offered at the PACKAGE dir ONLY. A lambda that answers for
+  // every directory makes `<pkg>/scripts` a package in its own right, so the row
+  // never reaches the scripts/ test at all and the case goes green without
+  // exercising it — which is exactly how the three below first passed while
+  // `packsScripts` was ablated to a constant `false`.
+  const at = (dir, manifest) => (d) => (d === dir ? manifest : null);
+  const glob = at('packages/x', { files: ['**/*'] });
   t('a glob that packs everything counts as packing scripts/ too',
-    tierOf('packages/x/scripts/t.mjs', false, () => ({ files: ['**/*'] })) === 'shipped');
+    tierOf('packages/x/scripts/t.mjs', false, glob) === 'shipped',
+    tierOf('packages/x/scripts/t.mjs', false, glob));
+  const noFiles = at('packages/x', { name: '@f/x' });
   t('no files field at all is shipped — npm packs the whole directory',
-    tierOf('packages/x/scripts/t.mjs', false, () => ({})) === 'shipped');
+    tierOf('packages/x/scripts/t.mjs', false, noFiles) === 'shipped',
+    tierOf('packages/x/scripts/t.mjs', false, noFiles));
   t('no owning package.json anywhere is shipped — the cautious tier',
     tierOf('some/loose/file.ts', false, () => null) === 'shipped');
   t('the NEAREST package.json owns the row, not an ancestor that packs differently',
     tierOf('packages/spec/inner/scripts/t.ts', false,
       (d) => (d === 'packages/spec/inner' ? { files: ['dist'] }
         : d === 'packages/spec' ? { files: ['scripts'] } : null)) === 'tooling');
+  const segment = at('packages/x', { files: ['dist'] });
   t('a path merely CONTAINING scripts in a segment name is not tooling',
-    tierOf('packages/x/src/scripts-util.ts', false, () => ({ files: ['dist'] })) === 'shipped',
-    tierOf('packages/x/src/scripts-util.ts', false, () => ({ files: ['dist'] })));
+    tierOf('packages/x/scripts-util/t.ts', false, segment) === 'shipped',
+    tierOf('packages/x/scripts-util/t.ts', false, segment));
 
   // -- the printed block must not put a row under a sentence that is false of
   //    it. Every tier the census can produce needs somewhere to be printed. --
