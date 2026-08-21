@@ -194,7 +194,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
     // the engine has no join, and a silent mis-bucket is worse than a loud
     // error. `null` ⇒ the query is base-only and takes the direct path below.
-    const plan = this.planCrossObject(cube, query, filter);
+    //
+    // [#10759] Judged on {@link filterMemberView} — EVERY member the `where`
+    // touches — and NOT on the engine filter built above. The engine filter is
+    // the wrong instrument for this question: an AND-ed leaf lands at its top
+    // level and is seen, but anything structural (an `$or`, a `$not`, a nested
+    // `$and` that cannot merge) is folded into `filter.$and`, so the only key
+    // `planCrossObject` could see for it was the literal `$and` — never a
+    // cross-object field name. A cross-object reference inside a combinator was
+    // therefore invisible HERE while `generateSql()` — which has always asked
+    // the flattened question — refused it, and the two doors answered
+    // differently for one query. `/analytics/query` reached `engine.aggregate`
+    // with a predicate the engine cannot join and silently mis-bucketed it,
+    // which is the exact outcome #3654's loud refusal exists to prevent.
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query));
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
@@ -341,11 +354,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // serves it via FK-expand.
     // EVERY member the filter touches, including ones nested in an `$or` —
     // the envelope check rejects cross-object filters, so a member it cannot
-    // see is a filter it cannot reject.
-    const plan = this.planCrossObject(cube, query, Object.fromEntries(
-      collectFilterLeaves(normalizeAnalyticsFilterTree(query))
-        .map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
-    ));
+    // see is a filter it cannot reject. [#10759] The same
+    // {@link filterMemberView} `execute()` is judged on, as one expression
+    // rather than two copies: "the preview accepts/rejects the same set" is an
+    // invariant between two call sites, and two copies of a view can drift
+    // apart while each stays individually correct — which is how they drifted.
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query));
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
     const dimExpr = (dim: string): string => {
@@ -533,6 +547,41 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * The member view {@link planCrossObject} judges a filter by: EVERY member
+   * the query's `where` touches, structure discarded, keyed by RESOLVED field
+   * name (#10759).
+   *
+   * Both call sites — `execute()` and `generateSql()` — are handed this and
+   * nothing else, which is what makes the invariant `planCrossObject` states
+   * for itself ("the preview accepts/rejects the same set") structural rather
+   * than a coincidence maintained by hand. They used to build the view
+   * separately: the echo flattened the tree, `execute()` passed the ENGINE
+   * FILTER, and a filter record answers a different question — it is a
+   * predicate to evaluate, not an inventory of members. An `$or`, a `$not` or
+   * an unmergeable nested `$and` travels in it as one opaque `$and` entry, so
+   * the members inside were unreadable from the outside and the envelope check
+   * could not reject what it could not see.
+   *
+   * `true` is a placeholder operand and never reaches a driver: `planCrossObject`
+   * reads `Object.keys` only. Structure is discarded on purpose — a member is
+   * cross-object or it is not, and which branch of a disjunction it sits in
+   * cannot make `engine.aggregate` able to join it.
+   *
+   * Time-dimension WINDOWS are deliberately absent (they live in
+   * `dateRangeBounds`, not in `where`). They need no arm here: a cross-object
+   * time dimension is refused by `planCrossObject`'s own first loop, over
+   * `query.timeDimensions`, and refused as the time dimension the author wrote
+   * rather than as the lowered predicate it becomes — which is the better
+   * diagnostic and the reason that loop runs first.
+   */
+  private filterMemberView(cube: Cube, query: AnalyticsQuery): Record<string, unknown> {
+    return Object.fromEntries(
+      collectFilterLeaves(normalizeAnalyticsFilterTree(query))
+        .map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
+    );
+  }
+
+  /**
    * Plan how to serve cross-object references on this join-less path (#3654).
    *
    * `engine.aggregate()` cannot join. A cross-object DIMENSION within a
@@ -545,7 +594,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * (needs a real join to evaluate), a MULTI-HOP dimension (`a.b.c`), or a
    * non-recombinable measure (`avg`/`count_distinct`, whose sub-bucket values
    * cannot be merged). A loud error beats the silent mis-bucket #3654 kills.
-   * `generateSql()` calls this too, so the preview accepts/rejects the same set.
+   * `generateSql()` calls this too, so the preview accepts/rejects the same set
+   * — and since #10759 both callers derive `filter` from the one
+   * {@link filterMemberView}, so that sentence is enforced by construction
+   * instead of restated at two call sites.
    *
    * [#5716] All four refusals below are `invalidMemberError` — `INVALID_FIELD` /
    * 400, naming the member — and the MESSAGES are unchanged (they are good
