@@ -269,6 +269,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * The scanned set as a 256-entry lookup: every ASCII control character except
@@ -1155,7 +1156,12 @@ function selfTest() {
   console.log(`✓ check-nul-bytes --self-test: ${checked} assertions over a temp git repo (real scan() path)`);
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   selfTest();
 } else if (process.argv.includes('--list')) {
   const result = scan(repoRoot());

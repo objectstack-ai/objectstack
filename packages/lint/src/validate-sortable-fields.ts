@@ -91,6 +91,13 @@
  *     without this rung the dispatch widening (#9313's other half) would be
  *     a silent no-op that reads as coverage. See the self rung note at the
  *     walk below for how the shape is recognised.
+ *   - `views[].config.sort` on a standalone ViewItem RECORD (#10001) — the
+ *     wire union's OTHER standalone member (`ViewItemWireSchema`,
+ *     `{ name, object, viewKind: 'list', config }`), through the same door:
+ *     objectui's `updateView` round-trips the whole record on every
+ *     pin/reorder toggle, `config` included. Judged against
+ *     `listViewObject(config) ?? entry.object`; the record rung note at the
+ *     walk below carries the recogniser.
  *
  * NOT walked, each verified against the schema rather than assumed:
  *
@@ -127,22 +134,94 @@
  * #4463 P2 gap this module's first landing recorded — and is walked since
  * #9313 (the self rung above). Its sibling shape, a standalone ViewItem
  * RECORD (`{ name, object, viewKind, config }` — `config.sort` one level
- * down), is NOT walked here: #9313's scope is the flattened overlay, and the
- * record shape is recorded as its own follow-up rather than silently ridden
- * along.
+ * down), was #9313's recorded follow-up scope and is walked since #10001
+ * (the record rung above).
  *
  * ── Skips, matching the search axis one for one (ADR-0072 D1) ────────────
  *
  *   1. An object this stack does not define — it may come from another package,
  *      and a field map we cannot see cannot be judged.
- *   2. An object that declares no field map at all — external objects and
- *      datasource-introspected schemas whose columns resolve at runtime.
+ *   2. An object that declares no field map at all — a datasource-introspected
+ *      schema whose columns resolve at runtime.
+ *
+ *      ⚠️ This skip is NOT an `external` test, and the sentence that used to
+ *      say so was measured wrong (#10474). `declaredFieldTarget`
+ *      (`validate-searchable-fields.ts`) returns `null` on exactly one
+ *      condition — `fields` missing, unreadable, or naming nothing — and
+ *      nothing in it looks at `external`. An ADR-0015 `external` object that
+ *      DOES declare a mapped field map is the shipped shape (`examples/
+ *      app-showcase`'s `showcase_ext_customer`), and it is indexed like any
+ *      other object and reaches skip 3 below. Measured on that object:
+ *      `indexObjectSearchTargets(...).get('showcase_ext_customer')` is
+ *      non-null with `names = [email, lifetime_value, name, region]`.
  *   3. Registry-injected system columns (`SYSTEM_FIELDS`, derived from the
  *      spec's own declarations). `sort: [{ field: 'created_at' }]` is the
  *      single most common list-view ordering in the platform's own objects and
  *      names a real column that never appears in authored `fields`. They are
  *      skipped for VIRTUALITY too: their runtime metadata is registry-owned and
  *      invisible here, and none of them is a formula.
+ *
+ *      Skip 3 answers EXISTENCE, and since #10474 it no longer ends the
+ *      matter — see the provenance section below.
+ *
+ * ── PROVENANCE: the second question about a name skip 3 kept (#10474) ────
+ *
+ * Skip 3 decided not to FLAG the name. On an ADR-0015 `external` object the
+ * platform registers its injected anchors and provisions no storage behind
+ * them (#7865 / #8116), so `created_at` there is addressable and backed by
+ * nothing. Existence rightly stays silent; PROVENANCE is a second question,
+ * asked only of the names skip 3 already kept and answered by the per-object
+ * index ({@link indexUnprovisionedAnchors}) rather than the object-independent
+ * union. This is the SORT twin of the SEARCH wiring #8404 added on the
+ * identical index, and it is the same shape the four filter/binding rules
+ * carry since #8340.
+ *
+ * WHY THIS AXIS NEEDS ITS OWN AUTHORING ANSWER — neither runtime door refuses
+ * it. Both key on `formula` ALONE (`UNMATERIALIZED_SORT_TYPES`): the ingress
+ * gate's third verdict (`assertSortFieldsExist`, #6994) and the engine's
+ * (`assertOrderByIsMaterializable`, #7095). An injected anchor is a `datetime`
+ * or `lookup`, it IS in `gate.known` (the registry injected it into the served
+ * schema), and it is undotted — so it passes all three verdicts and reaches
+ * the driver. Measured (#10474) with a real `SqlDriver` over better-sqlite3,
+ * the object declared exactly as `examples/app-showcase` declares it, against
+ * a remote `customers` table carrying `[id, name, email, region,
+ * lifetime_value]` and none of the seven injected anchors:
+ *
+ * ```
+ * orderBy name       asc -> [c1,c2,c3]   desc -> [c3,c2,c1]   (a real column: reverses)
+ * orderBy created_at asc -> [c1,c2,c3]   desc -> [c1,c2,c3]   asc === desc, 3 rows, no error
+ * orderBy owner_id   asc -> [c1,c2,c3]   desc -> [c1,c2,c3]   asc === desc, 3 rows, no error
+ * ```
+ *
+ * `asc` and `desc` coming back byte-identical while the baseline reverses is
+ * what makes it a DROPPED sort rather than a coincidence — the same signature
+ * this rule's virtuality docblock records for `formula`, reached by a second
+ * route. The difference is that a formula sort is REFUSED at both doors and
+ * this one is not: a list view ordered by an anchor with no storage answers
+ * `200` with the rows in the driver's arbitrary order, on the view's first
+ * fetch and every fetch after it, and `limit`/`offset` then slice an arbitrary
+ * page out of it.
+ *
+ * WARNING, never `error`, and never gating — #4330's cost asymmetry, the same
+ * call every sibling makes. The remote schema is not visible to this pass, so
+ * the remote table may genuinely carry a `created_at` of its own; the finding
+ * describes a degradation the author must check against their remote schema,
+ * not a refusal this pass can prove. (An author-DECLARED column of the same
+ * name is the author's — #7859's security direction — and
+ * `unprovisionedInjectedColumnsFor` already excludes it, so vouching for the
+ * remote column by declaring it silences this finding, which is exactly the
+ * first remedy the shared hint prescribes.)
+ *
+ * NOT asked for a DOTTED name, which is the one place this axis departs from
+ * the SEARCH twin, and deliberately: `validate-searchable-fields` asks about
+ * dotted entries because `resolveSearchFields` matches by exact string and
+ * drops them like a typo, whereas a dotted SORT name is REFUSED by the ingress
+ * gate as its own second verdict (`400 INVALID_SORT`, loudly, on every fetch).
+ * The silent-degradation this finding reports therefore cannot happen on that
+ * path, and answering there would give the SORT axis its own dotted verdict —
+ * precisely what the paragraph below records this rule as declining to do.
+ * `validate-page-field-bindings` takes the same posture, skipping a dotted ref
+ * before either question (#8340).
  *
  * A DOTTED name (`account.name`) is refused by the ingress gate as its own
  * second verdict, and this rule deliberately does not add a third finding for
@@ -154,7 +233,12 @@
  */
 
 import { isVirtualSearchField } from '@objectstack/spec/data';
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 import {
   indexObjectSearchTargets,
   type ObjectSearchTarget,
@@ -162,11 +246,18 @@ import {
 
 export const SORT_FIELD_UNKNOWN = 'sort-field-unknown';
 export const SORT_FIELD_UNSORTABLE = 'sort-field-unsortable';
+/** [#10474] The provenance verdict — a WARNING, unlike the two above. */
+export const SORT_FIELD_UNPROVISIONED = 'sort-field-unprovisioned';
 
 export type SortableFieldSeverity = 'error' | 'warning';
 
 export interface SortableFieldFinding {
-  /** Always `error` — both verdicts are a `400 INVALID_SORT` at request time. */
+  /**
+   * `error` for the two verdicts the runtime REFUSES (`400 INVALID_SORT` at
+   * request time); `warning` for the #10474 provenance verdict, which no
+   * runtime door refuses and which this pass cannot prove against a remote
+   * schema it cannot see.
+   */
   severity: SortableFieldSeverity;
   /** Diagnostic rule id. */
   rule: string;
@@ -297,6 +388,15 @@ export function checkSortDeclaration(
   where: string,
   path: string,
   subject: string,
+  // [#10474] `objectName -> its unprovisioned injected anchors`
+  // ({@link indexUnprovisionedAnchors}). OPTIONAL, and its absence means
+  // exactly one thing: this caller did not build the index, so the provenance
+  // question goes unasked and only existence/virtuality are answered — the
+  // pre-#10474 behaviour, preserved for out-of-repo callers of this exported
+  // core (this function is part of the package's public surface). The same
+  // posture, for the same reason, as `checkSearchableFieldList`'s own
+  // trailing parameter. Every in-repo caller passes it.
+  unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
   if (declared === undefined || declared === null) return findings;
@@ -306,6 +406,7 @@ export function checkSortDeclaration(
   if (!target) return findings; // ② external / introspected — no authored field map
 
   const known = target.names;
+  const anchors = unprovisionedAnchors?.get(objectName);
 
   for (const key of readSortKeys(declared)) {
     const name = key.field;
@@ -317,7 +418,42 @@ export function checkSortDeclaration(
     // authored `fields`. `created_at` is the platform's own most common list
     // ordering, and flagging it would be the false finding ADR-0072 D1 warns
     // about.
-    if (SYSTEM_FIELDS.has(head)) continue;
+    if (SYSTEM_FIELDS.has(head)) {
+      // [#10474] Existence answered "yes"; the membership test above keeps
+      // owning that first question. PROVENANCE is the second one — on a
+      // federated object this anchor is addressable and has no storage, and
+      // neither runtime door refuses an ORDER BY over it (both key on
+      // `formula` alone), so the view's first fetch answers 200 with the rows
+      // in the driver's arbitrary order. Emitted here, before the `continue`
+      // the skip has always ended with: an injected anchor has no entry in
+      // `target.fields`, so the virtuality check below is a no-op for it and
+      // there is nothing to fall through to.
+      //
+      // Undotted only — see the module note. A dotted SORT name is refused by
+      // the ingress gate as its own verdict, so the silent degradation this
+      // finding reports cannot happen on that path.
+      if (!name.includes('.') && anchors?.has(head)) {
+        findings.push({
+          severity: 'warning',
+          rule: SORT_FIELD_UNPROVISIONED,
+          where,
+          path: `${path}${key.at}`,
+          message:
+            `${subject} orders by "${name}", which resolves on object ` +
+            `"${objectName}", but ${unprovisionedAnchorCause(objectName, name)} — ` +
+            `so the ORDER BY reaches the driver, finds no column, and is dropped. ` +
+            `Measured on a federated object over a real remote table, 'asc' and ` +
+            `'desc' return BYTE-IDENTICAL row order under a 200 while the same ` +
+            `query on a real column reverses. Unlike this rule's other two ` +
+            `verdicts nothing refuses it: the REST ingress (#6994) and the engine ` +
+            `(#7095) both judge only 'formula', so the view's FIRST fetch — and ` +
+            `every fetch after it — silently answers in an arbitrary order, which ` +
+            `'limit'/'offset' then slice into an arbitrary page.`,
+          hint: unprovisionedAnchorHint(objectName, name),
+        });
+      }
+      continue;
+    }
 
     if (!known.has(head)) {
       const dotted = name.includes('.');
@@ -394,6 +530,9 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
       ? Object.entries(stack.objects).map(([name, def]) => ({ name, ...(def as AnyRec) }))
       : [];
   const fieldsByObject = indexObjectSearchTargets(stack);
+  // [#10474] The provenance index alongside the existence one — same keying,
+  // asked on the path where the existence check stays silent.
+  const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
   const check = (
     declared: unknown,
@@ -403,7 +542,15 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     subject: string,
   ) => {
     findings.push(
-      ...checkSortDeclaration(declared, objectName, fieldsByObject, where, path, subject),
+      ...checkSortDeclaration(
+        declared,
+        objectName,
+        fieldsByObject,
+        where,
+        path,
+        subject,
+        unprovisionedAnchors,
+      ),
     );
   };
 
@@ -450,8 +597,8 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     // `viewKind: 'list'` (REQUIRED on the overlay arm since #7741, and a key
     // the strict container schema refuses by name, so a container can never
     // match) with no nested `config` (a body carrying one is a ViewItem
-    // RECORD, whose `config.sort` is a different rung — deliberately not
-    // walked here, see the module note). `view-walk.ts` established the same
+    // RECORD, judged by its own record rung below since #10001).
+    // `view-walk.ts` established the same
     // `self` rung for the section-carrying shapes; this is its list twin.
     //
     // The binding order matches every other list-view rung: the overlay's own
@@ -465,6 +612,42 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
         listViewObject(view) ?? viewObject,
         `view "${viewLabel}" (flattened list overlay)`,
         `views[${vi}].sort`,
+        'list-view sort',
+      );
+    }
+
+    // ── [#10001] The RECORD rung: a standalone ViewItem record ──
+    //
+    // The self rung's structural complement — `ViewMetadataSchema`'s member 1
+    // (`ViewItemWireSchema`): `{ name, object, viewKind: 'list', config }`,
+    // the shape a Studio-saved view takes through `PUT /api/v1/meta/view`,
+    // with its `sort` one level down inside `config`. A hot wire shape, not a
+    // corner: objectui's `updateView` GETs the stored record and PUTs
+    // `{ ...current, ...partial }` (`view.zod.ts`'s #5074 trace), so every
+    // pin/reorder toggle round-trips the whole record, `config` included —
+    // and before this rung a record whose `config.sort` named nothing
+    // published through the runtime gate in silence, then answered
+    // `400 INVALID_SORT` on the view's first fetch (#6994/#7095), every load.
+    //
+    // Recognised by the wire schema's own member discrimination, exactly as
+    // the self rung recognises its member: `viewKind: 'list'` AND a
+    // record-shaped `config` (the union's own record/overlay split; a strict
+    // container can carry neither key, and a `form` record's
+    // `FormViewSchema` config declares no sort surface). The binding order
+    // matches every other list-view rung: the CONFIG's own `data.object`
+    // (ADR-0047 explicit retarget — a record's data binding lives on its
+    // config) ahead of the record's required top-level `object`.
+    // `config.sort[].id` row decorations (#5074) ride through `readSortKeys`
+    // unchanged. The record's top LEVEL is deliberately still not read: any
+    // stray `sort` riding beside `config` in the stored body (`saveMetaItem`
+    // persists the original) is a key the wire schema strips and no runtime
+    // read path serves — judging it would be a false-positive channel.
+    if (view.viewKind === 'list' && isRec(view.config)) {
+      check(
+        view.config.sort,
+        listViewObject(view.config) ?? viewObject,
+        `view "${viewLabel}" (ViewItem record)`,
+        `views[${vi}].config.sort`,
         'list-view sort',
       );
     }

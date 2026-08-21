@@ -12,6 +12,7 @@
 //     response has no per-row slot; the insert strip is schema-uniform).
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -25,6 +26,7 @@ const SCHEMA = {
 describe('updateManyData — per-row droppedFields + context threading (#3455)', () => {
   it('surfaces per-row engine strips and threads the caller context to each update', async () => {
     const update = vi.fn(async (object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
       // Only the second row forges the readonly field → only it drops.
       if (data.approval_status !== undefined) {
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
@@ -179,6 +181,7 @@ describe('batchData — per-row droppedFields + context threading (#3455)', () =
 
   it('update rows surface the engine strip and keep droppedFields when returnRecords=false', async () => {
     const update = vi.fn(async (object: string, _data: any, options?: any) => {
+      assertEngineUpdateDispatch(_data, options);
       options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
       return { id: options.where.id };
     });

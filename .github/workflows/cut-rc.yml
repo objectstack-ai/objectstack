@@ -560,14 +560,10 @@ jobs:
       # Three more paths can appear at a major boundary and are allowed for that
       # reason, all written by `sync-protocol-version.mjs` /
       # `sync-template-versions.mjs`: packages/spec/src/kernel/protocol-version.ts
-      # and the blank template's objectstack.config.ts (engines.protocol) and
-      # objectstack.manifest.json (specVersion). The manifest is named literally,
-      # like its sibling config.ts, rather than read the way the doc surfaces
-      # below are: `sync-template-versions.mjs` does declare its targets (a
-      # `TEXT_STAMPS` table plus a walk of `src/templates/`), but exports none of
-      # them and has no entry-point guard, so importing it would RUN the sync
-      # instead of reading its list. Give it those two things and this pathspec
-      # should read from it too.
+      # and, per bundled template, objectstack.config.ts (engines.protocol) and
+      # objectstack.manifest.json (specVersion). protocol-version.ts is named
+      # literally because that one file IS the whole of its surface. The template
+      # paths are not, and the reason is the one the doc half states below.
       #
       # THE DOC SURFACES ARE READ, NOT RESTATED. `pnpm run version` ends with
       # `sync-docs-image-tags.mjs`, which rewrites the doc surfaces that pin a
@@ -586,6 +582,29 @@ jobs:
       # output outside `SURFACES` — still fails loudly here, which is the whole
       # point of the assertion. Onboarding a surface stays a one-line edit to
       # `SURFACES` that a reviewer sees in the diff.
+      #
+      # THE TEMPLATE SURFACES ARE READ ON THE SAME TERMS. They used to be two
+      # literals, both hard-coding the template name `blank`, and this block used
+      # to record why: `sync-template-versions.mjs` declared its targets (a
+      # `TEXT_STAMPS` table plus a walk of `src/templates/`) but exported none of
+      # them and ran the sync at module scope, so importing it to ask "which files
+      # does the version pass stamp?" would have rewritten the templates instead of
+      # answering. #9648 gave it the export and the entry-point guard this block
+      # asked for, so the restatement is retired here rather than re-seeded:
+      # `stampedPaths()` derives its answer from the same walk and the same table
+      # the stamper's own `main()` uses.
+      #
+      # This is a COLLAPSE OF TWO COPIES OF ONE LIST, not a widening. The literals
+      # were never a deliberately narrower allowlist — they were the same set,
+      # spelled by hand, and they equal it only while `blank` is the only bundled
+      # template. `findTemplateDirs()` exists BECAUSE the template set is not
+      # curated ("a template added tomorrow is covered on the day it lands"), so
+      # the day a second template ships, the walk stamps it, the literal pair does
+      # not cover it, and the unstaged-files assertion below refuses the cut — with
+      # nothing red until someone attempts a release. `stampedPaths()` also reports
+      # each template's own package.json, which `'*package.json'` already permits,
+      # so the resolved list is a superset of the two literals and never a
+      # narrowing.
       #
       # The allowlist is ENFORCED rather than described. Only allowlisted paths are
       # staged, and then every staged path is re-checked against the same rule and
@@ -633,14 +652,37 @@ jobs:
           echo "doc surfaces declared by SURFACES (${#DOCS_SURFACES[@]}):"
           sed 's/^/  /' "$SURFACE_LIST"
 
+          # The template surfaces `sync-template-versions.mjs` stamps, read from the
+          # same walk and the same table the stamper itself uses. Import-safe by
+          # construction: that module carries the entry-point guard and the exports
+          # added for exactly this consumer.
+          TEMPLATE_LIST="${RUNNER_TEMP:-/tmp}/cut-rc-template-version-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { stampedPaths } from "./scripts/sync-template-versions.mjs"; for (const p of stampedPaths()) console.log(p);' \
+                 > "$TEMPLATE_LIST"; then
+            echo "::error::could not resolve stampedPaths() from scripts/sync-template-versions.mjs, so the template half of the release file surface is unknown. Refusing to push."
+            exit 1
+          fi
+          # Same rule as the doc half: unknown is a failure, never an empty
+          # allowlist. `stampedPaths()` THROWS rather than returning [] on a moved
+          # or empty template directory, so an empty file here means a resolution
+          # that reported nothing while still exiting 0 — which would stage no
+          # template path at all and then blame the files it left unstaged.
+          if [ ! -s "$TEMPLATE_LIST" ]; then
+            echo "::error::stampedPaths() in scripts/sync-template-versions.mjs resolved EMPTY, so no template surface would be staged even though the version pass stamps them. Refusing to push."
+            exit 1
+          fi
+          mapfile -t TEMPLATE_SURFACES < "$TEMPLATE_LIST"
+          echo "template surfaces declared by stampedPaths() (${#TEMPLATE_SURFACES[@]}):"
+          sed 's/^/  /' "$TEMPLATE_LIST"
+
           git add -A -- \
             '*package.json' \
             '*CHANGELOG.md' \
             .changeset \
             .objectui-sha \
             packages/spec/src/kernel/protocol-version.ts \
-            packages/create-objectstack/src/templates/blank/objectstack.config.ts \
-            packages/create-objectstack/src/templates/blank/objectstack.manifest.json \
+            "${TEMPLATE_SURFACES[@]}" \
             "${DOCS_SURFACES[@]}"
 
           STAGED="$(git diff --cached --name-only)"
@@ -650,13 +692,15 @@ jobs:
           fi
 
           # Re-check every staged path against the allowlist. The pathspec above is
-          # convenience; THIS is the guarantee. Two filters, same allowlist the
-          # pathspec used: the fixed release paths by pattern, then the declared doc
-          # surfaces by WHOLE-LINE EXACT match (`-xF`) against the very list that was
-          # staged — so the second filter cannot accept a path `SURFACES` does not
-          # name, and needs no regex-escaping of the paths to stay exact.
+          # convenience; THIS is the guarantee. Three filters, same allowlist the
+          # pathspec used: the fixed release paths by pattern, then the declared
+          # template and doc surfaces by WHOLE-LINE EXACT match (`-xF`) against the
+          # very lists that were staged — so neither derived filter can accept a path
+          # its declaration does not name, and neither needs regex-escaping of the
+          # paths to stay exact.
           BAD="$(printf '%s\n' "$STAGED" \
-            | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.config\.ts$|^packages/create-objectstack/src/templates/blank/objectstack\.manifest\.json$' \
+            | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$' \
+            | grep -vxF -f "$TEMPLATE_LIST" \
             | grep -vxF -f "$SURFACE_LIST" || true)"
           if [ -n "$BAD" ]; then
             echo "::error::the version commit would carry paths outside the release file surface. Refusing to push. Offending paths follow; if the version pass legitimately grew a new output, widen the allowlist in this workflow deliberately."

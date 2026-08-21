@@ -176,6 +176,77 @@ describe('LifecycleSchema (ADR-0057)', () => {
     expect(result.success).toBe(false);
   });
 
+  // [#10527] The retention + ttl + archive triple. Since #10347 the Archiver
+  // selects rows by the ttl cutoff whenever `ttl` is declared, so a triple
+  // whose ttl diverges from the age bound leaves `retention.maxAge` declared
+  // but enforced by nothing — refused at parse time unless the ttl restates
+  // the age bound (same clock, same window).
+  describe('retention + ttl + archive triple (#10527)', () => {
+    const messagesOf = (result: ReturnType<typeof LifecycleSchema.safeParse>) =>
+      result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+
+    it('still accepts the #10347-ruled ttl + archive pair (no retention)', () => {
+      const result = LifecycleSchema.safeParse({
+        class: 'audit',
+        ttl: { field: 'expires_at', expireAfter: '90d' },
+        archive: { after: '90d', to: 'datalake' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts the triple when the ttl restates the age bound exactly (created_at, equal windows)', () => {
+      const result = LifecycleSchema.safeParse({
+        class: 'audit',
+        retention: { maxAge: '90d' },
+        ttl: { field: 'created_at', expireAfter: '90d' },
+        archive: { after: '90d', to: 'datalake' },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects the issue's own triple — ttl on a different clock AND window — naming both bounds and the runtime truth", () => {
+      const result = LifecycleSchema.safeParse({
+        class: 'audit',
+        retention: { maxAge: '90d' },
+        ttl: { field: 'expires_at', expireAfter: '30d' },
+        archive: { after: '90d', to: 'datalake' },
+      });
+      expect(result.success).toBe(false);
+      const msg = messagesOf(result);
+      // Named values on both sides of the divergence …
+      expect(msg).toContain("lifecycle.ttl ('30d' after 'expires_at')");
+      expect(msg).toContain("retention.maxAge ('90d' after created_at)");
+      // … and the POST-#10347 runtime truth: the ttl cutoff selects, so the
+      // age bound is the one left inert (not "moves rows by age alone").
+      expect(msg).toContain('the Archiver moves rows by the ttl cutoff when ttl is declared');
+      expect(msg).toContain('no longer bounds the hot store');
+    });
+
+    it('rejects a diverging window even on the same clock (created_at, 30d vs 90d)', () => {
+      const result = LifecycleSchema.safeParse({
+        class: 'audit',
+        retention: { maxAge: '90d' },
+        ttl: { field: 'created_at', expireAfter: '30d' },
+        archive: { after: '90d', to: 'datalake' },
+      });
+      expect(result.success).toBe(false);
+      expect(messagesOf(result)).toContain("lifecycle.ttl ('30d' after 'created_at')");
+    });
+
+    it('rejects a diverging clock even with equal windows (expires_at, 90d = 90d)', () => {
+      // Equal durations do NOT make the age bound enforced: a row whose
+      // `expires_at` sits in the future stays hot past `retention.maxAge`.
+      const result = LifecycleSchema.safeParse({
+        class: 'audit',
+        retention: { maxAge: '90d' },
+        ttl: { field: 'expires_at', expireAfter: '90d' },
+        archive: { after: '90d', to: 'datalake' },
+      });
+      expect(result.success).toBe(false);
+      expect(messagesOf(result)).toContain("lifecycle.ttl ('90d' after 'expires_at')");
+    });
+  });
+
   it('rejects malformed duration literals', () => {
     for (const bad of ['14', 'd14', '14 days', '2mo', '-3d', '1.5d']) {
       const result = LifecycleSchema.safeParse({

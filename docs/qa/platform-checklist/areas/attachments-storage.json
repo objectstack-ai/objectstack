@@ -661,7 +661,7 @@
       "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, opaque sys_file reference in the atomic batch",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -670,6 +670,9 @@
         "requires": [
           "showcase_invoice_line.receipt (Field.file) and the seeded product 'Widget A' (sku WIDGET-A) for the line's product pick",
           "the storage service live (the upload rides the console's UploadProvider adapter into /api/v1/storage)"
+        ],
+        "knownGaps": [
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
@@ -727,7 +730,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "clause 3 restated against ADR-0104 D3 after run #7635 scored it `partial` on a product that is CORRECT: the clause demanded a resolved stored-file object with receipt.name and an absolute http(s) url, but D3 makes the stored form the bare opaque sys_file id and the resolved shape the read/expand form only — so the item was asserting a contract the ADR had already retired from the write path. The clause now asserts the opaque id plus the field-ownership stamp (ref_object/ref_id/ref_field/acl) that proves the reference is managed rather than a placeholder, the step text and title follow, a negative pins the drift itself so a future run does not re-score the shipped shape as a defect, and source cites the ADR + the storage-routes.ts line documenting the id. Checklist mirrors the product; no product change", "ref": "#7669" }
+        { "revision": 2, "date": "2026-08-11", "change": "clause 3 restated against ADR-0104 D3 after run #7635 scored it `partial` on a product that is CORRECT: the clause demanded a resolved stored-file object with receipt.name and an absolute http(s) url, but D3 makes the stored form the bare opaque sys_file id and the resolved shape the read/expand form only — so the item was asserting a contract the ADR had already retired from the write path. The clause now asserts the opaque id plus the field-ownership stamp (ref_object/ref_id/ref_field/acl) that proves the reference is managed rather than a placeholder, the step text and title follow, a negative pins the drift itself so a future run does not re-score the shipped shape as a defect, and source cites the ADR + the storage-routes.ts line documenting the id. Checklist mirrors the product; no product change", "ref": "#7669" },
+        {
+          "revision": 3,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {

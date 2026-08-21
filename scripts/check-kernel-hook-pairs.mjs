@@ -71,6 +71,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -104,7 +105,7 @@ const HOOK_NAME = /^kernel:[A-Za-z][A-Za-z0-9_:-]*$/;
 // ── Scanning ─────────────────────────────────────────────────────────────────
 
 function parse(fileName, source) {
-    return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    return parseSourceFile(fileName, source, ts.ScriptKind.TS);
 }
 
 /** The identifier a call expression ends in: `a.b.c(x)` → `c`, `c(x)` → `c`. */

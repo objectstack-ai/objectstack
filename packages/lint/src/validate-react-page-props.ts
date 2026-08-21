@@ -62,6 +62,7 @@ import {
 // #5020's zod-rejection renderer, shared with the SDUI component-props gate
 // since #5068 — see `zod-issue-format.ts` for why one copy matters here.
 import { describeIssue } from './zod-issue-format.js';
+import { createSourceFileChecked, describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
 
 import {
   SYSTEM_FIELDS,
@@ -260,6 +261,24 @@ function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribut
 // internal spellings are still accepted, silently: dashboards and the console's
 // own chart-view wiring emit them, and they remain a valid (if unpublished)
 // way to write the same binding.
+
+/**
+ * The source could not be parsed, so the prop checks below read a partially
+ * recovered tree (#10653).
+ *
+ * Severity is `warning`, not `error`, and the reason is measured rather than
+ * cautious. The syntax VERDICT on a react page belongs to `validate-react-
+ * pages.ts`, which transpiles the same source through **Sucrase** — the parser
+ * family that actually compiles a react page — and errors when it refuses. This
+ * rule speaks for a different parser, and the two acceptance sets are not the
+ * same set: measured on 2026-08-21 (TypeScript 6.0.3 / sucrase 3.35.x), a react
+ * source containing `0755`, `'\012'`, `0b2` or `1__0` parses CLEAN through
+ * Sucrase while TypeScript reports a parse diagnostic, and `with (o) {}` goes
+ * the other way. Erroring here would newly fail builds the platform's own
+ * transpiler accepts; going silent is the defect this rule closes. A warning
+ * says the true thing: these checks did not get to run.
+ */
+export const REACT_PAGE_SOURCE_UNPARSEABLE = 'react-page-source-unparseable';
 
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
 export const REACT_CHART_FIELD_UNPROVISIONED = 'react-chart-field-unprovisioned';
@@ -978,15 +997,36 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
     if (typeof source !== 'string' || source.trim() === '') continue;
     const name = String(page.name ?? `#${p}`);
 
-    // Outside the try below on purpose: a missing compiler must surface as an
-    // error, not be swallowed as "unparseable source".
+    // A missing compiler must surface as an error, not as "unparseable source":
+    // one is this deployment's problem, the other is the author's.
     const tsc = loadTypeScript();
 
-    let sf: ts.SourceFile;
-    try {
-      sf = tsc.createSourceFile('page.tsx', source, tsc.ScriptTarget.Latest, true, tsc.ScriptKind.TSX);
-    } catch {
-      continue; // the syntax gate reports unparseable sources
+    // [#10653] The parse used to sit in a `try/catch` that continued to the next
+    // page, on the reading that an unparseable source is the syntax gate's to
+    // report. Both halves were wrong. `createSourceFile` cannot throw (measured;
+    // see checked-parse.ts), so the catch never ran and the LIVE path was the
+    // unread `parseDiagnostics`: a recovered partial tree walked and scored
+    // clean. And the syntax gate parses with a different parser (Sucrase), so
+    // its silence is not evidence that this one could read the source.
+    //
+    // The recovered tree is still walked below — whatever findings it yields
+    // today it keeps yielding. What is added is the missing signal.
+    const { sourceFile: sf, failure } = createSourceFileChecked(tsc, 'page.tsx', source, {
+      target: tsc.ScriptTarget.Latest,
+      setParentNodes: true,
+      scriptKind: tsc.ScriptKind.TSX,
+    });
+    if (failure) {
+      findings.push({
+        severity: 'warning',
+        rule: REACT_PAGE_SOURCE_UNPARSEABLE,
+        where: `page "${name}"`,
+        path: `pages[${p}].source`,
+        message:
+          `kind:'react' source did not parse (${describeParseFailure(failure)}), so the component-contract ` +
+          `checks read a partially recovered tree and may have missed real problems.`,
+        hint: PARSE_FAILURE_HINT,
+      });
     }
 
     const locals = localComponentNames(tsc, sf);

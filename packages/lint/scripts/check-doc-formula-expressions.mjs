@@ -186,6 +186,105 @@ const SKIP_PATHS = new Set([
   'content/docs/references',
 ]);
 
+/**
+ * ROOTS above, written in the subtree spelling `scripts/pm/dispatch-gates.mjs`
+ * compares in. Provenance ONLY: nothing in this gate reads this list, and the
+ * scan behaves exactly as it did without it.
+ *
+ * ## The gap this closes (#9964's declaration pattern, seventh instance)
+ *
+ * That tool builds every dispatch's gate list by scanning each gate's own
+ * source for the path literals it operates on, and "looks like a path" there
+ * means "carries a separator" — or names a top-level DOTTED directory, which is
+ * the one arm that saved `.claude`. So three of the four ROOTS were bare words
+ * that never became a hint, while `SKIP_PATHS` above spells its entries with
+ * separators, and those DID.
+ *
+ * Measured on this tree, the gate's whole extracted hint set was:
+ *
+ *   .claude                          the one md/mdx root the dotted-dir arm
+ *                                    admitted — 20 files
+ *   packages/spec/src                SPEC_ROOT, surface 2 — already a path
+ *                                    literal, so already visible: 972 files
+ *   .claude/worktrees, docs/audits,  the exemptions, i.e. the subtrees it
+ *   docs/handoff, docs/plans,        deliberately does NOT read
+ *   content/docs/references
+ *   @objectstack/formula             the import specifier, inert as a path
+ *
+ * Of the 1388 files this gate walks, 396 were declared by nothing at all
+ * (28.5%) — every file under `docs` (156), `skills` (48) and `content` (192).
+ * The three declarations below are what close that.
+ *
+ * Within the `docs` root the shape was inverted rather than merely absent: a
+ * card touching `docs/plans/` DERIVED this gate (via the SKIP_PATHS literal —
+ * a subtree the walk returns from immediately), while a card touching
+ * `docs/qa/platform-checklist/` derived nothing. The exclusions were the
+ * declaration and the population was not.
+ *
+ * That is worse than declaring nothing, and worse in the direction that hides
+ * it: the residue line still PRINTED gate names, so the row read as "declared,
+ * just not relevant to you" rather than as a blind spot. A card editing the
+ * live docs corpus met this REQUIRED gate (lint.yml, `pnpm --filter
+ * @objectstack/lint run check:doc-formula-expressions`) as red CI instead of as
+ * a local command.
+ *
+ * `.claude/**` is redundant with the bare `.claude` the extractor already takes
+ * on its dotted-dir arm, and is kept so the declaration is uniform across ROOTS
+ * rather than depending on which arm happened to admit which root. SPEC_ROOT
+ * needs no entry for the same reason `.claude` did not strictly need one — it
+ * already carries a separator — and the self-test pins that it still does, so
+ * renaming it to a bare word fails here instead of silently unhinting 972
+ * files.
+ *
+ * ## Why the subtree spelling, and not a wider extractor
+ *
+ * `hintCovers` refuses a bare single-segment literal (`docs`) as too generic BY
+ * DESIGN, and that refusal is measured rather than incidental: teaching the
+ * extractor to accept bare top-level directory words was priced at +139084
+ * fabricated (gate, file) pairs, because `packages`, `apps` and `examples` are
+ * path COMPONENTS in dozens of gates that never read those roots. Nor can a
+ * class-level guard author this for us — flagging any gate that names a bare
+ * tracked directory none of its hints reach fires on 40 of 123 families, and
+ * the majority are right as they stand. The distinction between "population
+ * root" and "path component" is in the author's intent, not the source text,
+ * which is why the declaration has to be authored, gate by gate.
+ *
+ * ## Why the ROOT, and not the live subtrees under it (the SKIP_PATHS question)
+ *
+ * `hintCovers` has no way to SUBTRACT: hints are positive containment, so
+ * "`docs/**` except `docs/plans`" is not expressible. The exempt subtrees are
+ * therefore claimed by this declaration, and that is a DELIBERATE, bounded
+ * residual rather than an oversight — pinned as such in the self-test, so it
+ * cannot silently grow past the exemptions it is accounted for.
+ *
+ * The same limit applies one level down, to the extension filter: `collectFiles`
+ * keeps only `.md`/`.mdx` (and `.ts`/`.tsx` under SPEC_ROOT), which a subtree
+ * hint cannot express either — so a card touching `content/docs.site.json`
+ * derives this gate although the walk skips that file. Both residuals point the
+ * same way: the declaration over-claims INSIDE what it walks, never outside,
+ * and the negative half of the self-test is what holds that line.
+ *
+ * The residual is also not new, and this declaration does not widen it by one
+ * path: those five subtrees derive this gate TODAY, via the `SKIP_PATHS`
+ * literals themselves, which stay hints whatever this list says. Removing that
+ * residual would mean unquoting the most safety-critical constant in this file.
+ * The declaration subsumes those hints and adds nothing to that side while
+ * closing all 396 files of the missing side.
+ *
+ * What the precedent does draw a line at is claiming a tree the ROOTS do not
+ * reach at all, and the self-test in `scripts/pm/dispatch-gates.mjs` pins that
+ * negative half against the real extractor — the load-bearing direction for a
+ * declaration this broad, since a gate named on EVERY card is the louder
+ * version of naming none.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * The glob form appearing in ROOTS would send `walk()` at a directory that does
+ * not exist — since #4916 a hard refusal rather than a silent skip, but one
+ * that fails naming the wrong problem. The self-test pins both halves.
+ */
+const ROOT_WATCH_HINTS = ['.claude/**', 'docs/**', 'skills/**', 'content/**'];
+
 const posix = (p) => p.split(sep).join('/');
 
 /**
@@ -918,6 +1017,66 @@ const EXEMPTION_SELF_TEST_CASES = [
   },
 ];
 
+/**
+ * The `scripts/pm/dispatch-gates.mjs` declaration (#9964's pattern, seventh
+ * instance), pinned in both directions.
+ *
+ * Enforcement cannot hold any of these: the declaration is read by another tool
+ * entirely, so a wrong or stale one runs green here forever and pays itself out
+ * as a dev dispatched on a docs card with this REQUIRED gate missing from the
+ * brief — which is exactly how it stood before this block. Both sides are
+ * derived from ROOTS rather than re-spelled, so renaming or widening a root
+ * cannot leave the declaration describing the old population.
+ */
+const DECLARATION_SELF_TEST_CASES = [
+  {
+    name: 'DECLARATION — every ROOT the hint extractor cannot see is declared as a subtree '
+      + '(a root with no path separator is refused as too generic)',
+    holds: () => ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_WATCH_HINTS.includes(`${r}/**`)),
+  },
+  {
+    name: 'DECLARATION — and it declares no root this gate does not walk (a declaration that '
+      + 'can drift from the scan is worse than none — it replaces a silent gate with a lying one)',
+    holds: () => ROOT_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, ''))),
+  },
+  {
+    // Provenance, never a lookup key: the glob form appearing in ROOTS would
+    // send `walk()` at a directory that does not exist. Since #4916 that is a
+    // hard refusal rather than a silent skip, but it fails naming the wrong
+    // problem.
+    name: 'DECLARATION — the declared glob form is NOT a ROOTS entry',
+    holds: () => !ROOT_WATCH_HINTS.some((h) => ROOTS.includes(h)),
+  },
+  {
+    // The residual, pinned rather than hidden. `hintCovers` is positive
+    // containment with no way to subtract, so declaring a ROOT necessarily
+    // claims the exempt subtrees carved out of it. That is accounted for — but
+    // only for the exemptions themselves: every SKIP_PATHS entry must sit UNDER
+    // a declared root, so a future exemption somewhere this declaration does not
+    // reach fails here instead of quietly widening the over-claim.
+    name: 'DECLARATION — every skipped subtree is one this declaration knowingly over-claims, '
+      + 'and none is a surprise from outside the declared roots',
+    holds: () => [...SKIP_PATHS].every((p) => ROOTS.some((r) => p.startsWith(`${r}/`))),
+  },
+  {
+    // The exemptions must stay a strict SUBSET of the walked roots: an entry
+    // that WAS a whole root would mean the gate declares a population it never
+    // reads.
+    name: 'DECLARATION — no exemption swallows a declared root whole',
+    holds: () => ![...SKIP_PATHS].some((p) => ROOTS.includes(p)),
+  },
+  {
+    // Surface 2 is declared by SPEC_ROOT itself, which the extractor takes
+    // because it carries a separator — 972 files riding on one property of one
+    // string. Renaming it to a bare word (`spec`, say) would unhint all of them
+    // exactly the way `docs` was unhinted, and this is the only place that
+    // would notice.
+    name: 'DECLARATION — SPEC_ROOT still carries a path separator, so surface 2 needs no '
+      + 'subtree spelling of its own',
+    holds: () => SPEC_ROOT.includes('/'),
+  },
+];
+
 function specSelfTest() {
   const problemsFor = (c) => {
     const problems = [];
@@ -1004,7 +1163,12 @@ function selfTest() {
     }
   }
   failed += specSelfTest();
-  const total = SELF_TEST_CASES.length + SPEC_SELF_TEST_CASES.length + EXEMPTION_SELF_TEST_CASES.length;
+  for (const c of DECLARATION_SELF_TEST_CASES) {
+    if (c.holds()) console.log(`  ✓ ${c.name}`);
+    else { failed++; console.error(`  ✗ ${c.name}`); }
+  }
+  const total = SELF_TEST_CASES.length + SPEC_SELF_TEST_CASES.length + EXEMPTION_SELF_TEST_CASES.length
+    + DECLARATION_SELF_TEST_CASES.length;
   if (failed > 0) {
     console.error(`\n✗ check:doc-formula-expressions self-test: ${failed} case(s) failed`);
     process.exit(1);

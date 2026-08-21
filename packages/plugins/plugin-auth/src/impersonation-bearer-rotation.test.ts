@@ -38,7 +38,11 @@ import {
  * is pinned to ObjectQL's own dispatch predicate. The delete path is genuinely
  * exercised here: rotation deletes the admin's original session row.
  */
-const createMemoryEngine = () => {
+// Exported so the ADR-0068 impersonation-authorization suite
+// (`admin-impersonate-endpoint.test.ts`) drives the SAME double rather than
+// minting a second one: a new fake engine would be a new looseness risk and a
+// new `check:engine-double-contract` ledger entry, for no added fidelity.
+export const createMemoryEngine = () => {
   const tables = new Map<string, any[]>();
   const rows = (name: string) => {
     if (!tables.has(name)) tables.set(name, []);

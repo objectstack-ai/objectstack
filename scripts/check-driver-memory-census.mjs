@@ -108,6 +108,8 @@ import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER_PATH = join(ROOT, 'scripts', 'driver-memory-census.ledger.json');
@@ -229,7 +231,7 @@ function classify(node) {
 
 /** Every occurrence of the specifier in one source text, classified. */
 export function scanSource(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, text);
   const found = [];
   const visit = (node) => {
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && namesPackage(node.text)) {
@@ -682,5 +684,10 @@ function selfTest() {
 }
 
 const argv = process.argv.slice(2);
-if (argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (argv.includes('--self-test')) selfTest();
 else report({ list: argv.includes('--list') });

@@ -93,6 +93,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
+  sharingModel: 'private',
   nameField: 'display_title', // ADR-0079 — the record title is a designated field; composite titles migrate off the deprecated `titleFormat` to a text formula
   fields: {
     // Composite record title as a text formula, surfaced via `nameField` above.

@@ -93,7 +93,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -101,6 +101,9 @@
         "app": "showcase",
         "requires": [
           "a writable package to author into (create one via the Studio wizard or POST /api/v1/packages — the source-loaded com.example.showcase is read-only and rejects designer saves server-side)"
+        ],
+        "knownGaps": [
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
@@ -150,7 +153,13 @@
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 1 — read-only package rejects designer saves server-side, which is why a writable package is a fixture requirement)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: designer→metadata round-trip with the meta API as oracle, pinning the four objectui live-e2e regression classes (F1–F4) and the audit's field_N identifier finding", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: designer→metadata round-trip with the meta API as oracle, pinning the four objectui live-e2e regression classes (F1–F4) and the audit's field_N identifier finding", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 2,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {
@@ -228,13 +237,16 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record)"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["seeded showcase_invoice records to render the published page against (stock showcase seed)"]
+        "requires": ["seeded showcase_invoice records to render the published page against (stock showcase seed)"],
+        "knownGaps": [
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
+        ]
       },
       "steps": [
         "open /_console/apps/showcase_app/metadata/page/new and fill the create form: Label 'Invoice Page <uniq>' (slugifies into Name), Object showcase_invoice; Save",
@@ -295,7 +307,13 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "marked both pinning specs STALE (run #7695): studio-record-page.spec.ts fills the Object control as an input when it is now a role=combobox button, and studio-editor.spec.ts targets a 'Layout' heading that no longer exists plus a shipped page the editor correctly locks. Neither reports a product defect — the annotation tells a runner not to cite their output and not to score their failure as this item's FAIL. Re-pointing the specs lives in objectui (cross-repo half of #7753 item 6); this repo only records the staleness", "ref": "#7753" }
+        { "revision": 2, "date": "2026-08-11", "change": "marked both pinning specs STALE (run #7695): studio-record-page.spec.ts fills the Object control as an input when it is now a role=combobox button, and studio-editor.spec.ts targets a 'Layout' heading that no longer exists plus a shipped page the editor correctly locks. Neither reports a product defect — the annotation tells a runner not to cite their output and not to score their failure as this item's FAIL. Re-pointing the specs lives in objectui (cross-repo half of #7753 item 6); this repo only records the staleness", "ref": "#7753" },
+        {
+          "revision": 3,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {
@@ -591,7 +609,7 @@
       "title": "The Studio CEL editors reach the SAME verdict as the engine: formula result-type inference, previous. completion in conditional rules, and RLS lint + test-run — the editor UI, not a second grammar",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -603,7 +621,8 @@
           "the @objectstack/formula engine present in the console bundle — celAuthoring lazy-loads it"
         ],
         "knownGaps": [
-          "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead"
+          "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead",
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
@@ -690,7 +709,13 @@
         "examples/app-showcase/src/data/objects/invoice.object.ts + project.object.ts + field-zoo.object.ts (stock formula-field expressions to author against)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: the Studio CEL editor UI (formula result-type inference, previous. completion in conditional rules, RLS lint + test-run) round-tripping to the SAME @objectstack/formula verdicts the engine gives — grounded in celAuthoring.ts + CelPredicateField/CelTestRunDialog and cross-referencing the engine-parity items rather than re-proving them", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: the Studio CEL editor UI (formula result-type inference, previous. completion in conditional rules, RLS lint + test-run) round-tripping to the SAME @objectstack/formula verdicts the engine gives — grounded in celAuthoring.ts + CelPredicateField/CelTestRunDialog and cross-referencing the engine-parity items rather than re-proving them", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 2,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {
@@ -698,7 +723,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -708,6 +733,9 @@
           "a writable permission set to edit in the Permission Matrix editor (env-scope metadata-admin, or a package permission set in the Studio Access pillar) — a read-only source-loaded set can be opened to verify the read-only gate but not to exercise bulk writes",
           "an object with MORE THAN 6 fields to expand in the matrix, so the field sub-table's filter renders (FieldsSubTable shows the filter only when fields.length > 6) — a stock showcase object with a wide field set (showcase_account / showcase_invoice)",
           "a narrow viewport for the Bulk-column clip check (B3)"
+        ],
+        "knownGaps": [
+          "AUTOMATION IS PINNED IN THE objectui REPO, NOT HERE — `automated.ref` names objectui specs exclusively, so from this checkout the item is neither runnable nor pin-evidenced (no console bundle is built here and none of those specs exist here). Drive it by hand in the browser and score it as a manual run, OR run the pin in an objectui checkout and cite the output naming the revision (17.1.0 sweep subject: 9a3daf8d37ad). ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact."
         ]
       },
       "steps": [
@@ -777,7 +805,13 @@
         "access-security.permission-matrix-edit-loop (the grant→access flip — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: permission-matrix editor UX — field-filter + bulk apply scoped to exactly the visible fields (wrong scope writes wrong grants) and the Bulk column's anti-clip min-width, grounded in PermissionMatrixEditor.tsx + its fieldBulk/readonly tests; cross-refs the permission-matrix-edit-loop for the grant→access side", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: permission-matrix editor UX — field-filter + bulk apply scoped to exactly the visible fields (wrong scope writes wrong grants) and the Bulk column's anti-clip min-width, grounded in PermissionMatrixEditor.tsx + its fieldBulk/readonly tests; cross-refs the permission-matrix-edit-loop for the grant→access side", "ref": "claude/platform-test-checklist-ocwugl" },
+        {
+          "revision": 2,
+          "date": "2026-08-21",
+          "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
+          "ref": "#10236"
+        }
       ]
     },
     {

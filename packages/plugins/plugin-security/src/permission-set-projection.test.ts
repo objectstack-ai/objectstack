@@ -33,6 +33,7 @@ import {
   registerPermissionSetProjection,
   createPermissionSetWriteThrough,
   reconcilePermissionSetProjection,
+  type ProjectionLogger,
 } from './permission-set-projection.js';
 
 /** In-memory ql over sys_permission_set + sys_metadata. */
@@ -1104,6 +1105,48 @@ describe('reconcilePermissionSetProjection', () => {
     expect(summary).toHaveLength(1);
     expect(summary[0]!.level).toBe('error');
     expect(summary[0]!.meta?.failedNames).toEqual(['broken_set']);
+  });
+
+  it('[#9754] a sink with NO `warn` cannot be spelled at all — the TYPE forbids the silence', async () => {
+    // THE HARM, reproduced before the fix is believed. Until #9754 every member
+    // of `ProjectionLogger` was optional, so `{ info }` was a legal sink — and
+    // against it the reconcile pass reported NOTHING: the first-failure line
+    // and the summary both reach for `error`, fall back to `warn`, and find
+    // neither, while the `else` branch carrying the reassuring "reconciled"
+    // line is skipped because the pass did fail. A permission set that will not
+    // survive a re-provision, and a boot log that says nothing whatsoever.
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push({
+      id: 'ps_bad', name: 'broken_set', managed_by: 'admin', active: true,
+      label: 'Broken Set', object_permissions: JSON.stringify({ ticket: { allowRead: 'yes-please' } }),
+    });
+    const heard: string[] = [];
+    const silent = { info: (m: string) => heard.push(m) };
+
+    const out = await reconcilePermissionSetProjection(protocol, {
+      ql,
+      logger: silent as unknown as ProjectionLogger,
+    });
+
+    expect(out.backfillFailed).toBe(1);
+    expect(heard).toEqual([]);   // neither the failure, nor the count, nor the "reconciled" line
+
+    // THE CONTRACT is what removes that cast's subject: `warn` is non-optional
+    // on `ProjectionLogger` (#9754), so no TS caller can build the sink above
+    // without saying `as unknown as` out loud.
+    //
+    // ⚠️ Deliberately NOT pinned here with `@ts-expect-error`. This package's
+    // tsconfig excludes `**/*.test.ts` (it carries a TEST_DEBT ledger entry in
+    // scripts/check-type-check-coverage.mjs), so no tsc program compiles this
+    // file and the directive would evaluate NEVER — a phantom check that reads
+    // like proof, which is the failure AGENTS.md → "Build & Test" names and
+    // `pnpm check:type-check-coverage` refuses. The compile-time half of this
+    // contract is pinned in plugin-email's `outbox-sweep.test.ts`, whose
+    // package DOES compile its tests (observed: reverting `warn` there turns
+    // that directive into `error TS2578: Unused '@ts-expect-error' directive`),
+    // and the type half of BOTH sinks is held by
+    // `pnpm check:optional-error-sink`.
   });
 
   it('heals a record that drifted from an EXISTING metadata definition (metadata wins)', async () => {

@@ -251,7 +251,7 @@ describe('reconcileMembership / backfillMemberships — off-vocabulary policy (#
     const res = await reconcileMembership(makeEngine(), 'user-1', {
       policy: asPolicy('inviteOnly'),
       resolveTargetOrg: async () => 'org_default',
-      logger: { error },
+      logger: { error, warn: vi.fn() },
     });
     // Returned, so the diagnosis survives a caller that passed no logger.
     expect(res.error).toContain(`'inviteOnly'`);
@@ -302,7 +302,7 @@ describe('reconcileMembership / backfillMemberships — off-vocabulary policy (#
       // fields that have no business in a log line.
       policy: asPolicy({ membershipPolicy: 'invite-only', adminEmail: 'ops@example.com' }),
       resolveTargetOrg: async () => 'org_default',
-      logger: { error },
+      logger: { error, warn: vi.fn() },
     });
     expect(res.outcome).toBe('invalid-policy');
     expect(res.error).toContain('[object]');
@@ -315,7 +315,7 @@ describe('reconcileMembership / backfillMemberships — off-vocabulary policy (#
     const res = await reconcileMembership(makeEngine(), 'user-1', {
       policy: asPolicy('x'.repeat(500)),
       resolveTargetOrg: async () => 'org_default',
-      logger: { error },
+      logger: { error, warn: vi.fn() },
     });
     expect(res.error).toContain('(truncated)');
     expect(res.error!.length).toBeLessThan(200);

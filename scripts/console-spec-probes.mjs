@@ -146,6 +146,24 @@ export function readBundle(assetsDir) {
  * same staleness question. Appending an entry must not need a shape change.
  */
 export function writeStamp(distDir, entries) {
+  // A stamp with no entries asserts NOTHING about the dist it sits beside, and
+  // check:console-injection's three substantive verdicts — published-only
+  // detector present, stamped fresh witness missing, probe expired — all live
+  // inside its loop over this array. Writing an empty one would produce a dist
+  // that satisfies `--require-stamp` while the gate makes no assertion at all.
+  //
+  // Unrepresentable here rather than only detected there: this is the single
+  // call site every producer must pass, and the array shape above exists to be
+  // GROWN (objectstack#9659), so the day entries are derived from a package list
+  // instead of a literal, a filter that matches nothing becomes producible.
+  // Refusing at the write keeps that from ever reaching a dist.
+  //
+  // The caller downgrades this throw to a warning and writes no stamp, which
+  // lands the build in the missing-stamp state the gate already refuses under
+  // `--require-stamp` — an unguarded state converted into a guarded one.
+  if (!Array.isArray(entries) || entries.length === 0) {
+    bad(`refusing to write an empty ${STAMP_BASENAME}: a stamp with no packages asserts nothing`);
+  }
   const stamp = {
     stampVersion: STAMP_VERSION,
     generatedBy: 'scripts/assert-console-spec-injection.mjs',

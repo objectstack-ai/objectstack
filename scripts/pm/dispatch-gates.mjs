@@ -3148,6 +3148,39 @@ function selfTest() {
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
+  // The sixth instance of the class (#10648), and the worst-shaped one: three
+  // of check-doc-authoring's four roots were bare words (`.claude` survived on
+  // the dotted-dir arm alone), while its SKIP_PATHS carried separators and were
+  // taken. Five of the six paths it declared were therefore EXCLUSIONS, and 383
+  // of its 389 walked files were declared by nothing. The failure printed as a
+  // populated `names:` column, which reads as "declared, just not relevant to
+  // you" rather than as a blind spot — the reason it survived five same-class
+  // fixes without being noticed.
+  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'));
+  // One case per declared root, because a single one passes for a declaration
+  // that dropped the other three — which is the exact shape being fixed. Each
+  // path is reachable ONLY through its root's subtree spelling, never through a
+  // SKIP_PATHS literal.
+  t('the doc-authoring gate reaches the live docs corpus it declares', docAuthoringHints.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
+  t('and the top-level docs guides, which are files rather than a subtree', docAuthoringHints.some((h) => hintCovers(h, 'docs/protocol-upgrade-guide.md')));
+  // ⚠️ This one case does NOT pin the declaration, and says so rather than
+  // reading as though it does: `.claude` is a top-level DOTTED dir, which
+  // `looksPathy` admits and `hintCovers` does not refuse, so the bare ROOTS
+  // entry reaches this path on its own. Measured — deleting `.claude/**` from
+  // the gate leaves this case green, exactly the way check-nul-bytes survives
+  // the ablation above. What it pins is that `.claude` stays reachable AT ALL;
+  // the declaration itself is pinned in the gate's own self-test, which
+  // requires a subtree spelling for every separator-less ROOT.
+  t('and the agent operating manual it took in for the same reason', docAuthoringHints.some((h) => hintCovers(h, '.claude/agents/os-dev.md')));
+  t('and the published skills catalog', docAuthoringHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
+  t('and the content tree', docAuthoringHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  // The negative half, load-bearing for a declaration spanning four roots: a
+  // gate named on EVERY card is the louder version of naming none. These are
+  // the three biggest trees in the repo and none of them is corpus.
+  t('and claims nothing under packages/', !docAuthoringHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  t('nor under apps/', !docAuthoringHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !docAuthoringHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+
   // The second gate of that class (#9700): a whole-tree ESLint ratchet whose
   // only literals were its own baseline artifact and the ref it diffs against,
   // so it scored `silent` for every card in the tree while being REQUIRED in
@@ -3255,6 +3288,61 @@ function selfTest() {
   // bought by the declaration and by nothing else.
   t('the bare root word the gate spells in ROOTS is still refused as too generic', !hintCovers('skills', 'skills/objectstack-platform/SKILL.md'));
   t('while the declared subtree covers that same path', hintCovers('skills/**', 'skills/objectstack-platform/SKILL.md'));
+
+  // The seventh instance of the same directory class (#10664), in a
+  // PACKAGE-scoped gate — `pnpm --filter @objectstack/lint run
+  // check:doc-formula-expressions`, REQUIRED in lint.yml — so the source this
+  // reads is resolved through that package's manifest rather than the root one.
+  //
+  // Its ROOTS were `['.claude', 'docs', 'skills', 'content']`, three bare words
+  // and one dotted dir, while its SKIP_PATHS spelled five exclusions WITH
+  // separators. Measured on this tree: of the 1388 files it walks, 396 (28.5%)
+  // were declared by nothing — every file under `docs` (156), `skills` (48) and
+  // `content` (192). Inside the `docs` root the shape was inverted rather than
+  // merely absent: `docs/plans/` derived the gate (an exclusion, via its own
+  // SKIP_PATHS literal) while `docs/qa/` derived nothing.
+  //
+  // Read from the real gate, not a fixture: what is pinned is that the tree
+  // still HAS the declaration.
+  const docFormulaHints = extractWatchHints(readFileSync(join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'));
+  // One case per declared root, because a single one passes for a declaration
+  // that dropped the other two. Each path is reachable ONLY through its root's
+  // subtree spelling, never through a SKIP_PATHS literal.
+  t('the doc-formula gate reaches the live docs corpus it declares', docFormulaHints.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
+  t('and the published skills catalog', docFormulaHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
+  t('and the content tree', docFormulaHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
+  // ⚠️ These two do NOT pin the declaration, and say so rather than reading as
+  // though they do. `.claude` is a top-level DOTTED dir, which `looksPathy`
+  // admits and `hintCovers` does not refuse; `packages/spec/src` (the gate's
+  // SPEC_ROOT, its second surface — 972 files) already carries a separator.
+  // Both reach their paths on the bare literal alone — measured: deleting the
+  // declaration outright leaves both green. What they pin is that those two
+  // surfaces stay reachable AT ALL; the declaration itself is pinned in the
+  // gate's own self-test, which requires a subtree spelling for every
+  // separator-less ROOT and a separator in SPEC_ROOT.
+  t('and the agent operating manual it walks for the same reason', docFormulaHints.some((h) => hintCovers(h, '.claude/agents/os-dev.md')));
+  t('and its second surface, the spec TSDoc population', docFormulaHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
+  // The negative half, load-bearing for a declaration spanning four roots: a
+  // gate named on EVERY card is the louder version of naming none. `packages/`
+  // must be probed OUTSIDE `packages/spec/src`, which the gate really does read
+  // — a case using a spec path would pass on SPEC_ROOT and pin nothing.
+  t('and claims nothing elsewhere under packages/', !docFormulaHints.some((h) => hintCovers(h, 'packages/core/src/index.ts')));
+  t('nor under apps/', !docFormulaHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
+  t('nor under examples/', !docFormulaHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
+  // The bounded residual, pinned as pre-existing rather than as a cost of this
+  // declaration. `hintCovers` cannot subtract, so `docs/**` necessarily claims
+  // the exempt `docs/plans` — but that subtree ALREADY derived the gate through
+  // its own SKIP_PATHS literal, so the declaration adds nothing on that side.
+  // Asserted with the declaration removed from the hint set, which is what makes
+  // it a measurement instead of a restatement.
+  const withoutDeclaration = docFormulaHints.filter((h) => !['docs/**', 'skills/**', 'content/**', '.claude/**'].includes(h));
+  t('the exempt subtree derived the gate before this declaration, and still does — the over-claim is bounded, not new', withoutDeclaration.some((h) => hintCovers(h, 'docs/plans/x.md')));
+  t('while the live corpus derived nothing without it — the gap this closes', !withoutDeclaration.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
+  // The pair that makes the declaration worth having: the bare words this gate
+  // spells in its ROOTS array stay refused, so the coverage above is bought by
+  // the declaration and by nothing else.
+  t('the bare root words the gate spells in ROOTS are still refused as too generic', !hintCovers('docs', 'docs/qa/platform-checklist/RUNNER.md') && !hintCovers('content', 'content/docs/deployment/cli.mdx'));
+  t('while the declared subtrees cover those same paths', hintCovers('docs/**', 'docs/qa/platform-checklist/RUNNER.md') && hintCovers('content/**', 'content/docs/deployment/cli.mdx'));
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
   //

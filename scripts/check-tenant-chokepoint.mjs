@@ -111,6 +111,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -212,7 +214,7 @@ function isScoped(body, name) {
  * green run over a clean tree cannot exercise at all.
  */
 export function analyzeSource(fileName, text) {
-  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+  const sf = parseSourceFile(fileName, text);
   const builders = [];
   const unclassifiable = [];
 
@@ -553,9 +555,14 @@ above catches it" is not one: this asserts the chokepoint's own contract.`);
   );
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   selfTest();
   process.exit(0);
 }
 
-main();
+if (invokedDirectly) main();

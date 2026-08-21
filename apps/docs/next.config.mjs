@@ -6,7 +6,19 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
-  output: 'standalone',
+  // No `output: 'standalone'` here on purpose. The standalone packer
+  // (`writeStandaloneDirectory` -> `copyTracedFiles`) opens
+  // `.next/next-server.js.nft.json`, and that open is the ONLY thing in a
+  // production build that reads it. Vercel builds this app with Turbopack via
+  // `vercel.json`'s `pnpm turbo run build --filter=@objectstack/docs`, and the
+  // production build died there with ENOENT on that file while the same cold
+  // build passes locally -- so the trace set is absent under Vercel's builder
+  // specifically. Nothing in this repo consumes `.next/standalone`: no
+  // Dockerfile, workflow, script or config references it, and `docker/Dockerfile`
+  // does not build apps/docs at all. Vercel does its own serverless packaging,
+  // so the setting bought nothing here and cost the whole deployment. If this
+  // app ever gains a self-hosted Node target that needs the standalone bundle,
+  // reintroduce it together with a builder that emits the trace set.
   experimental: {
     // The docs site prerenders 400+ MDX pages. Next spawns one static-generation
     // worker per CPU, and on Vercel's high-core build container that fan-out

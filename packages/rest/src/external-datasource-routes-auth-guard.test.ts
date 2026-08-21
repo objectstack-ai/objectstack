@@ -3,7 +3,7 @@
 /**
  * [#9686] The `/api/v1/datasources/:name/external/*` federation family requires
  * an authenticated caller — on every route, read and write alike — and
- * [#9901] a CAPABILITY above that on four of the five.
+ * [#9901/#10255] a CAPABILITY above that on every route.
  *
  * ## What this pins, and why it is driven through the real plugin
  *
@@ -56,10 +56,16 @@
  * here, which is what makes the read/write split falsifiable rather than
  * merely written down.
  *
- * `POST /external/validate` is the one route the ruling does not name: it has
- * no admin twin and creates no metadata, so it keeps the #9686 authentication
- * floor. That is pinned too — an un-ruled route silently acquiring a
- * neighbour's gate is a change nobody decided.
+ * [#10255] `POST /external/validate` was the one route the #9901 ruling did
+ * not name: no admin twin, no metadata created, so it kept the #9686
+ * authentication floor — pinned here as an explicit `capability: null` row so
+ * that gating it later had to change the table. That later card is #10255,
+ * ruled 2026-08-20 (verbatim: 「同意你的意见。」, accepting option A): validate
+ * takes the READ capability, because `validateAll` drives the same live
+ * remote-schema introspection the read twins gate and reports on it. The row
+ * now carries `READ_CAPABILITY`, and its case below flips from "still served
+ * holding nothing" to "refused holding nothing" — deliberately, not by a
+ * neighbour's loop swallowing it.
  *
  * Both credential kinds the platform admits are exercised, because the cheap
  * mistake here is to read only a better-auth session: that would refuse a
@@ -96,10 +102,12 @@ type Handler = (req: any, res: any) => any;
  * runtime-origin federated object, the refresh rewrites the cached catalog
  * snapshot. Both are asserted to be unreachable without an identity.
  *
- * `capability: null` is `POST /external/validate`, the one route the ruling
- * does not name. Spelled as an explicit `null` rather than omitted so that a
- * later edit which gates it has to change this table — an absent field would
- * let that happen silently.
+ * [#10255] There is no `capability: null` row any more: `POST
+ * /external/validate` carried one — spelled as an explicit `null` rather than
+ * omitted, so that a later edit gating it had to change this table — and the
+ * 2026-08-20 #10255 ruling is that later edit: validate is a read
+ * (`validateAll` drives the same live remote introspection the read twins
+ * gate), so its row now carries `READ_CAPABILITY` like its two read siblings.
  */
 const READ_CAPABILITY = 'manage_platform_settings';
 const WRITE_CAPABILITY = 'manage_metadata';
@@ -109,7 +117,7 @@ const FAMILY = [
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/draft`, ok: 200, call: 'generateObjectDraft', writes: false, capability: READ_CAPABILITY },
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/import`, ok: 201, call: 'importObject', writes: true, capability: WRITE_CAPABILITY },
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/refresh-catalog`, ok: 200, call: 'refreshCatalog', writes: true, capability: WRITE_CAPABILITY },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateAll', writes: false, capability: null },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateAll', writes: false, capability: READ_CAPABILITY },
 ] as const;
 
 /** Every capability an entitled caller needs to clear all five routes. */
@@ -394,12 +402,15 @@ describe('[#9686] the same boot still serves an entitled caller', () => {
 });
 
 describe('[#9901] the family requires a capability above authentication', () => {
-  it('refuses an authenticated caller holding NOTHING on all four ruled routes — 403 PERMISSION_DENIED, before the service', async () => {
+  it('refuses an authenticated caller holding NOTHING on all five routes — 403 PERMISSION_DENIED, before the service', async () => {
+    // [#10255] Five, not four: `POST /external/validate` joined the ruled set
+    // on 2026-08-20, so there is no `capability: null` row left to filter out
+    // and this loop runs the whole family.
     const { table, service, lookups } = await bootFederation({
       withAuth: true, withEngine: true, grants: [],
     });
 
-    for (const route of FAMILY.filter((r) => r.capability !== null)) {
+    for (const route of FAMILY) {
       const { statusCode, body } = await call(table, route, { authorization: `Bearer ${SESSION}` });
 
       // Status AND code. "not 200" would be satisfied by the 401 the anonymous
@@ -414,7 +425,7 @@ describe('[#9901] the family requires a capability above authentication', () => 
 
     // The refusal precedes dispatch — so on the two routes that WRITE, nothing
     // was created before the caller was turned away.
-    for (const route of FAMILY.filter((r) => r.capability !== null)) {
+    for (const route of FAMILY) {
       expect(
         (service as any)[route.call],
         `${route.call} must not run for an unentitled caller`,
@@ -459,17 +470,40 @@ describe('[#9901] the family requires a capability above authentication', () => 
     }
   });
 
-  it('POST /external/validate keeps the #9686 authentication floor — the ruling does not name it', async () => {
-    // The route the 2026-08-20 ruling enumerates NO capability for: no admin
-    // twin, no metadata created. An authenticated caller holding nothing is
-    // served here while being refused the other four on the same boot, which is
-    // the difference stated rather than implied. A later card may change this;
-    // it will have to change this case to do it.
+  it('[#10255] POST /external/validate requires the READ capability — the authentication-floor era is over', async () => {
+    // This case is the previous pin FLIPPED, deliberately. Until the
+    // 2026-08-20 #10255 ruling it asserted the exact opposite — an
+    // authenticated caller holding nothing was SERVED here while refused the
+    // other four — because #9901's ruling did not name this route. The ruling
+    // that changed it is recorded on #10255 (option A): `validateAll` drives
+    // the same live remote-schema introspection the read twins gate, so
+    // validate is a read and answers to the read capability.
     const { table, service } = await bootFederation({
       withAuth: true, withEngine: true, grants: [],
     });
 
-    const validate = FAMILY.find((r) => r.capability === null)!;
+    const validate = FAMILY.find((r) => r.call === 'validateAll')!;
+    const { statusCode, body } = await call(table, validate, { authorization: `Bearer ${SESSION}` });
+
+    // Refused with the capability NAMED — the one thing the refused caller can
+    // act on — and the service never ran, so an unentitled caller cannot
+    // trigger remote introspection as a side effect of being refused.
+    expect(statusCode).toBe(403);
+    expect(body?.success).toBe(false);
+    expect(body?.error?.code).toBe('PERMISSION_DENIED');
+    expect(body?.error?.message).toContain(READ_CAPABILITY);
+    expect(service.validateAll).not.toHaveBeenCalled();
+  });
+
+  it('[#10255] …and `manage_platform_settings` alone clears it, like its two read siblings', async () => {
+    // The success half of the flip, on its own boot: the capability that
+    // clears the read twins clears validate too — this is what "joined the
+    // reads" means, stated as a served request rather than a table row.
+    const { table, service } = await bootFederation({
+      withAuth: true, withEngine: true, grants: [READ_CAPABILITY],
+    });
+
+    const validate = FAMILY.find((r) => r.call === 'validateAll')!;
     const { statusCode, body } = await call(table, validate, { authorization: `Bearer ${SESSION}` });
 
     expect(statusCode).toBe(validate.ok);

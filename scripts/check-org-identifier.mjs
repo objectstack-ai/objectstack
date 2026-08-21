@@ -269,7 +269,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
+import { parseSourceFile } from './ts-parse.mjs';
 import { maskComments } from './js-comment-mask.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOTS = ['examples', 'apps', 'packages'];
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.cts', '.mts'];
@@ -499,7 +501,7 @@ function parse(text, file) {
   // `scriptKind` left to the parser so `.tsx` / `.jsx` / `.mjs` are inferred
   // from the name. The parser is error-tolerant: a file it cannot fully parse
   // still yields the nodes around the failure rather than throwing.
-  return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, /* setParentNodes */ true);
+  return parseSourceFile(file, text);
 }
 
 // ── the gate ──────────────────────────────────────────────────────────────
@@ -784,4 +786,7 @@ cheapest way to silence it while leaving the dead read in place.`);
   process.exit(1);
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

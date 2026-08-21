@@ -58,6 +58,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { countTestFiles } from './partition-test-shards.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUT = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
@@ -382,4 +383,7 @@ function main() {
   );
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

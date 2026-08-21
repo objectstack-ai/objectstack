@@ -87,7 +87,7 @@ npm run validate   # verify metadata: schema + predicates + bindings
 ```
 
 See the docs:
-[Your First Project](https://docs.objectstack.ai/docs/getting-started/your-first-project).
+[Your First Project](https://objectstack.ai/docs/getting-started/your-first-project).
 
 ## License
 

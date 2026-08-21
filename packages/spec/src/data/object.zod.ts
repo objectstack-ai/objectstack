@@ -940,6 +940,25 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: `lifecycle.archive.after ('${lc.archive.after}') must equal retention.maxAge ('${lc.retention.maxAge}') — the hot window ends where the archive begins`,
     });
   }
+  // [#10527] The retention + ttl + archive triple — the alignment above, one
+  // policy wider. Since [#10347] the Archiver selects the rows it moves by the
+  // ttl cutoff (`ttl.field` older than `ttl.expireAfter`) whenever `ttl` is
+  // declared, and by `created_at`/`archive.after` only when it is not — so on
+  // this triple the age bound (`retention.maxAge`, pinned equal to
+  // `archive.after` above) no longer separately bounds the hot store: a row
+  // whose `ttl.field` sits in the future stays hot past `retention.maxAge`,
+  // silently. One declared bound nothing enforces is exactly the class this
+  // block refuses loudly (ADR-0049 declared ≠ enforced), so the triple parses
+  // only when the ttl restates the age bound — same clock (`created_at`), same
+  // window — and any divergence is refused here, at authoring time, rather
+  // than resolved by whichever column the sweep happens to read.
+  if (lc.retention && lc.ttl && lc.archive
+      && (lc.ttl.field !== 'created_at' || lc.ttl.expireAfter !== lc.retention.maxAge)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `lifecycle.ttl ('${lc.ttl.expireAfter}' after '${lc.ttl.field}') must restate retention.maxAge ('${lc.retention.maxAge}' after created_at) when retention, ttl and archive are all declared — the Archiver moves rows by the ttl cutoff when ttl is declared, so a diverging age bound no longer bounds the hot store; align ttl to { field: 'created_at', expireAfter: '${lc.retention.maxAge}' } or drop retention or ttl`,
+    });
+  }
   if (lc.retention?.onlyWhen && lc.storage?.strategy === 'rotation') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

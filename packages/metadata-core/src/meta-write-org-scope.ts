@@ -72,9 +72,26 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared
 
 /**
  * Metadata types whose registry entry declares `allowOrgOverride: true`,
- * augmented with each one's plural spelling so a REST-conventional URL
- * (`/api/v1/meta/views/...`) is judged identically to the singular form —
- * the same normalization the protocol's own allow-list does.
+ * augmented with each one's MANIFEST plural spelling (`SINGULAR_TO_PLURAL`).
+ *
+ * ⚠️ [#10340] That augmentation is NOT the protocol's URL fold, and the doc
+ * that used to stand here — "judged identically to the singular form — the
+ * same normalization the protocol's own allow-list does" — was measured
+ * false. The protocol folds through `META_URL_TO_SINGULAR`, the COMPLETE
+ * spelling map; `SINGULAR_TO_PLURAL` is the manifest-collection map, which is
+ * incomplete by design (`translation` and `email_template` have no manifest
+ * key, so `translations` / `email_templates` are not in this set). Handed a
+ * raw URL segment this predicate therefore answered env-wide for those two
+ * spellings while storage folded them into an org-scoped type — one item,
+ * two partitions, addressed by spelling.
+ *
+ * The correction landed at the boundary, not here: the REST `/meta` doors
+ * fold the segment through `canonicalMetaUrlType` BEFORE the scope decision,
+ * exactly as `metadata-url-spelling.ts` mandates ("folding happens at the
+ * boundary and only there; the layers below keep reading the single
+ * canonical singular"). ⛔ Do not "complete" this set with the URL map — a
+ * predicate below the boundary consuming the URL spelling contract is the
+ * repair that module's header forbids, and #7894 already refused once.
  */
 const ORG_OVERRIDABLE_TYPES: ReadonlySet<string> = (() => {
     const out = new Set<string>();
@@ -90,10 +107,18 @@ const ORG_OVERRIDABLE_TYPES: ReadonlySet<string> = (() => {
 /**
  * Does the registry declare this metadata type per-org overridable?
  *
- * Accepts either spelling of the type (`view` / `views`). A type with no
- * registry entry at all — runtime-registered plugin types — answers `false`:
- * boot hydration has no per-org channel for them either, so an org-scoped row
- * would be the same phantom.
+ * Expects the CANONICAL singular type. It additionally tolerates the
+ * manifest-collection spellings (`views`, `emailTemplates`, …) — kept for the
+ * dispatcher-era callers — but ⚠️ [#10340] that tolerance is NOT the URL
+ * fold: URL-only spellings (`translations`, `email_templates`) answer
+ * `false` here. A caller holding a raw `/meta/:type` segment must fold it
+ * through `canonicalMetaUrlType` BEFORE asking, as the REST doors do; see
+ * `ORG_OVERRIDABLE_TYPES` above for the measurement and for why this
+ * predicate must not grow the URL map itself.
+ *
+ * A type with no registry entry at all — runtime-registered plugin types —
+ * answers `false`: boot hydration has no per-org channel for them either, so
+ * an org-scoped row would be the same phantom.
  */
 export function declaresOrgOverride(type: string): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;

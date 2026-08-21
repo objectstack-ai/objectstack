@@ -17,41 +17,12 @@ import { SchemaRegistry } from './registry';
  * These tests assert on what the DRIVER receives: no `{token}` may survive to
  * the driver AST, and an unresolvable one must throw rather than pass through.
  */
-vi.mock('./registry', () => {
-  const instance: any = {
-    getObject: vi.fn(),
-    resolveObject: vi.fn((n: string) => instance.getObject(n)),
-    // [#9154] This double used to OMIT `getAllObjects`, and every test here
-    // passed anyway: the engine's roll-up summary index read it as
-    // `getAllObjects?.() ?? []`, so a double that does not model the method
-    // was indistinguishable from a registry with nothing in it — the write
-    // path silently skipped the insert-time roll-up seed (#5749) and the
-    // post-write recompute. With the optional call gone the omission is a
-    // hard `TypeError`, which is the point: the double now has to model the
-    // method the engine actually calls. Empty is the truthful body for THIS
-    // suite — it declares no `summary` field, so the roll-up index over it is
-    // empty either way, and now it says so instead of the engine inventing it.
-    getAllObjects: vi.fn(() => []),
-    registerObject: vi.fn(),
-    getObjectOwner: vi.fn(),
-    registerNamespace: vi.fn(),
-    registerKind: vi.fn(),
-    registerItem: vi.fn(),
-    registerApp: vi.fn(),
-    installPackage: vi.fn(),
-    reset: vi.fn(),
-    metadata: { get: vi.fn(() => new Map()) },
-  };
-  function SchemaRegistry() {
-    return instance;
-  }
-  Object.assign(SchemaRegistry, instance);
-  return {
-    SchemaRegistry,
-    computeFQN: (_ns: string | undefined, name: string) => name,
-    parseFQN: (fqn: string) => ({ namespace: undefined, shortName: fqn }),
-    RESERVED_NAMESPACES: new Set(['base', 'system']),
-  };
+vi.mock('./registry', async () => {
+  // [#10551] The one shared factory — see `registry-module-mock.ts` for the
+  // member set, the #9002 / #9154 lessons it carries, and why the async factory
+  // form is what makes this import legal under `vi.mock` hoisting.
+  const { createRegistryModuleMock } = await import('./registry-module-mock.js');
+  return createRegistryModuleMock();
 });
 
 const DEAL_SCHEMA = {

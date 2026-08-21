@@ -971,7 +971,12 @@ export class ApprovalService implements IApprovalService {
 
     try {
       if (type === 'team') {
-        const users = await this.expandTeamUsers(String(a.value));
+        // #10230: the request's OWN organization, not `directoryOrg`. They are
+        // provably equal on this branch (`team` is not org-scoped, so an
+        // `organization` declaration is refused above), and naming the request
+        // org says what the screen asserts: tenancy of the record being
+        // approved, never an ADR-0105 D9 retarget this type does not have.
+        const users = await this.expandTeamUsers(String(a.value), organizationId);
         if (users.length) return users;
       } else if (type === 'department' || type === 'business_unit' || type === 'bu') {
         const users = await bounded(await this.expandBusinessUnitUsers(String(a.value), directoryOrg));
@@ -1139,7 +1144,14 @@ export class ApprovalService implements IApprovalService {
       try {
         if (resolveAs === 'department') users = await this.expandBusinessUnitUsers(key, directoryOrg);
         else if (resolveAs === 'position') users = await this.expandPositionUsers(key, directoryOrg);
-        else if (resolveAs === 'team') users = await this.expandTeamUsers(key);
+        // #10230: `directoryOrg` and NOT the request org, the opposite of the
+        // static `team` branch — and deliberately so. `expression` IS org-scoped
+        // (APPROVER_ORG_SCOPED), so a declaration here resolves to a legitimately
+        // retargeted sibling organization and the team must belong to the
+        // directory actually being consulted. `filterApproversWhoCanRead` below
+        // then applies the D2 read screen to what comes back, exactly as it
+        // already does for the other `resolveAs` kinds.
+        else if (resolveAs === 'team') users = await this.expandTeamUsers(key, directoryOrg);
         else {
           throw new Error(
             `VALIDATION_FAILED: expression approver has unknown resolveAs '${resolveAs}' — `
@@ -1164,9 +1176,30 @@ export class ApprovalService implements IApprovalService {
     return { slots, raw };
   }
 
-  /** Flat team — `sys_team` is better-auth's collaboration grouping (no hierarchy). */
-  private async expandTeamUsers(teamId: string): Promise<string[]> {
+  /**
+   * Flat team — `sys_team` is better-auth's collaboration grouping (no hierarchy).
+   *
+   * Takes an organization for the reason every sibling expansion does
+   * ({@link expandBusinessUnitUsers}, {@link expandPositionUsers},
+   * {@link expandMembershipTierUsers}): an approver expansion answers "who, in
+   * THIS organization". Before #10230 this one did not ask, and it was the last
+   * expansion that did not — a `team` approver naming ANOTHER organization's
+   * team routed that organization's people an approval over a record they are
+   * not a tenant of.
+   *
+   * ⚠️ The screen is on the TEAM, not on its members, and that is the whole
+   * difference from the screen next door ({@link managerIsProvablyOutsideOrg},
+   * #10153). `sys_user` carries no tenancy fact at all, so a manager can only
+   * be placed by his `sys_member` rows; `sys_team` carries `organization_id`
+   * outright (`packages/platform-objects/src/identity/sys-team.object.ts`), so
+   * a team id transitively names exactly one organization and ONE row answers
+   * the question. Screening the MEMBERS instead would be both a wider read and
+   * a different assertion — it would rule on #7497 (does approver routing imply
+   * record read visibility?), which this card does not.
+   */
+  private async expandTeamUsers(teamId: string, organizationId?: string | null): Promise<string[]> {
     if (!teamId) return [];
+    if (await this.teamIsProvablyOutsideOrg(teamId, organizationId)) return [];
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_team_member', {
@@ -1177,6 +1210,66 @@ export class ApprovalService implements IApprovalService {
       } as any);
     } catch { rows = []; }
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+  }
+
+  /**
+   * Is `teamId` PROVABLY a team of a DIFFERENT organization? (#10230)
+   *
+   * "Provably" carries the same posture the sibling screen states at length in
+   * {@link managerIsProvablyOutsideOrg}, for the same reasons:
+   *
+   *   - the team row carries an `organization_id` and it is not the request's
+   *       ⇒ the tenancy fact is present and NEGATIVE ⇒ screen it out;
+   *   - the row carries no `organization_id`, does not exist, or the read failed
+   *       ⇒ the tenancy fact is ABSENT ⇒ leave routing exactly as it was.
+   *
+   * The `organization_id = null` limb is not timidity — it is the reading
+   * {@link businessUnitOrgScope} settled on one screen below, for the identical
+   * shape: null on a platform object means "owned by no organization", which is
+   * what a seed writes because a seed cannot know the organization id the
+   * runtime mints at boot. Treating null as "not mine" would delete every
+   * seeded team approver at once — a larger behaviour change than the hole
+   * being closed. Measured, and not hypothetically: this package's own
+   * `team_ok` expansion fixture is exactly such a stack (it has
+   * `sys_team_member` rows, a request carrying an organization, and no
+   * `sys_team` row at all).
+   *
+   * Screening the TEAM before reading its members is also what keeps the cost
+   * at one row: a team that fails the screen never fans out.
+   */
+  private async teamIsProvablyOutsideOrg(
+    teamId: string,
+    organizationId?: string | null,
+  ): Promise<boolean> {
+    const requestOrg = organizationId ? String(organizationId) : '';
+    // No organization on the request ⇒ nothing to screen against, and no read.
+    // The ordinary single-organization / embedded stack costs nothing here.
+    if (!requestOrg) return false;
+    let rows: any[] = [];
+    try {
+      // No `as any` on this options bag — #4918's ratchet grandfathers this
+      // file for its EXISTING erasures only, and a NEW one must carry the
+      // declared type. `ApprovalEngine.find` already accepts it as written.
+      rows = await this.engine.find('sys_team', {
+        where: { id: teamId },
+        fields: ['id', 'organization_id'],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+    } catch { return false; } // team unreadable — see the fail-open note above
+    const row: any = Array.isArray(rows) ? rows[0] : null;
+    const teamOrg = row?.organization_id ? String(row.organization_id) : '';
+    if (!teamOrg) return false;                  // no tenancy fact on this team
+    if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
+    this.logger?.warn?.(
+      `[approvals] #10230: team '${teamId}' was dropped from the approver slate — `
+      + `'sys_team.organization_id' is '${teamOrg}', not the request's organization `
+      + `'${requestOrg}', so routing this approval to its members would put approval `
+      + `authority over the record outside its tenant. Point the approver at a team in `
+      + `this organization, or route this step with an approver type that names someone in it.`,
+      { teamId, teamOrganizationId: teamOrg, requestOrganizationId: requestOrg },
+    );
+    return true;
   }
 
   /**

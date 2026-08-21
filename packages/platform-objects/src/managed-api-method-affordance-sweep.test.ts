@@ -101,14 +101,23 @@ import { MANAGED_API_METHOD_UNAFFORDABLE, validateManagedApiMethods } from '@obj
  *    in front of tsc, `import.meta` becomes an error in a ledger that may only
  *    shrink. `__dirname` type-checks under the package's own config and is
  *    defined at runtime by vitest's transform (verified, not assumed).
- *  - `check:cross-package-test-inputs` recognises exactly two seeds —
- *    `dirname(fileURLToPath(import.meta.url))` and `__dirname` — when it detects
- *    statically that a test escapes its package. Deriving the root any other way
- *    (walking up to `pnpm-workspace.yaml`, resolving from `process.cwd()`) makes
- *    this file's real radius INVISIBLE to that gate, which then reports the
- *    declaration below as stale and asks for its removal. Losing it would put
- *    the sweep back in #7802's blind spot: turbo would cache a green for a diff
- *    that changed another package's object file. Measured both ways.
+ *  - `check:cross-package-test-inputs` detects an escaping read STATICALLY, by
+ *    resolving the seed expression, and `__dirname` is one of the spellings it
+ *    resolves. Which spellings those are is published rather than restated
+ *    here: `RECOGNISED_PATH_SPELLINGS` in the detector, printed verbatim in its
+ *    failure text and mirrored in AGENTS.md. Read it there — the set has been
+ *    widened twice (#8995, #9763) since this note was first written, and a
+ *    count copied into a comment goes stale silently while the published list
+ *    cannot. Deriving the root a way the detector does NOT resolve (walking up
+ *    to `pnpm-workspace.yaml`, resolving from `process.cwd()`) makes this
+ *    file's real radius INVISIBLE to that gate, which then reports the
+ *    declaration below as stale and asks for its removal — this file is
+ *    platform-objects' only escaping test, so hiding it empties the package.
+ *    Measured on ceb33a9f12 by reseeding from `process.cwd()`: the gate exits 1
+ *    with "@objectstack/platform-objects declares a cross-package input radius,
+ *    but no test in it reads outside the package any more". Acting on that and
+ *    deleting the entry would put the sweep back in #7802's blind spot: turbo
+ *    would cache a green for a diff that changed another package's object file.
  */
 const HERE = __dirname;
 /** …/packages/platform-objects/src → repo root */

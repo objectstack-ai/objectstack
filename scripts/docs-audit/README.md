@@ -147,11 +147,21 @@ declared` — and a declined declaration is a `brokenScan` verdict that **names 
 reports its narrowness, it does not widen it, and `--self-test` pins the population at its
 old value so a silent widening fails there.
 
-⚠️ **Boundary, declared not discovered:** a `route:` whose value is not a string literal at
-all (`route: ROUTES.health`) is invisible to the recognizer *and* to this counter — the only
-exact discriminator against the `route: string;` member each ledger's own entry interface
-declares is the opening quote. Pinned in `--self-test`; filed separately rather than papered
-over with a heuristic.
+**Values in no quote at all are counted too.** A `route:` / `client:` whose value is not a
+string literal (`route: ROUTES.health`, `route: BASE + '/x'`) is read by neither the
+recognizer (which needs a leading `'`) nor the declined-spelling counter (which needs a
+leading `"` or backtick). Such a row used to leave the population with **no verdict at all** —
+not read, not declined, absent from the denominator. It is now reported as unread, so the
+row ends up in a verdict either way.
+
+The `route: string;` member each ledger's own entry interface declares is **not** a row, and
+is excluded on a structural discriminator rather than on the quote: a type member sits inside
+an `interface`/`type` declaration and a table row never does. Comments and string payloads
+are masked out for the same reason — `runtime/src/route-ledger.ts` contains the English
+sentence *"It never named a mounted route: the branch"*. Both exclusions are pinned in
+`--self-test` in both directions; removing the type-declaration one turns all seven of
+today's accurate ledgers red (`259 of 266`), which is why a bare "count every `route:`"
+check was never an option.
 
 ### What it cannot see is reported, never implied
 
