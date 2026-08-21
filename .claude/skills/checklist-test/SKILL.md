@@ -123,17 +123,8 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 
 用 `issue_write`(github MCP)立单:
 
-- **标题 —— 恰好一种形状**(维护者裁定 2026-08-20;`scripts/qa/qa-rollup.mjs` 按此
-  **严格**解析,⛔ 非宽容):
-  `QA run · <selector> (<已判定>/<总数>) · <framework-sha8> · <YYYY-MM-DD> · <counts>`
-  恒 5 个 `·` 字段;`(<已判定>/<总数>)` **强制**、纯数字、`已判定 ≤ 总数`,是标题的一部
-  分而非可选装饰;sha 恰好 8 位小写十六进制;日期为真实日历日;`<counts>` 是 ` / ` 分隔
-  的 `<n> <VERDICT>` 段,**大写**、按 `PASS / PARTIAL / FAIL / BLOCKED / NOT-RUN` 排序、
-  每桶至多一次(**省掉某桶 = 未声明,不等于 0**,要零就写 `0 FAIL`)。⛔ 退役写法一个都
-  不许再用:`(FULL area)`、`(N items)`、`(N of M items)`、`(N/M items consulted)`、省掉
-  括号、尾随 `(11 not-run)`。`(FULL area)` 正是裁定由来:它不声明总数,戴着它的记录只判
-  了本区 33 项里的 13 项,却读作全覆盖。存量记录**不迁移**(new records only);执法面是
-  roll-up 的 **Not parsed** 段 —— 立单后跑一次它,就是本步自检。
+- **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:恰好
+  一种形状、严格解析,`(<已判定>/<总数>)` **强制**;语法与退役写法见 RUNNER.md「The record title」。
 - **标签** —— 只带 `qa-run`,⛔ 不挂 `bug`/priority 等工作标签:run 记录是协议载体、
   不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取义务条款)。
   **这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。实测漂移形态:记录事后

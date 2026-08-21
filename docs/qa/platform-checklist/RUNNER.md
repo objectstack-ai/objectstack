@@ -397,6 +397,43 @@ carve-out excepted) · derived item verdicts + fixture gaps. The durable,
 version-controlled truth is still the checklist under `areas/`; a run is a dated assertion
 about one build, and it lives in its issue, not the tree.
 
+### The record title — one canonical shape
+
+Maintainer ruling 2026-08-20: the title is a **contract**, not prose, and it has exactly
+one shape. `scripts/qa/qa-rollup.mjs` parses it **strictly** — a title that deviates is
+printed in the roll-up's "Not parsed" section instead of being absorbed, so a mistake is
+visible the first time rather than degrading the view silently.
+
+```text
+QA run · <selector> (<judged>/<total>) · <framework-sha8> · <YYYY-MM-DD> · <counts>
+```
+
+| field | rule |
+|---|---|
+| separator | `·` (MIDDLE DOT), **exactly five fields**, never more or fewer. A selector that would contain the separator cannot be spelled — rename it. |
+| `QA run` | the literal prefix, unchanged |
+| `<selector>` | what this run selected; carries no parentheses of its own |
+| `(<judged>/<total>)` | **mandatory**, bare digits only, `judged` not greater than `total`. Not decoration — it is the coverage claim the record is read on. |
+| `<framework-sha8>` | exactly 8 lowercase hex characters |
+| `<YYYY-MM-DD>` | a real calendar date |
+| `<counts>` | ` / `-separated `<n> <VERDICT>` segments; verdicts **uppercase**, in the order `PASS / PARTIAL / FAIL / BLOCKED / NOT-RUN`, each bucket at most once |
+
+**An omitted bucket means "not declared", never zero** — the roll-up renders the two
+differently, so write `0 FAIL` when you mean zero.
+
+**Retired phrasings — ⛔ none of these may be written again:** `(FULL area)`, `(N items)`,
+`(N of M items)`, `(N/M items consulted)`, omitting the parenthetical entirely, and the
+trailing `(11 not-run)` spelling of NOT-RUN. `(FULL area)` is why the ruling exists: it
+declares no total, and a record wearing it judged 13 of its area's 33 items while reading
+as complete coverage. A run that reached 1 of 12 items writes
+`(1/12) · … · 0 PASS / 1 PARTIAL / 11 NOT-RUN` — `not-run` is an honest verdict and the
+title has to show it.
+
+Existing records are **not migrated**; the ruling is new-records-only. Records written
+before the contract keep their shapes, and the roll-up lists them separately, labelled as
+predating it rather than as defects. Run `node scripts/qa/qa-rollup.mjs` after filing —
+that is this step's self-check.
+
 ### Extraction obligation — the run record is a protocol carrier, not work
 
 Run issues are excluded from the PM's backlog sweep, same class as the `pm:seat` post
