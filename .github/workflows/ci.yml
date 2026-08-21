@@ -463,6 +463,32 @@ jobs:
                    --changed "$RUNNER_TEMP/changed-files.txt"; then
               echo "::warning::Could not union cross-package scans into the affected set; falling back to the full package list for this shard."
               pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
+            # A fourth signal the failure branches do not cover: a producer that
+            # exits 0 with a wrong, plausible, EMPTY answer. Only that `git
+            # diff`'s exit STATUS was checked, never its emptiness, so a
+            # merge-base resolving to something wrong-but-valid gave an empty
+            # changed-file list -> zero affected packages -> a green shard that
+            # tested nothing, with every log line reading like a normal quiet PR
+            # (#10057). The shard attestation (#6082) does not cover it: it
+            # attests "shard N ran and every step passed", which is exactly what
+            # a shard that tested nothing does.
+            #
+            # Empty is decidable as BROKEN here, and only here: a pull_request
+            # always differs from its merge-base. At the partitioner zero is
+            # frequently the CORRECT answer (a docs-only PR genuinely affects no
+            # package, and with 6 shards a small change legitimately leaves
+            # shards empty), so a blanket "red on empty" belongs there least of
+            # all -- this is the one place selection-failed and nothing-selected
+            # can be told apart.
+            #
+            # Scoping this to pull_request needs no `github.event_name` test:
+            # SCM_BASE is assigned only inside the `pull_request` guard above, so
+            # this whole `[ -n "$SCM_BASE" ]` branch is unreachable on push and
+            # merge_group. Those keep taking the full-list path in the `else`
+            # below, by design.
+            elif [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
+              echo "::warning::The diff against merge-base $SCM_BASE listed no changed files, which a pull_request cannot legitimately produce; falling back to the full package list for this shard rather than selecting nothing (#10057)."
+              pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
             fi
           else
             # Falling back to the FULL package list, never to the frozen
