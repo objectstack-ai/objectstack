@@ -79,7 +79,7 @@ export const ContactViews = defineView({
     create: {
       type: 'simple', data, title: 'New contact',
       sections: [
-        { label: 'Who is this?', columns: 1, fields: ['name', 'email', 'phone', 'company'] },
+        { name: 'who', label: 'Who is this?', columns: 1, fields: ['name', 'email', 'phone', 'company'] },
       ],
     },
   },
