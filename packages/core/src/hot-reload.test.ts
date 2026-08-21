@@ -5,7 +5,7 @@ import { HotReloadManager } from './hot-reload.js';
 import type { ObjectLogger } from './logger.js';
 import type { Plugin } from './types.js';
 import type { HotReloadConfigParsed } from '@objectstack/spec/kernel';
-import { recordGuards, stillPinningTheLoop } from './refd-timer-probe.testkit.js';
+import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
 
 /** Records `error` reports; every other level is dropped. `child()` is self. */
 function createRecordingLogger(errors: { message: string; error?: unknown }[]): ObjectLogger {
@@ -73,7 +73,7 @@ describe('HotReloadManager', () => {
       manager.registerPlugin('guarded-plugin', config);
 
       // The guard is named by the timeout it was armed with rather than
-      // counted out of the process — `refd-timer-probe.testkit.ts` explains
+      // counted out of the process — `@objectstack/refd-timer-testkit` explains
       // why `reloadPlugin()`'s `await` makes an absolute count unsound (#10685).
       let reloaded = false;
       const guards = await recordGuards(config.shutdownTimeout, async () => {

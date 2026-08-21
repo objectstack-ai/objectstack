@@ -1,0 +1,33 @@
+{
+  "name": "@objectstack/refd-timer-testkit",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "The subject-scoped instrument the ref'd-timer leak pins measure with (#4813, #6329, #10604, #10685, #10783). A process-global `getActiveResourcesInfo()` timer count is ambient — it belongs to every co-tenant test file in the worker — so this records the handles the SUBJECT arms and asks how many of those still pin the loop, across a window that is synchronous by construction. Not published; the one home `pnpm check:refd-timer-probe` allows the raw probe to be read from.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^6.0.3"
+  },
+  "keywords": [
+    "objectstack",
+    "qa",
+    "testkit",
+    "event-loop",
+    "timers"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/qa/refd-timer-testkit"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues"
+}

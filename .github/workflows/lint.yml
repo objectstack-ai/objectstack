@@ -1834,6 +1834,33 @@ jobs:
       - name: Test-source alias gate
         run: pnpm check:test-source-alias
 
+      # The process-global ref'd-timer probe lives in ONE module (#10785). A
+      # `'Timeout'` count derived from `getActiveResourcesInfo()` reports the
+      # WHOLE process, so comparing two readings across an `await` scores a
+      # subject against a number the test does not own — every co-tenant file's
+      # timers and the runner's own non-unref'd 100ms throttle. The shape was
+      # found FIVE times over four cards and repaired at the site each time;
+      # twice the first signal was a shard-only intermittent red (once in CI,
+      # `expected 2 to be 4`; once in the MERGE QUEUE, where it stalls every
+      # lane at once) whose message names a timer count rather than the change
+      # that caused it. Nothing prevented the sixth.
+      # ⛔ The rule is deliberately NOT "is there an `await` between these two
+      # readings" — that is an AST question, and a text scan that answers it
+      # approximately fails SILENTLY on spellings it does not know, which is the
+      # failure mode AGENTS.md already records for source-scanning gates. This
+      # bans the RAW PROBE outside the one approved module instead: a
+      # grep-level question, a one-entry allowlist, and a RED default that names
+      # the file, the line and the import to write. Matched by IDENTIFIER rather
+      # than by `process.`-receiver, so a destructure or a `node:process` named
+      # import cannot slip past; comments are masked, so the docblocks that must
+      # NAME the probe to explain the rule do not have to dodge the scanner.
+      # A clean run also asserts the approved module is present and still reads
+      # the probe — otherwise "nobody reads it" would be true of a tree where
+      # the instrument was deleted.
+      # Static scan of ~4.8k sources; sub-second.
+      - name: Ref'd-timer probe containment
+        run: pnpm check:refd-timer-probe
+
       # The TYPE axis of the same invariant (#8180). The gate above reads
       # `vitest.config.*` and nothing else, so the identical exposure on the
       # type axis was unguarded repo-wide — and its symptom is likewise a GREEN

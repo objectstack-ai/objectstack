@@ -814,6 +814,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
+      '@objectstack/refd-timer-testkit':
+        specifier: workspace:*
+        version: link:../qa/refd-timer-testkit
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
@@ -1959,6 +1962,15 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/coverage-v8@4.1.10)(happy-dom@20.10.2)(jsdom@30.0.1(@noble/hashes@2.3.0))(msw@2.14.6(@types/node@26.2.0)(typescript@6.0.3))(vite@8.0.16(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.0))
 
+  packages/qa/refd-timer-testkit:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.2.0
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/rest:
     dependencies:
       '@objectstack/core':
@@ -2185,6 +2197,9 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../../plugins/plugin-security
+      '@objectstack/refd-timer-testkit':
+        specifier: workspace:*
+        version: link:../../qa/refd-timer-testkit
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../service-job

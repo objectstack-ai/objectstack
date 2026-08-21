@@ -103,6 +103,7 @@
     "check:examples-live-imports": "node scripts/check-examples-live-imports.mjs --self-test && node scripts/check-examples-live-imports.mjs",
     "examples:live-imports": "node scripts/check-examples-live-imports.mjs --list",
     "check:test-source-alias": "node scripts/check-test-source-alias.mjs --self-test && node scripts/check-test-source-alias.mjs",
+    "check:refd-timer-probe": "node scripts/check-refd-timer-probe.mjs --self-test && node scripts/check-refd-timer-probe.mjs",
     "check:type-source-resolution": "node scripts/check-type-source-resolution.mjs --self-test && node scripts/check-type-source-resolution.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
