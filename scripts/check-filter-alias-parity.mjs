@@ -88,6 +88,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { parseSourceFile } from './ts-parse.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -648,4 +649,7 @@ function main() {
     process.exit(1);
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

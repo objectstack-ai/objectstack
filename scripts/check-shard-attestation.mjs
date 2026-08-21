@@ -122,6 +122,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /** Artifact-name prefix shared by every shard credential. */
 const ARTIFACT_PREFIX = 'shard-attest-';
@@ -948,7 +949,12 @@ async function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   await selfTest();
 } else if (process.argv.includes('--emit')) {
   emit();

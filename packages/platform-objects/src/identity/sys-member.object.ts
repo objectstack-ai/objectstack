@@ -43,8 +43,18 @@ export const SysMember = ObjectSchema.create({
       // Admin-only: directly attach an existing user to the active org,
       // bypassing the invite-accept flow. Better-auth:
       // `organization/add-member { userId, role, organizationId?, teamId? }`.
-      // organizationId/teamId default to the caller's active org/team when
-      // omitted, so we leave them as optional params.
+      // The two optional fields are NOT symmetric. `organizationId` defaults
+      // to the caller's active organization when omitted; `teamId` has no such
+      // fallback — omit it and the member simply joins no team. Measured on the
+      // installed better-auth 1.7.1
+      // (`dist/plugins/organization/routes/crud-members.mjs`, `addMember`):
+      // `ctx.body.organizationId || session?.session.activeOrganizationId`
+      // against `"teamId" in ctx.body ? ctx.body.teamId : void 0`, and no
+      // `activeTeamId` read anywhere in that file. So `organizationId` is
+      // carried as an optional param below and `teamId` is not a param at all
+      // — this action never sends it, so it never exercises the team half.
+      // Pinned against a vendor bump that ADDS the fallback by
+      // plugin-auth's `organization-add-member-team-fallback.test.ts`.
       name: 'add_member',
       label: 'Add Member',
       icon: 'user-plus',

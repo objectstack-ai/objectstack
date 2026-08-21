@@ -183,4 +183,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [@objectstack/spec/contracts](../../spec/src/contracts/)
 - [Cron Expression Generator](https://crontab.guru/)
-- [Queue Service](https://docs.objectstack.ai/docs/kernel/runtime-services/queue-service)
+- [Queue Service](https://objectstack.ai/docs/kernel/runtime-services/queue-service)

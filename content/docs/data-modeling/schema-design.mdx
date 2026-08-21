@@ -21,6 +21,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 export const MyObject = ObjectSchema.create({
   // Metadata
   name: 'my_object',              // Machine name (snake_case)
+  sharingModel: 'private',        // OWD baseline — REQUIRED on custom objects
   label: 'My Object',             // Display name
   pluralLabel: 'My Objects',      // Plural form
   icon: 'briefcase',              // Icon identifier
@@ -67,13 +68,14 @@ Control which features are available for an object:
 enable: {
   trackHistory: true,        // Track field changes over time
   searchable: true,          // Include in global search
-  apiEnabled: true,          // Expose via REST/GraphQL
+  apiEnabled: true,          // Expose object via automatic APIs (REST)
   apiMethods: [              // Whitelist API operations — six primitives only;
     'get',                   // search/export/… DERIVE from them (list grants
     'list',                  // aggregate/search/export; create+update grants
     'create',                // upsert/import). undefined = all, [] = none.
     'update',
-    'delete'
+    'delete',
+    'bulk'                   // omitting `bulk` DENIES batch operations
   ],
   files: true,               // Allow file attachments
   feeds: true,               // Enable activity feed (Chatter-like)
@@ -284,6 +286,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
 
   fieldGroups: [
@@ -403,6 +406,7 @@ here (ADR-0085).
 ```typescript
 export const Account = ObjectSchema.create({
   name: 'account',
+  sharingModel: 'private',
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',

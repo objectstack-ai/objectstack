@@ -193,11 +193,16 @@ is collected, then the body runs with those values as its `input`.
 Surfaces can also reference actions **by name**:
 
 ```typescript
-// List views — row and bulk menus
+// List views — row and bulk menus. These are LIST-VIEW keys, so they nest
+// under `list` (or a `listViews` entry) — never at the container top level:
+// `ViewSchema` is a strict object and rejects them there.
 defineView({
   // ...
-  rowActions: ['complete_task'],
-  bulkActions: ['showcase_bulk_reassign'],
+  list: {
+    // ...
+    rowActions: ['complete_task'],
+    bulkActions: ['showcase_bulk_reassign'],
+  },
 });
 
 // Record pages — a quick-actions bar

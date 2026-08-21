@@ -316,7 +316,8 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /automation/trigger/:name', domain: '/automation', disposition: 'sdk', client: 'automation.trigger',
     note: 'legacy verb-first shape; duplicates execute() against a different URL — candidates for consolidation' },
   { route: 'GET /automation', domain: '/automation', disposition: 'sdk', client: 'automation.list' },
-  { route: 'POST /automation', domain: '/automation', disposition: 'sdk', client: 'automation.create' },
+  { route: 'POST /automation', domain: '/automation', disposition: 'sdk', client: 'automation.create',
+    note: "authored metadata, so `manage_metadata` gates it (#10145): a flow definition lives on the metadata plane (ADR-0106), and this door now asks the capability every other door onto that plane already asks. Fail-closed by construction — an absent executionContext, an absent `systemPermissions` or an empty one all fall through to the refusal, 403 with code `PERMISSION_DENIED` (ADR-0112); only engine self-invocation (`isSystem`, never settable from the wire) bypasses. WHICH routes is one predicate, `isFlowAuthoringWrite` in `domains/automation.ts` — this row plus PUT/DELETE `/:name` below, with the execution doors (trigger / execute / toggle / resume) deliberately outside it. Second layer, not the first: the #5519 anonymous floor answers an unidentified caller 401 here, not 403. Pinned in `domains/automation-write-capability-gate.test.ts`" },
   { route: 'GET /automation/actions', domain: '/automation', disposition: 'sdk', client: 'automation.listActions' },
   { route: 'GET /automation/connectors', domain: '/automation', disposition: 'sdk', client: 'automation.listConnectors' },
   { route: 'GET /automation/_status', domain: '/automation', disposition: 'sdk', client: 'automation.getRuntimeStatus' },
@@ -328,8 +329,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /automation/:name/runs/:runId', domain: '/automation', disposition: 'sdk', client: 'automation.getRun' },
   { route: 'GET /automation/:name/runs', domain: '/automation', disposition: 'sdk', client: 'automation.listRuns' },
   { route: 'GET /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.get' },
-  { route: 'PUT /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.update' },
-  { route: 'DELETE /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.delete' },
+  { route: 'PUT /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.update',
+    note: "authored metadata, so `manage_metadata` gates it (#10145) — the same `isFlowAuthoringWrite` door as `POST /automation` above: fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
+  { route: 'DELETE /automation/:name', domain: '/automation', disposition: 'sdk', client: 'automation.delete',
+    note: "authored metadata, so `manage_metadata` gates it (#10145) — the same `isFlowAuthoringWrite` door as `POST /automation` above, and the destructive member of the family: before the gate a tenant org owner WITHOUT the capability deregistered a registered flow, 200, and flow metadata is registered at ENVIRONMENT scope so the write crossed the tenant wall. Fail-closed on an absent executionContext, an absent `systemPermissions` or an empty one, refusing 403 `PERMISSION_DENIED`, with only `isSystem` bypassing" },
 
   // ── auth (better-auth passthrough) ────────────────────────────────────────
   { route: '* /auth/**', domain: '/auth', disposition: 'sdk', client: 'auth.me',
@@ -350,7 +353,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /meta/_migrate-stored', domain: '/meta', disposition: 'sdk', client: 'meta.migrateStored',
     note: 'ADR-0087 stored-row canonicalization (#4327); gated on `manage_metadata`, preview unless { apply: true }' },
   { route: 'GET /meta/object/:name/state/:field', domain: '/meta', disposition: 'sdk', client: 'meta.getLegalNextStates',
-    note: '#9180 step 2 moved the SDK to the singular spelling and retired the plural REST registration; this row follows the client. The legacy if-chain branch in `domains/meta.ts` still matches BOTH literals (`objects` and `object`) — that tolerance is out of step 2 scope and is not narrowed here, so this row lists the canonical spelling of a branch that answers two' },
+    note: '#9180 step 2 moved the SDK to the singular spelling and retired the plural REST registration; this row follows the client. DELIBERATE ASYMMETRY, not residue nobody has got to yet: the legacy if-chain branch in `domains/meta.ts` still matches BOTH literals (`objects` and `object`), so `/meta/objects/:name/state/:field` is REFUSED by a REST-fronted deployment (transport 404 — no registration left to match it) and ANSWERED wherever `dispatch()` is the front door (the `createHonoApp` catch-all, the documented embed shape). It stays by the maintainer re-weigh of the #9180 ruling, 2026-08-17 item 3: the tolerance is kept for external callers, no new refusals beyond what step 1 shipped, the external break deferred with no scheduled window — narrowing this arm is a NEW refusal on a SECOND surface and is the maintainer call, not a step of the ruling. ⛔ It is NOT the `META_URL_TO_SINGULAR` fold whose retirement was deferred: that is a map consulted for `/meta/:type`, this is a literal `||` that no request reaches through the fold — separate mechanisms under separate decisions, and conflating them is the specific error to avoid. So this row lists the canonical spelling of a branch that answers two, and `domains/meta-state-plural-tolerance.test.ts` pins BOTH halves so this note cannot quietly stop being true (#10179)' },
 
   // ── data (legacy chain) ───────────────────────────────────────────────────
   { route: 'POST /data/:object/query', domain: '/data', disposition: 'sdk', client: 'data.query' },

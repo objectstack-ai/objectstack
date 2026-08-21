@@ -8,8 +8,12 @@ import {
   REACT_CHART_AXIS_UNKNOWN,
   REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
+  REACT_PAGE_SOURCE_UNPARSEABLE,
   type ReactPropFinding as PropFinding,
 } from './validate-react-page-props.js';
+// [#10653] The syntax gate whose cover the deleted `catch` comment credited,
+// imported so the divergence between the two parsers is asserted, not described.
+import { validateReactPages } from './validate-react-pages.js';
 import {
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
@@ -1338,5 +1342,100 @@ describe('validateReactPageProps — unprovisioned injected anchors (#8340)', ()
     expect(warned[0].where).toBe('page "p" › <Block>');
     expect(warned[0].path).toBe('pages[0].source › fields[0]');
     expect(warned[0].message).toContain('external object (ADR-0015)');
+  });
+});
+
+// ── [#10653] The source that could not be READ ───────────────────────────────
+//
+// The parse here used to sit in `try { … } catch { continue; }`, commented "the
+// syntax gate reports unparseable sources". Two separate things were wrong with
+// that, and the first one hid the second:
+//
+//   1. `ts.createSourceFile` cannot throw, so the catch never ran. The live path
+//      was the unread `parseDiagnostics` — error recovery hands back a partial
+//      tree, this gate walks it, finds no `<ObjectForm>` in the part that was
+//      lost, and returns clean.
+//   2. The syntax gate parses with a DIFFERENT parser. `validate-jsx-pages.ts`
+//      does not lint `kind:'react'` at all; the cover is `validate-react-
+//      pages.ts`, which uses Sucrase. Measured on 2026-08-21, the two acceptance
+//      sets differ in both directions (see `the syntax gate is a different
+//      parser` below), so the syntax gate's silence was never evidence that THIS
+//      gate could read the source.
+describe('an unparseable react source is reported, not scored clean (#10653)', () => {
+  // The defect (`<ObjectForm>` with no objectName) is real in both halves; the
+  // only difference is the `/*` that swallows it.
+  const wrecked = 'function Page(){\n  /* TODO\n  return <ObjectForm mode="edit" />;\n}\n';
+  const repaired = 'function Page(){\n  return <ObjectForm mode="edit" />;\n}\n';
+
+  it('POSITIVE CONTROL — the repaired source is flagged, so the wreck had something to lose', () => {
+    const f = validateReactPageProps(page(repaired));
+    expect(f.some((x) => x.rule === 'react-prop-missing-required')).toBe(true);
+    expect(f.some((x) => x.rule === REACT_PAGE_SOURCE_UNPARSEABLE)).toBe(false);
+  });
+
+  it('the wrecked source loses that finding — the harm, reproduced', () => {
+    // This is the measurement the card turns on: not "it throws and we skip",
+    // but "it parses, the finding vanishes, and the verdict reads clean".
+    const f = validateReactPageProps(page(wrecked));
+    expect(f.some((x) => x.rule === 'react-prop-missing-required')).toBe(false);
+  });
+
+  it('…and says so instead of returning clean', () => {
+    const f = validateReactPageProps(page(wrecked));
+    const parseFindings = f.filter((x) => x.rule === REACT_PAGE_SOURCE_UNPARSEABLE);
+    expect(parseFindings).toHaveLength(1);
+    expect(parseFindings[0].severity).toBe('warning');
+    expect(parseFindings[0].where).toBe('page "p"');
+    expect(parseFindings[0].path).toBe('pages[0].source');
+    expect(parseFindings[0].message).toContain('did not parse');
+    expect(parseFindings[0].message).toMatch(/line \d+, column \d+/);
+  });
+
+  it('is ADDITIVE — a recovered tree keeps every finding it yields today', () => {
+    // `0755` is a parse diagnostic whose recovery is local: the JSX below it
+    // still reads. The parse finding is added; the prop finding is NOT traded
+    // away for it. (A fix that skipped the walk on failure would silently drop
+    // this one.)
+    const f = validateReactPageProps(page('const n = 0755;\nfunction Page(){ return <ObjectForm mode="edit" />; }'));
+    expect(f.some((x) => x.rule === REACT_PAGE_SOURCE_UNPARSEABLE)).toBe(true);
+    expect(f.some((x) => x.rule === 'react-prop-missing-required')).toBe(true);
+  });
+
+  it('the syntax gate is a DIFFERENT parser — measured, not assumed', () => {
+    // The card recorded this divergence as unmeasured. Measured here: Sucrase
+    // accepts `0755`, TypeScript reports a parse diagnostic on it. So a react
+    // page can pass the syntax gate and still be unreadable to this one — which
+    // is the case where the silence this rule replaced was total.
+    const octal = 'const n = 0755;\nfunction Page(){ return <ObjectForm objectName="a" />; }';
+    expect(validateReactPages(page(octal)), 'sucrase accepts it').toEqual([]);
+    expect(
+      validateReactPageProps(page(octal)).some((x) => x.rule === REACT_PAGE_SOURCE_UNPARSEABLE),
+      'typescript does not',
+    ).toBe(true);
+  });
+
+  it('FALSE-POSITIVE CONTROL — sources that parse never gain the finding', () => {
+    // Including the TS-only spellings a react page may legitimately carry: the
+    // parse is ScriptKind.TSX, and a generic arrow or a type annotation must not
+    // read as a wreck.
+    const parseable = [
+      'function Page(){ return <ObjectForm objectName="account" mode="edit" />; }',
+      'const Page = (): JSX.Element => <ObjectForm objectName="a" />;\nexport default Page;',
+      'const id = <T,>(x: T): T => x;\nfunction Page(){ return <ObjectForm objectName="a" />; }',
+      'interface Props { a: number }\nexport default function Page(p: Props){ return <ObjectForm objectName="a" />; }',
+      'function Page(){ return <><ObjectForm objectName="a" /><ListView objectName="a" /></>; }',
+      'function Page(){ return <ObjectForm objectName="a" {...rest} />; }',
+    ];
+    for (const source of parseable) {
+      const rules = validateReactPageProps(page(source)).map((x) => x.rule);
+      expect(rules, `parseable source gained a parse finding:\n${source}`).not.toContain(
+        REACT_PAGE_SOURCE_UNPARSEABLE,
+      );
+    }
+  });
+
+  it('an empty source is skipped without a parse claim', () => {
+    expect(validateReactPageProps(page(''))).toEqual([]);
+    expect(validateReactPageProps(page('   \n '))).toEqual([]);
   });
 });

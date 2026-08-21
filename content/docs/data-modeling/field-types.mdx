@@ -314,7 +314,7 @@ Reference to a record in another object (foreign key).
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target object name (snake_case) |
-| `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property (unknown keys are stripped by the schema). Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
+| `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
 | `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted. On a *required* lookup `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared — **whether the `set_null` was defaulted or written out explicitly**. On a `multiple: true` required lookup the escalation is judged per referencing row: only a row the member removal would leave EMPTY is refused. `cascade` and `restrict` are the values honored as written. Where `set_null` does run, a `multiple: true` lookup loses only the deleted **member** — the other members are kept, and a set emptied that way is stored as `[]`, never `null` |
 
 ```typescript
@@ -336,7 +336,7 @@ Parent-child relationship (cascading delete by default).
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target (master) object name |
-| `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property (unknown keys are stripped by the schema). Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
+| `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
 | `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'cascade'` | Behavior when parent is deleted. `restrict` is the only value that deviates: master-detail cascades on everything else, so an explicit `set_null` here is **not** honored — the child is deleted with the parent |
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Edit child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |
@@ -530,7 +530,7 @@ Name-keyed map of embedded sub-objects (`Record<string, SubObject>`). Insertion 
 ## Enhanced Types
 
 ### `location`
-Geographic coordinates. Stored as `{ latitude, longitude, altitude?, accuracy? }` (latitude −90..90, longitude −180..180). No per-type config properties.
+Geographic coordinates. Stored as `{ lat, lng, altitude?, accuracy? }` (`lat` −90..90, `lng` −180..180). No per-type config properties. The key names are `lat`/`lng`, not `latitude`/`longitude` — see `LocationValueSchema` in `field-value.zod.ts` (ADR-0104 D1).
 
 ```typescript
 { name: 'headquarters', label: 'Location', type: 'location' }

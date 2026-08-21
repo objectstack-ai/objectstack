@@ -97,13 +97,24 @@ export function resolveIndexExecForTable(engine: unknown, table: string): IndexE
 
 /**
  * Minimal logger surface, structurally compatible with `@objectstack/spec`'s
- * `Logger` (every method optional so a bare console or a test double fits).
+ * `Logger` (a bare console or a test double fits — but see `warn` below, which
+ * #9754 made non-optional, so a double must now declare it).
  * Signatures mirror that contract exactly — notably `error(msg, Error, meta)`
  * versus `warn(msg, meta)` — so a host `Logger` is assignable as-is.
  */
 export interface IndexMigrationLogger {
     info?(message: string, meta?: Record<string, any>): void;
-    warn?(message: string, meta?: Record<string, any>): void;
+    /**
+     * The GUARANTEED fallback channel (#9754). `error` stays optional — hosts do
+     * inject reduced sinks — so `warn` is where a durability report lands when
+     * `error` is absent, and a fallback that may itself be missing is not a
+     * fallback. `logProblem` below is exactly that degrade, and until this member
+     * was required it could reach for two channels and find neither. Call sites
+     * keep the `logger?.warn?.(…)` spelling as the backstop for hosts the TYPE
+     * cannot reach; `SweepLogger` in plugin-email's `outbox-sweep.ts` carries the
+     * full reasoning and the measurement.
+     */
+    warn(message: string, meta?: Record<string, any>): void;
     error?(message: string, error?: Error, meta?: Record<string, any>): void;
 }
 

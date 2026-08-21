@@ -230,16 +230,18 @@ interface ObjectSecurityMeta {
    */
   unresolved: boolean;
   /**
-   * [#10401] WHICH of the two conditions behind {@link ObjectSecurityMeta.unresolved}
-   * this is — the object exists only as an unpublished draft, or its declaration
+   * [#10401 / #10424] WHICH of the conditions behind
+   * {@link ObjectSecurityMeta.unresolved} this is — the object exists only as an
+   * unpublished draft, the metadata STORE could not answer, or its declaration
    * genuinely cannot be read. Meaningful only when `unresolved` is `true`; absent
    * (and therefore `'unknown'`) on every resolved posture.
    *
-   * ⛔ Explanation only. Nothing may branch an ACCESS DECISION on it: both causes
-   * deny, identically and fail-closed, and the probe that produces it is
-   * best-effort by design (see `probeUnpublishedDraft`). Its whole job is to stop
-   * the refusal naming a remedy — "change a sharing rule" — that cannot fix
-   * either condition.
+   * ⛔ Explanation only. Nothing may branch an ACCESS DECISION on it: every cause
+   * denies, identically and fail-closed, and the probes that produce it are
+   * best-effort by design (see {@link SecurityPlugin.resolveUnresolvedCause}).
+   * Its whole job is to stop the refusal naming a remedy — "change a sharing
+   * rule", or "go fix your declaration" mid-outage — that cannot fix the
+   * condition at hand.
    */
   unresolvedCause?: UnresolvedPostureCause;
 }
@@ -5584,12 +5586,91 @@ export class SecurityPlugin implements Plugin {
       fieldRequiredPermissions,
       fieldMaskingRules,
       unresolved: !obj,
-      // [#10401] Explanation only, and only on the path that is already
-      // refusing. Both causes deny identically — see the field's TSDoc.
-      ...(obj ? {} : { unresolvedCause: await this.probeUnpublishedDraft(object) }),
+      // [#10401 / #10424] Explanation only, and only on the path that is already
+      // refusing. All causes deny identically — see the field's TSDoc.
+      ...(obj ? {} : { unresolvedCause: await this.resolveUnresolvedCause(object) }),
     };
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
+  }
+
+  /**
+   * [#10424] Which condition put this object on the unresolved path — the
+   * EXPLANATION only. Order matters, and it is the honest order rather than the
+   * cheap one.
+   *
+   * The outage probe runs FIRST and wins outright. When the metadata service
+   * reports its own read as degraded, "a draft declaration exists but no
+   * published one" is a claim we cannot support: the draft probe can still see
+   * a draft row through ObjectQL while the metadata store is exactly the thing
+   * that could not tell us whether a PUBLISHED one exists. Asserting
+   * `'unpublished_draft'` there would state as fact the half of the sentence
+   * the outage made unknowable — the same species of error as the defect this
+   * fixes, pointed the other way.
+   *
+   * Every leg that cannot reach a positive verdict lands on `'unknown'`, whose
+   * wording covers all cases.
+   */
+  private async resolveUnresolvedCause(object: string): Promise<UnresolvedPostureCause> {
+    if (await this.probeMetadataOutage(object)) return 'metadata_unavailable';
+    return await this.probeUnpublishedDraft(object);
+  }
+
+  /**
+   * [#10424 / #5840] Best-effort: did the metadata read fail because the STORE
+   * could not answer, rather than because nothing is declared?
+   *
+   * `IMetadataService.get` is ambiguous by construction — its own TSDoc says
+   * `undefined` means "not found" *and* "every loader that could hold it
+   * failed", and directs callers to `getDiagnosed` "wherever the difference
+   * could change a decision". `MetadataManager` defines `get` as
+   * `(await getDiagnosed(…)).data`, so the verdict is computed and discarded on
+   * the way here. This asks for it.
+   *
+   * ## Why this is a SEPARATE probe and not the read itself
+   *
+   * The obvious shape — swap `metadata.get` for `metadata.getDiagnosed` and use
+   * `.data` — was rejected deliberately. `obj` is what `unresolved` is computed
+   * from, so it is the input to a #3545 fail-closed DENY: changing which member
+   * produces it puts an externally observable accept/reject decision at the
+   * mercy of every third-party `IMetadataService` whose optional `getDiagnosed`
+   * disagrees with its own `get`, or throws where `get` would have succeeded.
+   * An object that resolves today would then be refused. This card is an
+   * explanation change and has to stay one, so the resolving read is untouched
+   * byte for byte and the verdict is asked for separately, on the path that is
+   * already refusing.
+   *
+   * The cost is one extra read, paid only on a request that is already denied —
+   * the same bargain `probeUnpublishedDraft` documents, beside which this sits.
+   *
+   * ## The fail-safe direction, which is the whole point
+   *
+   * `getDiagnosed` is OPTIONAL (`getDiagnosed?`), and the contract is explicit
+   * that "implementations that predate it simply cannot report the distinction,
+   * and a consumer that probes for it must keep reading `get` when it is
+   * absent". So a service without it returns `false` here and the caller
+   * reports `'unknown'` — NOT `'metadata_unavailable'`. Publishing "I don't
+   * know" as "the store is down" would manufacture an incident out of a missing
+   * capability, and the operator would go read healthy dashboards looking for
+   * an outage that the platform invented. Same for a `getDiagnosed` that throws
+   * or answers with a non-boolean `degraded`: no verdict is not a verdict.
+   * `'metadata_unavailable'` is asserted on a positive `degraded === true` and
+   * on nothing else.
+   *
+   * Like the draft probe, this can never turn a resolved posture into a denial
+   * nor a refusal into a grant — it is read after the deny decision is made.
+   */
+  private async probeMetadataOutage(object: string): Promise<boolean> {
+    const service = this.metadata as
+      | { getDiagnosed?: (type: string, name: string) => Promise<{ degraded?: unknown }> }
+      | undefined;
+    if (typeof service?.getDiagnosed !== 'function') return false;
+    try {
+      const diagnosed = await service.getDiagnosed('object', object);
+      return diagnosed?.degraded === true;
+    } catch {
+      return false;
+    }
   }
 
   /**

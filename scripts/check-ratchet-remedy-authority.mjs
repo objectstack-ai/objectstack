@@ -107,6 +107,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -982,6 +983,11 @@ function selfTest() {
   process.exit(0);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) selfTest();
 else if (process.argv.includes('--list')) list();
 else main();

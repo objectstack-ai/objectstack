@@ -27,6 +27,18 @@
  *   • the declaration genuinely cannot be read — the remedy is to check that
  *     the object is declared at all, or to look at a metadata-store outage.
  *
+ * [#10424] That second bullet was still doing two jobs, and the half it did
+ * badly is now its own cause. "Check that the object is declared" is correct
+ * advice for an absent declaration and actively wrong during a metadata-store
+ * OUTAGE, where the declaration is fine and the store is not. The distinction
+ * was already being computed and thrown away: `MetadataManager` defines `get`
+ * as `(await getDiagnosed(…)).data`, so the `degraded` verdict that separates
+ * a MISS from an OUTAGE existed and was discarded one frame below this module
+ * (#5840). `'metadata_unavailable'` is what reading it buys — asserted only on
+ * a positive `degraded: true`, never inferred from a service that cannot
+ * answer. The DENY is untouched in all three cases: #3545 fail-closed, same
+ * `PermissionDeniedError`, same `PERMISSION_DENIED`, same 403.
+ *
  * …and because it described an internal *security* step, every reader — human
  * and model alike — read it as a permissions problem and went looking for a
  * sharing rule to change. Measured downstream (objectstack-ai/cloud#1481): an
@@ -53,16 +65,49 @@
  */
 
 /**
- * Which of the two conditions behind an unresolved posture this is.
+ * Which of the conditions behind an unresolved posture this is.
  *
- * `'unknown'` is the honest default and the fail-safe: the draft probe that
- * distinguishes the two is best-effort (see `probeUnpublishedDraft` in
- * `security-plugin.ts`), so a deployment with no queryable `sys_metadata` — or
- * any probe failure at all — reports `'unknown'` and gets the wording that
- * covers both cases. The discriminator may never turn a *real* unpublished
- * object into a claim the platform cannot support.
+ * `'unknown'` is the honest default and the fail-safe: every probe that
+ * distinguishes the others is best-effort (see `probeUnpublishedDraft` and
+ * `probeMetadataOutage` in `security-plugin.ts`), so a deployment with no
+ * queryable `sys_metadata`, a metadata service that does not implement the
+ * optional `getDiagnosed` (#5840), or any probe failure at all reports
+ * `'unknown'` and gets the wording that covers every case. The discriminator
+ * may never turn a *real* unpublished object — or a *real* outage — into a
+ * claim the platform cannot support.
+ *
+ * [#10424] `'metadata_unavailable'` is the third member, and it is the one the
+ * fail-safe rule bites hardest on. `IMetadataService.get` is ambiguous by
+ * construction — its own TSDoc says `undefined` means "not found" *and* "every
+ * loader that could hold it failed" — so an outage and an absent declaration
+ * arrived here as the same `unresolved: true` wearing the same sentence, and
+ * that sentence told the reader to go check the declaration. `getDiagnosed`
+ * already computes the `degraded` verdict that separates them; this member is
+ * what consuming it buys. It is asserted ONLY when the service positively
+ * reports `degraded: true`. A service that cannot report the distinction is
+ * NOT an outage — "I don't know" must never be published as "the store is
+ * down", which would be manufacturing false information in the opposite
+ * direction from the defect this fixes.
  */
-export type UnresolvedPostureCause = 'unpublished_draft' | 'unknown';
+export type UnresolvedPostureCause =
+  | 'unpublished_draft'
+  | 'metadata_unavailable'
+  | 'unknown';
+
+/**
+ * Compile-time exhaustiveness for the switches below, with a RUNTIME fallback
+ * to the `'unknown'` wording rather than a throw.
+ *
+ * Both halves are deliberate. Adding a fourth cause without wording it is a
+ * type error at build time (the assignment to `never` fails). But these
+ * functions run on the middleware's already-refusing path, where an
+ * unhandled throw would turn a correct `403 PERMISSION_DENIED` into a `500` —
+ * so the runtime half degrades to the sentence that covers every case, which
+ * is exactly this module's documented fail-safe.
+ */
+function assertCauseExhausted(cause: never): void {
+  void cause;
+}
 
 /**
  * The remedy half — the sentence that tells the reader what to actually do, and
@@ -70,12 +115,29 @@ export type UnresolvedPostureCause = 'unpublished_draft' | 'unknown';
  * cannot diverge from the diagnosis.
  */
 export function unresolvedPostureRemedy(cause: UnresolvedPostureCause): string {
-  return cause === 'unpublished_draft'
-    ? 'Publish the object to make it queryable. This is NOT a permissions problem — no sharing rule, '
-      + 'visibility setting or permission-set change grants access to an unpublished object.'
-    : 'Check that the object is declared and published on this runtime. This is NOT a permissions '
-      + 'problem — no sharing rule, visibility setting or permission-set change grants access to an '
-      + 'object whose declaration cannot be read.';
+  const unknown =
+    'Check that the object is declared and published on this runtime. This is NOT a permissions '
+    + 'problem — no sharing rule, visibility setting or permission-set change grants access to an '
+    + 'object whose declaration cannot be read.';
+  switch (cause) {
+    case 'unpublished_draft':
+      return 'Publish the object to make it queryable. This is NOT a permissions problem — no sharing rule, '
+        + 'visibility setting or permission-set change grants access to an unpublished object.';
+    // [#10424] Points at the STORE, not at the declaration. The old sentence
+    // sent an operator mid-outage to re-check a declaration that was fine, and
+    // that is the whole defect: a refusal naming the wrong remedy is worse than
+    // a terse one, because the next reader's diagnosis is built on it.
+    case 'metadata_unavailable':
+      return 'Check the metadata store — the object may well be declared and published, and simply '
+        + 'unreadable right now. Do NOT change the declaration on the strength of this message. This is '
+        + 'NOT a permissions problem either — no sharing rule, visibility setting or permission-set '
+        + 'change restores a read the metadata store could not serve.';
+    case 'unknown':
+      return unknown;
+    default:
+      assertCauseExhausted(cause);
+      return unknown;
+  }
 }
 
 /**
@@ -91,12 +153,29 @@ export function unresolvedPostureDenialMessage(
   cause: UnresolvedPostureCause,
 ): string {
   const remedy = unresolvedPostureRemedy(cause);
-  return cause === 'unpublished_draft'
-    ? `[Security] Access denied: object '${object}' is not published — a draft declaration exists but `
-      + `no published one, so there is no security posture to authorize '${operation}' against. ${remedy}`
-    : `[Security] Access denied: the security posture of object '${object}' could not be resolved for `
-      + `operation '${operation}' — neither the live schema nor the metadata service returned a `
-      + `declaration for it, so access fails closed. ${remedy}`;
+  const unknown =
+    `[Security] Access denied: the security posture of object '${object}' could not be resolved for `
+    + `operation '${operation}' — neither the live schema nor the metadata service returned a `
+    + `declaration for it, so access fails closed. ${remedy}`;
+  switch (cause) {
+    case 'unpublished_draft':
+      return `[Security] Access denied: object '${object}' is not published — a draft declaration exists but `
+        + `no published one, so there is no security posture to authorize '${operation}' against. ${remedy}`;
+    // [#10424] Keeps the SAME opening clause as the `'unknown'` branch, verbatim
+    // through "could not be resolved for operation '…'", so anything pinning
+    // that substring keeps matching; only what follows the em dash differs. The
+    // divergence is the factual half: we are not claiming a declaration is
+    // absent, because a degraded read cannot support that claim.
+    case 'metadata_unavailable':
+      return `[Security] Access denied: the security posture of object '${object}' could not be resolved for `
+        + `operation '${operation}' — the metadata service reported its own read as DEGRADED, so whether a `
+        + `declaration exists is UNKNOWN rather than answered, and access fails closed. ${remedy}`;
+    case 'unknown':
+      return unknown;
+    default:
+      assertCauseExhausted(cause);
+      return unknown;
+  }
 }
 
 /**
@@ -112,13 +191,26 @@ export function unresolvedPostureExplainDetail(
   cause: UnresolvedPostureCause,
 ): string {
   const remedy = unresolvedPostureRemedy(cause);
-  return cause === 'unpublished_draft'
-    ? `'${object}' is not published — a draft declaration exists but no published one, so its 'private' `
-      + `flag and required-capability contract are unknown and access fails CLOSED rather than `
-      + `defaulting to public/uncontracted (#3545). ${remedy}`
-    : `The security posture of '${object}' could not be resolved (neither the live schema nor the `
-      + `metadata service returned it) — its 'private' flag and required-capability contract are `
-      + `unknown, so access fails CLOSED rather than defaulting to public/uncontracted (#3545). ${remedy}`;
+  const unknown =
+    `The security posture of '${object}' could not be resolved (neither the live schema nor the `
+    + `metadata service returned it) — its 'private' flag and required-capability contract are `
+    + `unknown, so access fails CLOSED rather than defaulting to public/uncontracted (#3545). ${remedy}`;
+  switch (cause) {
+    case 'unpublished_draft':
+      return `'${object}' is not published — a draft declaration exists but no published one, so its 'private' `
+        + `flag and required-capability contract are unknown and access fails CLOSED rather than `
+        + `defaulting to public/uncontracted (#3545). ${remedy}`;
+    case 'metadata_unavailable':
+      return `The security posture of '${object}' could not be resolved: the metadata service reported its `
+        + `own read as DEGRADED, so this is a metadata-store OUTAGE and not necessarily an absent `
+        + `declaration. Its 'private' flag and required-capability contract are unknown, so access fails `
+        + `CLOSED rather than defaulting to public/uncontracted (#3545). ${remedy}`;
+    case 'unknown':
+      return unknown;
+    default:
+      assertCauseExhausted(cause);
+      return unknown;
+  }
 }
 
 /**
@@ -132,9 +224,26 @@ export function unresolvedPostureLogLine(
   userId: string,
   cause: UnresolvedPostureCause,
 ): string {
-  return cause === 'unpublished_draft'
-    ? `[security] object '${object}' has a DRAFT declaration and no published one — denying operation `
-      + `'${operation}' (user ${userId}) with the unpublished-object refusal (fail-closed, #3545/#10401)`
-    : `[security] object security posture unresolvable for operation '${operation}' on `
-      + `object '${object}' (user ${userId}) — denying request (fail-closed, #3545)`;
+  const unknown =
+    `[security] object security posture unresolvable for operation '${operation}' on `
+    + `object '${object}' (user ${userId}) — denying request (fail-closed, #3545)`;
+  switch (cause) {
+    case 'unpublished_draft':
+      return `[security] object '${object}' has a DRAFT declaration and no published one — denying operation `
+        + `'${operation}' (user ${userId}) with the unpublished-object refusal (fail-closed, #3545/#10401)`;
+    // [#10424] The operator-facing half of the split, and the reason the log
+    // line is worth changing at all: a metadata-store outage is an INCIDENT and
+    // a query against a missing object is routine, and they were the same line.
+    // `DEGRADED` and `OUTAGE` are here to be grep-able.
+    case 'metadata_unavailable':
+      return `[security] object security posture unresolvable for operation '${operation}' on `
+        + `object '${object}' (user ${userId}) — the metadata service reported a DEGRADED read, i.e. a `
+        + `metadata-store OUTAGE rather than an absent declaration — denying request `
+        + `(fail-closed, #3545/#10424)`;
+    case 'unknown':
+      return unknown;
+    default:
+      assertCauseExhausted(cause);
+      return unknown;
+  }
 }

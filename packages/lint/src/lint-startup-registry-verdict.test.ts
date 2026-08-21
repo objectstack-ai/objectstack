@@ -17,6 +17,7 @@ import {
   OPEN_VOCABULARY_PROBES,
   PRE_SEAL_PHASES,
   STARTUP_OPEN_VOCABULARY_VERDICT,
+  STARTUP_SOURCE_UNPARSEABLE,
   STARTUP_VERDICT_ASSERTIVE_WORDING,
   STARTUP_VERDICT_HINT,
 } from './lint-startup-registry-verdict.js';
@@ -402,9 +403,96 @@ describe('the vocabulary is data, and every entry earns its place', () => {
     expect(PRE_SEAL_PHASES.has('start')).toBe(true);
   });
 
-  it('an empty or unparseable source is not a verdict about anyone', () => {
+  it('an empty source is not a verdict about anyone', () => {
+    // No parse is attempted, so nothing is claimed — including nothing about
+    // parseability. Unchanged by #10653.
     expect(findStartupRegistryVerdicts('')).toEqual([]);
     expect(findStartupRegistryVerdicts('   \n  ')).toEqual([]);
-    expect(findStartupRegistryVerdicts('class { { { getRegisteredNodeTypes(')).toEqual([]);
+  });
+
+  it('a source that mentions nothing from the vocabulary is skipped WITHOUT a parse claim', () => {
+    // The pre-filter is a raw-text scan, so it is sound whether or not the
+    // source parses: a source with no probe name in it cannot contain a probe
+    // READ, however it parses. Skipping the parse therefore hides nothing, and
+    // must not produce a parse finding either.
+    expect(findStartupRegistryVerdicts('class { { { totally unparseable ((( ')).toEqual([]);
+  });
+
+  // [#10653] This case used to assert `toEqual([])` for an unparseable source,
+  // under the heading "not a verdict about anyone". Its two halves came apart on
+  // inspection: declining to draw a STARTUP verdict from wreckage is right and
+  // still holds below, but returning nothing at all said the source was clean —
+  // and the assertion kept passing precisely BECAUSE nothing was produced. The
+  // `try/catch` it was read as covering never ran; the live path was the unread
+  // `parseDiagnostics`.
+  /**
+   * [#10653] Sources that DO parse, for the false-positive control below. The
+   * three sanctioned cures plus the ordinary shapes, deliberately including the
+   * TS-only syntax a JS-flavoured parser would trip on — `ScriptKind.TS` is what
+   * the rule parses under, and a rule that started reporting "did not parse" on
+   * a type annotation would be worse than the silence it replaced.
+   *
+   * The wider control is the rest of this file: every case above asserts an
+   * exact rule-id list for a parseable source, so a spurious parse finding
+   * reddens them too.
+   */
+  const PARSEABLE_CORPUS: readonly string[] = [
+    'export class P { async start(ctx) { ctx.hook("kernel:ready", () => this.engine.getRegisteredNodeTypes()); } }',
+    'export class P { async init() {} }',
+    'const known: string[] = this.engine.getRegisteredNodeTypes();\nexport type T = { a: number };',
+    'export class P {\n  private engine?: Engine;\n  async start(ctx: Ctx): Promise<void> {\n    const t = this.engine!.getRegisteredNodeTypes() as string[];\n  }\n}',
+    'enum Phase { Init, Start }\nexport class P { async start() { const k = this.e.knownNodeTypes; } }',
+    'export const listExecutors = () => [] as const;',
+  ];
+
+  describe('an unparseable source is REPORTED, not scored clean (#10653)', () => {
+    const wreck = 'class P {\n  async start(ctx) {\n    /* TODO getRegisteredNodeTypes\n  }\n}\n';
+
+    it('returns the parse finding', () => {
+      const findings = findStartupRegistryVerdicts(wreck, { file: 'plugin.ts' });
+      const parseFindings = findings.filter((f) => f.rule === STARTUP_SOURCE_UNPARSEABLE);
+      expect(parseFindings).toHaveLength(1);
+      expect(parseFindings[0].severity).toBe('warning');
+      expect(parseFindings[0].message).toContain('did not parse');
+      expect(parseFindings[0].path).toMatch(/^plugin\.ts:\d+$/);
+    });
+
+    it('still declines to draw a startup verdict from the wreckage', () => {
+      // The half of the original case that was right: no open-vocabulary verdict
+      // is invented out of a tree the parser had to guess at.
+      const rules = findStartupRegistryVerdicts(wreck, { file: 'plugin.ts' }).map((f) => f.rule);
+      expect(rules).not.toContain(STARTUP_OPEN_VOCABULARY_VERDICT);
+      expect(rules).not.toContain(STARTUP_VERDICT_ASSERTIVE_WORDING);
+    });
+
+    it('POSITIVE CONTROL — the same source, repaired, is the one that was being missed', () => {
+      // The wreck above is the repaired source with `/*` in front of the verdict.
+      // Repaired, the rule has plenty to say; wrecked, it used to say nothing at
+      // all. That gap is what the finding closes.
+      const repaired =
+        'class P {\n' +
+        '  async start(ctx) {\n' +
+        '    const types = this.engine.getRegisteredNodeTypes();\n' +
+        "    if (!types.includes('email')) {\n" +
+        "      ctx.logger.warn('email will fail at execution time');\n" +
+        '    }\n' +
+        '  }\n' +
+        '}\n';
+      const findings = findStartupRegistryVerdicts(repaired, { file: 'plugin.ts' });
+      expect(findings.map((f) => f.rule)).toContain(STARTUP_OPEN_VOCABULARY_VERDICT);
+      expect(findings.map((f) => f.rule)).not.toContain(STARTUP_SOURCE_UNPARSEABLE);
+    });
+
+    it('FALSE-POSITIVE CONTROL — no source that parses gains a parse finding', () => {
+      // Every source in this file's own corpus of parseable cases, swept for the
+      // new rule id. A rule that fires on readable source is worse than the
+      // silence it replaced.
+      for (const source of PARSEABLE_CORPUS) {
+        const rules = findStartupRegistryVerdicts(source, { file: 'plugin.ts' }).map((f) => f.rule);
+        expect(rules, `parseable source gained a parse finding:\n${source}`).not.toContain(
+          STARTUP_SOURCE_UNPARSEABLE,
+        );
+      }
+    });
   });
 });

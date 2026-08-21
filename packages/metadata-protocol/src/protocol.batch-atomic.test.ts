@@ -14,6 +14,7 @@
 // is already in the database.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = {
@@ -42,11 +43,15 @@ function makeTransactionalEngine(opts: { driverCanTransact?: boolean } = {}) {
         return { id: `rec-${insert.mock.calls.length}`, ...data };
     });
     const update = vi.fn(async (_object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         if (data?.title === POISON) throw new Error('update exploded');
         return { id: options?.where?.id, ...data };
     });
     const findOne = vi.fn(async (_object: string, options?: any) => ({ id: options?.where?.id }));
-    const del = vi.fn(async () => ({ deleted: 1 }));
+    const del = vi.fn(async (_object: string, options?: any) => {
+        assertEngineDeleteDispatch(options);
+        return { deleted: 1 };
+    });
 
     const engine: any = {
         registry: { getObject: () => SCHEMA },

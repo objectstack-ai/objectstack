@@ -1,6 +1,6 @@
 ---
 title: Validation Metadata
-description: Define data integrity rules — formula conditions, uniqueness, format, state machine transitions, and more
+description: Define data integrity rules — formula conditions, format, cross-field checks, state machine transitions, and more
 ---
 
 # Validation Metadata
@@ -10,7 +10,7 @@ description: Define data integrity rules — formula conditions, uniqueness, for
 <Callout type="info">
 Three patterns that look like validation rules are deliberately **not** rule types, because each needs I/O or is a client-side concern. Use the layer that already does each one correctly:
 
-- **Uniqueness** → a unique index (`ObjectSchema.indexes`, `{ fields, unique: 'organization' | 'global' }` — state the scope, [ADR-0120](/docs/data-modeling/indexing); `partial` for a scoped constraint) or field-level `unique`. A SELECT-then-INSERT rule is inherently racy (TOCTOU); a DB unique constraint is not.
+- **Uniqueness** → a unique index (`ObjectSchema.indexes`, `{ fields, unique: 'organization' | 'global' }` — state the scope, [ADR-0120](/docs/data-modeling/indexing)) or field-level `unique`. A SELECT-then-INSERT rule is inherently racy (TOCTOU); a DB unique constraint is not.
 - **Async / remote validation** → a client-form concern, and an SSRF/latency hazard on the server write path. Keep it in the form layer, or enforce the invariant with a `unique` index / lifecycle hook.
 - **Custom handler** → a `beforeInsert` / `beforeUpdate` lifecycle hook, the supported extension point for arbitrary validation code.
 - **Delete-time guards** → a `beforeDelete` lifecycle hook. Validation rules run only on insert/update (a delete carries no record payload to validate), so there is no `'delete'` validation event — block or gate deletions from a `beforeDelete` hook.
@@ -26,6 +26,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Order = ObjectSchema.create({
   name: 'order',
+  sharingModel: 'private',
   label: 'Order',
   fields: {
     amount: Field.currency({ label: 'Amount', required: true }),
@@ -132,9 +133,14 @@ email: Field.email({ label: 'Contact Email', unique: 'organization' }),
 // Composite / scoped uniqueness via ObjectSchema.indexes
 indexes: [
   { fields: ['code'], unique: 'organization' },
-  // `partial` expresses a scoped/conditional constraint
 ]
 ```
+
+`type` and `partial` were **retired at protocol 17** (#5248, #4943) — `IndexSchema` is a
+strict object declaring exactly `name` / `fields` / `unique`, so authoring either is now a
+rejection with guidance, not a silent strip. A **partial** index is built at the database
+layer (a runtime migration issuing `CREATE UNIQUE INDEX … WHERE`), not on the declaration
+surface; see [Objects](/docs/data-modeling/objects).
 
 ### Format Validation
 

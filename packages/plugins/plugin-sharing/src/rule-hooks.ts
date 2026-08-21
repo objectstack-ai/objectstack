@@ -75,7 +75,18 @@ interface MinimalEngine {
 
 interface MinimalLogger {
   info?: (msg: any, ...rest: any[]) => void;
-  warn?: (msg: any, ...rest: any[]) => void;
+  /**
+   * Non-optional because this logger is FORWARDED into `stashAffectedRowsOnCtx`
+   * (bulk-recompute.ts), whose sink guarantees a `warn` channel under #9754. A
+   * `warn?` here would re-open the silence one module downstream of the place it
+   * was closed — the forwarding seam is exactly where a guarantee gets lost, and
+   * `tsc` reported it the moment the callee's contract tightened (#10556).
+   *
+   * This shape declares no `error` at all, so it is not itself in the
+   * optional-error-sink population; what it must not do is hand a
+   * silence-permitting value to something that promises otherwise.
+   */
+  warn: (msg: any, ...rest: any[]) => void;
 }
 
 /**

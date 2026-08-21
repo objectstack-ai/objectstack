@@ -11,6 +11,7 @@ import {
     probeThenReplaceIndex,
     type IndexExec,
 } from './partial-index-probe.js';
+import type { IndexMigrationLogger } from './partial-index-probe.js';
 
 /**
  * The probe-first order, tested where it lives (#6418).
@@ -382,6 +383,18 @@ describe('probe-first partial index replacement (#6418)', () => {
         expect(warnOnly.warn).toHaveBeenCalledWith('msg', { detail: 'detail' });
 
         expect(() => logProblem(undefined, 'msg', 'detail')).not.toThrow();
-        expect(() => logProblem({}, 'msg', 'detail')).not.toThrow();
+        // `{}` is no longer a legal `IndexMigrationLogger` — #9754 made `warn`
+        // non-optional precisely so a sink with NEITHER channel cannot be
+        // written. The cast is deliberate and is the point of the case: it
+        // forces through the one host the TYPE cannot reach (a plain-JS
+        // embedder, or a cast at the boundary) and pins that `logProblem`'s
+        // `?.` backstop still degrades to silence instead of throwing
+        // `logger.warn is not a function` inside a migration probe. Type-level
+        // guarantee and runtime backstop are different promises; this asserts
+        // the second one, and the compile error that used to be impossible here
+        // is now what proves the first.
+        expect(() =>
+            logProblem({} as unknown as IndexMigrationLogger, 'msg', 'detail'),
+        ).not.toThrow();
     });
 });

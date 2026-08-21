@@ -21,7 +21,15 @@ import type {
  */
 export interface KnowledgeLogger {
   info?(msg: string, ...rest: unknown[]): void;
-  warn?(msg: string, ...rest: unknown[]): void;
+  /**
+   * The GUARANTEED fallback channel (#9754). `error` stays optional — hosts do
+   * inject reduced sinks — so `warn` is where a durability report lands when
+   * `error` is absent, and a fallback that may itself be missing is not a
+   * fallback. Call sites keep the `logger?.warn?.(…)` spelling as the backstop
+   * for hosts the TYPE cannot reach; `SweepLogger` in plugin-email's
+   * `outbox-sweep.ts` carries the full reasoning and the measurement.
+   */
+  warn(msg: string, ...rest: unknown[]): void;
   error?(msg: string, ...rest: unknown[]): void;
   debug?(msg: string, ...rest: unknown[]): void;
 }

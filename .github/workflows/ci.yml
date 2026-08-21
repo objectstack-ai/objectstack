@@ -463,6 +463,32 @@ jobs:
                    --changed "$RUNNER_TEMP/changed-files.txt"; then
               echo "::warning::Could not union cross-package scans into the affected set; falling back to the full package list for this shard."
               pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
+            # A fourth signal the failure branches do not cover: a producer that
+            # exits 0 with a wrong, plausible, EMPTY answer. Only that `git
+            # diff`'s exit STATUS was checked, never its emptiness, so a
+            # merge-base resolving to something wrong-but-valid gave an empty
+            # changed-file list -> zero affected packages -> a green shard that
+            # tested nothing, with every log line reading like a normal quiet PR
+            # (#10057). The shard attestation (#6082) does not cover it: it
+            # attests "shard N ran and every step passed", which is exactly what
+            # a shard that tested nothing does.
+            #
+            # Empty is decidable as BROKEN here, and only here: a pull_request
+            # always differs from its merge-base. At the partitioner zero is
+            # frequently the CORRECT answer (a docs-only PR genuinely affects no
+            # package, and with 6 shards a small change legitimately leaves
+            # shards empty), so a blanket "red on empty" belongs there least of
+            # all -- this is the one place selection-failed and nothing-selected
+            # can be told apart.
+            #
+            # Scoping this to pull_request needs no `github.event_name` test:
+            # SCM_BASE is assigned only inside the `pull_request` guard above, so
+            # this whole `[ -n "$SCM_BASE" ]` branch is unreachable on push and
+            # merge_group. Those keep taking the full-list path in the `else`
+            # below, by design.
+            elif [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
+              echo "::warning::The diff against merge-base $SCM_BASE listed no changed files, which a pull_request cannot legitimately produce; falling back to the full package list for this shard rather than selecting nothing (#10057)."
+              pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
             fi
           else
             # Falling back to the FULL package list, never to the frozen
@@ -696,6 +722,21 @@ jobs:
     # filter-`skipped` (#4928) keep their existing meanings — see the script.
     name: Test Core
     needs: [test, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # What this required aggregate stands in for, stated rather than inferred.
+    # `node scripts/check-aggregator-roster.mjs` asserts MEMBERS + NON_MEMBERS
+    # equals `needs:` EXACTLY, in both directions, so a lane added to this
+    # workflow and forgotten here cannot ride green behind "Test Core" as an
+    # advisory check-run, and a `needs:` entry whose job was deleted cannot
+    # keep being claimed. `filter` is a non-member on purpose: it is consulted
+    # for the #4928 skipped-only-when-filter-succeeded guard, not aggregated —
+    # and having somewhere to SAY that is what stops the roster from being
+    # widened to launder a red. The members are cross-checked against the
+    # `--leg` tokens below, so this declaration cannot drift into a second
+    # source of truth for what check:shard-attestation counts.
+    env:
+      OS_AGGREGATOR_MEMBERS: test
+      OS_AGGREGATOR_NON_MEMBERS: filter
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1280,6 +1321,14 @@ jobs:
     # is why `abandoned` gets counting rather than a place in a word list.
     name: Dogfood Regression Gate
     needs: [dogfood, dogfood-verify, filter]
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────
+    # Both legs this context covers, named. See test-gate above for the full
+    # note; the same gate asserts this list equals `needs:` in both directions
+    # and equals the `--leg` tokens the verdict actually counts. `filter` is
+    # the #4928 input, not a lane.
+    env:
+      OS_AGGREGATOR_MEMBERS: dogfood dogfood-verify
+      OS_AGGREGATOR_NON_MEMBERS: filter
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10

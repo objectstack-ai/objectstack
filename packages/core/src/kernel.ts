@@ -15,6 +15,7 @@ import {
 } from './plugin-order.js';
 import { dispatchHookIsolating, dispatchHookPropagating } from './hook-dispatch.js';
 import { registerPluginByName } from './plugin-registration.js';
+import { raceWithTimeout } from './timeout-guard.js';
 
 /**
  * Enhanced Kernel Configuration
@@ -457,16 +458,25 @@ export class ObjectKernel {
         const shutdownTimeoutError = new Error('Shutdown timeout exceeded');
 
         try {
-            const shutdownPromise = this.performShutdown();
-            const timeoutPromise = new Promise<void>((_, reject) => {
-                const t = setTimeout(() => {
-                    reject(shutdownTimeoutError);
-                }, this.config.shutdownTimeout);
-                // Don't let this timer keep the event loop alive
-                if (t.unref) t.unref();
-            });
-
-            await Promise.race([shutdownPromise, timeoutPromise]);
+            // Same guard as the startup races (#10604). It used to be hand-rolled
+            // here, and the two copies had already drifted into doing opposite
+            // halves of the same job: this one `unref()`d its timer and never
+            // cleared it, so a won race left it armed to fire against a kernel
+            // that was already 'stopped', while the startup site cleared and
+            // never unref'd. `raceWithTimeout` does both halves, once.
+            //
+            // Dropping the `unref()` is the point, not a casualty of the merge:
+            // an unref'd guard stops being a guard (#4813). If `performShutdown()`
+            // hangs and nothing else keeps the loop alive, an unref'd timer lets
+            // Node exit *silently* — no 'Shutdown timed out', no `exit(1)`, the
+            // one branch that hard-exit was ever right for never reached.
+            // Clearing on settle keeps it ref'd exactly while the race is
+            // undecided, which is the property this timeout needs.
+            await raceWithTimeout(
+                this.performShutdown(),
+                this.config.shutdownTimeout!,
+                () => shutdownTimeoutError,
+            );
 
             this.state = 'stopped';
             this.logger.info('✅ Graceful shutdown complete');
@@ -619,31 +629,21 @@ export class ObjectKernel {
      * as well: if the hook never settles and nothing else keeps the loop alive,
      * Node exits before the timer can fire and the timeout is never reported.
      * The guard has to stay ref'd exactly as long as the race is undecided,
-     * which is what `clearTimeout` in a `finally` expresses.
+     * which is what clearing on settle expresses.
      *
-     * `operation` is widened to `T | PromiseLike<T>` because the Plugin
-     * contract permits a synchronous hook (`init`/`start` return
-     * `void | Promise<void>`); such a hook wins the race immediately and the
-     * guard is reclaimed on the same turn.
+     * Clearing the timer was only half of it, though (#10604): the promise the
+     * race still holds a reaction on has to SETTLE, or it and that reaction are
+     * retained past the end of the run — two leaking promises per boot, which
+     * is what `vitest --detectAsyncLeaks` names here. Both halves now live in
+     * `TimeoutGuard.reclaim()`, shared with `shutdown()`, so the two sites
+     * cannot drift into doing one half each again.
      */
     private async raceStartupTimeout<T>(
         operation: T | PromiseLike<T>,
         timeout: number,
         message: string
     ): Promise<T> {
-        let guard: ReturnType<typeof setTimeout> | undefined;
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            guard = setTimeout(() => {
-                reject(new Error(message));
-            }, timeout);
-        });
-
-        try {
-            return await Promise.race([operation, timeoutPromise]);
-        } finally {
-            clearTimeout(guard);
-        }
+        return raceWithTimeout(operation, timeout, () => new Error(message));
     }
 
     /**

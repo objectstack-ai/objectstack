@@ -74,6 +74,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { historyHorizon } from './pm/git-history.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -334,4 +335,7 @@ function selfTest() {
   return failures === 0 ? 0 : 1;
 }
 
-process.exit(process.argv.includes('--self-test') ? selfTest() : main(process.argv.slice(2)));
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  process.exit(process.argv.includes('--self-test') ? selfTest() : main(process.argv.slice(2)));
+}

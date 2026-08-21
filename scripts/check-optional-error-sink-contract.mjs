@@ -164,6 +164,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
+import { parseSourceFile } from './ts-parse.mjs';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const BASELINE_PATH = join(HERE, 'optional-error-sink-contract.baseline.json');
@@ -489,7 +491,14 @@ function run({ list = false } = {}) {
             // this regex is exactly how the first draft of this population read a
             // clean tree while missing both audit sinks.
             if (!/\berror\s*\??\s*[:(]/.test(text)) continue;
-            const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+            // `parseSourceFile` rather than the raw call: ts.createSourceFile never
+            // throws, so a `.ts` file with a syntax error would be walked as a
+            // recovered partial tree, contribute nothing to the census, and be
+            // scored as a file with no sinks to report. scriptKind is OMITTED —
+            // `collectSourceFiles` yields `.ts` only, so the file name infers
+            // exactly what the forced `ScriptKind.TS` used to say, and forcing
+            // one is its own blind spot (see scripts/ts-parse.mjs).
+            const sf = parseSourceFile(file, text);
             analyzeSourceFile(sf, relative(ROOT, file).split(sep).join('/'), census);
         }
     }
@@ -656,7 +665,7 @@ function selfTest() {
 
     let failures = 0;
     for (const c of cases) {
-        const sf = ts.createSourceFile('t.ts', c.code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+        const sf = parseSourceFile('t.ts', c.code);
         const census = emptyCensus();
         analyzeSourceFile(sf, 't.ts', census);
         const verdicts = census.sinks.map((s) => s.verdict);

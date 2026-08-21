@@ -53,6 +53,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
 import { join, relative, sep } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const SCAN_ROOTS = ['packages'];
@@ -241,4 +242,7 @@ If this literal is NOT an error.code — a field/param-addressed validator code
   process.exit(1);
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}

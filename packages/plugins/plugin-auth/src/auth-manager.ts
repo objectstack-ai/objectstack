@@ -42,7 +42,6 @@ import {
 import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
-  isOrgAdminGrade,
 } from './invitation-role-cap.js';
 import {
   DEFAULT_CREATOR_ROLE,
@@ -631,8 +630,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
    * bookkeeping surfaces such as the ADR-0093 membership reconciler. Omitted →
    * those surfaces run silently (they already fail closed to no-op).
+   *
+   * The whole field stays OPTIONAL — omitting it is still a supported posture.
+   * What is no longer representable is supplying a logger that cannot carry a
+   * durability report: `warn` is non-optional because this value is FORWARDED
+   * verbatim into `ReconcileMembershipDeps.logger` (reconcile-membership.ts),
+   * whose sink guarantees that channel under #9754. Measured before tightening:
+   * the only non-test construction site in this repo is `auth-plugin.ts`, which
+   * passes `ctx.logger` — the kernel `Logger`, whose `warn` is already
+   * required — so the in-tree cost is zero. An external embedder handing
+   * `AuthManager` a reduced `{ info }` sink is the one caller this asks to
+   * change, and that is the point: it was the caller silently discarding the
+   * reconciler's reports (#10556).
    */
-  logger?: { info?: (msg: string, meta?: any) => void; warn?: (msg: string, meta?: any) => void };
+  logger?: { info?: (msg: string, meta?: any) => void; warn: (msg: string, meta?: any) => void };
 
   /**
    * ADR-0069 D2 — account lockout (anti-brute-force). After this many
@@ -1519,28 +1530,42 @@ export class AuthManager {
             // fall through — the vendor still performs the revoke itself
           }
 
-          // ── ADR-0024: admin-gate self-service SSO provider registration ──
+          // ── ADR-0024 + ADR-0068 D4: registering an identity provider is ──
+          // a PLATFORM-OPERATOR action.
+          //
           // `@better-auth/sso`'s POST /sso/register only checks org-admin when
           // `body.organizationId` is present (index.mjs: `if (ctx.body
           // .organizationId) { … hasOrgAdminRole … }`). A GLOBAL (org-less)
           // provider therefore passes with nothing but a valid session — so any
           // authenticated member can register an env-wide external IdP, a JIT-
-          // provisioning / login-routing vector. Require the caller to be a
-          // platform admin OR an owner/admin of their active org, regardless of
-          // whether `organizationId` is supplied. Unauthenticated requests fall
-          // through to better-auth's `sessionMiddleware` (→ 401). Fail-CLOSED:
-          // an unverifiable actor is denied. (D5.1's `/oauth2/authorize` gate is
-          // a different surface — the OP issuing codes, not the env's RP config.)
+          // provisioning / login-routing vector. So ObjectStack decides the
+          // authorization here, regardless of whether `organizationId` is
+          // supplied.
+          //
+          // [#10009] The admit set is PLATFORM ADMIN ONLY — the same posture
+          // #9653 landed on the `/admin/sso/*` bridges. It previously ALSO
+          // admitted an owner/admin of the caller's active org, and that gap
+          // made the bridge tightening honest labelling rather than a boundary:
+          // one principal, refused 403 at `/admin/sso/register` and admitted
+          // here, for the same underlying registration. Maintainer ruling
+          // 2026-08-20 closed the wider door (ADR-0068 D4 — platform-operator
+          // actions gate on the platform admin, sole operator). An org-scoped
+          // self-serve channel for org-scoped providers is a deliberate FUTURE
+          // ruling if multi-org IdP self-serve becomes a product goal — it is
+          // not the vendor default, inherited by omission.
+          //
+          // Unauthenticated requests fall through to better-auth's
+          // `sessionMiddleware` (→ 401). Fail-CLOSED: an unverifiable actor is
+          // denied. (D5.1's `/oauth2/authorize` gate is a different surface —
+          // the OP issuing codes, not the env's RP config.)
           if (ctx?.path === '/sso/register') {
             const actor = await this.resolveActor(ctx);
             if (actor?.userId) {
-              const ok = await this.isOrgOrPlatformAdmin(actor.userId, actor.activeOrgId);
+              const ok = await this.isPlatformAdminUserId(actor.userId);
               if (!ok) {
                 const { APIError } = await import('better-auth/api');
                 throw new APIError('FORBIDDEN', {
-                  message:
-                    'Only an organization owner/admin or a platform admin can ' +
-                    'register an SSO provider.',
+                  message: 'Only a platform admin can register an SSO provider.',
                   code: 'SSO_REGISTER_FORBIDDEN',
                 });
               }
@@ -4357,10 +4382,14 @@ export class AuthManager {
    * permission set with `organization_id = null` (seeded by
    * `bootstrapPlatformAdmin`)?
    *
-   * Deliberately NARROWER than {@link isOrgOrPlatformAdmin}: it does not admit
-   * organization owners/admins. Platform-admin routes must not be reachable by
-   * whoever happens to own an org (ADR-0068), so the two questions stay two
-   * methods.
+   * Deliberately does NOT admit organization owners/admins. Platform-admin
+   * routes must not be reachable by whoever happens to own an org (ADR-0068).
+   * [#10009] This replaced an `isOrgOrPlatformAdmin` predicate that admitted
+   * both; once `/sso/register` stopped asking the org question, that wider
+   * predicate had no caller left and was removed rather than parked.
+   *
+   * ⛔ The legacy `user.role === 'admin'` scalar is NOT consulted here. This
+   * asks the permission-set question only — the channel ADR-0068 D2 keeps.
    *
    * Reads through `withSystemReadContext` so the lookups are not themselves
    * RLS-scoped to the acting — possibly non-privileged — user, and fails CLOSED
@@ -4387,69 +4416,6 @@ export class AuthManager {
       );
       if (!adminSet) return false;
       return platformLinks.some((l: any) => l.permission_set_id === adminSet.id);
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * True when `userId` is a platform admin (a `sys_user_permission_set` row
-   * pointing at `admin_full_access` with `organization_id = null`) OR an
-   * owner/admin member of `activeOrgId` (any org membership with role
-   * owner/admin when no active org is set). Reads through
-   * `withSystemReadContext` so the lookups are not themselves RLS-scoped to the
-   * acting (possibly non-privileged) user. Fails CLOSED (returns false) on any
-   * lookup error — this backs a security gate, so an unverifiable actor must
-   * never pass.
-   *
-   * [#5942] The membership half asks {@link isOrgAdminGrade} — the single grade
-   * ladder in `invitation-role-cap.ts`, shared with the break-glass ban guard —
-   * so "which membership is an administrator" has exactly one answer inside
-   * plugin-auth. The platform-admin half above is unchanged and still has its
-   * own derivations elsewhere (`resolve-authz-context.ts` is authoritative).
-   */
-  private async isOrgOrPlatformAdmin(
-    userId: string,
-    activeOrgId?: string,
-  ): Promise<boolean> {
-    const engine = this.getDataEngine();
-    if (!engine) return false;
-    const sys = withSystemReadContext(engine);
-    try {
-      // 1) platform admin — admin_full_access permission set, org-less link.
-      const links = await sys.find('sys_user_permission_set', {
-        where: { user_id: userId },
-        limit: 50,
-      });
-      const platformLinks = (Array.isArray(links) ? links : []).filter(
-        (l: any) => !l.organization_id,
-      );
-      if (platformLinks.length) {
-        const sets = await sys.find('sys_permission_set', { limit: 50 });
-        const adminSet = (Array.isArray(sets) ? sets : []).find(
-          (r: any) => r.name === 'admin_full_access',
-        );
-        if (adminSet && platformLinks.some((l: any) => l.permission_set_id === adminSet.id)) {
-          return true;
-        }
-      }
-      // 2) org owner/admin — membership role in the active org (or any org).
-      const where: any = { user_id: userId };
-      if (activeOrgId) where.organization_id = activeOrgId;
-      const members = await sys.find('sys_member', { where, limit: 10 });
-      for (const m of (Array.isArray(members) ? members : [])) {
-        // [#5942] The ONE grade ladder answers "does this membership administer
-        // the org" — never a hand-copied `role === 'owner' || role === 'admin'`.
-        // The copy that used to live here was case-SENSITIVE and string-only, so
-        // a `sys_member.role` of `Owner` / `ADMIN` / `['owner']` was refused
-        // here while `last-admin-ban-guard.ts` — same question, same ladder —
-        // counted that row AS an administrator. Two spellings of one security
-        // question cannot disagree if there is only one spelling.
-        if (isOrgAdminGrade(m?.role)) {
-          return true;
-        }
-      }
-      return false;
     } catch {
       return false;
     }

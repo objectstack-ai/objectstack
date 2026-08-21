@@ -62,6 +62,125 @@ const declaredNotificationKeys = () => new Set(Object.keys((NotificationSchema a
 const declaredMarkReadKeys = () => new Set(Object.keys((MarkNotificationsReadResponseSchema as any).shape));
 const declaredMarkAllReadKeys = () => new Set(Object.keys((MarkAllNotificationsReadResponseSchema as any).shape));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// [#10380] The authz resolver's expected read failures: WITHHELD from the
+//          shared log, and ASSERTED instead
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// This fixture provisions the messaging objects and nothing else, so every
+// request's `resolveUserAuthzGrants` (`core/src/security/resolve-authz-context.ts`)
+// reads six `sys_*` tables that were never created. `tryFind` swallows each
+// one by design — the resolver is fail-closed and must always resolve — but on
+// the way out the driver and the engine each log it. Measured on `origin/main`:
+// 63 `[sql-driver] DATABASE_ERROR — the backend refused a read on '…'` lines
+// and 63 matching `ERROR Find operation failed` frames, out of a suite whose
+// eight tests all PASS.
+//
+// Turbo interleaves package logs without attribution, so in the `Test Core`
+// shard log those are indistinguishable from a real failure — they were lifted
+// verbatim into a p1 flake signature (#10293) and cost a full dispatch cycle
+// aimed at the wrong mechanism.
+//
+// ⛔ Not a mute. A capture that only silences would make this file blind: if
+// those reads ever started SUCCEEDING (someone provisions the tables) or
+// stopped happening (the resolver drops a read), the log would go quiet and
+// nothing would notice. So the sinks below withhold ONLY the expected fault —
+// each line must name one of the six tables AND carry that same table's
+// `no such table` reason — and record what they withheld, which `afterAll`
+// asserts. Everything else reaches the console untouched.
+
+/**
+ * The six tables the resolver reads and this fixture does not provision.
+ * Derived by measurement, not from the resolver's source, so a read this
+ * fixture stops provoking shows up as a changed set rather than silently.
+ */
+const ABSENT_AUTHZ_TABLES = [
+  'sys_user',
+  'sys_member',
+  'sys_user_position',
+  'sys_user_permission_set',
+  'sys_position',
+  'sys_setting',
+] as const;
+
+/**
+ * The five of them read on EVERY grant resolution, i.e. on every request this
+ * file makes. `sys_setting` is deliberately NOT here: it is read on only some
+ * routes (3 of the 12 resolutions), so requiring it would turn a single-test
+ * `-t` run red without meaning anything.
+ */
+const ALWAYS_READ_AUTHZ_TABLES = ABSENT_AUTHZ_TABLES.filter((t) => t !== 'sys_setting');
+
+/** Installs the two sinks and hands back the tables they withheld. */
+function captureExpectedAbsentTableNoise() {
+  const withheld = new Set<string>();
+  /** Recognised driver refusals not yet consumed by their engine frame. */
+  const pending = new Map<string, number>();
+
+  /** The refusal envelope AND the dialect reason must name the SAME table. */
+  const expectedRefusal = (line: string): string | undefined =>
+    ABSENT_AUTHZ_TABLES.find(
+      (t) => line.includes(`refused a read on '${t}'`) && line.includes(`no such table: ${t}`),
+    );
+
+  return {
+    withheld,
+
+    /**
+     * The driver's sink. Mirrors the default's `{ warn, error }` shape so
+     * `logDurabilityFailure` still finds an `error` channel.
+     */
+    install(driver: unknown): void {
+      (driver as { logger: unknown }).logger = {
+        warn: (msg: string, meta?: unknown): void => {
+          const table = expectedRefusal(String(msg));
+          if (table) {
+            withheld.add(table);
+            pending.set(table, (pending.get(table) ?? 0) + 1);
+            return;
+          }
+          console.warn(msg, meta ?? '');
+        },
+        error: (msg: string, meta?: unknown): void => console.error(msg, meta ?? ''),
+      };
+    },
+
+    /**
+     * The engine's `error` channel, through a Proxy so every other logger
+     * method stays the engine's own.
+     *
+     * ⛔ Gated on `pending`: an engine frame is withheld only when it sits
+     * directly above a driver refusal this capture already recognised. A
+     * `DATABASE_ERROR` on one of these six tables arising from any OTHER cause
+     * is not recognised by the driver sink, so its frame is not withheld here
+     * either — it reaches the log with both halves intact.
+     */
+    wrapEngine(engine: unknown): void {
+      const base = (engine as { logger: any }).logger;
+      (engine as { logger: any }).logger = new Proxy(base, {
+        get: (target: any, key: string) =>
+          key === 'error'
+            ? (msg: string, err?: unknown, meta?: unknown) => {
+                const object = (meta as { object?: string } | undefined)?.object;
+                const outstanding = object ? (pending.get(object) ?? 0) : 0;
+                const detail = String((err as { message?: string } | undefined)?.message ?? '');
+                if (
+                  msg === 'Find operation failed' &&
+                  object &&
+                  outstanding > 0 &&
+                  detail.includes(`refused to run this query for object '${object}'`)
+                ) {
+                  pending.set(object, outstanding - 1);
+                  return;
+                }
+                target.error(msg, err, meta);
+              }
+            : target[key],
+      });
+    },
+  };
+}
+
 /** Minimal `auth` service — `x-test-user` names the principal, absent = anonymous. */
 function fakeAuthPlugin(): Plugin {
   return {
@@ -86,10 +205,16 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   let kernel: ObjectKernel;
   let baseUrl: string;
   let messaging: MessagingService;
+  /** [#10380] The expected-noise capture, asserted in `afterAll`. */
+  const noise = captureExpectedAbsentTableNoise();
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logLevel: 'silent' });
-    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+    // [#10380] The driver is named rather than inlined so its logger can be
+    // scoped before it ever runs a statement.
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    noise.install(driver);
+    await kernel.use(new DriverPlugin(driver));
     await kernel.use(new ObjectQLPlugin());
     // Inline delivery so `emit()` materializes the inbox row synchronously.
     await kernel.use(new MessagingServicePlugin({ reliableDelivery: false }));
@@ -97,6 +222,10 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
     await kernel.use(new HonoServerPlugin({ port: 0 }));
     await kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
     await kernel.bootstrap();
+
+    // [#10380] The engine only exists once the kernel has bootstrapped; the
+    // reads this scopes all happen later, per request.
+    noise.wrapEngine(kernel.getService<unknown>('objectql'));
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
@@ -117,6 +246,21 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
         kernel.shutdown(),
         new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
       ]);
+    }
+
+    // [#10380] The capture is a PIN, not a mute — asserted after shutdown so
+    // a failure here can never leave the kernel running. Every one of these
+    // reads happens on EVERY grant resolution, so this holds for a single
+    // filtered test as well as for the whole file. If one goes silent, the
+    // right repair is to re-derive the list above, NOT to relax this: a
+    // resolver read that stopped happening is a finding, and a table that
+    // started resolving means this fixture now provisions it.
+    for (const table of ALWAYS_READ_AUTHZ_TABLES) {
+      expect(
+        noise.withheld.has(table),
+        `the expected '${table}' read failure was never emitted — resolveUserAuthzGrants ` +
+          'no longer reads it, or it no longer fails, and this capture has stopped measuring it',
+      ).toBe(true);
     }
   }, 30_000);
 

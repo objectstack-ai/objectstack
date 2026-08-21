@@ -42,13 +42,32 @@
  * capability error (501 when the organization plugin is off) → body
  * validation (400) → the vendor's own verdicts, forwarded verbatim.
  *
- * ── organizationId default ──────────────────────────────────────────────────
+ * ── organizationId defaults; teamId does NOT ────────────────────────────────
  *
- * The request headers are forwarded into `auth.api.addMember`, so an omitted
- * `organizationId` defaults to the CALLER's active organization — the
- * behaviour the `sys_member` action metadata documents ("organizationId/teamId
- * default to the caller's active org/team when omitted"). An admin with no
- * active organization gets the vendor's 400 `NO_ACTIVE_ORGANIZATION`.
+ * The two optional fields are NOT symmetric. `organizationId` defaults to the
+ * caller's active organization when omitted; `teamId` has no such fallback —
+ * omit it and the member simply joins no team. Measured on the installed
+ * better-auth 1.7.1 (`dist/plugins/organization/routes/crud-members.mjs`,
+ * inside `addMember`'s handler):
+ *
+ *     const orgId = ctx.body.organizationId || session?.session.activeOrganizationId;
+ *     const teamId = "teamId" in ctx.body ? ctx.body.teamId : void 0;
+ *
+ * and no `activeTeamId` read anywhere in that file (`activeOrganizationId`
+ * hits 8 times in the same grep, which is what proves the search works).
+ *
+ * So what header forwarding buys is the ORG default only: an admin with no
+ * active organization gets the vendor's 400 `NO_ACTIVE_ORGANIZATION`, while an
+ * omitted `teamId` stays `undefined` and every `if (teamId)` branch in the
+ * vendor handler (team lookup, `TEAM_NOT_FOUND`, per-team limit) is skipped.
+ * Forwarding `teamId` itself is still correct — pass it and it works.
+ *
+ * The `sys_member` `add_member` action metadata used to assert the symmetric
+ * version of this sentence; it was a wrong citation rather than a live defect,
+ * because that action's `params` list carries no `teamId` and so never sent
+ * one. Corrected at the origin in the same change, and pinned against a vendor
+ * bump that ADDS an active-team fallback by
+ * `organization-add-member-team-fallback.test.ts`.
  */
 
 import { mapAuthApiError, type EndpointResult } from './admin-user-endpoints.js';

@@ -58,6 +58,7 @@ export {
   STARTUP_VERDICT_HINT,
   STARTUP_OPEN_VOCABULARY_VERDICT,
   STARTUP_VERDICT_ASSERTIVE_WORDING,
+  STARTUP_SOURCE_UNPARSEABLE,
 } from './lint-startup-registry-verdict.js';
 export type {
   StartupRegistryVerdictFinding,
@@ -147,8 +148,16 @@ export {
   REACT_CHART_AXIS_UNKNOWN,
   REACT_CHART_DRILLDOWN_INVALID,
   REACT_BLOCK_NEEDS_RECORD_CONTEXT,
+  REACT_PAGE_SOURCE_UNPARSEABLE,
 } from './validate-react-page-props.js';
 export type { ReactPropFinding, ReactPropSeverity } from './validate-react-page-props.js';
+
+// [#10653] The package-local checked parse behind the three `*-source-unparseable`
+// rules above and below. Exported because a consumer that receives one of those
+// findings may want the failure's shape (line/column/count) rather than
+// re-parsing the message string — the same reason the rule ids are exported.
+export { describeParseFailure, PARSE_FAILURE_HINT } from './checked-parse.js';
+export type { SourceParseFailure, CheckedParse, CheckedParseOptions } from './checked-parse.js';
 export { validatePageSourceStyling, PAGE_SOURCE_CLASSNAME } from './validate-page-source-styling.js';
 export type { SourceStyleFinding, SourceStyleSeverity } from './validate-page-source-styling.js';
 
@@ -506,6 +515,7 @@ export {
   HOOK_BODY_WRITE_EXCLUSIONS,
   HOOK_BODY_WRITE_UNKNOWN_FIELD,
   HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR,
+  HOOK_BODY_SOURCE_UNPARSEABLE,
 } from './validate-hook-body-writes.js';
 export type {
   HookBodyWriteFinding,
@@ -530,6 +540,7 @@ export {
   ACTION_BODY_WRITE_UNKNOWN_FIELD,
   ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR,
   ACTION_RECORD_WRITE_DISCARDED,
+  ACTION_BODY_SOURCE_UNPARSEABLE,
 } from './validate-action-body-writes.js';
 export type {
   ActionBodyWriteFinding,

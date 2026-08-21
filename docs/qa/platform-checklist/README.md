@@ -71,7 +71,8 @@ next-sequential numbers do.
   "variants": ["…"],                     // enumerable-surface matrix (field types, chart types, flow
                                          // nodes, operators…) — derived from the spec's own Zod enums,
                                          // source cited; one clause requires per-variant verification
-  "traps": ["hydration-race"],           // known false-positive risks (vocabulary in RUNNER.md)
+  "traps": ["hydration-race"],           // known false-positive risks — CLOSED vocabulary,
+                                         // enforced against RUNNER.md's trap table
   "automated": { "kind": "e2e", "ref": "path/to/pinning.test.ts" },  // set when a permanent test pins it
   "blocked": { "by": "fixture", "ref": "#NNNN" },  // standing blocker, waive-with-a-reference
   "source": ["#3358 §1"],                // where the expectation comes from
@@ -88,6 +89,15 @@ Design notes:
 - **Every clause names its oracle.** The oracle hierarchy and the anti-false-positive
   rules live in [RUNNER.md](./RUNNER.md); the validator only enforces that an oracle is
   declared — an oracle-free clause is an invitation to tick on vibes.
+- **`traps` is a closed vocabulary, and RUNNER.md is where it is defined.** The
+  validator extracts the trap names from [RUNNER.md](./RUNNER.md)'s
+  `### Trap vocabulary` table and rejects any `traps` entry that table does not define,
+  in both directions (used-but-undocumented, documented-but-unused). Document a new trap
+  in that table *first* — name, what it fakes, the counter — then use it. The check that
+  matters most here is the one against a **typo** in a documented trap: `hydration-races`
+  reads as a real trap right up until someone greps the table for it, and RUNNER.md rule
+  3 asks a runner to rule each listed trap out. If that table cannot be parsed, the
+  validator **refuses** rather than validating against an empty allow-list.
 - **`automated` is the 🤖 lane** of the 15.1 plan: once a permanent test pins an item,
   runs may satisfy it by executing that test and citing its output as evidence, instead
   of re-driving the browser.

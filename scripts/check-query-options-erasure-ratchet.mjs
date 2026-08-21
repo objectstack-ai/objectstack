@@ -97,7 +97,15 @@ import eslintConfig, {
   QUERY_OPTIONS_TEST_GLOBS,
   QUERY_OPTIONS_ANY_MESSAGE,
 } from '../eslint.config.mjs';
-import { checkGuardAdoption, collectFatalMessages, lintFilesStrict } from './eslint-fatal-guard.mjs';
+import {
+  checkGuardAdoption,
+  collectFatalMessages,
+  guardAdoptionProblems,
+  lintFilesStrict,
+  lintFilesUnguarded,
+  lintTextStrict,
+  lintTextUnguarded,
+} from './eslint-fatal-guard.mjs';
 import {
   HEADROOM_CANARY_FILE,
   PARSER_STACK_SIZE_KB,
@@ -270,6 +278,209 @@ function baselineKeysAddedSinceMergeBase(baselineKeys) {
 // ---------------------------------------------------------------------------
 // --self-test
 
+// ── Guard-adoption fixtures (#10458) ──────────────────────────────────────
+//
+// checkGuardAdoption() reads THIS FILE, so its fixtures cannot be written the
+// obvious way. `stripComments` deliberately keeps string literals — a gate's
+// signal usually IS a string — so a contiguous `lintFilesStrict` + `(` inside
+// a fixture would satisfy this gate's own call test after its real calls were
+// gone, and a contiguous `.lintFiles` + `(` would report this gate as
+// unguarded outright. Both call shapes are therefore spelled with a `+`: the
+// runtime string is what the check sees, the source text is not a decoy. Do
+// not "tidy" them into single literals.
+const FIXTURE_CALL_STRICT = 'const results = await lintFilesStrict' + '(eslint, [TARGET], { gate: G });';
+const FIXTURE_CALL_RAW = 'const results = await eslint.lintFiles' + '([TARGET]);';
+const FIXTURE_IMPORT = "import { lintFilesStrict } from './eslint-fatal-guard.mjs';";
+const FIXTURE_IMPORT_TEXT = "import { lintTextStrict } from './eslint-fatal-guard.mjs';";
+const FIXTURE_PROSE = '// on the same input. scripts/eslint-fatal-guard.mjs carries the measurement and';
+const FIXTURE_COUNT = 'const sites = (await eslint.lintText' + '(code)).messages.filter(matches).length;';
+const FIXTURE_CALL_TEXT_STRICT = 'const [r] = await lintTextStrict' + '(eslint, code, { gate: G });';
+const FIXTURE_CALL_TEXT_DECLARED = "const [r] = await lintTextUnguarded" + "(eslint, code, { why: 'ground truth' });";
+
+const NO_IMPORT = 'does not import scripts/eslint-fatal-guard.mjs';
+const NOT_ARMED = 'Importing the guard does not arm it';
+const RAW_CALL = 'directly, so a parse failure in its population';
+const BARE_TEXT = 'A counted lintText result discards a parse failure';
+
+/**
+ * The adoption check in both directions, over sources written here.
+ *
+ * The live-tree assertion below can only prove the direction today's tree is
+ * in, and both gates are adopted today — so on its own it is exactly the shape
+ * #4690 warns about: a check that has only ever been green. The reject side is
+ * asserted positively here, and each case is a real regression someone could
+ * land: `[name, source lines, the problems it must produce]`.
+ */
+const GUARD_ADOPTION_CASES = [
+  // The positive control. A zero-hit result over the other five means nothing
+  // without a case that is supposed to come back clean and does.
+  ['imports the guard and calls it', [FIXTURE_PROSE, FIXTURE_IMPORT, FIXTURE_CALL_STRICT], []],
+  // The measured reproduction: the real import line deleted, the docblock left
+  // exactly as it was. Against the raw text this came back CLEAN and the
+  // self-test printed "both gates still routed through it".
+  // (FIXTURE_COUNT is a bare `lintText` count, so it now trips #10599's test
+  // too — the fixture really does carry both defects, and a case that under-
+  // states what its own source does is a case nobody can re-derive.)
+  ['a docblock mention is not an import', [FIXTURE_PROSE, FIXTURE_COUNT], [NO_IMPORT, BARE_TEXT]],
+  // "A guard imported once is not a guard still called" — the docblock's own
+  // thesis, which nothing used to assert.
+  ['imports the guard and never calls it', [FIXTURE_PROSE, FIXTURE_IMPORT, FIXTURE_COUNT], [NOT_ARMED, BARE_TEXT]],
+  // The same sentence one step further: commenting the call out leaves the
+  // identifier in the text.
+  ['a commented-out call is not a call', [FIXTURE_IMPORT, '// ' + FIXTURE_CALL_STRICT], [NOT_ARMED]],
+  // Back to unguarded ESLint: both problems, because it is both.
+  // (the case NAME avoids the raw call shape too — a decoy is a decoy in a
+  // label as much as in a fixture, and this one did red the gate once.)
+  ['went back to unguarded ESLint', [FIXTURE_IMPORT, FIXTURE_CALL_RAW], [NOT_ARMED, RAW_CALL]],
+  // The mask's other direction. Over-masking costs recall; UNDER-masking
+  // fabricates a finding out of prose (#9367), and this check must not.
+  ['a commented-out raw call is not a raw call',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// was: ' + FIXTURE_CALL_RAW], []],
+
+  // ── The lintText half (#10599) ─────────────────────────────────────────
+  //
+  // THE REPRODUCTION. Against the checker as #10458 left it this source came
+  // back with ZERO problems: it imports the guard, it still calls
+  // lintFilesStrict() for the first population, and it never touches
+  // `.lintFiles(` — so all three tests passed while the SECOND population,
+  // counted out of `eslint.lintText()`, went entirely unguarded.
+  ['a guarded call plus a second population measured through lintText',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_COUNT], [BARE_TEXT]],
+  // The negative control that makes the ban a rule rather than a spelling
+  // preference: the counted call routed through the guard is CLEAN.
+  ['a counted lintText routed through the guard is guarded',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_CALL_TEXT_STRICT], []],
+  // And the declared non-measurement — the shape this gate's own ground-truth
+  // fixtures use, which must not be a finding or the ban is unusable.
+  ['a declared non-measurement is not a finding',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_CALL_TEXT_DECLARED], []],
+  // A gate whose whole population is text is ARMED without ever calling
+  // lintFilesStrict(). Reporting that one unguarded would be a false positive
+  // of this card's own making.
+  ['armed through lintTextStrict alone', [FIXTURE_IMPORT_TEXT, FIXTURE_CALL_TEXT_STRICT], []],
+  // The mask, on the new test too: prose about a bare call is not a bare call.
+  ['a commented-out lintText is not a lintText',
+    [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// was: ' + FIXTURE_COUNT], []],
+];
+
+// ── Guard-closure fixtures (#10625) ───────────────────────────────────────
+//
+// Every case above is one file's text, which is exactly the bound this set
+// exists to close: a gate that moved its counting into a sibling module
+// presents a gate file with no banned shape in it, and passes all four tests
+// on whatever strict call it kept. Measured against the checker as #10599 left
+// it, the first case below came back with ZERO problems.
+//
+// TWO decoy disciplines apply here, and they are NOT the same rule:
+//
+//   • CALL shapes still take the `+` split. The bans read `stripComments`,
+//     which keeps string literals (#10598), so a contiguous `.lintFiles` + `(`
+//     in this file is a decoy in the live-tree scan of this very gate.
+//   • SPECIFIERS do not, and must not be "made consistent" with them. The
+//     closure walk is literal-AWARE — an import spelling inside a string is
+//     skipped, which is the only reason scripts/invoked-as.mjs (which writes
+//     `await import(${…})` into a template) is not read as a computed import
+//     of its own. The `a specifier inside a string is not an import` case
+//     below is that behaviour asserted, and it needs the specifier spelled
+//     contiguously to mean anything.
+const FAKE_GATE = 'scripts/__closure_fixture_gate__.mjs';
+const FAKE_HELPER = 'scripts/__closure_fixture_helper__.mjs';
+const FAKE_DEEPER = 'scripts/__closure_fixture_deeper__.mjs';
+const FIXTURE_IMPORT_HELPER = "import { measure } from './__closure_fixture_helper__.mjs';";
+const FIXTURE_IMPORT_DEEPER = "import { count } from './__closure_fixture_deeper__.mjs';";
+const FIXTURE_DELEGATE = 'const second = await measure(eslint, code);';
+const FIXTURE_IMPORT_FILES_DECLARED = "import { lintFilesUnguarded } from './eslint-fatal-guard.mjs';";
+const FIXTURE_CALL_FILES_DECLARED =
+  "const [r] = await lintFilesUnguarded" + "(eslint, [TARGET], { why: 'ground truth' });";
+
+/** A gate that is itself guarded, and hands a second population to a helper. */
+const DELEGATING_GATE = [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_IMPORT_HELPER, FIXTURE_DELEGATE];
+
+const VIA_CLOSURE = "is in the gate's local import closure";
+
+/**
+ * The closure walk in both directions, over synthetic file TREES.
+ *
+ * `[name, files, expected]`, where `files` maps a repo-relative path to its
+ * source lines and each `expected` entry is the list of needles ONE problem
+ * must carry — the file it names and which test fired, because a case that
+ * only counts problems cannot tell a right answer from a coincidence.
+ */
+const GUARD_CLOSURE_CASES = [
+  // THE REPRODUCTION. Zero problems before this card.
+  ['the counted call moved one import out',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    [[FAKE_HELPER, RAW_CALL, VIA_CLOSURE]]],
+  // …and the same move with the other method, which is #10599's hole one
+  // indirection further out.
+  ['a second population counted through lintText, one import out',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_COUNT] },
+    [[FAKE_HELPER, BARE_TEXT, VIA_CLOSURE]]],
+  // The positive control. A zero-hit result over the reject cases means
+  // nothing without a helper that is supposed to come back clean and does.
+  ['a guarded helper is guarded',
+    { [FAKE_GATE]: DELEGATING_GATE, [FAKE_HELPER]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT] },
+    []],
+  // The declaration, one import out: the shape scripts/eslint-stack-headroom.mjs
+  // uses for its canary. Without this the only way to keep a legitimate raw
+  // call green is a hand-kept exemption list, which is the thing a derived
+  // closure was chosen to avoid.
+  ['a declared non-measurement in a helper is not a finding',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_IMPORT_FILES_DECLARED, FIXTURE_CALL_FILES_DECLARED] },
+    []],
+  // Transitive, not one level: the walk is what makes the population derived,
+  // and a one-level walk would just move the same bound to the second hop.
+  ['a raw call two imports out',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_IMPORT_DEEPER, 'export const measure = count;'],
+      [FAKE_DEEPER]: [FIXTURE_CALL_RAW] },
+    [[FAKE_DEEPER, RAW_CALL]]],
+  // The guard module is not in anyone's closure. It holds the raw calls BY
+  // DESIGN, and — the trap — its own `lintFilesStrict(` definition would
+  // answer an armed test that is supposed to be about a call somewhere else.
+  ['the guard module itself is never scanned',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT],
+      'scripts/eslint-fatal-guard.mjs': [FIXTURE_CALL_RAW, FIXTURE_COUNT] },
+    []],
+  // The mask, on the WALK rather than on the bans: a commented-out import
+  // does not put a file in the closure, so the raw call in it is not this
+  // gate's problem. Under-masking here fabricates a finding out of prose.
+  ['a commented-out import does not reach the helper',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, '// ' + FIXTURE_IMPORT_HELPER],
+      [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    []],
+  // The literal direction of the same question — the scripts/invoked-as.mjs
+  // shape, which is in BOTH gates' real closures today.
+  ['a specifier inside a string is not an import',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT,
+      'const template = ' + JSON.stringify(FIXTURE_IMPORT_HELPER) + ';'],
+    [FAKE_HELPER]: [FIXTURE_CALL_RAW] },
+    []],
+  // Where the walk STOPS being decidable, it says so rather than reporting a
+  // closure it cannot claim to have walked. This is the one bound that the
+  // three cards before this one each discovered the expensive way.
+  ['a computed specifier is reported, not passed over',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, 'const m = await import(specifier);'] },
+    [[FAKE_GATE, 'cannot resolve']]],
+  // A closure member that is not there at all: the walk's own blind spot,
+  // reported for the same reason a missing GATE is.
+  ['an unresolvable import is reported',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, FIXTURE_IMPORT_HELPER] },
+    [[FAKE_HELPER, 'unreadable']]],
+  // `path.resolve` clamps at `/`, so an import walking out of the repo used to
+  // come back as a file at the top of it. The bans cannot cover what is not in
+  // the tree, so the honest answer is to name it.
+  ['an import that leaves the repository is reported',
+    { [FAKE_GATE]: [FIXTURE_IMPORT, FIXTURE_CALL_STRICT, "import { x } from '../../outside.mjs';"] },
+    [[FAKE_GATE, 'outside the repository']]],
+  // A cycle must terminate and must report the raw call exactly once.
+  ['a cycle in the closure terminates',
+    { [FAKE_GATE]: DELEGATING_GATE,
+      [FAKE_HELPER]: [FIXTURE_CALL_RAW, "import { gate } from './__closure_fixture_gate__.mjs';"] },
+    [[FAKE_HELPER, RAW_CALL]]],
+];
+
 async function selfTest() {
   const failures = [];
   const assert = (cond, msg) => { if (!cond) failures.push(msg); };
@@ -286,8 +497,24 @@ async function selfTest() {
     baseConfig: measuringConfig(drop),
     allowInlineConfig: false,
   });
+  // Counted, therefore guarded (#10599). A fixture that stops parsing yields
+  // zero messages matching the rule — which is precisely what the `silent`
+  // cases below assert — so an unguarded count here reads a TYPO as proof the
+  // rule is correctly quiet. Measured on this tree, the `argument 1, object
+  // literal` report fixture with its closing paren removed:
+  //
+  //   parses  → hits()=1, fatalErrorCount=0
+  //   typo    → hits()=0, fatalErrorCount=1, "Parsing error: ')' expected."
+  //
+  // The fatal is now a self-test FAILURE naming the fixture, not a zero.
   const hits = async (code, filePath = 'packages/objectql/src/__selftest__.ts') => {
-    const [result] = await eslint.lintText(code, { filePath, warnIgnored: false });
+    const [result] = await lintTextStrict(eslint, code, {
+      filePath,
+      warnIgnored: false,
+      gate: 'self-test fixture',
+      repoRoot,
+      onFatal: (report) => { failures.push(report); return []; },
+    });
     return (result?.messages ?? []).filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length;
   };
 
@@ -358,9 +585,13 @@ async function selfTest() {
       baseConfig: eslintConfig,
       allowInlineConfig: false,
     });
-    const [result] = await blocking.lintText(code, {
+    // Counted, and the assertion below is `=== 0` — same reason as hits().
+    const [result] = await lintTextStrict(blocking, code, {
       filePath: 'packages/objectql/src/__selftest__.test.ts',
       warnIgnored: false,
+      gate: 'self-test fixture (blocking config)',
+      repoRoot,
+      onFatal: (report) => { failures.push(report); return []; },
     });
     const blocked = (result?.messages ?? []).filter((m) => m.ruleId === QUERY_OPTIONS_RULE_ID).length;
     assert(blocked === 0, 'a *.test.ts path must NOT be blocked by the rule (first cut is non-test)');
@@ -402,9 +633,11 @@ async function selfTest() {
   // are therefore driven through real ESLint output, and the fixture is a file
   // that genuinely does not parse rather than a hand-built message object.
   {
-    const [broken] = await eslint.lintText('export const x = (', {
+    const [broken] = await lintTextUnguarded(eslint, 'export const x = (', {
       filePath: 'packages/objectql/src/__selftest_unparseable__.ts',
       warnIgnored: false,
+      why: 'ground truth: what raw ESLint returns for a file that will not parse. '
+        + 'Routing this through the guard would prove the guard with the guard.',
     });
     assert(
       (broken?.messages ?? []).some((m) => m.fatal),
@@ -422,9 +655,11 @@ async function selfTest() {
       `the collected fatal must name the file and the parse error (got ${JSON.stringify(fatals[0])})`,
     );
 
-    const [parses] = await eslint.lintText('export const x = 1;', {
+    const [parses] = await lintTextUnguarded(eslint, 'export const x = 1;', {
       filePath: 'packages/objectql/src/__selftest_parses__.ts',
       warnIgnored: false,
+      why: 'ground truth, the other direction: the guard must stay silent on this one, '
+        + 'so it has to reach collectFatalMessages() unfiltered.',
     });
     assert(
       collectFatalMessages([parses], repoRoot).length === 0,
@@ -456,9 +691,114 @@ async function selfTest() {
       'lintFilesStrict must pass the results through when every file parsed',
     );
 
-    // A guard imported once is not a guard still called. This is also the only
-    // wired coverage of the OTHER gate's call site: `pnpm check:slot-lookup`
-    // has no --self-test hook, and CI runs this one before the gate itself.
+    // The lintText twin, both ways (#10599). The source ban below is only
+    // worth having if the spelling it forces actually guards, and a
+    // pass-through that never checked would satisfy every source test in this
+    // file while doing nothing — the exact shape #10123 was.
+    {
+      let textReported = null;
+      let forwarded = null;
+      const stubBroken = { lintText: async (_code, options) => { forwarded = options; return [broken]; } };
+      const textRefused = await lintTextStrict(stubBroken, 'irrelevant', {
+        filePath: 'packages/objectql/src/__selftest_unparseable__.ts',
+        warnIgnored: false,
+        gate: 'self-test',
+        repoRoot,
+        onFatal: (report) => { textReported = report; return 'refused'; },
+      });
+      assert(textRefused === 'refused', 'lintTextStrict must not return results when the text did not parse');
+      assert(
+        (textReported ?? '').includes('__selftest_unparseable__.ts') && /Parsing error/i.test(textReported ?? ''),
+        `lintTextStrict's failure text must name the file and the parse error (got: ${textReported})`,
+      );
+      // The guard's own options must not reach ESLint: it rejects unknown keys,
+      // so a leak here is a crash at every call site, not a silent oddity.
+      assert(
+        forwarded !== null
+          && Object.keys(forwarded).sort().join(',') === 'filePath,warnIgnored',
+        `lintTextStrict must forward only lintText's own options (forwarded ${JSON.stringify(forwarded)})`,
+      );
+
+      let textFired = false;
+      const stubClean = { lintText: async () => [parses] };
+      const textPassed = await lintTextStrict(stubClean, 'irrelevant', {
+        gate: 'self-test',
+        repoRoot,
+        onFatal: () => { textFired = true; },
+      });
+      assert(
+        !textFired && Array.isArray(textPassed) && textPassed.length === 1,
+        'lintTextStrict must pass the results through when the text parsed',
+      );
+
+      // And the declaration is a declaration: an undeclared escape is a throw,
+      // not a quiet pass. An escape hatch nobody has to name is just the bare
+      // call with extra steps.
+      let threw = null;
+      try {
+        await lintTextUnguarded(stubClean, 'irrelevant', { filePath: 'x.ts' });
+      } catch (err) { threw = err; }
+      assert(
+        threw instanceof TypeError && /requires `why`/.test(threw?.message ?? ''),
+        `lintTextUnguarded must refuse an undeclared call (threw: ${threw?.message ?? 'nothing'})`,
+      );
+
+      // The `lintFiles` twin, same bargain (#10625). It exists because the
+      // bans now reach a gate's whole import closure, and the closure module
+      // that lints raw for a real reason needs the same way to say so a gate
+      // has. If it can be called without naming one, it is not a declaration.
+      let filesThrew = null;
+      try {
+        await lintFilesUnguarded({ lintFiles: async () => [parses] }, [LINT_TARGET], {});
+      } catch (err) { filesThrew = err; }
+      assert(
+        filesThrew instanceof TypeError && /requires `why`/.test(filesThrew?.message ?? ''),
+        `lintFilesUnguarded must refuse an undeclared call (threw: ${filesThrew?.message ?? 'nothing'})`,
+      );
+      const declared = await lintFilesUnguarded({ lintFiles: async () => [broken] }, [LINT_TARGET], {
+        why: 'self-test: proves a declared call passes the fatal STRAIGHT through',
+      });
+      assert(
+        Array.isArray(declared) && declared.length === 1 && declared[0] === broken,
+        'lintFilesUnguarded must return what ESLint returned, fatals and all — it adds no behaviour',
+      );
+    }
+
+    // A guard imported once is not a guard still called — proved in both
+    // directions over the fixtures above, because the live-tree call that
+    // follows can only ever confirm the direction this tree is already in.
+    for (const [name, lines, expected] of GUARD_ADOPTION_CASES) {
+      const problems = guardAdoptionProblems('scripts/__adoption_fixture__.mjs', lines.join('\n'));
+      assert(
+        problems.length === expected.length && expected.every((e) => problems.some((p) => p.includes(e))),
+        `guard adoption, ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(problems)}`,
+      );
+    }
+
+    // The same sentence about the FILES the tests are applied to (#10625).
+    // Every case above is one file's text; a measurement moved into a sibling
+    // module is invisible to all four of them, so the population is walked
+    // rather than listed — and that walk gets asserted in both directions for
+    // the same reason the tests themselves do.
+    for (const [name, files, expected] of GUARD_CLOSURE_CASES) {
+      const problems = checkGuardAdoption('/__fixture_root__', {
+        gates: [FAKE_GATE],
+        readFile: (file) => {
+          const lines = files[file];
+          if (lines === undefined) throw new Error(`ENOENT: ${file}`);
+          return lines.join('\n');
+        },
+      });
+      assert(
+        problems.length === expected.length &&
+          expected.every((needles) => problems.some((p) => needles.every((n) => p.includes(n)))),
+        `guard closure, ${name}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(problems)}`,
+      );
+    }
+
+    // And the live tree. This is also the only wired coverage of the OTHER
+    // gate's call site: `pnpm check:slot-lookup` has no --self-test hook, and
+    // CI runs this one before the gate itself.
     for (const problem of checkGuardAdoption(repoRoot)) assert(false, problem);
   }
 
@@ -544,7 +884,10 @@ async function selfTest() {
   console.log(
     `✓ self-test: ${reports.length} reporting shape(s), ${silent.length} silent counterpart(s), ` +
     `grandfathering + test-glob channels proved in both directions, ${cases.length} ratchet case(s), ` +
-    `fatal-parse guard proved both ways over real ESLint output, both gates still routed through it, ` +
+    `fatal-parse guard proved both ways over real ESLint output, every counted lint call in both ` +
+    `gates AND in the closures they import routed through it (adoption proved both ways over ` +
+    `${GUARD_ADOPTION_CASES.length} synthetic gate source(s), files AND text, and the closure walk ` +
+    `over ${GUARD_CLOSURE_CASES.length} synthetic tree(s)), ` +
     `and ${HEADROOM_CANARY_FILE} parses at --stack-size=${PARSER_STACK_SIZE_KB} through this gate's own channel.`,
   );
 }

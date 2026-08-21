@@ -2,7 +2,7 @@
 
 [RAGFlow](https://github.com/infiniflow/ragflow) `IKnowledgeAdapter` for ObjectStack.
 
-Bridges the [Knowledge Protocol](https://docs.objectstack.ai/docs/protocol/knowledge) to a RAGFlow deployment via its HTTP API. RAGFlow handles chunking (DeepDoc), embedding, hybrid retrieval, and reranking; ObjectStack handles metadata-native sources and permission-aware filtering on top of the returned hits.
+Bridges the [Knowledge Protocol](https://objectstack.ai/docs/protocol/knowledge) to a RAGFlow deployment via its HTTP API. RAGFlow handles chunking (DeepDoc), embedding, hybrid retrieval, and reranking; ObjectStack handles metadata-native sources and permission-aware filtering on top of the returned hits.
 
 ## Why RAGFlow?
 

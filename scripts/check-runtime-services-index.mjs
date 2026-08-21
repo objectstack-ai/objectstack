@@ -229,6 +229,7 @@ import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, mkdirSync
 import { join, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const repoRoot = () => join(HERE, '..');
@@ -1064,5 +1065,10 @@ function selfTest() {
   console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), label VOCABULARY (undefined label named with its allowed set and reported only against the page, every defined label accepted, the two legends drifting apart from EACH OTHER while every label they name is still in the enum, a legend widening it alone, legend order, section scoping past a decoy in each file, and a missing legend refused), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) selfTest();
 else main();

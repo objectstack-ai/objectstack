@@ -152,6 +152,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { maskComments } from './js-comment-mask.mjs';
 import { join, relative, dirname, resolve } from 'node:path';
+import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const SCAN_ROOT = 'packages';
@@ -1826,4 +1827,7 @@ function main() {
   console.log(bounds);
 }
 
-main();
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  main();
+}
