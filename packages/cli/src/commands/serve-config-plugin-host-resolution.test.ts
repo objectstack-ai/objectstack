@@ -165,6 +165,8 @@ describe('os serve → the branches that must NOT move (#10908 supersedes nothin
     // The base is what this pins: the directory holding serve.ts. Routing this
     // spelling through the host importer would silently re-base it under
     // `@objectstack/types/dist/`, which is the regression this branch prevents.
+    // Neither base is the served app's root — whether a relative entry SHOULD
+    // resolve there is #10944, deliberately left open by this card.
     expect(err.message).toContain('commands');
     expect(err.message).not.toContain('types/dist');
   });

@@ -419,6 +419,10 @@ export default class Serve extends Command {
    *      `@objectstack/types`, and ESM resolves a relative specifier against the
    *      module CONTAINING the call — so `'./local-plugin.js'` would resolve
    *      against `@objectstack/types/dist/` instead of this file's directory.
+   *      Neither base is the served app's root, so no relative spelling works
+   *      the way an author would expect either way; #10944 carries that
+   *      question, and this branch is why the answer stays open rather than
+   *      being decided by a silent re-base here.
    *   2. An UNDECLARED bare name changes base the same way, and this one bites.
    *      `createHostImporter`'s fallback is documented as "the importing
    *      package's own resolution", but the import it falls back to also lives
@@ -428,7 +432,10 @@ export default class Serve extends Command {
    *      audit` resolve from THIS package and fail through the host importer.
    *      An app that writes `plugins: ['@objectstack/plugin-auth']` without
    *      declaring it — a spelling this repo's own fixtures use — boots today
-   *      and would stop booting.
+   *      and would stop booting. The helper's own docblock claims the opposite
+   *      ("falls back to the importing package's own resolution"); that text is
+   *      wrong, and #10943 carries the fix. Until it lands, a caller that needs
+   *      its own resolution has to ask the declaration itself, as below.
    *
    * So the declaration is what selects the resolver, exactly as #4719 says it
    * should, and each branch keeps the resolution it already had:
