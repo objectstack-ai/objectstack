@@ -5,7 +5,7 @@ import type { Cube } from '@objectstack/spec/data';
 // [#8220] The read-scope provenance mark: `withReadScope` below is one of the
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
-import type { AnalyticsStrategy, StrategyContext } from './types.js';
+import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import {
   invalidFilterError,
   lowerAnalyticsWhere,
@@ -150,6 +150,39 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const { field, bounds } of this.dateRangeBounds(cube, query)) {
       const extra = this.mergeFilterOperand(filter, field, bounds);
       if (extra) conjuncts.push(extra);
+    }
+    // [#10413 phase 1] The compiled dataset's OWN scope — the half of the
+    // declaration the Cube model has no room for, read from the same channel
+    // `NativeSQLStrategy` reads it from (#10298). This door addresses the
+    // REGISTERED CUBE directly and never passes through `DatasetExecutor`, so
+    // the definition-level `filter` reached `engine.aggregate` nowhere: the call
+    // went out with no `filter` key at all and every measure aggregated the
+    // whole table, while the dashboard door — same cube, same measure names —
+    // answered the scoped numbers. `undefined` for a cube that is not a compiled
+    // dataset, which is why an inferred or manifest cube compiles unchanged.
+    //
+    // ANDed as its own conjunct rather than merged key by key, for the reason
+    // `withReadScope` gives below: the caller's `where` and the dataset's scope
+    // can name the SAME field, and a spread would let one silently overwrite the
+    // other. Placed before the `$and` fold, so it travels on the cross-object
+    // path (`executeCrossObject`) as well as the direct one.
+    //
+    // PHASE 1 ONLY. `datasetScope.measureFilters` is deliberately NOT read here:
+    // an aggregation is `{ field, method, alias }`, so a per-measure predicate
+    // cannot be expressed on this contract at all, and folding one into this
+    // whole-call filter would narrow EVERY measure — trading a wrong `won_count`
+    // for a wrong `opp_count` as well. Widening the aggregate contract is
+    // #10576; lowering the measure filters into it is phase 2 of #10413, and
+    // `objectql-dataset-filter.test.ts` pins the gap open until then.
+    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+    if (datasetScope?.filter) {
+      // `null` = constrains nothing, which is the AND identity — nothing to add,
+      // and nothing invented for a filter that says nothing.
+      const scopeCondition = this.filterNodeToCondition(
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
+        cube,
+      );
+      if (scopeCondition) conjuncts.push(scopeCondition);
     }
     if (conjuncts.length > 0) {
       filter.$and = [...(Array.isArray(filter.$and) ? filter.$and : []), ...conjuncts];
@@ -386,6 +419,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       params,
     );
     if (filterClause) whereParts.push(filterClause);
+    // [#10413] The dataset's own scope renders too, for the reason the read
+    // scope does further down: `execute()` really applies this predicate now, and
+    // an echo that OMITS an applied predicate is the same lie as one that invents
+    // a predicate (#3601 / #3602 / #3650). Rendered from the same lowering
+    // `execute()` uses, so the two cannot drift.
+    const echoedDatasetFilter =
+      (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.filter;
+    if (echoedDatasetFilter) {
+      const scopeSql = this.renderFilterNodeSql(
+        normalizeAnalyticsFilterTree({ where: echoedDatasetFilter }),
+        cube,
+        params,
+      );
+      if (scopeSql) whereParts.push(scopeSql);
+    }
     // Bounds bind as `$n` placeholders like every other comparand: this string
     // travels to the browser, and a window can carry tenant-derived dates.
     // A bare-day upper bound renders half-open (`< day+1`) because that is

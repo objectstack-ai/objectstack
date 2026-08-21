@@ -181,6 +181,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isEntrypoint } from './invoked-as.mjs';
 
 /**
  * The branch-protection-required check contexts, as this repository declares
@@ -2266,7 +2267,12 @@ async function selfTest() {
   );
 }
 
-if (process.argv.includes('--self-test')) {
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (process.argv.includes('--self-test')) {
   await selfTest();
 } else if (process.argv.includes('--verify-required-set')) {
   // Report-only, off the required path (#9642). Exit 0 = swept (0 or N

@@ -537,3 +537,51 @@ describe('[#5907] RemoteTransport refuses an aggregate function it cannot compil
     });
   });
 });
+
+/**
+ * [#10576] The per-aggregation `filter` (`AggregationNodeSchema.filter`, the
+ * contract half of #10413) — a key BOTH faces of this driver decline to
+ * compile, so both must refuse it identically rather than silently aggregating
+ * the unfiltered rows (the #10413 defect at the driver seam). The engine never
+ * pushes a filtered aggregation down (it lowers in memory); these pins are the
+ * direct-caller guard, and the parity pin keeps #6203's lesson: one driver,
+ * two faces, one answer.
+ */
+describe('[#10576] per-aggregation filter is refused identically by both faces', () => {
+  const filteredAst = (): QueryAST => ({
+    object: 'deal',
+    aggregations: [{ function: 'count', alias: 'won_count', filter: { stage: 'closed_won' } }],
+  }) as unknown as QueryAST;
+
+  it('REMOTE refuses NOT_IMPLEMENTED/501 without a round trip, naming the aggregation and the engine lowering', async () => {
+    const err = await refusalOfAst('count(filter)', filteredAst());
+    expect(err.code).toBe('NOT_IMPLEMENTED');
+    expect(err.status).toBe(501);
+    expect(err.message).toContain(
+      'Per-aggregation `filter` on "won_count" is not supported by this backend (Turso remote transport).',
+    );
+    expect(err.message).toContain('`engine.aggregate` lowers filtered aggregations in memory');
+  });
+
+  it('LOCAL (SqlDriver face) refuses the same class with the same first-sentence shape', async () => {
+    const remote = await refusalOfAst('count(filter)', filteredAst());
+    const local = await localRefusalOf('count(filter)', filteredAst());
+    expect(local.code).toBe('NOT_IMPLEMENTED');
+    expect(local.status).toBe(501);
+    expect(local.message).toContain(
+      'Per-aggregation `filter` on "won_count" is not supported by this backend (driver-sql).',
+    );
+    // First sentence for first sentence: the two faces differ only in the
+    // backend name they print.
+    expect(remote.message.replace('(Turso remote transport)', '(driver-sql)')).toBe(local.message);
+  });
+
+  it('control: an EMPTY filter object is vacuous and still compiles on the remote face', async () => {
+    const { t, calls } = transportWithCapturingClient();
+    await t.aggregate('deal', {
+      object: 'deal',
+      aggregations: [{ function: 'count', field: 'stage', alias: 'n', filter: {} }],
+    } as unknown as QueryAST);
+    expect(calls.map((c) => c.sql)).toEqual(['SELECT count("stage") AS "n" FROM "deal"']);
+  });
+});

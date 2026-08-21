@@ -17,6 +17,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Contact = ObjectSchema.create({
   name: 'contact',
+  sharingModel: 'private',
   label: 'Contact',
   fields: {
     first_name: Field.text({ label: 'First Name', required: true }),

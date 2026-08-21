@@ -96,7 +96,7 @@ Think of ObjectStack as:
 
 - **Kubernetes** for business applications - Declarative configuration over imperative code
 - **Terraform** for data modeling - Infrastructure as code, but for data
-- **GraphQL + React Server Components** - Schema-driven data + UI rendering combined (REST ships today; GraphQL is exposed via the `IGraphQLService` contract)
+- **GraphQL + React Server Components** - Schema-driven data + UI rendering combined — as an analogy for the shape, not the transport. The generated data surface is **REST**; GraphQL is not in the product plan and `/graphql` was removed from the dispatcher.
 - **MCP for business systems** - Structured, permission-aware tools generated from metadata
 
 ## Key Features
@@ -130,7 +130,7 @@ Think of ObjectStack as:
 | Traditional Approach | ObjectStack Approach |
 | :--- | :--- |
 | Write SQL migrations manually | Schema changes sync automatically |
-| Build CRUD APIs by hand | REST generated from schema (GraphQL via the `IGraphQLService` contract) |
+| Build CRUD APIs by hand | REST generated from schema |
 | Manually define agent tools | MCP/tool surfaces generated from metadata |
 | Duplicate validation logic 3x | Define once, enforce everywhere |
 | Lock into one database vendor | Swap databases without code changes |

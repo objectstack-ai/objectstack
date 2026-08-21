@@ -95,6 +95,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Customer = ObjectSchema.create({
   name: 'customer',
+  sharingModel: 'private',
   label: 'Customer',
   icon: 'building',
   
@@ -401,6 +402,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Opportunity = ObjectSchema.create({
   name: 'opportunity',
+  sharingModel: 'private',
   label: 'Opportunity',
   icon: 'target',
   

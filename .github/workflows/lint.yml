@@ -236,6 +236,45 @@ jobs:
       - name: scripts/ TypeScript parses go through one module
         run: pnpm check:parse-guard
 
+      # The comment-mask CORPUS sweep (#10640) — the other instrument for the
+      # module the two gates above delegate "is this span a comment, or code?"
+      # to. `js-comment-mask.mjs --self-test` pins the SHAPES someone wrote
+      # down; this parses every .{ts,tsx,mts,cts,js,mjs,cjs,jsx} file in the
+      # tree with @typescript-eslint/parser and diffs its comment ranges
+      # against the mask's, byte for byte. Neither subsumes the other, and that
+      # is measured in both directions on this tree rather than assumed:
+      # deleting the `{` counting inside `${...}` fails a pinned case and the
+      # sweep reads 0 disagreements over 4,741 files (the tree does not write
+      # that shape), while dropping `return` from REGEX_AFTER_KEYWORD passes all
+      # 23 pinned cases and the sweep names check-test-source-alias.mjs, where
+      # `return /(^|[^a-z])dist\//` is written today.
+      # The defect this would have caught shipped: 16 files disagreeing, 15 of
+      # them reading commented-out text as live code, 10,252 comment bytes in
+      # one file — and the instrument that found it lived in an agent's
+      # scratchpad, which is why re-deriving it was impossible until this file.
+      # WHY A HARD GATE ON EVERY PR, and not an on-demand flag: the sweep's
+      # verdict depends on the CORPUS as much as on the masker, so a PR that
+      # writes a shape the mask reads wrong turns ~20 source-scanning gates
+      # into liars on that file, on a PR that never touched the masker. That
+      # arrival is not detectable by any convention a human or an agent has to
+      # remember at the right moment — the failure mode this repo has already
+      # paid for at #4690 and again here.
+      # WHY A STEP AND NOT A JOB: a new job's `name:` is a required-context
+      # contract (scripts/check-required-contexts.mjs) that only a
+      # maintainer-present Settings change can enrol, and an unenrolled job is
+      # an advisory gate — #5617 verbatim. This job is already required.
+      # Invoked as `node` rather than `pnpm check:*` for the same reason as the
+      # other `node scripts/…` steps in this lane: that alias is a line in root
+      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # Runs its own comparator self-test first — 12 cases proving the
+      # comparison can still REPORT, because "0 files disagree" and "the
+      # comparison is broken" otherwise print the same line.
+      # Cost, measured on a contended 4-vCPU container: 4,741 files, 72 MB of
+      # source, 45–48 s, of which the parser is 45 s. The step prints CI's own
+      # number on every run.
+      - name: Comment mask agrees with a real parser over the whole corpus
+        run: node scripts/check-comment-mask-corpus.mjs
+
       # Stack-collection enumerations vs the schema (#6242). `stack.zod.ts`
       # decides which collections a stack may declare; eight other enumerations
       # of that same set are hand-maintained (the map-format list, the
@@ -581,6 +620,41 @@ jobs:
       # metadata literal for the 16 factory domains in a doc code block.
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
+
+      # Docs frontmatter parses (#10493). Nothing local YAML-parsed these pages.
+      # The one gate that reads them line by line — `check:doc-anchors` below —
+      # deliberately BLANKS the frontmatter block ("preserving line count"),
+      # which is right for heading ids and left the closest thing to a
+      # frontmatter reader as the thing that erases it. So "every page's
+      # frontmatter parses" had exactly one owner: the `Build Docs` job in
+      # ci.yml, a full `next build` on a 30-minute-timeout runner that exists
+      # only in CI and is path-filtered besides. A page landed whose unquoted
+      # `description` contained `apis: `, YAML read the colon-plus-space as the
+      # start of a nested mapping, and that build was what said so.
+      #
+      # This reads the corpus with the docs build's OWN extractor regex and the
+      # same `yaml` parser fumadocs resolves, and types the two keys
+      # `pageSchema` declares (`title: z.string()` required,
+      # `description: z.string().optional()` typed when present) — not a schema
+      # of its own: the shape one character from the original defect PARSES and
+      # yields an object, and only the type assertion sees it.
+      #
+      # Population is the WHOLE corpus, generated `references/**` included,
+      # because that is what `Build Docs` parses; scoping to the hand-written
+      # half would leave 214 of 403 pages carrying the gap this closes. Every
+      # unread state is a refusal rather than a quiet pass — an absent root, a
+      # tree resolving to zero pages, or a page that cannot be read all exit 1
+      # naming what could not be read (#4690 / #7484).
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the aggregator-roster step below: that alias belongs in root
+      # package.json, declared territory of the @changesets/cli v3 migration
+      # lane (#9465) while it runs. Dependency-free filesystem read, sub-second
+      # over the whole corpus.
+      - name: Docs frontmatter parses
+        run: |
+          node scripts/check-doc-frontmatter.mjs --self-test
+          node scripts/check-doc-frontmatter.mjs
 
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its
@@ -1355,6 +1429,35 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Aggregator roster gate (#10490). Three required contexts are aggregate
+      # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
+      # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
+      # each decides its verdict from what it lists in `needs:`. Nothing held
+      # those rosters to anything. Add a lane to a workflow, forget the
+      # `needs:` line, and the lane's check-run is ADVISORY (only the aggregate
+      # NAME is in the ruleset's required set), so the aggregate goes green
+      # without ever looking at it: a job that appears in the checks list,
+      # appears required, and blocks nothing. Neither existing gate covers it —
+      # `check:required-contexts` pins the aggregate's NAME and job id and says
+      # nothing about `needs:`, and `check:shard-attestation` covers only the
+      # `--leg`-to-`needs:` direction for ci.yml's two.
+      # Each aggregate now DECLARES its membership in job-level
+      # `OS_AGGREGATOR_MEMBERS` / `OS_AGGREGATOR_NON_MEMBERS` (triage's ruling
+      # on the card: an explicit per-aggregator declaration, local to the
+      # workflow file, NOT a repo-wide job-id naming convention), and this gate
+      # asserts declaration == `needs:` in BOTH directions. Every unreadable
+      # state is a refusal rather than a quiet pass — no aggregator found, a
+      # workflow that will not parse, or a roster that resolves to zero members
+      # all exit 1 naming what could not be read (#4690).
+      # Invoked as `node` rather than through a `pnpm check:*` alias: that
+      # alias belongs in root package.json, which is declared territory of the
+      # @changesets/cli v3 migration lane (#9465) while it runs. Reads two YAML
+      # files; sub-second.
+      - name: Aggregator roster gate
+        run: |
+          node scripts/check-aggregator-roster.mjs --self-test
+          node scripts/check-aggregator-roster.mjs
+
       # Required-context name pin (#6865). A GitHub required status check is
       # matched BY CHECK-RUN NAME, and a job's check-run name is its `name:`
       # value — so eight job `name:` literals across this file and ci.yml are
@@ -1611,6 +1714,47 @@ jobs:
       # here: 4 dispatched hooks, 0 problems.
       - name: Paired kernel-hook pin gate
         run: pnpm check:kernel-hook-pairs
+
+      # Plugin teardown-shape gate (#10619, from #9371 / #10371). `Plugin`
+      # declares exactly one teardown hook — `destroy?()` — and both kernels
+      # call only that one. A plugin whose teardown is spelled `stop()` is
+      # therefore never torn down: `await kernel.shutdown()` RESOLVES with its
+      # timers still armed. #9371 measured 48 further delivery reads/writes in
+      # the 80 ms after a resolved shutdown, and the bill arrived as merge-queue
+      # evictions of two green PRs — because an `unref`'d timer lets a host
+      # process exit while a test process stays alive through teardown.
+      # WHY A GATE AND NOT THE REPAIRS: the trap is an ASYMMETRY. `start?()` IS
+      # on the interface and does fire, so a `start`/`stop` pair reads symmetric
+      # to a reviewer while only one half is ever called — which is how this
+      # survived review in two packages and was found only by the evictions. Fix
+      # the known instances and the next one arrives spelled `shutdown()` or
+      # `close()`; a gate makes the class unreachable. Ruled FOR by the
+      # `domain:devx` PM on the #9371 thread.
+      # The roster is `stop` / `shutdown` / `close` / `dispose`, and what was
+      # deliberately left OFF it (`disconnect`, `release`, `end`, `cleanup` …)
+      # is argued in the script header and pinned as green cases by the
+      # self-test — a roster chosen silently is the thing that goes stale.
+      # The delegating alias (`stop()` calling `destroy()`, the #9371 repair
+      # shape landed by PR #10375) stays green, and the self-test's positive
+      # control is the REAL pre-#10375 revision of that same file rather than a
+      # synthesised class.
+      # The 11 instances that predate the gate are baselined shrink-only, each
+      # pointing at #10371 which owns their repair; the list refuses new members
+      # outright, so nothing can join it to get CI green.
+      # Invoked as `node` rather than through a `pnpm check:*` alias, same as
+      # the other `node scripts/…` steps in this lane: that alias is a line in
+      # root package.json, inside the @changesets/cli v3 fence (#9465).
+      # Runs its own --self-test first, and that leg is not decoration: this
+      # gate computes its own population, so a scan that stopped matching would
+      # print a confident green over a tree it never read (#4690's family). The
+      # self-test's refusal cases are each PAIRED with a readable tree that
+      # still returns a verdict, so "refuses unconditionally" cannot satisfy it.
+      # Static AST over ~4,400 sources plus one `git show` and two spawns;
+      # 3.4s + 2.5s measured locally, no build needed, so it belongs in this job.
+      - name: Plugin teardown-shape gate
+        run: |
+          node scripts/check-plugin-teardown-shape.mjs --self-test
+          node scripts/check-plugin-teardown-shape.mjs
 
       # Resume-authority declaration gate (#5561, from #3823). The #3801 resume
       # gate keys on the SUSPENDED NODE, so it covers a pausing node type exactly
@@ -3104,6 +3248,26 @@ jobs:
       - typecheck-workspace
       - typecheck-debt
       - typecheck-consumers
+    # ── ROSTER DECLARATION (#10490) ───────────────────────────────────────────
+    # The lanes this required aggregate stands in for, named rather than
+    # counted. It replaces the hand-maintained `EXPECTED_LANES = 4` that used to
+    # live in the verdict below: a number covers one aggregate, goes stale the
+    # moment a lane moves, and cannot say WHICH lane went missing.
+    #
+    # Two things read this list, which is why it is real YAML and not a comment:
+    #   - `node scripts/check-aggregator-roster.mjs` (statically, in the lint
+    #     job) asserts it equals this job's `needs:` EXACTLY, in both
+    #     directions. A fifth lane added to this workflow and forgotten here
+    #     would otherwise ride green as an ADVISORY check-run behind the
+    #     required "TypeScript Type Check" context — a job that appears in the
+    #     checks list, appears required, and blocks nothing;
+    #   - the verdict step below (at run time) checks the same equality against
+    #     `toJSON(needs)`, so a drift is red in CI even before the lint job
+    #     reaches it.
+    # This aggregate has no non-member inputs: every job it lists in `needs:` is
+    # a lane whose verdict it carries.
+    env:
+      OS_AGGREGATOR_MEMBERS: typecheck-source-gates typecheck-workspace typecheck-debt typecheck-consumers
     # `always()` is load-bearing and must not become `success()` or the implicit
     # bare condition: with those, a failed lane SKIPS this job, and a skipped
     # required context is not a red — it is an absence, which reads as green in
@@ -3120,10 +3284,12 @@ jobs:
       # Fail-closed, and deliberately NOT a hand-written list of the four lane
       # names. The verdict iterates `toJSON(needs)`, so every job wired into
       # `needs:` above is enforced automatically and none can be forgotten in
-      # the logic here. The lane COUNT is asserted separately as the tripwire
-      # for the other half of that drift: a fifth lane added to the workflow but
-      # never wired into `needs:` would otherwise ride green, unwatched, behind
-      # a required context — the dormant-gate shape this repo keeps paying for.
+      # the logic here. The other half of that drift — a fifth lane added to the
+      # workflow but never wired into `needs:`, which would ride green and
+      # unwatched behind a required context — is caught by comparing `needs:`
+      # against the job's declared ROSTER (#10490). That replaces the hand-
+      # maintained `EXPECTED_LANES` count this step used to carry: a count goes
+      # stale the moment a lane moves and cannot say which lane went missing.
       # Anything that is not exactly `success` fails, `skipped` and `cancelled`
       # included: a lane that never ran has not proved anything.
       - name: Verify every type-check lane succeeded
@@ -3135,14 +3301,26 @@ jobs:
           cat > "$RUNNER_TEMP/verify-lanes.mjs" <<'NODE'
           import { readFileSync } from 'node:fs';
 
-          // Every lane this aggregator is expected to carry. Adding a lane to
-          // `needs:` without bumping this is red on purpose, and so is the
-          // reverse -- the number and the roster have to be changed together.
-          const EXPECTED_LANES = 4;
+          // The roster this aggregator declares, read from the job-level
+          // `OS_AGGREGATOR_MEMBERS` above rather than re-typed here -- one
+          // declaration, two readers (this step, and the static
+          // scripts/check-aggregator-roster.mjs in the lint job).
+          const declared = (process.env.OS_AGGREGATOR_MEMBERS ?? '').trim().split(/\s+/).filter(Boolean);
+          const declaredSet = new Set(declared);
 
           const needs = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/needs.json`, 'utf8'));
           const ids = Object.keys(needs).sort();
           let bad = 0;
+
+          // An empty declaration would make every comparison below trivially
+          // true. Refuse rather than report a green over an unread roster.
+          if (declared.length === 0) {
+            console.log(
+              '::error::this job declares no OS_AGGREGATOR_MEMBERS roster, so there is nothing to hold `needs:` to -- ' +
+                'refusing to report a pass (#4690).',
+            );
+            bad++;
+          }
 
           for (const id of ids) {
             const result = needs[id]?.result ?? '(no result reported)';
@@ -3154,11 +3332,18 @@ jobs:
             bad++;
           }
 
-          if (ids.length !== EXPECTED_LANES) {
+          for (const id of declared.filter((d) => !ids.includes(d))) {
             console.log(
-              `::error::this gate aggregates ${ids.length} lane(s) but expects ${EXPECTED_LANES}: ${ids.join(', ')}. ` +
-                `A lane was added or removed -- update EXPECTED_LANES here AND make sure every lane is listed in ` +
-                `this job's \`needs:\`, or the unlisted one rides green behind a required context.`,
+              `::error::declared lane \`${id}\` is missing from this job's \`needs:\`, so its verdict is NOT aggregated -- ` +
+                `it publishes an advisory check-run and rides green behind a required context.`,
+            );
+            bad++;
+          }
+
+          for (const id of ids.filter((i) => !declaredSet.has(i))) {
+            console.log(
+              `::error::job \`${id}\` is in this job's \`needs:\` but not in the declared roster -- add it to ` +
+                `OS_AGGREGATOR_MEMBERS, or drop it from \`needs:\`.`,
             );
             bad++;
           }
@@ -3167,6 +3352,6 @@ jobs:
             console.log(`check-typecheck-lanes: FAILED (${bad} problem(s) above).`);
             process.exit(1);
           }
-          console.log(`check-typecheck-lanes: OK (${ids.length}/${EXPECTED_LANES} lanes succeeded).`);
+          console.log(`check-typecheck-lanes: OK (${ids.length} declared lane(s) succeeded: ${ids.join(', ')}).`);
           NODE
           node "$RUNNER_TEMP/verify-lanes.mjs"

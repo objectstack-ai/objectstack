@@ -278,7 +278,7 @@ export const ObjectCapabilities = strictObject({
    * `Field.file` / `Field.image` column attachments are independent of
    * this flag.
    */
-  files: z.boolean().default(false).describe('Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected. Field.file/Field.image are independent'),
+  files: z.boolean().default(false).describe('Generic record Attachments panel (sys_attachment). Opt-in: true surfaces the panel and permits attachments to target this object; otherwise any write that makes an attachment target it is rejected (403 FILES_DISABLED) — a create and an update that re-points an existing attachment alike. Field.file/Field.image are independent'),
 
   /**
    * Social collaboration (Comments, Mentions, Feeds) — opt-out.
@@ -287,7 +287,7 @@ export const ObjectCapabilities = strictObject({
    * rejects new `sys_comment` rows targeting this object (403
    * FEEDS_DISABLED, enforced at the engine hook seam by plugin-audit).
    */
-  feeds: z.boolean().default(true).describe('Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects new comments for this object'),
+  feeds: z.boolean().default(true).describe('Record comments/collaboration feed. Default on; explicit false hides the feed UI and rejects any write that makes a comment target this object (403 FEEDS_DISABLED) — a new comment and an update that re-threads an existing one alike'),
 
   /**
    * Activity timeline (sys_activity mirror of create/update/delete) — opt-out.
@@ -876,7 +876,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     field: z.string().describe('Timestamp field the TTL is measured from (e.g. created_at, expires_at).'),
     expireAfter: lifecycleDuration('ttl.expireAfter').describe('Rows expire this long after `field` and are deleted by the Reaper.'),
     onlyWhen: lifecycleOnlyWhenSchema.optional().describe(
-      'Row filter the TTL reap applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { revoked_at: { $null: true } }). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage and archive, which act on whole shards / age alone.',
+      'Row filter the TTL reap applies to — per-field equality, {$in: [...]} or the null predicate {$null: true|false} (e.g. { revoked_at: { $null: true } }). Rows OUTSIDE the filter are retained regardless of expiry: for tables that interleave live rows with terminal history a TTL keyed on the same timestamp would otherwise destroy (a sys_session audit tombstone backdates expires_at, so a naive TTL reaps tombstones first). Incompatible with rotation storage, which DROPs whole shards, and with archive, which selects rows by the ttl cutoff alone and does not apply this filter.',
     ),
   }).optional().describe('Per-row TTL auto-expiry (transient/event classes).'),
   storage: strictObject({
@@ -940,6 +940,25 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       message: `lifecycle.archive.after ('${lc.archive.after}') must equal retention.maxAge ('${lc.retention.maxAge}') — the hot window ends where the archive begins`,
     });
   }
+  // [#10527] The retention + ttl + archive triple — the alignment above, one
+  // policy wider. Since [#10347] the Archiver selects the rows it moves by the
+  // ttl cutoff (`ttl.field` older than `ttl.expireAfter`) whenever `ttl` is
+  // declared, and by `created_at`/`archive.after` only when it is not — so on
+  // this triple the age bound (`retention.maxAge`, pinned equal to
+  // `archive.after` above) no longer separately bounds the hot store: a row
+  // whose `ttl.field` sits in the future stays hot past `retention.maxAge`,
+  // silently. One declared bound nothing enforces is exactly the class this
+  // block refuses loudly (ADR-0049 declared ≠ enforced), so the triple parses
+  // only when the ttl restates the age bound — same clock (`created_at`), same
+  // window — and any divergence is refused here, at authoring time, rather
+  // than resolved by whichever column the sweep happens to read.
+  if (lc.retention && lc.ttl && lc.archive
+      && (lc.ttl.field !== 'created_at' || lc.ttl.expireAfter !== lc.retention.maxAge)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `lifecycle.ttl ('${lc.ttl.expireAfter}' after '${lc.ttl.field}') must restate retention.maxAge ('${lc.retention.maxAge}' after created_at) when retention, ttl and archive are all declared — the Archiver moves rows by the ttl cutoff when ttl is declared, so a diverging age bound no longer bounds the hot store; align ttl to { field: 'created_at', expireAfter: '${lc.retention.maxAge}' } or drop retention or ttl`,
+    });
+  }
   if (lc.retention?.onlyWhen && lc.storage?.strategy === 'rotation') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -958,8 +977,20 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   //   age with no row read, so rows the filter protects go down with it.
   // - archive: `reapObject` returns into `archiveObject` before the ttl reap
   //   ever runs, so with `archive` declared the filter guards a code path that
-  //   is never executed (declared ≠ enforced) — while the Archiver itself
-  //   copies and hot-deletes by `created_at` age alone.
+  //   is never executed (declared ≠ enforced). Since [#10347] the Archiver does
+  //   apply the declared ttl window itself — it selects candidates by
+  //   `ttl.field` past `ttl.expireAfter` instead of `created_at` past
+  //   `archive.after` — but its candidate read is that cutoff and nothing else
+  //   (`where: { [ttl.field]: { $lt: cutoff } }`, no `onlyWhen` spread the way
+  //   `reap()` spreads it into its scope), so every due row is copied and
+  //   hot-deleted whether or not the filter names it. That is the whole of what
+  //   [#10347] changed here: the WINDOW an author declares now carries over to
+  //   the Archiver, the FILTER still does not — so the refusal stands, on a
+  //   narrower reason than the "moves rows by age alone" this bullet used to
+  //   give. Whether `onlyWhen` should become meaningful under `archive` (the
+  //   Archiver would have to spread it into the `find` above) is a separate,
+  //   un-taken decision — it widens the accept-set and is not this text's to
+  //   make.
   if (lc.ttl?.onlyWhen && lc.storage?.strategy === 'rotation') {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -969,7 +1000,7 @@ export const LifecycleSchema = lazySchema(() => strictObject({
   if (lc.ttl?.onlyWhen && lc.archive) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs) and the Archiver moves rows by age alone',
+      message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs), and while the Archiver does move rows by the declared ttl cutoff it selects them by that cutoff alone and would archive rows the filter protects',
     });
   }
 }));

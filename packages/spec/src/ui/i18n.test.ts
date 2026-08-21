@@ -85,6 +85,68 @@ describe('I18nLabelSchema', () => {
     })).toThrow();
   });
 
+  // ── #10492: the retired spellings are rejected BY NAME, in any combination ─
+  //
+  // Before this, the pair above was rejected only because `defaultValue` fails
+  // the tag grammar — `key` is three letters, syntactically a valid BCP-47
+  // primary subtag, so `{ key: 'common.save' }` ALONE parsed as a "language
+  // `key` locale map" and the resolvers' last resort (first string value) then
+  // painted the raw dotted key on screen. The emitted type had already made
+  // that spelling a compile error (#9925 `key?: never`); these pins hold the
+  // runtime to the same line. Each rejection pin asserts the named error
+  // content (issue code + message), not just parse failure.
+
+  it('rejects a lone `key` — the enforcement hole #10492 closes', () => {
+    const r = I18nLabelSchema.safeParse({ key: 'common.save' });
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues);
+    expect(issues).toContain('invalid_key');
+    expect(issues).toContain('never by `key`/`defaultValue`');
+    expect(issues).toContain('#5055');
+  });
+
+  it('rejects a lone `defaultValue` with the same named error', () => {
+    const r = I18nLabelSchema.safeParse({ defaultValue: 'Save' });
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues);
+    expect(issues).toContain('invalid_key');
+    expect(issues).toContain('never by `key`/`defaultValue`');
+  });
+
+  it('rejects the retired spellings even when mixed with valid locale keys', () => {
+    for (const value of [
+      { key: 'common.save', en: 'Save' },
+      { en: 'Save', defaultValue: 'Save' },
+    ]) {
+      const r = I18nLabelSchema.safeParse(value);
+      expect(r.success, `expected ${JSON.stringify(value)} to be REJECTED`).toBe(false);
+      expect(JSON.stringify(r.error?.issues)).toContain('invalid_key');
+    }
+  });
+
+  it('the rejection message states the MEASURED behaviour, not "resolves to nothing"', () => {
+    // The message's old claim was measured false (#10492): both resolvers —
+    // `resolveI18nLabel` here and objectui's `pickLocalized`, parity-pinned —
+    // fall through to the first string value and return the raw key, which is
+    // worse than nothing: the machine key renders as the visible label.
+    const issues = JSON.stringify(I18nLabelSchema.safeParse({ key: 'common.save' }).error?.issues);
+    expect(issues).toContain('first string value');
+    expect(issues).toContain('raw key is rendered');
+    expect(issues).not.toContain('resolves to nothing');
+  });
+
+  it('does NOT deny-list real 2–3 letter subtags — only the two retired spellings', () => {
+    // The narrowing is exactly `key`/`defaultValue`, never a claim about which
+    // English-looking words are languages: real ISO-639 subtags still parse.
+    for (const tag of ['deu', 'fra', 'yue', 'EN']) {
+      expect(I18nLabelSchema.safeParse({ [tag]: 'v' }).success, `${tag} must stay accepted`).toBe(true);
+    }
+    // And the issue's rejected probes stay rejected (grammar, not deny-list).
+    for (const bad of ['notALocale', 'x-private', 'e']) {
+      expect(I18nLabelSchema.safeParse({ [bad]: 'v' }).success, `${bad} must stay rejected`).toBe(false);
+    }
+  });
+
   it('should reject non-string, non-map values', () => {
     expect(() => I18nLabelSchema.parse(123)).toThrow();
     expect(() => I18nLabelSchema.parse(true)).toThrow();

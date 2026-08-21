@@ -1500,9 +1500,15 @@ export const AppSchema = lazySchema(() => strictObject(
   /**
    * Default agent for this app's ambient chat surface.
    *
-   * When set, the ambient chat endpoint (`POST /api/v1/ai/chat` with
-   * `context.appName`) auto-resolves to this agent without the user
-   * having to pick from a list.
+   * When set, the assistant chat endpoint (`POST /api/v1/ai/assistant/chat`)
+   * resolves this agent for a call carrying `context.appName`, without the
+   * user having to pick from a list — that route is what drives the
+   * resolution chain (explicit agent > `defaultAgent` of the named app >
+   * first active agent).
+   *
+   * The bare `POST /api/v1/ai/chat` route is NOT part of that chain: it
+   * resolves no agent and never reads `context.appName`, so this key does not
+   * scope it. Do not read this key as a guarantee over that endpoint.
    *
    * ADR-0063 §1/§2 — this is a SURFACE-BINDING knob, not a custom-agent
    * slot: the resolvable values are the two platform agents (`ask` for a

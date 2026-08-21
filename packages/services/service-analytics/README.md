@@ -193,4 +193,4 @@ Apache-2.0. See [LICENSING.md](../../../LICENSING.md).
 
 - [@objectstack/objectql](../../objectql/)
 - [@objectstack/driver-memory](../../drivers/driver-memory/) — ships `InMemoryStrategy`
-- [Analytics Guide](https://docs.objectstack.ai/docs/data-modeling/analytics)
+- [Analytics Guide](https://objectstack.ai/docs/data-modeling/analytics)

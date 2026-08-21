@@ -87,6 +87,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
+import { isEntrypoint } from '../invoked-as.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: HERE })
@@ -466,17 +467,20 @@ export async function checkReadOnlyRouting(source) {
 
 // --- main --------------------------------------------------------------------
 
-try {
-  if (args.includes('--self-test')) {
-    await selfTest();
-    process.exit(0);
+// Exports bindings, so an import for those exports alone must run nothing (#10667).
+if (isEntrypoint(import.meta.url)) {
+  try {
+    if (args.includes('--self-test')) {
+      await selfTest();
+      process.exit(0);
+    }
+    await main();
+  } catch (e) {
+    // A structural failure (markers gone, list unparseable, derivation empty) is
+    // a RED result with a readable reason — never a stack trace, never a pass.
+    console.error(`✗ ${e.message}`);
+    process.exit(1);
   }
-  await main();
-} catch (e) {
-  // A structural failure (markers gone, list unparseable, derivation empty) is a
-  // RED result with a readable reason — never a stack trace, and never a pass.
-  console.error(`✗ ${e.message}`);
-  process.exit(1);
 }
 
 async function main() {

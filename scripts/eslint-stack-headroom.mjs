@@ -58,7 +58,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 
-import { GUARDED_GATES, collectFatalMessages } from './eslint-fatal-guard.mjs';
+import { GUARDED_GATES, collectFatalMessages, lintFilesUnguarded } from './eslint-fatal-guard.mjs';
 import { stripComments } from './js-comment-mask.mjs';
 
 /**
@@ -204,12 +204,25 @@ export function ensureStackHeadroom(scriptPath, args = process.argv.slice(2)) {
  * assertion trips BEFORE the population run starts reddening PRs — the point
  * of having it at all.
  *
+ * DECLARED rather than wrapped (#10625). This module sits in both guarded
+ * gates' import closure, so the call below is exactly the shape the adoption
+ * bans now cover — and it is the legitimate one: the fatals are not discarded
+ * here, they are the RETURN VALUE, collected by the guard's own collector and
+ * reported by the caller. Routing it through `lintFilesStrict()` would be
+ * circular and lossy both — the guard's exit path fires first and prints the
+ * generic report, and `formatCanaryFailure()` below is the only place a reader
+ * is told the remedy is `--stack-size` rather than a code fix.
+ *
  * @param {{lintFiles: (targets: string[]) => Promise<object[]>}} eslint
  * @param {{repoRoot: string, file?: string}} options
  * @returns {Promise<ReturnType<typeof collectFatalMessages>>} empty when it parsed
  */
 export async function canaryParseFailures(eslint, { repoRoot, file = HEADROOM_CANARY_FILE }) {
-  const results = await eslint.lintFiles([file]);
+  const results = await lintFilesUnguarded(eslint, [file], {
+    why: 'the canary IS the parse-failure detector: these results go straight to ' +
+      'collectFatalMessages() and the fatals are RETURNED, never counted as rule sites. ' +
+      'lintFilesStrict() would exit before formatCanaryFailure() could name the remedy.',
+  });
   return collectFatalMessages(results, repoRoot);
 }
 

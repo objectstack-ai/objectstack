@@ -1343,6 +1343,38 @@ function uncompilableAggregateFunctionError(func: string): Error {
 }
 
 /**
+ * [#10576] An aggregation entry carries a per-aggregation `filter`
+ * (`AggregationNodeSchema.filter`, the contract half of #10413) and this
+ * backend compiles no conditional-aggregate expression (SQL `FILTER (WHERE …)`
+ * / `CASE WHEN`) for it — so it is refused rather than silently aggregating
+ * the UNFILTERED rows, which is exactly the wrong-numbers defect #10413
+ * measured ("won deals" counting every row). Same class and envelope as
+ * {@link uncompilableAggregateFunctionError}: the query is spelled correctly
+ * and the spec declares the key, so this is a capability gap in the backend
+ * (NOT_IMPLEMENTED/501), not a mistake in the query (400).
+ *
+ * Unreachable through `engine.aggregate`, deliberately: the engine routes any
+ * call whose aggregations carry a filter through its in-memory lowering
+ * (`applyInMemoryAggregation`), which honours the predicate on every driver.
+ * This guard is the direct-caller half of "no silent drop, anywhere" — the
+ * refusal names the remedy so a direct caller knows the engine path works.
+ */
+function unsupportedAggregationFilterError(alias: string, backend: string): Error {
+  const err = new Error(
+    `Per-aggregation \`filter\` on "${alias}" is not supported by this backend (${backend}). ` +
+    `The query is spelled correctly and @objectstack/spec AggregationNodeSchema declares the key — ` +
+    `this backend compiles no conditional-aggregate (SQL FILTER (WHERE …) / CASE WHEN) expression ` +
+    `for it, so it is refused rather than silently aggregating the UNFILTERED rows (#10413), which ` +
+    `is why it answers NOT_IMPLEMENTED/501 rather than a 400. \`engine.aggregate\` lowers filtered ` +
+    `aggregations in memory for every driver without native support — route the query through the ` +
+    `engine, or drop the \`filter\` key.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
+}
+
+/**
  * [#6409] `count_distinct` written with no `field` — nothing to deduplicate.
  *
  * `AggregationNodeSchema` makes `field` optional because `COUNT(*)` is a real
@@ -7052,6 +7084,15 @@ export class SqlDriver implements IDataDriver {
     const aggregates = query.aggregations;
     if (aggregates) {
       for (const agg of aggregates) {
+        // [#10576] A per-aggregation `filter` this compiler cannot express is
+        // refused before any statement is built — silently emitting the
+        // UNFILTERED aggregate is the #10413 defect. Unreachable through
+        // `engine.aggregate` (the engine lowers filtered aggregations in
+        // memory); this is the direct-caller guard. `{}` is the vacuous filter,
+        // same convention as `where` / `having`.
+        if (agg.filter && Object.keys(agg.filter).length > 0) {
+          throw unsupportedAggregationFilterError(agg.alias ?? agg.field ?? '(unaliased)', 'driver-sql');
+        }
         const funcName = agg.function;
         const lowering = this.mapAggregateFunc(funcName);
         // Spec: `field` is optional for COUNT (means COUNT(*)).

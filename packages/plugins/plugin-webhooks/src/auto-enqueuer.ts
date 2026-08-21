@@ -87,7 +87,15 @@ const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
  */
 interface OptionalLogger {
     info?(msg: string, meta?: unknown): void;
-    warn?(msg: string, meta?: unknown): void;
+    /**
+     * The GUARANTEED fallback channel (#9754). `error` stays optional — hosts do
+     * inject reduced sinks — so `warn` is where a durability report lands when
+     * `error` is absent, and a fallback that may itself be missing is not a
+     * fallback. Call sites keep the `logger?.warn?.(…)` spelling as the backstop
+     * for hosts the TYPE cannot reach; `SweepLogger` in plugin-email's
+     * `outbox-sweep.ts` carries the full reasoning and the measurement.
+     */
+    warn(msg: string, meta?: unknown): void;
     debug?(msg: string, meta?: unknown): void;
     error?(msg: string, err?: unknown, meta?: unknown): void;
 }
@@ -186,7 +194,22 @@ export class AutoEnqueuer {
     private readonly subscriptions = new Map<string, CachedSubscription[]>();
     private readonly subscriptionsObject: string;
     private readonly refreshIntervalMs: number;
-    private readonly logger: OptionalLogger;
+    /**
+     * Optional, and deliberately NOT defaulted to `{}` (#10556).
+     *
+     * `OptionalLogger` guarantees a `warn` channel under #9754, so `{}` stopped being a
+     * legal value of the type — which is the gate working: an empty object is a
+     * sink that declares it can report and then discards everything. The repair
+     * is to say what is TRUE — there may be no logger at all — rather than to
+     * mint a sink that lies. Runtime behaviour is unchanged in both directions:
+     * absent logger and `{}` both printed nothing before, and print nothing now.
+     *
+     * ⛔ What this deliberately does NOT decide: whether an absent host sink should
+     * instead default to a `console`-backed one. That is the open design call the
+     * #9754 ledger records against `plugin-security`'s `= {}` field, and it is a
+     * maintainer decision — not something to settle here to make a checker green.
+     */
+    private readonly logger?: OptionalLogger;
     private subId: string | undefined;
     private subIdSelfHeal: string | undefined;
     private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -215,7 +238,7 @@ export class AutoEnqueuer {
     ) {
         this.subscriptionsObject = opts.subscriptionsObject ?? 'sys_webhook';
         this.refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
-        this.logger = opts.logger ?? {};
+        this.logger = opts.logger;
     }
 
     /**
@@ -254,7 +277,7 @@ export class AutoEnqueuer {
         if (this.refreshIntervalMs > 0) {
             this.refreshTimer = setInterval(() => {
                 this.refresh().catch((err) =>
-                    this.logger.warn?.('[webhook-auto-enqueuer] periodic refresh failed', err),
+                    this.logger?.warn?.('[webhook-auto-enqueuer] periodic refresh failed', err),
                 );
             }, this.refreshIntervalMs);
             // Don't keep the process alive solely for this timer.
@@ -295,7 +318,7 @@ export class AutoEnqueuer {
             .catch(() => undefined)
             .then(() => (this.running ? this.refresh() : undefined))
             .catch((err) =>
-                this.logger.warn?.(
+                this.logger?.warn?.(
                     '[webhook-auto-enqueuer] re-arm after CryptoProvider registration failed',
                     err,
                 ),
@@ -321,7 +344,7 @@ export class AutoEnqueuer {
                 where: { active: true },
             });
         } catch (err) {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 `[webhook-auto-enqueuer] failed to load ${this.subscriptionsObject}`,
                 err,
             );
@@ -364,7 +387,7 @@ export class AutoEnqueuer {
             }
         }
 
-        this.logger.debug?.('[webhook-auto-enqueuer] cache refreshed', {
+        this.logger?.debug?.('[webhook-auto-enqueuer] cache refreshed', {
             objects: this.subscriptions.size,
             rows: rows.length,
         });
@@ -444,7 +467,7 @@ export class AutoEnqueuer {
     ): void {
         const meta = { webhook: sub.name, eventId, err: (err as Error)?.message ?? err };
         if (!sub.parkedReason) {
-            this.logger.warn?.(`[webhook-auto-enqueuer] ${verb} failed`, meta);
+            this.logger?.warn?.(`[webhook-auto-enqueuer] ${verb} failed`, meta);
             return;
         }
         const message =
@@ -455,10 +478,10 @@ export class AutoEnqueuer {
             + `IHttpOutbox.enqueue instead of MessagingService.enqueueHttp — only the messaging seam `
             + `routes a parked event to recordUndeliverable(), and the delivery door refuses it `
             + `rather than minting a pending row that would be sent UNSIGNED.`;
-        if (typeof this.logger.error === 'function') {
-            this.logger.error(message, err, meta);
+        if (typeof this.logger?.error === 'function') {
+            this.logger?.error(message, err, meta);
         } else {
-            this.logger.warn?.(message, meta);
+            this.logger?.warn?.(message, meta);
         }
     }
 
@@ -523,7 +546,7 @@ export class AutoEnqueuer {
 
         const legacy = readLegacySecret(row?.definition_json);
         if (legacy) {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its signing secret as ` +
                     `CLEARTEXT in definition_json, readable over the data API (#7799). Signing continues ` +
                     `from it; run the boot sweep (migrateLegacyWebhookSecrets) with a CryptoProvider wired ` +
@@ -578,7 +601,7 @@ export class AutoEnqueuer {
 
         const legacy = readLegacyHeaders(row?.definition_json);
         if (legacy) {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its custom headers as ` +
                     `CLEARTEXT in definition_json, readable over the data API (#7986) — that map is the ` +
                     `ordinary place an Authorization header goes. Delivery continues from it; run the boot ` +
@@ -630,7 +653,7 @@ export class AutoEnqueuer {
             err: (err as Error)?.message ?? err,
         };
         if (this.droppedForSecret.has(sub.id)) {
-            this.logger.debug?.(
+            this.logger?.debug?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' is still dropped for an unresolvable ` +
                     `${credential.noun} (${credential.issues})`,
                 meta,
@@ -659,10 +682,10 @@ export class AutoEnqueuer {
         // The logger surface is a subset of console/kernel logger — `error` is
         // optional on it, so fall back rather than silently losing the report
         // on a logger that only implements `warn`.
-        if (typeof this.logger.error === 'function') {
-            this.logger.error(message, err, meta);
+        if (typeof this.logger?.error === 'function') {
+            this.logger?.error(message, err, meta);
         } else {
-            this.logger.warn?.(message, meta);
+            this.logger?.warn?.(message, meta);
         }
     }
 
@@ -697,7 +720,7 @@ export class AutoEnqueuer {
         // silently no-op again.
         const unknown = normalized.filter((t) => !DISPATCHABLE_WEBHOOK_TRIGGERS.has(t));
         if (unknown.length > 0) {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' declares trigger(s) the engine never emits: ` +
                     `${unknown.join(', ')} — ignored. Dispatchable triggers: ` +
                     `${[...DISPATCHABLE_WEBHOOK_TRIGGERS].join(', ')}.`,
@@ -720,7 +743,7 @@ export class AutoEnqueuer {
             // (`webhook/without-triggers`) so the boot log greps into the
             // same docs. Only active rows reach parseRow, so a deliberately
             // disabled webhook stays warning-free.
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 `[webhook-auto-enqueuer] webhook '${(row.name as string) ?? row.id}' has no dispatchable ` +
                     `triggers — it will NEVER fire (rule webhook/without-triggers): there is no manual fire ` +
                     `path (#3196), so this row is dead while looking armed in Setup. Declare ` +
@@ -806,7 +829,7 @@ export class AutoEnqueuer {
         const payload = event.payload ?? {};
         const recordId = (payload as { recordId?: unknown }).recordId;
         if (typeof recordId !== 'string' || recordId === '') {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 '[webhook-auto-enqueuer] dropping off-contract data event: payload is not a DataEvent ' +
                     '(no top-level string `recordId`) — fix the producer',
                 { type: event.type, object: event.object },
@@ -896,7 +919,7 @@ export class AutoEnqueuer {
         const payload = event.payload ?? {};
         const matched = (payload as { matched?: unknown }).matched;
         if (typeof matched !== 'number' || !Number.isInteger(matched) || matched < 0) {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 '[webhook-auto-enqueuer] dropping off-contract bulk data event: payload is not a ' +
                     'BulkDataEvent (no top-level non-negative integer `matched`) — fix the producer',
                 { type: event.type, object: event.object },
@@ -912,7 +935,7 @@ export class AutoEnqueuer {
         // ever conflating two distinct ones.
         const eventUuid = (payload as { id?: unknown }).id;
         if (typeof eventUuid !== 'string' || eventUuid === '') {
-            this.logger.warn?.(
+            this.logger?.warn?.(
                 '[webhook-auto-enqueuer] dropping off-contract bulk data event: payload has no ' +
                     'top-level string `id` to dedup on — fix the producer',
                 { type: event.type, object: event.object },
@@ -958,7 +981,7 @@ export class AutoEnqueuer {
         // the admin just turned off.
         if (!event.type?.startsWith('data.record.') && !event.type?.startsWith('data.records.')) return;
         this.refresh().catch((err) =>
-            this.logger.warn?.('[webhook-auto-enqueuer] self-heal refresh failed', err),
+            this.logger?.warn?.('[webhook-auto-enqueuer] self-heal refresh failed', err),
         );
     }
 

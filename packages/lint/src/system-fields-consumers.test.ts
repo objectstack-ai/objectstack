@@ -422,13 +422,17 @@ const LEDGER: Record<string, LedgerRow> = {
   'validate-sortable-fields.ts': {
     kind: 'rule',
     reach: ['direct'],
-    asksProvenance: false,
+    asksProvenance: true,
     why:
       'Landed 2026-08-17 (#9314), after the #8996 sweep — it is the arrival that released this card\'s hold. ' +
-      'Recorded as NOT asking: the rule returns before the union branch for any object with no authored field ' +
-      'map (skip ②), which is where an ADR-0015 external object normally lands, so today there is no path on ' +
-      'which the warning could fire. Whether an external object that DOES declare a mapped field map should ' +
-      'get the sort-axis warning is a rule-shape question, not this census\'s to decide — filed separately.',
+      'Wired by #10474, which also OVERTURNED the reason this row first carried. That reason claimed the rule ' +
+      '"returns before the union branch for any object with no authored field map (skip ②), which is where an ' +
+      'ADR-0015 external object normally lands, so today there is no path on which the warning could fire". ' +
+      'Measured on the shipped shape (examples/app-showcase\'s showcase_ext_customer, an external object that ' +
+      'DOES declare a mapped field map): declaredFieldTarget returns NON-null for it, so it is indexed like any ' +
+      'other object and reaches the union branch. The path existed and was shipped; only the warning was ' +
+      'missing. Recorded here rather than silently corrected because a census whose stated reasons are not ' +
+      'the reasons the code holds is the failure this ledger exists to prevent.',
   },
   'validate-translation-references.ts': {
     kind: 'rule',
@@ -438,7 +442,14 @@ const LEDGER: Record<string, LedgerRow> = {
       'Spreads the union into its own rule-local IMPLICIT_FIELDS, and has done since before #8340 — a spread ' +
       'consumer no sweep ever listed. Recorded as NOT asking on purpose: a translation bundle supplies a LABEL ' +
       'for a column, and never reads the value, so "this anchor has no storage" says nothing about whether the ' +
-      'label resolves. The #8116 warning is about predicates and pointers over the value.',
+      'label resolves. The #8116 warning is about predicates and pointers over the value. ' +
+      'RE-RULED and UPHELD by #10474 with fresh eyes, on evidence rather than inheritance: the union is read at ' +
+      'exactly ONE site (the fields.<name> orphan test), the key it decides about is derived from the ' +
+      'REGISTERED metadata, and the registry injects the anchor into that metadata on an external object just ' +
+      'as it does on a local one — so the derived key resolves and the label renders. Asking provenance here ' +
+      'would warn about a translation that works, which is the ADR-0072 D1 false finding the union exists to ' +
+      'prevent. The blank-column consequence belongs to the surface that RENDERS the anchor ' +
+      '(validate-page-field-bindings, #8340), not to the bundle that names it.',
   },
   'validate-widget-bindings.ts': {
     kind: 'rule',

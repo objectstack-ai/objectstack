@@ -61,17 +61,33 @@
  * cause was the template scan above; the same sweep after the fix disagrees on
  * 0 files.
  *
+ * That sweep is a SCRIPT now, not a paragraph (#10640):
+ *
+ *   node scripts/check-comment-mask-corpus.mjs
+ *
+ * It runs in CI on every pull request, and it carries the control that makes
+ * its green mean something -- `--masker <path>` re-derives the 16 files above
+ * against the pre-fix implementation. When this description and that script
+ * disagree, the script is the one that ran.
+ *
  * The lesson is about the claim, not the bug. A failure DIRECTION is a
  * property of an implementation, not of an intention, and this one cannot be
  * read off the code -- it took an independent parser over the whole tree to
  * find out which way the module actually failed. So the honest statement is
  * the one that can be re-derived: the shapes below are pinned, the sweep just
  * described is the way to check the rest, and neither direction is promised by
- * construction. Re-run it after touching `scanSource` -- and note that the
- * sweep is the STRONGER instrument of the two. A mutation that deleted the
- * brace counting inside `${...}` passed every case below AND the whole sweep,
- * because the tree did not happen to write the shape; the case that now holds
- * it was written from the mutation, not from the corpus.
+ * construction. Re-run both after touching `scanSource`.
+ *
+ * Neither is the stronger instrument -- that ordering was claimed here once
+ * and both directions of it have since been measured, on the same tree, in one
+ * sitting (#10640). Deleting the brace counting inside `${...}` fails the case
+ * below that was written from that mutation, and the sweep reads 0
+ * disagreements over 4,741 files, because the tree does not write the shape.
+ * Dropping `return` from `REGEX_AFTER_KEYWORD` passes all 23 cases below, and
+ * the sweep names `scripts/check-test-source-alias.mjs`, where
+ * `return /(^|[^a-z])dist\//` is written today. The self-test pins shapes
+ * someone thought of, the sweep finds shapes the tree actually contains, and
+ * neither substitutes for the other.
  */
 
 /** A character that can end an identifier -- i.e. a value, so `/` is division. */
