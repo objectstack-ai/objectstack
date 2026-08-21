@@ -60,18 +60,28 @@ alike — is [Declaring Capabilities](/docs/permissions/capabilities).
 
 ## What's in this module
 
+{/* Source of truth for this module's page set AND its order is meta.json in this directory — routing and the sidebar are built from it, and the list below mirrors it exactly, minus this page. */}
+{/* The list is hand-kept on purpose: meta.json stores slugs only, so the link text and the glosses below exist nowhere else, and a generated list would lose them. */}
+{/* Drift note: nothing checks the two against each other in either direction, so a page added to or removed from meta.json leaves this list silently stale — edit both in the same change. */}
+
 - [Administrator Guide](/docs/permissions/administrator-guide) — the task-first manual for customer system administrators
 - [Authentication](/docs/permissions/authentication)
 - [Social & Enterprise SSO](/docs/permissions/sso)
 - [Authorization Architecture](/docs/permissions/authorization)
+- [System Context (`isSystem`)](/docs/permissions/system-context) — what the platform's one elevation flag short-circuits, and what it deliberately does not
 - [Profiles (removed)](/docs/permissions/profiles)
 - [Permission Sets](/docs/permissions/permission-sets)
 - [Positions](/docs/permissions/positions)
+- [Delegated Administration](/docs/permissions/delegated-administration)
 - [Sharing Rules](/docs/permissions/sharing-rules)
+- [Row-Level Security (RLS)](/docs/permissions/rls)
 - [Field-Level Security](/docs/permissions/field-level-security)
+- [Attachments Access](/docs/permissions/attachments-access)
 - [Permission Metadata](/docs/permissions/permission-metadata)
 - [Declaring Capabilities](/docs/permissions/capabilities) - the package author's half: `defineCapability`, and how `capabilities:` differs from `requires:`
 - [Security Permissions Matrix](/docs/permissions/permissions-matrix)
+- [Access-Matrix Snapshot Gate](/docs/permissions/access-matrix) — the committed (permission set × object) snapshot that makes every grant change a reviewable build event
+- [Explain Engine](/docs/permissions/explain) — ask the runtime why one decision came out the way it did, layer by layer
 - [Record-View Auditing](/docs/permissions/record-view-auditing) - who opened which record, and when
 - [Access Recipes](/docs/permissions/access-recipes)
 
