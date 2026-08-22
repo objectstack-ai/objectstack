@@ -41,21 +41,25 @@ What you see:
   Author a SKILL instead. Skills (plus tools / MCP) are the third-party
   extension primitive ADR-0063 names — the live surface this one was not.
 
-  There is no `os g skill` scaffolder yet. Write the file by hand:
+  Scaffold one — the file lands where the loader looks for it:
 
-      src/skills/<name>.skill.ts
-      import { defineSkill } from '@objectstack/spec/ai';
+      os g skill <name>    ->  src/skills/<name>.skill.ts
+
+  It writes a `defineSkill` template with `surface` and `tools` filled in
+  and explained, ready to edit.
 
   Docs: https://objectstack.ai/docs/ai/agents
 ```
 
-**There is no command to rewrite the call into.** A skill is a different
-artifact with a different schema, not a renamed agent, and `os g skill` does not
-exist yet — the skill scaffolder is tracked separately, and this message says so
-rather than promising it. Delete the call; author the skill file by hand.
+**The call is not mechanically rewritable.** A skill is a different artifact
+with a different schema, not a renamed agent, so delete the `os g agent` call
+rather than renaming it — then run `os g skill` and fill the template in. (This
+message originally said no scaffolder existed; `os g skill` shipped in the same
+release, so the text above is what the command prints today.)
 
-The generator roster is now `object`, `view`, `action`, `flow`, `dashboard`,
-`app`. The docs that advertised the retired one — the `os g agent support`
+`agent` leaves the generator roster, which is `object`, `view`, `action`,
+`flow`, `dashboard`, `app` — plus `skill`, added in this same release. The docs
+that advertised the retired one — the `os g agent support`
 example, the `agent` / `src/agents/` row of the Available types table, and
 `os g agent sales-assistant` in the Typical Workflow block — are gone from
 `content/docs/deployment/cli.mdx`, which carries the retirement note instead;
@@ -63,4 +67,4 @@ example, the `agent` / `src/agents/` row of the Available types table, and
 map, which listed `src/agents` as the directory an app author writes AI metadata
 into, now names `src/skills`.
 
-<!-- adr-0087: not-required (no-migration-prescription) A CLI COMMAND NAME is an invocation surface, not authorable metadata. There is no authorable key, no `sys_metadata` row and no schema to tombstone here, so there is nothing for `objectstack migrate meta` to rewrite, nothing for `spec-changes.json` to project and no FROM -> TO spelling for the upgrade guide to carry: a skill is a different artifact rather than a renamed agent, and no replacement command exists to rewrite the call into. Nor is the ledger the only notification channel this time, which is the difference from `http-request-errors-total-retired` (where an operator's Grafana panel silently drew a flat zero and the entry was the sole way to say so): the command itself now refuses, exits 1, names ADR-0063 and points at skills at the exact moment and place of use. Same reasoning shape as ADR-0087's D7 addendum, one surface over — there the compiler carries the notice, here the CLI does. -->
+<!-- adr-0087: not-required (no-migration-prescription) A CLI COMMAND NAME is an invocation surface, not authorable metadata. There is no authorable key, no `sys_metadata` row and no schema to tombstone here, so there is nothing for `objectstack migrate meta` to rewrite, nothing for `spec-changes.json` to project and no FROM -> TO spelling for the upgrade guide to carry: a skill is a different artifact rather than a renamed agent, so even with `os g skill` shipping in this same release there is no FROM -> TO call rewrite to prescribe — the author deletes the call and fills in a scaffolded template. Nor is the ledger the only notification channel this time, which is the difference from `http-request-errors-total-retired` (where an operator's Grafana panel silently drew a flat zero and the entry was the sole way to say so): the command itself now refuses, exits 1, names ADR-0063 and points at skills at the exact moment and place of use. Same reasoning shape as ADR-0087's D7 addendum, one surface over — there the compiler carries the notice, here the CLI does. -->
