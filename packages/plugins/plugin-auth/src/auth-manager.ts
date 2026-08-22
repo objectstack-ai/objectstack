@@ -1643,22 +1643,49 @@ export class AuthManager {
             // the mount is conditional on the admin plugin, and because the
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
+            // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
+            // A `hooks.before` runs AHEAD of the endpoint's own
+            // `use: [adminMiddleware]`, and that middleware is the only layer
+            // establishing identity on this lane. So this guard used to read an
+            // unauthenticated request's body, ask the database a question about
+            // the named user, and answer it — a per-record answer to a caller
+            // nobody had authenticated, where every sibling `/admin/` route
+            // answers 401. Resolving the actor first makes the guard's decision
+            // (and its distinctive refusal) reachable only once the caller has
+            // an identity; an anonymous caller falls through to the vendor's own
+            // `sessionMiddleware`/`adminMiddleware` and hears the ordinary 401.
+            //
+            // Maintainer ruling 2026-08-22 (decision-inbox digest, accepted
+            // verbatim 「接受所有」): option A, authentication before the guard.
+            //
+            // ⚠️ This changes WHEN the guard decides, never WHAT it decides:
+            // an authenticated caller reaches exactly the same lookup and the
+            // same `CONFLICT`. `break-glass-guard-authentication-order.test.ts`
+            // pins both halves — the disclosure closing AND the invariant
+            // surviving — because closing the first by deleting the guard would
+            // satisfy a disclosure-only suite.
+            //
+            // Same shape as the `/oauth2/authorize` gate above: unauthenticated
+            // → fall through, never a refusal invented here.
+            const breakGlassActor = await this.resolveActor(ctx);
+
             let isLastLocalCredential = false;
-            try {
-              let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
-              if (!targetId && ctx.path === '/delete-user') {
-                const { getSessionFromCtx } = await import('better-auth/api');
-                const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
-                targetId = s?.user?.id ?? s?.session?.userId;
+            if (breakGlassActor?.userId) {
+              try {
+                // `/delete-user` names no target in the vendor's own contract:
+                // the subject IS the authenticated caller, which is now already
+                // resolved rather than looked up a second time.
+                let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
+                if (!targetId && ctx.path === '/delete-user') targetId = breakGlassActor.userId;
+                if (targetId) {
+                  isLastLocalCredential = await isLastLocalCredentialHolder(
+                    ctx.context.adapter,
+                    targetId,
+                  );
+                }
+              } catch {
+                // Fail-open — never block a legitimate op on a lookup error.
               }
-              if (targetId) {
-                isLastLocalCredential = await isLastLocalCredentialHolder(
-                  ctx.context.adapter,
-                  targetId,
-                );
-              }
-            } catch {
-              // Fail-open — never block a legitimate op on a lookup error.
             }
             if (isLastLocalCredential) {
               const { APIError } = await import('better-auth/api');

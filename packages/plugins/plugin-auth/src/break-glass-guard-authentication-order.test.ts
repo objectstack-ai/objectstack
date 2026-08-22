@@ -255,11 +255,14 @@ describe('#10776 — /delete-user sits under the same guard and is covered here'
 
     const v = await verdict(await post(manager, '/delete-user', { userId: ownerId }));
 
-    // The route is a DISABLED one on this platform (`user.deleteUser` is
-    // deliberately unconfigured — see the `disabled` row in
-    // `auth-route-ledger.ts`), so what an unauthenticated caller must hear is
-    // whatever that route says to everyone. The binding assertion is that the
-    // guard is not what answers.
+    // Measured: the vendor's own session middleware refuses first, in
+    // better-auth's flat envelope. That is deliberate and is NOT the #10349
+    // envelope's business — `/delete-user` is not an `/admin/` path, and that
+    // card's normalizer is scoped to `/admin/` on purpose. What matters here is
+    // that the answer is an AUTHENTICATION refusal and carries nothing about
+    // the named user.
+    expect(v.status, v.text).toBe(401);
+    expect(v.code, v.text).toBe('UNAUTHORIZED');
     expect(v.code, v.text).not.toBe(LAST_LOCAL_CREDENTIAL_CODE);
     expect(v.status, v.text).not.toBe(409);
   }, 60_000);
