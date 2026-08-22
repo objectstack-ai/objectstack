@@ -1377,6 +1377,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
       "verb": "delete",
       "pinned": 1

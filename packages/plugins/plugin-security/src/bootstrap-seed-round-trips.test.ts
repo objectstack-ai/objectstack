@@ -34,6 +34,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 
@@ -49,7 +50,7 @@ interface CountingQl {
   registry: { listItems: (type: string) => any[] };
   find(object: string, q: any, opts?: any): Promise<any[]>;
   insert(object: string, data: any, opts?: any): Promise<any>;
-  update(object: string, data: any, opts?: any): Promise<any>;
+  update(object: string, data: any, options?: any): Promise<any>;
 }
 
 /**
@@ -67,6 +68,13 @@ function makeCountingQl(
   const rows: any[] = [];
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([key, cond]) => {
+      // REFUSE the combinators this double does not implement rather than
+      // reading `$and`/`$or` as a column name — a matcher that silently treats
+      // a combinator as a field is how a fake quietly answers a question the
+      // real engine would have answered differently.
+      if (key.startsWith('$')) {
+        throw new Error(`counting driver: unsupported combinator ${key}`);
+      }
       if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
         const inList = (cond as any).$in;
         if (Array.isArray(inList)) return inList.includes(row[key]);
@@ -99,12 +107,19 @@ function makeCountingQl(
       rows.push({ ...data });
       return { id: data.id };
     },
-    async update(obj: string, data: any) {
+    // Routed through the real dispatch predicate: a fake looser than
+    // ObjectQL.update would let the seeder drift to a call shape the engine
+    // refuses while this suite stayed green.
+    async update(obj: string, data: any, options?: any) {
       if (obj !== object) return;
       ql.calls.update += 1;
       ql.log.push('update');
-      const r = rows.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const targets = dispatch.kind === 'by-id'
+        ? rows.filter((r) => r.id === dispatch.id)
+        : rows.filter((r) => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
   };
   return ql;
