@@ -71,6 +71,7 @@ import {
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
 import { summarizeTree, describeEntry } from './created-summary.js';
+import { renderVersionBanner } from './banner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -398,9 +399,7 @@ const program = new Command()
     options: { template: string; skipInstall?: boolean; skipSkills?: boolean },
   ) => {
     console.log('');
-    console.log(chalk.bold.cyan('  ╔═══════════════════════════════════╗'));
-    console.log(chalk.bold.cyan('  ║') + chalk.bold('   ◆ Create ObjectStack ') + chalk.dim('v6.x') + chalk.bold.cyan('       ║'));
-    console.log(chalk.bold.cyan('  ╚═══════════════════════════════════╝'));
+    for (const line of renderVersionBanner(readCliVersion())) console.log(line);
 
     printHeader('New Environment');
 
