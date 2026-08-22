@@ -56,10 +56,17 @@
  *    silently omitted -- an un-run cell that reports nothing is the same defect
  *    class as the compile-only gap this closes.
  *
- *    ⚠ What CI gains today: nothing. CI provisions no live Postgres or MySQL
- *    for this package's `test` task, so these legs skip there. Their value is a
- *    local/manual verification path plus a skip that announces itself -- not
- *    CI protection. See the PR body for the run that measured them.
+ *    What CI gains, stated exactly. The card that asked for these legs assumed
+ *    CI provisions no live servers, so a committed live leg would add no CI
+ *    protection. That is NOT true of this package: `Temporal Conformance
+ *    (live PG + MySQL)` runs the WHOLE driver-sql suite -- `pnpm --filter
+ *    @objectstack/driver-sql test`, not a filtered subset -- against a live
+ *    `postgres:16` and a live `mysql:8.0`, at `TZ=America/New_York`, with
+ *    `OS_EXPECT_LIVE_DIALECT_MATRIX=1` so a missing URL is a red rather than a
+ *    skip. So these legs really do execute in CI, on a REQUIRED check, against
+ *    real MySQL 8.0 rather than the MariaDB stand-in they were developed on.
+ *    They skip -- announced -- on `Test Core` and for a developer with no
+ *    servers. See the PR body for the local run that measured them.
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
