@@ -40,6 +40,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveUserAuthzGrants } from '@objectstack/core';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
@@ -118,13 +119,27 @@ async function boot(): Promise<ObjectQL> {
   return engine;
 }
 
-/** The engine faced with the stub registry (`ObjectQL.registry` is a getter). */
+/**
+ * The REAL engine, faced with the stub registry (`ObjectQL.registry` is a
+ * getter, so it cannot simply be assigned).
+ *
+ * A delegating pass-through, not a fake: every verb reaches the real ObjectQL
+ * behind it, which is the whole point of this suite. `update` still opens with
+ * the PRODUCER's own dispatch predicate (#4550 / #5480 / #6277) rather than a
+ * hand-mirrored guard, because a seam that merely forwards is exactly the shape
+ * that reads as "not a double" and then admits a call the real engine would
+ * reject. `delete` is not declared at all — none of the three seeders deletes,
+ * and a verb no caller exercises would be a contract this seam does not have to
+ * make.
+ */
 function withRegistry(engine: any): any {
   return {
     find: (o: string, q?: any, opt?: any) => engine.find(o, q, opt),
     insert: (o: string, d: any, opt?: any) => engine.insert(o, d, opt),
-    update: (o: string, d: any, opt?: any) => engine.update(o, d, opt),
-    delete: (o: string, opt?: any) => engine.delete(o, opt),
+    update: (o: string, d: any, opt?: any) => {
+      assertEngineUpdateDispatch(d, opt);
+      return engine.update(o, d, opt);
+    },
     registry: STUB_REGISTRY,
   };
 }
