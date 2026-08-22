@@ -112,7 +112,12 @@
  *       the remainder) never landed (#8683). Delivery is read from merged PR
  *       bodies with H7's code-stripped extractors (`Part of #N`, or a closing
  *       keyword bound to `#N` — either way an OPEN dispatched card named by a
- *       merged PR is a half-state, whichever mechanism failed). Live mode
+ *       merged PR is a half-state, whichever mechanism failed), and — for the
+ *       bodies that declare NO delivery at all — from the PR's own branch name
+ *       (#11036: a merged PR whose body said only `Refs #10757` left its card
+ *       dispatched and unreported for ~22h in a sweep that got six other H8
+ *       rows right). The precedence is deliberate and the widening's whole
+ *       safety margin; `prDeliversCard` carries the argument. Live mode
  *       feeds H8 a bounded window of recently merged PRs, so it is a patrol
  *       accelerator, never an exhaustive audit: a delivery older than the
  *       window is invisible, and the finding clears when the paired write
@@ -1140,13 +1145,69 @@ export function h7PartOfWithClosingKeyword(pr) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The card number a protocol dev-branch NAMES — `claude/issue-<n>-<slug>` — as
+ * a string, or null when the ref is not that shape.
+ *
+ * Anchored end to end, and deliberately a second READER of one shape rather
+ * than a second shape: `CLAIM_BRANCH_SHAPE` is the same pattern spelled for
+ * `matchAll` over prose, and the self-test pins the two against each other so a
+ * future change to the branch convention cannot move one reader and leave the
+ * other answering the old way. (It is not literally that constant because a
+ * shared `g` regex carries `lastIndex` between callers — the warning on it.)
+ */
+export function branchNameTarget(ref) {
+  const m = /^claude\/issue-(\d+)-[A-Za-z0-9][A-Za-z0-9._-]*$/.exec(String(ref ?? '').trim());
+  return m ? m[1] : null;
+}
+
+/**
+ * Does this PR deliver card `n`? The one delivery relation H8 reads, shared by
+ * its merged side and its open side so the two can never drift apart.
+ *
+ * Two channels, in a deliberate PRECEDENCE rather than a disjunction:
+ *
+ *  1. **The body** — `Part of #N`, or a closing keyword bound to `#N`, read
+ *     through `stripMarkdownCode` (a body QUOTING either spelling in backticks
+ *     does not deliver). Bound per issue number exactly like H7.
+ *  2. **The branch name**, and ONLY when the body declares no delivery at all.
+ *
+ * ## Why the branch name is a FALLBACK and not a third `||` term
+ *
+ * Every dev branch here is `claude/issue-<n>-<slug>` by protocol, and every PR
+ * row already carries `head.ref` — so a delivery whose body spells the relation
+ * some third way (the measured specimen: a merged PR whose body said only
+ * `Refs #10757`, leaving its card dispatched and invisible for ~22h while the
+ * same sweep reported six other H8 rows correctly) is recoverable at no API
+ * cost. That is the widening this channel exists for.
+ *
+ * But widening the delivery relation has a cost the fix must pay, and reading
+ * the branch as merely one more disjunct does not pay it: a branch cut for card
+ * N and then RE-SCOPED — the body now delivering a different card — would be
+ * counted as delivering N forever, on the authority of a name nobody updated.
+ * The body is the channel an author actually maintains; the branch name is
+ * fixed at `git worktree add` time and is evidence only when nothing better
+ * exists. So a body that declares ANY delivery is authoritative, and the branch
+ * name is consulted only for the bodies that declare none — which is exactly
+ * the population the specimen came from, and no other.
+ */
+export function prDeliversCard(pr, n) {
+  const target = String(n);
+  const body = pr?.body ?? '';
+  const partOf = partOfTargets(body);
+  const closing = closingKeywordTargets(body);
+  if (partOf.has(target) || closing.has(target)) return true;
+  // The body spoke — about some OTHER card. A stale branch name does not
+  // overrule it (the re-scope case above).
+  if (partOf.size > 0 || closing.size > 0) return false;
+  return branchNameTarget(pr?.head?.ref) === target;
+}
+
+/**
  * H8 — null when clean, else the finding sentence.
  *
- * A PR "delivers" card N when its body declares `Part of #N` or binds a
- * closing keyword to `#N`, read through `stripMarkdownCode` (a body QUOTING
- * either spelling in backticks does not deliver). Only `merged_at`-set PRs
- * count — closed-unmerged is an abandoned attempt, not a delivery. Bound per
- * issue number exactly like H7.
+ * Delivery is `prDeliversCard` (body first, branch name as the fallback its
+ * docblock justifies). Only `merged_at`-set PRs count — closed-unmerged is an
+ * abandoned attempt, not a delivery.
  */
 export function h8MergedPrStillDispatched(issue, mergedPrs) {
   if (!labelNames(issue).includes('pm:dispatched')) return null;
@@ -1154,10 +1215,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
   const delivering = [];
   for (const pr of mergedPrs ?? []) {
     if (!pr?.merged_at) continue;
-    const body = pr.body ?? '';
-    if (partOfTargets(body).has(n) || closingKeywordTargets(body).has(n)) {
-      delivering.push(pr);
-    }
+    if (prDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
   const list = delivering
@@ -5027,6 +5085,97 @@ function selfTest() {
   );
   t('H8: empty merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), []), null);
   t('H8: missing merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), undefined), null);
+
+  // -- H8: the branch-name fallback (#11036) ---------------------------------
+  // The card's ⚠️ is the load-bearing clause: this WIDENS the delivery
+  // relation, so BOTH directions are pinned — the hit must report, and a
+  // re-scoped branch must not.
+  const onBranch = (number, body, ref, merged_at = '2026-08-21T14:00:28Z') => ({
+    number,
+    body,
+    merged_at,
+    head: { ref },
+  });
+
+  // Direction 1 — the measured specimen's shape: merged, body carries NEITHER
+  // recognised spelling (`Refs #N` is not one), branch named for the card.
+  t(
+    'H8 branch: a `Refs #N`-only body delivers via its branch name',
+    typeof h8MergedPrStillDispatched(
+      dispatched(10757),
+      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
+    ),
+    'string',
+  );
+  t(
+    'H8 branch: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(
+      dispatched(10757),
+      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
+    ).includes('#10824'),
+    true,
+  );
+  // An empty body is the same population — nothing declared, so the branch is
+  // the only evidence there is.
+  t(
+    'H8 branch: an empty body delivers via its branch name',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]),
+    'string',
+  );
+
+  // Direction 2 — the RE-SCOPED branch, the false-fire this widening could
+  // otherwise buy. Branch still named for 4321; body now delivers 9999. The
+  // body is the channel an author maintains, so it wins and 4321 stays clean.
+  t(
+    'H8 branch: a re-scoped branch does NOT deliver the card it is NAMED for',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Part of #9999', 'claude/issue-4321-x')]),
+    null,
+  );
+  t(
+    'H8 branch: …and the card the re-scoped body DOES name still reports',
+    typeof h8MergedPrStillDispatched(dispatched(9999), [onBranch(4400, 'Part of #9999', 'claude/issue-4321-x')]),
+    'string',
+  );
+  t(
+    'H8 branch: a closing keyword for another card also suppresses the fallback',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Fixes #9999', 'claude/issue-4321-x')]),
+    null,
+  );
+  // …and the widening does not reach past the merged/unmerged line, nor past
+  // the label gate, nor onto a non-protocol branch name.
+  t(
+    'H8 branch: a closed-UNMERGED PR on the card branch is still not a delivery',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x', null)]),
+    null,
+  );
+  t(
+    'H8 branch: a non-protocol branch name delivers nothing',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'feat/some-hand-cut-branch')]),
+    null,
+  );
+  t(
+    'H8 branch: a branch named for a DIFFERENT card is clean',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-9999-x')]),
+    null,
+  );
+  t('H8 branch: a PR row with no head at all does not crash', h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, '')]), null);
+
+  // The extractor itself, and its agreement with the prose-scanning constant —
+  // one branch SHAPE, two readers, pinned together so a convention change
+  // cannot move only one of them.
+  t('H8 branch: the target is the issue number as a string', branchNameTarget('claude/issue-10757-dedupe'), '10757');
+  t('H8 branch: surrounding whitespace is tolerated', branchNameTarget('  claude/issue-1-a  '), '1');
+  t('H8 branch: a slug with dots and underscores survives', branchNameTarget('claude/issue-1-a.b_c-d'), '1');
+  t('H8 branch: a slugless branch is not the protocol shape', branchNameTarget('claude/issue-1'), null);
+  t('H8 branch: a trailing path segment is not the protocol shape', branchNameTarget('claude/issue-1-a/b'), null);
+  t('H8 branch: a prefixed ref is not the protocol shape', branchNameTarget('refs/heads/claude/issue-1-a'), null);
+  t('H8 branch: `main` yields nothing', branchNameTarget('main'), null);
+  t('H8 branch: a missing ref yields nothing', branchNameTarget(undefined), null);
+  t(
+    'H8 branch: the anchored reader agrees with CLAIM_BRANCH_SHAPE on the protocol shape',
+    [...'claude/issue-10757-dedupe-per-request-queries'.matchAll(CLAIM_BRANCH_SHAPE)][0][0],
+    'claude/issue-10757-dedupe-per-request-queries',
+  );
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
   const hold = (body) => issue(['pm:on-hold'], [], body);
