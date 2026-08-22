@@ -4,7 +4,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { printHeader, printSuccess, printError, printInfo, printStep, createTimer } from '../utils/format.js';
+import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -125,30 +125,6 @@ export default ${toCamelCase(name)}Flow;
 `,
   },
 
-  agent: {
-    description: 'AI agent',
-    defaultDir: 'src/agents',
-    generate: (name: string) => `import * as AI from '@objectstack/spec/ai';
-
-/**
- * ${toTitleCase(name)} Agent
- */
-const ${toCamelCase(name)}Agent: AI.Agent = {
-  name: '${toSnakeCase(name)}_agent',
-  label: '${toTitleCase(name)} Agent',
-  role: '${toTitleCase(name)} assistant',
-  instructions: 'You are a helpful ${toTitleCase(name).toLowerCase()} assistant.',
-  model: {
-    provider: 'openai',
-    model: 'gpt-4o',
-  },
-  tools: [],
-};
-
-export default ${toCamelCase(name)}Agent;
-`,
-  },
-
   dashboard: {
     description: 'Analytics dashboard',
     defaultDir: 'src/dashboards',
@@ -186,6 +162,58 @@ const ${toCamelCase(name)}App: UI.App = {
 
 export default ${toCamelCase(name)}App;
 `,
+  },
+};
+
+// ─── Retired Generators ─────────────────────────────────────────────
+
+/**
+ * Scaffolder types that were withdrawn, and what this command says when one
+ * of them is run.
+ *
+ * A retired type is NOT an unknown type, and deliberately does not fall
+ * through to the `Unknown type:` branch in {@link runMetadataGeneration}.
+ * That branch prints the surviving roster and nothing else, so an author
+ * arriving from a doc page, a tutorial or a CI script that still names the
+ * retired type would learn only that their spelling is not on the list —
+ * and the natural next move is to hunt for the right spelling of something
+ * that no longer exists.
+ *
+ * `agent` (ADR-0063 §2, which reversed ADR-0040 §3): the kernel ships exactly
+ * two agents, `ask` and `build`, bound by surface and never picked from a
+ * roster. Tenant / app-package agents were withdrawn, and the runtime catalog
+ * filters out every non-platform agent record. The file this generator wrote
+ * into `src/agents/` therefore passed `os validate`, published without
+ * complaint, and was then dropped on the floor: no error at any step, the
+ * agent simply never appeared. Retiring the command silently would have moved
+ * that silence one step earlier instead of ending it, which is why each entry
+ * owes both halves — the decision that withdrew the surface, and the surface
+ * to author instead.
+ */
+const RETIRED_GENERATORS: Record<string, {
+  /** Reason clause completing "`os g <type>` was retired — …". */
+  reason: string;
+  /** Body lines, printed in order; an empty string prints a blank line. */
+  detail: string[];
+}> = {
+  agent: {
+    reason: 'agents are platform-internal (ADR-0063 §2).',
+    detail: [
+      'The kernel ships exactly two agents, `ask` and `build`, bound by surface.',
+      'An agent you author still parses and still publishes — and the runtime',
+      'catalog then filters it out, so it never appears and nothing tells you.',
+      'This command scaffolded exactly that file, so it is retired, not repaired.',
+      '',
+      'Author a SKILL instead. Skills (plus tools / MCP) are the third-party',
+      'extension primitive ADR-0063 names — the live surface this one was not.',
+      '',
+      'There is no `os g skill` scaffolder yet. Write the file by hand:',
+      '',
+      '    src/skills/<name>.skill.ts',
+      "    import { defineSkill } from '@objectstack/spec/ai';",
+      '',
+      'Docs: https://objectstack.ai/docs/ai/agents',
+    ],
   },
 };
 
@@ -306,6 +334,19 @@ function generateTypesFromConfig(config: Record<string, unknown>): string {
 
 async function runMetadataGeneration(type: string, name: string, flags: { dir?: string; dryRun?: boolean }): Promise<void> {
     printHeader('Generate');
+
+    // A withdrawn type answers for itself, ahead of the roster lookup — see
+    // RETIRED_GENERATORS for why "unknown type" is the wrong answer here.
+    const retired = RETIRED_GENERATORS[type];
+    if (retired) {
+      printError(`\`${CLI_ALIAS} g ${type}\` was retired — ${retired.reason}`);
+      console.log('');
+      for (const line of retired.detail) {
+        console.log(line ? chalk.dim(`  ${line}`) : '');
+      }
+      console.log('');
+      process.exit(1);
+    }
 
     const generator = GENERATORS[type];
     if (!generator) {
@@ -874,7 +915,7 @@ export default class Generate extends Command {
   static override aliases = ['g'];
 
   static override args = {
-    type: Args.string({ description: 'Metadata type to generate (object, view, action, flow, agent, dashboard, app)', required: true }),
+    type: Args.string({ description: 'Metadata type to generate (object, view, action, flow, dashboard, app)', required: true }),
     name: Args.string({ description: 'Name for the metadata (use kebab-case)', required: false }),
   };
 
