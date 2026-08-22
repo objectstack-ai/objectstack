@@ -151,11 +151,14 @@ jobs:
             #     remember to update"). Eight further single-file `scripts/`
             #     declarations and six narrower `content/docs/…` ones (spec, cli,
             #     dogfood) sit inside the two.
-            #   The last three are a single file, a single file and a single subtree,
-            #     because that is what the declarations say — NOT `docs/**`,
+            #   The last four are a single file, a single subtree, a single file and a
+            #     single file, because that is what the declarations say — NOT `docs/**`,
             #     `skills/**` or `.github/workflows/**`. Over the last 100 first-parent
-            #     commits of `main` at `0bfbeb70c`, those three roots would newly have
+            #     commits of `main` at `0bfbeb70c`, three of those roots would newly have
             #     started Test Core on 5, 2 and 3 commits; the declared paths on ZERO.
+            #     `skills/objectstack-automation/SKILL.md` joined later (#10178) and was
+            #     NOT in that window's measurement — it is declared by @objectstack/rest,
+            #     one file, and the `skills/**` root it sits in is still declined here.
             #
             # PRICE, re-measured over that same 100-commit window through this matcher:
             # Test Core scheduling goes 80/100 → 83/100. All three additions are
@@ -169,6 +172,7 @@ jobs:
               - 'content/**'
               - 'docs/audits/2026-07-unknown-key-strictness-ledger.md'
               - 'skills/objectstack-formula/**'
+              - 'skills/objectstack-automation/SKILL.md'
               - '.github/workflows/scaffold-e2e.yml'
 
   test:

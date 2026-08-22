@@ -182,6 +182,18 @@
         "$TURBO_ROOT$/content/docs/protocol/kernel/realtime-protocol.mdx"
       ]
     },
+    "@objectstack/rest#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
+        "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md"
+      ]
+    },
     "@objectstack/formula#test": {
       "dependsOn": ["^build"],
       "outputs": [],
