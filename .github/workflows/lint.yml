@@ -1205,6 +1205,27 @@ jobs:
       - name: Dispatcher error-code vocabulary guard
         run: pnpm check:dispatcher-error-vocabulary
 
+      # #10534 follow-up 4: a `rawApp` mount under the auth basePath with no ledger
+      # row. `auth-plugin.ts` mounts routes DIRECTLY on the raw Hono app, ahead of
+      # the better-auth catch-all, so the vendor's route table cannot account for
+      # them and `auth.api`'s enumeration -- which the conformance suite drives --
+      # cannot see them either. That state produced #9941 and #10050, and the
+      # #10534 census found NINE of seventeen mounts in neither half of the ledger.
+      # The pin the suite already carries asserts the objectstack-sourced set
+      # exactly, so it fails when a row DISAPPEARS; it structurally cannot fail
+      # when a MOUNT APPEARS, because both of its sides are hand-written. This
+      # gate supplies that half by enumerating the mounts from SOURCE. Accounting
+      # is exact on `METHOD path`: matching by substring silently credits a prefix
+      # route to its longer sibling, which is the artifact that made #10534's own
+      # census read 5 when the truth was 6. A row alone does not satisfy it -- an
+      # objectstack row must carry the evidence its disposition claims -- because
+      # a gate that accepts a pasted row teaches the next author to paste one.
+      # No `paths:` filter, deliberately: either input can move it, and both live
+      # in one package, so a filter would only ever blind it. Runs its own
+      # --self-test first.
+      - name: Auth mount-vs-ledger guard
+        run: pnpm check:auth-mount-ledger
+
       # Optional-`error` sink contract (#9754, wired by #10608). A sink TYPE that
       # declares `error` as OPTIONAL must also declare `warn` as NON-optional, so
       # every value of that type has somewhere to put a durability report —

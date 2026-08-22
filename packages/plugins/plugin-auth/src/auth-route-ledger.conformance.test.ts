@@ -180,11 +180,18 @@ describe('auth route ledger hygiene', () => {
     // mounts, of which nine were in NEITHER half of the ledger; eight are
     // ledgered now. This pin is the thing that makes the enlarged set
     // reviewable: an ObjectStack mount added or removed without a matching
-    // row fails HERE, naming the route, which is the closest mechanical check
-    // that exists today for the "mounted with no ledger row" state. It is not
-    // a substitute for the mount-vs-ledger gate #10534 proposes — this list
-    // is still hand-written, so it catches a row that disappears, not a mount
-    // that never got one. The ninth mount,
+    // row fails HERE, naming the route. It is not a substitute for the
+    // mount-vs-ledger gate, because this list is still hand-written: it
+    // catches a row that disappears, not a mount that never got one.
+    //
+    // That other half now EXISTS — `scripts/check-auth-mount-ledger.mjs`
+    // (`pnpm check:auth-mount-ledger`, #10534 follow-up 4). It enumerates the
+    // `rawApp` mounts from `auth-plugin.ts` SOURCE and diffs them against both
+    // halves of the ledger, so a mount added with no row fails THERE. The two
+    // are complements rather than duplicates, and both are worth keeping: this
+    // pin is a reviewed, hand-written statement of what the objectstack-sourced
+    // set IS, and the gate is a reading of what the plugin actually serves.
+    // The ninth mount,
     // `POST /api/v1/auth/set-initial-password`, is deliberately absent: its
     // disposition is escalated on #10534 rather than guessed (see the ledger
     // comment above these rows).

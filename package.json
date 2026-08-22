@@ -72,6 +72,7 @@
     "check:verify-stand-in": "node scripts/check-verify-stand-in-erasure.mjs --self-test && node scripts/check-verify-stand-in-erasure.mjs",
     "check:service-providers": "node scripts/check-service-providers.mjs",
     "check:route-envelope": "node scripts/check-route-envelope.mjs --self-test && node scripts/check-route-envelope.mjs",
+    "check:auth-mount-ledger": "node scripts/check-auth-mount-ledger.mjs --self-test && node scripts/check-auth-mount-ledger.mjs",
     "check:error-code-casing": "node scripts/check-error-code-casing.mjs --self-test && node scripts/check-error-code-casing.mjs",
     "check:error-status-conformance": "node scripts/check-error-status-conformance.mjs --self-test && node scripts/check-error-status-conformance.mjs",
     "check:dispatcher-error-vocabulary": "node scripts/check-dispatcher-error-vocabulary.mjs --self-test && node scripts/check-dispatcher-error-vocabulary.mjs",
