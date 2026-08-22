@@ -84,10 +84,7 @@ const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
  * placeholder-aware anchors — the withdrawn-claim direction reuses
  * `WITHDRAWN_CLAIM` verbatim.
  */
-const RETIREMENT_SKILL_MD = path.resolve(
-  HERE,
-  '../../../../.claude/skills/spec-property-retirement/SKILL.md',
-);
+const RETIREMENT_SKILL_MD = path.resolve(HERE, '../../../../.claude/skills/spec-property-retirement/SKILL.md');
 
 /** One scanned corpus: a root directory, plus its own out-of-scope exemptions. */
 interface Corpus {

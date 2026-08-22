@@ -170,6 +170,7 @@ jobs:
               - 'docs/audits/2026-07-unknown-key-strictness-ledger.md'
               - 'skills/objectstack-formula/**'
               - '.github/workflows/scaffold-e2e.yml'
+              - '.claude/skills/spec-property-retirement/SKILL.md'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite

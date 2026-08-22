@@ -120,7 +120,10 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-test/SKILL.md', 232],
   ['.claude/skills/checklist-author/SKILL.md', 61],
   ['.claude/skills/dogfood-verification/SKILL.md', 155],
-  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  // 328 → 334 (#10848): maintainer-ruled (2026-08-22, Option A) — convention 5
+  // replaced with the pin's house sentence AND the pin docblock's one allowed
+  // variant shape carried into the skill, +6 lines within the card's budget.
+  ['.claude/skills/spec-property-retirement/SKILL.md', 334],
   // #9792: root AGENTS.md is the largest, most-read, most binding instruction
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line
