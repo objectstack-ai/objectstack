@@ -9,13 +9,43 @@
  * is that measurement, kept as a pin.
  *
  * It lives in `packages/runtime` because that is where the pieces already are:
- * `@objectstack/driver-memory` is a dependency, `@objectstack/service-package`
- * a devDependency, and this package's `vitest.config.ts` already aliases the
- * latter to its `src/` for exactly this reason (the `#5047` rehydration pin
- * next door). `service-package` itself depends on neither the engine nor a
- * driver, so the same boot cannot be written inside it.
+ * `@objectstack/service-package` is a devDependency and this package's
+ * `vitest.config.ts` already aliases it to `src/` for exactly this reason (the
+ * `#5047` rehydration pin next door). `service-package` itself depends on
+ * neither the engine nor a driver, so the same boot cannot be written inside it.
  *
- * ## Measured here, before the fix (framework `2866d5f97`)
+ * ## Why the driver here is a LOCAL DOUBLE, not `@objectstack/driver-memory`
+ *
+ * The first version of this file booted the real `InMemoryDriver`. That made it
+ * a THIRD consumer of a package whose investment is frozen (#5499), arriving
+ * after #5704 migrated the test backends and #6664 replaced the prose census
+ * with a ledger — and `check:driver-memory-census` refused it, correctly.
+ *
+ * The disposition taken was MIGRATE, not ledger. The two consumers a maintainer
+ * ruled permanent are both kept because nothing can stand in for them: one needs
+ * the SCHEMALESS arm of a divergence pin, the other needs a driver whose
+ * `supports = {}` hands autonumber seeding back to the engine. Neither shape is
+ * what this file needs. What it needs is a seam whose `execute()` RETURNS
+ * without answering — one return value, not a capability profile — and
+ * `packages/objectql/src/protocol-recorded-by-null.test.ts` already models
+ * exactly that with a local `makeStubDriver` carrying `async execute() { return
+ * null; }`. `makeStubDriver` is itself the convention #5704/#5784 established so
+ * that grepping for the driver lands on real consumers only.
+ *
+ * ⚠️ **What the double does NOT model.** It is not evidence about
+ * `@objectstack/driver-memory`'s behaviour. That the real driver logs
+ * `Raw execution not supported in InMemory driver` and returns `null` was
+ * measured on a real boot while triaging #10965, and it stays pinned on a real
+ * booted driver by `packages/cli/src/commands/migrate/duplicates.null-seam.test.ts`
+ * (#10677), which reaches it through the datasource factory rather than by
+ * importing it. Nothing about that fact is re-asserted here, and this file would
+ * not notice if that driver changed. What it models is the SHAPE — a seam that
+ * accepts a statement and returns no result set — which is the only property the
+ * guard under test keys on, and which the implementation deliberately judges by
+ * return value rather than by driver identity.
+ *
+ * ## Measured on a real booted `InMemoryDriver`, before the fix (framework
+ * `2866d5f97`) — the triage measurement this file is the regression pin for
  *
  *     typeof objectql.execute            -> 'function'   (the shape test passes)
  *     objectql.registry.installPackage   -> 'function'   (so hydration RUNS)
@@ -26,20 +56,19 @@
  *     list() -> []      ⇒ "no packages are installed"
  *     get()  -> null    ⇒ "this package is not installed"
  *
- * ⭐ What this pins is NOT "the memory driver is refused". It is the separation
+ * ⭐ What this pins is NOT "some named driver is refused". It is the separation
  * the guard keys on: **a seam that cannot ANSWER is absent, not empty.** No
  * driver is named by the implementation — the seam is judged by what it
- * returns, and this file asserts the real driver falls on the "cannot answer"
- * side of that line.
+ * returns — so the double below is judged by the same rule any real host is.
  *
- * The mongodb driver is deliberately NOT asserted anywhere here: it is not
- * loaded by this suite, and an assertion about it would be a false pin.
+ * No real driver is asserted anywhere in this file, by construction: every
+ * driver-specific claim would be a false pin over a backend this suite does not
+ * load.
  */
 
 import { describe, it, expect } from 'vitest';
 import { LiteKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import {
   PackageServicePlugin,
   PACKAGE_SEAM_UNREADABLE_MESSAGE,
@@ -67,6 +96,40 @@ interface PackageSlot {
   list: () => Promise<unknown[]>;
 }
 
+/**
+ * A seam that ACCEPTS a statement and returns no result set.
+ *
+ * The whole double, and deliberately the smallest thing that can be one: the
+ * engine's `execute` delegates straight to `driver.execute(...)` after checking
+ * only that the method EXISTS (`packages/objectql/src/engine.ts:11687`), which
+ * is the half of the defect that made the conflation invisible — the shape test
+ * passes and the answer never arrives.
+ *
+ * `execute` returning `null` is the measured `InMemoryDriver` return, modelled
+ * here the way `protocol-recorded-by-null.test.ts`'s own `makeStubDriver` models
+ * it. The rest of the surface exists so `kernel.bootstrap()` completes; nothing
+ * below `execute` is asserted on.
+ */
+function makeNonAnsweringDriver() {
+  const driver = {
+    name: 'stub-non-answering',
+    version: '0.0.0',
+    supports: {},
+    async connect() {},
+    async disconnect() {},
+    async checkHealth() { return true; },
+    /** ⭐ The one behaviour under test: it RETURNS, and it does not answer. */
+    async execute() { return null; },
+    async find() { return []; },
+    async findOne() { return null; },
+    async count() { return 0; },
+    async create(_object: string, data: Record<string, unknown>) { return data; },
+    async update(_object: string, _id: unknown, data: Record<string, unknown>) { return data; },
+    async delete() { return true; },
+  };
+  return driver;
+}
+
 interface BootedStack {
   kernel: LiteKernel;
   engine: ObjectQlSlot;
@@ -76,11 +139,16 @@ interface BootedStack {
   service: PackageSlot;
 }
 
-/** The zero-install stack: real engine, real InMemoryDriver, real plugin. */
-async function bootMemoryStack(): Promise<BootedStack> {
+/**
+ * The zero-install stack: REAL kernel, REAL ObjectQL engine and registry, REAL
+ * `PackageServicePlugin.start()` — with the non-answering seam supplied by the
+ * double above. Everything the guard is judged against is real except the one
+ * property being modelled.
+ */
+async function bootNonAnsweringStack(): Promise<BootedStack> {
   const kernel = new LiteKernel({ logger: { level: 'error' } });
   kernel.use(new ObjectQLPlugin({}));
-  kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }), 'memory'));
+  kernel.use(new DriverPlugin(makeNonAnsweringDriver()));
   await kernel.bootstrap();
 
   const engine = kernel.getService<ObjectQlSlot>('objectql');
@@ -116,9 +184,9 @@ async function bootMemoryStack(): Promise<BootedStack> {
   return { kernel, engine, statements, results, warnLogs, service: service! };
 }
 
-describe('#10965 service-package over a real booted InMemoryDriver', () => {
+describe('#10965 service-package over a booted engine whose seam never answers', () => {
   it('the seam has the SHAPE of a seam and answers nothing — the two the guard separates', async () => {
-    const stack = await bootMemoryStack();
+    const stack = await bootNonAnsweringStack();
     try {
       // The half that made the conflation invisible: `start()`'s own gate asks
       // whether `execute` is callable, and on this driver it is.
@@ -138,7 +206,7 @@ describe('#10965 service-package over a real booted InMemoryDriver', () => {
   }, 120_000);
 
   it('boot REACHES the list read — the card’s unverified half, measured', async () => {
-    const stack = await bootMemoryStack();
+    const stack = await bootNonAnsweringStack();
     try {
       const listStatement = stack.statements.find((s) => /^SELECT \* FROM sys_packages WHERE \(id, created_at\) IN/.test(s));
       expect(listStatement, 'start() issues the latest-per-id SELECT that backs list()').toBeDefined();
@@ -153,7 +221,7 @@ describe('#10965 service-package over a real booted InMemoryDriver', () => {
   }, 120_000);
 
   it('boot does not brick, and says the durable packages could not be read', async () => {
-    const stack = await bootMemoryStack();
+    const stack = await bootNonAnsweringStack();
     try {
       const skip = stack.warnLogs.find((l) => /hydration from sys_packages SKIPPED/i.test(l));
       expect(skip, 'the silent skip is now audible').toBeDefined();
@@ -164,7 +232,7 @@ describe('#10965 service-package over a real booted InMemoryDriver', () => {
   }, 120_000);
 
   it('get() and list() REFUSE with the ADR-0112 envelope instead of answering an absence', async () => {
-    const stack = await bootMemoryStack();
+    const stack = await bootNonAnsweringStack();
     try {
       for (const call of [
         () => stack.service.get('com.acme.crm', 'latest'),
