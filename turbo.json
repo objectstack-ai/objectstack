@@ -231,7 +231,8 @@
         "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
         "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
         "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
-        "$TURBO_ROOT$/scripts/publish-smoke.sh"
+        "$TURBO_ROOT$/scripts/publish-smoke.sh",
+        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
       ]
     },
     "test:e2e": {

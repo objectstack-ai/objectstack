@@ -643,16 +643,24 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // (its `paths:` filter is `packages/create-objectstack/**`), which is why
     // the test lives here rather than beside a shell script in spec (#9779).
     //
-    // The last three are NAMED in that test's header rather than read, the same
-    // shape as `check-nul-bytes.mjs` above and settled the same way: the literal
-    // collector takes quoted paths without parsing, so a mention forces a
-    // declaration, and declaring three rarely-touched files is cheaper than
-    // rewording prose to dodge a scanner. `serve.ts` earns it on the merits too
-    // — its `flags.dev || NODE_ENV === 'development'` port-shift gate is the
-    // single fact that decides which fix those workflow blocks need, so a change
-    // to that branch is exactly the change the test's premise would need
-    // re-measuring against. The two sibling scripts are cited for the contrast
-    // that keeps the fixes from being copied between them.
+    // Three of the remaining four are NAMED in a test's header rather than
+    // read, the same shape as `check-nul-bytes.mjs` above and settled the
+    // same way: the literal collector takes quoted paths without parsing, so
+    // a mention forces a declaration, and declaring a rarely-touched file is
+    // cheaper than rewording prose to dodge a scanner. `serve.ts` earns it on
+    // the merits too — its `flags.dev || NODE_ENV === 'development'`
+    // port-shift gate is the single fact that decides which fix those
+    // workflow blocks need, so a change to that branch is exactly the change
+    // the test's premise would need re-measuring against. The two sibling
+    // scripts are cited for the contrast that keeps the fixes from being
+    // copied between them.
+    //
+    // `packages/cli/src/commands/init.ts` is the fourth of that shape (#10322):
+    // scaffold-next-steps-pm.test.ts's header quotes it in backticks while
+    // explaining that `init.ts`'s own "Next steps" output already threads its
+    // detected `chosenPm` the same way this package's scaffolder now does —
+    // it is cited for the contrast, never read. The test execs
+    // `create-objectstack`'s own CLI via `tsx`, not `init.ts`.
     globs: [
       'content/**',
       'scripts/sync-template-versions.mjs',
@@ -670,6 +678,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/serve.ts',
       'scripts/gen-sdui-manifest.sh',
       'scripts/publish-smoke.sh',
+      'packages/cli/src/commands/init.ts',
     ],
     heldBy: {
       // Read through `git grep -- content/docs` and `git ls-files`, so the
