@@ -393,11 +393,25 @@ export const SysUser = ObjectSchema.create({
       ],
     },
     // ── Two-factor authentication ─────────────────────────────────
-    // Enable flow returns { totpURI, backupCodes } — surfacing those
-    // safely needs a QR + verify UI that the generic action engine
-    // can't render yet. We still expose it so the API call works
-    // and the success toast displays the otpauth:// URI that users
-    // can manually add to an authenticator app as a fallback.
+    // These three are the ONLY 2FA surface a user can actually reach: the
+    // `sys_two_factor` variants that carry the same declarations are mounted
+    // in no app (`setup-nav.contributions.ts` has no `sys_two_factor` entry),
+    // so this record page — Setup → People & Organization → Users, Security
+    // tab, via `record:quick_actions { location: 'record_section' }` in
+    // `pages/sys-user.page.ts` — is where these run in production.
+    //
+    // Both `enable` and `generate-backup-codes` return values that CANNOT be
+    // retrieved afterwards: better-auth mints backup codes and stores only
+    // `symmetricEncrypt(JSON.stringify(codes))` (its `twoFactor()` default is
+    // `storeBackupCodes: 'encrypted'`, which we do not override), and it
+    // publishes no re-reveal route — `auth-route-ledger.ts` lists
+    // `generate-backup-codes` and nothing that reads them back. So the
+    // response is the user's ONE sight of these values, and a `successMessage`
+    // toast discards them: the old codes are already dead by then, which turns
+    // the reachable path into a lockout. `resultDialog` is what makes the
+    // one-shot reveal an actual reveal — the runtime suppresses the toast and
+    // opens an acknowledge-only dialog instead. Same shape as the
+    // `sys_two_factor` declarations; deliberately not a fourth spelling.
     {
       name: 'enable_two_factor',
       label: 'Enable Two-Factor Auth',
@@ -408,11 +422,21 @@ export const SysUser = ObjectSchema.create({
       target: '/api/v1/auth/two-factor/enable',
       visible: 'has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true',
       requiresFeature: 'twoFactor',
-      successMessage: 'Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup.',
       refreshAfter: true,
       params: [
         { name: 'password', label: 'Current Password', type: 'text', required: true },
       ],
+      // No `successMessage`: `resultDialog` suppresses it, so one declared
+      // here would be unreachable text that still ships to every translator.
+      resultDialog: {
+        title: 'Two-factor authentication enabled',
+        description: 'Scan the QR code with your authenticator app, then save the backup codes somewhere safe. The backup codes are shown only once.',
+        acknowledge: 'I have saved my backup codes',
+        fields: [
+          { path: 'totpURI', label: 'Authenticator URI', format: 'qrcode' },
+          { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
+        ],
+      },
     },
     {
       name: 'disable_two_factor',
@@ -443,12 +467,25 @@ export const SysUser = ObjectSchema.create({
       visible: 'has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true',
       requiresFeature: 'twoFactor',
       // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      // The confirm dialog and the reveal dialog are NOT that pair: they are
+      // two different moments (decide, then save), which is exactly the shape
+      // `sys_two_factor.regenerate_backup_codes` already carries.
       description: 'Generate a new set of backup codes? Any previously generated codes will stop working.',
-      successMessage: 'New backup codes generated — save them somewhere safe.',
       refreshAfter: false,
       params: [
         { name: 'password', label: 'Current Password', type: 'text', required: true },
       ],
+      // No `successMessage` — see the note above `enable_two_factor`. The toast
+      // this replaces ("New backup codes generated — save them somewhere safe")
+      // told the user to save codes it never showed them.
+      resultDialog: {
+        title: 'New backup codes generated',
+        description: 'Previous backup codes are now invalid. Save these new codes somewhere safe — they are shown only once.',
+        acknowledge: 'I have saved the new codes',
+        fields: [
+          { path: 'backupCodes', label: 'Backup Codes', format: 'code-list' },
+        ],
+      },
     },
   ],
 
