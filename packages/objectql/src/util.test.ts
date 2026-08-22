@@ -27,6 +27,8 @@ describe('toTitleCase', () => {
 
 describe('convertIntrospectedSchemaToObjects', () => {
   const sampleSchema: IntrospectedSchema = {
+    dialect: 'sqlite',
+    introspectedAt: '2026-08-22T00:00:00.000Z',
     tables: {
       users: {
         name: 'users',
@@ -179,12 +181,18 @@ describe('convertIntrospectedSchemaToObjects', () => {
   });
 
   it('should handle empty schema', () => {
-    const objects = convertIntrospectedSchemaToObjects({ tables: {} });
+    const objects = convertIntrospectedSchemaToObjects({
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
+      tables: {},
+    });
     expect(objects).toHaveLength(0);
   });
 
   it('should handle numeric types (float, decimal, real)', () => {
     const schema: IntrospectedSchema = {
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
       tables: {
         metrics: {
           name: 'metrics',
@@ -209,6 +217,8 @@ describe('convertIntrospectedSchemaToObjects', () => {
 
   it('should handle time type', () => {
     const schema: IntrospectedSchema = {
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
       tables: {
         schedule: {
           name: 'schedule',

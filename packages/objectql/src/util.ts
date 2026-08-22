@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ServiceObject } from '@objectstack/spec/data';
-import type { IntrospectedColumn as SpecIntrospectedColumn } from '@objectstack/spec/contracts';
+import type {
+  IntrospectedColumn as SpecIntrospectedColumn,
+  IntrospectedSchema as SpecIntrospectedSchema,
+  IntrospectedTable as SpecIntrospectedTable,
+} from '@objectstack/spec/contracts';
 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
@@ -52,10 +56,14 @@ export interface IntrospectedForeignKey {
 
 /**
  * Table metadata from database introspection.
+ *
+ * DERIVED from the spec contract, like {@link IntrospectedColumn}. `indexes`
+ * is `Omit`ted rather than required: SQL introspection here does not read
+ * indexes, and an empty array would claim a table HAS none when it merely was
+ * not asked. `foreignKeys` / `primaryKeys` are extras the spec's diff-facing
+ * contract does not declare.
  */
-export interface IntrospectedTable {
-  /** Table name */
-  name: string;
+export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns' | 'indexes'> {
   /** List of columns */
   columns: IntrospectedColumn[];
   /** List of foreign key relationships */
@@ -66,8 +74,13 @@ export interface IntrospectedTable {
 
 /**
  * Complete database schema introspection result.
+ *
+ * DERIVED from the spec contract, so `dialect` and the REQUIRED
+ * `introspectedAt` come from the one declaration rather than being omitted
+ * here and read downstream — which is how a producer shipped `{ tables }`
+ * alone while consumers read two keys nobody set.
  */
-export interface IntrospectedSchema {
+export interface IntrospectedSchema extends Omit<SpecIntrospectedSchema, 'tables'> {
   /** Map of table name to table metadata */
   tables: Record<string, IntrospectedTable>;
 }

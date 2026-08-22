@@ -60,6 +60,35 @@ describe('SqlDriver.introspectSchema emits the spec introspection contract', () 
     expect(byName.age.primaryKey).toBe(false);
   });
 
+  it('emits `dialect` and the required `introspectedAt`', async () => {
+    const before = Date.now();
+    const schema = await driver.introspectSchema();
+
+    // #10998's acceptance criterion, spelled exactly as it was written: the
+    // producer returned `{ tables }` alone while the contract declares three
+    // keys, so consumers read two nobody set — type mapping ran with no
+    // dialect on the whole federation path, and `refreshCatalog` persisted
+    // `dialect: undefined` into the record Studio and the boot gate read back.
+    expect(Object.keys(schema)).toEqual(
+      expect.arrayContaining(['tables', 'dialect', 'introspectedAt']),
+    );
+
+    // The dialect TOKEN, not merely the key's presence. The consumer is
+    // `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`,
+    // whose vocabulary spells these `sqlite` / `postgres` / `mysql`; a token
+    // outside it (`better-sqlite3`, or the spec enum's `postgresql`) would
+    // leave every per-dialect alias unreachable with the key still present.
+    expect(schema.dialect).toBe('sqlite');
+
+    // Required in the contract, so it is emitted unconditionally — and it is a
+    // real ISO 8601 instant, not a placeholder a consumer would have to guard.
+    expect(typeof schema.introspectedAt).toBe('string');
+    expect(new Date(schema.introspectedAt).toISOString()).toBe(schema.introspectedAt);
+    const at = Date.parse(schema.introspectedAt);
+    expect(at).toBeGreaterThanOrEqual(before - 1000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
   it('no longer emits the retired `isPrimary` spelling', async () => {
     const schema = await driver.introspectSchema();
     const id = schema.tables['customers'].columns.find((c) => c.name === 'id')!;

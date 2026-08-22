@@ -11,7 +11,11 @@ import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/sp
 // The ONE introspection contract (ADR-0015 / `ISchemaDiffService`). This
 // driver's introspection types are DERIVED from these rather than
 // re-declared next to them — see the `Introspection Types` region below.
-import type { IntrospectedColumn as SpecIntrospectedColumn } from '@objectstack/spec/contracts';
+import type {
+  IntrospectedColumn as SpecIntrospectedColumn,
+  IntrospectedSchema as SpecIntrospectedSchema,
+  IntrospectedTable as SpecIntrospectedTable,
+} from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
@@ -3650,13 +3654,14 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 /**
- * `IntrospectedColumn` is DERIVED from
- * `packages/spec/src/contracts/schema-diff-service.ts`, never re-declared
- * beside it.
+ * These are DERIVED from `packages/spec/src/contracts/schema-diff-service.ts`,
+ * never re-declared beside it.
  *
- * It used to be a second, independent declaration that happened to describe
+ * They used to be a second, independent declaration that happened to describe
  * the same idea in a different vocabulary: this file spelled a column's key
- * membership `isPrimary?`, the spec spells it `primaryKey`. `plugin.ts` hands
+ * membership `isPrimary?`, the spec spells it `primaryKey`; the spec also
+ * declares `dialect` and a REQUIRED `introspectedAt` that this file's schema
+ * type did not mention and `introspectSchema` therefore never emitted. `plugin.ts` hands
  * this driver's result straight to `ExternalDatasourceService`, which is typed
  * against the spec — so the consumer read a key no driver ever set and every
  * federated object drafted from a remote table silently lost its primary key.
@@ -3672,7 +3677,8 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
  * something the spec declares:
  *
  *  - the SQL layer carries EXTRA per-column facts (`isUnique`, `maxLength`)
- *    that the spec's diff-facing contract does not declare;
+ *    and extra per-table facts (`foreignKeys`, `primaryKeys`) that the spec's
+ *    diff-facing contract does not declare;
  *  - `defaultValue` is `unknown` here rather than the spec's `string`, because
  *    that is what Knex's `columnInfo()` actually returns (measured on live
  *    SQLite: `null`). Narrowing the declaration without normalising the value
@@ -3695,14 +3701,28 @@ export interface IntrospectedForeignKey {
   constraintName?: string;
 }
 
-export interface IntrospectedTable {
-  name: string;
+/**
+ * `indexes` is `Omit`ted from the spec table rather than emitted empty: this
+ * driver does not introspect indexes, and `indexes: []` would tell a schema
+ * differ that a table HAS none when it merely was not asked — a worse answer
+ * than an absent key. Emitting them for real is per-dialect work over arms
+ * this container cannot execute, so it is filed rather than guessed.
+ */
+export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns' | 'indexes'> {
   columns: IntrospectedColumn[];
+  /** SQL-introspection extra: outbound foreign keys. */
   foreignKeys: IntrospectedForeignKey[];
+  /** SQL-introspection extra: the table's primary-key columns, in key order. */
   primaryKeys: string[];
 }
 
-export interface IntrospectedSchema {
+/**
+ * `dialect` and `introspectedAt` are inherited from the spec contract, where
+ * `introspectedAt` is REQUIRED — so `tsc` now refuses an `introspectSchema`
+ * that omits them, which is the check that was missing while this type
+ * declared `{ tables }` alone.
+ */
+export interface IntrospectedSchema extends Omit<SpecIntrospectedSchema, 'tables'> {
   tables: Record<string, IntrospectedTable>;
 }
 
@@ -9831,6 +9851,10 @@ export class SqlDriver implements IDataDriver {
 
   async introspectSchema(): Promise<IntrospectedSchema> {
     const tables: Record<string, IntrospectedTable> = {};
+    // Stamped BEFORE the reads, not after: a consumer asking "has the remote
+    // changed since this snapshot?" must not be told the snapshot covers a
+    // moment later than the first table it actually read.
+    const introspectedAt = new Date().toISOString();
     let tableNames: string[] = [];
 
     if (this.isPostgres) {
@@ -9877,7 +9901,15 @@ export class SqlDriver implements IDataDriver {
       tables[tableName] = { name: tableName, columns, foreignKeys, primaryKeys };
     }
 
-    return { tables };
+    // `dialectName` — not the raw Knex client, and not the spec's
+    // `SQLDialectSchema` enum. The only in-tree consumer of this key is
+    // `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`,
+    // whose `SqlDialect` vocabulary (`packages/spec/src/data/type-compat.ts`)
+    // spells PostgreSQL `postgres`, exactly as `dialectName` does. Emitting
+    // the enum's `postgresql` instead would put the key in `Object.keys()`
+    // while leaving every per-dialect type alias unreachable — the omission
+    // this repairs, wearing a fix's clothes.
+    return { tables, dialect: this.dialectName, introspectedAt };
   }
 
   // ===================================

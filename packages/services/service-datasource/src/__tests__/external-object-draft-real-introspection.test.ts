@@ -134,6 +134,28 @@ describe('generateObjectDraft, driven off a real SqlDriver.introspectSchema()', 
     expect(remoteKeyComment(draft.source)).toBe('// Remote primary key: order_id, line_no');
   });
 
+  it('carries the driver-reported dialect into the persisted catalog', async () => {
+    const schema = await introspectReal(async (knex: never) => {
+      await (knex as unknown as CreateTable).schema.createTable('customers', (t: never) => {
+        const b = t as unknown as TableBuilder;
+        b.string('id').primary();
+      });
+    });
+
+    // The other half of the same omission (#10998): `refreshCatalog` writes
+    // `dialect: schema.dialect` into the `external_catalog` record Studio's
+    // schema browser and the boot gate read back, and the producer never set
+    // it — so every persisted catalog recorded `undefined`. Asserted through
+    // the service rather than on the driver's return value, because the
+    // persisted record is what a consumer actually sees.
+    const catalog = await serviceOver(schema).refreshCatalog('showcase_external');
+    expect(catalog.dialect).toBe('sqlite');
+
+    // …and it is a token `suggestFieldTypeForSqlType` understands, so the
+    // per-dialect aliases the federation path needs are reachable at all.
+    expect(['postgres', 'mysql', 'sqlite']).toContain(catalog.dialect);
+  });
+
   it('invents no key for a remote table that declares none', async () => {
     const schema = await introspectReal(async (knex: never) => {
       await (knex as unknown as CreateTable).schema.createTable('events', (t: never) => {
