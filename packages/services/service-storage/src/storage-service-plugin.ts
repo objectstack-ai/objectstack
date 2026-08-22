@@ -128,12 +128,42 @@ export class StorageServicePlugin implements Plugin {
    */
   providesServices = ['storage', 'file-storage'];
   /**
-   * init() registers sys_file / sys_upload_session / sys_attachment through
-   * the `manifest` service ObjectQLPlugin provides — order-if-present so the
-   * registration is deterministic (ADR-0116, #4471). Soft, not hard: without
-   * an engine the plugin degrades on purpose (storage service still up).
+   * `com.objectstack.engine.objectql` — init() registers sys_file /
+   * sys_upload_session / sys_attachment through the `manifest` service
+   * ObjectQLPlugin provides — order-if-present so the registration is
+   * deterministic (ADR-0116, #4471). Soft, not hard: without an engine the
+   * plugin degrades on purpose (storage service still up).
+   *
+   * `com.objectstack.service.settings` — order-if-present (ADR-0116, #10250).
+   *
+   * `start()` registers a `kernel:ready` hook that reads the `storage`
+   * namespace (backend selection + credentials). `SettingsServicePlugin` binds
+   * its data engine from ITS `kernel:ready` hook, registered in ITS `start()`,
+   * so the plugin that starts first registers the earlier hook and the earlier
+   * hook runs first. Start order is the topological order over these
+   * declarations (`resolvePluginOrder`, used for BOTH phases in
+   * `ObjectKernel.bootstrap`), so declaring the edge is what puts the bind
+   * ahead of the read.
+   *
+   * Without it the ordering was incidental: the always-on slate happens to put
+   * `settings` ahead of `storage`, but an app declaring `requires: ['storage']`
+   * gets storage FIRST (declared tokens are prepended, the slate only
+   * appended), and cloud's objectos-runtime mounts from its own wiring. In that
+   * window `getNamespace('storage')` reads the in-memory fallback and answers
+   * with the manifest DEFAULTS — so the deployment keeps its constructor-built
+   * local adapter while the operator's saved S3 credentials sit unread in
+   * `sys_setting`.
+   *
+   * SOFT, not hard, exactly like the objectql edge above: without a settings
+   * service this plugin degrades on purpose (`bindToSettings` is optional and
+   * the constructor-built adapter stands). ADR-0049 — declared is enforced:
+   * `serve-settings-ordering.pin.test.ts` boots a kernel with the readers
+   * registered BEFORE settings and proves the order moves.
    */
-  optionalDependencies = ['com.objectstack.engine.objectql'];
+  optionalDependencies = [
+    'com.objectstack.engine.objectql',
+    'com.objectstack.service.settings',
+  ];
   version = '1.0.0';
   type = 'standard';
 

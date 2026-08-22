@@ -94,6 +94,32 @@ export class SmsServicePlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['sms'];
+  /**
+   * Order-if-present on the settings service (ADR-0116, #10250).
+   *
+   * `start()` registers a `kernel:ready` hook that reads the `sms` namespace —
+   * provider credentials AND the daily cost ceiling. `SettingsServicePlugin`
+   * binds its data engine from ITS `kernel:ready` hook, registered in ITS
+   * `start()`, so the plugin that starts first registers the earlier hook and
+   * the earlier hook runs first. Start order is the topological order over this
+   * declaration (`resolvePluginOrder`, used for BOTH phases in
+   * `ObjectKernel.bootstrap`), so declaring the edge is what puts the bind
+   * ahead of the read.
+   *
+   * `sms` is the entry this card was filed about: it sits at index 6 of
+   * `PLATFORM_ALWAYS_ON_CAPABILITIES`, one past the pinned `slice(0, 6)`, so
+   * before this declaration its correct position relative to `settings` was
+   * held by nothing at all. In the window `getNamespace('sms')` answers from
+   * the manifest defaults — a `log` provider that reports every OTP "sent" and
+   * a default cost ceiling — while the operator's saved credentials sit unread
+   * in `sys_setting`.
+   *
+   * SOFT, not hard: a kernel with no settings service must still boot this
+   * plugin (the transport is buildable from options alone). ADR-0049 —
+   * declared is enforced: `serve-settings-ordering.pin.test.ts` boots a kernel
+   * with the readers registered BEFORE settings and proves the order moves.
+   */
+  optionalDependencies = ['com.objectstack.service.settings'];
   version = '1.0.0';
   type = 'standard' as const;
 
