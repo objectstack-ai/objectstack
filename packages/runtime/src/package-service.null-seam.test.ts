@@ -37,7 +37,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
+import { LiteKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { InMemoryDriver } from '@objectstack/driver-memory';
 import {
@@ -47,13 +47,33 @@ import {
 
 import { DriverPlugin } from './driver-plugin.js';
 
+/**
+ * The `objectql` slot, as this file reads it: the raw-SQL seam under test, plus
+ * the registry half whose presence is what lets `start()`'s hydration loop run
+ * at all. Spelled out rather than `any` so the slot's shape is a declaration
+ * (#4251 / `check:slot-lookup`).
+ */
+interface ObjectQlSlot {
+  execute: (query: { sql: string; args?: unknown[] }) => Promise<unknown>;
+  registry?: {
+    installPackage?: (manifest: unknown) => unknown;
+    getPackage?: (id: string) => unknown;
+  };
+}
+
+/** The two read methods this card is about, off the registered `package` slot. */
+interface PackageSlot {
+  get: (packageId: string, version?: string) => Promise<unknown>;
+  list: () => Promise<unknown[]>;
+}
+
 interface BootedStack {
   kernel: LiteKernel;
-  engine: any;
+  engine: ObjectQlSlot;
   statements: string[];
   results: unknown[];
   warnLogs: string[];
-  service: any;
+  service: PackageSlot;
 }
 
 /** The zero-install stack: real engine, real InMemoryDriver, real plugin. */
@@ -63,13 +83,13 @@ async function bootMemoryStack(): Promise<BootedStack> {
   kernel.use(new DriverPlugin(new InMemoryDriver({ persistence: false }), 'memory'));
   await kernel.bootstrap();
 
-  const engine = kernel.getService<any>('objectql');
+  const engine = kernel.getService<ObjectQlSlot>('objectql');
 
   // Record what `start()` actually asks the seam, and what the seam answers.
   const statements: string[] = [];
   const results: unknown[] = [];
   const realExecute = engine.execute.bind(engine);
-  engine.execute = async (q: any) => {
+  engine.execute = async (q: { sql: string; args?: unknown[] }) => {
     const result = await realExecute(q);
     statements.push(String(q.sql).replace(/\s+/g, ' ').trim());
     results.push(result);
@@ -77,9 +97,9 @@ async function bootMemoryStack(): Promise<BootedStack> {
   };
 
   const warnLogs: string[] = [];
-  let service: any;
+  let service: PackageSlot | undefined;
   const services = new Map<string, unknown>([['objectql', engine]]);
-  const ctx: any = {
+  const ctx = {
     logger: {
       debug: () => {}, info: () => {},
       warn: (msg: string) => warnLogs.push(String(msg)),
@@ -88,12 +108,12 @@ async function bootMemoryStack(): Promise<BootedStack> {
     getService: (n: string) => services.get(n),
     registerService: (n: string, s: unknown) => {
       services.set(n, s);
-      if (n === 'package') service = s;
+      if (n === 'package') service = s as PackageSlot;
     },
-  };
+  } as unknown as PluginContext;
 
   await new PackageServicePlugin().start(ctx);
-  return { kernel, engine, statements, results, warnLogs, service };
+  return { kernel, engine, statements, results, warnLogs, service: service! };
 }
 
 describe('#10965 service-package over a real booted InMemoryDriver', () => {
@@ -151,17 +171,17 @@ describe('#10965 service-package over a real booted InMemoryDriver', () => {
         () => stack.service.get('com.acme.crm', '1.0.0'),
         () => stack.service.list(),
       ]) {
-        let thrown: any;
+        let thrown: (Error & { code?: string; status?: number }) | undefined;
         try {
           await call();
           throw new Error('expected a refusal, but the call returned');
         } catch (e) {
-          thrown = e;
+          thrown = e as Error & { code?: string; status?: number };
         }
         // code AND status — never status alone, and never a bare toThrow().
-        expect(thrown.code).toBe('SERVICE_UNAVAILABLE');
-        expect(thrown.status).toBe(503);
-        expect(thrown.message).toBe(PACKAGE_SEAM_UNREADABLE_MESSAGE);
+        expect(thrown!.code).toBe('SERVICE_UNAVAILABLE');
+        expect(thrown!.status).toBe(503);
+        expect(thrown!.message).toBe(PACKAGE_SEAM_UNREADABLE_MESSAGE);
       }
     } finally {
       await stack.kernel.shutdown();
