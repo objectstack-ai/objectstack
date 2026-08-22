@@ -21,8 +21,12 @@ export const Note = ObjectSchema.create({
     }),
   },
 
-  // Org-wide default (OWD): who can see records they don't own. The security
-  // posture gate (ADR-0090) requires an explicit, authored decision here.
+  // Org-wide default (OWD): who can see records they don't own. `private` is
+  // owner-only until access is widened by a permission grant or a sharing rule.
+  // Declaring it is required, deliberately: `objectstack build` refuses an
+  // object that declares no OWD, so the baseline is always an authored decision
+  // rather than an accident. The other values, and how to widen access safely:
+  // https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
 
   enable: {

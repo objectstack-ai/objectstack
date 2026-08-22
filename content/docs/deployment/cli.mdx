@@ -1078,7 +1078,6 @@ os g object customer        # Generate a Customer object
 os g view customer          # Generate a Customer list view
 os g action approve         # Generate an action
 os g flow customer          # Generate an automation flow
-os g agent support          # Generate an AI agent
 os g dashboard sales        # Generate a dashboard
 os g app crm                # Generate an app definition
 
@@ -1094,9 +1093,22 @@ os g object task --dry-run  # Preview without writing
 | `view` | `src/views/` | List or form view definition |
 | `action` | `src/actions/` | Button or batch action |
 | `flow` | `src/flows/` | Automation flow |
-| `agent` | `src/agents/` | AI agent |
 | `dashboard` | `src/dashboards/` | Analytics dashboard |
 | `app` | `src/apps/` | Application navigation |
+
+<Callout type="warn" title="`os g agent` is retired">
+There is no `agent` type. Running `os g agent <name>` fails with a message
+naming [ADR-0063](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0063-two-kernel-agents-skills-are-the-extension-primitive.md)
+and pointing at skills, rather than the generic "unknown type" listing.
+
+Agents are **platform-internal**: the kernel ships exactly two (`ask` and
+`build`), and the runtime catalog filters out every other agent record. A
+scaffolded `src/agents/*.ts` therefore passed `os validate`, published without
+complaint, and never appeared — silently. Skills (plus tools / MCP) are the
+third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
+`defineSkill`; see [AI Agents](/docs/ai/agents). There is no `os g skill`
+scaffolder yet, so write that file by hand for now.
+</Callout>
 
 **Options:**
 - `-d, --dir <directory>` — Override target directory
@@ -1634,7 +1646,6 @@ os g object opportunity
 
 # 3. Add business logic
 os g flow lead-qualification
-os g agent sales-assistant
 
 # 4. Validate everything
 os validate

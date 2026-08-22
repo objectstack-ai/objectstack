@@ -59,7 +59,13 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Create a new package/plugin/example from template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `agent`, `dashboard`, `app`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`
+
+`agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
+`src/agents/*.ts` validated, published and was then filtered out of the runtime
+catalog without a word. `os g agent` now says so and points at skills — the
+third-party extension primitive — which are authored as `src/skills/<name>.skill.ts`
+with `defineSkill`. There is no `os g skill` scaffolder yet.
 
 ### Cloud — publish & install
 
