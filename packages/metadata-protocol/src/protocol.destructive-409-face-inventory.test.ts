@@ -93,8 +93,8 @@
  *
  * #11015 repairs the clause on ROW 6, where a genuinely different remedy
  * exists to prescribe (a free target namespace, or reconciling the collision).
- * Rows 2 and 3 are left as measured and filed separately: the honest repair
- * for a `PUT` that cannot acknowledge a risk may be to thread `force` on those
+ * Rows 2 and 3 are left as measured and filed as #11095: the honest repair for
+ * a `PUT` that cannot acknowledge a risk may be to thread `force` on those
  * routes, which is a contract decision and not a message fix. Section 4 pins
  * row 6; section 1's remedy guard pins that row 1's wording is untouched.
  *

@@ -3238,7 +3238,9 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * same reason and are deliberately NOT repaired here: unlike the duplicate
  * gesture, which has a genuine collision-free alternative to prescribe, the
  * right repair for a `PUT` that cannot acknowledge a risk may well be to thread
- * `force` on those routes — a contract question, filed rather than guessed at.
+ * `force` on those routes — a contract question, filed as #11095 rather than
+ * guessed at. Adding a face value here is one of the two candidate repairs it
+ * weighs.
  */
 function destructiveChangeRemedy(
     face: 'package-duplicate' | undefined,
