@@ -589,6 +589,19 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // formula skill's stdlib table against the implementation.
     globs: ['packages/spec/src/security/rls.zod.ts', 'skills/objectstack-formula/**'],
   },
+  '@objectstack/rest': {
+    // src/meta-state-route-doc-spelling.test.ts reads the two published prose
+    // sites that teach the `meta.getLegalNextStates` route and asserts each
+    // spells it the way this package's REST_ROUTE_LEDGER row does, so the
+    // ledger row and the prose can no longer drift apart in silence (#10178).
+    // Per-file rather than `content/docs/**` or `skills/**` for the reason the
+    // @objectstack/spec entry gives: those roots are edited far more often than
+    // anything this radius really depends on.
+    globs: [
+      'content/docs/protocol/objectql/state-machine.mdx',
+      'skills/objectstack-automation/SKILL.md',
+    ],
+  },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
     // log-level gate's own source to pin that the repository stays inside it.

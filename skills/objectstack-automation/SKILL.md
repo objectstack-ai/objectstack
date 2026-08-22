@@ -248,7 +248,6 @@ rejected with the rule's `message`. A `from` state mapped to `[]` is a declared
 dead-end.
 
 ```typescript
-// On the object definition — crm_opportunity.validations[]
 {
   type: 'state_machine',
   name: 'case_lifecycle',

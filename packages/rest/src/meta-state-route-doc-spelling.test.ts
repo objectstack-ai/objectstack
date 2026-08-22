@@ -22,18 +22,23 @@
  *
  * PRESENCE, NOT ABSENCE. The assertion is that the canonical path IS THERE.
  * "no doc contains the plural" would pass on a page that stopped mentioning
- * the route at all, which is the same silence this guard exists to break — see
- * `scripts/check-doc-authoring.mjs` for the repo's standing statement of why an
- * evaporated corpus must not read as a clean one.
+ * the route at all, which is the same silence this guard exists to break — the
+ * doc-authoring gate under `scripts/` carries the repo's standing statement of
+ * why an evaporated corpus must not read as a clean one.
  *
  * ⛔ WHAT THIS DOES NOT SAY. The plural is NOT universally dead and this test
- * must never be read as saying it is: the legacy if-chain branch in
- * `packages/runtime/src/domains/meta.ts` still matches BOTH literals, so
+ * must never be read as saying it is: the legacy if-chain branch in the
+ * runtime's `/meta` dispatcher domain still matches BOTH literals, so
  * `/meta/objects/:name/state/:field` is refused by a REST-fronted deployment
  * and still ANSWERED wherever `dispatch()` is the front door. That asymmetry is
  * deliberate (maintainer re-weigh of the #9180 ruling, 2026-08-17 item 3) and
- * is pinned by `packages/runtime/src/domains/meta-state-plural-tolerance.test.ts`.
- * This file is about the spelling the docs TEACH, nothing else.
+ * is pinned by that domain's own `meta-state-plural-tolerance` suite. This file
+ * is about the spelling the docs TEACH, nothing else.
+ *
+ * Those two modules are CITED, never read — spelling them as repo paths here
+ * would make `check-cross-package-test-inputs` demand a declared radius over
+ * `packages/runtime/**`, claiming an input dependency this test does not have
+ * and invalidating this package's test cache on every runtime change.
  */
 
 import { readFileSync } from 'node:fs';
@@ -50,10 +55,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /**
  * The published prose that teaches this route. Both spell the REST wire path,
  * so both are judged against the REST ledger row.
+ *
+ * Each path is a plain `const` bound to ONE relative literal, which is a
+ * spelling `check-cross-package-test-inputs` recognises. That gate reads these
+ * by scanning source text, so a path it cannot NAME — one composed in a loop,
+ * or nested in an object literal — would hold a real input radius while naming
+ * nothing its roster can check. Both files are declared for `@objectstack/rest`
+ * in `CROSS_PACKAGE_TEST_INPUTS` and hashed by `turbo.json`.
  */
+const STATE_MACHINE_DOC = resolve(HERE, '../../../content/docs/protocol/objectql/state-machine.mdx');
+const AUTOMATION_SKILL = resolve(HERE, '../../../skills/objectstack-automation/SKILL.md');
+
 const TEACHING_SITES = [
-    'content/docs/protocol/objectql/state-machine.mdx',
-    'skills/objectstack-automation/SKILL.md',
+    { label: 'content/docs/protocol/objectql/state-machine.mdx', path: STATE_MACHINE_DOC },
+    { label: 'skills/objectstack-automation/SKILL.md', path: AUTOMATION_SKILL },
 ] as const;
 
 describe('meta state-introspection route — docs spell it the way the ledger does', () => {
@@ -75,13 +90,13 @@ describe('meta state-introspection route — docs spell it the way the ledger do
     });
 
     for (const site of TEACHING_SITES) {
-        it(`${site} teaches the canonical path`, () => {
+        it(`${site.label} teaches the canonical path`, () => {
             // readFileSync throws on a moved/renamed file rather than passing
             // quietly: a site that evaporated is a finding, not a green.
-            const text = readFileSync(resolve(HERE, '../../../', site), 'utf8');
+            const text = readFileSync(site.path, 'utf8');
             expect(
                 text.includes(canonicalPath),
-                `${site} does not teach \`${canonicalPath}\`, the path the REST ledger row for `
+                `${site.label} does not teach \`${canonicalPath}\`, the path the REST ledger row for `
                 + '`meta.getLegalNextStates` declares. Update the prose to the ledger spelling '
                 + '(or, if the route itself moved, update the ledger first and let this follow). '
                 + '⛔ Do not "fix" this by asserting the plural is dead everywhere — it is still '
