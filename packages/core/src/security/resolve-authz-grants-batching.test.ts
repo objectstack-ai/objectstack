@@ -115,7 +115,19 @@ function makeProbe(tables: Tables) {
         const where = opts?.where ?? {};
         const matched = rows.filter((r) =>
           Object.entries(where).every(([k, v]) => {
-            if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            // REFUSE what this double does not implement rather than reading it
+            // as a column name. A `$or` treated as a field matches nothing, and
+            // "nothing" on this path reads as a principal holding no grant —
+            // a silent under-grant that would make every assertion below agree
+            // with a resolver that had stopped working.
+            if (k.startsWith('$')) throw new Error(`probe: unsupported WHERE combinator ${k}`);
+            if (v !== null && typeof v === 'object') {
+              const ops = Object.keys(v as object);
+              if (ops.length !== 1 || ops[0] !== '$in') {
+                throw new Error(`probe: unsupported WHERE operator(s) [${ops.join(', ')}] on ${k}`);
+              }
+              return (v as any).$in.includes(r[k]);
+            }
             return r[k] === v;
           }),
         );
