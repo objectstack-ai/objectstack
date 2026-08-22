@@ -1,8 +1,7 @@
 # 平台读数事实表(references —— 按需加载)
 
-出处:主文件「平台读数纪律」。本表是 GitHub API / 工具行为的**实测事实**,在做对应
-操作的那一刻查阅;原则住在主文件。⛔ 本表不引用 issue 编号 —— 每条自含失效模式与边
-界。
+出处:主文件「平台读数纪律」。本表 = GitHub API / 工具行为的**实测事实**,做对应操作的那一刻查阅;
+原则住主文件。⛔ 不引用 issue 编号 —— 每条自含失效模式与边界。
 
 ## 队列成员资格与 auto-merge
 
@@ -41,11 +40,11 @@
   射式重投;第三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run
   全部 `success` = 队列重建的连带取消不是红 —— 带签名读数收据重投一次(收据留在
   PR 上),⛔ 无收据不重投;同一 PR 第二次被踢 ⇒ 停止重投,按签名四分支重判。
-- **实测吞吐参数两则**:合并队列落地延迟 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没
-  落」提前判异常);单容器重验证(build+test)并发甜点 ≈3,排批按它定并发上限。
+- **实测吞吐两则**:合并队列落地 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没落」提前判异常);单容器重验证(build+test)并发甜点 ≈3,排批按它定上限。
 
 ## API 配额
 
+- **配额按账户计,不跨席共享;按查询复杂度计费,不按调用次数**:各席位跑在**不同 GitHub 账户**下,「所有 agent 共用一个身份」只在**席位内部**成立(一个席位派出的每个 dev 都以该席身份发言 —— 这正是认领必须在评论里写 session ID 的理由)⇒ ⛔ 不据限流报文里的 user ID 推「池子跨席共用、优化自己没用」(实测推翻),本席额度**完全由本席做法决定**,优化有效且是唯一有效手段;计费按复杂度/节点数 ⇒ 优化方向是**每次少拿**,不是少调用。实测(`/rate_limit` 前后差量,该端点自身不计费):上限 5000/时;单个 dev 子代理 ~15 分钟烧 ~5658 点;一次 `list_issues`(34 张卡、perPage=100)= 107 点;耗尽时刻 GraphQL used 10461(超上限一倍)而 REST core used 7 ⇒ **最大消耗方是派出去的 dev 子代理,PM 巡检相比之下是噪声**(2026-08-22 实测)。
 - GraphQL 配额(5000/时)极易打满,**MCP list/search 家族整个走 GraphQL 池** ——
   反复撞上的限流墙就是它;「读与评论走 REST(core 15000/时,独立计)」预设会话真有
   REST 通道:MCP 读工具无 REST 替身,直连 REST 受会话级授权门(会话起点快照,403
@@ -53,13 +52,13 @@
   路径,`/search/*` 被拒、`/rate_limit` 例外)钳制 —— **纯 MCP 会话撞上枯竭池 =
   重置前没有任何 list 通道**,降级读法 = 下文 git 先行与 WebFetch 两行;只有无
   REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额红时认领类动作排队,评论(REST 池)先行把结论发出去。
-- **`fields` 瘦身省载荷不省池**:MCP list/search 服务器端无条件抓 Project
-  field_values —— 池枯竭时**最小字段请求同样全体失败**,报错串 `failed to fetch issue field values: API rate limit already exceeded`。
-- **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查
-  照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);开轮先读配额
-  (免装 gh CLI:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`),graphql
-  remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写。打满时:待执行写**排成有序
-  清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
+- **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓 Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串 `failed to fetch issue field values: API rate limit already exceeded`);
+  ⛔ **`minimal_output: true` 不裁 `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`,首条 3258 字符、整体 122,685 字符仍超单次工具输出上限被落盘)—— 工具描述的反向暗示是假的,**永不当省额度手段写进任何 skill**;只要 number/labels/title 时也没有任何参数能关掉 body:要么接受整表 107 点,要么换更窄接口(`search_issues` 点数未实测)。⚠️ 前后体积对比不作证据(两次调用相隔数小时、population 已变),站得住的是直接观察 `body` 在。
+- **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);
+  **零成本等价物四条**(API 两次挂掉期间实测全程可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep;squash 验证 `git rev-list --parents -n1`(父提交数);分支存在性 `git ls-remote origin 'refs/heads/*<key>*'`。
+  开轮先读配额(`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,该端点免费;容器内**没有** `gh`,见「读数陷阱」),graphql remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写;
+  **派 dev 之前同样先读一次**:额度不足先等重置再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档;限流窗口里「必须查重才能归档」的动作等待,⛔ 不盲目开卡。
+  打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
   search 与 core 独立计,一侧打满另一侧可作退路;REST core 共享身份下同样会打满;文档载明、未实测:条件请求答 `304` 不计 core 池(仅当直连 REST 获准才相关)。
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
