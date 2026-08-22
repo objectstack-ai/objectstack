@@ -108,29 +108,93 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
     const yaml = renderPnpmWorkspaceYaml();
     expect(yaml).toMatch(/^onlyBuiltDependencies:/m);
     expect(yaml).toMatch(/^ {2}- better-sqlite3$/m);
-    // No `packages:` key — this is a settings file, not a workspace declaration.
-    expect(yaml).not.toMatch(/^packages:/m);
   });
 });
 
-// That missing `packages:` key is exactly what early pnpm 10 refuses: it exits
-// 1 with "ERROR packages field missing or empty" before resolving a single
-// dependency, so a freshly scaffolded project cannot be installed at all.
-// Measured on the rendered shape, one clean install per pnpm version, each with
-// its own store:
+// A scaffolded project is a workspace root with NO member packages, and the
+// rendered file says so in one line rather than leaving it to be inferred from
+// the absence of a key. That is not cosmetic: pnpm 9.x and 10.0–10.4 parse
+// `pnpm-workspace.yaml` BEFORE they read `engines`, and a file without the key
+// is refused outright — `pnpm install` exits 1 with "ERROR packages field
+// missing or empty" before it resolves a single dependency, naming a file the
+// user never wrote. Measured on the rendered shape, one clean install per pnpm
+// version, each with its own store:
 //
-//   10.0.0–10.4.0    parse pnpm-workspace.yaml BEFORE reading `engines`, so a
-//                    floor cannot reach them — still the raw workspace error.
-//                    Closing that sliver needs a decision about the `packages:`
-//                    key itself, which is deliberately not made here.
-//   10.5.0–10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE, naming the range.
-//   >=10.15.0        install succeeds.
+//   9.15.9 / 10.0.0 / 10.4.0   raw workspace error BEFORE → the floor's own
+//                              ERR_PNPM_UNSUPPORTED_ENGINE AFTER.
+//   10.15.0 / 10.34.5 / 11.22.0  install succeeds either way, and the two
+//                              renders are equivalent: byte-identical
+//                              `pnpm-lock.yaml`, `.modules.yaml` identical once
+//                              run-local `prunedAt`/`storeDir` are dropped, and
+//                              `pnpm ls -r --depth -1` reporting one project.
 //
-// The floor is what turns the reachable part of that band from an error about a
-// file the user never wrote into "your pnpm is too old". These assertions pin
+// ⛔ NOT `packages: ['.']`, which satisfies the same parsers but declares the
+// project root a workspace MEMBER — a monorepo root. The scaffold's output is
+// the start of every AI-written app on this platform, so a line that reads as
+// "add member packages here" is the expensive half of that choice.
+describe('explicit empty workspace declaration in the rendered file', () => {
+  // Comments are stripped first: the prose above the key names it, and must
+  // not be what satisfies an assertion about the declaration itself.
+  const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
+
+  it('declares `packages:` — the key early pnpm refuses the file without', () => {
+    expect(
+      /^packages:/m.test(settings),
+      'the rendered pnpm-workspace.yaml must declare `packages:` — without it pnpm 9.x ' +
+        'and 10.0–10.4 exit 1 with "packages field missing or empty" before reading engines',
+    ).toBe(true);
+  });
+
+  it('declares it EMPTY — a workspace root with no member packages', () => {
+    const inline = /^packages:[ \t]*(.*)$/m.exec(settings);
+    expect(inline, '`packages:` must be declared inline').not.toBeNull();
+    expect(
+      inline![1].trim(),
+      "`packages:` must be an empty list; `['.']` would declare the project root a " +
+        'workspace MEMBER (a monorepo root), which a single-package scaffold is not',
+    ).toBe('[]');
+  });
+
+  it('declares no member in any spelling', () => {
+    // Covers the inline form (`['.']`, `["packages/*"]`) and the block form
+    // (`packages:` followed by `  - …`), so neither can arrive unnoticed.
+    expect(settings).not.toMatch(/^packages:[ \t]*\[[ \t]*[^\]\s]/m);
+    expect(settings).not.toMatch(/^packages:[ \t]*\n[ \t]*-/m);
+  });
+
+  it('adds no other top-level setting to the rendered file', () => {
+    // The rest of the file is what it was: the same four keys, same order. A
+    // "restore the packages key" edit that also drags a setting in fails here.
+    const keys = [...settings.matchAll(/^([A-Za-z][\w-]*):/gm)].map((m) => m[1]);
+    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds', 'peerDependencyRules']);
+  });
+});
+
+// The explicit `packages:` key above is what makes this floor reachable at all.
+// While the key was omitted, pnpm 9.x and 10.0–10.4 never got as far as
+// `engines` — they parse the workspace file first and refused it outright — so
+// no floor value could reach them. With the key present the entire band below
+// the floor reports the same actionable cause instead. Measured on the rendered
+// shape, one clean install per pnpm version, each with its own store:
+//
+//   9.15.9, 10.0.0, 10.4.0,   ERR_PNPM_UNSUPPORTED_ENGINE naming ">=10.15".
+//   10.5.0–10.14.0            (9.x and 10.0–10.4 printed the raw workspace
+//                             error here before the key existed.)
+//   >=10.15.0                 install succeeds, byte-identical lockfile.
+//
+// ⚠️ So the floor, not the workspace file, is now what stops 10.0–10.4: with the
+// floor lowered they install (exit 0, measured) — but they read neither the
+// build allowlist nor the peer rules out of `pnpm-workspace.yaml`, so a scaffold
+// there is quietly missing its native builds. Admitting that band is a support
+// decision (#11048), not a value this suite should drift. These assertions pin
 // the declared range, not pnpm's wording.
 describe('pnpm floor in the rendered package.json', () => {
-  /** First pnpm measured to accept the keyless workspace file. */
+  /**
+   * Lowest pnpm measured to install the rendered shape AND honour the workspace
+   * file's settings — its build allowlist actually runs there (`node-gyp
+   * rebuild` for better-sqlite3). 10.0.0 and 10.4.0 install too, now that
+   * `packages:` is explicit, but skip those builds with only a warning.
+   */
   const FIRST_GOOD: [number, number, number] = [10, 15, 0];
 
   function parseFloor(range: string): [number, number, number] {
@@ -149,14 +213,20 @@ describe('pnpm floor in the rendered package.json', () => {
     }
   });
 
-  it('sets the floor at or above the first pnpm that accepts the keyless workspace file', () => {
+  it('sets the floor at or above the first pnpm measured to honour the rendered workspace file', () => {
     expect(rank(parseFloor(SCAFFOLD_PNPM_RANGE))).toBeGreaterThanOrEqual(rank(FIRST_GOOD));
   });
 
-  it('excludes every pnpm version measured to refuse the rendered workspace file', () => {
+  it('excludes every pnpm version this scaffold is not supported on', () => {
     const declared = rank(parseFloor(SCAFFOLD_PNPM_RANGE));
-    const refused: [number, number, number][] = [[10, 0, 0], [10, 5, 0], [10, 14, 0]];
-    for (const v of refused) {
+    // 10.0.0 and 10.4.0 were measured to install and then IGNORE the workspace
+    // file's build allowlist ("The following dependencies have build scripts
+    // that were ignored: better-sqlite3, esbuild"). 10.5.0 and 10.14.0 are
+    // refused by the floor itself and were never measured past it — they stay
+    // listed because nothing has shown them to honour the file, and dropping
+    // them would silently widen what the scaffold claims to support.
+    const unsupported: [number, number, number][] = [[10, 0, 0], [10, 4, 0], [10, 5, 0], [10, 14, 0]];
+    for (const v of unsupported) {
       expect(rank(v), `pnpm ${v.join('.')} must fall below the declared floor`).toBeLessThan(declared);
     }
   });

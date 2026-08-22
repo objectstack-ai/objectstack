@@ -117,36 +117,44 @@ export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
  * Lowest pnpm that can actually install this scaffold, declared as
  * `engines.pnpm` in the generated `package.json`.
  *
- * The rendered `pnpm-workspace.yaml` is a settings-only file with no
- * `packages:` key (see `renderPnpmWorkspaceYaml` below). Early pnpm 10 refuses
- * that file outright: `pnpm install` exits 1 with "ERROR packages field
- * missing or empty" before it resolves a single dependency, so a brand-new
- * project cannot be installed at all. pnpm 10.15.0 and everything above accept
- * the keyless file.
+ * The rendered `pnpm-workspace.yaml` declares an explicit empty `packages: []`
+ * (see `renderPnpmWorkspaceYaml` below). It did not always, and that history is
+ * why this floor is reachable at all: while the key was omitted, pnpm 10.0–10.4
+ * refused the file outright — `pnpm install` exited 1 with "ERROR packages
+ * field missing or empty" before resolving a single dependency — and those
+ * versions parse `pnpm-workspace.yaml` BEFORE they read `engines`, so no floor
+ * value could ever be consulted on that band.
  *
- * Declaring the floor does not repair those pnpm versions — it makes them
+ * Declaring the floor does not repair the versions below it — it makes them
  * report a cause the user can act on instead of a workspace error about a file
  * they did not write. Measured on the rendered shape, one clean install per
  * pnpm version, each with its own store:
  *
- *   pnpm 10.0.0 – 10.4.0    pnpm parses `pnpm-workspace.yaml` BEFORE it reads
- *                           `engines`, so these still print the raw "packages
- *                           field missing or empty". The floor cannot reach
- *                           this sliver; only a decision about the `packages:`
- *                           key itself closes it.
- *   pnpm 10.5.0 – 10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
- *                           pnpm version is incompatible with <project>.
- *                           Expected version: >=10.15".
+ *   pnpm 9.15.9, 10.0.0,    refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
+ *   10.4.0, 10.5.0–10.14.0  pnpm version is incompatible with PROJECT.
+ *                           Expected version: >=10.15". With the key omitted,
+ *                           9.x and 10.0–10.4 printed the raw workspace error
+ *                           here instead, naming a file the user never wrote.
  *   pnpm >= 10.15.0         installs; unchanged by this declaration.
+ *
+ * ⚠️ So this floor, not the workspace file, is now what stops pnpm 10.0–10.4:
+ * with the floor lowered they install (measured, exit 0). Admitting them is a
+ * support decision rather than an edit — measured on 10.0.0 and 10.4.0, they
+ * read neither the build allowlist nor the peer rules out of
+ * `pnpm-workspace.yaml` ("The following dependencies have build scripts that
+ * were ignored: better-sqlite3, esbuild"), so a scaffold installed there is
+ * quietly missing its native builds. Do not move this floor as a side effect;
+ * whether to admit that band at all is #11048.
  *
  * `engines.pnpm` rather than a `packageManager` stamp, on purpose. npm, yarn
  * and bun ignore `engines.pnpm` entirely, so the scaffold keeps working for all
  * four package managers `objectstack init` can hand off to (see
  * `detectPackageManager`). `packageManager: "pnpm@x.y.z"` would instead declare
  * the project pnpm-only — corepack-driven yarn refuses to run in such a project
- * — and pin one exact version that goes stale on every pnpm release. It also
- * buys nothing on 10.0–10.4, which reach the workspace error before they read
- * that field either.
+ * — and pin one exact version that goes stale on every pnpm release. Those two
+ * reasons carry the choice on their own: the third one recorded when the stamp
+ * was rejected ("it buys nothing on 10.0–10.4") was measured against the
+ * keyless file, and the explicit `packages:` key retires it.
  */
 export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 
@@ -179,8 +187,14 @@ export function renderScaffoldPackageJson(
 /**
  * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
  * declares the two known-benign peer skews.
- * Kept minimal (no `packages:` key) so it acts purely as a settings file for
- * the single-package scaffold rather than declaring a workspace.
+ * Declares an explicit empty `packages: []`: a workspace root with no member
+ * packages, which is what a single-package scaffold is — the file stays purely
+ * a settings file. Spelling the key out is what lets pnpm 10.0–10.4 (and 9.x)
+ * parse the file at all; they read it before `engines` and refuse a file
+ * without the key outright. ⛔ Never `packages: ['.']`: that declares the
+ * project root a workspace MEMBER, i.e. a monorepo root, which this is not —
+ * and it is the shape an AI reader would take as licence to add member packages
+ * to a scaffolded app.
  *
  * The allowlist is emitted TWICE, under two keys that no single pnpm version
  * range reads both of. Measured against a scaffold of this exact shape, one
@@ -210,6 +224,15 @@ export function renderPnpmWorkspaceYaml(
   const peerEntries = Object.entries(allowedPeerVersions);
 
   return [
+    '# An explicit EMPTY workspace: this project has no member packages, so',
+    '# this file is settings-only. The key is not decoration — pnpm 9.x and',
+    '# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file',
+    '# without a `packages:` key outright ("ERROR packages field missing or',
+    '# empty") before resolving a single dependency.',
+    '# Not `packages: [\'.\']`: that would declare this project a workspace',
+    '# MEMBER — a monorepo root, which it is not.',
+    'packages: []',
+    '',
     '# pnpm does not run dependency build scripts unless they are approved',
     '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
     '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
