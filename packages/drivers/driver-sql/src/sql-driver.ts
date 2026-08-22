@@ -12715,14 +12715,32 @@ export class SqlDriver implements IDataDriver {
 
     try {
       if (this.isPostgres) {
+        // `i.indkey` is an `int2vector` holding the key's attnums IN KEY ORDER,
+        // but `a.attnum = ANY(i.indkey)` is a MEMBERSHIP test: it reads the
+        // vector as a set and discards the position. With no `ORDER BY`, the row
+        // order was whatever the plan yielded — measured on PostgreSQL 16.13,
+        // `pg_attribute` scan order, i.e. COLUMN order. For a table declared
+        // `(carrier_code, shipment_id, leg_seq)` with `PRIMARY KEY (shipment_id,
+        // carrier_code)` that is the key REVERSED.
+        //
+        // Joining the ORDINALITY of `indkey` keeps the position that the
+        // membership test threw away, and `ORDER BY k.ord` makes the result the
+        // declared key order — the same guarantee the SQLite arm below gets from
+        // sorting on the `PRAGMA table_info` ordinal. The two orders differ
+        // whenever a key is declared out of column sequence, and this list is
+        // used as an addressing / upsert-conflict-target key, where the order is
+        // load-bearing: a key in the wrong order is a DIFFERENT key.
         const result = await this.knex.raw(
           `
           SELECT a.attname as column_name
           FROM pg_index i
-          JOIN pg_attribute a ON a.attrelid = i.indrelid
-            AND a.attnum = ANY(i.indkey)
+          CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a
+            ON a.attrelid = i.indrelid
+            AND a.attnum = k.attnum
           WHERE i.indrelid = ?::regclass
             AND i.indisprimary
+          ORDER BY k.ord
         `,
           [tableName],
         );
@@ -12731,6 +12749,13 @@ export class SqlDriver implements IDataDriver {
           primaryKeys.push(row.column_name);
         }
       } else if (this.isMysql) {
+        // `KEY_COLUMN_USAGE.ORDINAL_POSITION` IS the key ordinal, and it was
+        // selected by neither the projection nor an order clause. Without
+        // `ORDER BY` the row order is unspecified — and measured on MySQL
+        // 8.0.46 it is COLUMN order, not ordinal order, so an out-of-sequence
+        // key came back reversed. (The InnoDB folklore that it "tends to"
+        // return ordinal order does not hold on this shape.) Same reason as the
+        // Postgres arm above: the order is load-bearing.
         const result = await this.knex.raw(
           `
           SELECT COLUMN_NAME as column_name
@@ -12738,6 +12763,7 @@ export class SqlDriver implements IDataDriver {
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
             AND CONSTRAINT_NAME = 'PRIMARY'
+          ORDER BY ORDINAL_POSITION
         `,
           [tableName],
         );
