@@ -17,6 +17,14 @@
       "mcp__Claude_in_Chrome__find",
       "mcp__Claude_in_Chrome__read_console_messages",
       "mcp__Claude_in_Chrome__list_connected_browsers",
+      "mcp__Claude_Code_Remote__delete_trigger",
+      "mcp__Claude_Code_Remote__fire_trigger",
+      "mcp__Claude_Code_Remote__update_trigger",
+      "mcp__Claude_Code_Remote__send_later",
+      "mcp__Claude_Code_Remote__list_triggers",
+      "mcp__Claude_Code_Remote__get_session",
+      "mcp__Claude_Code_Remote__list_sessions",
+      "mcp__Claude_Code_Remote__create_trigger",
       "Bash(agent-browser snapshot *)",
       "Bash(agent-browser skills *)"
     ]
