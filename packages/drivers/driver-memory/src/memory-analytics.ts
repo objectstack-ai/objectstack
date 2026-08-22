@@ -481,6 +481,52 @@ function sizeDistinctSet(values: readonly unknown[]): number {
 }
 
 /**
+ * [#11065] `path`, with a BOOLEAN rendered as the number it is worth — the
+ * aggregand expression `$sum` and `$avg` consume on this face.
+ *
+ * ## What it is for
+ *
+ * mingo's `$avg` mirrors MongoDB's and IGNORES a non-numeric value, so a
+ * whole boolean column averaged to `null` and summed to `0` (measured: five
+ * bools in, `{avg: null, sum: 0}` out). Under SQL the same rows answer
+ * `AVG(col)` = 0.4 and `SUM(col)` = 2, and objectql's in-memory fallback
+ * (`in-memory-aggregation.ts`) answers those numbers too, because its
+ * `toNumber` is `Number(v)` and `Number(true) === 1`. A rate measure over a
+ * flag column — an SLA-violation rate, a win rate — is the ordinary shape of
+ * that query, and the two answers are not two spellings of one: a tile bound
+ * to the measure renders a percentage on one driver and a blank on the other,
+ * with no error on either path.
+ *
+ * ## Why an EXPRESSION and not post-processing
+ *
+ * The `count_distinct` neighbour above collects with `$addToSet` and sizes the
+ * array after `driver.aggregate` returns ({@link sizeDistinctSet}). Sum and
+ * average must NOT be built that way: the post-processing step runs after the
+ * pipeline's own `$sort` and `$limit` stages, so a measure left as an array
+ * until then would be SORTED as an array — `order` over a `sum` or `avg`
+ * measure is an ordinary analytics query, unlike ordering by `count_distinct`.
+ * Keeping the rule inside the `$group` expression leaves every later stage
+ * looking at the number it expects.
+ *
+ * ## The narrowness is deliberate
+ *
+ * Only `bool` is rewritten. Everything else — null, missing, a non-numeric
+ * string — reaches mingo exactly as before and is ignored by the accumulator
+ * exactly as before (measured: a numeric column carrying a null, a string and
+ * a missing key answers identically with and without this wrapper). Coercing
+ * wider would mean adopting `toNumber`'s other half, which maps a non-numeric
+ * string to `0` and so averages garbage as zero rather than excluding it —
+ * a separate question from this one.
+ *
+ * The data face carries the same rule in JavaScript (`memory-driver.ts`,
+ * `computeAggregate`); `memory-boolean-aggregand.test.ts` drives both, because
+ * one face aligned alone is how this package's faces come to disagree.
+ */
+function numericAggregandExpr(path: string): Record<string, unknown> {
+  return { $cond: [{ $eq: [{ $type: path }, 'bool'] }, { $cond: [path, 1, 0] }, path] };
+}
+
+/**
  * [#7853] A `JSON.stringify` replacer that renders a `RegExp` operand instead of
  * dropping it — the one value type the pipeline dump carries that
  * `JSON.stringify` erases.
@@ -1192,9 +1238,9 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       case 'count':
         return { $sum: 1 };
       case 'sum':
-        return { $sum: `$${fieldPath}` };
+        return { $sum: numericAggregandExpr(`$${fieldPath}`) };
       case 'avg':
-        return { $avg: `$${fieldPath}` };
+        return { $avg: numericAggregandExpr(`$${fieldPath}`) };
       case 'min':
         return { $min: `$${fieldPath}` };
       case 'max':
