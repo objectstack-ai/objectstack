@@ -278,7 +278,7 @@ Notes:
   "do something when the state changes" is a **record-triggered Flow**
   (ADR-0019) — a `record_change` flow whose start-node condition gates on the
   transition, e.g. `previous.status != 'escalated' && record.status == 'escalated'`.
-- **Introspection:** `GET /metadata/objects/:name/state/:field?from=:state`
+- **Introspection:** `GET /api/v1/meta/object/:name/state/:field?from=:state`
   returns the legal next states so UIs/agents can read the transition table
   instead of hard-coding it (`next: null` when no FSM governs the field).
 - Predicate conditions in sibling rules evaluate against the merged record in
