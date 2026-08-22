@@ -2046,8 +2046,10 @@ function clientFacingFailureCode(err: unknown): string | undefined {
  *
  * The author is also strictly better off: the old path stringified a whole
  * `ZodError`, so `seedApplied.error` was a multi-line JSON dump of raw zod
- * internals. This is the curated summary {@link zodIssuesToMetadataIssues}
- * already produces for every other authoring surface.
+ * internals. The curated findings {@link zodIssuesToMetadataIssues} produces
+ * for every other authoring surface ride this error's `issues` — surfaced on
+ * `seedApplied.issues` by the catches (#10524) — and the message is their
+ * one-sentence headline.
  *
  * [#8443] EXPORTED alongside {@link clientFacingFailureText}: the runtime
  * package-publish door parses the SAME `SeedLoaderRequestSchema` in its own
@@ -2059,17 +2061,38 @@ function clientFacingFailureCode(err: unknown): string | undefined {
  */
 export function seedRequestValidationError(zodIssues: unknown): Error {
     const issues = zodIssuesToMetadataIssues(zodIssues);
-    const summary = issues.slice(0, 3)
-        .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
-        .join('; ');
+    // [#10524] `message` is a HEADLINE — count plus `path [zod code]`
+    // locators — never a restatement of the issue prose: the same `issues`
+    // array rides the error structurally, and the catches that surface this
+    // refusal thread it onto `seedApplied.issues` beside the headline, so
+    // the author's curated per-key prose still arrives exactly once.
     const err = new Error(
-        `[invalid_metadata] the published seed bodies failed spec validation: ${summary}`
-        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : ''),
+        `[invalid_metadata] the published seed bodies failed spec validation: `
+        + metadataIssueHeadline(issues),
     );
     (err as any).code = 'INVALID_METADATA';
     (err as any).status = 422;
     (err as any).issues = issues;
     return err;
+}
+
+/**
+ * [#10524] The one-sentence headline for a refusal whose per-path detail
+ * rides `issues[]` structurally: total count plus up to three
+ * `path [zod code]` locators. Restating the issue MESSAGES here is exactly
+ * the duplication #10524 removed — every console rendering both channels
+ * showed each finding twice — so the message names WHERE and HOW MANY and
+ * leaves the prose to the structured channel. The leading count subsumes the
+ * old `(+N more)` tail. The author-time gate composes its own analogue with
+ * `[rule]` locators (`runtime-authoring-gate.ts`), deliberately: rule ids
+ * and zod codes are different vocabularies and folding them into one helper
+ * would blur which one a reader is looking at.
+ */
+function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
+    const locators = issues.slice(0, 3)
+        .map((i) => `${i.path || '<root>'}${i.code ? ` [${i.code}]` : ''}`)
+        .join('; ');
+    return `${issues.length} issue${issues.length === 1 ? '' : 's'} — ${locators}`;
 }
 
 /**
@@ -8881,7 +8904,8 @@ export class ObjectStackProtocolImplementation implements
         //   ride the spread into the engine AST and OVERRIDE the resolved
         //   object, splitting `ast.object` from the table actually queried —
         //   a mismatch is refused, never resolved by picking a winner.
-        // - `count`: a response-shape flag this method consumed above.
+        // - `count`: a response-shape flag this method consumed above (and,
+        //   since #10757, one it actually HONOURS — see `countOptOut` below).
         // - QueryAST tombstones (`cursor`/`joins`/`windowFunctions`/
         //   `distinct`): reserved at the wire gate so they are not read as
         //   field filters; on the wire they stay ignored-with-tombstone-docs
@@ -8899,6 +8923,22 @@ export class ObjectStackProtocolImplementation implements
             err.code = 'QUERY_OBJECT_MISMATCH';
             throw err;
         }
+        // [#10757] `$count=false` — read the flag BEFORE the strip below deletes
+        // it, because the strip is what kept it from ever being honoured: the
+        // parameter has been declared (`ODataQuerySchema.$count`,
+        // `packages/spec/src/api/odata.zod.ts`), aliased (`$count` → `count`,
+        // {@link WIRE_DOLLAR_ALIASES}), reserved from the implicit-field-filter
+        // bucket ({@link RESERVED_LIST_QUERY_PARAMS}), arity-checked and boolean-
+        // coerced — and then deleted unread, so every list request paid for the
+        // COUNT query below whether or not the caller wanted a `total`.
+        //
+        // Only an EXPLICIT `false` opts out. An absent `$count` keeps today's
+        // behaviour (count runs, `total` is reported) rather than taking OData's
+        // "absent means omit" reading: every existing caller sends nothing and
+        // reads `total`, so the OData default would silently break all of them.
+        // The parameter is therefore an opt-OUT here, and that asymmetry is
+        // deliberate — see the changeset for the wording that ships to consumers.
+        const countOptOut = options.count === false;
         for (const k of ['object', 'count', 'joins', 'windowFunctions', 'cursor', 'distinct', 'having']) {
             delete options[k];
         }
@@ -8915,7 +8955,7 @@ export class ObjectStackProtocolImplementation implements
         // reporting a wrong total.
         const pageLimit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : undefined;
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
-        let total = records.length;
+        let total: number | undefined = records.length;
         let hasMore = false;
         if (pageLimit !== undefined) {
             // `distinct` used to suppress the count here too — #4286 finding 2:
@@ -8923,18 +8963,47 @@ export class ObjectStackProtocolImplementation implements
             // that never deduplicated a row. Removed with `query.distinct`
             // (tombstoned in spec 17); `total`/`hasMore` are truthful again.
             const countable = options.search == null;
-            if (countable) {
+            if (countOptOut) {
+                // [#10757] The caller said it does not need `total`, so the
+                // COUNT query is not issued at all — that is the whole point of
+                // the parameter, and on a remote database it is a full round
+                // trip saved per list request.
+                //
+                // `total` is OMITTED rather than estimated. `FindDataResponse`
+                // declares it optional ("Total number of records matching the
+                // filter (IF REQUESTED)",
+                // `packages/spec/src/api/protocol.zod.ts`), so absent is the
+                // declared shape for "not requested" — and it is the only
+                // honest one: the `search` branch below reports an estimate
+                // because it has no better number to give, while here a real
+                // number was available and the caller declined it. Handing back
+                // a plausible-looking guess under those circumstances is how a
+                // page-local estimate ends up rendered as a record count.
+                //
+                // `hasMore` is still answered, from the page alone: a FULL page
+                // means there may be more. Same page-local rule the search
+                // branch uses, and it never over-reports the data — it can only
+                // say "maybe more" on an exactly-full last page.
+                hasMore = records.length === pageLimit;
+                total = undefined;
+            } else if (countable) {
+                // [#10757] `counted` is a separate, always-assigned local so
+                // `hasMore` below compares against a `number`: `total` became
+                // optional when `$count=false` gained the right to omit it, and
+                // TypeScript cannot narrow it back across the try/catch.
+                let counted: number;
                 try {
-                    total = await this.engine.count(request.object, {
+                    counted = await this.engine.count(request.object, {
                         where: options.where,
                         context: options.context,
                     } as any);
                 } catch {
                     // engine.count() has its own find().length fallback; if it still
                     // throws, degrade to a page-local total rather than failing the list.
-                    total = pageOffset + records.length;
+                    counted = pageOffset + records.length;
                 }
-                hasMore = pageOffset + records.length < total;
+                total = counted;
+                hasMore = pageOffset + records.length < counted;
             } else {
                 hasMore = records.length === pageLimit;
                 total = pageOffset + records.length + (hasMore ? 1 : 0);
@@ -8943,7 +9012,11 @@ export class ObjectStackProtocolImplementation implements
         return {
             object: request.object,
             records,
-            total,
+            // [#10757] Omitted, not `undefined`-valued: a JSON body carrying
+            // `"total": null` (or a key some serializers keep) reads as "the
+            // total is nothing", which is a different claim from "no total was
+            // requested". The key is simply absent.
+            ...(total === undefined ? {} : { total }),
             hasMore,
         };
     }
@@ -13254,6 +13327,19 @@ export class ObjectStackProtocolImplementation implements
                 const parsed = schema.safeParse(request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
+                    // [#10524] Deliberately NOT trimmed to the headline the
+                    // author-time gate and `seedRequestValidationError` now
+                    // compose, although this is the same duplication shape on
+                    // the 422 envelope face (message prose + `details.issues`).
+                    // Measured during that card: this message is quoted on
+                    // faces where it is the SOLE carrier — `duplicatePackage`'s
+                    // `failed[].error` threads no `issues`, and three #8333
+                    // GUARD pins hold the author's prescription ("Unrecognized
+                    // key(s) …", the `defineView(` spelling) to it. Trimming
+                    // here without first declaring a structured channel on
+                    // those faces deletes the prescription from the wire —
+                    // the declare-then-trim order, violated. Filed as its own
+                    // card; see the #10524 PR for the measurement.
                     const summary = issues.slice(0, 3)
                         .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
                         .join('; ');
@@ -14788,7 +14874,10 @@ export class ObjectStackProtocolImplementation implements
     private async applySeedBodies(
         bodies: unknown[],
         organizationId: string | null,
-    ): Promise<{ success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[] }> {
+    ): Promise<{
+        success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
+        issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+    }> {
         try {
             const seeds = bodies.filter(
                 (b: any) => b && typeof b.object === 'string' && Array.isArray(b.records),
@@ -14855,6 +14944,17 @@ export class ObjectStackProtocolImplementation implements
             return {
                 success: false, inserted: 0, updated: 0,
                 error: clientFacingFailureText(e, 'seed apply failed'),
+                // [#10524] A DECLARED refusal's structured findings ride the
+                // receipt beside the headline `error` — the message is a
+                // one-sentence headline now, so this is where the per-key
+                // prose reaches the author. Guarded by the same declaration
+                // test as the text above: only the declared 422
+                // (`seedRequestValidationError`) attaches `issues`; no driver
+                // error carries them (the #8441 measurement), so nothing
+                // undeclared is routed around the withhold.
+                ...(declaresClientRefusal(e) && Array.isArray(e?.issues)
+                    ? { issues: e.issues }
+                    : {}),
             };
         }
     }
@@ -15070,6 +15170,20 @@ export class ObjectStackProtocolImplementation implements
         aiModel?: string;
     }): Promise<{
         success: boolean;
+        /**
+         * [#10462] First-class discriminant for WHICH exit answered — the fact
+         * `success` alone cannot carry: a publish with nothing to promote and
+         * a genuine refusal both answer `success: false` (cloud#1488 graded
+         * the former as a rollback and burned two repair rounds on artifacts
+         * that were already correct). Producer invariants, pinned in the
+         * conformance suites: `outcome === 'refused'` if and only if
+         * `failed.length > 0`; `outcome === 'nothing_to_publish'` if and only
+         * if `published.length === 0 && failed.length === 0`; and
+         * `success === (outcome === 'published')` — `success` keeps its exact
+         * pre-#10462 value and is now derivable. Values are lowercase snake,
+         * matching the `sys_metadata_audit` outcome vocabulary.
+         */
+        outcome: 'published' | 'refused' | 'nothing_to_publish';
         publishedCount: number;
         failedCount: number;
         published: Array<{
@@ -15363,6 +15477,10 @@ export class ObjectStackProtocolImplementation implements
             }
             return {
                 success: false,
+                // [#10462] Guarded by `preflightViolations.length > 0`, so
+                // `failed[]` is non-empty by construction — this exit is
+                // always a refusal.
+                outcome: 'refused',
                 publishedCount: 0,
                 failedCount: preflightViolations.length,
                 published: [],
@@ -15767,6 +15885,16 @@ export class ObjectStackProtocolImplementation implements
                     });
             return {
                 success: false,
+                // [#10462] `failedOut` mirrors `ordered` one-to-one, so it is
+                // empty ONLY when the batch had zero drafts — a failure in the
+                // transaction machinery itself over nothing pending. Deriving
+                // the outcome (rather than hard-coding 'refused') keeps the
+                // producer invariant `outcome === 'refused' iff
+                // failed.length > 0` true on every return site; on that edge
+                // "nothing to publish" stays the truthful answer (nothing was
+                // pending, nothing was refused) and the `console.warn` above
+                // remains the record of the machinery failure.
+                outcome: failedOut.length > 0 ? 'refused' : 'nothing_to_publish',
                 publishedCount: 0,
                 failedCount: failedOut.length,
                 published: [],
@@ -15918,8 +16046,32 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0067 D2 — the commit record was written INSIDE the Phase-1
         // transaction above, together with the promotions it describes.
 
+        // [#10462] The no-op exit — a publish with nothing to promote — used
+        // to be the ONLY exit that left no trace at all: no audit row (right:
+        // `sys_metadata_audit` rows are keyed on `(type, name)`, and a batch
+        // with zero items has no honest identity to mint — the limiting case
+        // of the rule both refusal sites already follow) and no log line
+        // (wrong: an operator who reads `success: false` as a refusal goes
+        // looking for a rollback that never happened). `info`, not `warn`:
+        // nothing was claimed persisted and nothing was lost, so this is
+        // neither a durability nor a functional degradation.
+        if (published.length === 0 && failed.length === 0) {
+            console.info(
+                `[Protocol] publishPackageDrafts: nothing to publish for package `
+                + `'${request.packageId}' — no pending drafts were found, and nothing was refused.`,
+            );
+        }
+
         return {
             success: failed.length === 0 && published.length > 0,
+            // [#10462] Derived, never stored: 'refused' the moment anything is
+            // in `failed[]` (defensive — every failure on this route unwinds
+            // through the Phase-1 catch above today), else 'published' iff
+            // something landed, else the no-op. Exactly the three-way fact
+            // `success` compresses into one boolean.
+            outcome: failed.length > 0
+                ? 'refused'
+                : published.length > 0 ? 'published' : 'nothing_to_publish',
             publishedCount: published.length,
             failedCount: failed.length,
             published,

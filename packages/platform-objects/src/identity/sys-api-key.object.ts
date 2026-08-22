@@ -42,7 +42,7 @@ export const SysApiKey = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   // [#8778, #8707 remainder] Stamp-only organization declaration — NOT a wall.
   //

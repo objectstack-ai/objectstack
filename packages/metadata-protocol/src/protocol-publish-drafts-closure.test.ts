@@ -380,7 +380,14 @@ describe('publishPackageDrafts judges each draft against the BATCH closure (#103
         const causal = res.failed.find((f) => f.name === 'customer_dashboard')!;
         expect(causal.code).toBe('INVALID_METADATA');
         expect(causal.error).toMatch(/widget-dataset-unknown/);
-        expect(causal.error).toMatch(/no_such_dataset_xyz/);
+        // [#10524] `error` is a headline now (path + rule locators); the
+        // dataset NAME lives in the finding's message, once, on the
+        // structured channel the batch response declares (`failed[].issues`).
+        const unknownDs = (causal as any).issues.find(
+            (i: any) => i.rule === 'widget-dataset-unknown',
+        );
+        expect(unknownDs.message).toMatch(/no_such_dataset_xyz/);
+        expect(causal.error).not.toContain(unknownDs.message);
         // ADR-0067 D2 — all-or-nothing: the healthy sibling is aborted, not
         // published around the refusal.
         expect(res.failed.find((f) => f.name === 'shyx_customer_ds')?.code).toBe('BATCH_ABORTED');

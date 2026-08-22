@@ -842,6 +842,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1182,6 +1192,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/team-member-org-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1309,6 +1329,11 @@
     {
       "file": "packages/plugins/plugin-auth/src/session-tombstone.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

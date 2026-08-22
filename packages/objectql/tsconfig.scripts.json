@@ -1,0 +1,33 @@
+// The SCRIPTS-layer type-check program for @objectstack/objectql (#10756).
+//
+// `packages/objectql/scripts/` held a compatibility checker with a documented
+// CLI -- `dry-run-hash-compat.ts`, which `src/dry-run-hash-compat.test.ts`
+// imports `runDryRun` from -- and no tsc program this package's `typecheck`
+// runs had ever read a line of it. `tsconfig.json` selects `src/**/*` and the
+// directory is not under it, so the package passed `check:type-check-coverage`
+// as COVERED with a whole source directory unchecked. Injecting a `number`
+// initialised with a string into that file moved no gate.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, which is the
+// distinction #5475 drew for `packages/spec` and it holds for the same reason
+// here: that config emits (`rootDir: "src"`, `outDir: "dist"`, and `dev` runs
+// `tsc -w` through it), so widening it to reach `scripts/` would put the
+// directory in front of the emit and `rootDir` would reject it. This program
+// emits nothing, so it can neutralise `rootDir` without touching what ships.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest come
+// from the root config through `tsconfig.json`. The directory type-checks clean
+// under them today -- it entered with ZERO recorded debt, and there is no
+// ledger here to record any in.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the files this program
+    // checks are the ones outside `src`. Safe precisely because nothing is
+    // emitted from here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["scripts/**/*"]
+}

@@ -919,9 +919,9 @@ an old dialect exits `1`. So "my metadata is on protocol N" becomes a check
 rather than a belief.
 
 Note the division of labour with the default mode: `os migrate meta --from N`
-rewrites an **author's source** and reads no database; `--stored` rewrites **one
-deployment's rows** and reads no config. Same chain, opposite ends of the
-contract — which is why the two modes are mutually exclusive.
+lists the edits **an author's source** needs and reads no database; `--stored`
+rewrites **one deployment's rows** and reads no config. Same chain, opposite
+ends of the contract — which is why the two modes are mutually exclusive.
 
 **Without shell access, use the route.** This command needs to reach the
 deployment's database directly, which a hosted operator cannot do. The same pass

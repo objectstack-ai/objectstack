@@ -64,9 +64,18 @@ function makeDoor(opts: {
     failSaveMetaItem?: boolean;
     failTrigger?: boolean;
     apps?: Array<Record<string, unknown>>;
+    /**
+     * [#10524] Provide `getMetaItem` so the route-level seed back-fill gets
+     * past its services guard and actually reads seed bodies — the leg the
+     * seed-refusal case below needs. Absent by default, which the no-counter
+     * case relies on.
+     */
+    getMetaItem?: (args: unknown) => Promise<unknown>;
 } = {}) {
     const result = opts.result ?? {
-        success: true, publishedCount: 1, failedCount: 0,
+        // `outcome` (#10462) is REQUIRED on every producer return — a double
+        // without it is a drifted seam, not a minimal one.
+        success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
         published: [{ type: 'flow', name: 'nightly_rollup', version: 'sha256:aa11' }], failed: [],
         probes: { issues: [], checked: { seeds: 0, views: 0, widgets: 0 } },
         commitId: 'cmt_01',
@@ -88,11 +97,15 @@ function makeDoor(opts: {
     const kernel: any = {
         getService: (name: string) => {
             if (name === 'protocol') {
-                // Deliberately NO `getMetaItem`: the route-level seed
-                // back-fill demands it and reports "required services
+                // Deliberately NO `getMetaItem` by default: the route-level
+                // seed back-fill demands it and reports "required services
                 // unavailable" without counters — the measured union arm that
-                // makes the schema's counters optional.
-                return Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem });
+                // makes the schema's counters optional. The seed-refusal case
+                // (#10524) opts one in to get past that guard.
+                return Promise.resolve({
+                    publishPackageDrafts, getMetaItems, saveMetaItem,
+                    ...(opts.getMetaItem ? { getMetaItem: opts.getMetaItem } : {}),
+                });
             }
             if (name === 'objectql') {
                 return Promise.resolve({
@@ -136,6 +149,10 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         expect(strippedKeys(data)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(data);
         expect(parsed.success).toBe(true);
+        // #10462 — the discriminant crosses the route untouched: the door
+        // mutates the object (seed back-fill, ADR-0045 receipts) but never
+        // this key, and the declared parse does not strip it.
+        expect(parsed.outcome).toBe('published');
         expect(parsed.published[0]!.version).toBe('sha256:aa11');
         // The route-attached ADR-0045 receipt is ON the wire and declared.
         expect(parsed.unhiddenApps).toEqual(['crm', 'ops']);
@@ -168,7 +185,7 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         spyLogs();
         const { data } = await publishDrafts({
             result: {
-                success: true, publishedCount: 1, failedCount: 0,
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
                 published: [{ type: 'seed', name: 'demo_rows', version: 'sha256:bb22' }], failed: [],
                 // NO seedApplied: a custom protocol that does not self-apply.
                 // The door back-fills it via `applyPublishedSeeds`, which — the
@@ -185,6 +202,54 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         expect(typeof parsed.seedApplied?.error).toBe('string');
         expect(parsed.seedApplied?.inserted).toBeUndefined();
         expect(parsed.seedApplied?.updated).toBeUndefined();
+    });
+
+    /**
+     * [#10524] The seed bodies' own schema refusal, through the REAL route
+     * catch: `applyPublishedSeeds` reads the body back, `SeedLoaderRequestSchema`
+     * refuses it, `seedRequestValidationError`'s declared 422 is thrown, and
+     * the route catch surfaces it as `seedApplied` — headline on `error`, the
+     * per-key prose ONCE, structurally, on the now-declared `issues[]`. This
+     * is the route-level half of the declare-then-trim pair; the in-batch
+     * producer's half is pinned in `protocol.batch-verb-driver-text.test.ts`
+     * (§4) against the real `applySeedBodies`.
+     */
+    it('a seed-body schema refusal serves headline + structured issues on seedApplied, and it conforms (#10524)', async () => {
+        spyLogs();
+        const { data } = await publishDrafts({
+            result: {
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
+                published: [{ type: 'seed', name: 'bad_rows', version: 'sha256:cc33' }], failed: [],
+                // NO seedApplied — the route-level fallback applies the seed.
+            },
+            apps: [],
+            // Passes the body-shape filter (`object` string, `records` array)
+            // so the loader-request parse is what refuses — same fixture family
+            // as `protocol.batch-verb-driver-text.test.ts` §4.
+            getMetaItem: async () => ({
+                item: { object: 'acct', records: [{ x: 1 }], mode: 'not-a-real-mode' },
+            }),
+        });
+
+        expect(strippedKeys(data)).toEqual([]);
+        const parsed = PublishPackageDraftsResponseSchema.parse(data);
+        expect(parsed.seedApplied?.success).toBe(false);
+        // The headline names the refusal class and the offending key…
+        expect(parsed.seedApplied?.error).toContain('[invalid_metadata]');
+        expect(parsed.seedApplied?.error).toContain('failed spec validation');
+        expect(parsed.seedApplied?.error).toContain('seeds.0.mode');
+        // …and the prose lives ONCE, on the declared structured channel.
+        const issues = parsed.seedApplied?.issues;
+        expect(Array.isArray(issues)).toBe(true);
+        const modeIssue = issues!.find((i) => i.path === 'seeds.0.mode');
+        expect(modeIssue).toBeDefined();
+        expect(typeof modeIssue!.message).toBe('string');
+        for (const i of issues!) {
+            expect(parsed.seedApplied?.error).not.toContain(i.message);
+        }
+        // Unstripped through the declared parse — the ablation of this
+        // declaration (reported in the PR) reds exactly this deep-equal.
+        expect(parsed.seedApplied?.issues).toEqual((data as any).seedApplied.issues);
     });
 
     it('byte-stability across the route: nothing on the serving path parses this schema, so declaring it moved no bytes', async () => {

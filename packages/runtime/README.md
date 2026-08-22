@@ -203,8 +203,8 @@ class MyBusinessPlugin implements Plugin {
     // CRUD operations - works with any data layer
     const user = await engine.insert('user', { name: 'John' });
     const users = await engine.find('user', { filter: { active: true } });
-    await engine.update('user', user.id, { name: 'Jane' });
-    await engine.delete('user', user.id);
+    await engine.update('user', { id: user.id, name: 'Jane' });
+    await engine.delete('user', { where: { id: user.id } });
   }
 }
 ```
@@ -212,8 +212,10 @@ class MyBusinessPlugin implements Plugin {
 **Interface Methods:**
 - `insert(objectName, data)` - Create a record
 - `find(objectName, query?)` - Query records
-- `update(objectName, id, data)` - Update a record
-- `delete(objectName, id)` - Delete a record
+- `update(objectName, data, options?)` - Update a record (one row when `data.id` is a
+  truthy scalar, or `options.where.id` is; `options.multi` for a bulk update)
+- `delete(objectName, options?)` - Delete a record (`options.where.id` for one row,
+  `options.multi` for a bulk delete)
 
 ### ObjectKernel
 
@@ -247,18 +249,25 @@ interface PluginContext {
   getService<T>(name: string): T;
   hook(name: string, handler: Function): void;
   trigger(name: string, ...args: any[]): Promise<void>;
-  logger: Console;
-  getKernel?(): any;
+  logger: Logger;
+  getKernel(): ObjectKernel;
 }
 ```
 
 ## Examples
 
-See the `examples/` directory for complete examples:
-- `examples/host/` - Full server setup with Hono
-- `examples/msw-react-crud/` - Browser-based setup with MSW
-- `test-mini-kernel.ts` - Comprehensive kernel test suite
-- `packages/runtime/src/
+Complete, CI-exercised examples live in the repo's [`examples/`](../../examples)
+catalog. The three that build on this package:
+
+- [`app-todo`](../../examples/app-todo) — the smallest complete app; the fastest read of the `AppPlugin` conventions.
+- [`app-crm`](../../examples/app-crm) — relational modeling driven through the metadata loading pipeline.
+- [`app-showcase`](../../examples/app-showcase) — the kitchen-sink conformance fixture.
+
+To put an HTTP server in front of one, see [`@objectstack/plugin-hono-server`](../plugins/plugin-hono-server)
+(boots the kernel behind Hono) and [`@objectstack/hono`](../adapters/hono) (the adapter itself).
+
+This package's own behaviour is pinned by the test suite under [`src/`](./src) —
+`pnpm --filter @objectstack/runtime test`.
 
 ## Benefits of MiniKernel
 
@@ -481,7 +490,6 @@ export class LoggingMiddleware implements Plugin {
       ctx.logger.info('Response', {
         method: req.method,
         path: req.path,
-        status: res.statusCode,
         duration
       });
     });
@@ -607,7 +615,7 @@ import { RateLimiter, DEFAULT_RATE_LIMITS } from '@objectstack/runtime';
 
 const limiter = new RateLimiter(DEFAULT_RATE_LIMITS.auth);
 const decision = limiter.consume(`ip:${ip}`);
-if (!decision.allowed) reply.code(429).send({ retryAfterMs: decision.retryAfterMs });
+if (!decision.allowed) res.status(429).json({ retryAfterMs: decision.retryAfterMs });
 ```
 
 ### Observability (opt-in adapters)
@@ -639,9 +647,10 @@ Defaults are noop — zero overhead until you plug an adapter.
 
 ## Documentation
 
-- [MiniKernel Guide](../../MINI_KERNEL_GUIDE.md) - Complete API documentation and patterns
-- [MiniKernel Architecture](../../MINI_KERNEL_ARCHITECTURE.md) - Architecture diagrams and flows
-- [MiniKernel Implementation](../../MINI_KERNEL_IMPLEMENTATION.md) - Implementation details
+- 📖 Docs: <https://objectstack.ai/docs>
+- 📚 API Reference: <https://objectstack.ai/docs/references/kernel>
+- 🛡️ Hardening: [`docs/HARDENING.md`](../../docs/HARDENING.md)
+- 📈 Observability: [`docs/OBSERVABILITY.md`](../../docs/OBSERVABILITY.md)
 
 ## License
 

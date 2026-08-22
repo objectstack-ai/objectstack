@@ -163,6 +163,23 @@ sentence *"It never named a mounted route: the branch"*. Both exclusions are pin
 today's accurate ledgers red (`259 of 266`), which is why a bare "count every `route:`"
 check was never an option.
 
+**The row recognizer reads through both of those exclusions too** — comments and string
+payloads since #10683, type declarations since #10793. Before each, the recognizer read a
+source the rest of the file had already ruled out, and a lead it should not have read did
+not merely mis-count: it became a **row**. Both were silent for the same reason — `rows`
+and the first term of `routesDeclared` moved together, so the partial-read verdict, which
+keys on the gap between them, had no gap to see. The type-declaration case is the one a
+quote test cannot catch on its own: a literal-union member (`route: 'GET /a' | 'GET /b'`)
+opens with the very quote the recognizer reads. Both moves were priced on a tree carrying
+no instance of the shape, and `259 of 259` / `221 of 221` / 176 unreachable came out
+byte-identical across each.
+
+A skipped type member is reported **nowhere**, and that is the intended answer rather than
+a new silence: it is a correct declaration of a *type*, not a table row — the same rule
+under which the `route: string;` member of all seven entry interfaces has always produced
+nothing. What the prose case gets instead is `prose-quoted leads`, because a lead sitting
+where the mask says code is not is a would-be row and worth naming.
+
 ### What it cannot see is reported, never implied
 
 `anchorlessChanges` lists changed files that yielded no anchor at all; a non-empty value

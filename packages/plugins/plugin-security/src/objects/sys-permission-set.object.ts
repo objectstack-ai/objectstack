@@ -24,7 +24,7 @@ export const SysPermissionSet = ObjectSchema.create({
   protection: {
     lock: 'no-overlay',
     reason: 'RBAC schema is platform-defined — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Named permission groupings for fine-grained access control',
   displayNameField: 'label',

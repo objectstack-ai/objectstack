@@ -9,9 +9,8 @@
     "build": "pnpm --filter @objectstack/spec gen:schema && pnpm --filter @objectstack/spec gen:docs && NODE_OPTIONS='--max-old-space-size=4096' next build",
     "start": "next start",
     "site:lint": "next lint",
-    "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit"
   },
   "dependencies": {
     "fumadocs-core": "16.14.4",

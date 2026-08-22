@@ -10,14 +10,14 @@ describe('checkSpecVersionGap', () => {
     expect(gap!.declaredMajor).toBe(12);
     expect(gap!.installedMajor).toBe(14);
     expect(gap!.installedVersion).toBe('14.7.0');
-    expect(gap!.url).toBe('https://docs.objectstack.ai/docs/releases/v14');
-    expect(gap!.hint).toContain('https://docs.objectstack.ai/docs/releases/v14');
+    expect(gap!.url).toBe('https://objectstack.ai/docs/releases/v14');
+    expect(gap!.hint).toContain('https://objectstack.ai/docs/releases/v14');
   });
 
   it('points at the guide for the INSTALLED major, not the declared one', () => {
     // Two-major jump (12 → 14): the guide must be v14, the version on disk.
     const gap = checkSpecVersionGap({ specVersion: '^12.0.0' }, '14.0.0');
-    expect(gap!.url).toBe('https://docs.objectstack.ai/docs/releases/v14');
+    expect(gap!.url).toBe('https://objectstack.ai/docs/releases/v14');
   });
 
   it('is silent when declared major matches the installed platform', () => {

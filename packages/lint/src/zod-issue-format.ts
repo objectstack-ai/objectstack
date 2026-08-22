@@ -22,7 +22,7 @@
  *    exist to replace. `aggregate.groupBy` is a union (`ChartGroupBySchema` —
  *    bare field name or `{ field, dateGranularity?, alias? }`) and so is
  *    `RecordHighlightsProps.fields[]` (`RecordHighlightsField` — bare field
- *    name or `{ name, label?, icon?, type?, readonly? }`), so this is the
+ *    name or `{ name, label?, type?, readonly? }`), so this is the
  *    common path on both surfaces. **As of #5583 it is also the only thing
  *    carrying a STRICT rejection out of a union arm**: `ChartGroupBySchema`'s
  *    object arm is a `strictObject` now, and the `unrecognized_keys` it raises

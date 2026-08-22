@@ -313,6 +313,163 @@ describe('validateAll', () => {
   });
 });
 
+/**
+ * [#10537] `validateDatasource` — the same sweep, scoped to one datasource.
+ *
+ * The card it closes is a COST/SHAPE defect, not a wrong answer:
+ * `POST /datasources/:name/external/validate` used to run `validateAll()` and
+ * post-filter the report, so a URL-scoped request drove a live
+ * `introspect(datasource)` against EVERY federated datasource and discarded
+ * most of what it measured. So the assertions below are about the introspection
+ * CALL RECORD — a test comparing only returned rows would have passed before
+ * the method existed, since post-filtering already produced the right rows.
+ *
+ * Every case also pins the rows against `validateAll()` filtered the old way:
+ * "same answer, less work" is one claim, and the equivalence half is what keeps
+ * the selection predicate (federated AND bound to this datasource) from
+ * drifting away from the sweep's.
+ */
+describe('validateDatasource', () => {
+  /** Three datasources — with one, "scoped" and "all" are the same reading. */
+  const DATASOURCES = ['wh_a', 'wh_b', 'wh_c'];
+
+  const REMOTE: IntrospectedSchema = {
+    dialect: 'postgres',
+    introspectedAt: '2026-08-21T00:00:00.000Z',
+    tables: {
+      orders: {
+        name: 'orders',
+        indexes: [],
+        columns: [{ name: 'order_id', type: 'text', nullable: false, primaryKey: true }],
+      },
+    },
+  };
+
+  /**
+   * One federated object per datasource, one local object, and one object that
+   * is federated by its `external` binding while sitting on the DEFAULT
+   * datasource — the edge where "bound to `:name`" and "federated" come apart,
+   * and the reason the scoped filter cannot simply be `datasource === name`.
+   */
+  const OBJECTS: ObjectLike[] = [
+    ...DATASOURCES.map((ds) => ({
+      name: `${ds}_orders`,
+      datasource: ds,
+      external: { remoteName: 'orders' },
+      fields: { order_id: { type: 'text' } },
+    })),
+    { name: 'local_thing', datasource: 'default', fields: { id: { type: 'text' } } },
+    {
+      name: 'default_bound_orders',
+      datasource: 'default',
+      external: { remoteName: 'orders' },
+      fields: { order_id: { type: 'text' } },
+    },
+  ];
+
+  function makeMulti(opts: { unreachable?: readonly string[] } = {}) {
+    const introspected: string[] = [];
+    const unreachable = new Set(opts.unreachable ?? []);
+    const svc = new ExternalDatasourceService({
+      introspect: async (datasource: string) => {
+        introspected.push(datasource);
+        if (unreachable.has(datasource)) throw new Error(`connect ECONNREFUSED (${datasource})`);
+        return REMOTE;
+      },
+      getDatasource: async (name: string) =>
+        DATASOURCES.includes(name) ? { name, schemaMode: 'external' } : undefined,
+      getObject: async (name: string) => OBJECTS.find((o) => o.name === name),
+      listObjects: async () => OBJECTS,
+      logger: { warn: () => {} },
+    });
+    return { svc, introspected };
+  }
+
+  /** What the pre-#10537 route computed: the whole sweep, filtered afterwards. */
+  async function sweptThenFiltered(datasource: string, opts?: { unreachable?: readonly string[] }) {
+    const { svc, introspected } = makeMulti(opts);
+    const report = await svc.validateAll();
+    return {
+      results: report.results.filter((r) => r.datasource === datasource),
+      introspected,
+    };
+  }
+
+  it('introspects only the named datasource', async () => {
+    expect(DATASOURCES.length).toBeGreaterThan(1);
+    const { svc, introspected } = makeMulti();
+
+    const report = await svc.validateDatasource('wh_a');
+
+    expect(introspected).toEqual(['wh_a']);
+    expect(report.ok).toBe(true);
+    expect(report.results.map((r) => r.object)).toEqual(['wh_a_orders']);
+  });
+
+  it('returns exactly the rows the whole-farm sweep would have kept', async () => {
+    const { svc } = makeMulti();
+    for (const ds of DATASOURCES) {
+      const scoped = await svc.validateDatasource(ds);
+      const swept = await sweptThenFiltered(ds);
+      expect(scoped.results).toEqual(swept.results);
+      expect(scoped.ok).toBe(swept.results.every((r) => r.ok));
+      // The sweep really was wider — otherwise the line above is vacuous.
+      expect(swept.introspected.length).toBeGreaterThan(1);
+    }
+  });
+
+  it('keeps the federated-only predicate: a `default`-bound external object is the default datasource\'s row', async () => {
+    const { svc } = makeMulti();
+
+    const scoped = await svc.validateDatasource('default');
+    const swept = await sweptThenFiltered('default');
+
+    // `local_thing` is not federated and appears in neither reading;
+    // `default_bound_orders` is federated and appears in both.
+    expect(scoped.results.map((r) => r.object)).toEqual(['default_bound_orders']);
+    expect(scoped.results).toEqual(swept.results);
+  });
+
+  it('never touches an unrelated unreachable remote', async () => {
+    const opts = { unreachable: ['wh_b'] } as const;
+    const { svc, introspected } = makeMulti(opts);
+
+    const report = await svc.validateDatasource('wh_a');
+
+    expect(introspected).toEqual(['wh_a']);
+    expect(report.ok).toBe(true);
+    expect(report.results).toEqual((await sweptThenFiltered('wh_a', opts)).results);
+  });
+
+  it('keeps the per-object failure row the sweep produces', async () => {
+    const opts = { unreachable: ['wh_b'] } as const;
+    const { svc, introspected } = makeMulti(opts);
+
+    const report = await svc.validateDatasource('wh_b');
+
+    // The scoped path still turns a per-object throw into a row rather than
+    // rejecting the whole report — the sweep's `catch`, not a second one.
+    expect(introspected).toEqual(['wh_b']);
+    expect(report.ok).toBe(false);
+    expect(report.results).toEqual((await sweptThenFiltered('wh_b', opts)).results);
+    expect(report.results[0]).toMatchObject({
+      ok: false,
+      datasource: 'wh_b',
+      object: 'wh_b_orders',
+      diffs: [expect.objectContaining({ kind: 'missing_table', severity: 'error' })],
+    });
+  });
+
+  it('answers an empty report for a datasource nothing is bound to — and introspects nothing', async () => {
+    const { svc, introspected } = makeMulti();
+
+    const report = await svc.validateDatasource('no_such_ds');
+
+    expect(report).toEqual({ ok: true, results: [] });
+    expect(introspected).toEqual([]);
+  });
+});
+
 describe('refreshCatalog', () => {
   it('produces a snapshot with suggested field types', async () => {
     const svc = makeService();

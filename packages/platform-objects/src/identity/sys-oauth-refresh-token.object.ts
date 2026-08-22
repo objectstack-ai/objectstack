@@ -32,7 +32,7 @@ export const SysOauthRefreshToken = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Opaque OAuth refresh tokens (linked to a session)',
   highlightFields: ['client_id', 'user_id', 'expires_at'],

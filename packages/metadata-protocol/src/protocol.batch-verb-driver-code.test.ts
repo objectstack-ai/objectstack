@@ -441,9 +441,12 @@ describe('[#8441] [GUARD] the Studio publish surface still gets the code it bran
         // WHICH DRAFT.
         expect(failure.type).toBe('flow');
         expect(failure.name).toBe('leave_approval');
-        // WHICH FIELD — the located path, in the human sentence (#8333's half).
+        // WHICH FIELD — the located path, in the human sentence (#8333's
+        // half). [#10524] The sentence is a HEADLINE: path and rule id stay
+        // in it, and the message prose lives once, in `issues[]` below.
         expect(failure.error).toContain('flows[0].nodes[1].config.approvers[0].value');
-        expect(failure.error).toContain('does not parse as CEL');
+        expect(failure.error).toContain('[approval-expression-invalid]');
+        expect(failure.error).not.toContain('does not parse as CEL');
         // …and the machine-readable halves the form highlights with. `code` is
         // THIS card's field: catalogued, so it passes through byte for byte.
         expect(failure.code).toBe('INVALID_METADATA');
@@ -451,6 +454,7 @@ describe('[#8441] [GUARD] the Studio publish surface still gets the code it bran
         expect(Array.isArray(failure.issues)).toBe(true);
         expect(failure.issues[0].path).toBe('flows[0].nodes[1].config.approvers[0].value');
         expect(failure.issues[0].rule).toBe('approval-expression-invalid');
+        expect(failure.issues[0].message).toMatch(/does not parse as CEL/);
     });
 });
 

@@ -45,9 +45,10 @@ function getPreferredLanguage(request: NextRequest): string {
 }
 
 /**
- * Middleware for automatic language detection and redirection
+ * Proxy (Next `proxy` file convention) for automatic language detection and
+ * redirection
  * 
- * This middleware:
+ * This proxy:
  * - Detects the user's preferred language from browser settings or cookies
  * - Redirects users to the appropriate localized version
  * - For the default language (en): keeps URL as "/" (with internal rewrite)
@@ -56,7 +57,7 @@ function getPreferredLanguage(request: NextRequest): string {
  * The docs are English-only by decision (2026-07); the i18n plumbing stays so a
  * future language only needs entries in lib/i18n.ts and content, not new routing.
  */
-export default function middleware(request: NextRequest) {
+export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Check if the pathname already has a locale

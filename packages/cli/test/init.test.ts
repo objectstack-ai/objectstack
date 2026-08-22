@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, SCAFFOLD_ALLOWED_PEER_VERSIONS, renderPnpmWorkspaceYaml } from '../src/commands/init';
+import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, SCAFFOLD_ALLOWED_PEER_VERSIONS, renderPnpmWorkspaceYaml, renderScaffoldPackageJson, SCAFFOLD_PNPM_RANGE } from '../src/commands/init';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -95,18 +95,13 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
   });
 
   it('does NOT put the allowlist in package.json (current pnpm ignores it)', () => {
-    const t = TEMPLATES.app;
-    // Mirror init.ts's package.json construction.
-    const pkgJson: Record<string, unknown> = {
-      name: 'my-app',
-      version: '0.1.0',
-      private: true,
-      type: 'module',
-      scripts: t.scripts,
-      dependencies: t.dependencies,
-      devDependencies: t.devDependencies,
-    };
+    // Read the real renderer rather than a hand-copied mirror of it: the
+    // previous version of this test re-declared the object literal inline, so
+    // it asserted against its own copy and would have kept passing however far
+    // init.ts drifted from it.
+    const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES.app);
     expect(pkgJson.pnpm).toBeUndefined();
+    expect((pkgJson.engines as Record<string, string>).pnpm).toBeDefined();
   });
 
   it('renders a pnpm-workspace.yaml that allowlists better-sqlite3', () => {
@@ -115,6 +110,65 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
     expect(yaml).toMatch(/^ {2}- better-sqlite3$/m);
     // No `packages:` key — this is a settings file, not a workspace declaration.
     expect(yaml).not.toMatch(/^packages:/m);
+  });
+});
+
+// That missing `packages:` key is exactly what early pnpm 10 refuses: it exits
+// 1 with "ERROR packages field missing or empty" before resolving a single
+// dependency, so a freshly scaffolded project cannot be installed at all.
+// Measured on the rendered shape, one clean install per pnpm version, each with
+// its own store:
+//
+//   10.0.0–10.4.0    parse pnpm-workspace.yaml BEFORE reading `engines`, so a
+//                    floor cannot reach them — still the raw workspace error.
+//                    Closing that sliver needs a decision about the `packages:`
+//                    key itself, which is deliberately not made here.
+//   10.5.0–10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE, naming the range.
+//   >=10.15.0        install succeeds.
+//
+// The floor is what turns the reachable part of that band from an error about a
+// file the user never wrote into "your pnpm is too old". These assertions pin
+// the declared range, not pnpm's wording.
+describe('pnpm floor in the rendered package.json', () => {
+  /** First pnpm measured to accept the keyless workspace file. */
+  const FIRST_GOOD: [number, number, number] = [10, 15, 0];
+
+  function parseFloor(range: string): [number, number, number] {
+    const m = /^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$/.exec(range.trim());
+    if (!m) throw new Error(`expected a plain ">=" floor, got "${range}"`);
+    return [Number(m[1]), Number(m[2]), Number(m[3] ?? '0')];
+  }
+
+  const rank = ([maj, min, pat]: [number, number, number]) => maj * 1e6 + min * 1e3 + pat;
+
+  it('declares engines.pnpm in every template', () => {
+    for (const key of Object.keys(TEMPLATES)) {
+      const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES[key]);
+      const engines = pkgJson.engines as Record<string, string> | undefined;
+      expect(engines?.pnpm, `template "${key}"`).toBe(SCAFFOLD_PNPM_RANGE);
+    }
+  });
+
+  it('sets the floor at or above the first pnpm that accepts the keyless workspace file', () => {
+    expect(rank(parseFloor(SCAFFOLD_PNPM_RANGE))).toBeGreaterThanOrEqual(rank(FIRST_GOOD));
+  });
+
+  it('excludes every pnpm version measured to refuse the rendered workspace file', () => {
+    const declared = rank(parseFloor(SCAFFOLD_PNPM_RANGE));
+    const refused: [number, number, number][] = [[10, 0, 0], [10, 5, 0], [10, 14, 0]];
+    for (const v of refused) {
+      expect(rank(v), `pnpm ${v.join('.')} must fall below the declared floor`).toBeLessThan(declared);
+    }
+  });
+
+  it('does NOT pin a packageManager — the scaffold also supports npm, yarn and bun', () => {
+    // `packageManager: "pnpm@x.y.z"` would declare the project pnpm-only
+    // (corepack-driven yarn refuses to run in such a project) and pin one exact
+    // version that goes stale on every pnpm release. `detectPackageManager`
+    // hands off to whichever of the four invoked the CLI, and all three others
+    // ignore `engines.pnpm` — so the floor costs them nothing.
+    const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES.app);
+    expect(pkgJson.packageManager).toBeUndefined();
   });
 });
 

@@ -27,7 +27,7 @@
  *   protection: {
  *     lock: 'full',
  *     reason: 'Core admin UI shipped by @objectstack/platform-objects.',
- *     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+ *     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
  *   },
  *   // ...
  * };

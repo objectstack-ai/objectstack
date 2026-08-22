@@ -253,9 +253,11 @@ If you have a body that genuinely cannot be expressed in L1+L2 (typically: it ne
 2. For each inline handler, take its source via `String(fn)` (the callable is already loaded by tsx/esbuild).
 3. Run a regex allow-list over the stringified body (see "What the sandbox forbids" above).
 4. **Pass:** emit `body: { language: 'js', source: <body>, capabilities: <inferred> }`.
-5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook/action bodies — declare a Connector recipe instead.`
+5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. The warning is **printed** (and carried in `--json` under `bodyExtractionWarnings`), so a forbidden pattern is a visible warn-and-bundle rather than a silent success; before #10678 it was recorded and shown to nobody. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook/action bodies — declare a Connector recipe instead.`
 
-Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. You can override with a directive comment when the inference is wrong.
+   Note that a CommonJS `require('node:os')` in a TypeScript config reaches the extractor as esbuild's `__require("node:os")`. Both spellings are refused under the same `require()` reason.
+
+Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. When the inference is wrong, supply `body` yourself with an explicit `capabilities` array — the `// @capabilities` directive comment [does not reach the build](#capability-inference).
 
 ## Migration
 
@@ -325,6 +327,39 @@ handler: async (ctx) => {
   …
 }
 ```
+
+<Callout type="warn" title="This directive does not reach `objectstack build`">
+  The override is read off the handler's **stringified source** (`String(fn)`), so it
+  only works if the function the CLI holds still carries the comment. Through
+  `objectstack build`, it never does.
+
+  `loadConfig` runs your config through `bundle-require` → esbuild, and esbuild strips
+  `//` line comments before the handler is ever a runtime function. The directive is
+  gone by the time the extractor looks at it. Measured on all four authoring shapes:
+
+  | Authoring shape | `// @capabilities api.write log` reaches the extractor? |
+  |---|---|
+  | `objectstack.config.ts` | **No** — comment stripped by esbuild |
+  | `objectstack.config.js` | **No** — esbuild runs on `.js` too |
+  | `objectstack.config.mjs` | **No** — same path |
+  | handler imported from a local `./handlers.js` | **No** — esbuild bundles it as well |
+
+  In every case the build exits 0, prints nothing, and emits the **inferred**
+  capabilities only. A handler asking for `api.write log` whose body reads
+  `ctx.api.object('x').find({})` ships `"capabilities": ["api.read"]` — inference won,
+  silently, and the directive had no effect at all.
+
+  **So do not rely on this directive.** Write the body so the
+  [inference table](#capability-inference) above derives what you need, or supply
+  `body` yourself on the hook with an explicit `capabilities` array — that path is
+  data, not a comment, and survives the build.
+
+  Inference is unaffected: it matches the *code*, which esbuild keeps. Only the
+  comment-borne override is lost. Tracked in #10678, where the question of whether the
+  directive should get a real authorable surface (or be retired) is open — this page
+  documents the reach as measured, and an `objectstack build`-level test pins it so
+  this page and the extractor cannot drift apart again.
+</Callout>
 
 ### Build pipeline at a glance
 

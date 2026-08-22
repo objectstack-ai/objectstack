@@ -208,6 +208,7 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(strippedKeys(raw)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(raw);
         expect(parsed.success).toBe(true);
+        expect(parsed.outcome).toBe('published');
         expect(parsed.publishedCount).toBe(2);
         expect(parsed.failedCount).toBe(0);
         expect(parsed.failed).toEqual([]);
@@ -219,12 +220,12 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.published.map((e) => e.name).sort()).toEqual(['cases', 'leads']);
     });
 
-    it('the five always-emitted keys are required — the producer sets them on every return site', async () => {
+    it('the six always-emitted keys are required — the producer sets them on every return site', async () => {
         const p = await makeProtocol();
         await stageDrafts(p, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
         const raw: any = await p.publishPackageDrafts({ packageId: PKG });
 
-        for (const key of ['success', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
+        for (const key of ['success', 'outcome', 'publishedCount', 'failedCount', 'published', 'failed'] as const) {
             expect(raw[key], `producer must emit '${key}'`).toBeDefined();
             const body: Record<string, unknown> = { ...raw };
             delete body[key];
@@ -365,6 +366,7 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         const raw: any = await p.publishPackageDrafts({ packageId: PKG });
 
         expect(raw.success).toBe(false);
+        expect(raw.outcome).toBe('refused');
         expect(raw.publishedCount).toBe(0);
         expect(raw.published).toEqual([]);
         expect(raw.failedCount).toBeGreaterThan(0);
@@ -373,5 +375,265 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.failed[0]).toMatchObject({ type: 'object', name: 'ticket' });
         expect(typeof parsed.failed[0]!.error).toBe('string');
         expect(typeof parsed.failed[0]!.code).toBe('string');
+    });
+});
+
+/**
+ * #10462 — `outcome`, the first-class discriminant for WHICH exit answered.
+ *
+ * The defect this pins shut, measured on cloud#1488: a publish with nothing
+ * to promote and a genuine refusal both answer `success: false` with
+ * `publishedCount: 0`, and the no-op leaves no trace — so an AI consumer
+ * graded the no-op as "refused and rolled back" and burned two repair rounds
+ * re-authoring artifacts that were already correct. cloud#1492's patch
+ * discriminates on `failed.length > 0`, an invariant the producer never
+ * stated and nothing pinned. `outcome` states it, typed, and these cases pin
+ * it in both directions.
+ *
+ * The card's own requested pin — "every non-success return carries at least
+ * one `failed[]` entry" — is FALSE today and the no-op is its counterexample
+ * (`success: false`, `failed: []`). The three invariants below are the honest
+ * restatement (PM ruling on the card).
+ */
+describe('outcome discriminates the three publish exits (#10462)', () => {
+    /** Stage the measured pre-flight refusal class (ADR-0028 prefix rule). */
+    async function makeRefusal() {
+        const p = await makeProtocol();
+        (p as any).engine.registry.registerPackage?.({
+            id: PKG, manifest: { namespace: 'edu' },
+        });
+        await stageDrafts(p, [
+            { type: 'object', name: 'ticket', item: { name: 'ticket', label: 'Ticket', fields: {} } },
+        ]);
+        return p;
+    }
+
+    /**
+     * DEFECT CONTROL — the two shapes cloud#1488 could not tell apart,
+     * side by side (a case that exercised only the no-op would prove nothing
+     * about discrimination). Red on origin/main by construction: there the
+     * two responses differ on no key but `failed[]`'s contents.
+     */
+    it('a no-op publish and a genuine refusal are distinguishable through outcome', async () => {
+        // The no-op: a package with NO pending drafts.
+        const pNoop = await makeProtocol();
+        const noop: any = await pNoop.publishPackageDrafts({ packageId: 'app.empty' });
+
+        // The refusal: the same fixture class the refused-batch case stages.
+        const refused: any = await (await makeRefusal()).publishPackageDrafts({ packageId: PKG });
+
+        // Identical on every axis the consumer previously had…
+        expect(noop.success).toBe(false);
+        expect(refused.success).toBe(false);
+        expect(noop.publishedCount).toBe(0);
+        expect(refused.publishedCount).toBe(0);
+        expect(noop.published).toEqual([]);
+        expect(refused.published).toEqual([]);
+        // …and now distinguishable through the declared discriminant.
+        expect(noop.outcome).toBe('nothing_to_publish');
+        expect(refused.outcome).toBe('refused');
+        // Both shapes stay inside the declared face.
+        expect(strippedKeys(noop)).toEqual([]);
+        expect(strippedKeys(refused)).toEqual([]);
+    });
+
+    /**
+     * The three producer invariants — BOTH directions of each biconditional
+     * (asserted as boolean equality, which is the biconditional), on every
+     * response class this suite can stage against the real engine. (i) is the
+     * guarantee cloud#1492's `failed.length > 0` discrimination needs, stated
+     * by the producer at last. (iii) doubles as the pin that existing
+     * `success` semantics did not move.
+     */
+    const expectOutcomeInvariants = (res: any) => {
+        // (i) refused ⟺ failed[] non-empty.
+        expect(res.outcome === 'refused').toBe(res.failed.length > 0);
+        // (ii) nothing_to_publish ⟺ nothing landed AND nothing refused.
+        expect(res.outcome === 'nothing_to_publish')
+            .toBe(res.published.length === 0 && res.failed.length === 0);
+        // (iii) success === (outcome === 'published').
+        expect(res.success).toBe(res.outcome === 'published');
+    };
+
+    it('the invariants hold on a published batch, a refused batch, and a no-op', async () => {
+        const pOk = await makeProtocol();
+        await stageDrafts(pOk, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
+        const ok: any = await pOk.publishPackageDrafts({ packageId: PKG });
+        expect(ok.outcome).toBe('published');
+        expectOutcomeInvariants(ok);
+
+        const refused: any = await (await makeRefusal()).publishPackageDrafts({ packageId: PKG });
+        expect(refused.outcome).toBe('refused');
+        expectOutcomeInvariants(refused);
+
+        const pNoop = await makeProtocol();
+        const noop: any = await pNoop.publishPackageDrafts({ packageId: 'app.empty' });
+        expect(noop.outcome).toBe('nothing_to_publish');
+        expectOutcomeInvariants(noop);
+    });
+
+    /**
+     * PRESERVED-BEHAVIOUR CONTROL — `outcome` is additive: every pre-existing
+     * field answers exactly as before on all three exits, `success` included.
+     * Green on origin/main by construction (minus the `outcome` key), so its
+     * power to fail is proven by mutation, not by running main: rewiring
+     * `success` from `outcome` (the "a no-op is not a failure" refactor this
+     * card explicitly does NOT make — that call is the maintainer's) goes red
+     * on the no-op leg below. The mutation run is reported in the PR.
+     */
+    it('every pre-existing field answers exactly as before on all three exits', async () => {
+        const pOk = await makeProtocol();
+        await stageDrafts(pOk, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
+        const { outcome: _okOutcome, ...ok } = (await pOk.publishPackageDrafts({ packageId: PKG })) as any;
+        expect(ok).toMatchObject({ success: true, publishedCount: 1, failedCount: 0, failed: [] });
+        expect(ok.published.map((e: any) => e.name)).toEqual(['cases']);
+        expect(typeof ok.commitId).toBe('string');
+
+        const { outcome: _refusedOutcome, ...refused } =
+            (await (await makeRefusal()).publishPackageDrafts({ packageId: PKG })) as any;
+        expect(refused).toMatchObject({ success: false, publishedCount: 0, published: [] });
+        expect(refused.failedCount).toBeGreaterThan(0);
+        expect(refused.failed[0]).toMatchObject({ type: 'object', name: 'ticket' });
+        expect(typeof refused.failed[0].error).toBe('string');
+        expect(typeof refused.failed[0].code).toBe('string');
+
+        const pNoop = await makeProtocol();
+        const { outcome: _noopOutcome, ...noop } =
+            (await pNoop.publishPackageDrafts({ packageId: 'app.empty' })) as any;
+        // The EXACT pre-#10462 no-op shape, strictly — the issue's own quote.
+        expect(noop).toEqual({
+            success: false, publishedCount: 0, failedCount: 0, published: [], failed: [],
+        });
+    });
+});
+
+/**
+ * #10524 — declare-then-trim on the batch refusal face.
+ *
+ * The measured defect: the causal `failed[]` entry carried BOTH an `error`
+ * string that inlined the first three findings' prose AND the same findings
+ * structurally under `issues` — undeclared, so every declared parse stripped
+ * the structured half while every console rendered the prose twice. Step 1
+ * declared `issues` on the element (spec #10524); step 2 trimmed the
+ * #4463 gate's message to a headline. These cases pin both halves against
+ * the REAL protocol, and each names its control kind.
+ *
+ * The refusal is real, not synthesized: the same Zod-valid / gate-invalid
+ * broken-CEL approval flow `protocol.runtime-authoring-gate.test.ts` and
+ * `protocol.batch-verb-driver-text.test.ts` use, so the three files agree on
+ * what "a broken flow" is.
+ */
+const brokenApprovalFlow = () => ({
+    name: 'leave_approval',
+    label: 'Leave Approval',
+    type: 'autolaunched',
+    status: 'active',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        {
+            id: 'approve',
+            type: 'approval',
+            label: 'Approve',
+            config: { approvers: [{ type: 'expression', value: 'record.owner ==' }] },
+        },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'approve' }],
+});
+
+describe('failed[].issues — the causal refusal\'s structured findings (#10524)', () => {
+    async function publishBrokenFlow() {
+        const p = await makeProtocol();
+        // Drafts are never gated (#4463 D1), so the broken body stages
+        // cleanly; the promote inside the batch publish is what refuses.
+        await stageDrafts(p, [{ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() }]);
+        return (await p.publishPackageDrafts({ packageId: PKG })) as any;
+    }
+
+    /**
+     * CONTROL WHOSE SUBJECT DOES NOT EXIST PRE-FIX — the step-1 declaration.
+     * The producer has emitted `issues` on the causal element since #8333;
+     * what was missing is this case, which is why the key rode the wire
+     * undeclared. Falsified by ablating the `issues` declaration on the
+     * `failed[]` element (a plain z.object STRIPS what it does not declare,
+     * so the deep-equal below reds); the ablation run — both legs rebuilt,
+     * dist state proven — is reported in the PR.
+     */
+    it('a causal failed[] entry carries issues[] and the declared parse strips none of it', async () => {
+        const raw = await publishBrokenFlow();
+
+        expect(raw.success).toBe(false);
+        expect(raw.outcome).toBe('refused');
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal).toMatchObject({ type: 'flow', name: 'leave_approval' });
+        const issue = causal.issues.find((i: any) => i.rule === 'approval-expression-invalid');
+        expect(issue, `issues: ${JSON.stringify(causal.issues)}`).toBeDefined();
+        expect(issue.path).toBe('flows[0].nodes[1].config.approvers[0].value');
+        expect(issue.message).toMatch(/does not parse as CEL/);
+
+        expect(strippedKeys(raw)).toEqual([]);
+        const parsed = PublishPackageDraftsResponseSchema.parse(raw);
+        const parsedCausal = parsed.failed.find((f) => f.code === 'INVALID_METADATA');
+        expect(parsedCausal?.issues).toEqual(causal.issues);
+        // The full six-key element shape — declaring the card's `{path,
+        // message}` guess instead would strip `rule`/`hint` right here.
+        expect(Object.keys(parsedCausal!.issues![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+    });
+
+    /**
+     * DEFECT CONTROL — red on the pre-fix tree by construction: the gate's
+     * message interpolated `path: [rule] message` for the first three issues
+     * verbatim, so `error` contained every message this loop checks. This is
+     * the card's duplication, asserted directly; no ablation needed.
+     */
+    it('error is a headline: it restates none of the prose issues[] carries', async () => {
+        const raw = await publishBrokenFlow();
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal.issues.length).toBeGreaterThan(0);
+        for (const i of causal.issues) {
+            expect(causal.error).not.toContain(i.message);
+        }
+    });
+
+    /**
+     * PRESERVED-BEHAVIOUR CONTROL — the triage acceptance criterion: a
+     * consumer that renders ONLY `error` (CLI, logs) still learns what
+     * failed, where, under which rule, and how many findings there are.
+     * Green post-fix by construction, so its power to fail is proven by
+     * mutating the fix (dropping the locators or the count from the
+     * headline reds the matching assertion) — the mutation run is reported
+     * in the PR. The `(+N more)` tail's decided fate: replaced by the
+     * leading total count, which subsumes it.
+     */
+    it('a consumer rendering only error still learns what failed, where, and how many', async () => {
+        const raw = await publishBrokenFlow();
+        const causal = raw.failed.find((f: any) => f.code === 'INVALID_METADATA');
+        expect(causal.error).toContain('flow/leave_approval');
+        expect(causal.error).toContain('failed author-time validation');
+        // The located path stays in the sentence — the #8333 GUARD property,
+        // preserved through the trim…
+        expect(causal.error).toContain('flows[0].nodes[1].config.approvers[0].value');
+        // …with the stable rule id beside it, and the total up front.
+        expect(causal.error).toContain('[approval-expression-invalid]');
+        expect(causal.error).toMatch(/: 1 issue — /);
+    });
+
+    /**
+     * NAMED NON-EFFECT — BATCH_ABORTED siblings never carry `issues` (the
+     * refusal was not theirs), and the refusal face still parses unstripped
+     * beside them.
+     */
+    it('BATCH_ABORTED siblings carry no issues, and the face still conforms', async () => {
+        const p = await makeProtocol();
+        await stageDrafts(p, [
+            { type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() },
+            { type: 'view', name: 'cases', item: viewBody('cases', 'Cases') },
+        ]);
+        const raw: any = await p.publishPackageDrafts({ packageId: PKG });
+
+        const sibling = raw.failed.find((f: any) => f.code === 'BATCH_ABORTED');
+        expect(sibling).toBeDefined();
+        expect('issues' in sibling).toBe(false);
+        expect(strippedKeys(raw)).toEqual([]);
     });
 });

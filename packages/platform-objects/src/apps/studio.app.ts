@@ -41,7 +41,7 @@ export const STUDIO_APP: App = {
   protection: {
     lock: 'full',
     reason: 'Core developer workbench shipped by @objectstack/platform-objects — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   // Studio is the metadata-authoring host, so its ambient copilot is
   // pinned to the schema-architect agent. Resolved by the ambient chat

@@ -7,7 +7,6 @@ import { Hono } from 'hono';
 const mockDispatcher = {
   getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', routes: {} }),
   handleAuth: vi.fn().mockResolvedValue({ handled: true, response: { body: { ok: true }, status: 200 } }),
-  handleGraphQL: vi.fn().mockResolvedValue({ data: {} }),
   dispatch: vi.fn().mockResolvedValue({ handled: true, response: { body: { success: true }, status: 200 } }),
 };
 
@@ -507,6 +506,37 @@ describe('createHonoApp', () => {
         'POST',
         '/storage/upload/presigned',
         { filename: 'a.txt' },
+        expect.any(Object),
+        expect.objectContaining({ request: expect.anything() }),
+        '/api',
+      );
+    });
+
+    // [#10835] `/graphql` is NOT a routed domain: it was removed along with the
+    // GraphQL surface itself (`runtime/http-dispatcher.ts` — "/graphql removed
+    // — GraphQL is not in the product plan", #2462 follow-on), so it is ordinary
+    // catch-all traffic, exactly like the retired `/storage` mount above.
+    //
+    // This REPLACES a `handleGraphQL` double that used to sit on
+    // `mockDispatcher` and proved nothing. The adapter calls exactly three
+    // dispatcher methods — `getDiscoveryInfo`, `handleAuth`, `dispatch` — so an
+    // extra key on the mock was unreachable from `index.ts`: it could never
+    // diverge from the real dispatcher, stayed green by construction, and read
+    // to anyone grepping the name as evidence the runtime still had the method.
+    // A double for an unrouted method is not how fall-through is demonstrated;
+    // a request that lands on `dispatch()` is, which is why the `/storage` test
+    // above needs no `handleStorage` double either.
+    it('POST /api/graphql reaches the catch-all — GraphQL is not a routed domain', async () => {
+      const res = await app.request('/api/graphql', {
+        method: 'POST',
+        body: JSON.stringify({ query: '{ __typename }' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(res.status).toBe(200);
+      expect(mockDispatcher.dispatch).toHaveBeenCalledWith(
+        'POST',
+        '/graphql',
+        { query: '{ __typename }' },
         expect.any(Object),
         expect.objectContaining({ request: expect.anything() }),
         '/api',

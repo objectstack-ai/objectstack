@@ -34,6 +34,30 @@
       ]
     }
   },
+  // `typecheck` runs `next typegen` before tsc on purpose, and these two
+  // `.next` globs are why. Next writes both of them itself
+  // (`writeConfigurationDefaults`) and re-adds either one on the next
+  // `next dev` / `next build` if you delete it -- measured by running that
+  // routine against a narrowed copy of this file: the `dev` glob came
+  // straight back and the file was rewritten. This array cannot be narrowed,
+  // so the honesty has to come from the script instead.
+  //
+  //   .next/types/**     produced by the `next typegen` that the `typecheck`
+  //                      script now runs itself, so the checked program is a
+  //                      function of source rather than of whatever `.next` an
+  //                      earlier build happened to leave behind. A bare
+  //                      `tsc --noEmit` here passed over a broken route
+  //                      signature precisely because these files were absent.
+  //   .next/dev/types/** written only by `next dev`. Next's own build-mode
+  //                      type check filters this directory OUT of the program
+  //                      (`getDevTypesPath`, lib/typescript/runTypeCheck.js)
+  //                      "to prevent stale dev types from causing errors when
+  //                      routes have been deleted since the last dev session".
+  //                      Plain tsc has no such filter, so a leftover dev
+  //                      session can only add a local false RED here, never a
+  //                      false green. Remedy: `rm -rf apps/docs/.next`.
+  //
+  // Do not reduce `typecheck` back to a bare `tsc --noEmit`.
   "include": [
     "next-env.d.ts",
     "**/*.ts",

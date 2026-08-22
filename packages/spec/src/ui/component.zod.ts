@@ -997,10 +997,38 @@ export const RecordHighlightsField = z.union([
       // `fieldRefsFrom`, which had to handle both).
       field: 'name',
     },
+    guidance: {
+      // REMOVED (#10054, ADR-0049 enforce-or-remove; maintainer ruling
+      // 2026-08-21): `icon` was declared and advertised on six author-facing
+      // surfaces with ZERO read points, measured at the 2026-08-20 census:
+      // objectui's renderer normalized the authored object and carried
+      // `icon: f?.icon` into `HeaderHighlight`, whose chip has no icon slot
+      // (its only `icon` occurrence is a button `size="icon"`), and the key
+      // could travel nowhere else — `useRegisterHighlightFields` registers
+      // `names: string[]` (structurally unable to carry it) and the Studio
+      // block designer publishes the field list as a `string[]` input. So an
+      // authored value parsed clean and was drawn by nothing — the #8691
+      // reference-rail `icon` shape, on the highlight chip. This arm is
+      // `strictObject`, so the route is strict deletion + this `guidance`
+      // entry carrying the prescription (the `data/Metric:filters` precedent;
+      // no `retiredKey` tombstone — the key is out of the walked shape
+      // entirely, and the refusal is the arm's own named `unrecognized_keys`).
+      icon:
+        '`record:highlights` field `icon` was removed in @objectstack/spec 17 (#10054, ADR-0049) — '
+        + 'no render path ever read it: the renderer normalized the authored object and passed '
+        + '`icon` to a highlight chip with no icon slot, and the key could travel nowhere else '
+        + '(`useRegisterHighlightFields` registers field NAMES only; the Studio designer publishes '
+        + 'the field list as plain strings), so an authored value was accepted and drawn by '
+        + 'nothing. Delete the key — no replacement: the renderer never drew it, and the chip '
+        + 'renders label and value only. '
+        + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    },
   }, {
     name: z.string().describe('Field name on the record'),
     label: z.string().optional().describe('Display label (overrides schema label)'),
-    icon: z.string().optional().describe('Icon name (lucide icon key)'),
+    // `icon` was REMOVED here (#10054) — see the `guidance` entry above for
+    // the full story. There is no replacement mechanism: the highlight chip
+    // renders label and value only, so the key never had an effect to lose.
     type: z.string().optional().describe('Override cell renderer type (rare)'),
     // #5176 — declared because it is already enforced: the renderer's
     // HeaderHighlight gate refuses inline editing on a chip carrying it. Kept
@@ -1010,7 +1038,7 @@ export const RecordHighlightsField = z.union([
     // column editable again with no diagnostic anywhere.
     readonly: z.boolean().optional().describe('Render this chip read-only — suppresses inline editing on the highlight card. Use for hook/automation-maintained columns that must not be hand-edited from the record header.'),
   }),
-]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
+]).describe('Highlight field: bare name, or {name,label?,type?,readonly?}');
 export type RecordHighlightsField = z.input<typeof RecordHighlightsField>;
 
 export const RecordHighlightsProps = strictObject({
@@ -1018,7 +1046,7 @@ export const RecordHighlightsProps = strictObject({
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
+  fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, type?, readonly?} for inline overrides.'),
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

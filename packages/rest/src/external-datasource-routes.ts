@@ -10,7 +10,11 @@ import {
   ANONYMOUS_DENY_MESSAGE,
   type PluginContext,
 } from '@objectstack/core';
-import type { IExternalDatasourceService, IHttpServer } from '@objectstack/spec/contracts';
+import type {
+  IExternalDatasourceService,
+  IHttpServer,
+  SchemaValidationReport,
+} from '@objectstack/spec/contracts';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 import { sendOk, sendError } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
@@ -27,7 +31,7 @@ import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
  *   POST /datasources/:name/external/tables/:remote/draft → generateObjectDraft
  *   POST /datasources/:name/external/tables/:remote/import → importObject
  *   POST /datasources/:name/external/refresh-catalog    → refreshCatalog
- *   POST /datasources/:name/external/validate           → validateAll (this ds)
+ *   POST /datasources/:name/external/validate           → validateDatasource(:name)
  *
  * NOTE: the datasource *lifecycle* routes (`/api/v1/datasources` —
  * list / test / create / update / remove, ADR-0015 Addendum) were extracted
@@ -68,6 +72,17 @@ import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
  * (`results.every(r => r.ok)`). A domain verdict that happens to share the name
  * is not a second envelope flag, so it belongs inside `data` rather than being
  * dropped.
+ *
+ * [#10537] `POST /validate` does URL-SCOPED WORK. It used to call
+ * `validateAll()` — every federated object on every federated datasource, each
+ * validation driving a live `introspect(datasource)` — and then keep only the
+ * rows matching `:name`. The rows were right; the work was not scoped, so one
+ * datasource's health check paid for N datasources' remote round-trips and an
+ * unreachable *unrelated* remote slowed the answer for the datasource actually
+ * asked about (measured at head: a request for one of three federated
+ * datasources introspected all three). It now calls the service's scoped
+ * composition — see {@link scopedValidation} for what that is and why it is
+ * probed rather than declared on `IExternalDatasourceService`.
  */
 export interface ExternalDatasourceRoutesOptions {
   /**
@@ -128,12 +143,16 @@ export interface ExternalDatasourceRoutesOptions {
  * the #9686 authentication floor and filed the question instead of deciding
  * it. The follow-up ruling (maintainer, 2026-08-20, verbatim:
  * 「同意你的意见。」, accepting option A on #10255) converged it here: what
- * `validateAll` does is drive the SAME live remote-schema introspection the
+ * validation does is drive the SAME live remote-schema introspection the
  * two read twins gate (`introspect` per datasource, in
  * `service-datasource/src/external-datasource-service.ts`), and its report —
  * schema diffs naming remote columns and types, driver error strings for
  * unreachable remotes — is a read of the same federation surface. One family,
  * one door-type: reads here, writes on {@link FEDERATION_WRITE_CAPABILITY}.
+ *
+ * [#10537] The reasoning is unchanged by the scoping fix and was never about
+ * the sweep's WIDTH: it is the same introspection whether one datasource is
+ * read or all of them, so `validate` answers to the read capability either way.
  */
 export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
 
@@ -321,6 +340,45 @@ export function registerExternalDatasourceRoutes(
     }
   };
 
+  /**
+   * [#10537] The scoped validation the `POST /validate` route needs: validate
+   * the federated objects bound to ONE datasource, composed service-side from
+   * the same primitives the whole-farm sweep uses (`listObjects` → filter →
+   * `validateObject`).
+   *
+   * ## Why it is PROBED rather than read off the contract
+   *
+   * `IExternalDatasourceService` declares `validateObject(objectName)` and
+   * `validateAll()` and no per-datasource spelling. Adding one is a
+   * spec-surface change that has to be decided on its own terms, so this fix
+   * takes the other authorized shape: the composition lives in the service
+   * (`ExternalDatasourceService.validateDatasource`, the only registrant of
+   * this slot) and the route probes for it. Everything about the ANSWER is
+   * still contract-typed — {@link SchemaValidationReport} is the contract's
+   * own report type — so what is asserted here rather than checked is the
+   * method's name, and nothing about the shape it returns.
+   *
+   * ## Absence answers 503, deliberately not a fan-out fallback
+   *
+   * A wired service with no scoped spelling could be served by falling back to
+   * `validateAll()` and post-filtering — which is precisely the behaviour
+   * #10537 removed. A silent fallback would leave the fan-out reachable, on a
+   * path no test drives, for exactly the deployments nobody is looking at. So
+   * absence takes the same 503 arm every other route here takes when the
+   * service cannot serve it: loud, and already the declared shape of "this
+   * deployment's federation service cannot do this".
+   */
+  interface ScopedValidation {
+    validateDatasource(datasource: string): Promise<SchemaValidationReport>;
+  }
+
+  const scopedValidation = (): ScopedValidation | undefined => {
+    const svc = externalService() as
+      | (IExternalDatasourceService & Partial<ScopedValidation>)
+      | undefined;
+    return typeof svc?.validateDatasource === 'function' ? (svc as ScopedValidation) : undefined;
+  };
+
   const unavailable = (res: any) =>
     sendError(res, 503, 'SERVICE_UNAVAILABLE', 'The external-datasource service is not available.');
 
@@ -437,20 +495,29 @@ export function registerExternalDatasourceRoutes(
     },
 
     // Validate the federated objects on this datasource. [#10255] A 'read':
-    // validateAll drives the same live remote-schema introspection the two
+    // validation drives the same live remote-schema introspection the two
     // read twins gate, so it answers to the same capability (ruled 2026-08-20;
     // the constant's doc carries the reasoning).
+    //
+    // [#10537] The work is scoped by the CALL, not by a filter over a
+    // whole-farm sweep: `validateDatasource(:name)` introspects the named
+    // datasource's remote and no other. The response is unchanged — the rows
+    // the post-filter used to keep are exactly the rows this returns (see
+    // `external-datasource-validate-scope.test.ts`, which pins the two answers
+    // against each other and the introspection call record beside them).
     {
       method: 'POST',
       path: `${ext}/validate`,
       metadata: { summary: 'Validate the federated objects on a datasource', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
         if (await refuseFederationRequest(req, res, 'read')) return;
-        const svc = externalService();
-        if (!svc?.validateAll) return unavailable(res);
+        const scoped = scopedValidation();
+        if (!scoped) return unavailable(res);
         try {
-          const report = await svc.validateAll();
-          const results = (report.results ?? []).filter((r) => r.datasource === req.params.name);
+          const report = await scoped.validateDatasource(req.params.name);
+          const results = report.results ?? [];
+          // The domain verdict stays this route's own computation over the rows
+          // it answers with — the same expression as before the scoping fix.
           sendOk(res, { ok: results.every((r) => r.ok), results });
         } catch (err) {
           refused(res, err);

@@ -50,6 +50,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import {
   SeedLoaderService,
   backfillSeedTenancy,
+  buildSequencesPresenceSql,
   resolveSeedTenancySeam,
   GLOBAL_TENANT,
 } from '@objectstack/metadata-protocol';
@@ -384,5 +385,54 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     );
     expect(untenanted).toBe(3);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);
+  });
+  /**
+   * #10789 — PRESERVED-BEHAVIOUR control for the `absent`/`no-split` separation.
+   *
+   * `backfillSeedTenancy` used to answer `no-split` over a seam it never
+   * queried: a no-op `execute` returns `null`, `normalizeRows(null)` is `[]`,
+   * and zero rows is this module's every-branch no-op. The repair keys the
+   * distinction on whether a probe returns a RESULT SET — so this case exists
+   * to prove the OTHER side of that key, on the real driver, with real SQL:
+   *
+   *   - an EMPTY result set is an ANSWER. `buildSequencesPresenceSql` is a
+   *     `WHERE 1 = 0` SELECT that matches nothing by construction, and it is the
+   *     first thing every boot runs. If "no rows" were read as "no answer", every
+   *     healthy SQL install on earth would report `absent` at boot instead of
+   *     `no-split` — a fix that satisfied the defect control perfectly and
+   *     destroyed the status.
+   *   - a real seam with no split rows still reports `no-split`.
+   *
+   * A hand-built double cannot stand in: the whole question is what
+   * better-sqlite3 through knex actually hands back for an empty SELECT, which
+   * is a fact about the driver, not about the fixture.
+   */
+  it('[#10789 preserved] a real seam with no split rows still answers no-split, not absent', async () => {
+    const { driver, engine } = await bootInstall();
+
+    // An install that allocated numbers WITH an organization from the first
+    // write: `_objectstack_sequences` exists and holds exactly one row, so there
+    // is a counter table to read and nothing split across two partitions.
+    await createOrganization(engine);
+    await apiCreate(engine, 'api 1');
+    await apiCreate(engine, 'api 2');
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: 2 }]);
+
+    const seam = resolveSeedTenancySeam(engine);
+
+    // The measurement the separation rests on, taken from the driver itself
+    // rather than assumed: the presence probe matches no rows and still comes
+    // back as a result set (a bare array, on this dialect).
+    const presence = await seam!.exec(buildSequencesPresenceSql(seam!.client));
+    expect(Array.isArray(presence)).toBe(true);
+    expect(presence).toEqual([]);
+
+    const result = await backfillSeedTenancy(seam, createLogger() as any);
+
+    expect(result.status).toBe('no-split');
+    expect(result.detail).toBeUndefined();
+    // Nothing moved: the SQL path is untouched by #10789.
+    expect(await readSequences(driver)).toEqual([{ tenant: ORG_ID, lastValue: 2 }]);
+    expect(await countUntenanted(driver)).toBe(0);
   });
 });

@@ -118,7 +118,25 @@ function have(bin: string): boolean {
 // pinned is an agent-container one, and the helpers read `/proc`-backed liveness.
 const RUNNABLE = process.platform === 'linux' && ['bash', 'curl', 'jq', 'node'].every(have);
 
-/** A tiny HTTP server on $STUB_PORT announcing $STUB_NAME, as a `node -e` program. */
+/**
+ * A tiny HTTP server on $STUB_PORT announcing $STUB_NAME, as a `node -e` program.
+ *
+ * ⛔ Deliberately WITHOUT the `s.once("error", …)` guard `OWNED_HTTP_STUB` below
+ * carries — the asymmetry was measured, not overlooked, so that the next reader
+ * comparing the two does not close it on symmetry grounds. Losing a bind here
+ * does kill the stub with an unhandled `'error'` event rather than a clean
+ * exit, but every one of this stub's call sites spells `>/dev/null 2>&1`, and
+ * against that spelling the two forms are indistinguishable to the harness:
+ *
+ *     unguarded → stub exit 1 · cleanup `kill` rc 1 · 896 stderr bytes
+ *     guarded   → stub exit 1 · cleanup `kill` rc 1 ·   0 stderr bytes
+ *
+ * The only difference is a stack trace on a stream nothing reads. What made the
+ * lost bind illegible was never the trace — it was the harness having no
+ * trailing `exit 0`, so the cleanup `kill` of the dead stub became the harness's
+ * exit status and `Command failed` pre-empted the guard. That is fixed in
+ * `runHarness`; adding four inert guards on top would not have reported it.
+ */
 const HTTP_STUB = [
   'const http = require("node:http");',
   'http.createServer((_q, r) => {',
@@ -189,6 +207,27 @@ function runHarness(body: string[]): Record<string, string> {
       'trap \'for j in $(jobs -p); do kill "$j" 2>/dev/null; done\' EXIT',
       'echo "SOURCED=ok"',
       ...body,
+      // Grading belongs to the assertions, not to whatever the last cleanup
+      // returned. Every case above ends by killing its stubs, and reaping one
+      // that has ALREADY EXITED returns 1. The `set +e` above stops that from
+      // aborting the harness mid-line — which is all it buys — but not from
+      // becoming the harness's EXIT STATUS; `execFileSync` then throws in the
+      // test body and the failure arrives as a bare `Command failed: bash
+      // /tmp/publish-smoke-collision-*/harness.sh`, pre-empting the vacuity
+      // guard written to name the problem. Measured on this file, one rig, one
+      // mutation, differing only in whether the stub survives to be reaped:
+      //
+      //     stub exits → Error: Command failed … at runHarness, no assertion
+      //     stub alive → AssertionError: expected '' to be 'holder'
+      //
+      // The harness's exit status is not a measurement. Every measurement is a
+      // printed KEY=VALUE line and the assertions grade those. This is the
+      // second half of the reporting fix PR #10456 landed for the sdui sibling;
+      // this file had only the `set +e` half. It sits AFTER the body but the
+      // EXIT trap above still runs, and a trap that does not itself exit leaves
+      // the status alone — so the stubs are still reaped, and 0 is still what
+      // `execFileSync` sees.
+      'exit 0',
     ].join('\n'),
     { mode: 0o755 },
   );

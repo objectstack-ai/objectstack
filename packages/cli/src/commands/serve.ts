@@ -33,15 +33,19 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
 // has to refuse exactly the configurations `makeTransport` cannot build, and
 // two literal lists for one vocabulary is the drift #5094 was filed for. Values
-// only (no plugin class): `os serve` loads `EmailServicePlugin` itself through
-// the capability loop's dynamic import, host copy first.
+// only (no plugin class): the capability loop loads `EmailServicePlugin` itself
+// with a bare `import()`, resolved against THIS CLI's own realpath — its
+// bundled copy always wins, never the host app's. Contrast `importConfigPlugin`
+// below, which IS host-anchored: an app-declared package wins there (#10909).
 import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProviderFix } from '@objectstack/plugin-email';
 // The SMS provider vocabulary, read from the package that materialises the
 // transports, for the same reason and by the same rule as the mail one above
 // (#5713). `resolveSmsCapabilityArg` has to refuse exactly the tags
 // `makeSmsTransport` cannot build — restating `log`/`aliyun`/`twilio` here would
 // be the second literal #5094 was filed for. Values only (no plugin class): the
-// capability loop dynamic-imports `SmsServicePlugin` itself, host copy first.
+// capability loop dynamic-imports `SmsServicePlugin` itself the same way — a
+// bare `import()` resolved against this CLI's own realpath, so its bundled
+// copy wins, never the host's (#10909).
 import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
@@ -54,7 +58,9 @@ import {
   createHostImporter,
   hostImportFailureKind,
   isDeclaredByHost,
+  packageNameFromSpecifier,
   readHostDeclaration,
+  type HostImporter,
 } from '@objectstack/types/node';
 import {
   printHeader,
@@ -209,6 +215,74 @@ type CapabilitySpec = {
   extras?: Array<{ pkg: string; export: string; identities: CapabilityIdentities }>;
 };
 
+const hostImporters = new Map<string, HostImporter>();
+
+/**
+ * Host-anchored dynamic import: load a package **as the app being served
+ * declares it**, falling back to the CLI's own resolution when the app does not
+ * declare it (`createHostImporter`, `@objectstack/types/node`).
+ *
+ * Node ESM resolves a bare `import(pkg)` against the IMPORTER's own realpath.
+ * The CLI is reached through a workspace/`link:` dependency, so that realpath is
+ * inside the FRAMEWORK workspace: a bare import can only see what the framework
+ * itself installed. A package supplied by the app being served — a cloud-private
+ * one such as `@objectstack/organizations`, a distribution one such as
+ * `@objectstack/service-cluster`, or anything a customer installs into their own
+ * project — is invisible to it no matter what the host app declares.
+ *
+ * #4719: "resolve from the host root" means "resolve what the host root
+ * DECLARES". The host lookup was a CJS require, CJS honours NODE_PATH, and the
+ * pnpm bin shim exports NODE_PATH pointing at the hoisted workspace store — so
+ * anything transitively reachable from anywhere in the workspace resolved as if
+ * the app had declared it, and whether the ADR-0093 D5 wall fired came down to
+ * how the process was launched. The declaration is the contract; reachability is
+ * not. This helper only moves where a module resolves FROM; it does not widen
+ * what `serve` will accept.
+ *
+ * ── Why this is a MODULE-SCOPE FUNCTION DECLARATION, not a `const` ───────────
+ *
+ * It used to be `const importFromHost = createHostImporter(hostRoot)` bound
+ * partway down the boot method, so it existed only BELOW its own binding — and a
+ * load written above that line was NOT a compile error. The author simply wrote
+ * a bare `import()`, which resolves from the CLI and works fine in a dev checkout
+ * where everything is hoisted into one `node_modules`. It breaks only in a real
+ * distribution layout, at boot, in production. That shipped TWICE:
+ *
+ *   • cloud#1013 — the binding sat below the AUTH block, so the enterprise
+ *     organizations load resolved in the framework workspace, never found the
+ *     cloud-private package, and every walled-posture deployment hit the
+ *     ADR-0093 D5 fail-fast and exited 1.
+ *   • #10645 — the binding sat below the CLUSTER block, so `serve` could not load
+ *     an app-declared `@objectstack/service-cluster*` at all: on the published EE
+ *     image `OS_CLUSTER_DRIVER=redis` died at boot with `Cannot find package
+ *     '@objectstack/service-cluster'`, and compose's
+ *     `service_completed_successfully` took the whole stack down with it.
+ *
+ * Hoisting the binding fixed each instance and left the CLASS open: the next load
+ * added above the new line reproduces it exactly, and no author has any reason to
+ * know where that line is. A function declaration at module scope is hoisted over
+ * the ENTIRE module, so "above the definition" is no longer a state this file can
+ * be in — every line of `serve.ts`, in any order, reaches the same host-anchored
+ * importer (#10769).
+ *
+ * `serve-cluster-host-resolution.test.ts` is the detection backstop: it scans
+ * this file for every app-declarable optional load and fails on a bare one.
+ *
+ * @param hostRoot Directory holding the served app's `package.json`. Defaults to
+ * the process CWD — the same root `serve` reads `objectstack.config.ts` from, and
+ * the value its boot path computes as `hostRoot`.
+ */
+function importFromHost(specifier: string, hostRoot: string = process.cwd()): Promise<any> {
+  // Memoised per root so one boot shares a single host `require`, exactly as the
+  // one mid-function `const` did before it was hoisted out here.
+  let importer = hostImporters.get(hostRoot);
+  if (!importer) {
+    importer = createHostImporter(hostRoot);
+    hostImporters.set(hostRoot, importer);
+  }
+  return importer(specifier);
+}
+
 export default class Serve extends Command {
   static override description = 'Start ObjectStack server. Reads `objectstack.config.ts` if present; otherwise falls back to `dist/objectstack.json` (or OS_ARTIFACT_PATH, including http(s):// URLs) as a portable artifact.';
 
@@ -322,6 +396,98 @@ export default class Serve extends Command {
     if (opts.required) return 'required';
     if (opts.declared) return 'auto';
     return 'off';
+  }
+
+  /**
+   * Load one `plugins: [...]` entry of the served app's own config that is
+   * written as a STRING (#10908).
+   *
+   * This is the most app-owned specifier in the whole file — it is supplied by
+   * the app being served, and `plugins: [...]` is THE documented way to extend a
+   * deployment. It used to be loaded with a bare `import()`, which Node ESM
+   * resolves against the IMPORTER's realpath: this CLI's. So an app that writes
+   * `plugins: ['@acme/my-plugin']` and DECLARES `@acme/my-plugin` in its own
+   * package.json could only be served where that package happened to be hoisted
+   * somewhere the CLI could see it — true in a dev checkout, false in a real
+   * distribution layout. Same mechanism as cloud#1013 and #10645, but on the
+   * surface users are explicitly told to use.
+   *
+   * ── Why this is three branches and not `await importFromHost(specifier)` ────
+   *
+   * The obvious repair is to hand every specifier to `importFromHost`. MEASURED,
+   * that is NOT a superset of what this line does today — in two ways, both of
+   * which would take working deployments away:
+   *
+   *   1. A RELATIVE specifier changes base. `createHostImporter` passes a
+   *      non-package specifier through to an `import()` that physically lives in
+   *      `@objectstack/types`, and ESM resolves a relative specifier against the
+   *      module CONTAINING the call — so `'./local-plugin.js'` would resolve
+   *      against `@objectstack/types/dist/` instead of this file's directory.
+   *      Neither base is the served app's root, so no relative spelling works
+   *      the way an author would expect either way; #10944 carries that
+   *      question, and this branch is why the answer stays open rather than
+   *      being decided by a silent re-base here.
+   *   2. An UNDECLARED bare name changes base the same way, and this one bites.
+   *      `createHostImporter`'s fallback is documented as "the importing
+   *      package's own resolution", but the import it falls back to also lives
+   *      in `@objectstack/types`, which under a pnpm-isolated layout can see
+   *      only `@objectstack/types`'s own dependencies. Measured from an app that
+   *      declares nothing: `@objectstack/plugin-auth` and `@objectstack/plugin-
+   *      audit` resolve from THIS package and fail through the host importer.
+   *      An app that writes `plugins: ['@objectstack/plugin-auth']` without
+   *      declaring it — a spelling this repo's own fixtures use — boots today
+   *      and would stop booting. The helper's own docblock claims the opposite
+   *      ("falls back to the importing package's own resolution"); that text is
+   *      wrong, and #10943 carries the fix. Until it lands, a caller that needs
+   *      its own resolution has to ask the declaration itself, as below.
+   *
+   * So the declaration is what selects the resolver, exactly as #4719 says it
+   * should, and each branch keeps the resolution it already had:
+   *
+   *   • not a package name (path, `file://` URL, `node:` builtin) → unchanged;
+   *     nothing a package.json can declare, so the gate has no opinion.
+   *   • DECLARED by the served app → `importFromHost`: the app's own copy wins.
+   *     This is the repair — the whole card is this branch.
+   *   • UNDECLARED → this CLI's own resolution, byte-identical to the bare
+   *     `import()` that has always been here. No app loses a plugin it does not
+   *     declare but the CLI ships.
+   *
+   * Nothing about WHICH plugins are accepted changes: this only moves where a
+   * declared one resolves FROM. The #4719 declaration gate is untouched, and no
+   * undeclared package gains a way in that it did not already have.
+   *
+   * @param pluginSpecifier The string as the app wrote it in `plugins: [...]`.
+   * @param hostRoot Root of the served app; defaults to the process CWD, the
+   * same value `serve`'s boot path computes.
+   */
+  static async importConfigPlugin(pluginSpecifier: string, hostRoot?: string): Promise<any> {
+    const root = hostRoot ?? process.cwd();
+    try {
+      // `await` inside the `try` rather than a bare `return`: a returned promise
+      // would settle OUTSIDE it and skip the diagnostic wrapper below.
+      if (packageNameFromSpecifier(pluginSpecifier) === undefined) {
+        return await import(/* webpackIgnore: true */ pluginSpecifier);
+      }
+      if (isDeclaredByHost(pluginSpecifier, root)) {
+        return await importFromHost(pluginSpecifier, root);
+      }
+      try {
+        return await import(/* webpackIgnore: true */ pluginSpecifier);
+      } catch (cliError: unknown) {
+        // Present but broken is a crash, not an absence — never reinterpret it.
+        if (!Serve.isModuleNotFoundError(cliError)) throw cliError;
+        // Undeclared AND unresolvable anywhere. Re-enter the host importer for
+        // the failure alone: it owns the #4719 "declare it in that app's
+        // package.json" remedy, and having one owner of that wording is why
+        // this does not compose the message itself.
+        return await importFromHost(pluginSpecifier, root);
+      }
+    } catch (importError: any) {
+      // The wrapper lives with the load it describes, so the composed
+      // user-facing string is testable rather than assembled at the call site
+      // (triage on #10908 requires this text be CHOSEN, not drift).
+      throw new Error(`Failed to import plugin '${pluginSpecifier}': ${importError.message}`);
+    }
   }
 
   /**
@@ -1409,42 +1575,17 @@ export default class Serve extends Command {
       // keys off it too (#4012).
       const loggerConfig = { level: bootLogLevel };
 
-      // Host-app package resolution — shared by every optional / enterprise
-      // package loaded from here down.
+      // The root of the app being served: where its `package.json` and
+      // `objectstack.config.ts` live. `importFromHost` (module scope, top of this
+      // file) anchors every app-declarable optional load here, and defaults to
+      // this same `process.cwd()`, so a load written ANYWHERE in this method —
+      // above this line included — resolves from the app rather than the CLI.
+      // That reachability is the point: see the helper's own note for the two
+      // shipped instances (cloud#1013, #10645) that a mid-function binding cost.
       //
-      // Node ESM resolves a bare `import(pkg)` against the IMPORTER's own
-      // realpath. The CLI is reached through a workspace/`link:` dependency, so
-      // that realpath is inside the FRAMEWORK workspace: a bare import can only
-      // see what the framework itself installed. A package supplied by the app
-      // being served — a cloud-private one such as `@objectstack/organizations`,
-      // or anything a customer installs into their own project — is invisible
-      // to it no matter what the host app declares. Resolve from the host root
-      // instead; the CLI's own resolution stays as the fallback for the
-      // framework-owned packages the CLI depends on.
-      //
-      // #4719: "resolve from the host root" now means "resolve what the host
-      // root DECLARES". The host lookup was a CJS require, CJS honours
-      // NODE_PATH, and the pnpm bin shim exports NODE_PATH pointing at the
-      // hoisted workspace store — so anything transitively reachable from
-      // anywhere in the workspace resolved as if the app had declared it, and
-      // whether the D5 wall below fired came down to whether `serve` was reached
-      // through that shim. The declaration is the contract; reachability is not.
-      //
-      // Defined HERE, at the TOP of the boot sequence, because the very first
-      // optional package `serve` loads is the cluster gate a few lines below.
-      // This helper has now been hoisted twice for the same reason, which is the
-      // point worth keeping: every load placed ABOVE it silently falls back to a
-      // bare import and can only see the framework's own node_modules. It first
-      // sat below the auth block, so the enterprise organizations load resolved
-      // in the framework workspace, never found the cloud-private package, and
-      // every walled-posture deployment hit the ADR-0093 D5 fail-fast and exited
-      // 1 (cloud#1013). It then sat below the cluster block, so `serve` could not
-      // load an app-declared `@objectstack/service-cluster*` at all and EE
-      // multi-node boot died outright on `OS_CLUSTER_DRIVER=redis`. A new
-      // optional load added above this line reintroduces the same defect a third
-      // time — put it below, or hoist this further and say why here.
+      // #4719: what the host root DECLARES is the contract; being merely
+      // reachable through a hoisted workspace store is not, and is refused.
       const hostRoot = process.cwd();
-      const importFromHost = createHostImporter(hostRoot);
 
       // Cluster wiring: env-driven driver selection (mirrors OS_DATABASE_URL).
       // The remote driver self-registers on import; import it dynamically so it
@@ -1778,9 +1919,15 @@ export default class Serve extends Command {
       );
       if (!hasI18nPlugin && configHasTranslations && tierEnabled('i18n')) {
         try {
-          // Dynamic import with variable to prevent tsc from resolving the optional package
+          // Dynamic import with variable to prevent tsc from resolving the optional package.
+          // Host-anchored: `packages/cli` does NOT declare @objectstack/service-i18n,
+          // so a bare import here resolves against the CLI's own realpath and can
+          // only ever find the package by workspace hoisting — the same defect
+          // class that cost cloud#1013 and #10645 (#10769). An app that does not
+          // declare it still falls back to the CLI's resolution, so the quiet-skip
+          // path below is unchanged.
           const i18nPkg = '@objectstack/service-i18n';
-          const { I18nServicePlugin } = await import(/* webpackIgnore: true */ i18nPkg);
+          const { I18nServicePlugin } = await importFromHost(i18nPkg);
           const i18nCfg = config.i18n || config.manifest?.i18n || {};
           await kernel.use(new I18nServicePlugin({
             defaultLocale: i18nCfg.defaultLocale,
@@ -2623,12 +2770,11 @@ export default class Serve extends Command {
 
             // Resolve string references (package names)
             if (typeof plugin === 'string') {
-              try {
-                 const imported = await import(plugin);
-                 pluginToLoad = imported.default || imported;
-              } catch (importError: any) {
-                 throw new Error(`Failed to import plugin '${plugin}': ${importError.message}`);
-              }
+              // Host-anchored, NOT a bare `import()`: this specifier comes from
+              // the served app's own config, so what the app DECLARES about it is
+              // the contract (#10908). The helper carries the failure wrapper too.
+              const imported = await Serve.importConfigPlugin(plugin, hostRoot);
+              pluginToLoad = imported.default || imported;
             }
 
             // Wrap raw config objects (no init/start) into AppPlugin
@@ -2756,9 +2902,10 @@ export default class Serve extends Command {
         (p: any) => p.name === 'com.objectstack.service-ai'
             || p.constructor?.name === 'AIServicePlugin'
       );
-      // `importFromHost` (declared above, before the auth block) resolves
-      // optional plugin packages from the HOST APP's context — the app being
-      // served declares them as deps, including private packages like
+      // `importFromHost` (module scope, hoisted over this whole file — it is no
+      // longer "declared above" anything, which is the point) resolves optional
+      // plugin packages from the HOST APP's context — the app being served
+      // declares them as deps, including private packages like
       // @objectstack/service-ai-studio that the framework CLI itself does not
       // depend on.
       // [CE AI opt-in] Auto-register the headless AI service ONLY when the host
@@ -3436,7 +3583,28 @@ export default class Serve extends Command {
       // #8978 — the Config:/Artifact: row must name what actually booted,
       // never `relativeConfig` unconditionally (see resolveBannerConfigRow).
       printServerReady({
-        port,
+        // #10646 — the banner used to take `port` and compose
+        // `http://localhost:<port>` itself, which is where this process
+        // LISTENS, not where an operator can reach it. On the EE 4.1.0 compose
+        // stack that address is `expose`-only (no `ports:` mapping, and less
+        // reachable still under `--scale app=N`) while Caddy publishes `:80`
+        // and `OS_AUTH_URL` is already `http://localhost` — so the Console link
+        // 404'd at the shell and the `MCP:` line customers paste into an AI
+        // client could never connect.
+        //
+        // Resolved through the runtime's OWN chain, not a banner-local copy of
+        // it: `resolveAuthBaseUrl` is the same function whose `baseOrigin` is
+        // pushed onto the CSRF allow-list a few hundred lines above, so the
+        // banner cannot disagree with what the deployment actually trusts. It
+        // reads only `process.env` and the port, so calling it here changes
+        // nothing about what is bound or advertised — this is printed text.
+        //
+        // `port` is the port the server ACTUALLY bound (past any dev auto-shift),
+        // so the `http://localhost:<port>` tail of the chain still names the
+        // right address in the local dev loop. `baseOrigin` is `null` when the
+        // chain produced something unparseable; the banner then prints paths
+        // with no origin rather than a confident wrong URL.
+        externalBaseOrigin: resolveAuthBaseUrl(port).baseOrigin,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,

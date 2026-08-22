@@ -1206,65 +1206,162 @@ export class LifecycleService {
     // `packages/spec` accept-set question, outside this card's fence), is
     // #10527 rather than a choice this diff makes silently.
     const dueField = lc.ttl ? lc.ttl.field : 'created_at';
-    const dueWindow = lc.ttl ? lc.ttl.expireAfter : archive.after;
-    const cutoff = new Date(this.now() - parseLifecycleDuration(dueWindow)).toISOString();
-    let archived = 0;
-    for (let batch = 0; batch < ARCHIVE_MAX_BATCHES_PER_SWEEP; batch++) {
-      // [#4747] Leg boundary, per batch — the same check the reap loop makes
-      // (see {@link batchedReap}). `sweep()` checks the abort bit between
-      // OBJECTS, which leaves one archive round as up to 20 pages of reads and
-      // writes across TWO datasources (a hot page read, a cold upsert per row,
-      // a hot bulk delete), i.e. ~10k operations issued at stores the host may
-      // already be closing — precisely what #4747 stopped.
-      //
-      // Breaking BETWEEN batches keeps the Archiver's safety rule intact
-      // ("hot-delete only what the cold store has taken"): a batch already in
-      // flight finishes its upsert → bulkDelete pair, and batches not yet begun
-      // are simply left for the next sweep, which re-reads them from the hot
-      // store unchanged.
-      if (this.abort.aborted) break;
-      const rows = await hot.find(object, {
-        where: { [dueField]: { $lt: cutoff } },
-        limit: ARCHIVE_BATCH_SIZE,
-      });
-      if (!rows.length) break;
-      // [#8807] The conflict target stays `['id']`, and that is a measured
-      // conclusion rather than an untouched line.
-      //
-      // #8807 ruled that an upsert must never modify a row whose identity the
-      // caller did not supply and whose conflict key it did not name — the
-      // MySQL `ON DUPLICATE KEY UPDATE` merge can land on any UNIQUE key,
-      // including one nobody named. The enforcement options included refusing
-      // this exact call shape on any table carrying a non-primary UNIQUE key,
-      // which would have refused archival wholesale, so the ruling required the
-      // blast radius on THIS caller be measured before anything shipped.
-      //
-      // Measured: of the objects in this repo that declare `lifecycle.archive`
-      // — `sys_audit_log` and `sys_metadata_audit`, the only two — ZERO declare
-      // a non-primary unique field or a `unique` index. The archiver therefore
-      // never even reaches the check today.
-      //
-      // It is also correct by construction for a customer object that DOES
-      // carry one, which is why no opt-out is threaded through here: this loop
-      // copies a row that already has an `id` and re-copies it idempotently, so
-      // the merge lands on the identity it supplied and the check passes. The
-      // one case it would refuse is a cold row that collides on a business key
-      // while carrying a DIFFERENT id — which is not archival working, it is
-      // archival about to overwrite an unrelated archived record. Refusing
-      // there is the Archiver's own safety rule ("hot-delete only what the cold
-      // store has taken"): the upsert throws, `bulkDelete` below never runs,
-      // and the hot rows survive for the next sweep.
-      for (const row of rows) {
-        await cold.upsert(object, row, ['id']);
+
+    // [#10528] WHICH WINDOW IS DUE — resolved through ADR-0057 P4 governance,
+    // the same {@link effectiveWindowMs} every window on the reap path goes
+    // through. Until this card the cutoff below was read straight off the
+    // declaration, and that was not one forgotten call: `reapObject` RETURNS
+    // into this method for any object declaring `archive`, so the entire
+    // governance leg — settings override, retention floor (#5195), per-tenant
+    // windows — sat on a branch archive-declaring objects never reach. An
+    // operator's override was silently ignored, and `report.floorViolations`
+    // stayed empty however the floors were registered, which is
+    // indistinguishable from a healthy sweep.
+    //
+    // Resolved HERE rather than in `reapObject` before it delegates, because
+    // the selection above is what decides WHICH window is governed and that
+    // decision lives in this method by the 2026-08-20 ruling (#10347).
+    // Resolving in the caller would mean either duplicating the selection or
+    // splitting one decision across two methods — and the per-tenant leg is a
+    // pass over this method's own hot/cold batch loop, which cannot leave it
+    // either way.
+    //
+    // WHICH KEY governs follows which window the selection picked: a
+    // ttl-selected archive is governed by `expireAfter`, an age-selected one
+    // by `maxAge` — the identical mapping `reap()` makes. Two windows, not
+    // two spellings of one.
+    const policy: 'retention' | 'ttl' = lc.ttl ? 'ttl' : 'retention';
+    const overrideKey = policy === 'ttl' ? 'expireAfter' : 'maxAge';
+    const declaredMs = parseLifecycleDuration(lc.ttl ? lc.ttl.expireAfter : archive.after);
+    const windowMs = this.effectiveWindowMs(
+      this.governance.overrides[object]?.[overrideKey],
+      declaredMs,
+      object,
+      policy,
+      'global',
+      report,
+    );
+    const cutoff = new Date(this.now() - windowMs).toISOString();
+
+    /**
+     * One archive pass over `where`: copy → hot-delete, batched. Mirrors
+     * `reap()`'s `reapWhere` closure — the caller decides which ROWS a pass
+     * addresses (all of them, or one tenant's), while the pass itself stays a
+     * single algorithm under a single set of bounds.
+     */
+    const archivePass = async (where: Record<string, unknown>): Promise<number> => {
+      let moved = 0;
+      for (let batch = 0; batch < ARCHIVE_MAX_BATCHES_PER_SWEEP; batch++) {
+        // [#4747] Leg boundary, per batch — the same check the reap loop makes
+        // (see {@link batchedReap}). `sweep()` checks the abort bit between
+        // OBJECTS, which leaves one archive round as up to 20 pages of reads and
+        // writes across TWO datasources (a hot page read, a cold upsert per row,
+        // a hot bulk delete), i.e. ~10k operations issued at stores the host may
+        // already be closing — precisely what #4747 stopped.
+        //
+        // Breaking BETWEEN batches keeps the Archiver's safety rule intact
+        // ("hot-delete only what the cold store has taken"): a batch already in
+        // flight finishes its upsert → bulkDelete pair, and batches not yet begun
+        // are simply left for the next sweep, which re-reads them from the hot
+        // store unchanged.
+        if (this.abort.aborted) break;
+        const rows = await hot.find(object, {
+          where,
+          limit: ARCHIVE_BATCH_SIZE,
+        });
+        if (!rows.length) break;
+        // [#8807] The conflict target stays `['id']`, and that is a measured
+        // conclusion rather than an untouched line.
+        //
+        // #8807 ruled that an upsert must never modify a row whose identity the
+        // caller did not supply and whose conflict key it did not name — the
+        // MySQL `ON DUPLICATE KEY UPDATE` merge can land on any UNIQUE key,
+        // including one nobody named. The enforcement options included refusing
+        // this exact call shape on any table carrying a non-primary UNIQUE key,
+        // which would have refused archival wholesale, so the ruling required the
+        // blast radius on THIS caller be measured before anything shipped.
+        //
+        // Measured: of the objects in this repo that declare `lifecycle.archive`
+        // — `sys_audit_log` and `sys_metadata_audit`, the only two — ZERO declare
+        // a non-primary unique field or a `unique` index. The archiver therefore
+        // never even reaches the check today.
+        //
+        // It is also correct by construction for a customer object that DOES
+        // carry one, which is why no opt-out is threaded through here: this loop
+        // copies a row that already has an `id` and re-copies it idempotently, so
+        // the merge lands on the identity it supplied and the check passes. The
+        // one case it would refuse is a cold row that collides on a business key
+        // while carrying a DIFFERENT id — which is not archival working, it is
+        // archival about to overwrite an unrelated archived record. Refusing
+        // there is the Archiver's own safety rule ("hot-delete only what the cold
+        // store has taken"): the upsert throws, `bulkDelete` below never runs,
+        // and the hot rows survive for the next sweep.
+        for (const row of rows) {
+          await cold.upsert(object, row, ['id']);
+        }
+        await hot.bulkDelete(object, rows.map((r) => r.id as string));
+        moved += rows.length;
+        if (rows.length < ARCHIVE_BATCH_SIZE) break;
       }
-      await hot.bulkDelete(object, rows.map((r) => r.id as string));
-      archived += rows.length;
-      if (rows.length < ARCHIVE_BATCH_SIZE) break;
+      return moved;
+    };
+
+    // [#10528] Per-tenant windows (ADR-0057 §3.2), in the shape `reap()` uses:
+    // each overriding tenant gets its own cutoff on its own rows, then one
+    // global pass covers everyone else INCLUDING rows with no organization —
+    // a bare `$nin` would silently skip NULL-org rows, since a value that is
+    // not there satisfies no positive comparison (#5298/#5299).
+    //
+    // Only genuinely tenant-scoped overrides reach `tenantOverrides` (see
+    // `loadGovernance`), so an object nobody has tuned per tenant still runs
+    // as exactly one pass over exactly the predicate it ran before.
+    //
+    // [#4747] The per-batch abort check is the first thing every pass does, so
+    // a `stop()` observed mid-sweep ends the passes not yet begun as well as
+    // the batches: the leg boundary widens with the loop instead of leaving a
+    // new unchecked seam between passes.
+    const tenantWindows = (this.governance.tenantOverrides.get(object) ?? []).filter(
+      (t) => typeof t[overrideKey] === 'string',
+    );
+    let archived = 0;
+    if (tenantWindows.length === 0) {
+      archived += await archivePass({ [dueField]: { $lt: cutoff } });
+    } else {
+      for (const t of tenantWindows) {
+        // [#5195] A tenant-scoped override goes through the same floor — the
+        // identical side door, one scope down. Its fallback is the
+        // already-resolved global window, which has itself passed the floor.
+        const tMs = this.effectiveWindowMs(
+          t[overrideKey],
+          windowMs,
+          object,
+          policy,
+          `tenant:${t.tenantId}`,
+          report,
+        );
+        const tCutoff = new Date(this.now() - tMs).toISOString();
+        archived += await archivePass({ [dueField]: { $lt: tCutoff }, organization_id: t.tenantId });
+      }
+      archived += await archivePass({
+        [dueField]: { $lt: cutoff },
+        $or: [
+          { organization_id: { $nin: tenantWindows.map((t) => t.tenantId) } },
+          { organization_id: null },
+        ],
+      });
     }
 
     // Cold-side retention: `keep` bounds the archive itself.
     //
-    // [#4747] Leg boundary, after the batch loop — the last leg `archiveObject`
+    // [#10528] Governance deliberately does NOT reach this line. `keep` bounds
+    // the ARCHIVE — how long cold rows survive — not which hot rows are due,
+    // and the `lifecycle` settings namespace has no key for it
+    // (`retention_overrides` carries `maxAge` / `expireAfter` only). It also
+    // stays a single `created_at` prune under a per-tenant sweep above: the
+    // tenant windows decide when a row LEAVES the hot store, not how long the
+    // archive keeps it.
+    //
+    // [#4747] Leg boundary, after the passes — the last leg `archiveObject`
     // can issue, and the one the per-batch check above does not reach. The loop
     // may have just broken BECAUSE it read `aborted === true`, so firing a
     // predicate DELETE at the cold datasource here is not a race teardown lost:

@@ -1111,6 +1111,498 @@ describe('LifecycleService.sweep — Archiver (P3)', () => {
   });
 });
 
+/* ==================================================================== *
+ * [#10528] The Archiver resolves its window through ADR-0057 P4
+ * governance — the same `effectiveWindowMs` resolver the Reaper uses.
+ *
+ * Before this card the three legs below were not "partly wired", they were
+ * STRUCTURALLY UNREACHABLE: `reapObject` returns into `archiveObject` for
+ * any object declaring `archive`, so the `effectiveWindowMs` resolutions on
+ * the reap path sat on a branch archive-declaring objects skip entirely.
+ * Every `it` in this block is therefore a real DEFECT CONTROL — each one
+ * fails on `origin/main` — rather than an ablation standing in for one.
+ *
+ * The floor leg comes first deliberately. It is the leg whose absence is
+ * SILENT: an empty `report.floorViolations` is byte-identical to a healthy
+ * sweep, so nothing anywhere says the floor was never consulted. The
+ * override leg is merely conservative-but-wrong (the declaration is the
+ * longer window in the case that matters), which is why it is second.
+ * ==================================================================== */
+describe('LifecycleService.sweep — Archiver governance (#10528)', () => {
+  const DAY = 86_400_000;
+  const at = (deltaMs: number) => new Date(FIXED_NOW + deltaMs).toISOString();
+
+  /** `sys_audit_log`'s real declared shape — one of the two objects in this
+   * repo that declare `lifecycle.archive`. The spec pins
+   * `archive.after === retention.maxAge`, so the hot window and the archive
+   * boundary are one number under two names. */
+  const AUDIT_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      retention: { maxAge: '90d' },
+      archive: { after: '90d', to: 'archive', keep: '7y' },
+    } as any,
+  };
+
+  /** The other one. Same shape — which is the point of the per-object
+   * non-effect control below: an override naming one must not move both. */
+  const METADATA_AUDIT_OBJ: LifecycleObjectLike = {
+    name: 'sys_metadata_audit',
+    lifecycle: {
+      class: 'audit',
+      retention: { maxAge: '90d' },
+      archive: { after: '90d', to: 'archive', keep: '7y' },
+    } as any,
+  };
+
+  /** `ttl` + `archive` (no `retention`) — the pair #10347 made executable.
+   * Its due window is `ttl.expireAfter` on `ttl.field`, so the governance
+   * key that governs it is `expireAfter`, not `maxAge`. */
+  const TTL_ARCHIVE_OBJ: LifecycleObjectLike = {
+    name: 'sys_audit_log',
+    lifecycle: {
+      class: 'audit',
+      ttl: { field: 'expires_at', expireAfter: '90d' },
+      archive: { after: '90d', to: 'archive', keep: '7y' },
+    } as any,
+  };
+
+  /**
+   * Evaluates the predicates the Archiver actually sends, and THROWS on any
+   * operator it was not taught — a fake that quietly returned every row
+   * would report a green tenant leg for an Archiver that never learned to
+   * scope one.
+   *
+   * Null handling is the platform's settled answer, not a JS accident: a
+   * value that is not there satisfies no positive comparison (#5298/#5299,
+   * every backend's `nullValueSatisfiesOperator` ends `default: return
+   * false`). That is exactly why the global pass needs the explicit
+   * `{ organization_id: null }` branch beside its `$nin` — a bare `$nin`
+   * skips NULL-org rows — and modelling it here is what makes that branch
+   * load-bearing in the tenant test rather than decorative.
+   */
+  const matchesWhere = (row: Record<string, unknown>, where: Record<string, any>): boolean =>
+    Object.entries(where).every(([key, cond]) => {
+      if (key === '$or') {
+        return (cond as Array<Record<string, any>>).some((branch) => matchesWhere(row, branch));
+      }
+      const value = row[key];
+      if (cond !== null && typeof cond === 'object') {
+        if ('$lt' in cond) {
+          if (value === null || value === undefined) return false;
+          return String(value) < String(cond.$lt);
+        }
+        if ('$nin' in cond) {
+          if (value === null || value === undefined) return false;
+          return !(cond.$nin as unknown[]).includes(value);
+        }
+        throw new Error(`[test fake] unsupported operator: ${JSON.stringify(cond)}`);
+      }
+      return value === cond;
+    });
+
+  /** One hot store + one cold store, keyed by object so a sweep covering
+   * both archive-declaring objects is observable per object. */
+  function governedStores(seed: Record<string, Array<Record<string, unknown>>>) {
+    const wheres: Array<{ object: string; where: Record<string, any> }> = [];
+    const upserts: Array<{ object: string; id: unknown }> = [];
+    const coldDeletes: Array<{ object: string; query: any }> = [];
+    const bulkDeleted: Array<{ object: string; ids: Array<string | number> }> = [];
+    const rows: Record<string, Array<Record<string, unknown>>> = {};
+    for (const [object, list] of Object.entries(seed)) rows[object] = [...list];
+
+    return {
+      wheres,
+      upserts,
+      coldDeletes,
+      bulkDeleted,
+      readsFor: (object: string) => wheres.filter((w) => w.object === object).map((w) => w.where),
+      archivedFrom: (object: string) => upserts.filter((u) => u.object === object).map((u) => u.id),
+      remaining: (object: string) => (rows[object] ?? []).map((r) => r.id),
+      hot: {
+        name: 'default',
+        find: async (object: string, query: any) => {
+          wheres.push({ object, where: query.where });
+          return (rows[object] ?? [])
+            .filter((r) => matchesWhere(r, query.where))
+            .slice(0, query.limit ?? Infinity);
+        },
+        upsert: async () => ({}),
+        bulkDelete: async (object: string, ids: Array<string | number>) => {
+          bulkDeleted.push({ object, ids });
+          rows[object] = (rows[object] ?? []).filter((r) => !ids.includes(r.id as string));
+        },
+        deleteMany: async () => 0,
+      },
+      cold: {
+        name: 'archive',
+        syncSchema: vi.fn(async () => {}),
+        find: async () => [],
+        upsert: async (object: string, row: Record<string, unknown>) => {
+          upserts.push({ object, id: row.id });
+          return row;
+        },
+        bulkDelete: async () => {},
+        deleteMany: async (object: string, query: any) => {
+          coldDeletes.push({ object, query });
+          return 0;
+        },
+      },
+    };
+  }
+
+  function fakeSettings(values: Record<string, unknown>, tenantValues: Record<string, Record<string, unknown>> = {}) {
+    return {
+      async get(_ns: string, key: string, ctx?: Record<string, unknown>) {
+        const tenantId = ctx?.tenantId as string | undefined;
+        if (tenantId && tenantValues[tenantId] && key in tenantValues[tenantId]) {
+          return { value: tenantValues[tenantId][key], source: 'tenant' };
+        }
+        if (key in values) return { value: values[key], source: 'global' };
+        return { value: undefined, source: 'default' };
+      },
+    };
+  }
+
+  const floor = (over: Partial<Parameters<LifecycleService['registerRetentionFloor']>[1]> = {}) => ({
+    policy: 'retention' as const,
+    minWindowMs: 30 * DAY,
+    declaredBy: 'com.example.compliance-export',
+    consequence: 'the quarterly compliance export reads a window that is already empty.',
+    remedy: 'raise the override to >= 30d, or shorten the export window.',
+    ...over,
+  });
+
+  /* ---------------- LEG 1: the floor — the SILENT one ---------------- */
+
+  it('DEFECT CONTROL (floor): rejects a global override below a floor registered against an archive-declaring object', async () => {
+    const error = vi.fn();
+    const stores = governedStores({
+      sys_audit_log: [
+        { id: 'old', created_at: at(-200 * DAY), organization_id: null },
+        { id: 'young', created_at: at(-2 * DAY), organization_id: null },
+      ],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const settings = fakeSettings({ retention_overrides: { sys_audit_log: { maxAge: '1h' } } });
+    const svc = service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), error },
+    });
+    svc.registerRetentionFloor('sys_audit_log', floor());
+
+    const report = await svc.sweep();
+
+    // The 1h override never reaches the candidate read: the declared 90d
+    // window stands, so the compliance export still has rows to read.
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['old']);
+    expect(stores.remaining('sys_audit_log')).toEqual(['young']);
+
+    // …and it is LOUD. This whole expectation is the card's point: before the
+    // fix `floorViolations` was `[]` for every archive-declaring object no
+    // matter how the floors were registered, which is indistinguishable from
+    // a healthy sweep.
+    expect(report.floorViolations).toEqual([{
+      object: 'sys_audit_log',
+      policy: 'retention',
+      scope: 'global',
+      override: '1h',
+      offendingMs: 3_600_000,
+      floorMs: 30 * DAY,
+      declaredBy: 'com.example.compliance-export',
+      appliedMs: 90 * DAY,
+    }]);
+    expect(error).toHaveBeenCalledTimes(1);
+    const line = error.mock.calls[0]![0] as string;
+    expect(line).toContain('REJECTED');
+    expect(line).toContain('com.example.compliance-export');
+    expect(line).toContain('Consequence:');
+    expect(line).toContain('Fix:');
+  });
+
+  it('DEFECT CONTROL (floor): reports a DECLARED archive window below the floor, and still enforces it', async () => {
+    const error = vi.fn();
+    const stores = governedStores({
+      sys_audit_log: [{ id: 'old', created_at: at(-200 * DAY), organization_id: null }],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const svc = service(engine, { logger: { ...silentLogger(), error } });
+    // A floor LONGER than the declaration, with no override in play at all:
+    // the object and its consumer disagree at authoring time.
+    svc.registerRetentionFloor('sys_audit_log', floor({ minWindowMs: 365 * DAY }));
+
+    const report = await svc.sweep();
+
+    // Still enforced as declared — refusing to archive would trade a broken
+    // consumer contract for an unbounded hot table.
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+    expect(report.floorViolations).toEqual([{
+      object: 'sys_audit_log',
+      policy: 'retention',
+      scope: 'global',
+      offendingMs: 90 * DAY,
+      floorMs: 365 * DAY,
+      declaredBy: 'com.example.compliance-export',
+      appliedMs: 90 * DAY,
+    }]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0]![0]).toContain('declared retention window');
+  });
+
+  it('SILENCE CONTROL: a healthy sweep leaves floorViolations empty — with a floor registered and a legal override applied', async () => {
+    // The partner of the two cases above. "floorViolations is non-empty" is
+    // satisfied by any bug that reports spurious violations, so the assertion
+    // only means something paired with a sweep that must stay silent — one
+    // where a floor IS registered and an override IS present, both legal.
+    const error = vi.fn();
+    const stores = governedStores({
+      sys_audit_log: [
+        { id: 'past-60d', created_at: at(-70 * DAY), organization_id: null },
+        { id: 'within-60d', created_at: at(-40 * DAY), organization_id: null },
+      ],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const settings = fakeSettings({ retention_overrides: { sys_audit_log: { maxAge: '60d' } } });
+    const svc = service(engine, {
+      getSettings: () => settings,
+      logger: { ...silentLogger(), error },
+    });
+    svc.registerRetentionFloor('sys_audit_log', floor()); // 30d — 60d clears it
+
+    const report = await svc.sweep();
+
+    expect(report.floorViolations).toEqual([]);
+    expect(error).not.toHaveBeenCalled();
+    // The floor bounds overrides, it does not abolish them: 60d wins over 90d.
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('60d') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['past-60d']);
+    expect(stores.remaining('sys_audit_log')).toEqual(['within-60d']);
+  });
+
+  /* ---------------- LEG 2: the global window override ---------------- */
+
+  it('DEFECT CONTROL (override): a global maxAge override moves the archive cutoff', async () => {
+    const stores = governedStores({
+      sys_audit_log: [
+        { id: 'past-1y', created_at: at(-400 * DAY), organization_id: null },
+        // Past the DECLARED 90d but inside the overridden 1y: the row that
+        // separates the two policies. Pre-fix it is archived.
+        { id: 'past-90d-only', created_at: at(-200 * DAY), organization_id: null },
+      ],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const settings = fakeSettings({ retention_overrides: { sys_audit_log: { maxAge: '1y' } } });
+
+    const report = await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('1y') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['past-1y']);
+    expect(stores.remaining('sys_audit_log')).toEqual(['past-90d-only']);
+    const entry = report.swept.find((e) => e.policy === 'archive');
+    expect(entry?.cutoff).toBe(isoCutoff('1y'));
+    expect(entry?.archived).toBe(1);
+  });
+
+  it('DEFECT CONTROL (override): with ttl declared it is `expireAfter` that governs — on the ttl field', async () => {
+    // Which override key applies follows which window SELECTION picks
+    // (#10347). A fix that always consulted `maxAge` would leave this red.
+    const stores = governedStores({
+      sys_audit_log: [
+        { id: 'expired-400d', created_at: at(-2 * DAY), expires_at: at(-400 * DAY), organization_id: null },
+        { id: 'expired-200d', created_at: at(-2 * DAY), expires_at: at(-200 * DAY), organization_id: null },
+      ],
+    });
+    const { engine } = captureEngine([TTL_ARCHIVE_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const settings = fakeSettings({ retention_overrides: { sys_audit_log: { expireAfter: '1y' } } });
+
+    await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ expires_at: { $lt: isoCutoff('1y') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['expired-400d']);
+    expect(stores.remaining('sys_audit_log')).toEqual(['expired-200d']);
+  });
+
+  it('NON-EFFECT: the override key that does not govern this selection is ignored', async () => {
+    // `maxAge` against a ttl-selected archive, and `expireAfter` against an
+    // age-selected one. Both must leave the declared window standing — the
+    // two keys are two windows, not two spellings of one.
+    const ttlStores = governedStores({
+      sys_audit_log: [{ id: 'r', created_at: at(-400 * DAY), expires_at: at(-100 * DAY), organization_id: null }],
+    });
+    const ttlEngine = captureEngine([TTL_ARCHIVE_OBJ], {
+      driver: ttlStores.hot,
+      datasources: { archive: ttlStores.cold },
+    }).engine;
+    await service(ttlEngine, {
+      getSettings: () => fakeSettings({ retention_overrides: { sys_audit_log: { maxAge: '1y' } } }),
+    }).sweep();
+    expect(ttlStores.readsFor('sys_audit_log')).toEqual([{ expires_at: { $lt: isoCutoff('90d') } }]);
+
+    const ageStores = governedStores({
+      sys_audit_log: [{ id: 'r', created_at: at(-100 * DAY), organization_id: null }],
+    });
+    const ageEngine = captureEngine([AUDIT_OBJ], {
+      driver: ageStores.hot,
+      datasources: { archive: ageStores.cold },
+    }).engine;
+    await service(ageEngine, {
+      getSettings: () => fakeSettings({ retention_overrides: { sys_audit_log: { expireAfter: '1y' } } }),
+    }).sweep();
+    expect(ageStores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+  });
+
+  it('NON-EFFECT: an override naming one archive-declaring object leaves the other on its declaration', async () => {
+    // The two objects that declare `lifecycle.archive` today. Both are
+    // retention + archive at 90d, both sweep in the same pass, and only the
+    // named one may move.
+    const stores = governedStores({
+      sys_audit_log: [{ id: 'audit-200d', created_at: at(-200 * DAY), organization_id: null }],
+      sys_metadata_audit: [{ id: 'meta-200d', created_at: at(-200 * DAY), organization_id: null }],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ, METADATA_AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+    });
+    const settings = fakeSettings({ retention_overrides: { sys_audit_log: { maxAge: '1y' } } });
+
+    await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('1y') } }]);
+    expect(stores.readsFor('sys_metadata_audit')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual([]);
+    expect(stores.archivedFrom('sys_metadata_audit')).toEqual(['meta-200d']);
+    expect(stores.remaining('sys_audit_log')).toEqual(['audit-200d']);
+  });
+
+  /* ---------------- LEG 3: per-tenant windows ---------------- */
+
+  it('DEFECT CONTROL (tenant): one candidate read per overriding tenant, then a global pass covering everyone else', async () => {
+    const stores = governedStores({
+      sys_audit_log: [
+        // The regulated tenant keeps rows 2y. Past both windows ⇒ moves.
+        { id: 'reg-800d', created_at: at(-800 * DAY), organization_id: 'org_reg' },
+        // Past the global 90d but INSIDE the tenant's 2y ⇒ must NOT move.
+        // Pre-fix, with one global pass, this row is archived — it is what
+        // makes the tenant leg falsifiable rather than merely unobserved.
+        { id: 'reg-200d', created_at: at(-200 * DAY), organization_id: 'org_reg' },
+        { id: 'plain-200d', created_at: at(-200 * DAY), organization_id: 'org_plain' },
+        // NULL org: covered by the global pass's explicit null branch, never
+        // by a bare `$nin`.
+        { id: 'no-org-200d', created_at: at(-200 * DAY), organization_id: null },
+      ],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+      findImpl: (object) => (object === 'sys_organization' ? [{ id: 'org_reg' }, { id: 'org_plain' }] : []),
+    });
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { sys_audit_log: { maxAge: '2y' } } } },
+    );
+
+    const report = await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(stores.readsFor('sys_audit_log')).toEqual([
+      { created_at: { $lt: isoCutoff('2y') }, organization_id: 'org_reg' },
+      {
+        created_at: { $lt: isoCutoff('90d') },
+        $or: [{ organization_id: { $nin: ['org_reg'] } }, { organization_id: null }],
+      },
+    ]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['reg-800d', 'plain-200d', 'no-org-200d']);
+    expect(stores.bulkDeleted).toEqual([
+      { object: 'sys_audit_log', ids: ['reg-800d'] },
+      { object: 'sys_audit_log', ids: ['plain-200d', 'no-org-200d'] },
+    ]);
+    expect(stores.remaining('sys_audit_log')).toEqual(['reg-200d']);
+
+    // One report entry for the object, carrying the GLOBAL cutoff and the
+    // summed count — the same shape `reap()` reports for its tenant passes.
+    const entries = report.swept.filter((e) => e.policy === 'archive');
+    expect(entries).toEqual([{
+      object: 'sys_audit_log',
+      class: 'audit',
+      policy: 'archive',
+      cutoff: isoCutoff('90d'),
+      archived: 3,
+    }]);
+    // NON-EFFECT: the cold-side `keep` prune is a bound on the ARCHIVE, not
+    // on which hot rows are due. It stays one `created_at` prune at `keep`,
+    // never per tenant and never governed.
+    expect(stores.coldDeletes).toEqual([
+      { object: 'sys_audit_log', query: { where: { created_at: { $lt: isoCutoff('7y') } } } },
+    ]);
+  });
+
+  it('DEFECT CONTROL (tenant): a tenant-scoped override below the floor is rejected the same way', async () => {
+    const stores = governedStores({
+      sys_audit_log: [{ id: 'reg-200d', created_at: at(-200 * DAY), organization_id: 'org_fast' }],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+      findImpl: (object) => (object === 'sys_organization' ? [{ id: 'org_fast' }] : []),
+    });
+    const settings = fakeSettings(
+      {},
+      { org_fast: { retention_overrides: { sys_audit_log: { maxAge: '1h' } } } },
+    );
+    const svc = service(engine, { getSettings: () => settings });
+    svc.registerRetentionFloor('sys_audit_log', floor());
+
+    const report = await svc.sweep();
+
+    // The tenant pass falls back to the window that DID pass the floor.
+    expect(stores.readsFor('sys_audit_log')[0]).toEqual({
+      created_at: { $lt: isoCutoff('90d') },
+      organization_id: 'org_fast',
+    });
+    expect(report.floorViolations).toHaveLength(1);
+    expect(report.floorViolations[0]!.scope).toBe('tenant:org_fast');
+    expect(report.floorViolations[0]!.appliedMs).toBe(90 * DAY);
+  });
+
+  it('NON-EFFECT: a tenant override naming a DIFFERENT object leaves the archive on one global pass', async () => {
+    // `tenantOverrides` is keyed by object. A regulated tenant tuning some
+    // other table must not split the Archiver into per-tenant passes.
+    const stores = governedStores({
+      sys_audit_log: [{ id: 'audit-200d', created_at: at(-200 * DAY), organization_id: 'org_reg' }],
+    });
+    const { engine } = captureEngine([AUDIT_OBJ], {
+      driver: stores.hot,
+      datasources: { archive: stores.cold },
+      findImpl: (object) => (object === 'sys_organization' ? [{ id: 'org_reg' }] : []),
+    });
+    const settings = fakeSettings(
+      {},
+      { org_reg: { retention_overrides: { sys_job_run: { maxAge: '2y' } } } },
+    );
+
+    await service(engine, { getSettings: () => settings }).sweep();
+
+    expect(stores.readsFor('sys_audit_log')).toEqual([{ created_at: { $lt: isoCutoff('90d') } }]);
+    expect(stores.archivedFrom('sys_audit_log')).toEqual(['audit-200d']);
+  });
+});
+
 describe('LifecycleService.sweep — space reclaim', () => {
   it('reclaims once per driver after deletions', async () => {
     const reclaimSpace = vi.fn(async () => {});

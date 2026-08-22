@@ -127,6 +127,53 @@ describe('bundled template declared version surfaces', () => {
       }
     });
 
+    // The bundled `pnpm-workspace.yaml` is a settings-only file with no
+    // `packages:` key, and early pnpm 10 refuses such a file outright: `pnpm
+    // install` exits 1 with "ERROR packages field missing or empty" before it
+    // resolves a single dependency, so a scaffolded project cannot be installed
+    // at all. Measured on the bundled shape, one clean install per pnpm
+    // version, each with its own store:
+    //
+    //   10.0.0–10.4.0    parse pnpm-workspace.yaml BEFORE reading `engines`, so
+    //                    the floor cannot reach them — still the raw workspace
+    //                    error. Only a decision about the `packages:` key
+    //                    itself closes that sliver, and it is not made here.
+    //   10.5.0–10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE.
+    //   >=10.15.0        install succeeds.
+    //
+    // `objectstack init` (packages/cli/src/commands/init.ts) is the other
+    // scaffold path and declares the same floor from `SCAFFOLD_PNPM_RANGE`.
+    it('package.json declares a pnpm floor at or above the version that accepts the keyless workspace file', () => {
+      const templatePkg = JSON.parse(readTemplateFile('package.json'));
+      const range: unknown = templatePkg.engines?.pnpm;
+      expect(
+        typeof range,
+        `${template}/package.json must declare engines.pnpm — without it, pnpm 10.5–10.14 ` +
+          'hit "packages field missing or empty" on a brand-new project instead of being told ' +
+          'to upgrade',
+      ).toBe('string');
+
+      const match = /^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$/.exec(String(range).trim());
+      expect(match, `engines.pnpm "${range}" must be a plain ">=" floor`).not.toBeNull();
+
+      const rank = (maj: number, min: number, pat: number) => maj * 1e6 + min * 1e3 + pat;
+      const declared = rank(Number(match![1]), Number(match![2]), Number(match![3] ?? '0'));
+      expect(
+        declared,
+        `engines.pnpm "${range}" admits pnpm versions measured to refuse this template's ` +
+          'pnpm-workspace.yaml — the first accepting version is 10.15.0',
+      ).toBeGreaterThanOrEqual(rank(10, 15, 0));
+    });
+
+    // `packageManager: "pnpm@x.y.z"` would declare the scaffolded project
+    // pnpm-only — corepack-driven yarn refuses to run in such a project — and
+    // pin one exact version that goes stale on every pnpm release. npm, yarn
+    // and bun all ignore `engines.pnpm`, so the floor above costs them nothing.
+    it('package.json does NOT pin a packageManager', () => {
+      const templatePkg = JSON.parse(readTemplateFile('package.json'));
+      expect(templatePkg.packageManager).toBeUndefined();
+    });
+
     // NOTE the file: this stamp lives in `objectstack.config.ts`, inside the
     // `defineStack({ manifest: … })` literal. It is NOT in
     // `objectstack.manifest.json` — the two were conflated in this suite's own

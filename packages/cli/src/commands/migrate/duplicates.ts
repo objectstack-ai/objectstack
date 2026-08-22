@@ -431,6 +431,97 @@ export function collectScanTargets(
   return { targets, skipped };
 }
 
+/**
+ * ── The seam that ACCEPTS a query but never ANSWERS one (#10677) ───────────
+ *
+ * `resolveSeedTenancyExec` answers "is there a raw-SQL seam here?" by looking
+ * for a callable — `typeof d.execute === 'function'`. That is a question about
+ * the driver's SHAPE, and one driver in this repo satisfies the shape without
+ * satisfying the contract: `InMemoryDriver.execute()` logs
+ * `Raw execution not supported in InMemory driver` and returns `null`. It
+ * neither throws nor is absent.
+ *
+ * `normalizeRows(null)` is `[]`, and `[]` is also what a real driver returns
+ * for a SELECT that matched nothing. So the no-op seam produced the one
+ * outcome #8928's ruling exists to forbid: `duplicates: []`, `skipped: []`,
+ * `counters.status: "read"`, exit 0 — a clean bill of health from a probe that
+ * never ran. Measured on `os migrate duplicates --database-url memory://qa`:
+ * exit 0, an empty report, and three `Raw execution not supported` warnings on
+ * stderr for the three statements it silently swallowed.
+ *
+ * The fix keys on the only thing that actually separates the two cases: a
+ * driver that ANSWERS returns a RESULT SET, and a driver that cannot answer
+ * returns no result set at all. "Absent" and "empty" stop being the same
+ * observation. Nothing here names a driver — a seam is judged by what it
+ * returns, so a future host with the same no-op shape is covered without an
+ * allowlist to maintain.
+ */
+
+/**
+ * Is `result` one of the result-set shapes a raw SELECT can come back as?
+ *
+ * The same three `normalizeRows` flattens, asked as a yes/no: a bare row array
+ * (better-sqlite3 through knex), `{ rows }` (pg), and the `[rows, fields]`
+ * tuple (mysql2) — an empty result set in any of those spellings is still a
+ * result set, and still `true`. Everything else is the fourth thing a seam can
+ * hand back, which is nothing: `null`, `undefined`, or a value the dialects do
+ * not produce.
+ *
+ * This cannot lose rows that `normalizeRows` would have found. Every shape it
+ * rejects is a shape `normalizeRows` already flattens to `[]`, so the change is
+ * only ever "reported as unreadable" replacing "reported as zero rows".
+ */
+export function isResultSet(result: unknown): boolean {
+  if (Array.isArray(result)) return true;
+  if (typeof result === 'object' && result !== null) {
+    return Array.isArray((result as { rows?: unknown }).rows);
+  }
+  return false;
+}
+
+/** Legal in every dialect this report supports, reads nothing, writes nothing. */
+const SEAM_PREFLIGHT_SQL = 'select 1 as os_seam_probe';
+
+const SEAM_NO_ANSWER_DETAIL =
+  'the raw-SQL seam returned no result set — a seam that cannot answer is not a seam that answered "no rows"';
+
+/**
+ * Does the resolved seam decline to answer at all?
+ *
+ * ⚠️ A seam that THROWS is deliberately NOT reported here. Throwing is a
+ * driver present and refusing loudly, and the per-probe `skipped` path already
+ * records that honestly (`duplicate probe failed: <driver message>`), so an
+ * install whose seam errors keeps exactly the behaviour it has today. Only a
+ * seam that RETURNS a non-answer is the defect this guards, because only that
+ * one is invisible in the report.
+ */
+export async function seamAnswersNothing(exec: SeedTenancyExec): Promise<boolean> {
+  try {
+    return !isResultSet(await exec(SEAM_PREFLIGHT_SQL, []));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wrap a seam so a probe that returns no result set FAILS instead of reading as
+ * zero rows.
+ *
+ * The preflight above rejects a wholly no-op seam before the scan starts; this
+ * covers the remainder of the class — a seam that answers one statement and not
+ * the next. It adds no new refusal and no new report key: the throw lands in
+ * the `catch` blocks the collector already has, so the outcome is a `skipped`
+ * entry naming the reason, which is what this command's contract has always
+ * promised for a target it could not read.
+ */
+export function answeringSeam(exec: SeedTenancyExec): SeedTenancyExec {
+  return async (sql: string, params?: unknown[]) => {
+    const result = await exec(sql, params);
+    if (!isResultSet(result)) throw new Error(SEAM_NO_ANSWER_DETAIL);
+    return result;
+  };
+}
+
 /** How many values one holder query asks about — bound-parameter limits are per dialect. */
 const HOLDER_BATCH = 200;
 
@@ -694,15 +785,24 @@ export default class MigrateDuplicates extends Command {
       const getService = (stack.kernel as { getService?: (name: string) => unknown })?.getService;
       const ql = getService?.call(stack.kernel, 'objectql') as IObjectQLEngine | undefined;
       const exec = resolveSeedTenancyExec(ql);
-      if (!exec) {
-        // Loud absence, never a clean empty report: a driver with no raw-SQL
-        // seam (memory, mongodb) cannot be grouped by value from here, and
-        // "zero duplicates" would be indistinguishable from "never looked".
+      // Loud absence, never a clean empty report: a driver that cannot be
+      // grouped by value from here must say so, because "zero duplicates"
+      // would be indistinguishable from "never looked".
+      //
+      // TWO ways a seam fails to be one, and the second is the whole of #10677:
+      // it can be missing (`resolveSeedTenancyExec` returns undefined), or it
+      // can be present, accept every statement and answer none of them. The
+      // resolver only ever saw the first, because it judges the driver's SHAPE
+      // (`typeof d.execute === 'function'`) and a no-op `execute` has the right
+      // shape. So the seam is asked one trivial question before the scan
+      // starts, and a seam that returns no RESULT SET is absent, not empty.
+      if (!exec || (await seamAnswersNothing(exec))) {
         await emitJson(
           {
             error: 'no_sql_seam',
             detail:
-              'The active driver exposes no raw SQL seam, so the data-side duplicate probe cannot run. ' +
+              'The active driver exposes no usable raw SQL seam — it is either absent, or present but ' +
+              'returning no result set — so the data-side duplicate probe cannot run. ' +
               'This report supports the SQL drivers (sqlite / postgres / mysql / turso).',
           },
           1,
@@ -712,7 +812,11 @@ export default class MigrateDuplicates extends Command {
       }
 
       const report = await collectDuplicateIdentifierReport({
-        exec,
+        // Wrapped, not bare: the preflight cleared the seam as a whole, and
+        // this keeps every individual probe held to the same standard — one
+        // that returns no result set becomes a `skipped` entry rather than
+        // zero findings.
+        exec: answeringSeam(exec),
         normalize: normalizeRows,
         objects: stack.allObjects(),
         database: stack.dbLabel,

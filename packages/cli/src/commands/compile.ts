@@ -148,6 +148,35 @@ export default class Compile extends Command {
         }
       }
 
+      // 2c. [#10678] SURFACE the warn-and-bundle. The default (non-`--strict-body`)
+      //     build catches every extraction failure in `lowerCallables`, records it
+      //     in `bodyExtractionWarnings`, ships the callable through the .mjs bundle
+      //     and exits 0. That last part is correct and stays correct — flipping the
+      //     default to a hard failure would change what `os build` ACCEPTS, which is
+      //     not this change. What was wrong is that the recorded warnings reached
+      //     nobody: a hook body containing `fetch()` produced a completely silent
+      //     success, and the only way to learn the handler had NOT become a metadata
+      //     body was to diff the artifact. The data already existed; it just never
+      //     got printed. Advisory only — nothing below may touch the exit code.
+      //
+      //     The reason strings carry a multi-line `--- offending body source ---`
+      //     dump for `--strict-body`'s per-callable diagnostic; on the default path
+      //     we print the first line and point at the flag for the rest, so the
+      //     default build stays readable while staying honest.
+      if (lowering.bodyExtractionWarnings.length > 0 && !flags.json) {
+        const n = lowering.bodyExtractionWarnings.length;
+        console.log('');
+        printWarning(
+          `${n} handler${n === 1 ? '' : 's'} could not be lowered to a metadata body — ` +
+            `bundled via the legacy runtime module instead (build still succeeds)`,
+        );
+        for (const w of lowering.bodyExtractionWarnings.slice(0, 20)) {
+          console.log(`  • ${w.origin}: ${String(w.reason).split('\n')[0]}`);
+        }
+        if (n > 20) console.log(chalk.dim(`  … and ${n - 20} more`));
+        console.log(chalk.dim('    → run `os build --strict-body` for the full diagnostic, or to make this fatal'));
+      }
+
       // 3. Validate the lowered (JSON-safe) stack against the Protocol.
       if (!flags.json) printStep('Validating protocol compliance...');
       const result = ObjectStackDefinitionSchema.safeParse(lowering.lowered);
@@ -435,6 +464,15 @@ export default class Compile extends Command {
           // reports. This key used to carry the widget rule's warnings alone —
           // one gate out of the twenty-odd that raise them.
           warnings: ruleAdvisories,
+          // [#10678] Body-extraction failures that made a callable fall back to
+          // the legacy .mjs bundle. A SEPARATE key on purpose: `warnings` above
+          // is author-time RULE advisories (`{where,message,rule,path,hint}`)
+          // and is the shape `os validate --json` shares — folding a different
+          // record shape (`{origin,reason}`) into it would break that contract
+          // for every consumer that reads one shape from either command. Empty
+          // array when every callable lowered cleanly, so a CI consumer can read
+          // the key unconditionally.
+          bodyExtractionWarnings: lowering.bodyExtractionWarnings,
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,
@@ -450,6 +488,13 @@ export default class Compile extends Command {
       printSuccess(`Build complete ${chalk.dim(`(${timer.display()})`)}`);
       if (ruleAdvisories.length > 0) {
         printWarning(`${ruleAdvisories.length} author-time warning(s) — see above`);
+      }
+      if (lowering.bodyExtractionWarnings.length > 0) {
+        // [#10678] Repeat the tally in the summary: the detail printed before the
+        // parse, and a long build scrolls it away.
+        printWarning(
+          `${lowering.bodyExtractionWarnings.length} handler(s) bundled instead of lowered to a metadata body — see above`,
+        );
       }
       console.log('');
       printMetadataStats(stats);

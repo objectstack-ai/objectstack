@@ -346,7 +346,6 @@ export interface MetadataStats {
   apis: number;
   positions: number;
   permissions: number;
-  themes: number;
   datasources: number;
   translations: number;
   plugins: number;
@@ -386,7 +385,6 @@ export function collectMetadataStats(config: any): MetadataStats {
     apis: count(config.apis),
     positions: count(config.positions),
     permissions: count(config.permissions),
-    themes: count(config.themes),
     datasources: count(config.datasources),
     translations: count(config.translations),
     plugins: count(config.plugins),
@@ -397,7 +395,47 @@ export function collectMetadataStats(config: any): MetadataStats {
 // ─── Server Ready Banner ────────────────────────────────────────────
 
 export interface ServerReadyOptions {
-  port: number;
+  /**
+   * The origin an operator can actually reach this deployment on — the base
+   * every absolute URL in the banner is built from — or `null` when none could
+   * be determined.
+   *
+   * ## Why this is handed in, and why the port is not
+   *
+   * This field replaced a `port: number` that the banner turned into
+   * `http://localhost:${port}` itself. That address is the one the process
+   * BINDS, which is not the one a human can open the moment anything sits in
+   * front of it. Measured on the EE 4.1.0 compose stack (#10646): the app
+   * container `expose`s `:3000` with no `ports:` mapping — unreachable from the
+   * host, and more so under `--scale app=N` — while the published entry point
+   * is Caddy on `:80` and `OS_AUTH_URL` is already resolved to
+   * `http://localhost`. The banner printed `http://localhost:3000/_console/`
+   * anyway: a Console link that fails outright, and an `MCP:` line that is the
+   * address customers paste into an AI client, where a wrong absolute URL never
+   * fails loudly — it just never connects.
+   *
+   * So the banner no longer knows the port at all. It cannot compose an address
+   * from one, which makes the old defect a COMPILE error rather than a
+   * plausible-looking line of output. The caller resolves the origin through
+   * the runtime's own chain (`resolveAuthBaseUrl` in `serve`: `OS_AUTH_URL` →
+   * legacy `BETTER_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>`) and
+   * hands the answer here. That is the same value the CSRF allow-list and
+   * first-party auth redirects key off, so the banner and the runtime cannot
+   * disagree about where this deployment lives — a second, banner-local notion
+   * of "external base" is exactly the drift this field exists to prevent.
+   *
+   * ## `null` means "say nothing", never "guess"
+   *
+   * `null` is what the resolver reports when the chain produced something that
+   * will not parse — a set-but-empty `OS_AUTH_URL=` (which does NOT fall
+   * through to the rest of the chain), or a value with no scheme. The banner
+   * then prints the PATHS with no origin in front of them. A missing address
+   * sends the operator to look one up; a confidently wrong one gets copied.
+   *
+   * Required on purpose: an absent field must not be able to mean
+   * `http://localhost:<port>` again by omission.
+   */
+  externalBaseOrigin: string | null;
   /**
    * The authored config file, relative to cwd — printed in the `Config:`
    * row. Omit it when the boot did not actually read a config (#8978): on
@@ -570,17 +608,33 @@ export interface AutomationReadySummary {
  * they serve every command, some of whose stdout IS the program's output.
  */
 export function printServerReady(opts: ServerReadyOptions) {
-  const base = `http://localhost:${opts.port}`;
+  // #10646 — the address the OPERATOR can reach, never the one this process
+  // binds. See ServerReadyOptions.externalBaseOrigin for the measured case
+  // these two came apart in; `null` there means the deployment's external base
+  // is UNKNOWN, and the rule for that case is the whole design: print the path
+  // and no origin. Every absolute URL below goes through `link()`, so there is
+  // exactly one place that decides, and no line can quietly grow its own base.
+  const base = opts.externalBaseOrigin;
+  const link = (path: string) => (base === null ? path : base + path);
   console.error('');
   console.error(chalk.bold.green('  ✓ Server is ready'));
   console.error('');
-  console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(base + '/'));
+  console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(link('/')));
   if (opts.uiEnabled && opts.consolePath) {
-    console.error(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
+    console.error(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(link(opts.consolePath + '/')));
   }
   if (opts.mcpEnabled) {
-    console.error(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(base + '/api/v1/mcp'));
-    console.error(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${base}/api/v1/mcp/skill`));
+    console.error(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(link('/api/v1/mcp')));
+    console.error(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${link('/api/v1/mcp/skill')}`));
+  }
+  if (base === null) {
+    // Say why the origin is missing and name the one variable that fixes it,
+    // rather than leaving the operator to infer it from truncated links. The
+    // boot already complains in more detail (formatUnusableAuthBaseUrlDiagnostic
+    // in `serve`), but only on the branch that registers auth — so on every
+    // other boot shape this line is the only notice there is.
+    console.error(chalk.dim('      paths only — this deployment\'s external base URL could not be resolved;'));
+    console.error(chalk.dim('      set OS_AUTH_URL to its public origin (e.g. https://app.example.com)'));
   }
   if (opts.seededAdmin) {
     console.error('');
@@ -752,7 +806,24 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
 }
 
 export function printMetadataStats(stats: MetadataStats) {
-  const sections: Array<{ label: string; items: Array<[string, number]> }> = [
+  const sections: Array<{
+    label: string;
+    items: Array<[string, number]>;
+    /**
+     * #10504 — a section whose every item is `0` used to vanish from the
+     * summary entirely, and that reads as "this summary does not report on
+     * this section" rather than "this project has none of it" — exactly the
+     * same output for a newcomer's freshly scaffolded project (intentionally
+     * zero apps) and for a summary that simply never covers UI. Triage ruled
+     * this narrowly for `UI:` — the newcomer-facing "is there a navigable
+     * app" signal — not as a blanket rule for every section, so this is an
+     * opt-in per section naming the one item to force-print at zero, not a
+     * change to the drop behavior of `Data:`/`Logic:`/`Security:` (those
+     * still omit the whole row when every item in them is zero — see #10952
+     * for whether that should change too).
+     */
+    zeroFallback?: string;
+  }> = [
     {
       label: 'Data',
       items: [
@@ -771,8 +842,8 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Dashboards', stats.dashboards],
         ['Reports', stats.reports],
         ['Actions', stats.actions],
-        ['Themes', stats.themes],
       ],
+      zeroFallback: 'Apps',
     },
     {
       label: 'Logic',
@@ -793,10 +864,15 @@ export function printMetadataStats(stats: MetadataStats) {
   ];
 
   for (const section of sections) {
-    const nonZero = section.items.filter(([, v]) => v > 0);
-    if (nonZero.length === 0) continue;
-    
-    const line = nonZero.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
+    let shown = section.items.filter(([, v]) => v > 0);
+    if (shown.length === 0) {
+      if (!section.zeroFallback) continue;
+      const fallback = section.items.find(([k]) => k === section.zeroFallback);
+      if (!fallback) continue; // defensive — zeroFallback must name a real item
+      shown = [fallback];
+    }
+
+    const line = shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
     console.log(`  ${chalk.bold(section.label + ':')} ${line}`);
   }
 

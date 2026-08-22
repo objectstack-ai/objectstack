@@ -69,6 +69,34 @@ describe('extractHookBody', () => {
     expect(() => extractHookBody(fn, 'hook bad')).toThrow(/fetch/);
   });
 
+  // #10678 — BOTH spellings, one reason. A TS config never reaches the
+  // extractor spelling `require(`: `loadConfig` runs it through bundle-require
+  // -> esbuild, whose ESM interop shim rewrites it to `__require("node:os")`
+  // first. Matching only the source spelling left the promised require()-reason
+  // unreachable from the real authoring path — the refusal still fired, but as
+  // the generic #1876 free-identifier message naming an identifier the author
+  // never typed. These two cases are written with the call built at runtime so
+  // the test file itself is not rewritten by its own bundler.
+  it('rejects require() — the spelling the author writes', () => {
+    const fn = new Function('ctx', "const os = require('node:os'); return os;") as (...a: unknown[]) => unknown;
+    expect(() => extractHookBody(fn, 'hook bad')).toThrow(/`require\(\)` is not allowed/);
+  });
+
+  it('rejects __require() — the spelling esbuild leaves behind (#10678)', () => {
+    const fn = new Function('ctx', 'const os = __require("node:os"); return os;') as (...a: unknown[]) => unknown;
+    // The require()-specific reason, NOT the free-identifier fallback. If this
+    // ever reads "not in scope at runtime" again, the reason went unreachable.
+    expect(() => extractHookBody(fn, 'hook bad')).toThrow(/`require\(\)` is not allowed/);
+    expect(() => extractHookBody(fn, 'hook bad')).not.toThrow(/not in scope at runtime/);
+  });
+
+  it('does NOT widen to an identifier merely ending in `require` (#10678)', () => {
+    // `\b(?:__)?require\s*\(` has no word boundary inside `myrequire`, so the
+    // pattern cannot swallow an author's own helper. Guards the widening.
+    const fn = new Function('ctx', 'return ctx.myrequire ? 1 : 0;') as (...a: unknown[]) => unknown;
+    expect(() => extractHookBody(fn, 'hook ok')).not.toThrow();
+  });
+
   it('rejects process access', () => {
     const fn = (_ctx: any) => {
       const env = (process as any).env.X;

@@ -66,6 +66,7 @@ export default defineView({
       data: { provider: 'object', object: 'lead' },
       sections: [
         {
+          name: 'about_you',
           label: 'Tell us about yourself',
           columns: 2,
           fields: [
@@ -242,6 +243,7 @@ entry in `sections[].fields[]` (declarable since #7467):
 
 ```ts
 sections: [{
+  name: 'about_you',
   label: 'About you',
   fields: [
     'company',
@@ -326,6 +328,7 @@ export default defineView({
       data: { provider: 'object', object: 'lead' },
       sections: [
         {
+          name: 'lead',
           label: 'Lead',
           columns: 2,
           fields: [

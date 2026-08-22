@@ -100,6 +100,9 @@ describe('#8687 — unknown top-level stack keys are refused at parse', () => {
       ['workflows', 'state_machine'],
       // #3464: the collection was removed outright.
       ['portals', '#3464'],
+      // #10485 (ADR-0049): the themes carrier retired; app.branding is the
+      // one colour surface.
+      ['themes', 'app.branding'],
       // #4212: the uninvoked lifecycle family.
       ['onDisable', '#4212'],
     ];
@@ -119,6 +122,51 @@ describe('#8687 — unknown top-level stack keys are refused at parse', () => {
     if (result.success) return;
     const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys')!;
     expect(issue.message).toContain('ObjectStackDefinitionSchema');
+  });
+});
+
+describe('#10485 — the `themes` carrier is retired (ADR-0049; ruled 退役授权面 2026-08-21)', () => {
+  // A theme body that parsed green on 17.0 — the exact authoring the issue
+  // measured shipping end-to-end while changing nothing on screen.
+  const previouslyAcceptedThemes = [
+    { name: 'corporate', label: 'Corporate', mode: 'light', colors: { primary: '#7C3AED' } },
+  ];
+
+  it('a stack declaring `themes` is refused LOUDLY, at the key (not the value)', () => {
+    const result = parseTopLevel({ ...legalStack(), themes: previouslyAcceptedThemes });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys')!;
+    expect(issue, 'themes must raise unrecognized_keys').toBeDefined();
+    expect(issue.path).toEqual([]);
+    expect((issue as unknown as { keys: string[] }).keys).toContain('themes');
+    // The prescription itself — removal citation, and where colour lives now.
+    expect(issue.message).toContain('#10485');
+    expect(issue.message).toContain('app.branding');
+    expect(issue.message).toContain('primaryColor');
+    // A retirement is a prescription, never a rename suggestion (finding 7).
+    expect(issue.message).not.toContain('Did you mean');
+  });
+
+  it('positive control: the prescribed replacement parses green', () => {
+    const result = parseTopLevel({
+      ...legalStack(),
+      apps: [{
+        name: 'probe_app',
+        label: 'Probe',
+        branding: { primaryColor: '#7C3AED', accentColor: '#06B6D4' },
+      }],
+    });
+    expect(result.success, 'app.branding must stay accepted').toBe(true);
+  });
+
+  it('the schema surface is gone with the carrier: no theme export survives on ./ui', async () => {
+    const ui = await import('./ui/index');
+    for (const name of ['ThemeSchema', 'ColorPaletteSchema', 'TypographySchema', 'BorderRadiusSchema', 'ShadowSchema', 'ThemeModeSchema', 'defineTheme']) {
+      expect(name in ui, `${name} must not survive on ./ui`).toBe(false);
+    }
+    // Anti-vacuity: the namespace probed is real and non-trivial.
+    expect('PageSchema' in ui).toBe(true);
   });
 });
 

@@ -18,8 +18,10 @@
 // regression than the bug. Three populations therefore have to keep answering
 // `200` with an empty collection, and each is here for a different reason:
 //
-//   * types in the static spelling contract (`sharing_rule`, `theme`,
-//     `objects`, `api`) — declared, addressable, frequently empty;
+//   * types in the static spelling contract (`sharing_rule`, `webhook`,
+//     `objects`, `api`) — declared, addressable, frequently empty
+//     (`theme` was one of them until #10485 retired its carrier out of the
+//     contract — it now earns the refusal, pinned below);
 //   * live-only keys an ordinary `registerApp` produces (`data`, `kind`,
 //     `package`, `policy`) — outside the static contract but ENUMERATED by
 //     `GET /meta/types`, which is precisely why #8421 refused to raise the
@@ -168,7 +170,7 @@ describe('[#9488] the read door and the write door agree on one invented name', 
 describe('[#9488] a type that EXISTS and has no items still answers 200 with an empty collection', () => {
     // The static spelling contract's own members — declared and addressable,
     // whether or not this deployment holds a single item of them.
-    it.each(['sharing_rule', 'sharingRules', 'theme', 'themes', 'objects', 'object', 'api', 'external_catalogs'])(
+    it.each(['sharing_rule', 'sharingRules', 'webhook', 'webhooks', 'objects', 'object', 'api', 'external_catalogs'])(
         'declared type %s', async (type) => {
             const { rest } = setup();
 
@@ -176,6 +178,21 @@ describe('[#9488] a type that EXISTS and has no items still answers 200 with an 
 
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual([]);
+        },
+    );
+
+    it.each(['theme', 'themes'])(
+        '[#10485] retired spelling %s is refused — it left the static contract with its carrier',
+        async (type) => {
+            // Until #10485 both spellings answered 200-empty here. The
+            // retirement removed the `themes: 'theme'` fold, so a read now
+            // gets the same ADR-0112 refusal an invented name does.
+            const { rest } = setup();
+
+            const res = await listType(rest, type);
+
+            expect(res.statusCode).toBe(400);
+            expect(res.body?.code).toBe('INVALID_REQUEST');
         },
     );
 

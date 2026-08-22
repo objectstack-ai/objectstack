@@ -411,6 +411,41 @@ human_s() {
   if ((s >= 60)); then printf '%ss (%dm%02ds)' "$s" $((s / 60)) $((s % 60)); else printf '%ss' "$s"; fi
 }
 
+# The ORDINARY refusal: the budget elapsed and we never got the lock. One
+# function because more than one check can be the one that notices, and a
+# timeout that describes itself differently depending on WHICH check noticed is
+# exactly how an ordinary full-budget wait came to be reported as a clock fault.
+# The optional note is the only thing that varies, and it says where the wait
+# was spent — never why the deadline passed, which is not in question here.
+verdict_queue_timeout() {
+  local waited="$1" note="${2:-}"
+  if [[ -n "$note" ]]; then
+    log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · ${note} · $(holder_line)"
+  else
+    log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · $(holder_line)"
+  fi
+}
+
+# Does a count-based backstop have grounds to blame the CLOCK?
+#
+# Both backstops below bound this script by counting something that cannot lie
+# about the passage of time (seconds handed to `flock`, or polling passes that
+# each sleep). Reaching such a bound proves the loop ran; it does NOT by itself
+# prove anything about the clock. So the accusation gets its own predicate, and
+# it is the comparison the accusation has always claimed to have made: the
+# counted real seconds against what the polled clock says elapsed over the SAME
+# stretch. `2 * elapsed < counted` — the clock accounted for less than half the
+# time the count proves went by.
+#
+# Scale-free on purpose (no tolerance constant to tune): a stalled clock reports
+# ~0 whatever the budget, while the benign disagreements — whole-second
+# truncation at each read, a `flock -w N` returning a hair early — are a few
+# seconds against a budget of hundreds and can never reach half of it.
+clock_disagrees() {
+  local counted="$1" elapsed="$2"
+  ((elapsed * 2 < counted))
+}
+
 # --- host preflight ---------------------------------------------------------
 
 # What this entry point needs from the host, checked ONCE, before any waiting.
@@ -544,26 +579,39 @@ mode_run() {
   # where `now` was the empty string on every pass and `now >= deadline` was
   # `0 >= 540` forever. One pass costs at least POLL_S of sleep, so a run that
   # burns through the whole budget's worth of passes and more has learned
-  # something about the clock, not about the lock.
+  # something the deadline check could not.
+  #
+  # ORDER MATTERS, and it is the same order as in the flock-slice loop below:
+  # read the clock, test the DEADLINE, and only then the count. A backstop that
+  # gets to answer first answers for the ordinary case too, and then an ordinary
+  # timeout is reported as an infrastructure fault. With the deadline first, a
+  # working clock always ends this loop by the ordinary route (it reaches the
+  # budget in BUDGET seconds, long before BUDGET+60 passes), and reaching the
+  # count at all means the clock did not get there — which the wording then
+  # states as the measured disagreement rather than as an assertion.
   local -a q
   q=()
-  local last_report=0 now pos i qline
+  local last_report=0 now pos i qline elapsed
   local passes=0 remints=0
   local max_passes=$((BUDGET / POLL_S + 60))
   local max_remints=5
   while ((ordered == 1)); do
     passes=$((passes + 1))
-    if ((passes > max_passes)); then
-      log "VERDICT lock-unusable (exit 99) · never acquired · the queue loop ran ${passes} passes inside a ${BUDGET}s budget, so the clock this script polls is not advancing · refusing to spin · nothing was built or tested"
-      exit 99
-    fi
     now="$(now_s)" || {
       log "VERDICT lock-unusable (exit 99) · never acquired · the seconds clock stopped answering mid-wait · refusing to spin · nothing was built or tested"
       exit 99
     }
+    elapsed=$((now - started))
     if ((now >= deadline)); then
-      waited=$((now - started))
-      log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · never reached the head of the queue · $(holder_line)"
+      verdict_queue_timeout "$elapsed" 'never reached the head of the queue'
+      exit 99
+    fi
+    if ((passes > max_passes)); then
+      if clock_disagrees $((passes * POLL_S)) "$elapsed"; then
+        log "VERDICT lock-unusable (exit 99) · never acquired · the queue loop ran ${passes} passes, each sleeping ${POLL_S}s, while the clock this script polls advanced only ${elapsed}s over the same stretch — the two accounts disagree, so the ${BUDGET}s deadline could never expire · refusing to spin · nothing was built or tested"
+        exit 99
+      fi
+      verdict_queue_timeout "$elapsed" "gave up after ${passes} queue passes inside a ${BUDGET}s budget"
       exit 99
     fi
     q=()
@@ -616,16 +664,40 @@ mode_run() {
   # trust the clock. The deadline check below is computed from `now_s`; if that
   # clock is frozen or running backwards, `remaining` stays positive forever and
   # this loop retries `flock -w` for as long as the process is left alive — an
-  # unbounded wait that prints no verdict, which is the exact failure this card
-  # is about, merely relocated from the queue loop into this one. Measured while
-  # fixing it: with the clock frozen and the lock held, this loop was still
-  # running when a 40s timeout killed it, having printed zero VERDICT lines.
+  # unbounded wait that prints no verdict, which is the exact failure that
+  # bound was added for, merely relocated from the queue loop into this one.
+  # Measured while fixing it: with the clock frozen and the lock held, this loop
+  # was still running when a 40s timeout killed it, having printed zero VERDICT
+  # lines.
   #
   # So elapsed time is ALSO accumulated from the one ruler here that cannot lie:
   # the timeout just handed to `flock`, which really did block for that long. It
   # rises by at least 1 each pass, so the loop terminates within BUDGET passes
   # whatever the clock claims. A flock that fails EARLY over-counts, which errs
   # toward terminating — the safe direction.
+  #
+  # WHAT THAT BOUND MUST NOT DO IS EXPLAIN THE ORDINARY CASE.
+  #
+  # It used to. A waiter that reaches the head of the queue and then spends its
+  # whole budget here spends it ENTIRELY in slices — 18 × 30s = 540s = BUDGET —
+  # so `slices_spent >= BUDGET` came true at the bottom of pass 18, one check
+  # before `remaining <= 0` would have come true at the top of pass 19. The
+  # backstop won that tie by position and printed "the clock this script polls
+  # reported none of it" for a completely healthy clock: the same run's own 18
+  # progress lines, decrementing 510 → 30 in exact 30s steps with the holder's
+  # `held` counter rising in lockstep, are proof the clock answered every poll.
+  # That reads as an infrastructure fault no retry can fix, when the truth was
+  # the mundane and actionable one — a sibling held the lock longer than one
+  # full budget. The two readings lead to opposite next moves, and the misread
+  # has already cost a seat an agent.
+  #
+  # Hence the order below, which is the whole fix: check the WALL-CLOCK DEADLINE
+  # after each slice, BEFORE the slice backstop, so a budget that genuinely
+  # elapsed always reports the ordinary timeout. The backstop keeps its job of
+  # terminating the loop, but it only gets to blame the clock when the clock is
+  # actually caught out — `clock_disagrees`, the comparison the old sentence
+  # asserted it had made and never made. When the two accounts agree, hitting
+  # the backstop means nothing more than "the budget is spent", and it says so.
   local remaining flock_rc slices_spent=0
   exec 9>> "$LOCK_FILE" || {
     log "✗ cannot open ${LOCK_FILE} for locking."
@@ -639,26 +711,54 @@ mode_run() {
     }
     remaining=$((deadline - now))
     if ((remaining <= 0)); then
-      waited=$((now - started))
-      log "VERDICT queue-timeout (exit 99) · never acquired · waited $(human_s "$waited") · $(holder_line)"
+      verdict_queue_timeout $((now - started))
       exit 99
     fi
     ((remaining > SLICE_S)) && remaining="$SLICE_S"
     flock_rc=0
     "$FLOCK_BIN" -w "$remaining" 9 || flock_rc=$?
     ((flock_rc == 0)) && break
-    slices_spent=$((slices_spent + remaining))
-    if ((slices_spent >= BUDGET)); then
-      log "VERDICT queue-timeout (exit 99) · never acquired · spent ${slices_spent}s of a ${BUDGET}s budget in flock slices while the clock this script polls reported none of it, so the deadline could never expire · refusing to spin · nothing was built or tested · $(holder_line)"
-      exit 99
-    fi
     # 126/127 is "the primitive is gone", not "someone else holds it". Retrying
-    # that costs a fork per slice and can never succeed, so it is a verdict.
+    # that costs a fork per slice and can never succeed, so it is a verdict —
+    # and it is tested BEFORE the two bounds below, because it is a cause this
+    # script has actually established. A cause that is KNOWN outranks one that
+    # is inferred: left underneath, a flock that returns instantly every pass
+    # ran the accounting up to BUDGET in no time at all and was reported as a
+    # clock that had stopped. Same misattribution as the one above, one branch
+    # over.
     if ((flock_rc == 126 || flock_rc == 127)); then
       log "VERDICT lock-unusable (exit 99) · never acquired · \`${FLOCK_BIN}\` exited ${flock_rc} (not found / not executable) · nothing was built or tested"
       exit 99
     fi
-    now="$(now_s)" || now="$deadline"
+    slices_spent=$((slices_spent + remaining))
+    # Re-read the clock now that the slice has really gone by, and let the
+    # DEADLINE answer first. This is the check whose absence made the backstop
+    # below the default explanation for an ordinary full-budget wait.
+    now="$(now_s)" || {
+      log "VERDICT lock-unusable (exit 99) · never acquired · the seconds clock stopped answering mid-wait · refusing to spin · nothing was built or tested"
+      exit 99
+    }
+    elapsed=$((now - started))
+    if ((elapsed >= BUDGET)); then
+      verdict_queue_timeout "$elapsed"
+      exit 99
+    fi
+    if ((slices_spent >= BUDGET)); then
+      if clock_disagrees "$slices_spent" "$elapsed"; then
+        log "VERDICT lock-unusable (exit 99) · never acquired · spent ${slices_spent}s of a ${BUDGET}s budget in flock slices while the clock this script polls advanced only ${elapsed}s over the same stretch — the two accounts disagree, so the deadline could never expire · refusing to spin · nothing was built or tested · $(holder_line)"
+        exit 99
+      fi
+      # The count is spent and the clock agrees it is: an ordinary timeout that
+      # whole-second rounding kept a hair short of the deadline test above.
+      # Report the larger of the two accounts — both are lower bounds on the
+      # real wait, and understating it is what invites a pointless retry.
+      if ((elapsed > slices_spent)); then
+        verdict_queue_timeout "$elapsed"
+      else
+        verdict_queue_timeout "$slices_spent"
+      fi
+      exit 99
+    fi
     if ((now - last_report >= PROGRESS_EVERY_S)); then
       last_report="$now"
       log "waiting: at the head of the queue, $((deadline - now))s of budget left · $(holder_line)"
@@ -862,6 +962,53 @@ mode_self_test() {
     "$([[ -e "$franfile" ]] && echo yes || echo no)" no
   st_case 'and gives up in bounded wall time (<= 20s on a 3s budget)' \
     "$((fz1 - fz0 <= 20))" 1
+  # CASE 2 OF THE PAIR BELOW: this is the ONE situation entitled to the
+  # clock-fault wording, and it must still fire — a message that can never fire
+  # is its own defect, and the fix that stopped it firing for ordinary timeouts
+  # would be worthless if it also silenced the case it guards. The frozen shim
+  # pins both numbers: `started` and `now` are the same constant, so the clock
+  # reports exactly 0s against a slice account of 3s.
+  st_case 'and the clock-fault wording DOES still fire when the clock really stalls' \
+    "$([[ "$froze" == *'the clock this script polls advanced only 0s over the same stretch'* ]] && echo yes || echo no)" yes
+  st_case 'and prints both accounts, so the accusation can be checked rather than believed' \
+    "$([[ "$froze" == *'spent 3s of a 3s budget in flock slices'*'the two accounts disagree'* ]] && echo yes || echo no)" yes
+  st_case 'and calls a stalled clock lock-unusable, not a timeout (nothing timed out)' \
+    "$([[ "$froze" == *'VERDICT lock-unusable'* ]] && echo yes || echo no)" yes
+
+  # CASE 1 OF THE PAIR: an ORDINARY full-budget wait, healthy clock, real
+  # holder — the situation that used to print the clock-fault sentence above.
+  #
+  # The shape is the whole point: a waiter that reaches the HEAD of the queue
+  # spends its entire budget inside the flock-slice loop, so slice accounting
+  # reaches BUDGET at the bottom of a pass one check before the deadline test at
+  # the top of the next one would have. The backstop won that tie by position
+  # and accused a clock that the same run's own progress lines proved was
+  # answering every poll. An agent reading that concludes the container is
+  # broken and no retry can help; the truth was that a sibling held the lock for
+  # longer than one full budget, which is ordinary and actionable. Both readings
+  # cannot be right, and this case is what keeps them apart.
+  #
+  # Budget 3s reproduces it exactly at 1/180th of the size: one 3s slice fills
+  # the budget in slices with nothing left over, which is what 18 × 30s did.
+  local ordhold ordout ordrc ordranfile
+  ordranfile="${tmp}/ordinary-command-ran"
+  rm -f "$ordranfile"
+  bash "$SELF" -c 'sleep 25' > /dev/null 2>&1 &
+  ordhold=$!
+  sleep 1.5
+  ordout="$(OS_VERIFY_LOCK_WAIT=3 bash "$SELF" -c ": > '${ordranfile}'" 2>&1)"
+  ordrc=$?
+  kill "$ordhold" 2> /dev/null
+  wait "$ordhold" 2> /dev/null
+  st_case 'an ordinary full-budget wait at the head of the queue exits 99' "$ordrc" 99
+  st_case 'and reports the ORDINARY timeout' \
+    "$([[ "$ordout" == *'VERDICT queue-timeout'*'never acquired · waited'* ]] && echo yes || echo no)" yes
+  st_case 'and accuses no clock — the fault this branch used to assert by default' \
+    "$([[ "$ordout" == *clock* ]] && echo ACCUSED-THE-CLOCK || echo no)" no
+  st_case 'and names the holder instead, which is the half an agent can act on' \
+    "$([[ "$ordout" == *'holder pid '* ]] && echo yes || echo no)" yes
+  st_case 'and does not run the command' \
+    "$([[ -e "$ordranfile" ]] && echo yes || echo no)" no
 
   # every exit path prints a verdict, argument errors included.
   st_case 'a usage error prints a verdict too' \

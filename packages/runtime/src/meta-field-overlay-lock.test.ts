@@ -696,26 +696,28 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
     it('#7894 POSITIVE CONTROL — a plugin-registered runtime type is still permitted', async () => {
         const { engine, dispatcher } = makeStack();
 
-        // `theme` has no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all.
-        // [#10194] spec-valid bodies — `theme` resolves a schema through
-        // UNREGISTERED_KIND_SCHEMAS now, and this control measures the #7894
+        // `webhook` has no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all.
+        // [#6245] spec-valid bodies — `webhook` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS, and this control measures the #7894
         // PERMISSION verdict, so a malformed body would 422 and misread it.
+        // (`theme` was the specimen until #10485 retired that kind out of the
+        // spelling contract.)
         const singular = responseOf(await dispatcher.handleMetadata(
-            '/theme/midnight', ctx(), 'PUT',
-            { name: 'midnight', label: 'Midnight', colors: { primary: '#3b82f6' } },
+            '/webhook/midnight_hook', ctx(), 'PUT',
+            { name: 'midnight_hook', label: 'Midnight', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
         ));
         expect(singular.status).toBe(200);
-        expect(metaRow(engine, 'theme', 'midnight')).toBeDefined();
+        expect(metaRow(engine, 'webhook', 'midnight_hook')).toBeDefined();
 
         // …and via its plural spelling, which the URL map carries from the
         // manifest map's limb — still one namespace, the singular one.
         const plural = responseOf(await dispatcher.handleMetadata(
-            '/themes/twilight', ctx(), 'PUT',
-            { name: 'twilight', label: 'Twilight', colors: { primary: '#3b82f6' } },
+            '/webhooks/twilight_hook', ctx(), 'PUT',
+            { name: 'twilight_hook', label: 'Twilight', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
         ));
         expect(plural.status).toBe(200);
-        expect(metaRow(engine, 'theme', 'twilight')).toBeDefined();
-        expect(metaRow(engine, 'themes', 'twilight')).toBeUndefined();
+        expect(metaRow(engine, 'webhook', 'twilight_hook')).toBeDefined();
+        expect(metaRow(engine, 'webhooks', 'twilight_hook')).toBeUndefined();
     });
 
     it('#7894 POSITIVE CONTROL — the #7894 refusal still cannot reach a never-heard-of kind (#8421 CHANGED the boundary)', async () => {
@@ -738,7 +740,7 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         // `@objectstack/metadata-protocol` for the full record.
         //
         // The discriminating control for that narrowing is the case directly
-        // ABOVE, which must stay green: `theme` has no registry entry either
+        // ABOVE, which must stay green: `webhook` has no registry entry either
         // and is still minted, because it IS in the static contract. If a
         // change ever breaks both, the narrowing stopped being narrow.
         const { engine, dispatcher } = makeStack();

@@ -144,9 +144,21 @@ export type SeedTenancyExec = (sql: string, params?: unknown[]) => Promise<unkno
 export type SeedTenancyLogger = IndexMigrationLogger;
 
 export type SeedTenancyBackfillStatus =
-  /** No raw-SQL-capable driver — a memory engine or a test double. */
+  /**
+   * No raw-SQL-capable driver at all — the engine exposes neither `execute` nor
+   * `raw`, so no seam was resolved. A test double with no driver is the case.
+   *
+   * ⚠️ NOT a memory engine, however plausible that reads (#10789). A memory
+   * engine's `execute` is a no-op that RETURNS rather than being absent, so it
+   * resolves a seam and reports {@link 'absent'} — this branch never sees it.
+   */
   | 'no-driver'
-  /** No `_objectstack_sequences` table: nothing has ever allocated a number. */
+  /**
+   * The counter table could not be read: either there is no
+   * `_objectstack_sequences` (nothing has ever allocated a number), or the seam
+   * answered nothing at all — a memory engine's no-op `execute` (#10789), and
+   * the case this branch's comment always claimed. `detail` names which.
+   */
   | 'absent'
   /** No object holds both a `__global__` and an organization-scoped counter. */
   | 'no-split'
@@ -359,6 +371,87 @@ export function normalizeRows(result: unknown): Record<string, unknown>[] {
   const rows = (result as { rows?: unknown }).rows;
   if (Array.isArray(rows)) return rows as Record<string, unknown>[];
   return [];
+}
+
+/**
+ * ── The seam that ACCEPTS a query but never ANSWERS one (#10789) ───────────
+ *
+ * {@link normalizeRows} flattens the three shapes a raw SELECT comes back as.
+ * A seam can hand back a FOURTH thing, and it means something else entirely:
+ * `null` — "I did not run your query". `InMemoryDriver.execute()` is the
+ * measured case (it logs `Raw execution not supported in InMemory driver` and
+ * returns `null`); it neither throws nor is absent, so `resolveSeedTenancySeam`'s
+ * shape test is satisfied and `no-driver` never fires, while `normalizeRows(null)`
+ * is `[]` — which is also what a real driver returns for a SELECT that matched
+ * nothing.
+ *
+ * Every branch of this migration reads "no rows" as "healthy install, nothing to
+ * do", so the two collapsed into one answer and the module reported `no-split`
+ * — "I looked, there is no split" — over a driver it never queried. Step 1's
+ * `absent` branch, whose own comment says *"Absent on a memory engine"*, was
+ * unreachable there for exactly this reason.
+ *
+ * ⭐ **A seam that cannot ANSWER is absent, not empty.** The separation keys on
+ * the only thing that distinguishes them: a driver that answers returns a RESULT
+ * SET. Nothing here names a driver, so any host with the same no-op shape is
+ * covered without an allowlist to maintain — the consumer-side shape #10677 /
+ * PR #10788 landed for `os migrate duplicates`, applied to this module's own
+ * probes.
+ */
+
+/**
+ * Is `result` one of the result-set shapes a raw SELECT can come back as?
+ *
+ * The same three {@link normalizeRows} flattens, asked as a yes/no: a bare row
+ * array (better-sqlite3 through knex), `{ rows }` (pg), and the `[rows, fields]`
+ * tuple (mysql2). An empty result set in any of those spellings is still a
+ * result set, and still `true` — that is what keeps a healthy install's
+ * `no-split` intact, and it is the half of this change that stops it being a
+ * rename.
+ *
+ * This cannot lose a split that {@link normalizeRows} would have found: every
+ * shape it rejects is one already flattened to `[]`, so the only change is
+ * "reported as unreadable" replacing "reported as zero rows".
+ *
+ * ⛔ NOT exported from the package index. It has no consumer outside this
+ * module, and the CLI's `migrate/duplicates.ts` carries its own copy for its own
+ * probes (#10677) — unifying the two is a separate decision, exactly as
+ * `quoteIdent` records for the same pair.
+ */
+export function isResultSet(result: unknown): boolean {
+  if (Array.isArray(result)) return true;
+  if (typeof result === 'object' && result !== null) {
+    return Array.isArray((result as { rows?: unknown }).rows);
+  }
+  return false;
+}
+
+/** Why a probe was treated as unreadable — the `detail` an operator reads. */
+const SEAM_NO_ANSWER_DETAIL =
+  'the raw-SQL seam returned no result set — a seam that cannot answer is not a seam that answered "no rows"';
+
+/**
+ * Run one READ probe and flatten it, failing when the seam answered nothing.
+ *
+ * The throw lands in the `catch` each probe below already has, so this adds no
+ * new branch and no new status — a probe that cannot answer takes the same route
+ * a probe that THREW has always taken. That equivalence is the point: both mean
+ * "this migration could not look", and only one of them used to say so.
+ *
+ * ⛔ READ probes only. An UPDATE or DELETE does not return a result set on every
+ * dialect (better-sqlite3 through knex reports a change count, mysql2 a
+ * `ResultSetHeader`), so the write statements in step 6 stay on the bare `exec`.
+ * Holding them to "must answer" would break the repair on exactly the installs
+ * it exists for.
+ */
+async function selectRows(
+  exec: SeedTenancyExec,
+  sql: string,
+  params?: unknown[],
+): Promise<Record<string, unknown>[]> {
+  const result = await exec(sql, params);
+  if (!isResultSet(result)) throw new Error(SEAM_NO_ANSWER_DETAIL);
+  return normalizeRows(result);
 }
 
 /**
@@ -848,8 +941,18 @@ export async function backfillSeedTenancy(
 
   // 1. Is there a counter table at all? Absent on a memory engine, and on any
   //    install that has never allocated an autonumber.
+  //
+  //    TWO ways this probe fails to find one, and the second is #10789. The
+  //    table can be missing — the driver raises, and the `catch` reports it. Or
+  //    the SEAM can be one that accepts the statement and never runs it: a no-op
+  //    `execute` that returns `null` neither throws nor is absent, so this
+  //    branch was unreachable on a memory engine despite the comment above
+  //    saying it was the case it existed for. Both mean "no counter table was
+  //    read", which is what `absent` says; `detail` separates the reasons.
   try {
-    await exec(buildSequencesPresenceSql(client));
+    if (!isResultSet(await exec(buildSequencesPresenceSql(client)))) {
+      return { status: 'absent', ...empty, detail: SEAM_NO_ANSWER_DETAIL };
+    }
   } catch {
     return { status: 'absent', ...empty };
   }
@@ -860,7 +963,7 @@ export async function backfillSeedTenancy(
   //    loudly, because reaching it means a real defect is present.
   let splits: SeedTenancySplit[];
   try {
-    const rows = normalizeRows(await exec(buildSplitProbeSql(client), [GLOBAL_TENANT, GLOBAL_TENANT]));
+    const rows = await selectRows(exec, buildSplitProbeSql(client), [GLOBAL_TENANT, GLOBAL_TENANT]);
     splits = rows
       .filter((r) => isSafeIdentifier(r.object) && isSafeIdentifier(r.field))
       // Platform seeds stay global — the loader's own rule, see PLATFORM_NAMESPACE.
@@ -904,7 +1007,7 @@ export async function backfillSeedTenancy(
   // 4. Exactly one organization, or there is nothing derivable to adopt.
   let organizationIds: string[] = [];
   try {
-    organizationIds = normalizeRows(await exec(buildOrganizationProbeSql(client)))
+    organizationIds = (await selectRows(exec, buildOrganizationProbeSql(client)))
       .map((r) => (r.id == null ? '' : String(r.id)))
       .filter((id) => id.length > 0);
   } catch {
@@ -932,7 +1035,7 @@ export async function backfillSeedTenancy(
   const collisions: SeedTenancyCollision[] = [];
   for (const split of splits) {
     try {
-      const rows = normalizeRows(await exec(buildCollisionProbeSql(split.object, split.field, client)));
+      const rows = await selectRows(exec, buildCollisionProbeSql(split.object, split.field, client));
       for (const r of rows) {
         if (r.value == null) continue;
         collisions.push({
@@ -985,9 +1088,11 @@ export async function backfillSeedTenancy(
     // same split and retries the whole repair.
     if (stampFailures.includes(split.object)) continue;
     try {
-      const orgRows = normalizeRows(
-        await exec(buildOrgCounterProbeSql(client), [split.object, split.field, GLOBAL_TENANT]),
-      );
+      const orgRows = await selectRows(exec, buildOrgCounterProbeSql(client), [
+        split.object,
+        split.field,
+        GLOBAL_TENANT,
+      ]);
       for (const row of orgRows) {
         const tenantId = row.tenant_id == null ? '' : String(row.tenant_id);
         if (!tenantId) continue;

@@ -274,7 +274,9 @@ export const COVERAGE = {
     automation: 'automation/flows/index.ts (incl. approval nodes) + automation/webhooks/index.ts + automation/jobs/index.ts + system/emails/index.ts',
   },
   i18nAndTheming: {
-    coveredBy: 'system/translations/index.ts (en + zh-CN), ui/themes/index.ts (light + dark)',
+    // `themes` was retired at #10485 (ADR-0049) — colour coverage now rides the
+    // apps' `branding` blocks; `app.branding` is the one colour surface.
+    coveredBy: 'system/translations/index.ts (en + zh-CN); app branding blocks (ui/apps/*)',
   },
   docs: {
     source: 'ADR-0046 (doc metadata)',

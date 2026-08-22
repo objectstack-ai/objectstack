@@ -1,6 +1,6 @@
 ---
 title: Plugin Endpoints
-description: REST endpoints that become available when the corresponding plugin is installed — auth, workflow, automation, views, realtime, notifications, AI, i18n, GraphQL, and file storage.
+description: REST endpoints that become available when the corresponding plugin is installed — auth, workflow, automation, views, realtime, notifications, AI, i18n, and file storage.
 ---
 
 # Plugin Endpoints
@@ -141,12 +141,6 @@ protocol `ai.chatStream` parses and owns message state for you.
 | GET | `/i18n/locales` | List available locales |
 | GET | `/i18n/translations/:locale` | Get translation bundle |
 | GET | `/i18n/labels/:object/:locale` | Get field labels |
-
-### GraphQL (`/graphql`) — Plugin Required
-
-| Method | Endpoint | Description |
-|:-------|:---------|:------------|
-| POST | `/graphql` | Execute GraphQL query/mutation |
 
 ### File Storage (`/storage`) — Plugin Required
 

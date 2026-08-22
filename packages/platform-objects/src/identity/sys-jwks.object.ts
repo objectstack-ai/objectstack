@@ -34,7 +34,7 @@ export const SysJwks = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Asymmetric key pairs used to sign and verify issued JWTs',
   highlightFields: ['id', 'created_at', 'expires_at'],

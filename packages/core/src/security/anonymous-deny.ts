@@ -4,11 +4,40 @@
  * #2567 — the single anonymous-deny decision, shared by every HTTP seam.
  *
  * ADR-0056 D2 made the platform deny anonymous callers by default. Phase 1 gated
- * each surface (REST `/data`, dispatcher `/graphql` + `/meta`, raw-hono `/data`)
- * but every seam hand-rolled the same `!userId && !isSystem → 401` check. This
- * centralises that DECISION into one pure, tested function — the exact pattern
- * {@link ./auth-gate.ts} established for the ADR-0069 auth-policy gate: keeping
- * the decision in one function means the seams can never drift on who is denied.
+ * each surface separately, with every seam hand-rolling the same
+ * `!userId && !isSystem → 401` check. This centralises that DECISION into one
+ * pure, tested function — the exact pattern {@link ./auth-gate.ts} established
+ * for the ADR-0069 auth-policy gate: keeping the decision in one function means
+ * the seams can never drift on who is denied.
+ *
+ * ## Do NOT keep a route list here (#10835)
+ *
+ * This paragraph used to name the Phase-1 surfaces inline — "REST `/data`,
+ * dispatcher `/graphql` + `/meta`, raw-hono `/data`" — and TWO of those three
+ * outlived the routes they named:
+ *
+ *  - **`/graphql` is gone.** Removed with the GraphQL surface itself
+ *    (`packages/runtime/src/http-dispatcher.ts`: "/graphql removed — GraphQL is
+ *    not in the product plan", #2462 follow-on). No `handleGraphQL` survives
+ *    anywhere in `packages/runtime`, and `/graphql` is now ordinary catch-all
+ *    traffic.
+ *  - **raw-hono `/data` is gone.** Those routes were deleted as a duplicate
+ *    surface in v17 (#4073); `packages/adapters/hono` mounts only `/discovery`,
+ *    `/auth/*` and the terminal `${prefix}/*` catch-all.
+ *
+ * A stale list here is worse than no list, because the seams it names are the
+ * thing a reader opens this file to learn: a dead route reads as a live surface.
+ * That is not hypothetical — the `handleGraphQL` test doubles removed alongside
+ * this edit had become the only non-CHANGELOG hits in `packages/**`, and so read
+ * to the next author grepping the name as evidence the runtime still had the
+ * method.
+ *
+ * The live enumeration is mechanical, so defer to it rather than restating it:
+ * `packages/qa/dogfood/test/authz-conformance.matrix.ts` and its companion
+ * `authz-conformance.test.ts` ratchet a CURATED table of HTTP/transport entry
+ * points out of source — deleting a `shouldDenyAnonymous` call makes its row
+ * STALE, a new ungated route in one of those files is UNCLASSIFIED, and either
+ * breaks CI. Read the ratchet, or read the call sites.
  *
  * ## The `requireAuth` opt-out is gone (#3963)
  *

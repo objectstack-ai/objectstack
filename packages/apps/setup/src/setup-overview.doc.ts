@@ -28,7 +28,7 @@ export const SETUP_OVERVIEW_DOC: Doc = {
 
 Setup is the administrator app. Its screens are mostly self-explanatory — these
 are the few rules behind them that the UI does not show. For everything else,
-see <https://docs.objectstack.ai>.
+see <https://objectstack.ai>.
 
 - **A user is identity, not access.** Creating a \`sys_user\` lets someone sign
   in; *what* they can do comes entirely from the roles and permission sets you
@@ -43,7 +43,7 @@ see <https://docs.objectstack.ai>.
   is only ever widened by the role hierarchy and sharing rules — never silently
   narrowed.
 
-See <https://docs.objectstack.ai> for the full security model.
+See <https://objectstack.ai> for the full security model.
 `,
   translations: {
     zh: {
@@ -52,7 +52,7 @@ See <https://docs.objectstack.ai> for the full security model.
       content: `# Setup 概览
 
 Setup 是管理员应用。它的界面大多一目了然——下面这几条是界面背后、UI 没有明说的
-规则。其余内容见 <https://docs.objectstack.ai>。
+规则。其余内容见 <https://objectstack.ai>。
 
 - **用户是身份,不是权限。** 创建一条 \`sys_user\` 只是让人能登录;他*能做什么*
   完全由你随后分配的角色和权限集决定。停用用户会收回登录权,但不删除其记录,
@@ -63,7 +63,7 @@ Setup 是管理员应用。它的界面大多一目了然——下面这几条�
   *哪类*记录;共享决定*哪些行*。可见性从组织级默认出发,只会被角色层级和共享规则
   *放宽*,绝不会被悄悄收窄。
 
-完整安全模型见 <https://docs.objectstack.ai>。
+完整安全模型见 <https://objectstack.ai>。
 `,
     },
   },

@@ -86,21 +86,6 @@ export interface AttachmentLifecycleLogger {
 
 const PACKAGE_ID = 'com.objectstack.service.storage';
 const SYSTEM_CTX = { isSystem: true } as const;
-/** Bound on join rows resolved per multi-delete — matches the reap-guard
- * batch posture: bound one pass, converge across sweeps. */
-const MULTI_DELETE_RESOLVE_LIMIT = 1_000;
-
-/** Key under which beforeDelete stashes file ids for afterDelete (the engine
- * passes the SAME HookContext object to both events). */
-const STASH_KEY = '__attachmentFileIds';
-
-function asIdList(id: unknown): Array<string | number> | null {
-  if (typeof id === 'string' || typeof id === 'number') return [id];
-  if (id && typeof id === 'object' && Array.isArray((id as any).$in)) {
-    return (id as any).$in.filter((v: unknown) => typeof v === 'string' || typeof v === 'number');
-  }
-  return null;
-}
 
 /**
  * Tombstone every id in `fileIds` that no longer has a join row — the orphan
@@ -149,50 +134,87 @@ export function installAttachmentLifecycleHooks(
   engine: AttachmentLifecycleEngine,
   logger: AttachmentLifecycleLogger,
 ): void {
-  // beforeDelete: resolve the file_id(s) of the join row(s) about to die —
-  // after the delete they are unreadable. Stash on the shared HookContext.
-  engine.registerHook(
-    'beforeDelete',
-    async (ctx: any) => {
-      try {
-        const fileIds = new Set<string>();
-        const ids = asIdList(ctx?.input?.id);
-        if (ids) {
-          for (const id of ids) {
-            const row = await engine.findOne('sys_attachment', { where: { id }, context: { ...SYSTEM_CTX } });
-            if (row?.file_id) fileIds.add(String(row.file_id));
-          }
-        } else if (ctx?.input?.options?.where) {
-          const rows = await engine.find('sys_attachment', {
-            where: ctx.input.options.where,
-            limit: MULTI_DELETE_RESOLVE_LIMIT,
-            context: { ...SYSTEM_CTX },
-          });
-          for (const row of rows ?? []) {
-            if (row?.file_id) fileIds.add(String(row.file_id));
-          }
-        }
-        ctx[STASH_KEY] = [...fileIds];
-      } catch (err) {
-        // Never block the delete; the reap guard's sweep-time re-verification
-        // cannot resurrect a missed tombstone, but a missed tombstone only
-        // means the orphan lingers — fail toward retention, not data loss.
-        logger.warn(
-          `[storage] attachment lifecycle: failed to resolve file ids before delete (${(err as Error)?.message ?? err})`,
-        );
-        ctx[STASH_KEY] = [];
-      }
-    },
-    { object: 'sys_attachment', packageId: PACKAGE_ID },
-  );
-
-  // afterDelete: any stashed file with zero remaining references is
-  // tombstoned — if (and only if) it is an attachments-scope committed file.
+  // afterDelete: the join row is gone, so the file it pointed at may now be an
+  // orphan — tombstone it if (and only if) it is an attachments-scope
+  // committed file with no remaining references.
+  //
+  // ── Why the departed id comes from `ctx.previous`, and NOT from a
+  //    `beforeDelete` stash (#10240) ─────────────────────────────────────────
+  // This pair used to hand its ids over on the hook context itself
+  // (`ctx['__attachmentFileIds']`, written in a `beforeDelete` that resolved
+  // the doomed rows), on the premise — stated in its own comment — that "the
+  // engine passes the SAME HookContext object to both events". That was true
+  // of the pre-#5574 batch dispatch and is FALSE for a predicate write: since
+  // #5574 (ADR-0058 Addendum II, D1/D2) a `multi: true` write dispatches ONE
+  // CONTEXT PER MATCHED ROW, and those row contexts are fresh objects spread
+  // from the batch context in each phase independently
+  // (`dispatchPerRowBeforeHooks` / `buildPerRowAfterContexts` in objectql's
+  // `engine.ts`, which says so outright: "a per-row context is a fresh object,
+  // so a stash written on the context itself dies with the row that held it").
+  //
+  // So on a PREDICATE delete the stash never arrived, `fileIds` was `[]`, and
+  // NO TOMBSTONE WAS EVER WRITTEN. That is not the module's "fail toward
+  // retention" bias, which buys a second look later: `sys_file`'s declared
+  // lifecycle nominates a sweep candidate only via `ttl { field: 'deleted_at' }`
+  // or `retention { onlyWhen: { status: 'pending' } }`, and an untombstoned
+  // orphan matches NEITHER — so it is never a candidate, the reap guard is
+  // never asked about it, and the bytes are stranded PERMANENTLY. Measured on
+  // the wired engine for #10240, both verbs in one run:
+  //
+  //   DELETE by-id      (dispatch record) : f1    -> status "deleted"   OK
+  //   DELETE predicate  (dispatch per-row): f1    -> status "committed" LEAK
+  //   UPDATE by-id      (dispatch record) : f_old -> status "deleted"   OK
+  //   UPDATE predicate  (dispatch per-row): f_old -> status "deleted"   OK
+  //
+  // The two UPDATE rows are green because #10171 had already reached this
+  // conclusion for its verb; this handler now reads the id the same way, so
+  // the file carries ONE mechanism for "what file did this join row point at
+  // before?" rather than two that drift apart.
+  //
+  // `previous` has neither problem: the engine binds it to the row's PRE-IMAGE
+  // on BOTH phases and BOTH paths — by-id unconditionally since #7867 (the
+  // read that also produces the 404, so it is never skipped), per-row from the
+  // batch's single doomed-row read (#5038/#5574 D7). It costs no extra round
+  // trip on either path for the same reason.
+  //
+  // ── The `MULTI_DELETE_RESOLVE_LIMIT` limb that went with the stash ────────
+  // The old `beforeDelete` had a second branch — `else if
+  // (ctx.input.options.where)`, resolving the doomed set itself under a
+  // 1_000-row cap — for a batch-shaped context that binds no `input.id`. It is
+  // removed here as a producer that never existed (the shape #5906 removed
+  // from `afterInsert` in this same file), and unreachability was MEASURED
+  // rather than assumed, with the sibling branch as the positive control.
+  // Both limbs of the live handler were counted while every delete shape the
+  // engine offers was driven through the wired engine:
+  //
+  //   shape                             id-limb  where-limb
+  //   by-id                                1         0
+  //   predicate multi (1 row)              1         0
+  //   predicate multi (3 rows)             3         0
+  //   multi, where { id: { $in: [..] } }   2         0
+  //   multi, where {} (match-all)          2         0
+  //   multi, NO where (unscoped)           2         0
+  //   non-multi, non-id where           engine refuses: "Delete requires an ID
+  //                                     or options.multi=true"
+  //
+  // Zero hits on the branch under test, while the control branch fires on the
+  // very predicate path the removed branch was written for. The mechanism
+  // agrees: all three sites that dispatch `beforeDelete` bind `input.id` to a
+  // scalar — by-id from `resolveEngineDeleteDispatch`, per-row to `row.id`,
+  // and the unscoped-multi dispatch (#9719) reaches only registrations that
+  // declared `dispatchUnscopedMultiWrite`, which this file never did, and by
+  // definition carries no `where` at all.
   engine.registerHook(
     'afterDelete',
     async (ctx: any) => {
-      const fileIds: string[] = Array.isArray(ctx?.[STASH_KEY]) ? ctx[STASH_KEY] : [];
-      await tombstoneOrphanedFiles(engine, logger, fileIds);
+      // No pre-image (an engine that does not bind it) means the departed id
+      // is unknowable — tombstone nothing and KEEP the file. Retention-biased
+      // on purpose and identically to the `afterUpdate` leg below: a missed
+      // tombstone leaves an orphan lingering, while a tombstone written off a
+      // guess puts real bytes on the reap path.
+      const fileId = ctx?.previous?.file_id;
+      if (fileId === undefined || fileId === null || fileId === '') return;
+      await tombstoneOrphanedFiles(engine, logger, [String(fileId)]);
     },
     { object: 'sys_attachment', packageId: PACKAGE_ID },
   );
@@ -241,19 +263,19 @@ export function installAttachmentLifecycleHooks(
   // never asked about it, and the bytes are stranded permanently.
   //
   // ── Why the departed id comes from `ctx.previous`, and NOT from a
-  //    beforeUpdate stash like the delete pair above ────────────────────────
-  // The `beforeDelete` → `afterDelete` pair hands its ids over on the shared
-  // HookContext (STASH_KEY). Since #5574 (ADR-0058 Addendum II D1/D2) a
-  // PREDICATE write dispatches ONE CONTEXT PER MATCHED ROW, and those row
-  // contexts are fresh objects spread from the batch context in both phases
-  // (`dispatchPerRowBeforeHooks` / `buildPerRowAfterContexts` in objectql's
-  // `engine.ts`) — so a property a `before*` handler writes onto its own row
-  // context dies with that row and never reaches the `after*` phase. Measured
-  // on the wired engine for #10171: a stash set in `beforeUpdate` arrives in
-  // `afterUpdate` on the by-id path (`dispatch.mode === 'record'`) and is LOST
-  // on the predicate path (`dispatch.mode === 'per-row'`). A stash-based twin
-  // of the delete pair would therefore have been silently half-dead on exactly
-  // the multi-row updates that orphan the most files.
+  //    beforeUpdate stash ────────────────────────────────────────────────────
+  // Since #5574 (ADR-0058 Addendum II D1/D2) a PREDICATE write dispatches ONE
+  // CONTEXT PER MATCHED ROW, and those row contexts are fresh objects spread
+  // from the batch context in both phases (`dispatchPerRowBeforeHooks` /
+  // `buildPerRowAfterContexts` in objectql's `engine.ts`) — so a property a
+  // `before*` handler writes onto its own row context dies with that row and
+  // never reaches the `after*` phase. Measured on the wired engine for #10171:
+  // a stash set in `beforeUpdate` arrives in `afterUpdate` on the by-id path
+  // (`dispatch.mode === 'record'`) and is LOST on the predicate path
+  // (`dispatch.mode === 'per-row'`). A stash-based shape would therefore have
+  // been silently half-dead on exactly the multi-row updates that orphan the
+  // most files. The delete pair above WAS that shape and was exactly that
+  // half-dead until #10240; both verbs now read the same slot.
   //
   // `previous` has neither problem: the engine binds it to the row's PRE-IMAGE
   // on BOTH phases and BOTH paths (by-id since #7867 unconditionally, per-row

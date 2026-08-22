@@ -19,7 +19,7 @@ import { createRequire } from 'module';
  * instead of being reverse-engineered from per-package `CHANGELOG.md` files.
  */
 
-const RELEASES_BASE = 'https://docs.objectstack.ai/docs/releases';
+const RELEASES_BASE = 'https://objectstack.ai/docs/releases';
 
 export interface SpecVersionGap {
   /** Major of the `@objectstack/spec` resolved from the app's node_modules. */

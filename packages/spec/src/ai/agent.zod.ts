@@ -136,7 +136,6 @@ export type StructuredOutputConfigParsed = z.infer<typeof StructuredOutputConfig
  *   role: 'Help Desk Assistant',
  *   instructions: 'You are a helpful assistant. Always verify user identity first.',
  *   skills: ['case_management', 'knowledge_search'],
- *   knowledge: { sources: ['faq', 'policies'], indexes: ['support_docs'] },
  * });
  * ```
  */
@@ -223,10 +222,15 @@ export const AgentSchema = lazySchema(() => strictObject({
    * resolved `agent.tools[].name` against the FULL registry with no surface
    * check, so an `ask`-surface agent could name an authoring tool and get it.
    *
-   * Tombstoned rather than deleted: `AgentSchema` is not `.strict()`, so a
-   * plain deletion would silently strip the key and the agent would quietly
-   * reach none of the tools its author listed — the same silent-capability-loss
-   * shape this whole issue is about (#3820), restored one layer down.
+   * Tombstoned rather than deleted: `AgentSchema` is `strictObject`, so a plain
+   * deletion would already REJECT the key — but only with a generic unknown-key
+   * error. The prescription is the payload. An author who wrote `tools` has to
+   * be told the specific thing this key's removal means: the capability moves
+   * into a skill, and ADR-0064's union is the only path from an agent to a tool
+   * — which this tombstone says and an unknown-key rejection cannot. It also
+   * types the key `never`, so the same mistake fails `tsc` at the authoring site
+   * before any parse runs. Those are the two channels an upgrading author, very
+   * often an AI (ADR-0033), actually reads (`shared/retired-key.ts`).
    */
   tools: retiredKey(
     '`agent.tools` was removed in @objectstack/spec 17 (#3894) — use `skills`. ' +

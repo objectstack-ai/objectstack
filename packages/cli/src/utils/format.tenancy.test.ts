@@ -26,7 +26,7 @@ import { printServerReady, type ServerReadyOptions } from './format.js';
  */
 describe('printServerReady Tenancy row (#4801, ADR-0105 D1)', () => {
   const base: ServerReadyOptions = {
-    port: 3000,
+    externalBaseOrigin: 'http://localhost:3000',
     configFile: 'objectstack.config.ts',
     isDev: true,
     pluginCount: 1,
@@ -173,11 +173,11 @@ describe('printServerReady Tenancy row (#4801, ADR-0105 D1)', () => {
     // re-wiring the banner to the legacy knob can no longer compile, and the
     // retired field name can no longer be passed in silently ignored.
     // @ts-expect-error — tenancyPosture is a TenancyPosture, never a boolean.
-    printServerReady({ port: 1, configFile: 'c', isDev: true, pluginCount: 0, tenancyPosture: true });
+    printServerReady({ externalBaseOrigin: null, configFile: 'c', isDev: true, pluginCount: 0, tenancyPosture: true });
     // @ts-expect-error — `multiTenant` was removed with #4801; nothing reads it.
-    printServerReady({ port: 1, configFile: 'c', isDev: true, pluginCount: 0, multiTenant: true });
+    printServerReady({ externalBaseOrigin: null, configFile: 'c', isDev: true, pluginCount: 0, multiTenant: true });
     // @ts-expect-error — and an arbitrary string is not a posture.
-    printServerReady({ port: 1, configFile: 'c', isDev: true, pluginCount: 0, tenancyPosture: 'multi' });
+    printServerReady({ externalBaseOrigin: null, configFile: 'c', isDev: true, pluginCount: 0, tenancyPosture: 'multi' });
     expect(lines.filter((l) => l.includes('Tenancy:'))).toHaveLength(2);
   });
 });

@@ -89,7 +89,14 @@
  *     is WHICH gate reports it. `check:error-code-casing` owns the lowercase
  *     sweep, and every pattern it has needs a QUOTED lowercase literal beside
  *     the token `code` — `code: 'x'`, `.code = 'x'`, `code === 'x'`,
- *     `code?: 'x' | 'y'`. In those positions (`objlit`, `assign`) the
+ *     `code?: 'x' | 'y'`, and [#10760] `code: parsed?.code || 'x'` /
+ *     `.code = e?.code ?? 'x'` — the OUR-DEFAULT slot of a `||`/`??`
+ *     fallback chain, that gate's `fallback` pattern. It still captures only
+ *     a string literal, and a literal in our source is by construction the
+ *     default WE author. That fifth one is a position this gate has NO shape
+ *     for rather than one it hands over: an intervening expression leaves
+ *     `objlit` and `assign` with no quote to match.
+ *     In those positions (`objlit`, `assign`) the
  *     delegation is real: that gate reads the same characters and carries the
  *     D6/D6b/D6c discrimination — field-addressed catalogs, persisted audit
  *     columns, diagnostics payloads, Zod's own issue codes — that decides which
@@ -126,6 +133,22 @@
  *     Reduction is ALL-OR-NOTHING — a chain with one runtime limb reduces to
  *     nothing rather than to its literal half, since half an expression's
  *     values is a finding that is wrong in both directions at once.
+ *     [#10762] WHO owns a runtime-limbed chain then depends on WHERE it sits,
+ *     and the two answers differ — measured against both gates' recognizers,
+ *     not inferred from either one's prose. At the STAMP SITE
+ *     (`{ code: parsed?.code || 'lit' }`, `err.code = e?.code ?? 'lit'`) no
+ *     reduction is involved at all: `objlit`/`assign` need the quote
+ *     immediately, so this gate never had a shape there — and since #10760
+ *     `check:error-code-casing`'s `fallback` pattern reads that literal, so
+ *     the shape is DELEGATED, not dropped. That is the position the two live
+ *     SSO codes in `register-sso-provider.ts` shipped through. In a LOCAL'S
+ *     INITIALIZER (`const code = parsed?.code || 'lit'; err.code = code`) it
+ *     is neither: the ALL-OR-NOTHING rule above declines it here, and that
+ *     gate's `fallback` pattern anchors on `code:`/`code?:`/`.code =`, so a
+ *     `const code =` is out of ITS reach too. That one is still owned by
+ *     NOBODY — deliberately on this side, filed as #10897 for the other.
+ *     Stated so the next reader does not re-derive the hole and close it in
+ *     the wrong gate.
  *   - A constant this gate cannot resolve is REPORTED as unresolved, never
  *     dropped: a deriver that goes quietly blind is the same failure one layer
  *     down. [#9223] A constant imported from a WORKSPACE package is resolved
@@ -801,7 +824,11 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
    *
    * `check:error-code-casing` owns the lowercase sweep, and every pattern it
    * has requires a QUOTED lowercase literal sitting next to the token `code`:
-   * `code: 'x'`, `.code = 'x'`, `code === 'x'`, `code?: 'x' | 'y'`. Where this
+   * `code: 'x'`, `.code = 'x'`, `code === 'x'`, `code?: 'x' | 'y'`, and
+   * [#10760] `code: parsed?.code || 'x'` / `.code = e?.code ?? 'x'`, the
+   * OUR-DEFAULT slot of a `||`/`??` fallback chain (that gate's `fallback`
+   * pattern; it still captures only a literal, which in our source is the
+   * default we author). Where this
    * gate finds a lowercase code in one of those same positions — `objlit`,
    * `assign` — the delegation is real: that gate sees the identical text, and
    * it carries the D6/D6b/D6c discrimination (field-addressed catalogs,

@@ -67,7 +67,7 @@ The ObjectStack boot process follows a **strict order** to ensure dependencies a
 │  └─ Start event bus                                             │
 │  └─ Start job scheduler                                         │
 │  └─ Start audit logger                                          │
-│  └─ Start HTTP/GraphQL servers                                  │
+│  └─ Start HTTP server                                           │
 └─────────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -481,6 +481,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export default ObjectSchema.create({
   name: 'salesforce_account',
+  sharingModel: 'private',
   label: 'Salesforce Account',
   fields: {
     salesforce_id: Field.text({ required: true, unique: 'global' }),

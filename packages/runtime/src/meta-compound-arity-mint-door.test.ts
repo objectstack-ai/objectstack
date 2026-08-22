@@ -254,16 +254,17 @@ describe('#8421 — the compound `/meta` arity is not a metadata-type claim', ()
     it('CONTROL — a recognised type at the simple arity is unaffected', async () => {
         const { engine, dispatcher } = makeStack();
 
-        // [#10194] spec-valid body — `theme` resolves a schema through
-        // UNREGISTERED_KIND_SCHEMAS now, and this control measures the ARITY
-        // door, so a malformed body would 422 and misread it.
+        // [#6245] spec-valid body — `webhook` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS, and this control measures the ARITY
+        // door, so a malformed body would 422 and misread it. (`theme` was
+        // the specimen until #10485 retired that kind.)
         const res = responseOf(await dispatcher.handleMetadata(
-            '/theme/midnight', ctx(), 'PUT',
-            { name: 'midnight', label: 'Midnight', colors: { primary: '#3b82f6' } },
+            '/webhook/midnight_hook', ctx(), 'PUT',
+            { name: 'midnight_hook', label: 'Midnight', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
         ));
 
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'theme', 'midnight')).toBeDefined();
+        expect(metaRow(engine, 'webhook', 'midnight_hook')).toBeDefined();
     });
 
     it('CONTROL — the capability gate still fires first on the compound form', async () => {

@@ -8,7 +8,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -20,7 +20,7 @@
           "showcase_account — writable standard object (sharingModel public_read_write), required name + status, format validations tax_id_format / billing_email_format (examples/app-showcase/src/data/objects/account.object.ts)"
         ],
         "knownGaps": [
-          "Clause 7 (clone is RLS-gated) cannot be scored on showcase_account, the object every other clause here drives: it is public_read_write, so there is no persona for whom a source row is invisible. It needs showcase_invoice plus a contributor-bound member — the recipe qa-contributor-bound-member in areas/search.json. ⚠️ The recipe mechanism is AREA-SCOPED (provisioning.use must name a key in this area's own fixtures block, README.md; unresolved by the validator either way, deferred at #7716 / tracked #7720), so this item cross-references the recipe by name rather than opting in. Replay it from there; do not fork a second copy into this area."
+          "Clause 7 (clone is RLS-gated) cannot be scored on showcase_account, the object every other clause here drives: it is public_read_write, so there is no persona for whom a source row is invisible. It needs showcase_invoice plus a contributor-bound member — the recipe qa-contributor-bound-member in areas/search.json. ⚠️ The recipe mechanism is AREA-SCOPED (provisioning.use must name a key in this area's own fixtures block, README.md) and the validator now ENFORCES that scoping (#10593): a same-area `use` RESOLVES, and a `use` naming another area's recipe key FAILS check:platform-checklist as a dangling pointer, naming the item and the key that resolved to nothing. ⛔ So this reference cannot be spelled as `use` today — no cross-area spelling exists that the tooling accepts, and giving that pointer one is the open half of #10593 — and this item cross-references the recipe by name rather than opting in. Replay it from there; do not fork a second copy into this area."
         ]
       },
       "steps": [
@@ -129,6 +129,12 @@
           "date": "2026-08-21",
           "change": "named the object and persona clause 7 actually needs, and separated its refusal from the one next to it. The clause asks for a clone of a row the caller cannot SEE to be refused 404 RECORD_NOT_FOUND, but every other clause in this item drives showcase_account, which is public_read_write — no persona can fail to read a row there, so the clause was unscoreable on its own item's object. The 17.1.0 sweep hit this directly: cloning showcase_account as a seeded demo persona produced 403 PERMISSION_DENIED (a missing CREATE grant), a different gate that a status-only reading would have scored as the RLS refusal. Clause 7 now names showcase_invoice + INV-1003 + a contributor-bound member (recipe qa-contributor-bound-member, areas/search.json), requires the code and not just the status, requires the invisibility premise to be read first, and states the 404-vs-403 discriminator. A knownGap records the cross-area recipe reference and why `use` is not available here (#10236 B1)",
           "ref": "#10236"
+        },
+        {
+          "revision": 6,
+          "date": "2026-08-21",
+          "change": "corrected a knownGap that had gone from stale FACT to stale PERMISSION. Clause 7's cross-area note said `provisioning.use` was 'unresolved by the validator either way' — true when written (deferred at #7716 / tracked #7720), false since the area-scoped resolve landed at #10593: a same-area `use` now resolves and a cross-area one FAILS check:platform-checklist, naming the item. The prose therefore invited exactly the edit the gate rejects. The note now states what is enforced today; the cross-area SPELLING is still undecided (the open half of #10593) and is deliberately NOT predicted here, so this correction cannot itself become the next stale permission. Item substance, steps, personas, fixtures and all acceptance clauses are unchanged — no run verdict is invalidated by this revision",
+          "ref": "#10809"
         }
       ]
     },

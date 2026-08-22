@@ -184,11 +184,45 @@ jobs:
       # `ts-parse` spawns ~20 real node children (~10 s measured, and the spawns
       # are the point — they pin that a caller's try/catch cannot swallow the
       # refusal); the other two are in-process fixtures, ~0.5 s combined.
+      #
+      # ⭐ Collected rather than sequenced, for the reason spelled out at the
+      # `Shallow-history guard self-tests` step below (#10814): under `bash -e` a
+      # bare sequence stops at the first failure, so a red `ts-parse` would leave
+      # the entry-predicate and comment-mask self-tests UNRUN while the log shows
+      # only the one failure. `ts-parse` is both the slowest of the three and the
+      # one that spawns real children, so it is the likeliest to be red —
+      # precisely the masking direction. The three modules are independent of one
+      # another, so collecting loses nothing.
       - name: scripts/ shared-module self-tests (parse · entry predicate · comment mask)
         run: |
-          node scripts/ts-parse.mjs --self-test
-          node scripts/invoked-as.mjs --self-test
-          node scripts/js-comment-mask.mjs --self-test
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # self-test runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success. Both directions are pinned
+          # by `node scripts/check-step-collectors.mjs --self-test`, which extracts
+          # THIS block from THIS file and drives it under `bash -e` with stubs.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/ts-parse.mjs --self-test
+          run_self_test node scripts/invoked-as.mjs --self-test
+          run_self_test node scripts/js-comment-mask.mjs --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "scripts/ shared-module self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "scripts/ shared-module self-tests — all three ran and passed"
 
       # Every `scripts/**` entry guard goes through ONE predicate (#10086).
       # The hand-typed forms of "did node run me, or did someone import me?"
@@ -527,11 +561,116 @@ jobs:
       # (`check-governed-merges.mjs`'s own cases run in the
       # `pnpm check:pm-governed-merges` step above, which is already its
       # self-test.)
+      #
+      # ⭐ The three run through a COLLECTOR rather than as a bare sequence
+      # (#10814). A `run:` block is executed by `bash -e`, so the first non-zero
+      # exit aborts the STEP and every command after it is never reached —
+      # neither green nor red, and nothing in the log tells those apart. Not
+      # hypothetical here: while `git-history.mjs --self-test` was red on `main`
+      # for ~10 h on 2026-08-21 (#10807), the two self-tests listed after it did
+      # not execute in CI once — on the step that gates every PR. Both were
+      # green, so that time the mask hid nothing; the compounding shape is that a
+      # SECOND regression can land unnoticed while the first is red, and then
+      # reads as though the fix broke it. #4690 one level up: a partial result
+      # that reads like a complete one.
+      #
+      # These three are INDEPENDENT — none is a precondition for reading the
+      # next — which is what makes collecting correct HERE and
+      # abort-on-first-failure correct in this job's many
+      # `<gate> --self-test` + `<gate>` steps, where the self-test IS the
+      # precondition for trusting the run after it. The census behind that
+      # distinction: of 200 `run:` steps in lint.yml + ci.yml, 21 hold two or
+      # more substantive commands, and exactly two were independent self-tests
+      # sequenced together — this step and the `scripts/` shared-module step
+      # above. Every other one is a precondition or a dependency, where the
+      # abort is the correct semantics.
+      #
+      # ⛔ Not one step per self-test: a plain step split does not fix this at
+      # all — Actions skips a job's remaining steps once a step fails, so the
+      # mask survives the split verbatim. Restoring it would take an `if:` on
+      # each gate step, and a condition is a way for a PR to arrange that a gate
+      # does not run on it (the reason the required-context pin step carries
+      # none). Both gates that read step structure were checked and would
+      # TOLERATE a split — `check-shard-attestation` scans ci.yml only, and
+      # `check-required-contexts` pins job-level properties plus the one
+      # `check:required-contexts` step — so this is a choice on the merits,
+      # not a constraint.
       - name: Shallow-history guard self-tests
         run: |
-          node scripts/pm/git-history.mjs --self-test
-          node scripts/check-engine-split-ratio.mjs --self-test
-          bash scripts/collect-release-notes.sh --self-test
+          # Tolerate-and-collect (#10814) — see the note above this step. Each
+          # self-test runs unconditionally and prints its own verdict; the step
+          # still FAILS when any of them does, naming every one that failed.
+          # ⛔ Never let the collector swallow the exit code — a green step over
+          # a red self-test looks identical to success. Both directions are pinned
+          # by `node scripts/check-step-collectors.mjs --self-test`, which extracts
+          # THIS block from THIS file and drives it under `bash -e` with stubs.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/pm/git-history.mjs --self-test
+          run_self_test node scripts/check-engine-split-ratio.mjs --self-test
+          run_self_test bash scripts/collect-release-notes.sh --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Shallow-history guard self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Shallow-history guard self-tests — all three ran and passed"
+
+      # Step-collector gate (#10814) — the guard over the two steps above, and
+      # over any step that grows their shape later. It has a static half and a
+      # dynamic half, and the dynamic one is the load-bearing part:
+      #
+      # STATIC: one `run:` block invoking `--self-test` on TWO OR MORE DISTINCT
+      # scripts must route them through a collector. Distinct scripts testing
+      # themselves are independent by construction, so there is no reading under
+      # which a failure in one should skip the others. Deliberately narrow: it
+      # does NOT flag `<gate> --self-test` + `<gate>`, this job's dominant shape,
+      # where the abort IS the point (a checker whose self-test failed has no
+      # verdict worth printing), nor ci.yml's `mkdir -p` / `psql ALTER SYSTEM`
+      # dependency sequences. Swept when it was written: 343 `run:` steps across
+      # 26 workflows, exactly 2 matched, both of them above.
+      #
+      # DYNAMIC: nothing static can tell a collector that PROPAGATES the exit
+      # code from one that swallows it, and the swallowing kind is worse than
+      # the masking it replaces — a green step over a red self-test, which from
+      # outside is indistinguishable from success. So `--self-test` extracts each
+      # live block out of THIS file and runs it as `bash -e <file>` — the same
+      # invocation Actions uses — against stubs with controlled exit codes, and
+      # reads "did this command run" from the STUB's own side effect rather than
+      # from the block's output, so the block cannot vouch for itself. Both
+      # directions are pinned in every position, and the same command list is
+      # also driven through the PRE-FIX bare sequence, which must mask — 1 of 3
+      # commands executing when the first fails, 3 of 3 when none does. A harness
+      # that cannot reproduce the defect cannot certify the fix.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
+      # on the precedent this job already sets: several gate steps here are
+      # invoked directly, and dispatch-gates.mjs derives gate families from
+      # either spelling, so the direct form loses no discovery and adds no key
+      # to the root manifest.
+      #
+      # ⚠️ NOT because root package.json is off limits. The #9465 changeset lane
+      # fences that file's `@changesets/cli` range and its `version` script — the
+      # parenthetical in the issue body is scoping, not illustrative — and not
+      # the file, so a `check:step-collectors` key would have been allowed. Said
+      # plainly because the over-broad reading is easy to acquire and then
+      # propagates as a constraint nobody actually has, which is this step's own
+      # defect class wearing a different hat: a claim that reads as verified.
+      # Temp-dir fixtures, no network, ~1 s.
+      - name: Step-collector gate (self-tests that mask each other)
+        run: |
+          node scripts/check-step-collectors.mjs --self-test
+          node scripts/check-step-collectors.mjs
 
       # Verify-lock entry-point self-test (#9661). `scripts/pm/os-verify-lock.sh`
       # is the ONE way an agent takes the container's shared heavy-verify lock,
@@ -1176,6 +1315,28 @@ jobs:
       - name: objectui pin-changeset digest guard
         run: pnpm check:objectui-changeset
 
+      # objectui pin write-ordering guard (#10797). Its sibling above is about
+      # WHAT the bump writes; this one is about WHEN. `bump-objectui.sh` wrote
+      # `.objectui-sha` before it read the commit subject out of the objectui
+      # checkout, so a commit object that cannot be read killed the run under
+      # `set -e` with the pin file ALREADY REWRITTEN — no changeset, no commit,
+      # a bare `fatal: bad object` as the whole explanation, and a tree the
+      # operator had to clean up by hand. Re-running did not self-correct: the
+      # pin file now held the bad SHA. Reachable with no argument at all —
+      # measured, git 2.43.0, `git rev-parse HEAD` exits 0 and prints the sha
+      # for a commit whose object is missing, because it resolves the ref
+      # without reading the object.
+      #
+      # The self-test asserts the invariant on BYTES, not on the message: both
+      # the broken and the fixed script exit non-zero on this input (128 from
+      # `set -e` vs 1 from the refusal), so "did it fail?" does not tell them
+      # apart and a test asking only that would have passed against the defect.
+      # It also drives two readable-commit cases all the way through, because
+      # `exit 1` at the top of the script would satisfy every refusal case on
+      # its own. Offline: throwaway git repos, no node, no network, ~1s.
+      - name: objectui pin write-ordering guard
+        run: pnpm check:objectui-bump
+
       # Changeset-family gate self-tests (#6509). The SELF-TEST halves only —
       # the real scans stay in pr-automation.yml's `changeset-check`, and the
       # split is the whole point of this step.
@@ -1236,6 +1397,33 @@ jobs:
       # gate prints that cutoff and its reason on both the OK and failure paths.
       - name: Release-page status guard
         run: pnpm check:release-page-status
+
+      # Release SECTION-COVERAGE guard (#10268). The guard above is keyed on the
+      # MAJOR: `releasedAssertionRe(17)` is satisfied by ANY 17.x.y released-claim,
+      # so a page saying "17.0.0 is released" passes forever however many 17.x
+      # minors ship after it. Reconstructed from history and measured on this
+      # change's base, that gate exits 0 on the exact #10232 state — v17 page with
+      # no 17.1 heading and an index still reading "(current series: 17.0.0)" while
+      # 17.1.0 had been on `latest` for hours. Third occurrence of the class
+      # (#8886/#8882 -> the gate above, #8917 -> no gate, #10232).
+      #
+      # ADVISORY BY DEFAULT, AND THAT IS MEASURED, NOT TIMID. The CHANGELOG heading
+      # lands in the version commit that publishes, so a hard failure starts the
+      # instant a minor ships and lasts until someone writes curated prose. Timed
+      # from git: 17.1.0 ran 5h44m (36 PRs landed), 16.1.0 ran 25 days (2712 PRs).
+      # Hard-failing would have red 2748 PRs for a debt none of them created. So
+      # findings are a `::warning::` + step summary with the job GREEN — the
+      # loud-but-non-blocking shape prerelease-pin-watch.yml uses — and the policy
+      # follows half-state-patrol.yml's rule verbatim: findings never fail
+      # anything, the job DOES fail when the sweep could not run. A broken
+      # instrument is fatal here in every mode. `--strict` promotes findings to
+      # exit 1 for a caller that owns the remedy; nothing on a PR passes it.
+      #
+      # No `pnpm check:*` alias: root package.json is inside the #9465 fence.
+      - name: Release section-coverage guard
+        run: |
+          node scripts/check-release-section-coverage.mjs --self-test
+          node scripts/check-release-section-coverage.mjs
 
       # Release-body limit guard (#4900). The GitHub Releases API rejects any
       # body over 125,000 characters, and @objectstack/spec's changelog section
@@ -1509,6 +1697,30 @@ jobs:
       # Reads ~2000 test sources; sub-second.
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
+
+      # Live-server database isolation (#10382). CI provisions ONE Postgres and
+      # ONE MySQL for the whole temporal-conformance job and points every live
+      # leg at them, and every live suite in the repo issues a `drop` when it
+      # finishes — so two suites naming the same database do not contend, they
+      # destroy each other's fixture. When the shared name is the one the
+      # connection URL itself carries, the next suite cannot even complete its
+      # handshake: measured on a live MariaDB 10.11, `Error: Unknown database
+      # 'conformance'`, deterministically, without any concurrency needed.
+      #
+      # #9350 fixed this and enforced it — inside `packages/drivers/driver-sql`
+      # only. That scan was correctly green while two live suites in
+      # `packages/metadata-protocol` named their databases with hand-typed
+      # constants, distinct from each other only because two authors typed two
+      # different strings. A per-package scan cannot see the package that has
+      # not been written yet, and the next live suite will be in a third one.
+      #
+      # This gate is the repo-wide half and nothing has to opt in: it finds the
+      # live files itself (they are the ones reading OS_TEST_*_URL) and fails
+      # any whose database name reaches its DDL from a literal. It does NOT
+      # check distinctness — that needs the derivation actually run, and lives
+      # in the two packages' own isolation suites. Reads ~4 files; sub-second.
+      - name: Live-server database isolation
+        run: pnpm check:live-db-isolation
 
       # LAYER C of the gate above (#10379). That gate verifies two of the three
       # layers a cross-package declaration has: it finds the escaping tests
@@ -3154,6 +3366,28 @@ jobs:
       # both directions.
       - name: Check docs formula examples are valid CEL
         run: pnpm --filter @objectstack/lint run check:doc-formula-expressions
+
+      # The AUTHOR-TIME-LINT half of the same surface (#10618). check:skill-examples
+      # proves an `os:check` block COMPILES; it cannot prove `os validate` accepts
+      # what the block constructs, because the lint rules judge VALUES, not types:
+      # `sharingModel` is `.optional()` with no `.default()`, so omitting it
+      # type-checks clean while `os validate` rejects the object as severity:
+      # 'error' (SECURITY_OWD_UNSET — the ADR-0090 D1 authored-baseline rule).
+      # That is how 22 canonical docs examples across 12 pages shipped a shape
+      # the platform's own gate rejects (#10581; fixed by the #10714 sweep, plus
+      # 8 more this gate's first run found on pages outside that sweep's scope).
+      #
+      # The verdict is `validateSecurityPosture` imported from @objectstack/lint —
+      # the same gating-tier registry entry `os validate` / `os compile` and the
+      # runtime publish gate run — never a lookalike, so the docs are gated by
+      # the rule rather than a dialect of it. Same home and reasoning as its
+      # CEL neighbour directly above. The constructed `ObjectSchema.create`
+      # literal is STATICALLY evaluated (never executed), with per-fact
+      # conservatism: a verdict is only trusted where its facts are statically
+      # known, so `Field.*` factory calls and dynamic values can never turn
+      # into a false red. Self-test first, both directions.
+      - name: Check docs object examples pass the os validate security posture
+        run: pnpm --filter @objectstack/lint run check:doc-security-posture
 
       # Same anti-drift class as the gates above, for the generated translation
       # bundles in packages/platform-objects/src/apps/translations/. Nothing

@@ -703,11 +703,77 @@ describe('RecordHighlightsProps', () => {
   });
 
   it('should still accept bare-string and other object-form highlight fields', () => {
+    // #10054 fixture triage: this pin used to author `icon: 'flag'` — the one
+    // in-repo writer of the key that change retired. Respelled rather than
+    // deleted: the pin guards the SURVIVING object-arm surface, which is
+    // {name, label?, type?, readonly?}.
     const result = RecordHighlightsProps.parse({
-      fields: ['name', { name: 'status', label: 'State', icon: 'flag' }],
+      fields: ['name', { name: 'status', label: 'State', type: 'text', readonly: true }],
     });
     expect(result.fields[0]).toBe('name');
-    expect(result.fields[1]).toEqual({ name: 'status', label: 'State', icon: 'flag' });
+    expect(result.fields[1]).toEqual({ name: 'status', label: 'State', type: 'text', readonly: true });
+  });
+
+  // ── #10054 — `icon` retired from the object arm (ADR-0049 / ADR-0087) ────
+  //
+  // Measured dead (census 2026-08-20): the renderer normalized `icon` into a
+  // chip with no icon slot, `useRegisterHighlightFields` carries names only,
+  // and the Studio designer publishes the field list as `string[]` — while six
+  // author-facing surfaces advertised the key. The arm is `strictObject`, so
+  // the route is strict deletion + a `guidance` prescription and the refusal
+  // is the arm's own named `unrecognized_keys` (the `data/Metric:filters`
+  // route, not a `retiredKey` tombstone).
+  //
+  // Reverse-verified from the committed state: restoring the `icon` line turns
+  // the refusal pin red (the parse succeeds) — the pin reads the live schema,
+  // not a cached shape.
+  describe('retired icon on the RecordHighlightsField object arm (#10054)', () => {
+    /**
+     * Dig the object arm's own issues out of the zod-4 union collapse: the
+     * union reports ONE `invalid_union` whose `errors` tucks each arm's real
+     * issues away (the #5583 shape — `zod-issue-format.ts` unpacks this for
+     * authors; here the pin asserts the raw material it unpacks).
+     */
+    const collapsedUnion = (input: unknown) => {
+      const r = RecordHighlightsProps.safeParse(input);
+      expect(r.success).toBe(false);
+      if (r.success) throw new Error('unreachable');
+      const union = r.error.issues.find((i) => i.code === 'invalid_union') as {
+        code: string;
+        path: PropertyKey[];
+        errors?: ReadonlyArray<ReadonlyArray<{
+          code: string; message: string; path: PropertyKey[]; keys?: string[];
+        }>>;
+      } | undefined;
+      expect(union, 'the union collapse carries the arm issues').toBeDefined();
+      return union!;
+    };
+
+    it('refuses an authored icon as a named unrecognized_keys rejection carrying the prescription', () => {
+      const union = collapsedUnion({ fields: [{ name: 'status', icon: 'flag' }] });
+      // The right path: the offending entry, not the whole props bag.
+      expect(union.path).toEqual(['fields', 0]);
+      const armIssue = (union.errors ?? []).flat().find((i) => i.code === 'unrecognized_keys');
+      expect(armIssue, "the object arm's own unrecognized_keys issue").toBeDefined();
+      expect(armIssue!.keys).toContain('icon');
+      // The named surface and the retirement prescription — citation, the
+      // "drawn by nothing" story, and the no-replacement guidance. The `s`
+      // flag is house style: the message spans lines.
+      expect(armIssue!.message).toMatch(/this `record:highlights` field/);
+      expect(armIssue!.message).toMatch(/`record:highlights` field `icon` was removed .*#10054.*ADR-0049/s);
+      expect(armIssue!.message).toMatch(/Delete the key — no replacement: the renderer never drew it/s);
+      expect(armIssue!.message).toMatch(/os migrate meta --from 17/);
+    });
+
+    it('control: the same entry without icon parses clean — the refusal is about the key, not the arm', () => {
+      const result = RecordHighlightsProps.parse({ fields: [{ name: 'status' }] });
+      expect(result.fields[0]).toEqual({ name: 'status' });
+    });
+
+    it('readonly behaviour is untouched by the retirement', () => {
+      const result = RecordHighlightsProps.parse({ fields: [{ name: 'supply_share', readonly: true }] });
+      expect((result.fields[0] as { readonly?: boolean }).readonly).toBe(true);
+    });
   });
 });
 

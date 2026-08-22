@@ -97,7 +97,7 @@ const SKILL_MAP: Record<string, string[]> = {
     'ui/widget.zod.ts',
     'ui/component.zod.ts',
     'ui/report.zod.ts',
-    'ui/theme.zod.ts',
+    // 'ui/theme.zod.ts' — retired whole at #10485 (ADR-0049).
     'ui/dataset.zod.ts',
   ],
   'objectstack-platform': [

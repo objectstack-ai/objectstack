@@ -30,21 +30,22 @@
  * ## Why the sample spans THREE classes and not just the withdrawn four
  *
  * A suite that only pinned the four withdrawn types would be satisfied by a
- * blanket flip of the synthesis — which would break `PUT /meta/theme/dark`, the
- * operation the plugin path exists to serve, and would be a worse outcome than
- * the defect being closed. So every case here carries its class, and the
+ * blanket flip of the synthesis — which would break `PUT /meta/webhook/stripe`,
+ * the operation the plugin path exists to serve, and would be a worse outcome
+ * than the defect being closed. So every case here carries its class, and the
  * classes are checked against each other:
  *
  *  1. **statically declared** (`view`, `hook`, `agent`) — the flag comes off
  *     the registry entry, as it always did, in both the `true` and the `false`
  *     direction;
- *  2. **URL-map-only plugin kinds** (`theme`, and its five siblings) — no
+ *  2. **URL-map-only plugin kinds** (`webhook`, and its four siblings) — no
  *     registry entry, IN the static spelling contract, still advertised and
  *     still mintable. This is the discriminating control: without it the change
  *     cannot show its narrowing is narrow;
- *  3. **withdrawn** (`policy`, `data`, `package`, `kind`) — live
- *     `SchemaRegistry` keys an ordinary `registerApp` produces, in NEITHER half
- *     of the static contract, advertised `false` and refused.
+ *  3. **withdrawn** (`policy`, `data`, `package`, `kind` — and, since #10485,
+ *     `theme`, whose carrier retired out of the spelling contract while legacy
+ *     stored rows can still hold the key live) — live `SchemaRegistry` keys,
+ *     in NEITHER half of the static contract, advertised `false` and refused.
  *
  * Harness: the real `getMetaTypes()` and the real `saveMetaItem()` on one
  * protocol instance over a stub engine, so agreement is MEASURED across the two
@@ -152,13 +153,24 @@ const SAMPLE: Array<{
         item: { name: 'probe_agent', label: 'Probe' },
     },
     {
-        type: 'theme',
+        type: 'webhook',
         klass: 'url-map-only',
         creatable: true,
-        // [#10194] spec-valid body — `theme` resolves a schema through
-        // UNREGISTERED_KIND_SCHEMAS now, and the "behaves as advertised" case
+        // [#6245] spec-valid body — `webhook` resolves a schema through
+        // UNREGISTERED_KIND_SCHEMAS, and the "behaves as advertised" case
         // drives this body through a real write, so a malformed one would
         // 422 and misread the ADVERTISEMENT door this suite measures.
+        // (`theme` held this slot until #10485 retired the themes surface.)
+        item: { name: 'probe_webhook', label: 'Probe', object: 'task', triggers: ['create'], url: 'https://example.com/hook' },
+    },
+    {
+        // [#10485] `theme` moved from class 2 to class 3: the carrier retired
+        // out of the spelling contract, while a legacy environment's stored
+        // rows can still hold the key in the live set — so it must be
+        // advertised `false` and refused at the mint door, like the four.
+        type: 'theme',
+        klass: 'withdrawn',
+        creatable: false,
         item: { name: 'probe_theme', label: 'Probe', colors: { primary: '#3b82f6' } },
     },
     { type: 'policy', klass: 'withdrawn', creatable: false, item: { name: 'probe_policy', label: 'Probe' } },
@@ -231,17 +243,17 @@ describe('#8421 — the read door and the mint door agree, across all three clas
         }
     });
 
-    it('the six URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
-        // The blanket-flip guard, quantified rather than sampled. `theme` above
-        // is the one driven end-to-end through a write; these five have no
-        // hand-written spec-valid body here, so they are pinned on the door
+    it('the five URL-map-only plugin kinds are ALL still advertised as creatable', async () => {
+        // The blanket-flip guard, quantified rather than sampled. `webhook`
+        // above is the one driven end-to-end through a write; the others have
+        // no hand-written spec-valid body here, so they are pinned on the door
         // that this change actually moved — the advertisement. Breaking any of
         // them is the one outcome that would make this change worse than the
-        // defect it closes.
+        // defect it closes. (`theme` left the set at #10485.)
         const { protocol } = makeProtocol();
         const listing = await protocol.getMetaTypes();
         for (const kind of [
-            'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'theme', 'webhook',
+            'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'webhook',
         ]) {
             const entry = listing.entries.find((e: any) => e.type === kind);
             expect(entry, `${kind} must be listed`).toBeDefined();

@@ -565,6 +565,9 @@ importers:
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
+      create-objectstack:
+        specifier: workspace:*
+        version: link:../create-objectstack
       dotenv-flow:
         specifier: ^4.1.0
         version: 4.1.0

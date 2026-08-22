@@ -791,8 +791,9 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
  * measured on the producer pair, not assumed:
  *
  * - `ObjectStackProtocolImplementation.publishPackageDrafts` builds the base
- *   object. Its three return sites always set `success` / `publishedCount` /
- *   `failedCount` / `published` / `failed` (so those five are REQUIRED), and
+ *   object. Its three return sites always set `success` / `outcome` /
+ *   `publishedCount` / `failedCount` / `published` / `failed` (so those six
+ *   are REQUIRED), and
  *   attach `seedApplied` / `materializeApplied` / `probes` / `commitId` only
  *   on the happy path when the corresponding fact exists (so each is
  *   optional — absence means "did not apply", never "failed").
@@ -808,6 +809,10 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
  * (pre-flight violations; the ADR-0067 D2 all-or-nothing rollback) answer
  * `success: false` on a 200 with `publishedCount: 0`, `published: []` and the
  * whole batch in `failed[]` (`BATCH_ABORTED` marks the non-causal items).
+ * `success: false` alone does NOT mean a refusal — a publish with no pending
+ * drafts answers it too, with `failed: []`; `outcome` (#10462) names which of
+ * the three exits answered, so no consumer has to reverse-engineer that from
+ * `failed.length`.
  *
  * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
  * it here without a consumer-driven card (#9406 ruling).
@@ -816,9 +821,28 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe(
     'True only when every pending draft promoted (`failed` empty) AND at '
     + 'least one item published. A pre-flight refusal or an ADR-0067 D2 '
-    + 'rollback answers false on a 200 — read `failed[]`, not the HTTP '
-    + 'status. It does NOT cover the best-effort receipts below, each of '
-    + 'which reports its own `success`.',
+    + 'rollback answers false on a 200 — but so does a publish with nothing '
+    + 'to promote, so false alone is NOT a refusal: read `outcome` (#10462), '
+    + 'not this boolean or the HTTP status. Always equal to '
+    + '`outcome === \'published\'` (pinned). It does NOT cover the '
+    + 'best-effort receipts below, each of which reports its own `success`.',
+  ),
+  outcome: z.enum(['published', 'refused', 'nothing_to_publish']).describe(
+    'First-class discriminant for WHICH exit answered (#10462) — the fact '
+    + '`success` compresses into one boolean. `published`: at least one draft '
+    + 'promoted and none refused. `refused`: the batch was refused — a '
+    + 'pre-flight violation or the ADR-0067 D2 all-or-nothing rollback; the '
+    + 'per-item story is in `failed[]`, which is non-empty exactly on this '
+    + 'outcome (the invariant consumers previously had to reverse-engineer, '
+    + 'now stated by the producer). `nothing_to_publish`: the package had no '
+    + 'pending drafts — nothing landed AND nothing was refused; `success` '
+    + 'stays false (a no-op is not a successful publish), which before this '
+    + 'field made that answer indistinguishable from a refusal. Producer '
+    + 'invariants, pinned in the conformance suites: '
+    + '`success === (outcome === \'published\')`; `refused` if and only if '
+    + '`failed.length > 0`; `nothing_to_publish` if and only if '
+    + '`published.length === 0 && failed.length === 0`. Values are lowercase '
+    + 'snake, matching the `sys_metadata_audit` outcome vocabulary.',
   ),
   publishedCount: z.number().int().describe(
     'Number of drafts promoted to active — `published.length`. 0 on every '
@@ -861,12 +885,30 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     name: z.string().describe('Item name.'),
     error: z.string().describe(
       'What refused it. On a rollback, the causal item carries its real '
-      + 'error and every sibling carries the all-or-nothing explanation.',
+      + 'error and every sibling carries the all-or-nothing explanation. '
+      + 'A refusal that produced structured findings states a one-sentence '
+      + 'HEADLINE here (what failed, where, which rules, how many); the '
+      + 'per-path detail rides `issues[]` instead of being restated in this '
+      + 'string (#10524 — consumers rendering both channels were showing '
+      + 'every finding twice).',
     ),
     code: z.string().optional().describe(
       'Machine code for the refusal class (SCREAMING_SNAKE, ADR-0112 '
       + 'vocabulary) — e.g. a pre-flight violation code, or BATCH_ABORTED '
       + 'on the non-causal items of a rolled-back batch.',
+    ),
+    issues: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+      'The structured findings behind the refusal, when the refusing error '
+      + 'carried them — today the #4463 author-time gate\'s '
+      + 'INVALID_METADATA refusal on the causal item. The producer has '
+      + 'emitted this key since #8333; declaring it (#10524) is what lets a '
+      + 'typed consumer read it back, and what lets `error` stay a headline '
+      + 'without losing the per-path detail. Same element shape as '
+      + '`published[].advisories` and the single-item 422\'s `issues[]` '
+      + '(#4717 — one dialect, declared once). Present ONLY on the causal '
+      + 'item and only when the refusal produced structured findings; '
+      + 'BATCH_ABORTED siblings never carry it. Absent means "this refusal '
+      + 'carried no structured findings", never "no problems".',
     ),
   })).describe(
     'Items that did not publish. Because the batch is all-or-nothing '
@@ -890,11 +932,34 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     ),
     error: z.string().optional().describe(
       'Single failure message, present when the apply failed before the '
-      + 'loader ran (including "no readable seed bodies").',
+      + 'loader ran (including "no readable seed bodies"). When the failure '
+      + 'is the seed bodies\' own schema refusal, this is a one-sentence '
+      + 'headline and the per-path detail rides `issues[]` (#10524).',
     ),
     errors: z.array(z.unknown()).optional().describe(
       'Per-record failures reported by the seed loader, plus any seed-body '
       + 'read failures. May be present and empty on a clean load.',
+    ),
+    issues: z.array(z.object({
+      path: z.string().describe(
+        'Dotted config path inside the submitted seed set (`seeds.0.mode`), '
+        + 'so an author can jump to the offending key. May be empty for a '
+        + 'whole-request finding.',
+      ),
+      message: z.string().describe('What is wrong, in the schema\'s own words.'),
+      code: z.string().optional().describe(
+        'Zod\'s own issue code, verbatim — deliberately NOT the ADR-0114 '
+        + '`fields[]` vocabulary (the #5364 decision: this is a '
+        + 'metadata-authoring diagnostic and its consumers read raw zod '
+        + 'codes; aligning the vocabularies is a separate decision).',
+      ),
+    })).optional().describe(
+      'Structured spec-validation findings behind `error`, present when the '
+      + 'apply was refused by the seed bodies\' own schema — the declared '
+      + '422 `seedRequestValidationError` mints (#8443). The per-path '
+      + 'detail lives HERE, once; `error` stays a one-sentence headline '
+      + '(#10524). Absent on non-validation failures (driver faults, '
+      + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),
   }).optional().describe(
     'Aggregate outcome of materializing EVERY published `seed` body in one '

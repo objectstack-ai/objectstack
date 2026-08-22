@@ -12,7 +12,8 @@
  * ## What this answers
  *
  * "What is the latest verdict for every checklist selector, and is it stale?"
- * Today that question costs a human 23 issue-reads. This prints it as one table.
+ * Today that question costs a human one issue-read per record (34 as of
+ * 2026-08-21). This prints it as one table.
  *
  * ## It is a generated VIEW, not a tracker
  *
@@ -25,8 +26,8 @@
  *
  * Measured over the whole live corpus on 2026-08-18 (23 records, open+closed):
  *
- *   - 23/23 titles parse. The counts field is uniform enough to tokenize
- *     mechanically, and it is the record author's OWN item-level summary.
+ *   - The title is the only uniform machine-readable field the corpus has, and
+ *     it is the record author's OWN item-level summary.
  *   - The bodies are not one shape and never were. 9 of 23 records (the
  *     2026-08-11 `92f26f75` wave) contain NO markdown table at all — they are
  *     prose with `## PASS - 4 items` headings. The other 14 carry 26 DISTINCT
@@ -42,23 +43,51 @@
  * have read the bodies. The output says so, every run, so that no reader can
  * mistake this view for a body-derived one.
  *
- * ## The title convention has drifted, and the drift is REPORTED, not hidden
+ * ## ONE canonical title shape, and this parser is STRICT about it
  *
- * Three different conventions are in play:
+ * Maintainer ruling, 2026-08-20 (option 2 on the drift card): the run-record
+ * title is tightened to exactly ONE shape, and this parser matches that shape
+ * and nothing else. The contract, documented in full at
+ * `.claude/skills/checklist-test/SKILL.md`:
  *
- *   documented (.claude/skills/checklist-test/SKILL.md):
- *     QA run | <selector> | <judged>/<total> | <sha8> | <date>          (5 fields, no counts)
- *   as described in the #9486 card:
- *     QA run | <selector> | <judged>/<total> | <sha8> | <date> | <counts>  (6 fields)
- *   as ACTUALLY written by 23/23 records:
- *     QA run | <selector[(judged/total)]> | <sha8> | <date> | <counts>   (5 fields)
+ *   QA run | <selector> (<judged>/<total>) | <sha8> | <YYYY-MM-DD> | <counts>
  *
- * Zero records follow either documented form. The judged/total is folded into a
- * parenthetical on the selector, in five distinct phrasings, and is absent
- * entirely on one record. This parser accepts the shape the records actually
- * have; anything it cannot parse is PRINTED, never dropped. A roll-up that
- * silently omits records is the "derived list read as authoritative" defect
- * this repo has paid for repeatedly (#9294, #9331, #9503, #9590).
+ *   - five `·`-separated fields, always;
+ *   - `(<judged>/<total>)` is MANDATORY and is bare digits only. The phrasings
+ *     the corpus grew -- `(FULL area)`, `(77 items)`, `(5 of 10 items)`,
+ *     `(6/14 items consulted)`, and omitting the parenthetical altogether --
+ *     are all RETIRED. `(FULL area)` is the reason the ruling exists: it
+ *     declares no total, and a record wearing it judged 13 of its area's 33
+ *     items while reading as complete coverage;
+ *   - `<sha8>` is exactly 8 lowercase hex characters;
+ *   - `<counts>` is ` / `-separated `<n> <VERDICT>` segments in report order,
+ *     each bucket at most once, uppercase, NOT-RUN spelled `NOT-RUN`. The
+ *     trailing `(11 not-run)` parenthetical the corpus also used is RETIRED.
+ *
+ * ⛔ Do NOT re-add tolerant multi-shape parsing here. Accepting five spellings
+ * of one field is precisely the tolerant-consumer shape the ruling kills: it
+ * fossilizes authoring errors into a second de-facto contract and hides them
+ * (AGENTS.md Prime Directive #12). One strict contract, and deviation is loud.
+ *
+ * ## Existing records are NOT migrated -- and "unparsed" is split in two
+ *
+ * The ruling is new-records-only: every record written before the contract
+ * keeps its own shape and simply does not parse. Measured on 2026-08-21 the
+ * corpus is 34 records and NONE of them matches the canonical shape, so an
+ * undifferentiated "Not parsed" list would be 34 rows deep -- and the first
+ * genuine deviation by a NEW record would be invisible inside it. That would
+ * defeat the enforcement surface the ruling is relying on.
+ *
+ * So the render partitions the unparsed set by `CANONICAL_FROM`, using the
+ * GitHub API's `created_at` -- an API fact, never anything read out of the
+ * title. Nothing is extracted from a legacy title, no legacy shape is
+ * recognised, and every record is equally unparsed; only the EXPLANATION
+ * differs. Records that predate the contract are expected, and say so;
+ * records written after it are the signal.
+ *
+ * Either way a record is PRINTED, never dropped. A roll-up that silently omits
+ * records is the "derived list read as authoritative" defect this repo has paid
+ * for repeatedly (#9294, #9331, #9503, #9590).
  *
  * ## Staleness is THREE-valued, because a shallow clone cannot always tell
  *
@@ -95,15 +124,54 @@ const TITLE_PREFIX = 'QA run';
 const SEP = '·'; // MIDDLE DOT, the field separator the records use
 
 /**
- * Parse one `qa-run` issue title.
+ * The date the canonical title contract takes effect. A record created BEFORE
+ * this predates the contract and is not expected to match it (the ruling is
+ * new-records-only, with no migration); a record created on or after it that
+ * fails to parse is a real deviation.
+ *
+ * This is a presentation boundary only — it never relaxes the parser, which
+ * has exactly one accepted shape regardless of date. If this PR lands later
+ * than the date below, bump this one constant to the merge date.
+ */
+export const CANONICAL_FROM = '2026-08-22';
+
+/**
+ * Whether a record predates the canonical contract, from the GitHub API's
+ * `created_at`.
+ *
+ * Deliberately reads an API fact rather than the title: a legacy title is not
+ * parsed at all, so no field of it — including its date field — may be
+ * consulted to decide how to describe it.
+ *
+ * @param {string|null|undefined} createdAt ISO 8601 timestamp from the API
+ * @returns {boolean} true when the record predates the contract
+ */
+export function predatesContract(createdAt) {
+  if (typeof createdAt !== 'string' || createdAt.length < 10) return false;
+  return createdAt.slice(0, 10) < CANONICAL_FROM;
+}
+
+/**
+ * Parse one `qa-run` issue title against the ONE canonical shape.
+ *
+ *   QA run · <selector> (<judged>/<total>) · <sha8> · <YYYY-MM-DD> · <counts>
+ *
+ * Strict by ruling (2026-08-20). Every rejection carries a reason naming the
+ * field that failed and what was expected, because the reason is what the
+ * "Not parsed" section prints and that section is the enforcement surface —
+ * a bare "did not match" would tell an author nothing about what to fix.
+ *
+ * ⛔ Never widen this to accept a second phrasing of a field. The retired
+ * spellings are pinned as REJECTED in `--self-test`; re-accepting one turns
+ * this back into the tolerant consumer the ruling removed.
  *
  * Pure: every input is an argument, so `--self-test` exercises the real code
  * path rather than a re-implementation.
  *
  * @param {string} title raw issue title
- * @returns {{ok: true, selector: string, selectorKind: string, judged: number|null,
- *            total: number|null, note: string|null, sha: string, date: string,
- *            counts: Record<string, number>, unrecognized: string[]}
+ * @returns {{ok: true, selector: string, selectorKind: string, judged: number,
+ *            total: number, sha: string, date: string,
+ *            counts: Record<string, number>}
  *          | {ok: false, reason: string}}
  */
 export function parseRunTitle(title) {
@@ -119,53 +187,37 @@ export function parseRunTitle(title) {
   }
   const [, selectorField, shaField, dateField, countsField] = fields;
 
-  // selector, with the judged/total folded into an optional parenthetical
-  const parenMatch = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(selectorField);
-  const selector = (parenMatch ? parenMatch[1] : selectorField).trim();
-  const paren = parenMatch ? parenMatch[2].trim() : null;
+  // selector + the MANDATORY judged/total parenthetical, in its one spelling.
+  const parenMatch = /^(.*?)\s*\((\d+)\/(\d+)\)$/.exec(selectorField);
+  if (!parenMatch) {
+    return {
+      ok: false,
+      reason: `selector field ${JSON.stringify(selectorField)} does not end in a mandatory \`(<judged>/<total>)\` — bare digits only, no words`,
+    };
+  }
+  const selector = parenMatch[1].trim();
   if (selector === '') return { ok: false, reason: 'empty selector' };
-
-  let judged = null;
-  let total = null;
-  let note = null;
-  if (paren !== null) {
-    let m;
-    if ((m = /^(\d+)\s*\/\s*(\d+)/.exec(paren))) {
-      judged = Number(m[1]);
-      total = Number(m[2]);
-    } else if ((m = /^(\d+)\s+of\s+(\d+)/i.exec(paren))) {
-      judged = Number(m[1]);
-      total = Number(m[2]);
-    } else if ((m = /^(\d+)\s+items?\b/i.exec(paren))) {
-      total = Number(m[1]);
-    } else {
-      note = paren;
-    }
+  if (selector.includes('(') || selector.includes(')')) {
+    return { ok: false, reason: `selector ${JSON.stringify(selector)} contains a parenthesis` };
+  }
+  const judged = Number(parenMatch[2]);
+  const total = Number(parenMatch[3]);
+  if (judged > total) {
+    return { ok: false, reason: `judged ${judged} exceeds total ${total}` };
   }
 
-  if (!/^[0-9a-f]{7,40}$/i.test(shaField)) {
-    return { ok: false, reason: `sha field ${JSON.stringify(shaField)} is not a hex sha` };
+  if (!/^[0-9a-f]{8}$/.test(shaField)) {
+    return {
+      ok: false,
+      reason: `sha field ${JSON.stringify(shaField)} is not exactly 8 lowercase hex characters`,
+    };
   }
   if (!isCalendarDate(dateField)) {
     return { ok: false, reason: `date field ${JSON.stringify(dateField)} is not a real YYYY-MM-DD date` };
   }
 
-  // counts: tokenize `<n> <WORD>` pairs. This spans both spellings the corpus
-  // uses -- `/`-separated segments and a trailing `(11 not-run)` parenthetical
-  // -- and both NOT-RUN casings.
-  const counts = {};
-  const unrecognized = [];
-  for (const m of countsField.matchAll(/(\d+)\s*([A-Za-z][A-Za-z-]*)/g)) {
-    const word = m[2].toUpperCase();
-    if (VERDICTS.includes(word)) {
-      counts[word] = (counts[word] ?? 0) + Number(m[1]);
-    } else {
-      unrecognized.push(`${m[1]} ${m[2]}`);
-    }
-  }
-  if (Object.keys(counts).length === 0) {
-    return { ok: false, reason: `counts field ${JSON.stringify(countsField)} yielded no known verdict` };
-  }
+  const parsedCounts = parseCounts(countsField);
+  if (!parsedCounts.ok) return parsedCounts;
 
   return {
     ok: true,
@@ -173,12 +225,52 @@ export function parseRunTitle(title) {
     selectorKind: classifySelector(selector),
     judged,
     total,
-    note,
-    sha: shaField.toLowerCase(),
+    sha: shaField,
     date: dateField,
-    counts,
-    unrecognized,
+    counts: parsedCounts.counts,
   };
+}
+
+/**
+ * The counts field, in its one spelling: ` / `-separated `<n> <VERDICT>`
+ * segments, verdicts uppercase and in report order, each bucket at most once.
+ *
+ * A bucket that is ABSENT means the record did not declare it, which is not
+ * the same as declaring zero — the render shows the two differently, so an
+ * author who means zero writes `0 FAIL`. That is why this refuses to invent
+ * missing buckets rather than defaulting them.
+ *
+ * @param {string} field
+ * @returns {{ok: true, counts: Record<string, number>} | {ok: false, reason: string}}
+ */
+function parseCounts(field) {
+  if (field === '') return { ok: false, reason: 'counts field is empty' };
+  const counts = {};
+  let lastIndex = -1;
+  for (const segment of field.split('/')) {
+    const seg = segment.trim();
+    const m = /^(\d+) ([A-Z][A-Z-]*)$/.exec(seg);
+    if (!m) {
+      return {
+        ok: false,
+        reason: `counts segment ${JSON.stringify(seg)} is not \`<n> <VERDICT>\` with an uppercase verdict`,
+      };
+    }
+    const word = m[2];
+    const index = VERDICTS.indexOf(word);
+    if (index === -1) {
+      return { ok: false, reason: `${JSON.stringify(word)} is not a verdict (expected one of ${VERDICTS.join(', ')})` };
+    }
+    if (word in counts) {
+      return { ok: false, reason: `verdict ${word} declared more than once` };
+    }
+    if (index <= lastIndex) {
+      return { ok: false, reason: `verdict ${word} is out of report order (${VERDICTS.join(' / ')})` };
+    }
+    lastIndex = index;
+    counts[word] = Number(m[1]);
+  }
+  return { ok: true, counts };
 }
 
 /**
@@ -316,26 +408,21 @@ export function readAreas(root) {
  * The "judged" cell: how many items this record actually judged, over how many
  * the selector covers.
  *
- * The denominator has two possible provenances and they are NOT interchangeable:
- * the record's own declared total, or -- when the record declares none and the
- * selector names a checklist area -- the area's item count read from
- * `docs/qa/platform-checklist/areas/`. The second is marked with `*` because it
- * is the checklist's number, not the record's claim, and the difference is
- * load-bearing: several records titled "(FULL area)" judged far fewer items than
- * their area holds, which is invisible if the two denominators render alike.
+ * One provenance now — the record's own mandatory `(<judged>/<total>)`. The
+ * earlier version had three more branches (summed counts over a declared
+ * total, the checklist area's item count marked `*`, and a free-text note),
+ * which existed solely because the retired phrasings declared no judged/total.
+ * With the parenthetical mandatory there is nothing left to infer, and
+ * inferring a denominator the record never claimed is exactly the confident
+ * nonsense the contract removes.
  *
  * Pure.
  *
- * @param {{judged: number|null, total: number|null, note: string|null, counts: Record<string, number>}} parsed
- * @param {number|null} areaItems item count for the selector's area, or null
+ * @param {{judged: number, total: number}} parsed
  * @returns {string}
  */
-export function judgedCell(parsed, areaItems) {
-  const sum = Object.values(parsed.counts).reduce((a, b) => a + b, 0);
-  if (parsed.judged != null && parsed.total != null) return `${parsed.judged}/${parsed.total}`;
-  if (parsed.total != null) return `${sum}/${parsed.total}`;
-  if (areaItems != null && areaItems > 0) return `${sum}/${areaItems}*`;
-  return parsed.note ? `${sum} (${parsed.note})` : `${sum}/?`;
+export function judgedCell(parsed) {
+  return `${parsed.judged}/${parsed.total}`;
 }
 
 const FRESHNESS_CELL = {
@@ -368,6 +455,7 @@ export function renderMarkdown(model) {
   L.push(`- target: \`${computedOn.targetRef}\` = \`${computedOn.targetSha ?? 'unresolved'}\``);
   L.push(`- repository: ${computedOn.shallow ? `shallow clone (graft boundary \`${computedOn.boundary ?? '?'}\`, ${computedOn.boundaryDate ?? '?'})` : 'full clone'}`);
   L.push(`- corpus: ${corpus.total} \`qa-run\` records (${corpus.open} open, ${corpus.closed} closed), ${corpus.parsed} parsed, ${corpus.unparseable} unparseable`);
+  L.push(`- contract: ONE canonical title shape, strict, effective \`${CANONICAL_FROM}\` (new records only — earlier records are not migrated)`);
   L.push(`- source: issue TITLES only — bodies are not parsed (see caveat below)`);
   L.push(`- API: ${computedOn.apiCalls} REST call(s), core quota`);
   L.push(`- generated: ${computedOn.generatedAt}`);
@@ -387,27 +475,56 @@ export function renderMarkdown(model) {
       `| \`${r.selector}\` | ${r.selectorKind} | #${r.number} | ${r.date} | \`${r.sha}\` | ${fresh} | ${cells.join(' | ')} | ${r.judgedCell} |`,
     );
   }
+  if (rows.length === 0) {
+    L.push('_No record matches the canonical title shape yet. Every record in the corpus predates');
+    L.push(`the contract (effective \`${CANONICAL_FROM}\`) and is listed below — this table fills in as`);
+    L.push('runs adopt the shape. An empty table here is the expected state immediately after the');
+    L.push('contract lands, not a failure of this view._');
+  }
   L.push('');
   L.push('`—` = the record did not declare that bucket (which is NOT the same as declaring zero).');
   L.push('`?` = could not be computed, never "fresh" — see reason.');
-  L.push('`*` on a denominator = item count from the checklist area, not a number the record declared.');
   L.push('');
 
-  if (unparseable.length > 0) {
-    L.push(`### Not parsed — ${unparseable.length} record(s)`);
+  // The enforcement surface, split so that a NEW deviation cannot hide inside
+  // the legacy backlog. The split reads the API's `created_at`, never the
+  // title: a legacy title is not parsed at all, so no field of it is consulted.
+  const legacy = unparseable.filter((u) => predatesContract(u.createdAt));
+  const deviations = unparseable.filter((u) => !predatesContract(u.createdAt));
+
+  if (deviations.length > 0) {
+    L.push(`### Not parsed — ${deviations.length} record(s) deviating from the contract`);
     L.push('');
-    L.push('Listed because a roll-up that silently drops records reads as authoritative and is not.');
+    L.push(`These were written on or after \`${CANONICAL_FROM}\`, so the canonical title shape applied`);
+    L.push('to them. Each is a title to fix, and the reason names the field that failed.');
     L.push('');
     L.push('| record | title | why |');
     L.push('|---|---|---|');
-    for (const u of unparseable) {
+    for (const u of deviations) {
       L.push(`| #${u.number} | ${escapeCell(u.title)} | ${escapeCell(u.reason)} |`);
     }
     L.push('');
   } else {
-    L.push('### Not parsed — none');
+    L.push('### Not parsed — no deviations');
     L.push('');
-    L.push('Every record in the corpus parsed.');
+    L.push('Every record written under the canonical contract matches it.');
+    L.push('');
+  }
+
+  if (legacy.length > 0) {
+    L.push(`### Predates the canonical contract — ${legacy.length} record(s)`);
+    L.push('');
+    L.push(`Written before \`${CANONICAL_FROM}\`, when the title convention had several shapes. The`);
+    L.push('tightening ruling is new-records-only: these are **not** migrated and are **not**');
+    L.push('defects. They are listed rather than dropped, because a roll-up that silently omits');
+    L.push('records reads as authoritative and is not — but nothing is extracted from their');
+    L.push('titles, so they contribute no verdict to the table above.');
+    L.push('');
+    L.push('| record | title |');
+    L.push('|---|---|');
+    for (const u of legacy) {
+      L.push(`| #${u.number} | ${escapeCell(u.title)} |`);
+    }
     L.push('');
   }
 
@@ -614,14 +731,19 @@ async function main(argv) {
   for (const issue of issues) {
     const parsed = parseRunTitle(issue.title);
     if (parsed.ok) parsedOk.push({ number: issue.number, state: issue.state, parsed });
-    else unparseable.push({ number: issue.number, title: issue.title, reason: parsed.reason });
+    else
+      unparseable.push({
+        number: issue.number,
+        title: issue.title,
+        reason: parsed.reason,
+        createdAt: issue.created_at ?? null,
+      });
   }
 
   const { latest, superseded } = rollUp(parsedOk);
   const latestBySelector = new Map(latest.map((r) => [r.parsed.selector, r.number]));
 
   const areas = readAreas(root);
-  const areaItems = new Map(areas.map((a) => [a.area, a.items]));
 
   const rows = latest.map((r) => {
     const shaFacts = readShaFacts(root, r.parsed.sha, targetSha);
@@ -633,7 +755,7 @@ async function main(argv) {
       date: r.parsed.date,
       sha: r.parsed.sha,
       counts: r.parsed.counts,
-      judgedCell: judgedCell(r.parsed, areaItems.get(r.parsed.selector) ?? null),
+      judgedCell: judgedCell(r.parsed),
       freshness,
     };
   });
@@ -687,29 +809,65 @@ function valueOf(argv, flag) {
 }
 
 /* ------------------------------------------------------------------ *
- * --self-test: exercises the pure core against fixtures taken from the
- * REAL corpus as measured on 2026-08-18. No network, no git needed.
+ * --self-test: exercises the pure core offline. No network, no git.
+ *
+ * Two fixture sets, and BOTH are load-bearing. FIXTURE_TITLES pins what the
+ * canonical contract accepts; RETIRED_TITLES pins what it must now REJECT,
+ * using the real phrasings the live corpus grew. A tightening whose test suite
+ * only checks the happy path passes just as well after someone re-widens the
+ * parser, so the rejections are the half that actually holds the ruling.
  * ------------------------------------------------------------------ */
 
 /**
- * Every distinct title shape the live corpus actually contains. If a future
- * record introduces a sixth phrasing, this list is where it gets pinned.
+ * The canonical title shape, in the variations it legitimately has: which
+ * buckets a record declares is the author's to choose, everything else is
+ * fixed.
  */
 export const FIXTURE_TITLES = [
-  // <judged>/<total> in the parenthetical
+  // three buckets; a fully-judged selector
   'QA run · tier2c:browser-2 (18/18) · e4e5c6e3 · 2026-08-18 · 10 PASS / 4 PARTIAL / 4 FAIL',
-  // "<n> items" -- a total with no judged
-  'QA run · tier1:automated-pins (77 items) · e4e5c6e3 · 2026-08-17 · 35 PASS / 39 PARTIAL / 0 FAIL',
-  // "FULL area" -- a note, no numbers
-  'QA run · studio-authoring (FULL area) · e4e5c6e3 · 2026-08-17 · 0 PASS / 1 PARTIAL / 0 FAIL (11 not-run)',
-  // "<a>/<b> items consulted"
-  'QA run · integration-system (6/14 items consulted) · e4e5c6e3 · 2026-08-17 · 2 PASS / 4 PARTIAL / 0 FAIL / 8 NOT-RUN',
-  // "<a> of <b> items"
-  'QA run · automation (5 of 10 items) · e4e5c6e3 · 2026-08-17 · 1 PASS / 3 PARTIAL / 1 BLOCKED',
-  // no parenthetical at all
-  'QA run · priority:P0 · e4e5c6e3 · 2026-08-17 · 7 PASS / 7 PARTIAL / 2 FAIL / 2 BLOCKED',
-  // no PARTIAL bucket declared
-  'QA run · ai (FULL area) · 92f26f75 · 2026-08-11 · 4 PASS / 3 FAIL',
+  // all five buckets, NOT-RUN in its one spelling, partial coverage declared
+  'QA run · access-security (9/20) · e4e5c6e3 · 2026-08-17 · 1 PASS / 7 PARTIAL / 0 FAIL / 2 BLOCKED / 10 NOT-RUN',
+  // the shape a run that reached 1 of 12 items must now write -- this is the
+  // record that used to be titled "(FULL area)" while judging almost nothing
+  'QA run · studio-authoring (1/12) · e4e5c6e3 · 2026-08-17 · 0 PASS / 1 PARTIAL / 11 NOT-RUN',
+  // a non-area selector; judged/total is mandatory for it too
+  'QA run · priority:P0 (18/18) · e4e5c6e3 · 2026-08-17 · 7 PASS / 7 PARTIAL / 2 FAIL / 2 BLOCKED',
+  // a single bucket is legal; an omitted bucket is "not declared", not zero
+  'QA run · ai (4/7) · 92f26f75 · 2026-08-11 · 4 PASS',
+];
+
+/**
+ * Real phrasings from the live corpus that the contract RETIRES, each with the
+ * substring its rejection reason must name. Re-accepting any of these is the
+ * regression this list exists to catch.
+ */
+export const RETIRED_TITLES = [
+  // the five judged/total phrasings the corpus grew, all retired in favour of
+  // the bare `(<judged>/<total>)`
+  ['QA run · studio-authoring (FULL area) · e4e5c6e3 · 2026-08-17 · 0 PASS / 1 PARTIAL / 0 FAIL', 'selector field'],
+  ['QA run · tier1:automated-pins (77 items) · e4e5c6e3 · 2026-08-17 · 35 PASS / 39 PARTIAL / 0 FAIL', 'selector field'],
+  ['QA run · automation (5 of 10 items) · e4e5c6e3 · 2026-08-17 · 1 PASS / 3 PARTIAL / 1 BLOCKED', 'selector field'],
+  ['QA run · integration-system (6/14 items consulted) · e4e5c6e3 · 2026-08-17 · 2 PASS / 4 PARTIAL / 8 NOT-RUN', 'selector field'],
+  ['QA run · priority:P0 · e4e5c6e3 · 2026-08-17 · 7 PASS / 7 PARTIAL / 2 FAIL / 2 BLOCKED', 'selector field'],
+  // the second NOT-RUN spelling: a trailing parenthetical on the counts field
+  ['QA run · approvals (1/11) · e4e5c6e3 · 2026-08-17 · 0 PASS / 1 PARTIAL / 0 FAIL (10 not-run)', 'counts segment'],
+  // lowercase verdicts
+  ['QA run · search (4/4) · 92f26f75 · 2026-08-11 · 2 pass / 2 fail', 'counts segment'],
+  // the 2026-08-20 wave: five fields, but judged/total standing alone in the
+  // sha position and no counts field at all
+  ['QA run · repo-wide pin sweep · 19f98fa1 · 2026-08-20 · 15/15', 'selector field'],
+  // a 7-character sha
+  ['QA run · scan-functionality (14/14) · 79ebb37 · 2026-08-21 · 7 PASS / 7 FAIL', 'sha field'],
+  // an uppercase sha
+  ['QA run · cli (6/6) · E4E5C6E3 · 2026-08-17 · 6 PASS', 'sha field'],
+  // shapes no record wrote, but that a strict parser must still refuse
+  ['QA run · i18n (5/4) · 92f26f75 · 2026-08-11 · 5 PASS', 'exceeds total'],
+  ['QA run · i18n (2/4) · 92f26f75 · 2026-08-11 · 1 PASS / 1 PASS', 'more than once'],
+  ['QA run · i18n (2/4) · 92f26f75 · 2026-08-11 · 1 FAIL / 1 PASS', 'out of report order'],
+  ['QA run · i18n (2/4) · 92f26f75 · 2026-08-11 · 2 SKIPPED', 'is not a verdict'],
+  ['QA run · i18n (2/4) · 92f26f75 · 2026-08-11 · 2026-13-99', 'counts segment'],
+  ['QA run · i18n (2/4) · 92f26f75 · 2026-13-99 · 2 PASS', 'date field'],
 ];
 
 function assert(cond, msg, failures) {
@@ -729,34 +887,22 @@ async function selfTest() {
 
   const byIndex = FIXTURE_TITLES.map(parseRunTitle);
 
-  // judged/total extraction, per phrasing
+  // --- the ONE judged/total spelling --------------------------------------
   checked += assert(byIndex[0].judged === 18 && byIndex[0].total === 18, '"(18/18)" -> 18/18', failures);
-  checked += assert(byIndex[1].judged === null && byIndex[1].total === 77, '"(77 items)" -> total only', failures);
-  checked += assert(
-    byIndex[2].judged === null && byIndex[2].total === null && byIndex[2].note === 'FULL area',
-    '"(FULL area)" -> note, no numbers',
-    failures,
-  );
-  checked += assert(byIndex[3].judged === 6 && byIndex[3].total === 14, '"(6/14 items consulted)" -> 6/14', failures);
-  checked += assert(byIndex[4].judged === 5 && byIndex[4].total === 10, '"(5 of 10 items)" -> 5/10', failures);
-  checked += assert(
-    byIndex[5].judged === null && byIndex[5].total === null && byIndex[5].note === null,
-    'no parenthetical -> no judged/total and no note',
-    failures,
-  );
-  checked += assert(byIndex[5].selector === 'priority:P0', 'bare selector survives intact', failures);
-
+  checked += assert(byIndex[1].judged === 9 && byIndex[1].total === 20, '"(9/20)" -> 9/20', failures);
+  checked += assert(byIndex[2].judged === 1 && byIndex[2].total === 12, '"(1/12)" -> 1/12', failures);
   // the parenthetical must not leak into the selector
   checked += assert(byIndex[0].selector === 'tier2c:browser-2', 'selector excludes the parenthetical', failures);
+  checked += assert(byIndex[3].selector === 'priority:P0', 'non-area selector survives intact', failures);
 
-  // --- counts, both NOT-RUN spellings ------------------------------------
-  checked += assert(byIndex[2].counts['NOT-RUN'] === 11, 'trailing "(11 not-run)" counts as NOT-RUN', failures);
-  checked += assert(byIndex[3].counts['NOT-RUN'] === 8, 'segment "8 NOT-RUN" counts as NOT-RUN', failures);
-  checked += assert(byIndex[4].counts.BLOCKED === 1, 'BLOCKED parsed', failures);
+  // --- the ONE NOT-RUN spelling -------------------------------------------
+  checked += assert(byIndex[1].counts['NOT-RUN'] === 10, 'segment "10 NOT-RUN" counts as NOT-RUN', failures);
+  checked += assert(byIndex[2].counts['NOT-RUN'] === 11, 'segment "11 NOT-RUN" counts as NOT-RUN', failures);
+  checked += assert(byIndex[3].counts.BLOCKED === 2, 'BLOCKED parsed', failures);
 
   // an UNDECLARED bucket must be absent, not zero -- the render shows it as
   // "—", and conflating the two would invent a fact the record never stated.
-  checked += assert(!('PARTIAL' in byIndex[6].counts), 'undeclared PARTIAL stays absent, not 0', failures);
+  checked += assert(!('PARTIAL' in byIndex[4].counts), 'undeclared PARTIAL stays absent, not 0', failures);
   checked += assert(!('NOT-RUN' in byIndex[0].counts), 'undeclared NOT-RUN stays absent, not 0', failures);
   checked += assert(byIndex[0].counts.FAIL === 4, 'declared 4 FAIL parsed', failures);
   checked += assert(byIndex[1].counts.FAIL === 0, 'declared 0 FAIL is present AND zero', failures);
@@ -766,45 +912,42 @@ async function selfTest() {
   checked += assert(classifySelector('priority:P0') === 'priority', 'priority selector classified', failures);
   checked += assert(classifySelector('studio-authoring') === 'area', 'area selector classified', failures);
 
+  // --- every RETIRED phrasing is rejected, by the right reason -------------
+  // This is the half that holds the ruling: a parser re-widened to accept one
+  // of these passes every happy-path assertion above.
+  for (const [title, expectedReason] of RETIRED_TITLES) {
+    const p = parseRunTitle(title);
+    checked += assert(
+      p.ok === false && typeof p.reason === 'string' && p.reason.includes(expectedReason),
+      `retired shape must be rejected naming ${JSON.stringify(expectedReason)}: ${JSON.stringify(title)}\n    -> ${p.ok ? 'PARSED' : p.reason}`,
+      failures,
+    );
+  }
+
   // --- malformed titles are REPORTED, never silently dropped --------------
   const bad = [
     ['', 'empty'],
     ['Some other issue title', 'not a run record'],
-    ['QA run · thing · deadbeef · 2026-13-99 · 1 PASS', 'bad date'],
-    ['QA run · thing · nothexsha · 2026-08-18 · 1 PASS', 'bad sha'],
-    ['QA run · thing · deadbeef · 2026-08-18 · nothing numeric', 'no verdict counts'],
+    ['QA run · thing (1/1) · deadbeef · 2026-08-18', 'too few fields'],
+    ['QA run · thing (1/1) · deadbeef · 2026-08-18 · 1 PASS · extra', 'too many fields'],
+    ['QA run ·  (1/1) · deadbeef · 2026-08-18 · 1 PASS', 'empty selector'],
   ];
   for (const [title, why] of bad) {
     const p = parseRunTitle(title);
     checked += assert(p.ok === false && typeof p.reason === 'string' && p.reason.length > 0, `must reject (${why}) with a reason: ${JSON.stringify(title)}`, failures);
   }
 
-  // The convention as DOCUMENTED (6 fields, standalone judged/total) is not
-  // what any record writes. It must be rejected loudly rather than mis-parsed
-  // into the wrong fields -- that drift is a finding, not something to absorb.
-  const documented = 'QA run · records-forms · 12/33 · e4e5c6e3 · 2026-08-17 · 2 PASS / 10 PARTIAL / 1 FAIL';
-  const docParsed = parseRunTitle(documented);
-  checked += assert(
-    docParsed.ok === false && /6 .*fields, expected 5/.test(docParsed.reason),
-    'the 6-field documented convention is rejected with a field-count reason',
-    failures,
-  );
+  // --- the judged cell now has ONE provenance -----------------------------
+  // The record's own mandatory parenthetical. Nothing is inferred from the
+  // checklist, because there is no longer a record that declares no total.
+  checked += assert(judgedCell(byIndex[0]) === '18/18', 'judged cell is the declared judged/total', failures);
+  checked += assert(judgedCell(byIndex[2]) === '1/12', 'a 1-of-12 run renders as 1/12, never as complete', failures);
 
-  // --- the judged cell, and the provenance of its denominator -------------
-  checked += assert(judgedCell(byIndex[0], null) === '18/18', 'declared judged/total wins', failures);
-  checked += assert(judgedCell(byIndex[1], null) === '74/77', 'declared total + summed counts', failures);
-  // "(FULL area)" declares no total. When the selector is a known area, the
-  // checklist's item count supplies the denominator -- marked `*`, because it
-  // is not the record's claim. This is what makes a record titled "FULL area"
-  // that judged 13 of 33 items legible instead of reassuring.
-  checked += assert(judgedCell(byIndex[2], 12) === '12/12*', 'area item count supplies a starred denominator', failures);
-  checked += assert(
-    judgedCell({ judged: null, total: null, note: 'FULL area', counts: { PASS: 2, PARTIAL: 10, FAIL: 1 } }, 33) === '13/33*',
-    'a "FULL area" record that judged 13 of 33 renders as 13/33*, not as complete',
-    failures,
-  );
-  checked += assert(judgedCell(byIndex[2], null) === '12 (FULL area)', 'unknown area -> note preserved', failures);
-  checked += assert(judgedCell(byIndex[5], null) === '18/?', 'no total and no note -> sum over unknown', failures);
+  // --- the legacy boundary reads created_at, never the title --------------
+  checked += assert(predatesContract('2026-08-18T03:18:26Z') === true, 'a 2026-08-18 record predates the contract', failures);
+  checked += assert(predatesContract(`${CANONICAL_FROM}T00:00:00Z`) === false, 'a record created on the effective date is under the contract', failures);
+  checked += assert(predatesContract('2026-09-01T00:00:00Z') === false, 'a later record is under the contract', failures);
+  checked += assert(predatesContract(null) === false, 'a missing created_at is not treated as legacy', failures);
 
   // --- freshness is three-valued -----------------------------------------
   const repoShallow = { shallow: true, boundaryDate: '2026-08-16' };
@@ -901,7 +1044,7 @@ async function selfTest() {
       apiCalls: 1,
       generatedAt: '2026-08-18T00:00:00.000Z',
     },
-    corpus: { total: 2, open: 0, closed: 2, parsed: 1, unparseable: 1 },
+    corpus: { total: 3, open: 0, closed: 3, parsed: 1, unparseable: 2 },
     rows: [
       {
         number: 9353,
@@ -909,35 +1052,77 @@ async function selfTest() {
         selectorKind: 'area',
         date: '2026-08-17',
         sha: 'e4e5c6e3',
-        counts: { PASS: 0, PARTIAL: 1, FAIL: 0, 'NOT-RUN': 11 },
-        judgedCell: '12 (FULL area)',
+        counts: { PASS: 0, PARTIAL: 1, 'NOT-RUN': 11 },
+        judgedCell: '1/12',
         freshness: { state: 'unknown', reason: 'shallow', behind: null },
       },
     ],
     superseded: [],
-    unparseable: [{ number: 4242, title: 'QA run · broken', reason: '2 fields, expected 5' }],
+    unparseable: [
+      // written under the contract -> a deviation to fix
+      { number: 4242, title: 'QA run · broken', reason: '2 fields, expected 5', createdAt: '2026-09-01T00:00:00Z' },
+      // written before it -> expected, not a defect
+      { number: 7627, title: 'QA run · ai (FULL area) · 92f26f75 · 2026-08-11 · 4 PASS / 3 FAIL', reason: 'selector field …', createdAt: '2026-08-11T09:22:08Z' },
+    ],
     areaGaps: [{ area: 'dashboards', items: 10 }],
     openRecords: [],
   });
   checked += assert(md.includes('#4242'), 'unparseable record appears in the rendered view', failures);
   checked += assert(md.includes('2 fields, expected 5'), 'unparseable reason appears in the rendered view', failures);
+  checked += assert(md.includes('#7627'), 'a legacy record appears in the rendered view too, never dropped', failures);
   checked += assert(md.includes('dashboards'), 'area with no record appears as a gap', failures);
   checked += assert(md.includes('? shallow'), 'unknown freshness renders as ? with its reason', failures);
   checked += assert(!/\bcurrent\b.*studio-authoring/.test(md), 'an unknown row is not rendered as current', failures);
   checked += assert(md.includes('computedOn'), 'provenance block is present', failures);
-  checked += assert(md.includes('not a number the record declared'), 'the starred-denominator legend is present', failures);
   checked += assert(md.includes('713ccbc95'), 'provenance names the shallow boundary', failures);
   checked += assert(md.includes('No state is written'), 'the view states that it writes nothing', failures);
   checked += assert(md.includes('bodies are not parsed'), 'the view states it did not read the bodies', failures);
   // an undeclared bucket renders as the em dash, not as 0
   checked += assert(/\|\s*—\s*\|/.test(md), 'undeclared bucket renders as — rather than 0', failures);
 
+  // THE enforcement surface: a deviation written under the contract must be
+  // separated from the legacy backlog, or the first real one is invisible
+  // inside 34 rows of records that were never expected to match.
+  const deviationHeading = md.indexOf('deviating from the contract');
+  const legacyHeading = md.indexOf('Predates the canonical contract');
+  checked += assert(deviationHeading !== -1, 'deviations get their own section', failures);
+  checked += assert(legacyHeading !== -1, 'legacy records get their own section', failures);
+  checked += assert(deviationHeading < legacyHeading, 'the deviation section comes first', failures);
+  checked += assert(
+    md.indexOf('#4242') < legacyHeading && md.indexOf('#7627') > legacyHeading,
+    'each record is filed under the right heading',
+    failures,
+  );
+  checked += assert(md.includes(CANONICAL_FROM), 'the render names the effective date', failures);
+  // the legacy section must not read as a defect list
+  checked += assert(/not\*\* migrated/.test(md), 'the legacy section says these are not migrated', failures);
+
+  // with no canonical record yet, the empty table explains itself rather than
+  // rendering as a silent blank
+  const emptyMd = renderMarkdown({
+    computedOn: { targetRef: 'origin/main', targetSha: 'b057e53f4', shallow: false, boundary: null, boundaryDate: null, apiCalls: 1, generatedAt: '2026-08-22T00:00:00.000Z' },
+    corpus: { total: 1, open: 0, closed: 1, parsed: 0, unparseable: 1 },
+    rows: [],
+    superseded: [],
+    unparseable: [{ number: 7627, title: 'QA run · ai (FULL area) · 92f26f75 · 2026-08-11 · 4 PASS', reason: 'selector field …', createdAt: '2026-08-11T09:22:08Z' }],
+    areaGaps: [],
+    openRecords: [],
+  });
+  checked += assert(
+    emptyMd.includes('No record matches the canonical title shape yet'),
+    'an empty table explains itself instead of rendering blank',
+    failures,
+  );
+  checked += assert(emptyMd.includes('#7627'), 'the legacy record is still listed when the table is empty', failures);
+
   if (failures.length > 0) {
     console.error(`✗ qa-rollup --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  - ${f}`);
     process.exit(1);
   }
-  console.log(`✓ qa-rollup --self-test: ${checked} assertions over ${FIXTURE_TITLES.length} real-corpus title shapes`);
+  console.log(
+    `✓ qa-rollup --self-test: ${checked} assertions over ${FIXTURE_TITLES.length} canonical shapes and ${RETIRED_TITLES.length} retired ones`,
+  );
 }
 
 if (process.argv.includes('--self-test')) {

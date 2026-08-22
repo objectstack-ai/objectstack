@@ -962,7 +962,7 @@
       "title": "os doctor --scan-deprecations: every retired pattern is found with file:line attribution, decoys are skipped, the run warns without gating — and the remediation hint prescribes a command that does not exist (expected-fail)",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)", "upgrading author (pre-major sweep)"],
@@ -1016,7 +1016,7 @@
           "evidence": "the no-src transcript + the ls refusal"
         },
         {
-          "clause": "EXPECTED-FAIL (shippable defect — record actual behavior): the remediation hint printed after hits (doctor.ts:2149) prescribes `objectstack codemod v2-to-v3`, but no codemod command is registered anywhere in packages/cli/src/commands/ — the prescription is a dead end, and content/docs/protocol/backward-compatibility.mdx:134 admits the command is 'not yet available'. The real metadata codemod is `os migrate meta` (cli.migrate-meta-codemod). The clause: the hint must name a command os actually registers; today it does not",
+          "clause": "EXPECTED-FAIL (shippable defect — record actual behavior): the remediation hint printed after hits (doctor.ts:2149) prescribes `objectstack codemod v2-to-v3`, but no codemod command is registered anywhere in packages/cli/src/commands/ — the prescription is a dead end, and content/docs/protocol/backward-compatibility.mdx:134 admits the command is 'not yet available'. The remediation path that DOES exist is `os migrate meta` (cli.migrate-meta-codemod) — but it is not a codemod: it replays the migration chain and PRINTS the mechanical edits for the author to apply by hand. It declares no --write/--fix/in-place flag (exactly from/to/step/out/stored/database-url/apply/yes/force/type/json, commands/migrate/meta.ts:195-239) and writes no source file — both writeFileSync calls are guarded by `if (flags.out)` (:347 and :394-396) and emit a JSON snapshot, and the header at :155-157 declines the AST rewrite as 'unsafe and lossy'. The in-place codemod is commissioned as #9591 (v18, pm:on-hold) and has not been built, so a hint rewritten to name `os migrate meta` must promise a LIST of edits, not an auto-fix. The clause: the hint must name a command os actually registers; today it does not",
           "oracle": "log",
           "verify": "the hint line is captured verbatim from the seeded run, and `os codemod --help` errors 'command … not found' (nonzero) from the same binary — the pair is the failure evidence; the clause flips to pass when the hint names a registered command",
           "evidence": "the hint line + the command-not-found capture"
@@ -1034,10 +1034,12 @@
         "content/docs/protocol/backward-compatibility.mdx:126-134 (the documented workflow, including the :134 admission that the codemod command is not yet available)",
         "packages/cli/README.md §os doctor (documents -v and --scan-deprecations)",
         "packages/create-objectstack/src/templates/blank/ (the scaffold whose src/ the seeds land in)",
-        "sibling items cli.doctor-health-report (the command's own report contract) and cli.migrate-meta-codemod (the codemod that actually exists)"
+        "#9591 (the v18 `os migrate meta --write` AST codemod, pm:on-hold — the in-place metadata codemod is COMMISSIONED, not shipped; cited so this item's remediation-path clause resolves to the card that owns it)",
+        "sibling items cli.doctor-health-report (the command's own report contract) and cli.migrate-meta-codemod (`os migrate meta` — the remediation path that does exist; its revision 3 asserts the command LISTS mechanical edits and rewrites no source file. The id keeps its `-codemod` spelling only because ids are immutable and never reused (README lifecycle) — it reads as a forward reference to #9591, not as a description of today's command)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), found independently by two hunters and re-verified against source: --scan-deprecations had zero coverage of any kind (no test in the repo references it). The 8-entry pattern table was recounted from doctor.ts:1186-1234; brief line-drift corrected during authoring (absent-dir return is :1238 not :1273, the scanner body ends at :1265 not :1276). The dead `objectstack codemod v2-to-v3` prescription at :2149 is encoded as an expected-fail clause with the docs' own 'not yet available' admission as corroborating source", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), found independently by two hunters and re-verified against source: --scan-deprecations had zero coverage of any kind (no test in the repo references it). The 8-entry pattern table was recounted from doctor.ts:1186-1234; brief line-drift corrected during authoring (absent-dir return is :1238 not :1273, the scanner body ends at :1265 not :1276). The dead `objectstack codemod v2-to-v3` prescription at :2149 is encoded as an expected-fail clause with the docs' own 'not yet available' admission as corroborating source", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-21", "change": "corrected the two descriptors that called `os migrate meta` a codemod — the expected-fail clause's 'The real metadata codemod is os migrate meta' and the source list's 'cli.migrate-meta-codemod (the codemod that actually exists)'. It is not one. Re-derived at this base: the command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json (commands/migrate/meta.ts:195-239) with no --write/--fix/in-place; its only file writes are the two `if (flags.out)`-guarded writeFileSync calls at :347 and :394-396, which emit a JSON snapshot; and its header at :155-157 states the command does not silently rewrite TS config source because that AST rewrite is 'unsafe and lossy'. Both descriptors now say what it is — a chain replayer that PRINTS the mechanical edits for hand application — and name #9591 (v18, pm:on-hold) as the commissioned-but-unbuilt in-place codemod, which was added to `source` so the reference resolves. The clause the item turns on is UNCHANGED and still an expected-fail: the hint at doctor.ts:2149 prescribes `objectstack codemod v2-to-v3`, registered nowhere. The clause also now warns that a FIX which merely repoints the hint at `os migrate meta` must describe it as a list, not an auto-fix — otherwise the dead prescription is replaced by a false one. Sibling cli.migrate-meta-codemod was read and deliberately left alone: its revision-3 text (#9733 via PR #10412) already states the print-only contract correctly, and its `-codemod` id is immutable by README lifecycle", "ref": "#10418" }
       ]
     },
     {
@@ -1045,7 +1047,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1057,7 +1059,7 @@
         ],
         "knownGaps": [
           "ORDERING IS LOAD-BEARING: do NOT boot the dev server again between seeding and scanning — a #8686-repairing boot backfills organization_id = NULL, which is exactly the evidence this report inventories (the command's own header calls the evidence perishable). The duplicates command itself boots read-only (deferSchemaDdl + readOnlyProbe) and is safe to run any number of times",
-          "the memory and mongodb drivers expose no raw-SQL seam, so the negative no_sql_seam probe needs a second scratch config on the memory driver — stage it per run"
+          "the memory driver does NOT lack a raw-SQL seam — `InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver` and returns null, which is exactly the SHAPE the seam resolver tests for, so the no_sql_seam refusal was dead code for it (a clean `duplicates:[]` exit 0 instead, #10677). The refusal now keys on whether a seam returns a RESULT SET rather than on whether `execute` exists, so the memory driver does take the no_sql_seam branch. The negative probe still needs a second scratch config on the memory driver — stage it per run. The mongodb branch is NOT covered by that fix's evidence — the driver was not loaded — so treat it as unverified rather than assuming it behaves like memory"
         ]
       },
       "steps": [
@@ -1110,7 +1112,7 @@
         {
           "clause": "a driver with no raw-SQL seam refuses LOUDLY: {error: 'no_sql_seam', …} with exit 1 — an empty clean report from a driver the probe cannot run against would be indistinguishable from 'never looked'",
           "oracle": "log",
-          "verify": "the memory-driver run emits the no_sql_seam payload and echo $? is 1 (duplicates.ts:697-712); a boot failure likewise answers {error: 'boot_failed'} exit 1, never a zero-duplicate success",
+          "verify": "the memory-driver run emits the no_sql_seam payload and echo $? is 1 (duplicates.ts:787-812); a boot failure likewise answers {error: 'boot_failed'} exit 1, never a zero-duplicate success",
           "evidence": "the refusal payload + exit code"
         }
       ],
@@ -1122,13 +1124,14 @@
       ],
       "traps": ["stale-dist", "absence-inference"],
       "source": [
-        "packages/cli/src/commands/migrate/duplicates.ts (the :17-80 contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces :82-165; the cross-partition HAVING at :263-266; flags :648-656; read-only boot :670-679; no_sql_seam refusal :697-712)",
+        "packages/cli/src/commands/migrate/duplicates.ts (the :17-80 contract header encoding the 2026-08-16 maintainer ruling's five points; report interfaces :82-165; the cross-partition HAVING at :263-266; the seam-answer guards at :434-523; flags :739-747; read-only boot :761-770; no_sql_seam refusal :787-812)",
         "packages/cli/src/commands/migrate/duplicates.contract.test.ts (the full JSON shape against a real sqlite), duplicates.pre-repair.test.ts (byte-identical DB + the #8686 repair measured destroying the evidence), duplicates.integration.test.ts, duplicates.probe-sql.test.ts — seam pins; none drives the oclif command end-to-end, hence no automated entry",
         "#8928 (the card and ruling), #8686 / #8844 (the closed producers whose damage this inventories)",
         "sibling item cli.migrate-plan-apply-json (lists duplicates as a variant; the scratch-DB boot recipe is shared)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os migrate duplicates` landed 2026-08-16 (#8928) after the sibling migrate item's enumeration was authored, so the subcommand had no functional coverage. Authored from the :17-80 contract header's five ruling points, with the perishability ordering (seed → scan → only then any repair-bearing boot) carried as a load-bearing knownGap and the no-JSON-flag posture spelled out so the #4873 sweep does not misread an oclif 2", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os migrate duplicates` landed 2026-08-16 (#8928) after the sibling migrate item's enumeration was authored, so the subcommand had no functional coverage. Authored from the :17-80 contract header's five ruling points, with the perishability ordering (seed → scan → only then any repair-bearing boot) carried as a load-bearing knownGap and the no-JSON-flag posture spelled out so the #4873 sweep does not misread an oclif 2", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-21", "change": "clause-7 knownGap was factually wrong about the memory driver, and the run that trusted it produced a false all-clear: the driver exposes a NO-OP `execute` seam (warn + return null), not no seam, so the no_sql_seam refusal never fired and the scan answered exit 0 with `duplicates:[]` — indistinguishable from `never looked`. Corrected the knownGap, and re-derived the drifted duplicates.ts line citations against the fix that makes the refusal live (#10677). The mongodb half is left explicitly UNVERIFIED rather than restated: that driver was not loaded for the fix", "ref": "#10677" }
       ]
     },
     {

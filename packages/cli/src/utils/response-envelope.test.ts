@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { sendError, sendOk } from '@objectstack/types';
 import { serverBody } from './__tests__/server-body.js';
-import { readEnvelope, readEnvelopeFrom } from './response-envelope.js';
+import { readEnvelope, readEnvelopeFrom, readErrorMessage } from './response-envelope.js';
 
 describe('readEnvelope', () => {
   it('returns the payload nested under `data` for a `sendOk` body', () => {
@@ -85,5 +85,77 @@ describe('readEnvelopeFrom', () => {
 
     expect(read.ok).toBe(false);
     expect((read as { message: string }).message).toContain('HTTP 404');
+  });
+});
+
+/**
+ * `readErrorMessage` — the PRINTABLE-message reader (#10763).
+ *
+ * Two dialects are covered because the control plane really does emit two: the
+ * declared envelope, and the flat `error: '<sentence>'` its `fail()` helper
+ * still writes while cloud#944 converts it. The declared arm is built with
+ * `sendError`, the one writer, for the reason the file header gives. The flat
+ * arm has to be a literal — its writer lives in the closed `cloud` repo and
+ * cannot be imported — so it is written here exactly as objectui's `readApiError`
+ * records it, and that transcription is the thing to re-check if it ever drifts.
+ */
+describe('readErrorMessage', () => {
+  const res = (status: number, statusText = 'Bad Request') => ({ status, statusText });
+
+  it('reads `error.message` — the FIELD — out of the declared envelope', () => {
+    const body = serverBody((r) =>
+      sendError(r, 422, 'PACKAGE_PUBLISH_FAILED', 'Version 1.2.0 already exists for com.acme.crm.'),
+    );
+
+    expect(readErrorMessage(body, res(422))).toBe('Version 1.2.0 already exists for com.acme.crm.');
+  });
+
+  it('reads the control plane’s flat `fail()` dialect, which is still live (cloud#944)', () => {
+    const body = { success: false, error: 'Publisher is not verified.' };
+
+    expect(readErrorMessage(body, res(403))).toBe('Publisher is not verified.');
+  });
+
+  /**
+   * The defect this card is named for. `String(parsed?.error)` over the
+   * declared envelope produced this literal, and `??` never reached the
+   * `statusText` fallback because an object is not nullish.
+   */
+  it('NEVER renders an error object as text, in any shape', () => {
+    const bodies: unknown[] = [
+      serverBody((r) => sendError(r, 400, 'VALIDATION_ERROR', 'Manifest is invalid.')),
+      { success: false, error: { code: 'FORBIDDEN' } },
+      { success: false, error: {} },
+      { success: false, error: [] },
+      { success: false, error: { message: 42 } },
+      { success: false, error: { message: '   ' } },
+    ];
+
+    for (const body of bodies) {
+      const read = readErrorMessage(body, res(400));
+      expect(typeof read, JSON.stringify(body)).toBe('string');
+      expect(read, JSON.stringify(body)).not.toContain('[object');
+    }
+  });
+
+  it('falls back to the code when the envelope refuses without a message', () => {
+    expect(readErrorMessage({ success: false, error: { code: 'PACKAGE_PUBLISH_FAILED' } }, res(422)))
+      .toBe('PACKAGE_PUBLISH_FAILED');
+  });
+
+  it('falls back to `statusText`, then to the status line, when the body carries no text', () => {
+    expect(readErrorMessage(null, res(502, 'Bad Gateway'))).toBe('Bad Gateway');
+    expect(readErrorMessage({ success: false }, res(502, 'Bad Gateway'))).toBe('Bad Gateway');
+    expect(readErrorMessage('not json at all', res(502, 'Bad Gateway'))).toBe('Bad Gateway');
+  });
+
+  /**
+   * HTTP/2 carries no reason phrase, so `fetch` reports `statusText` as ''. The
+   * original chain used `??`, which keeps an empty string and printed nothing
+   * after the status code — the second half of "there is no useful fallback".
+   */
+  it('treats a blank `statusText` as absent rather than printing nothing', () => {
+    expect(readErrorMessage(null, { status: 500, statusText: '' })).toBe('HTTP 500');
+    expect(readErrorMessage(null, { status: 500 })).toBe('HTTP 500');
   });
 });

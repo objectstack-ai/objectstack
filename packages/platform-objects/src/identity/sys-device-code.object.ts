@@ -44,7 +44,7 @@ export const SysDeviceCode = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'OAuth 2.0 Device Authorization Grant (RFC 8628) pending requests',
   nameField: 'user_code', // [ADR-0079] canonical primary-title pointer (single-field titleFormat)

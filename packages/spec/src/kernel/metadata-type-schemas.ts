@@ -47,7 +47,6 @@ import { DatasetSchema } from '../ui/dataset.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { WebhookSchema } from '../automation/webhook.zod';
 
-import { ThemeSchema } from '../ui/theme.zod';
 
 import { CubeSchema } from '../data/analytics.zod';
 
@@ -209,8 +208,11 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
  * with `.strict()` schemas (`defineStack({ themes, analyticsCubes })`), named
  * by the URL-spelling contract as legal, addressable kinds — yet neither was
  * bound here, so `PUT /meta/theme/:name` stored ANY JSON with `success: true`
- * while the stack door strictly refused the same body. They are bound now, the
- * same SHAPE-check-only way. `rag_pipeline` is deliberately NOT bound: it has
+ * while the stack door strictly refused the same body. They were bound then,
+ * the same SHAPE-check-only way. (#10485 later retired the `themes` carrier
+ * and `ThemeSchema` whole under ADR-0049, and `theme` left the URL-spelling
+ * contract with it — see the entry-shaped comment below.) `rag_pipeline` is
+ * deliberately NOT bound: it has
  * no stack collection to take a schema from — that drift is recorded as #6242
  * row 2 (`scripts/check-stack-collection-maps.mjs`), not solved by inventing a
  * schema here.
@@ -261,16 +263,14 @@ const UNREGISTERED_KIND_SCHEMAS: Record<string, z.ZodType> = {
   // never refuses one. Same treatment #5271/#5312 gave their strict surfaces.
   sharing_rule: SharingRuleSchema,
 
-  // [#10194] `stack.zod.ts`: `themes: z.array(ThemeSchema)`.
-  //
-  // The console's own styling surface: a malformed theme stored through this
-  // door used to fail at RENDER, with nothing at the write point to say so.
-  // `ThemeSchema` declares the ADR-0010 envelope for the reason
-  // `sharing.zod.ts` states for its own spread — the schema is `.strict()`,
-  // and binding the door without the spread would aim the new 422 at the
-  // runtime's own `applyProtection` stamp instead of at malformed author
-  // input.
-  theme: ThemeSchema,
+  // [#10194 → #10485] `theme: ThemeSchema` was bound here when `themes` was a
+  // stack collection; #10485 retired that carrier and the schema whole
+  // (ADR-0049 — nothing downstream ever read a stored theme). The binding did
+  // NOT regress to the store-anything branch this docblock describes: with the
+  // `themes: 'theme'` fold gone from `PLURAL_TO_SINGULAR`, `theme` leaves the
+  // generated URL-spelling contract entirely, so `PUT /meta/theme/:name` now
+  // gets `unrecognisedMetaTypeRefusal`'s loud verdict (#8421) before any
+  // schema would be consulted.
 
   // [#10194] `stack.zod.ts`: `analyticsCubes: z.array(CubeSchema)`.
   //

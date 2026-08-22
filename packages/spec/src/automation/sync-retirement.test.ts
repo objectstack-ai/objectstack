@@ -204,7 +204,8 @@ describe('[#4738] sync/conflict dual-source retirement', () => {
     }
     // Anti-vacuity: the ui namespace we just probed is real and non-trivial —
     // otherwise a broken import would satisfy the three absences above.
-    expect('ThemeSchema' in ui).toBe(true);
+    // (`ThemeSchema` was the probe until #10485 retired it — ADR-0049.)
+    expect('PageSchema' in ui).toBe(true);
   });
 
   it('still parses authored connector syncConfig through the renamed enum — the live path', async () => {
