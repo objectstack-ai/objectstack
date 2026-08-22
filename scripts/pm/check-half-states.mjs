@@ -122,6 +122,14 @@
  *       accelerator, never an exhaustive audit: a delivery older than the
  *       window is invisible, and the finding clears when the paired write
  *       lands, not when the PR ages out.
+ *       H8 is ALSO handed the open-PR list the sweep already holds (#10468):
+ *       a card delivered in halves keeps `pm:dispatched` legitimately while
+ *       its last half is open, and the row used to fire on every sweep until
+ *       that half landed — prescribing a DESTRUCTIVE de-labelling against the
+ *       most active card on the board. That case now emits a distinct quieter
+ *       sentence that names both sides and says the label is correct, rather
+ *       than falling silent: silence would lose the genuine #8683 case where
+ *       the last half is later ABANDONED. See the predicate.
  *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` line in
  *       EITHER channel — the state model (post 2026-08-16 ruling) makes the
  *       hold state legal
@@ -1206,10 +1214,35 @@ export function prDeliversCard(pr, n) {
  * H8 — null when clean, else the finding sentence.
  *
  * Delivery is `prDeliversCard` (body first, branch name as the fallback its
- * docblock justifies). Only `merged_at`-set PRs count — closed-unmerged is an
- * abandoned attempt, not a delivery.
+ * docblock justifies). Only `merged_at`-set PRs count on the merged side —
+ * closed-unmerged is an abandoned attempt, not a delivery.
+ *
+ * ## The open side, and why this row DOWNGRADES rather than falls silent
+ *
+ * `openPrs` is the open-PR list the sweep already holds (its summary line
+ * reports it), so consulting it costs no request. Without it H8 could not ask
+ * the question that decides the answer — *is there ALSO an unmerged PR
+ * delivering this card?* — and on a card delivered in halves it fired on every
+ * sweep from the first half's merge until the last half landed, pointing at the
+ * card whose remaining work was most active and prescribing a DESTRUCTIVE write
+ * against it: "drop `pm:dispatched`". A reader who followed that row de-labelled
+ * a card with an open PR, which then read as un-dispatched and was liable to be
+ * re-dispatched — two agents on one card, the exact outcome the claim protocol
+ * exists to prevent (#10468, measured on #9834 + open PR #10226).
+ *
+ * Silence would fix the harm and buy a new one, and the card's caveat says so:
+ * it loses the genuine #8683 case where the last half is later ABANDONED — the
+ * merged half really is delivered, the card really is stale, and nothing would
+ * ever say so again. So the half-delivered case gets its own quieter sentence
+ * instead: it names both sides, states the counts, and — the whole point —
+ * says `pm:dispatched` is CORRECT here and must not be dropped. The destructive
+ * prescription fires only when every delivering PR has merged.
+ *
+ * Drafts are deliberately NOT filtered out of the open side: the measured
+ * specimen (#10226) was `draft: true`, and a draft delivering half is exactly
+ * the live work this row must not step on.
  */
-export function h8MergedPrStillDispatched(issue, mergedPrs) {
+export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   if (!labelNames(issue).includes('pm:dispatched')) return null;
   const n = String(issue.number);
   const delivering = [];
@@ -1221,6 +1254,29 @@ export function h8MergedPrStillDispatched(issue, mergedPrs) {
   const list = delivering
     .map((p) => `#${p.number} (merged ${String(p.merged_at).slice(0, 10)})`)
     .join(', ');
+
+  const stillOpen = [];
+  for (const pr of openPrs ?? []) {
+    // A merged row appearing in the open list is not an outstanding half; the
+    // merged side above already judged it.
+    if (pr?.merged_at) continue;
+    if (prDeliversCard(pr, n)) stillOpen.push(pr);
+  }
+  if (stillOpen.length > 0) {
+    const openList = stillOpen
+      .map((p) => `#${p.number}${p.draft ? ' (draft)' : ''}`)
+      .join(', ');
+    const total = delivering.length + stillOpen.length;
+    return (
+      `delivered IN PART — ${delivering.length} of ${total} delivering PR(s) merged ` +
+      `(${list}), while ${openList} is still OPEN against this card. ` +
+      `\`pm:dispatched\` is CORRECT here and must NOT be dropped: the card is not ` +
+      `finished, and de-labelling it would read as un-dispatched work and invite a ` +
+      `second seat onto it. No action — this row exists so an abandoned last half is ` +
+      `still visible, not to prescribe one.`
+    );
+  }
+
   return (
     `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
     `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
@@ -4374,10 +4430,16 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
   // against the already-collected open `pm:dispatched` cards; no per-card fetch.
+  //
+  // The open-PR list is handed in alongside it (#10468). It is already in hand
+  // from the H7/H12/H21 pass above, so the half-delivered question costs no
+  // request — and without it this row prescribed a destructive label drop
+  // against cards whose remaining half was still open.
   for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
   const mergedWindow = [...seenMerged.values()];
+  const openWindow = [...seenPrs.values()];
   for (const issue of seen.values()) {
-    const stale = h8MergedPrStillDispatched(issue, mergedWindow);
+    const stale = h8MergedPrStillDispatched(issue, mergedWindow, openWindow);
     if (stale) findings.push([issue, 'H8', stale]);
   }
 
@@ -5175,6 +5237,74 @@ function selfTest() {
     'H8 branch: the anchored reader agrees with CLAIM_BRANCH_SHAPE on the protocol shape',
     [...'claude/issue-10757-dedupe-per-request-queries'.matchAll(CLAIM_BRANCH_SHAPE)][0][0],
     'claude/issue-10757-dedupe-per-request-queries',
+  );
+
+  // -- H8: the open-PR side — a card delivered in HALVES (#10468) ------------
+  // The measured specimen: #9834's duration half merged as #10004 while its
+  // error-counter half sat OPEN as draft #10226. The old row fired every sweep
+  // and prescribed dropping `pm:dispatched` off a card with live work.
+  const openHalf = (number, body, draft = false) => ({ number, body, draft, merged_at: null });
+  const halves = (openPrs) =>
+    h8MergedPrStillDispatched(dispatched(9834), [mergedPr(10004, 'Part of #9834')], openPrs);
+
+  t('H8 open: a half-delivered card still reports', typeof halves([openHalf(10226, 'Part of #9834', true)]), 'string');
+  // The whole point of the downgrade: the destructive prescription must not
+  // fire on a card whose remaining half is open.
+  t(
+    'H8 open: …and does NOT prescribe dropping the label',
+    halves([openHalf(10226, 'Part of #9834', true)]).includes('Drop `pm:dispatched`'),
+    false,
+  );
+  t(
+    'H8 open: …and says the label is CORRECT here',
+    halves([openHalf(10226, 'Part of #9834', true)]).includes('must NOT be dropped'),
+    true,
+  );
+  t('H8 open: …and names the open half', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10226'), true);
+  t('H8 open: …and the merged half too', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10004'), true);
+  t('H8 open: …and counts them, N of M', halves([openHalf(10226, 'Part of #9834', true)]).includes('1 of 2'), true);
+  // A draft open half is the specimen's own shape — never filtered out.
+  t('H8 open: …and marks the open half as a draft', halves([openHalf(10226, 'Part of #9834', true)]).includes('(draft)'), true);
+  t('H8 open: a NON-draft open half counts identically', typeof halves([openHalf(10226, 'Part of #9834', false)]), 'string');
+
+  // …and the row it replaces is unchanged whenever every deliverer HAS merged —
+  // the genuine #8683 case, which must keep its prescription.
+  t(
+    'H8 open: no open deliverer -> the destructive prescription still fires',
+    halves([]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  t('H8 open: a missing open list is the pre-#10468 reading', halves(undefined).includes('Drop `pm:dispatched`'), true);
+  t(
+    'H8 open: an open PR delivering a DIFFERENT card does not downgrade the row',
+    halves([openHalf(10226, 'Part of #9999')]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  // No merged deliverer at all is still clean — the open side never MANUFACTURES
+  // a row, it only softens one the merged side already raised.
+  t(
+    'H8 open: an open deliverer with no merged half is clean',
+    h8MergedPrStillDispatched(dispatched(9834), [], [openHalf(10226, 'Part of #9834')]),
+    null,
+  );
+  // The open side reads delivery through the SAME relation, branch fallback
+  // included — a `Refs #N` open half is as live as a `Part of #N` one.
+  t(
+    'H8 open: the branch-name fallback applies to the open side too',
+    halves([{ number: 10226, body: 'Refs #9834', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-error-counter' } }]).includes('must NOT be dropped'),
+    true,
+  );
+  // …and its re-scope guard travels with it.
+  t(
+    'H8 open: a re-scoped open branch does not soften the row',
+    halves([{ number: 10226, body: 'Part of #9999', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-x' } }]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  // A merged row appearing in the open list is not an outstanding half.
+  t(
+    'H8 open: a merged row in the open list is not an open half',
+    halves([{ number: 10226, body: 'Part of #9834', merged_at: '2026-08-20T00:00:00Z' }]).includes('Drop `pm:dispatched`'),
+    true,
   );
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
