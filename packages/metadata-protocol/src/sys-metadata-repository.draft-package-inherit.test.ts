@@ -48,6 +48,11 @@ function makeFakeEngine(seed: Row[] = []) {
         if (!branches.some((b) => matches(row, b))) return false;
         continue;
       }
+      if (k.startsWith('$')) {
+        // Refuse combinators this double does not implement — a silent
+        // field-name read is how a fake matcher lies (WHERE-matcher gate).
+        throw new Error(`fake matcher: unimplemented combinator ${k}`);
+      }
       const rv = row[k] ?? null;
       if ((v ?? null) !== rv) return false;
     }
