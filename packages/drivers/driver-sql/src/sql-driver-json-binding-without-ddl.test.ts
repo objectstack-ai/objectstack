@@ -65,7 +65,7 @@ function prefObject(name: string) {
   return { name, fields: { ...PREF_FIELDS } } as any;
 }
 
-const OPTS = { bypassTenantAudit: true } as any;
+const OPTS = { bypassTenantAudit: true };
 
 /** `create table … (id text primary key, key text, value jsonb)` — no driver DDL. */
 async function migrateOutOfBand(driver: SqlDriver, table: string): Promise<void> {
@@ -79,7 +79,7 @@ async function migrateOutOfBand(driver: SqlDriver, table: string): Promise<void>
 async function insertAndRead(driver: SqlDriver, table: string, value: unknown): Promise<any> {
   const id = `i_${Math.random().toString(36).slice(2, 10)}`;
   await driver.create(table, { id, key: 'ui.recent', value }, OPTS);
-  const row: any = await driver.findOne(table, { where: { id } } as any, OPTS);
+  const row: any = await driver.findOne(table, { where: { id } }, OPTS);
   return row?.value;
 }
 
@@ -88,7 +88,7 @@ async function updateAndRead(driver: SqlDriver, table: string, value: unknown): 
   const id = `u_${Math.random().toString(36).slice(2, 10)}`;
   await driver.create(table, { id, key: 'ui.recent', value: { seeded: true } }, OPTS);
   await driver.update(table, id, { value }, OPTS);
-  const row: any = await driver.findOne(table, { where: { id } } as any, OPTS);
+  const row: any = await driver.findOne(table, { where: { id } }, OPTS);
   return row?.value;
 }
 
@@ -163,7 +163,7 @@ describe.skipIf(!PG_URL)('#10995 — live Postgres, driver told about the object
     // comes back — the registration must not turn every column into JSON.
     const id = `k_${Math.random().toString(36).slice(2, 10)}`;
     await driver.create(TABLE, { id, key: 'ui.recent', value: null }, OPTS);
-    const row: any = await driver.findOne(TABLE, { where: { id } } as any, OPTS);
+    const row: any = await driver.findOne(TABLE, { where: { id } }, OPTS);
     expect(row.key).toBe('ui.recent');
     expect(row.value).toBeNull();
   });
