@@ -31,12 +31,27 @@
  * stated the invariant it was breaking: *"`generateSql()` calls this too, so the
  * preview accepts/rejects the same set."*
  *
- * ## Why this file pins FOUR directions, not one
+ * ## [#10861] The second producer, and why this file now covers both
  *
- * Pinning only the new refusal would go green on an implementation that refuses
- * every combinator — which would break every legitimate `$or` query shipping
- * today. So the accepting neighbours are pinned in the same file, one character
- * away from the refused ones:
+ * The caller's `where` is not the only thing that puts a predicate in front of
+ * `engine.aggregate` here. PR #10758 gave the compiled dataset's OWN
+ * definition-level `filter` a route onto this door, and that route was outside
+ * both member views too — so a dataset declaring
+ * `filter: { 'account.region': 'West' }` was accepted by BOTH doors and the
+ * engine received a predicate it cannot join. #10759 was not that card: the two
+ * doors AGREED there, so there was no divergence to restore, and refusing it
+ * was a new decision about the refusal set. It was taken (maintainer,
+ * 2026-08-22: Option A, refuse at query time) and #10861 folds the scope's
+ * leaves into the same one member view. Both producers are now judged by one
+ * check, which is why they are pinned in one file.
+ *
+ * ## Why this file pins SIX directions, not one
+ *
+ * Pinning only the new refusals would go green on an implementation that
+ * refuses every combinator, or every dataset scope — which would break every
+ * legitimate `$or` query and every scoped dataset shipping today. So the
+ * accepting neighbours are pinned in the same file, one character away from the
+ * refused ones:
  *
  *   ① a cross-object member nested in `$or` / `$not` is REFUSED on both doors
  *   ② a combinator with NO cross-object member still passes both doors, and
@@ -47,14 +62,13 @@
  *      misread as a cross-object reference — an ordinary definition-level scope
  *      travels in `$and` exactly like a combinator does, and reads as a member
  *      of nothing
+ *   ⑤ a CROSS-OBJECT dataset-level `filter` is REFUSED on both doors, in the
+ *      ADR-0112 envelope, before `engine.aggregate` is reached (#10861)
+ *   ⑥ an ORDINARY dataset-level `filter` still reaches the engine CARRYING its
+ *      predicate — the load-bearing half of ⑤, and the pin a
+ *      "refuse every dataset scope" implementation fails
  *
- * ## The scope line this file also draws
- *
- * A dataset whose DEFINITION-LEVEL filter is itself cross-object is accepted by
- * BOTH doors, before and after this change — neither call site's view contains
- * the dataset scope. The doors AGREE there, so it is not the invariant this card
- * restores; it is a separate defect and is pinned here as measured-and-known
- * rather than left to be rediscovered. See the last block.
+ * ①–④ are #10759's and are re-run unchanged here; ⑤–⑥ are #10861's.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -65,7 +79,7 @@ import { AnalyticsService } from '../analytics-service.js';
 
 const ctxA = { tenantId: 'org_A', userId: 'u_a' } as ExecutionContext;
 
-interface Refusal extends Error { code?: string; status?: number; member?: string; param?: string }
+interface Refusal extends Error { code?: string; status?: number; member?: string; param?: string; cube?: string }
 interface AggCall { object: string; filter?: unknown }
 
 /** A cube with one base dimension, one cross-object dimension, one base measure. */
@@ -104,6 +118,21 @@ const XOBJ_SCOPED_SALES: Dataset = DatasetSchema.parse({
   object: 'opportunity',
   include: ['account'],
   filter: { 'account.region': 'West' },
+  dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+  measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+}) as Dataset;
+
+/**
+ * [#10861] A dataset scope with a base leaf AND a cross-object leaf. Serving is
+ * not a property of a scope containing a base leaf — the cross-object one
+ * decides, wherever it sits.
+ */
+const MIXED_SCOPED_SALES: Dataset = DatasetSchema.parse({
+  name: 'mixed_scoped_sales',
+  label: 'Mixed scoped sales',
+  object: 'opportunity',
+  include: ['account'],
+  filter: { is_deleted: false, 'account.region': 'West' },
   dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
   measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
 }) as Dataset;
@@ -150,6 +179,15 @@ async function bothDoors(cube: string, query: Omit<AnalyticsQuery, 'cube'>, defs
 }
 
 const CROSS_OBJECT_MESSAGE = /cannot evaluate a cross-object filter \("account\.region"\)/;
+/**
+ * [#10861] A DISTINCT message, deliberately: the four refusals that predate
+ * this card keep their wording (#5923's tests read it), and this one has to say
+ * a different thing — the member is in a saved document, not in the request.
+ * Matching on the substring that carries that distinction, so a rewording that
+ * dropped the provenance would go red.
+ */
+const DATASET_SCOPE_MESSAGE =
+  /cannot evaluate the cross-object filter \("account\.region"\) that dataset "[^"]+" declares at its definition level/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ① the refusal that was missing on the execution door
@@ -281,29 +319,148 @@ describe('[#10759] the #10413-phase-1 dataset filter conjunct is not misread', (
     expect(calls).toEqual([]);
   });
 
-  /**
-   * MEASURED AND DELIBERATELY LEFT OPEN — not a latent pass.
-   *
-   * A cross-object DEFINITION-LEVEL filter is accepted by both doors, and
-   * `engine.aggregate` receives `{"$and":[{"account.region":"West"}]}`, which it
-   * cannot join. PR #10758 created this instance by giving the dataset scope a
-   * route onto the ObjectQL door at all; #10759 is not it, because the two doors
-   * AGREE here — neither call site's member view contains the dataset scope, so
-   * there is no preview/execution divergence to restore.
-   *
-   * Filed separately rather than widened into this PR: refusing it is a real
-   * decision (query-time refusal versus a compile-time rejection in
-   * `dataset-compiler.ts`, which is the contract-first placement), and it is not
-   * the invariant this file restores. The expectation below is written to the
-   * behaviour as it IS, so the day that decision lands this pin goes red and
-   * points at the paragraph explaining why.
-   */
-  it('a CROSS-OBJECT definition-level filter is still accepted by both doors (filed separately)', async () => {
-    const { execute, generateSql, calls } = await bothDoors('xobj_scoped_sales', {
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⑤ [#10861] the CROSS-OBJECT dataset scope — the second producer
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE REFUSAL IS INTENDED. This block replaces the as-is pin #10759 left here.
+ *
+ * What that pin recorded, and what it was for: a dataset whose DEFINITION-LEVEL
+ * `filter` is itself cross-object was accepted by BOTH doors, and
+ * `engine.aggregate` received `{"$and":[{"account.region":"West"}]}` — a
+ * predicate it cannot join, so it matches nothing on any driver that evaluates
+ * it honestly and the widget answers neither the scoped number nor the unscoped
+ * one. #10759 was not that card: the two doors AGREED in accepting it, so there
+ * was no preview/execution divergence to restore. It was written to the
+ * behaviour as it WAS, so that the day the decision landed it would go red and
+ * point at its own explanation. It did exactly that; this is the rewrite it
+ * asked for.
+ *
+ * The decision (maintainer, 2026-08-22 decision-inbox digest, accepted verbatim
+ * 「接受所有」): **Option A — refuse at query time.** The dataset scope's
+ * leaves are folded into the one member view `planCrossObject` judges, so both
+ * doors refuse at the moment the engine would otherwise be misled. Compile-time
+ * rejection in `dataset-compiler.ts` (Option B) was NOT taken — the compiler
+ * cannot see which driver will serve the dataset, and this same definition is
+ * legal on a native-SQL deployment — and serving the shape (Option C) is
+ * deferred until a real customer dataset is found to depend on it.
+ *
+ * Measured on the merged tree, one fixture, both doors in one run:
+ *
+ * ```
+ * BEFORE   execute()     ACCEPTED  -> engine.aggregate got
+ *                                     {"$and":[{"account.region":"West"}]}
+ *          generateSql() ACCEPTED
+ * AFTER    execute()     REFUSED   INVALID_FIELD / 400, member "account.region"
+ *          generateSql() REFUSED   same
+ *          engine.aggregate        never reached (0 calls)
+ * ```
+ *
+ * ## Why the still-served neighbour below is load-bearing
+ *
+ * "Refuse the dataset scope" has a trivially green wrong implementation:
+ * refuse EVERY dataset scope. It would pass a refusal-only suite and break
+ * every scoped dataset shipping today. The ordinary-scope case is therefore
+ * pinned one character away from the refused one, reaching the engine and
+ * CARRYING its predicate — dropping the scope silently widens the answer just
+ * as badly as refusing it wrongly narrows the product.
+ */
+describe('[#10861] a CROSS-OBJECT definition-level filter is refused on BOTH doors', () => {
+  it('execute() refuses with the ADR-0112 envelope, before the engine is asked', async () => {
+    const { execute, calls } = await bothDoors('xobj_scoped_sales', {
       dimensions: ['stage'], measures: ['revenue'],
     }, [XOBJ_SCOPED_SALES]);
-    expect(execute).toBeUndefined();
-    expect(generateSql).toBeUndefined();
-    expect(JSON.stringify(calls[0]?.filter)).toContain('account.region');
+
+    expect(execute, 'accepted — the dataset scope was invisible to the envelope check')
+      .toBeInstanceOf(Error);
+    // Read exactly as `rest-server.ts`'s catch reads them: a 4xx status AND a
+    // code, or the route falls through to 500 ANALYTICS_QUERY_FAILED. Asserting
+    // only that it throws would pass on a bare `Error` and report the platform
+    // broken for what is a dataset-authoring mistake on this deployment.
+    expect(execute?.code, 'no `code` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe('INVALID_FIELD');
+    expect(execute?.status, 'no `status` ⇒ 500 ANALYTICS_QUERY_FAILED').toBe(400);
+    // The member as the DATASET spelled it, and the dataset named as the
+    // document to go and edit.
+    expect(execute?.member).toBe('account.region');
+    expect(execute?.cube).toBe('xobj_scoped_sales');
+    expect(String(execute?.message)).toMatch(DATASET_SCOPE_MESSAGE);
+    // `param` is ABSENT on purpose, and this assertion is the pin on that
+    // choice rather than an omission nobody noticed. `AnalyticsRequestKey` is
+    // the analytics REQUEST vocabulary; `AnalyticsQuerySchema` is strict and has
+    // no `filter` key, and this request carries no `where` at all. Both
+    // `param: 'where'` and a widened `param: 'filter'` would send the caller to
+    // a key that does not exist on what they sent. `cube` is the locator that
+    // does.
+    expect(execute?.param, '`param` must not name a key the request has no room for')
+      .toBeUndefined();
+    // Refused BEFORE the engine was asked, not after it mis-bucketed. This is
+    // the assertion the whole card is about: the BEFORE run reached it once,
+    // carrying `{"$and":[{"account.region":"West"}]}`.
+    expect(calls, 'engine.aggregate was reached — it cannot join').toEqual([]);
+  });
+
+  it('both doors agree', async () => {
+    const { execute, generateSql } = await bothDoors('xobj_scoped_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+    }, [XOBJ_SCOPED_SALES]);
+    // One fact about one query, not two independent expectations — the same
+    // shape ① uses. Two expectations that happen to coincide do not pin an
+    // invariant BETWEEN two call sites; this does.
+    expect(
+      [execute === undefined, generateSql === undefined],
+      'the preview and the execution door accept/reject the same set',
+    ).toEqual([false, false]);
+    expect(generateSql?.code).toBe('INVALID_FIELD');
+    expect(generateSql?.status).toBe(400);
+    expect(String(generateSql?.message)).toMatch(DATASET_SCOPE_MESSAGE);
+  });
+
+  it('the still-served neighbour: an ORDINARY dataset scope still reaches the engine carrying its predicate', async () => {
+    // LOAD-BEARING. An implementation that refused every dataset scope would go
+    // green on the two tests above and break every scoped dataset shipping
+    // today. `is_deleted: false` is one character away from `account.region`
+    // in the fixture and travels the identical `$and` conjunct route.
+    const { execute, generateSql, calls } = await bothDoors('scoped_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+    }, [SCOPED_SALES]);
+    expect(
+      [execute === undefined, generateSql === undefined],
+      'both doors must still SERVE an ordinary dataset scope',
+    ).toEqual([true, true]);
+    expect(calls, 'the engine was not reached at all — the scope was refused, not served')
+      .toHaveLength(1);
+    expect(
+      JSON.stringify(calls[0]?.filter),
+      'reached the engine with the scope DROPPED — silently wider, not refused',
+    ).toContain('is_deleted');
+  });
+
+  it('a base-object leaf beside a cross-object one in the SAME dataset scope is still refused', async () => {
+    // The counter-shape for the test above: refusing is not a property of the
+    // scope having more than one leaf, and serving is not a property of it
+    // having a base leaf anywhere in it. The cross-object leaf decides.
+    const { execute, generateSql, calls } = await bothDoors('mixed_scoped_sales', {
+      dimensions: ['stage'], measures: ['revenue'],
+    }, [MIXED_SCOPED_SALES]);
+    expect([execute === undefined, generateSql === undefined]).toEqual([false, false]);
+    expect(execute?.member).toBe('account.region');
+    expect(calls).toEqual([]);
+  });
+
+  it('the KNOWN-PRESENT control: a cross-object member in the CALLER\u2019s where keeps its own diagnostic', async () => {
+    // The counter-check for every "refused" above, and the pin that #10861 did
+    // not repaint the refusal #10759 restored. This shape was refused before
+    // this card and is refused after it, with the OTHER message and with
+    // `param: 'where'` — which is exactly what makes the absent `param` above a
+    // deliberate distinction rather than a field this file forgot to set.
+    const { execute, generateSql } = await bothDoors('sales_by_account', {
+      dimensions: ['stage'], measures: ['revenue'], where: { 'account.region': 'West' },
+    }, [SALES_BY_ACCOUNT]);
+    expect(String(execute?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(String(generateSql?.message)).toMatch(CROSS_OBJECT_MESSAGE);
+    expect(execute?.param).toBe('where');
   });
 });

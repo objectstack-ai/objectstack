@@ -28,6 +28,16 @@ import {
   type RecombinableMethod,
 } from './cross-object-rebucket.js';
 
+/**
+ * [#10861] Where a member in the cross-object envelope's inventory came from.
+ *
+ * Two producers put predicates in front of `engine.aggregate` on this path: the
+ * caller's own `where`, and — since PR #10758 — the compiled dataset's
+ * definition-level `filter`. Both are judged by the same envelope check; only
+ * the DIAGNOSTIC differs, because only one of them names a key the caller sent.
+ */
+type FilterMemberOrigin = 'where' | 'dataset-filter';
+
 /** Scalar analytics operators → their SQL spelling (display SQL only). */
 const SCALAR_SQL_OPS: Record<string, string> = {
   equals: '=', notEquals: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=',
@@ -207,7 +217,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // differently for one query. `/analytics/query` reached `engine.aggregate`
     // with a predicate the engine cannot join and silently mis-bucketed it,
     // which is the exact outcome #3654's loud refusal exists to prevent.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
@@ -359,7 +369,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // rather than two copies: "the preview accepts/rejects the same set" is an
     // invariant between two call sites, and two copies of a view can drift
     // apart while each stays individually correct — which is how they drifted.
-    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query));
+    const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
     const dimExpr = (dim: string): string => {
@@ -548,8 +558,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
   /**
    * The member view {@link planCrossObject} judges a filter by: EVERY member
-   * the query's `where` touches, structure discarded, keyed by RESOLVED field
-   * name (#10759).
+   * that will end up in the engine's predicate, structure discarded, keyed by
+   * RESOLVED field name (#10759), valued by WHERE THE MEMBER CAME FROM
+   * (#10861).
    *
    * Both call sites — `execute()` and `generateSql()` — are handed this and
    * nothing else, which is what makes the invariant `planCrossObject` states
@@ -562,10 +573,33 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * the members inside were unreadable from the outside and the envelope check
    * could not reject what it could not see.
    *
-   * `true` is a placeholder operand and never reaches a driver: `planCrossObject`
-   * reads `Object.keys` only. Structure is discarded on purpose — a member is
-   * cross-object or it is not, and which branch of a disjunction it sits in
-   * cannot make `engine.aggregate` able to join it.
+   * ## Two producers, one inventory (#10861)
+   *
+   * The caller's `where` is not the only thing that reaches `engine.aggregate`
+   * as a predicate. Since PR #10758 the compiled dataset's own definition-level
+   * `filter` is lowered onto `execute()`'s `conjuncts` and rendered by
+   * `generateSql()`, so a dataset declaring `filter: { 'account.region': 'West' }`
+   * sent `{"$and":[{"account.region":"West"}]}` to an engine that cannot join —
+   * measured on both doors, which AGREED in accepting it, so #10759's
+   * preview/execution symmetry had nothing to restore. Refusing it is a
+   * widening of the refusal set, ruled by the maintainer on 2026-08-22 (Option
+   * A, query-time refusal): fold the scope's leaves in HERE, where driver
+   * capability is known, rather than in `dataset-compiler.ts`, which cannot see
+   * which driver will serve the dataset and would refuse a dataset that is
+   * perfectly legal on a native-SQL deployment.
+   *
+   * Structure is discarded on purpose — a member is cross-object or it is not,
+   * and which branch of a disjunction it sits in cannot make
+   * `engine.aggregate` able to join it. PROVENANCE is not discarded, because it
+   * decides what the refusal can tell the caller to go fix: `AnalyticsRequestKey`
+   * is the analytics REQUEST vocabulary and a dataset's `filter` is not in it,
+   * so a scope-borne member must not be reported as `param: 'where'` — see
+   * `planCrossObject`. The value slot carries that and nothing else; it never
+   * reaches a driver.
+   *
+   * Dataset leaves are inserted FIRST so a member named by BOTH producers keeps
+   * the caller's provenance (last write wins on a duplicate key): if it is in
+   * the request too, the request is the actionable place to fix it.
    *
    * Time-dimension WINDOWS are deliberately absent (they live in
    * `dateRangeBounds`, not in `where`). They need no arm here: a cross-object
@@ -574,11 +608,24 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * rather than as the lowered predicate it becomes — which is the better
    * diagnostic and the reason that loop runs first.
    */
-  private filterMemberView(cube: Cube, query: AnalyticsQuery): Record<string, unknown> {
-    return Object.fromEntries(
-      collectFilterLeaves(normalizeAnalyticsFilterTree(query))
-        .map((f) => [this.resolveFieldName(cube, f.member, 'any'), true]),
-    );
+  private filterMemberView(
+    cube: Cube,
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): Record<string, FilterMemberOrigin> {
+    // Read from the SAME channel both doors lower the scope from, so the view
+    // and the predicate cannot disagree about what the engine will receive.
+    const datasetFilter = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.filter;
+    const leaves = (node: ReturnType<typeof normalizeAnalyticsFilterTree>, origin: FilterMemberOrigin) =>
+      collectFilterLeaves(node).map(
+        (f) => [this.resolveFieldName(cube, f.member, 'any'), origin] as const,
+      );
+    return Object.fromEntries([
+      ...(datasetFilter
+        ? leaves(normalizeAnalyticsFilterTree({ where: datasetFilter }), 'dataset-filter')
+        : []),
+      ...leaves(normalizeAnalyticsFilterTree(query), 'where'),
+    ]);
   }
 
   /**
@@ -591,7 +638,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * query (direct path), a plan for an in-envelope cross-object query.
    *
    * THROWS for anything outside the envelope — a cross-object MEASURE or FILTER
-   * (needs a real join to evaluate), a MULTI-HOP dimension (`a.b.c`), or a
+   * (needs a real join to evaluate), a cross-object leaf in the DATASET's own
+   * definition-level `filter` (#10861 — same join it does not have, arriving
+   * from the producer PR #10758 added), a MULTI-HOP dimension (`a.b.c`), or a
    * non-recombinable measure (`avg`/`count_distinct`, whose sub-bucket values
    * cannot be merged). A loud error beats the silent mis-bucket #3654 kills.
    * `generateSql()` calls this too, so the preview accepts/rejects the same set
@@ -599,16 +648,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * {@link filterMemberView}, so that sentence is enforced by construction
    * instead of restated at two call sites.
    *
-   * [#5716] All four refusals below are `invalidMemberError` — `INVALID_FIELD` /
-   * 400, naming the member — and the MESSAGES are unchanged (they are good
-   * diagnostics, and #5923's tests read them). Each is decided by two caller-side
-   * facts and nothing else: a member the query named, and whether that member
-   * resolves across a join. Neither is an internal invariant — a cube where the
-   * member exists and a driver that could serve it are both perfectly ordinary,
-   * which is exactly what the "run this on a native-SQL driver" half of each
-   * message says. They are member-level rather than dataset-level (hence not
-   * `datasetInvalidError`) because the fix is always to change or drop ONE named
-   * member, and because they fire on `/analytics/query` where no dataset exists.
+   * [#5716] All five refusals below are `invalidMemberError` — `INVALID_FIELD` /
+   * 400, naming the member — and the four that predate #10861 keep their
+   * MESSAGES unchanged (they are good diagnostics, and #5923's tests read
+   * them). Each is decided by two facts and nothing else: a member that will
+   * reach the engine's predicate, and whether that member resolves across a
+   * join. Neither is an internal invariant — a cube where the member exists and
+   * a driver that could serve it are both perfectly ordinary, which is exactly
+   * what the "run this on a native-SQL driver" half of every message says. They
+   * are member-level rather than dataset-level (hence not `datasetInvalidError`)
+   * because the fix is always to change or drop ONE named member, and because
+   * four of them fire on `/analytics/query` where no dataset exists.
+   *
+   * [#10861] The fifth is the exception that proves the rule and is written to
+   * it: it can only fire where a dataset DOES exist, and it is the one refusal
+   * here whose member no request key named — so it carries `cube` and no
+   * `param`, and says in its own words which document to go and edit. It stays
+   * `INVALID_FIELD` rather than becoming `DATASET_INVALID` because the verdict
+   * is the same physical one as its neighbour — this engine cannot join this
+   * member — and splitting the code by PROVENANCE would make a caller branch on
+   * two wire shapes for one capability limit.
    *
    * Detection is on RESOLVED field names, so a dotted dimension the cube
    * flattens to a real column is treated as base, not cross-object.
@@ -616,7 +675,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private planCrossObject(
     cube: Cube,
     query: AnalyticsQuery,
-    filter: Record<string, unknown>,
+    filter: Record<string, FilterMemberOrigin>,
   ): CrossObjectPlan | null {
     const baseObject = this.extractObjectName(cube);
 
@@ -644,7 +703,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       ...(query.measures ?? []).map((m) => ({
         where: 'measure', member: m, field: this.resolveMeasureAggregation(cube, m).field,
       })),
-      ...Object.keys(filter).map((f) => ({ where: 'filter', member: f, field: f })),
+      ...Object.entries(filter)
+        .filter(([, origin]) => origin === 'where')
+        .map(([f]) => ({ where: 'filter', member: f, field: f })),
     ].filter((r) => this.isCrossObjectField(cube, r.field, baseObject));
     if (nonDim.length > 0) {
       throw invalidMemberError(
@@ -658,6 +719,42 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
           param: nonDim[0].where === 'measure' ? 'measures' : 'where',
           cube: cube.name,
         },
+      );
+    }
+
+    // [#10861] The same verdict for a member the CALLER never named: a leaf of
+    // the compiled dataset's own definition-level `filter`. Checked after the
+    // caller's own members, so a request that names a cross-object member keeps
+    // the diagnostic it can act on directly, and so every shape that was
+    // refused before this card is refused with the identical message.
+    //
+    // Same family and same envelope as the arm above — `INVALID_FIELD` / 400 —
+    // because it is the same physical verdict about the same member: this
+    // engine has no join. A caller should not have to branch on two codes for
+    // one capability limit.
+    //
+    // `param` is deliberately ABSENT rather than `'where'`. `AnalyticsRequestKey`
+    // is the analytics REQUEST vocabulary, and `AnalyticsQuerySchema` is strict:
+    // there is no `filter` key on a query (its `guidance` sends `filters` to
+    // `where`), and the request's `where` may be empty or absent entirely. Both
+    // `param: 'where'` and a widened `param: 'filter'` would name a key the
+    // caller cannot go and edit — the exact "never suggest a key the schema
+    // cannot accept" trap `strict-object.ts` documents. `cube` carries the
+    // locator that IS actionable: the dataset whose definition holds the leaf.
+    const scopeCross = Object.entries(filter)
+      .filter(([field, origin]) =>
+        origin === 'dataset-filter' && this.isCrossObjectField(cube, field, baseObject))
+      .map(([field]) => field);
+    if (scopeCross.length > 0) {
+      throw invalidMemberError(
+        `[Analytics] ObjectQLStrategy cannot evaluate the cross-object filter ` +
+        `("${scopeCross[0]}") that dataset "${cube.name}" declares at its definition ` +
+        `level — the engine cannot join in an aggregate, so this predicate matches ` +
+        `nothing and the answer would be neither the scoped number nor the unscoped ` +
+        `one. Nothing in the request names it: remove the cross-object leaf from the ` +
+        `dataset's own \`filter\`, or serve this dataset on a native-SQL driver, ` +
+        `where the same definition is valid.`,
+        { member: scopeCross[0], cube: cube.name },
       );
     }
 
