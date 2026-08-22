@@ -5,6 +5,12 @@
   "bin": {
     "create-objectstack": "./bin/create-objectstack.js"
   },
+  "exports": {
+    "./created-summary": {
+      "types": "./dist/created-summary.d.ts",
+      "import": "./dist/created-summary.js"
+    }
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

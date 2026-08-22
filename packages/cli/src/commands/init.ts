@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { printHeader, printSuccess, printError, printStep, printKV, printInfo, formatZodErrors } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
+import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -474,6 +475,43 @@ function printWarning(msg: string) {
 }
 
 /**
+ * Print the closing "Created files" summary from a walk of the FINISHED
+ * project directory, not from a list accumulated while writing the
+ * template. A list built during the copy phase is printed before `<pm>
+ * install` runs and so can never name `pnpm-lock.yaml`, `package-lock.json`,
+ * `node_modules/`, or anything else the package manager writes — the exact
+ * gap this replaces (measured: a fresh `init` omitted a 138 KB
+ * `pnpm-lock.yaml` and a 575 MB `node_modules/` from its own "Created
+ * files" list). Reuses `create-objectstack`'s `created-summary.ts` (see its
+ * header for the reachability measurement that made a hand-accumulated
+ * list untenable for that scaffolder) instead of a second copy of the same
+ * renderer — the two scaffold paths already drifted once (#10499) from
+ * carrying separate implementations of the same list.
+ *
+ * Called once, after the install attempt (success OR failure) has run its
+ * course, so it always reports the real state of disk at that point rather
+ * than a promise: on a failed install it shows whatever partial state the
+ * failure left behind instead of silently disappearing.
+ */
+function printCreatedFilesSummary(targetDir: string, wasEmpty: boolean) {
+  const entries = summarizeTree(targetDir);
+  if (entries.length === 0) return;
+
+  console.log(chalk.bold(wasEmpty ? '  Created files:' : '  Project contents:'));
+  if (!wasEmpty) {
+    console.log(chalk.dim('    (the directory already had contents; this lists all of it)'));
+  }
+
+  const width = Math.min(44, Math.max(...entries.map((e) => e.path.length)) + 2);
+  for (const entry of entries) {
+    const note = describeEntry(entry);
+    const pad = note ? entry.path.padEnd(width) : entry.path;
+    console.log(chalk.green(`    + ${pad}${note ? chalk.dim(note) : ''}`));
+  }
+  console.log('');
+}
+
+/**
  * Write a template's `srcFiles` into `targetDir` and return the relative paths
  * written, in creation order.
  *
@@ -635,7 +673,18 @@ export default class Init extends Command {
     printKV('Directory', targetDir);
     console.log('');
 
-    const createdFiles: string[] = [];
+    // Read BEFORE the first write. The named-arg branch above refuses a
+    // non-empty target, but the no-name branch scaffolds into whatever the
+    // current directory already is — the closing summary is a walk of that
+    // directory, so it must know whether it is entitled to call what it
+    // finds "Created files" (mirrors create-objectstack's own `targetWasEmpty`).
+    let targetWasEmpty = true;
+    try {
+      targetWasEmpty = fs.readdirSync(targetDir).filter((e) => e !== '.git').length === 0;
+    } catch {
+      // targetDir does not exist — treated as empty (defensive; both
+      // branches above already create or verify it before this point).
+    }
 
     let installSucceeded = false;
     let installAttempted = false;
@@ -647,7 +696,6 @@ export default class Init extends Command {
       if (!fs.existsSync(pkgPath)) {
         const pkg = renderScaffoldPackageJson(projectName, template);
         fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-        createdFiles.push('package.json');
       } else {
         printInfo('package.json already exists, skipping');
       }
@@ -660,7 +708,6 @@ export default class Init extends Command {
       const pnpmWorkspacePath = path.join(targetDir, 'pnpm-workspace.yaml');
       try {
         fs.writeFileSync(pnpmWorkspacePath, renderPnpmWorkspaceYaml(), { flag: 'wx' });
-        createdFiles.push('pnpm-workspace.yaml');
       } catch (err: any) {
         if (err?.code !== 'EEXIST') throw err;
       }
@@ -668,7 +715,6 @@ export default class Init extends Command {
       // 2. Create objectstack.config.ts
       const configContent = template.configContent(projectName, namespace);
       fs.writeFileSync(path.join(targetDir, 'objectstack.config.ts'), configContent);
-      createdFiles.push('objectstack.config.ts');
 
       // 3. Create tsconfig.json if missing
       const tsconfigPath = path.join(targetDir, 'tsconfig.json');
@@ -689,26 +735,17 @@ export default class Init extends Command {
           exclude: ['dist', 'node_modules'],
         };
         fs.writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n');
-        createdFiles.push('tsconfig.json');
       }
 
       // 4. Create src files (see `writeTemplateSrcFiles` for the `__name__`
       //    placeholder rule and why the loop is exported).
-      createdFiles.push(...writeTemplateSrcFiles(template.srcFiles, targetDir, projectName, namespace));
+      writeTemplateSrcFiles(template.srcFiles, targetDir, projectName, namespace);
 
       // 5. Create .gitignore if missing
       const gitignorePath = path.join(targetDir, '.gitignore');
       if (!fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, `node_modules/\ndist/\n*.tsbuildinfo\n`);
-        createdFiles.push('.gitignore');
       }
-
-      // Summary
-      console.log(chalk.bold('  Created files:'));
-      for (const f of createdFiles) {
-        console.log(chalk.green(`    + ${f}`));
-      }
-      console.log('');
 
       // Install dependencies
       if (flags.install) {
@@ -723,6 +760,11 @@ export default class Init extends Command {
           printWarning(`Dependency installation with ${chosenPm} failed. Run \`${chosenPm} install\` manually in ${targetDir}.`);
         }
       }
+
+      // Created-files summary — printed HERE, after the install attempt has
+      // run its course (whether it succeeded or failed), so it can name what
+      // `<pm> install` wrote. See `printCreatedFilesSummary` for why.
+      printCreatedFilesSummary(targetDir, targetWasEmpty);
 
       // Self-test the scaffold so we catch template regressions before the
       // user discovers them by running `objectstack dev`. Only runs when deps
