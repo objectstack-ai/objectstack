@@ -50,8 +50,6 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
-
 import { ApprovalService } from './approval-service.js';
 import { redactSnapshot } from './payload-redaction.js';
 import {
@@ -120,33 +118,14 @@ function makeEngine() {
       return rows.slice(options?.offset ?? 0, (options?.offset ?? 0) + (options?.limit ?? 1000));
     },
     async insert(object: string, data: any) { ensure(object).push({ ...data }); return { ...data }; },
-    async update(object: string, data: any, options?: any) {
-      const dispatch = assertEngineUpdateDispatch(data, options);
-      const table = ensure(object);
-      if (dispatch.kind === 'multi') {
-        let n = 0;
-        for (let i = 0; i < table.length; i++) {
-          if (matches(table[i], options?.where)) { table[i] = { ...table[i], ...data }; n++; }
-        }
-        return { updated: n };
-      }
-      const i = table.findIndex(r => r.id === dispatch.id);
-      if (i >= 0) table[i] = { ...table[i], ...data };
-      return table[i];
-    },
-    async delete(object: string, options?: any) {
-      const dispatch = assertEngineDeleteDispatch(options);
-      const table = ensure(object);
-      if (dispatch.kind === 'multi') {
-        const survivors = table.filter(r => !matches(r, options?.where));
-        const deleted = table.length - survivors.length;
-        table.splice(0, table.length, ...survivors);
-        return { deleted };
-      }
-      const i = table.findIndex(r => r.id === dispatch.id);
-      if (i >= 0) table.splice(i, 1);
-      return { id: dispatch.id };
-    },
+    // ⛔ No `update` / `delete` here ON PURPOSE. This file's subject is the READ
+    // path (`getRequest` / `listRequests` / a generic `find`), which never
+    // reaches a write verb — so declaring the two verbs would add an engine
+    // double to `check:engine-double-contract`'s pinned ledger for coverage
+    // nothing here exercises. If a future test in this file drives a write, add
+    // them back routed through `assertEngineUpdateDispatch` /
+    // `assertEngineDeleteDispatch` (never a hand-mirrored copy of the check)
+    // and run the gate's `--write` in the same edit.
   };
 }
 
