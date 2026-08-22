@@ -426,7 +426,26 @@ export class SysMetadataRepository implements MetadataRepository {
     // overlay. Callers state their scope; this line no longer decides it
     // anywhere but for the documented `PutOptions.packageId` default
     // (omitted/undefined = the env-local, unbound row).
-    const targetPackageId: string | null = opts.packageId ?? null;
+    let targetPackageId: string | null = opts.packageId ?? null;
+    // [#11087] Draft-save package inheritance. A `state='draft'` save is a
+    // pending change OVER the published row, and every package-scoped consumer
+    // — `listDrafts({ packageId })`, the console's pending-changes surfaces,
+    // `publishPackageDrafts` — keys drafts by `package_id`. A caller that names
+    // no base (the console's plain `?mode=draft` save) used to stamp NULL even
+    // when the row it overlays is package-bound, producing an "orphan draft"
+    // that no package view counts and no per-package publish can ever promote
+    // (measured live: `_drafts` lists it, `_drafts?packageId=` does not).
+    // Inherit the overlaid ACTIVE row's binding instead. Explicit
+    // `opts.packageId` is untouched (a caller that states its base keeps it,
+    // ADR-0048), and with no active row — a brand-new item drafted first —
+    // there is nothing to inherit and the package-less semantics stand.
+    if (state === 'draft' && opts.packageId == null) {
+      const activeRow = await this.engine.findOne('sys_metadata', {
+        where: this.whereFor(ref, 'active'),
+      });
+      const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
+      if (activePkg) targetPackageId = activePkg;
+    }
 
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
@@ -434,10 +453,22 @@ export class SysMetadataRepository implements MetadataRepository {
       // ADR-0048 — scope the existing-row lookup to the requested package so a
       // save for package B does not find (and overwrite) package A's same-name
       // overlay. A package-less save (packageId null) targets the global row.
-      const existing = await this.engine.findOne('sys_metadata', {
+      let existing = await this.engine.findOne('sys_metadata', {
         where: this.whereFor(ref, state, targetPackageId),
         context: ctx,
       });
+      // [#11087] Orphan-draft adoption: when the package binding above was
+      // INHERITED (caller named none), a pre-fix draft for the same
+      // (org, type, name) sits at `package_id NULL` and the scoped lookup
+      // misses it — creating a second draft row would fork the pending change.
+      // Re-read the package-less row and update THAT one; the stamp below
+      // (`existingPkg ?? targetPackageId`) then adopts it into the package.
+      if (!existing && state === 'draft' && opts.packageId == null && targetPackageId !== null) {
+        existing = await this.engine.findOne('sys_metadata', {
+          where: this.whereFor(ref, state, null),
+          context: ctx,
+        });
+      }
       const existingHash: string | null = existing?.checksum ?? null;
       if (opts.parentVersion !== existingHash) {
         throw new ConflictError(this.fullRef(ref), opts.parentVersion, existingHash);
