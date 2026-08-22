@@ -214,6 +214,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export default ObjectSchema.create({
   name: 'account',
   label: 'Account',
+  sharingModel: 'private',
 
   fieldGroups: [
     { key: 'contact_info', label: 'Contact Information', icon: 'user' },
@@ -253,6 +254,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
+  sharingModel: 'private',
   fields: {
     status: Field.select({
       options: [
@@ -321,6 +323,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export default ObjectSchema.create({
   name: 'support_case',
   label: 'Support Case',
+  sharingModel: 'private',
   enable: {
     trackHistory: true,
     feeds: true,
