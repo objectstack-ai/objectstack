@@ -72,7 +72,7 @@ come from `os cloud login` (stored in `~/.objectstack/cloud.json`) or the
 |---------|-------------|
 | `os cloud login` | Authenticate to ObjectStack Cloud (browser or `--email/--password`); writes `~/.objectstack/cloud.json` |
 | `os cloud whoami` / `os cloud logout` | Inspect / clear the stored cloud session |
-| `os environments create --org <id> --name <n>` | Provision a new environment (alias: `os projects create`) |
+| `os environments create --org <id> --name <n>` | Provision a new environment (was `os projects create` before the v5.0 project → environment rename; ADR-0006, no aliases) |
 | `os environments list` / `show <id>` | List / inspect your environments |
 | `os package publish [artifact]` | Publish `dist/objectstack.json` as a versioned package in your org |
 
@@ -95,7 +95,7 @@ review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` (or
 
 ### Plugin Management
 
-Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the legacy `os projects bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
 
 ### Quality
 
@@ -275,7 +275,7 @@ os generate view customer        # 4. Add a list view
 os validate                      # 5. Validate everything
 os dev                           # 6. Start dev server
 os compile                       # 7. Build for production
-os projects bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud Project
+os environments bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud environment
 ```
 
 ## Architecture
