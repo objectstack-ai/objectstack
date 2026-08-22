@@ -547,6 +547,18 @@ A complete opt-in 2FA UX still needs to handle:
 - the `twoFactorRedirect` response returned by password sign-in, and
 - backup-code recovery.
 
+<Callout type="warn">
+  **`/two-factor/enable` always issues a secret that must be confirmed — including
+  on re-enrollment.** Calling it on an account that already has 2FA active replaces
+  the stored secret and marks the enrollment unconfirmed, so the new secret is
+  **not** accepted at the sign-in challenge (`400 TOTP_NOT_ENABLED`) and `totp` is
+  not offered in `twoFactorMethods` until `/two-factor/verify-totp` succeeds with
+  the live session. The replaced secret stops working as soon as `enable` returns,
+  so a re-enrollment UI must run the confirmation step in the same session, and
+  must show the backup codes from that response — they are the recovery path if
+  the authenticator was never captured.
+</Callout>
+
 For custom account UIs, enable the backend plugin in configuration:
 
 ```typescript
