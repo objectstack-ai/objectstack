@@ -25,9 +25,10 @@
  * `printError` writes to stdout. Spawned through `bin/run-dev.js` + tsx so the
  * suite does not depend on `packages/cli/dist` having been built.
  *
- * ⛔ Not asserted, because it is out of scope and stays that way: that
- * `os g skill` exists. It does not — the skill scaffolder is the split-out
- * follow-up half, and the message says so rather than promising it.
+ * The refusal's pointer at skills is asserted here only as TEXT. That the
+ * command it now names actually exists and writes a loadable file is pinned
+ * next door, in `generate-skill.e2e.test.ts` (#11025) — when this message was
+ * first written there was no `os g skill` to point at, and it said so.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
