@@ -58,7 +58,7 @@ import {
   hashSpec,
 } from '@objectstack/metadata-core';
 import { runRepositoryContractTests } from '@objectstack/metadata-core/testing';
-import type { MetadataEvent } from '@objectstack/metadata-core';
+import type { MetadataEvent, WatchFilter } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -446,5 +446,136 @@ describe('SysMetadataRepository — invariant 6, both halves (#10842)', () => {
     // over: a cursor we could not read is not a cursor we may invent.
     await expect(iter.next()).rejects.toThrow('connection reset');
     await iter.return?.(undefined);
+  });
+});
+
+/**
+ * #11021 — what `close()` owes a pending iterator.
+ *
+ * `close()` used to model shutdown as a metadata EVENT: it broadcast a
+ * synthetic `{ seq: -1, ref: { org: '', type: 'view', name: '_close' } }`
+ * through the same `dispatch` closure every real event passes, and then
+ * cleared the watcher set. Both of that closure's guards reject it:
+ *
+ *   - `matchesFilter` — the synthetic ref's org is the EMPTY STRING and its
+ *     type is always `view`, so any subscription naming an `org`, a `type`
+ *     other than `view`, or a `name` drops it;
+ *   - the `since` drop — `-1 <= since` holds against every real seq, so every
+ *     numeric-`since` subscription drops it too.
+ *
+ * Dropped, and then unsubscribed by `watchers.clear()`: nothing could ever
+ * settle the promise, and the consumer's `for await` never returned. The
+ * matrix below is the one the card was filed on, plus the row that is easy to
+ * misread — an EMPTY filter with no `since` passed both guards, so the pending
+ * pull settled, but it settled with `done: false` carrying the synthetic event
+ * as though a view named `_close` had been deleted at seq -1. The iterator
+ * then hung on the NEXT pull just like the other two.
+ *
+ * The repair is that shutdown is not an event. `close()` runs the same
+ * termination routine `iterator.return()` runs, on every live watcher — which
+ * is what these cases assert, and it is why the assertion is on `done: true`
+ * with NO value rather than on "something arrived".
+ */
+describe('SysMetadataRepository — close() terminates every live watcher (#11021)', () => {
+  const ref = { org: 'system', type: 'view' as const, name: 'sample_view' };
+
+  const PENDING = Symbol('still-pending');
+
+  /**
+   * Settle-or-report-pending. Every case here has to tell "settled with
+   * `done: true`" apart from "still unsettled", and a bare `await` on the
+   * unsettled shape hangs the RUN rather than failing the case.
+   */
+  function within<T>(p: Promise<T>, ms: number): Promise<T | typeof PENDING> {
+    return Promise.race([
+      p,
+      new Promise<typeof PENDING>((resolve) => setTimeout(() => resolve(PENDING), ms)),
+    ]);
+  }
+
+  /**
+   * Let the durable-replay promise settle, so the pull under test is genuinely
+   * PARKED on the live listener rather than still inside `await replayReady`.
+   * Without this the numeric-`since` row would prove less than it claims.
+   */
+  const parked = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  it.each([
+    ['filtered + numeric `since`', { org: 'system' } as WatchFilter, true],
+    // ⭐ The row that proves the org-filter half bites ON ITS OWN. A fix
+    // tested only against the `since` half looks complete and leaves this —
+    // `MetadataCache.start()` with any non-empty `watchFilter` — hanging.
+    ['filtered, no `since` at all', { org: 'system' } as WatchFilter, false],
+    // The row that looked drained and was not: it received the synthetic
+    // event, then hung on the next pull.
+    ['empty filter, no `since`', {} as WatchFilter, false],
+  ])('close() settles the pending next() with done:true — %s', async (_label, filter, withSince) => {
+    const repo = makeRepo();
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+
+    const iter = (withSince ? repo.watch(filter, a.seq) : repo.watch(filter))[
+      Symbol.asyncIterator
+    ]();
+    const pending = iter.next();
+    await parked();
+
+    repo.close();
+
+    // Termination — not a synthetic event wearing `done: false`.
+    expect(await within(pending, 500)).toEqual({ value: undefined, done: true });
+    // …and the iterator is FINISHED, not merely unblocked once. This is the
+    // half the old empty-filter row hid: one pull settled, the next hung.
+    expect(await within(iter.next(), 500)).toEqual({ value: undefined, done: true });
+  });
+
+  it('finishes a watcher that has no pull outstanding at close() time', async () => {
+    const repo = makeRepo();
+    const iter = repo.watch({ org: 'system' })[Symbol.asyncIterator]();
+    await parked();
+
+    repo.close();
+
+    expect(await within(iter.next(), 500)).toEqual({ value: undefined, done: true });
+  });
+
+  it('terminates EVERY live watcher, and is idempotent', async () => {
+    const repo = makeRepo();
+    const iters = [
+      repo.watch({ org: 'system' })[Symbol.asyncIterator](),
+      repo.watch({ type: 'view' })[Symbol.asyncIterator](),
+      repo.watch({ org: 'system', type: 'view', name: 'sample_view' })[Symbol.asyncIterator](),
+      repo.watch({})[Symbol.asyncIterator](),
+    ];
+    const pendings = iters.map((it) => it.next());
+    await parked();
+
+    repo.close();
+    repo.close();
+
+    for (const p of pendings) {
+      expect(await within(p, 500)).toEqual({ value: undefined, done: true });
+    }
+  });
+
+  it('ends the stream exactly the way the consumer’s own `return()` does', async () => {
+    // The contract sentence, as a comparison rather than a claim: a consumer
+    // that breaks its loop and a consumer whose repository shut down under it
+    // observe the SAME thing, so neither has to special-case the other.
+    const byReturn = makeRepo();
+    const a = byReturn.watch({ org: 'system' })[Symbol.asyncIterator]();
+    const aPending = a.next();
+    await parked();
+    void a.return?.(undefined);
+
+    const byClose = makeRepo();
+    const b = byClose.watch({ org: 'system' })[Symbol.asyncIterator]();
+    const bPending = b.next();
+    await parked();
+    byClose.close();
+
+    const viaReturn = await within(aPending, 500);
+    const viaClose = await within(bPending, 500);
+    expect(viaClose).toEqual(viaReturn);
+    expect(viaClose).toEqual({ value: undefined, done: true });
   });
 });
