@@ -154,21 +154,32 @@ describe('os serve → the branches that must NOT move (#10908 supersedes nothin
     expect(mod.default ?? mod).toBeTruthy();
   });
 
-  it('keeps a RELATIVE specifier anchored to serve.ts, not to @objectstack/types', async () => {
+  // ⚠️ REPLACED, not reworded (#10944). This slot used to pin that a RELATIVE
+  // specifier stayed anchored to serve.ts rather than being re-based under
+  // `@objectstack/types/dist/` — i.e. it pinned the exact branch #10944 has
+  // since removed. #10944 ruled that neither base is the served app's root, so
+  // the spelling is now refused at load instead of resolved anywhere; keeping
+  // the old assertion would have pinned a resolution that no longer runs.
+  // The refusal, the two spellings that do work, and the full shape matrix live
+  // in `serve-config-plugin-relative-refusal.test.ts`. What remains here is the
+  // half that is still this file's business: the refusal must not have widened
+  // to the base-independent spellings this branch exists to protect.
+  it('refuses a RELATIVE specifier without touching the base-independent ones (#10944)', async () => {
     const root = makeApp(APP_ONLY, { declare: false, install: false });
     const missing = './__no_such_config_plugin_10908__.js';
 
     const err = await Serve.importConfigPlugin(missing, root).catch((e: unknown) => e as Error);
 
     expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain(`Failed to import plugin '${missing}':`);
-    // The base is what this pins: the directory holding serve.ts. Routing this
-    // spelling through the host importer would silently re-base it under
-    // `@objectstack/types/dist/`, which is the regression this branch prevents.
-    // Neither base is the served app's root — whether a relative entry SHOULD
-    // resolve there is #10944, deliberately left open by this card.
-    expect(err.message).toContain('commands');
+    expect(err.message).toBe(Serve.relativePluginSpecifierRefusal(missing));
+    // The refusal replaces a resolution attempt, so no base is reported at all.
     expect(err.message).not.toContain('types/dist');
+    // …and an absolute path — the spelling the refusal points at — is
+    // untouched, which is what makes the line above a narrowing and not a ban.
+    const file = join(root, 'still-loads.js');
+    writeFileSync(file, 'export default { name: "still-loads" };\n');
+    const mod: any = await Serve.importConfigPlugin(file, root);
+    expect(mod.default).toEqual({ name: 'still-loads' });
   });
 
   it('loads an absolute path and a file:// URL unchanged (base-independent spellings)', async () => {
