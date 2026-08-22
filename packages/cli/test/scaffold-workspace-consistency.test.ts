@@ -52,9 +52,26 @@
 // `@objectstack/cli#test` inputs; without that declaration a template-only diff
 // could not reach this suite and its cache would replay a stale green.
 //
-// ⛔ `peerDependencyRules` is deliberately NOT compared here. The peer-warning
-// skew between the two files is #10931, open on this same surface; a limb
-// added here would either duplicate that card or pre-empt its ruling.
+// ── `peerDependencyRules`, and why it is compared here NOW ──────────────────
+//
+// This limb was deliberately absent while #10931 was open: that card was the
+// ruling on WHICH peer skews the scaffold should declare, and a limb written
+// before it would have either duplicated the card or pre-empted its answer.
+// #10931 is answered (the four `@better-auth/utils` declarations landed with
+// it), so the reservation is discharged and the drift risk is what remains —
+// and it is the same two-producer risk the rest of this file exists for. The
+// peer block is, if anything, the more fragile of the two: build approvals are
+// one flat package list, while a peer rule is a `<declaring>><peer>` key whose
+// value has to be RE-MEASURED per entry, so a copy that lands in one file and
+// not the other is both easy to make and invisible to either package's own
+// tests.
+//
+// What is compared is the rendered `allowedVersions` MAP — the keys each file
+// widens and the version each key is widened to — for the same reason the
+// build limb compares rendered grants: no expected value is restated here, so
+// each producer's expectation is the other producer. The prose above each
+// block is NOT compared: the two files explain these skews in their own words
+// on purpose, and the measurement they describe is the same either way.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -86,6 +103,21 @@ const [CLI, TEMPLATE] = Object.keys(RENDERED) as [Producer, Producer];
 
 /** The two keys that grant a dependency's build script permission to run. */
 const APPROVAL_KEYS = ['allowBuilds', 'onlyBuiltDependencies'] as const;
+
+/**
+ * The peer skews each file declares, as `<declaring package>><peer>` → version.
+ *
+ * Read out of the settings with the prose stripped first, exactly as the build
+ * grants are: the comments above the block NAME these packages and versions,
+ * and must never be what satisfies an assertion about the declarations.
+ */
+function declaredPeerSkews(yaml: string): Record<string, string> {
+  const settings = yaml.replace(/^\s*#.*$/gm, '');
+  const block = /^peerDependencyRules:\n[ \t]+allowedVersions:\n((?:[ \t]+.*\n?)*)/m.exec(settings)?.[1] ?? '';
+  const out: Record<string, string> = {};
+  for (const m of block.matchAll(/^[ \t]+'([^']+)':[ \t]*'([^']*)'[ \t]*$/gm)) out[m[1]] = m[2];
+  return out;
+}
 
 /**
  * The packages each key actually grants a build to, read out of the settings
@@ -213,5 +245,32 @@ describe('the two scaffold paths render the same pnpm build approvals (#10499)',
           'file to match a wrong one.',
       ).toEqual(claimed[TEMPLATE]);
     }
+  });
+
+  it('declares the same peer skews, widened to the same versions', () => {
+    const cli = declaredPeerSkews(RENDERED[CLI]);
+    const template = declaredPeerSkews(RENDERED[TEMPLATE]);
+
+    // Non-vacuity: two empty maps compare equal while declaring nothing, which
+    // is the state that puts an unmet-peer report on a newcomer's first screen.
+    for (const [producer, skews] of [[CLI, cli], [TEMPLATE, template]] as const) {
+      expect(
+        Object.keys(skews).length,
+        `${producer} declares no peer skew at all — a scaffolded project's first ` +
+          '`pnpm install` then opens with an unmet-peer report the user did not cause',
+      ).toBeGreaterThan(0);
+    }
+
+    expect(
+      cli,
+      'the two scaffold paths declare different peer skews: ' +
+        `${CLI} widens {${Object.entries(cli).map(([k, v]) => `${k}=${v}`).join(', ')}} and ` +
+        `${TEMPLATE} widens {${Object.entries(template).map(([k, v]) => `${k}=${v}`).join(', ')}}. ` +
+        'Each entry is a per-declaration judgement backed by its own measurement, so a ' +
+        'key present in one file and missing from the other means half of users see a ' +
+        'report the other half does not — and a key widened to DIFFERENT versions means ' +
+        'one of the two is silencing a skew nobody measured. Re-measure before moving ' +
+        'either file; never copy a value across just to make this pass.',
+    ).toEqual(template);
   });
 });

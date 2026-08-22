@@ -342,6 +342,59 @@ describe('benign peer-skew declarations (#10326)', () => {
     expect(settings).toMatch(/^ {4}'@better-auth\/scim>better-call': '1\.4\.0'$/m);
   });
 
+  it.each([
+    ['@better-auth/core'],
+    ['@better-auth/oauth-provider'],
+    ['@better-auth/scim'],
+    ['@better-auth/sso'],
+  ])('widens %s\'s exact @better-auth/utils peer to the version the tree resolves', (declaring) => {
+    // Each of the four peers an EXACT `@better-auth/utils@0.4.2`, while the
+    // tree hands them 0.5.0 — better-call (better-auth's own HTTP layer)
+    // depends on `^0.5.0`, and that is the copy plugin-auth's direct
+    // dependencies resolve their peer against. Measured on the surface the
+    // range governs: the four import three symbols in total (base64/base64Url,
+    // createHash, and createRandomStringGenerator in core), 0.5.0 declares all
+    // three unchanged, and both versions return identical values on the inputs
+    // those call sites pass — confirmed end to end through better-auth with the
+    // sso, oauth-provider and scim plugins. Pinning utils back instead would
+    // drag better-call off its own `^0.5.0`, trading four reported skews for a
+    // real one.
+    const key = `${declaring}>@better-auth/utils`;
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[key]).toBe('0.5.0');
+    expect(settings).toMatch(
+      new RegExp(`^ {4}'${key.replace(/[/*+?^${}()|[\]\\]/g, '\\$&')}': '0\\.5\\.0'$`, 'm'),
+    );
+  });
+
+  it('covers every declaring package that peers @better-auth/utils, not some of them', () => {
+    // The defect this replaces was PARTIAL coverage: two skews were declared
+    // and four more were not, so the first screen was clean for a third of the
+    // report. A set assertion is what fails when a fifth declaration appears
+    // and nobody measures it, or when one of these four is dropped while the
+    // others stay.
+    const declaring = Object.keys(SCAFFOLD_ALLOWED_PEER_VERSIONS)
+      .filter((k) => k.endsWith('>@better-auth/utils'))
+      .map((k) => k.slice(0, -'>@better-auth/utils'.length))
+      .sort();
+    expect(declaring).toEqual([
+      '@better-auth/core',
+      '@better-auth/oauth-provider',
+      '@better-auth/scim',
+      '@better-auth/sso',
+    ]);
+  });
+
+  it('keeps the @better-auth/utils widening separate from the retiring better-call pin', () => {
+    // @better-auth/scim appears in TWO entries for two unrelated reasons, and
+    // they retire on different days: the better-call one goes when scim leaves
+    // the rc (stable 1.7.1 peers better-call 1.4.0), while the utils one
+    // outlives it (stable 1.7.1 still peers @better-auth/utils 0.4.2). Deleting
+    // both together — the obvious move when the rc pin lifts — would silently
+    // put the utils report back on a newcomer's first screen.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>@better-auth/utils']).toBe('0.5.0');
+  });
+
   it('renders the rules under peerDependencyRules.allowedVersions', () => {
     expect(settings).toMatch(/^peerDependencyRules:$/m);
     expect(settings).toMatch(/^ {2}allowedVersions:$/m);

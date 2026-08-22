@@ -82,10 +82,10 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
  * spelling, so each entry widens exactly one declaration and nothing else.
  *
- * Both are reported by `pnpm install` on a brand-new scaffold, and neither is a
- * real incompatibility. They are declared here because that report is the first
- * thing a newcomer sees, on the one screen where they are deciding whether this
- * project is solid, and there is nothing they did to cause it.
+ * Every one of them is reported by `pnpm install` on a brand-new scaffold, and
+ * none is a real incompatibility. They are declared here because that report is
+ * the first thing a newcomer sees, on the one screen where they are deciding
+ * whether this project is solid, and there is nothing they did to cause it.
  *
  *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
  *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
@@ -105,12 +105,62 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    HOST's better-call instance, so the single 1.4.0 copy every install
  *    already resolves is the correct tree, not a skew to repair.
  *    ⚠️ This entry retires together with the SCIM rc pin — delete both at once.
+ *    Stable `@better-auth/scim@1.7.1` peers `better-call@1.4.0`, so the skew
+ *    this line covers is genuinely gone the moment the pin moves.
  *
- * `allowedVersions` suppresses the report ONLY; it moves no resolution.
+ *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
+ *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
+ *    scaffolded tree hands them 0.5.0. The 0.5.0 comes from `better-call@1.4.0`
+ *    (better-auth's own HTTP layer), which DEPENDS on `^0.5.0`;
+ *    `@objectstack/plugin-auth` names the four packages as direct dependencies
+ *    without naming utils, so pnpm satisfies their peer from better-call's copy
+ *    rather than from better-auth's own exact 0.4.2 dependency.
+ *
+ *    Measured compatible rather than assumed. Those four import exactly three
+ *    symbols across two subpaths — `base64`/`base64Url` (`/base64`),
+ *    `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
+ *    (`/random`). 0.5.0 exports all three with identical signatures; `/random`
+ *    is unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)`
+ *    for a helper that IS `new Uint8Array(data)` on non-strings, and `/hash`
+ *    only widens its input coercion for views not backed by a plain
+ *    ArrayBuffer. Run against the input shapes those call sites actually pass,
+ *    0.4.2 and 0.5.0 agree on every value; run end to end (better-auth with the
+ *    sso, oauth-provider and scim plugins), a tree where the four resolve 0.5.0
+ *    and one where they resolve 0.4.2 produce the same transcript — sign-up,
+ *    sign-in, session, both OAuth metadata documents, the RFC 7636 PKCE
+ *    challenge, and the SCIM and SSO endpoint outcomes.
+ *
+ *    ⛔ A resolution change is the WRONG remedy here, and was measured too:
+ *    pinning utils back to 0.4.2 clears the four lines only by dragging
+ *    `better-call@1.4.0` off its own declared `^0.5.0` — manufacturing one real
+ *    range violation to silence four benign ones.
+ *
+ *    Spelled `0.5.0` exactly, not `0.5`: 0.5.0 is the version that was
+ *    measured, and a future 0.6.0 SHOULD report again rather than inherit this
+ *    finding.
+ *
+ *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
+ *    names scim. Stable `@better-auth/scim@1.7.1` still peers
+ *    `@better-auth/utils@0.4.2`, so this skew outlives that pin. They retire
+ *    when the four packages accept 0.5.0 upstream, or when
+ *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
+ *    resolution so that all four land on 0.4.2 by themselves. Measured on the
+ *    rendered scaffold, one clean resolve per pnpm version:
+ *
+ *      pnpm 10.15.0 – 10.30.0   all four reported as unmet peers.
+ *      pnpm >= 10.31.0          resolved to 0.4.2; nothing to report.
+ *
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution — the
+ * lockfile a scaffold resolves is byte-identical with and without this block
+ * (verified by digest on pnpm 10.15.0 and 10.30.0).
  */
 export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
   'better-auth>better-sqlite3': '13',
   '@better-auth/scim>better-call': '1.4.0',
+  '@better-auth/core>@better-auth/utils': '0.5.0',
+  '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
+  '@better-auth/scim>@better-auth/utils': '0.5.0',
+  '@better-auth/sso>@better-auth/utils': '0.5.0',
 };
 
 /**
@@ -186,7 +236,7 @@ export function renderScaffoldPackageJson(
 
 /**
  * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
- * declares the two known-benign peer skews.
+ * declares the known-benign peer skews.
  * Declares an explicit empty `packages: []`: a workspace root with no member
  * packages, which is what a single-package scaffold is — the file stays purely
  * a settings file. Spelling the key out is what lets pnpm 10.0–10.4 (and 9.x)
@@ -257,9 +307,9 @@ export function renderPnpmWorkspaceYaml(
     // declaration that is not there.
     ...(peerEntries.length === 0 ? [] : [
       '',
-      '# Two third-party peer ranges resolve outside what their declaring package',
-      '# states, and pnpm reports both on a first install. Neither is a real',
-      '# incompatibility:',
+      '# Third-party peer ranges that resolve outside what their declaring',
+      '# package states, and that pnpm reports on a first install. None is a',
+      '# real incompatibility:',
       '#',
       '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
       '#   That peer is optional and covers handing better-auth a raw',
@@ -272,7 +322,18 @@ export function renderPnpmWorkspaceYaml(
       '#   better-auth plugin has to share the host\'s better-call instance, so',
       '#   the single 1.4.0 copy is the correct resolution.',
       '#',
-      '# These suppress the report only — no resolution moves.',
+      '#   @better-auth/core, /oauth-provider, /scim and /sso each peer an exact',
+      '#   @better-auth/utils 0.4.2, while better-call (better-auth\'s own HTTP',
+      '#   layer) depends on ^0.5.0 and is what the tree resolves them against.',
+      '#   0.5.0 keeps every symbol those four import — base64/base64Url,',
+      '#   createHash, createRandomStringGenerator — with the same signatures',
+      '#   and the same values on the inputs they pass, so the report is the',
+      '#   only difference. Pinning utils back instead would drag better-call',
+      '#   off its own declared range, which is a real violation rather than a',
+      '#   reported one.',
+      '#',
+      '# These suppress the report only — no resolution moves, and the lockfile',
+      '# is byte-identical with and without this block.',
       'peerDependencyRules:',
       '  allowedVersions:',
       ...peerEntries.map(([k, v]) => `    '${k}': '${v}'`),

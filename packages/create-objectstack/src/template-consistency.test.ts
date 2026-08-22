@@ -512,6 +512,41 @@ describe('blank template peer-skew declarations (#10326)', () => {
     ).toBe(true);
   });
 
+  it.each([
+    ['@better-auth/core'],
+    ['@better-auth/oauth-provider'],
+    ['@better-auth/scim'],
+    ['@better-auth/sso'],
+  ])('declares %s\'s exact @better-auth/utils peer against the resolved 0.5.0', (declaring) => {
+    // These four peer an EXACT @better-auth/utils 0.4.2 while the tree resolves
+    // 0.5.0 through better-call's `^0.5.0` dependency. Measured on the surface
+    // the range governs — the three symbols the four import — 0.4.2 and 0.5.0
+    // agree on every value, so the report is the only difference. This template
+    // ships to `npx create-objectstack` users; the `objectstack init` renderer
+    // declares the same four, and scaffold-workspace-consistency.test.ts in
+    // packages/cli is what fails if the two ever disagree.
+    const key = `${declaring}>@better-auth/utils`.replace(/[/*+?^${}()|[\]\\]/g, '\\$&');
+    expect(
+      new RegExp(`^\\s*'${key}':\\s*'0\\.5\\.0'\\s*$`, 'm').test(allowed),
+      `allowedVersions must widen ${declaring}'s @better-auth/utils peer to 0.5.0`,
+    ).toBe(true);
+  });
+
+  it('covers every declaring package that peers @better-auth/utils', () => {
+    // The defect was PARTIAL coverage — two skews declared, four left showing.
+    // A set assertion fails both ways: a fifth declaration nobody measured, and
+    // a drop of one of these four while the rest stay.
+    const declaring = [...allowed.matchAll(/^\s*'([^']+)>@better-auth\/utils':/gm)]
+      .map((m) => m[1])
+      .sort();
+    expect(declaring).toEqual([
+      '@better-auth/core',
+      '@better-auth/oauth-provider',
+      '@better-auth/scim',
+      '@better-auth/sso',
+    ]);
+  });
+
   it('scopes every rule to one declaring package, never a bare peer name', () => {
     // A bare `better-sqlite3: '13'` would silence that peer for EVERY package
     // that declares it, including ones whose complaint would be real.
