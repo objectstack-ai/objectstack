@@ -12,9 +12,9 @@ packages: []
 # ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard error.
 #
 # Both keys are needed; they are read by different pnpm versions:
-#   allowBuilds             pnpm >= 10.31 and pnpm 11+. pnpm 11 reads ONLY this
+#   allowBuilds             pnpm >= 10.26 and pnpm 11+. pnpm 11 reads ONLY this
 #                           one — onlyBuiltDependencies alone still errors.
-#   onlyBuiltDependencies   pnpm 10.0–10.30, which do not understand allowBuilds.
+#   onlyBuiltDependencies   pnpm 10.0–10.25, which do not understand allowBuilds.
 #
 # better-sqlite3 is the native sqlite driver (@objectstack/driver-sql's optional
 # dependency); esbuild compiles objectstack.config.ts. Both ship prebuilt

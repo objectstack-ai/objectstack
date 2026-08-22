@@ -435,7 +435,7 @@ describe('blank template explicit empty workspace', () => {
 // hard error, so the template declaring nothing meant `npx create-objectstack`
 // + `pnpm install` exited 1 for every user on a current pnpm (#3119). Both keys
 // are load-bearing and read by different pnpm versions: pnpm 11 honours only
-// `allowBuilds`, while pnpm 10.0–10.30 understand only `onlyBuiltDependencies`.
+// `allowBuilds`, while pnpm 10.0–10.25 understand only `onlyBuiltDependencies`.
 describe('blank template pnpm build approvals (#3119)', () => {
   const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
   const APPROVED = ['better-sqlite3', 'esbuild'];
@@ -463,12 +463,12 @@ describe('blank template pnpm build approvals (#3119)', () => {
     }
   });
 
-  it('lists the same packages under onlyBuiltDependencies for pnpm 10.0–10.30', () => {
+  it('lists the same packages under onlyBuiltDependencies for pnpm 10.0–10.25', () => {
     const block = /^onlyBuiltDependencies:\n((?:[ \t]*-.*\n?)*)/m.exec(settings)?.[1] ?? '';
     for (const pkg of APPROVED) {
       expect(
         new RegExp(`^\\s*-\\s*${pkg}\\s*$`, 'm').test(block),
-        `onlyBuiltDependencies must list "${pkg}" — pnpm < 10.31 does not understand allowBuilds`,
+        `onlyBuiltDependencies must list "${pkg}" — pnpm < 10.26 does not understand allowBuilds`,
       ).toBe(true);
     }
   });
