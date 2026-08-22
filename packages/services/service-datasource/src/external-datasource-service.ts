@@ -409,14 +409,29 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     return { ok, datasource, object: objectName, diffs };
   }
 
-  async validateAll(): Promise<SchemaValidationReport> {
-    const objects = await this.config.listObjects();
-    const federated = objects.filter(
-      (o) => o.external !== undefined || (o.datasource && o.datasource !== 'default'),
-    );
+  /**
+   * Is this object part of the federated sweep at all?
+   *
+   * ONE spelling of the predicate, deliberately — {@link validateAll} and
+   * {@link validateDatasource} select from the same population, and the scoped
+   * one exists to do LESS WORK, not to answer a different question. Two copies
+   * would be two answers to "is this object federated" waiting to diverge.
+   */
+  private isFederated(o: ObjectLike): boolean {
+    return o.external !== undefined || Boolean(o.datasource && o.datasource !== 'default');
+  }
 
+  /**
+   * Validate a chosen set of objects, one report.
+   *
+   * A per-object throw becomes a `missing_table` row carrying the thrower's
+   * message rather than rejecting the whole report: one unreachable remote (or
+   * one object whose definition vanished mid-sweep) must not erase the verdicts
+   * of the objects that did validate.
+   */
+  private async validateEach(objects: ObjectLike[]): Promise<SchemaValidationReport> {
     const results = await Promise.all(
-      federated.map((o) =>
+      objects.map((o) =>
         this.validateObject(o.name).catch((err): SchemaValidationResult => {
           this.logger?.warn(`validateObject('${o.name}') failed`, err);
           return {
@@ -438,6 +453,51 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
 
     const ok = results.every((r) => r.ok);
     return { ok, results };
+  }
+
+  async validateAll(): Promise<SchemaValidationReport> {
+    const objects = await this.config.listObjects();
+    return this.validateEach(objects.filter((o) => this.isFederated(o)));
+  }
+
+  /**
+   * [#10537] Validate the federated objects bound to ONE datasource.
+   *
+   * The scoped twin of {@link validateAll}, composed from the same primitives
+   * (`listObjects` → filter → `validateObject`) so a caller that asked about
+   * one datasource drives live remote introspection against THAT datasource
+   * only. `POST /api/v1/datasources/:name/external/validate` used to reach this
+   * by running the whole-farm sweep and post-filtering the report: the rows
+   * were right, but a request scoped by its URL paid for every OTHER federated
+   * datasource's remote round-trips and discarded the results — and an
+   * unreachable *unrelated* remote slowed the answer for the datasource that
+   * was actually asked about.
+   *
+   * Row-for-row identical to that composition, by construction: the same
+   * federation predicate, the same `validateObject`, the same per-object catch,
+   * and a selection keyed on `o.datasource ?? 'default'` — which is exactly the
+   * value `validateObject` reports back as `result.datasource`, so "the rows
+   * the sweep would have kept" and "the objects this selects" are the same set
+   * (pinned in `__tests__/external-datasource-service.test.ts`).
+   *
+   * A name nothing is bound to selects nothing and answers an empty, vacuously
+   * `ok` report — the sweep-then-filter answer for an unknown name, kept rather
+   * than upgraded to a throw: whether an unknown datasource is an error is a
+   * separate question from this one, and this method must not decide it in
+   * passing.
+   *
+   * NOT on `IExternalDatasourceService` (spec): the route composition this
+   * serves was authorized as a service-side helper, while adding a
+   * per-datasource validate to the contract is a spec-surface change that has
+   * to be decided on its own. `packages/rest`'s federation registrar therefore
+   * probes for this method and answers `503` when the wired service has no
+   * scoped spelling, rather than silently falling back to the fan-out.
+   */
+  async validateDatasource(datasource: string): Promise<SchemaValidationReport> {
+    const objects = await this.config.listObjects();
+    return this.validateEach(
+      objects.filter((o) => this.isFederated(o) && (o.datasource ?? 'default') === datasource),
+    );
   }
 }
 

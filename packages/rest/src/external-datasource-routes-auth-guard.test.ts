@@ -61,7 +61,7 @@
  * authentication floor — pinned here as an explicit `capability: null` row so
  * that gating it later had to change the table. That later card is #10255,
  * ruled 2026-08-20 (verbatim: 「同意你的意见。」, accepting option A): validate
- * takes the READ capability, because `validateAll` drives the same live
+ * takes the READ capability, because validation drives the same live
  * remote-schema introspection the read twins gate and reports on it. The row
  * now carries `READ_CAPABILITY`, and its case below flips from "still served
  * holding nothing" to "refused holding nothing" — deliberately, not by a
@@ -106,8 +106,13 @@ type Handler = (req: any, res: any) => any;
  * /external/validate` carried one — spelled as an explicit `null` rather than
  * omitted, so that a later edit gating it had to change this table — and the
  * 2026-08-20 #10255 ruling is that later edit: validate is a read
- * (`validateAll` drives the same live remote introspection the read twins
+ * (validation drives the same live remote introspection the read twins
  * gate), so its row now carries `READ_CAPABILITY` like its two read siblings.
+ *
+ * [#10537] The validate row's `call` is the SCOPED composition
+ * (`validateDatasource`), which is what the route dispatches to since the
+ * fan-out fix; the fixture keeps a `validateAll` spy beside it precisely so a
+ * regression to the whole-farm sweep is visible here rather than silent.
  */
 const READ_CAPABILITY = 'manage_platform_settings';
 const WRITE_CAPABILITY = 'manage_metadata';
@@ -117,7 +122,7 @@ const FAMILY = [
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/draft`, ok: 200, call: 'generateObjectDraft', writes: false, capability: READ_CAPABILITY },
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/tables/customers/import`, ok: 201, call: 'importObject', writes: true, capability: WRITE_CAPABILITY },
   { method: 'POST', url: `${BASE}/datasources/${DS}/external/refresh-catalog`, ok: 200, call: 'refreshCatalog', writes: true, capability: WRITE_CAPABILITY },
-  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateAll', writes: false, capability: READ_CAPABILITY },
+  { method: 'POST', url: `${BASE}/datasources/${DS}/external/validate`, ok: 200, call: 'validateDatasource', writes: false, capability: READ_CAPABILITY },
 ] as const;
 
 /** Every capability an entitled caller needs to clear all five routes. */
@@ -174,7 +179,13 @@ function federationServiceSpies() {
     generateObjectDraft: vi.fn(async () => ({ name: 'customers' })),
     importObject: vi.fn(async () => ({ name: 'customers' })),
     refreshCatalog: vi.fn(async () => ({ tables: {} })),
+    // [#10537] `POST /external/validate` dispatches to the SCOPED composition
+    // now. The whole-farm `validateAll` stays in the set, spied and never
+    // expected to run: "the service never ran" then means the method the
+    // route actually reaches, and a regression to the sweep shows up as a
+    // call on a spy nobody expects rather than as silence.
     validateAll: vi.fn(async () => ({ results: [{ datasource: DS, ok: true }] })),
+    validateDatasource: vi.fn(async (name: string) => ({ results: [{ datasource: name, ok: true }] })),
   };
 }
 
@@ -475,14 +486,14 @@ describe('[#9901] the family requires a capability above authentication', () => 
     // 2026-08-20 #10255 ruling it asserted the exact opposite — an
     // authenticated caller holding nothing was SERVED here while refused the
     // other four — because #9901's ruling did not name this route. The ruling
-    // that changed it is recorded on #10255 (option A): `validateAll` drives
+    // that changed it is recorded on #10255 (option A): validation drives
     // the same live remote-schema introspection the read twins gate, so
     // validate is a read and answers to the read capability.
     const { table, service } = await bootFederation({
       withAuth: true, withEngine: true, grants: [],
     });
 
-    const validate = FAMILY.find((r) => r.call === 'validateAll')!;
+    const validate = FAMILY.find((r) => r.call === 'validateDatasource')!;
     const { statusCode, body } = await call(table, validate, { authorization: `Bearer ${SESSION}` });
 
     // Refused with the capability NAMED — the one thing the refused caller can
@@ -492,6 +503,7 @@ describe('[#9901] the family requires a capability above authentication', () => 
     expect(body?.success).toBe(false);
     expect(body?.error?.code).toBe('PERMISSION_DENIED');
     expect(body?.error?.message).toContain(READ_CAPABILITY);
+    expect(service.validateDatasource).not.toHaveBeenCalled();
     expect(service.validateAll).not.toHaveBeenCalled();
   });
 
@@ -503,12 +515,14 @@ describe('[#9901] the family requires a capability above authentication', () => 
       withAuth: true, withEngine: true, grants: [READ_CAPABILITY],
     });
 
-    const validate = FAMILY.find((r) => r.call === 'validateAll')!;
+    const validate = FAMILY.find((r) => r.call === 'validateDatasource')!;
     const { statusCode, body } = await call(table, validate, { authorization: `Bearer ${SESSION}` });
 
     expect(statusCode).toBe(validate.ok);
     expect(body?.success).toBe(true);
-    expect(service.validateAll).toHaveBeenCalled();
+    expect(service.validateDatasource).toHaveBeenCalledWith(DS);
+    // [#10537] …and the served request did NOT fan out across every datasource.
+    expect(service.validateAll).not.toHaveBeenCalled();
   });
 
   it('a capability the caller does not hold is not granted by an api key either', async () => {
