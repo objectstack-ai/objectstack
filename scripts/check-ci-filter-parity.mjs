@@ -563,11 +563,21 @@ export async function selfTest() {
     'the checked-in `crosspkg` still names the same-root-different-file entry #10015 added',
   );
   // The pre-#10015 list, as the measurement that motivated this gate: with the
-  // four roots removed, the ten declarations #10015 fixed go uncovered here.
+  // four roots removed, the ten declarations #10015 fixed go uncovered here —
+  // plus, since #10848, the one post-#10015 declaration none of those roots
+  // ever covered (the retirement skill's SKILL.md, a `.claude/` literal), so
+  // the rollback now uncovers eleven. This pin is judged over the LIVE
+  // declaration table on purpose: a declaration added under a root the
+  // rollback keeps leaves the count alone, one under a new root moves it and
+  // is recorded here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 10,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers exactly the ten -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 11,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('.claude/skills/spec-property-retirement/SKILL.md'),
+    `-- and the post-#10015 member is #10848's declaration, by name`,
   );
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
@@ -593,7 +603,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering exactly ten, and the CI wiring read out of lint.yml.`,
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one, and the CI wiring read out of lint.yml.`,
   );
   return 0;
 }
