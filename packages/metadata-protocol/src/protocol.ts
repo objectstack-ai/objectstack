@@ -13166,6 +13166,43 @@ export class ObjectStackProtocolImplementation implements
                 if (prev) {
                     const issues = detectDestructiveObjectChanges(prev, request.item);
                     if (issues.length > 0) {
+                        // [#10886] Deliberately NOT trimmed to a headline, and
+                        // this is a MEASURED verdict rather than an oversight —
+                        // the same one the sibling `INVALID_METADATA` message
+                        // below carries, reached the same way (#10524's
+                        // declare-then-trim order).
+                        //
+                        // The message restates what `err.issues` already
+                        // carries, so a console rendering both channels shows
+                        // every finding twice. The trim is nonetheless refused,
+                        // because the face inventory says the message is a SOLE
+                        // CARRIER on one of the faces that quote it:
+                        // `duplicatePackage`'s `failed[].error`, which reports
+                        // per-item failures as DATA on a **200** (`POST
+                        // /packages/:id/duplicate`). No HTTP boundary is
+                        // involved there, so `details.issues` never exists; the
+                        // array is typed inline as `{ type, name, error }` with
+                        // no `issues` slot; and unlike `publishPackageDrafts` —
+                        // whose `failed[]` #10895 could extend because it HAS a
+                        // response schema — `duplicatePackage` has none in
+                        // `packages/spec` at all. Declaring a channel there is a
+                        // spec change, and until it lands a trim would delete
+                        // the prescription from that wire.
+                        //
+                        // ⚠️ Reaching that face is not the obvious case: a
+                        // duplicate re-namespaces objects, so the target name
+                        // usually does not exist and this gate is skipped
+                        // entirely. It fires on the duplicate-AGAIN workflow,
+                        // where the target namespace already holds the renamed
+                        // object. Measured, not argued —
+                        // `protocol.destructive-409-face-inventory.test.ts`
+                        // carries the whole inventory and pins this face.
+                        //
+                        // ⛔ Whatever else a future trim does, the `?force=true`
+                        // remedy below must survive it: this is a
+                        // risk-acknowledgement refusal, not a validation one,
+                        // and no structured channel on any face carries the
+                        // remedy.
                         const summary = issues.slice(0, 3).map((i) => i.message).join('; ');
                         const err = new Error(
                             `[destructive_change] ${request.type}/${request.name} would drop or transform existing data: ${summary}`
