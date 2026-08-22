@@ -53,7 +53,7 @@ claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
 
 Set `OS_MCP_SERVER_ENABLED=false` to turn it off. This is the *serve* side — the
 reverse of the `mcp` connector below (which lets your app *call* other MCP
-servers). See [Connect an MCP Client](https://docs.objectstack.ai/docs/ai/connect-mcp)
+servers). See [Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp)
 for OAuth, API keys, and which objects/actions become tools.
 
 ## Layout
@@ -84,7 +84,7 @@ to `plugins:`; to drop a provider, remove its plugin.
 > `new ConnectorMcpPlugin({ declarativeStdio: ['node'] })`; `http` transports
 > need no opt-in.
 
-See [Automation → Flows](https://docs.objectstack.ai/docs/automation/flows) for
+See [Automation → Flows](https://objectstack.ai/docs/automation/flows) for
 the full connector and `connector_action` guide.
 
 ## Verify your changes
@@ -122,7 +122,7 @@ curl -fsS http://localhost:8080/api/v1/health
 ```
 
 Bare Node, Kubernetes, reverse-proxy wiring, and the required secrets are
-covered in [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting).
+covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting).
 
 ## Next steps
 
