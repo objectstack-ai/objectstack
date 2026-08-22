@@ -8,6 +8,16 @@
   "sideEffects": false,
   "exports": {
     ".": {
+      "browser": {
+        "import": {
+          "types": "./dist/index.d.mts",
+          "default": "./dist/browser/index.mjs"
+        },
+        "require": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/browser/index.js"
+        }
+      },
       "import": {
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
@@ -18,6 +28,16 @@
       }
     },
     "./data": {
+      "browser": {
+        "import": {
+          "types": "./dist/data/index.d.mts",
+          "default": "./dist/browser/data/index.mjs"
+        },
+        "require": {
+          "types": "./dist/data/index.d.ts",
+          "default": "./dist/browser/data/index.js"
+        }
+      },
       "import": {
         "types": "./dist/data/index.d.mts",
         "default": "./dist/data/index.mjs"
@@ -28,6 +48,16 @@
       }
     },
     "./system": {
+      "browser": {
+        "import": {
+          "types": "./dist/system/index.d.mts",
+          "default": "./dist/browser/system/index.mjs"
+        },
+        "require": {
+          "types": "./dist/system/index.d.ts",
+          "default": "./dist/browser/system/index.js"
+        }
+      },
       "import": {
         "types": "./dist/system/index.d.mts",
         "default": "./dist/system/index.mjs"
@@ -38,6 +68,16 @@
       }
     },
     "./kernel": {
+      "browser": {
+        "import": {
+          "types": "./dist/kernel/index.d.mts",
+          "default": "./dist/browser/kernel/index.mjs"
+        },
+        "require": {
+          "types": "./dist/kernel/index.d.ts",
+          "default": "./dist/browser/kernel/index.js"
+        }
+      },
       "import": {
         "types": "./dist/kernel/index.d.mts",
         "default": "./dist/kernel/index.mjs"
@@ -128,6 +168,16 @@
       }
     },
     "./cloud": {
+      "browser": {
+        "import": {
+          "types": "./dist/cloud/index.d.mts",
+          "default": "./dist/browser/cloud/index.mjs"
+        },
+        "require": {
+          "types": "./dist/cloud/index.d.ts",
+          "default": "./dist/browser/cloud/index.js"
+        }
+      },
       "import": {
         "types": "./dist/cloud/index.d.mts",
         "default": "./dist/cloud/index.mjs"
