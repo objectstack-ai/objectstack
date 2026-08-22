@@ -157,6 +157,24 @@ export const PENDING_MAX = 1;
 /** A `note:` shorter than this is not evidence. A floor, not a proof. */
 export const MIN_NOTE_CHARS = 60;
 
+/**
+ * The #8435 remedy-authority token, spelled exactly as
+ * `scripts/check-ratchet-remedy-authority.mjs` sweeps for it.
+ *
+ * This gate hands out TWO remedies and they do not have the same owner, which is
+ * why it is `marked` and not `refused` in that gate's control corpus. Fixing the
+ * MAIN population -- a mount with no row -- is the author's, freely: it lands a
+ * row in `AUTH_ROUTE_LEDGER`, which grows as routes are added and is no ratchet.
+ * But both paths that touch PENDING_DISPOSITION expand a shrink-only exemption
+ * list, and neither is the landing author's to take. Refusing them outright would
+ * be the stronger shape and would also be FALSE: the list has a legitimate entry,
+ * granted by a maintainer ruling. There is a real act here with a real owner, so
+ * the honest shape is to name the owner rather than to deny the act -- the same
+ * reading `check-skills-token-ratchet.mjs` records for its published-catalog
+ * ceiling (#10473).
+ */
+export const RATCHET_AUTHORITY = '⛔ MAINTAINER-ONLY';
+
 /** Hono verbs that mount ONE route, which is the only thing a ledger row can describe. */
 const PER_ROUTE_VERBS = new Set(['get', 'post', 'put', 'patch', 'delete', 'options', 'head']);
 
@@ -368,9 +386,17 @@ function dispositionDemand(route) {
     '  SDK-absent, while `/set-initial-password` is NOT, because its three siblings in the',
     '  same createAuthClient are uniformly `sdk` (#10534, maintainer ruling 2026-08-22).',
     '',
-    '  IF YOU CANNOT DECIDE, DO NOT PICK THE NEAREST ALLOWED WORD. File the question, then',
-    `  add \`${route}\` to PENDING_DISPOSITION in ${'scripts/check-auth-mount-ledger.mjs'} with`,
-    '  that issue number. An open question stays printed on every run; a guessed row does not.',
+    '  IF YOU CANNOT DECIDE, DO NOT PICK THE NEAREST ALLOWED WORD. Escalate the question and',
+    '  get a ruling, the way #10534 did for `set-initial-password`. The route is then carried by',
+    '  a PENDING_DISPOSITION entry naming that issue, and stays printed on every clean run.',
+    '',
+    `  ${RATCHET_AUTHORITY} -- adding \`${route}\` to PENDING_DISPOSITION is an EXEMPTION from this`,
+    '  gate, and it is not yours to grant yourself. That list is shrink-only, its one entry exists',
+    '  because a maintainer ruled on it (#10534, 2026-08-22), and an author who quietly adds their',
+    '  own route has done the single thing that turns this gate into a parking space: the mount is',
+    '  then "accounted for" by a line recording that nobody decided. Escalating costs a round; a',
+    '  self-granted exemption costs the gate. There IS a legitimate act here -- it just has an',
+    '  owner, and the owner is not the landing author.',
   ].join('\n');
 }
 
@@ -460,7 +486,8 @@ export function reconcile({ mounts, lanes, wildcards, unreadable, rows, vendorSu
       text:
         `PENDING_DISPOSITION holds ${pending.length} entries and PENDING_MAX is ${PENDING_MAX}. ` +
         `This ratchet only shrinks: the repair is to land a disposition and delete an entry. ` +
-        `Raising PENDING_MAX is a maintainer decision, never the co-equal option.`,
+        `${RATCHET_AUTHORITY} -- raising PENDING_MAX is a maintainer decision and is never the ` +
+        `co-equal option. A ceiling raised to fit the entry that did not fit is not a measurement.`,
     });
   }
   for (const p of pending) {
@@ -740,6 +767,40 @@ function selfTest() {
       'PENDING_DISPOSITION grew past PENDING_MAX without failing',
     );
   }
+
+  // -- #8435 remedy authority. PLACEMENT is pinned here, per-gate, because the
+  //    farm-wide sweep deliberately checks only PRESENCE (its header states the
+  //    split: "Presence here, placement there"). Both paths that expand
+  //    PENDING_DISPOSITION must name their owner IN THE MESSAGE THE AUTHOR READS.
+  ok(
+    RATCHET_AUTHORITY === '⛔ MAINTAINER-ONLY',
+    'the authority token is not the spelling scripts/check-ratchet-remedy-authority.mjs sweeps for',
+  );
+  ok(
+    runFixture('rawApp.post(`${basePath}/admin/zzz-new`, h);', [])
+      .findings.some((f) => f.kind === 'unaccounted-mount' && f.text.includes(RATCHET_AUTHORITY)),
+    'the unaccounted-mount remedy offers PENDING_DISPOSITION without naming whose call it is',
+  );
+  ok(
+    kinds(runFixture(
+      'rawApp.post(`${basePath}/a`, h);\nrawApp.post(`${basePath}/b`, h);',
+      [],
+      [],
+      [{ route: 'POST /api/v1/auth/a', issue: '#1', why: 'x' },
+       { route: 'POST /api/v1/auth/b', issue: '#2', why: 'x' }],
+    )).includes('pending-ratchet'),
+    'the PENDING_MAX ratchet did not fire',
+  );
+  ok(
+    runFixture(
+      'rawApp.post(`${basePath}/a`, h);\nrawApp.post(`${basePath}/b`, h);',
+      [],
+      [],
+      [{ route: 'POST /api/v1/auth/a', issue: '#1', why: 'x' },
+       { route: 'POST /api/v1/auth/b', issue: '#2', why: 'x' }],
+    ).findings.some((f) => f.kind === 'pending-ratchet' && f.text.includes(RATCHET_AUTHORITY)),
+    'the ceiling-raising path is offered without naming whose call it is',
+  );
 
   // -- Parse anchors: a moved anchor is a REFUSAL input, never an empty population.
   ok(parseLedgerRows('export const SOMETHING_ELSE = [];') === null, 'a missing AUTH_ROUTE_LEDGER anchor parsed as zero rows');

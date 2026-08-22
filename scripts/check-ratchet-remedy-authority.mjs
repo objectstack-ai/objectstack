@@ -614,6 +614,24 @@ const CONTROL = {
     why: 'PR for #10473. Its published-catalog ceilings only ever ratchet down, and registering a new published skill prices the whole shipped bundle — a maintainer\'s call, not the landing author\'s.',
   },
 
+  // The eighth, and the second to join as a NEW gate rather than by retrofit
+  // (#10534 follow-up 4). Same reading as the seventh, reached independently and
+  // then checked against it. The gate hands out two remedies with two different
+  // owners: repairing its MAIN population — a `rawApp` auth mount carrying no
+  // ledger row — is the landing author's, freely, because it lands a row in
+  // `AUTH_ROUTE_LEDGER`, which grows as routes are added and is not a ratchet at
+  // all. Both paths that touch PENDING_DISPOSITION are a different act: that list
+  // is a shrink-only EXEMPTION from the gate, so adding a route to it (or raising
+  // PENDING_MAX to fit one) is the author excusing themselves from the check they
+  // just failed. `refused` would be the stronger shape and would also be untrue —
+  // the list holds a legitimate entry, granted by the maintainer ruling of
+  // 2026-08-22 on the same card. There IS a real act here with a real owner, so
+  // the honest shape is to name the owner rather than deny the act.
+  'check-auth-mount-ledger.mjs': {
+    expect: 'marked',
+    why: 'PR for #10534 follow-up 4. Its main remedy (ledger the mount, with evidence) is the author\'s and touches no ratchet; its PENDING_DISPOSITION paths expand a shrink-only exemption list whose one entry exists by maintainer ruling, so both are marked rather than refused.',
+  },
+
   'check-adr-links.mjs': {
     expect: 'refused',
     why: 'Refuses by binding a negation to the verb, over a shrink-only registry.',
