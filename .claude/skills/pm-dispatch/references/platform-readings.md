@@ -88,11 +88,11 @@
 
 ## 读数陷阱
 
-- **读数四坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读
-  数)—— 跨仓一律 `git -C <path>`;`git grep -c <pat> | wc -l` 数文件数不是命中数;
-  裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,更硬判据是查声明式
-  (`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
-  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`。
+- **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读数)—— 跨仓一律 `git -C <path>`;
+  `git grep -c <pat> | wc -l` 数文件数不是命中数;裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,
+  更硬判据是查声明式(`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
+  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`;
+  **容器里没有 `gh`**(实测:`command -v gh` 退出 1、`/usr/bin/gh` 与 `/usr/local/bin/gh` 都不存在),于是 `gh … || echo "none"` 是个**不可证伪的否定** —— 127「命令不存在」与「grep 没命中」在输出上同值,实测五张 PR 上跑五次「无重叠文件」全部打印安心结论、一次都没检查,险些作为已核验声明进 PR 正文(与隔管道读退出码同类:仪器对两种结局回同一个值,重跑多少次都不自相矛盾)。安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态;⛔ 一般规则:**任何可能不存在的命令上挂 `|| 回退` 都是不可证伪的否定**,PR / 查重类核验改走 MCP GitHub 工具或 git。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上
   缺一个已合修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即是。
 - **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的
