@@ -1315,6 +1315,146 @@ describe('AuthManager', () => {
     });
   });
 
+  // #10366 — the localhost-wildcard trio is a DEVELOPMENT convenience and is
+  // gated on `NODE_ENV !== 'production'`. Before the gate the condition tested
+  // only emptiness, so a production deployment whose trusted-origin list
+  // resolved empty silently CSRF-trusted every `localhost` / `*.localhost`
+  // origin. These pins enforce the boundary in BOTH directions: production
+  // must not substitute, and non-production must still substitute.
+  describe('trustedOrigins localhost substitution is non-production only (#10366)', () => {
+    const TRIO = ['http://localhost:*', 'http://*.localhost:*', 'https://*.localhost:*'];
+
+    const ENV_KEYS = ['NODE_ENV', 'OS_CORS_ORIGIN', 'CORS_ORIGIN', 'OS_SSO_ENABLED'] as const;
+    let saved: Record<string, string | undefined>;
+
+    beforeEach(() => {
+      saved = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
+      for (const k of ENV_KEYS) delete process.env[k];
+    });
+
+    afterEach(() => {
+      for (const k of ENV_KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k]!;
+      }
+    });
+
+    async function captureConfig(config: Record<string, unknown>): Promise<any> {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((c: any) => {
+        capturedConfig = c;
+        return { handler: vi.fn(), api: {} };
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const manager = new AuthManager({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'https://app.example.com',
+        ...config,
+      } as any);
+      await manager.getAuthInstance();
+      warnSpy.mockRestore();
+      return capturedConfig;
+    }
+
+    describe('production does not substitute', () => {
+      it('omits the trustedOrigins key entirely when none is provided', async () => {
+        process.env.NODE_ENV = 'production';
+        const cfg = await captureConfig({});
+
+        expect(cfg.trustedOrigins).toBeUndefined();
+        // Absent, not merely empty — the key must not appear at all, which is
+        // the shape better-auth receives.
+        expect('trustedOrigins' in cfg).toBe(false);
+      });
+
+      it('omits the trustedOrigins key entirely when an empty array is provided', async () => {
+        process.env.NODE_ENV = 'production';
+        const cfg = await captureConfig({ trustedOrigins: [] });
+
+        expect(cfg.trustedOrigins).toBeUndefined();
+        expect('trustedOrigins' in cfg).toBe(false);
+      });
+    });
+
+    describe('non-production still substitutes', () => {
+      it("substitutes the trio under NODE_ENV='development'", async () => {
+        process.env.NODE_ENV = 'development';
+        const cfg = await captureConfig({});
+
+        expect(cfg.trustedOrigins).toEqual(TRIO);
+      });
+
+      // Guards against "hardening" the predicate to `=== 'development'`, which
+      // would be a STRICTER boundary than ruled and would break `test` and
+      // unset-NODE_ENV development flows.
+      it("substitutes the trio under NODE_ENV='test'", async () => {
+        process.env.NODE_ENV = 'test';
+        const cfg = await captureConfig({});
+
+        expect(cfg.trustedOrigins).toEqual(TRIO);
+      });
+
+      it('substitutes the trio when NODE_ENV is unset', async () => {
+        delete process.env.NODE_ENV;
+        const cfg = await captureConfig({});
+
+        expect(cfg.trustedOrigins).toEqual(TRIO);
+      });
+    });
+
+    // LOAD-BEARING: without these two legs, a change that broke ALL origin
+    // trust in production would still pass a substitution-only suite.
+    describe('production leaves real configured trust intact', () => {
+      it('forwards an explicitly configured trustedOrigins list unchanged', async () => {
+        process.env.NODE_ENV = 'production';
+        const cfg = await captureConfig({
+          trustedOrigins: ['https://app.example.com', 'https://*.example.com'],
+        });
+
+        expect(cfg.trustedOrigins).toEqual([
+          'https://app.example.com',
+          'https://*.example.com',
+        ]);
+      });
+
+      it('forwards an OS_CORS_ORIGIN-derived list unchanged', async () => {
+        process.env.NODE_ENV = 'production';
+        process.env.OS_CORS_ORIGIN = 'https://app.example.com,https://admin.example.com';
+        const cfg = await captureConfig({});
+
+        expect(cfg.trustedOrigins).toEqual([
+          'https://app.example.com',
+          'https://admin.example.com',
+        ]);
+      });
+    });
+
+    // The SSO branch returns `trustedOrigins` as a per-request FUNCTION built
+    // from a copy of the same `origins` array, so gating the push at the source
+    // covers this shape too. That is true today and is exactly the kind of
+    // coupling a future refactor breaks silently — pin it.
+    describe('SSO per-request function shape', () => {
+      it('production: the resolved list contains no localhost wildcard', async () => {
+        process.env.NODE_ENV = 'production';
+        const cfg = await captureConfig({ plugins: { sso: true } });
+
+        expect(typeof cfg.trustedOrigins).toBe('function');
+        const resolved: string[] = await cfg.trustedOrigins(undefined);
+        for (const entry of TRIO) expect(resolved).not.toContain(entry);
+        expect(resolved.some(o => o.includes('localhost'))).toBe(false);
+      });
+
+      it('non-production: the resolved list still contains the trio', async () => {
+        process.env.NODE_ENV = 'development';
+        const cfg = await captureConfig({ plugins: { sso: true } });
+
+        expect(typeof cfg.trustedOrigins).toBe('function');
+        const resolved: string[] = await cfg.trustedOrigins(undefined);
+        for (const entry of TRIO) expect(resolved).toContain(entry);
+      });
+    });
+  });
+
   describe('setRuntimeBaseUrl', () => {
     it('should update baseURL before auth instance is created', async () => {
       let capturedConfig: any;
