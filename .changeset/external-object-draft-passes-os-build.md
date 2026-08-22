@@ -27,6 +27,7 @@ prefix — mirroring `defineStack`, which skips the check entirely rather than
 inventing one, and avoiding an `_customers` that would trade one invalid draft
 for another.
 
-Note the `opts.primaryKey` path still does not build: it emits
-`fields.<f>.primaryKey`, which is not an authorable spec field key. That is
-#11000, a separate open contract question, untouched here.
+At the time this landed, the `opts.primaryKey` path still did not build: it
+emitted `fields.<f>.primaryKey`, which is not an authorable spec field key.
+That was #11000, and it is fixed separately in this same release — both paths
+build now. See that changeset for what replaced the key.

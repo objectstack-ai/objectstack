@@ -210,6 +210,40 @@ function toObjectName(remoteName: string): string {
 const GENERATED_SHARING_MODEL = 'private';
 
 /**
+ * The lead-in of the comment that carries the introspected remote primary key
+ * into the generated source — and the one place the reason is written down.
+ *
+ * `fields.<f>.primaryKey` is **not a key of the spec field schema**. Emitting
+ * it produced a `*.object.ts` the platform's own toolchain refused on both
+ * instruments it is annotated for: `tsc --noEmit` against `ServiceObject`
+ * (`TS2353 … 'primaryKey' does not exist in type`) and
+ * `ObjectSchema.safeParse` (`unrecognized_keys` at `["fields","<f>"]`). So the
+ * generator had a pinned path that produced a draft neither the compiler nor
+ * the validator would take (#11000).
+ *
+ * Maintainer ruling, 2026-08-22 live session (「同意所有」, item 8) — **D**:
+ *
+ * > `generateObjectDraft`/`renderObjectSource` stop emitting
+ * > `fields.<f>.primaryKey`; the introspected key survives **as a comment** in
+ * > the generated source (information preserved for the reader, zero contract
+ * > face); the existing pin tests that assert the invalid emission are updated
+ * > as part of the fix.
+ *
+ * Both halves are load-bearing, and the second is the one an implementation
+ * can silently skip: simply dropping `opts.primaryKey` on the floor would make
+ * every parse-and-compile assertion green while discarding exactly what the
+ * ruling said to keep.
+ *
+ * The rejected alternatives, so they are not re-litigated from scratch:
+ * routing the key to `fields.<f>.externalId` was refused as semantically
+ * different and itself of unproven enforcement, and an authorable spelling on
+ * the binding (`external.primaryKey: string[]`) is **deferred, not rejected** —
+ * it returns as its own `packages/spec` card once federated upsert has a live
+ * runtime consumer to justify the surface.
+ */
+const REMOTE_PRIMARY_KEY_COMMENT = '// Remote primary key: ';
+
+/**
  * Normalise an injected namespace. Blank / whitespace-only reads as ABSENT:
  * `validateObjectNamespacePrefix` skips a falsy namespace, but `'  '` is
  * truthy and would render `  _customers` — one invalid draft traded for
@@ -331,7 +365,11 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const exclude = opts.excludeColumns ? new Set(opts.excludeColumns) : new Set<string>();
     const pkOverride = opts.primaryKey ? new Set(opts.primaryKey) : undefined;
 
-    const fields: Record<string, { type: FieldType; primaryKey?: boolean }> = {};
+    const fields: Record<string, { type: FieldType }> = {};
+    // The remote key is collected here rather than onto the field, because
+    // there is no authorable field key to put it on — see
+    // REMOTE_PRIMARY_KEY_COMMENT for the ruling and the measurements.
+    const primaryKeyFields: string[] = [];
     const review: ObjectDraft['review'] = [];
 
     for (const col of table.columns) {
@@ -356,7 +394,8 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       }
 
       const isPk = pkOverride ? pkOverride.has(col.name) : col.primaryKey;
-      fields[fieldName] = isPk ? { type: fieldType, primaryKey: true } : { type: fieldType };
+      fields[fieldName] = { type: fieldType };
+      if (isPk) primaryKeyFields.push(fieldName);
     }
 
     // ADR-0028: every object a package defines must be named
@@ -387,7 +426,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       name,
       datasource,
       definition,
-      source: renderObjectSource(definition, fields, review, namespace),
+      source: renderObjectSource(definition, fields, review, namespace, primaryKeyFields),
       review,
     };
   }
@@ -657,22 +696,45 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
  * because the two absent cases are NOT the same file: a name that is already
  * prefixed and a name that could not be prefixed both read as "starts with
  * something" from here, and only the second one needs the TODO.
+ *
+ * `primaryKeyFields` is rendered as a COMMENT and nowhere else — see
+ * {@link REMOTE_PRIMARY_KEY_COMMENT}. It is passed separately from `fields` on purpose:
+ * a field record that could carry the key at all is a field record something
+ * could accidentally serialise into the definition again.
  */
 function renderObjectSource(
   definition: Record<string, unknown>,
-  fields: Record<string, { type: FieldType; primaryKey?: boolean }>,
+  fields: Record<string, { type: FieldType }>,
   review: ObjectDraft['review'],
   namespace?: string,
+  primaryKeyFields: readonly string[] = [],
 ): string {
   const reviewByColumn = new Map(review.map((r) => [r.column, r.note]));
   const external = definition.external as { remoteSchema?: string; remoteName?: string };
 
   const fieldLines = Object.entries(fields).map(([fieldName, f]) => {
     const note = reviewByColumn.get(fieldName);
-    const pk = f.primaryKey ? ', primaryKey: true' : '';
     const comment = note ? ` // REVIEW: ${note}` : '';
-    return `    ${fieldName}: { type: '${f.type}'${pk} },${comment}`;
+    return `    ${fieldName}: { type: '${f.type}' },${comment}`;
   });
+
+  // The whole of ruling D's second half: information for the reader, zero
+  // contract face. Rendered only when a key was actually reported — with no
+  // key there is nothing to preserve, and an empty "none reported" banner would
+  // be noise in every draft of every keyless table.
+  const primaryKeyComment =
+    primaryKeyFields.length > 0
+      ? [
+          `  ${REMOTE_PRIMARY_KEY_COMMENT}${primaryKeyFields.join(', ')}`,
+          `  // Preserved as a COMMENT because 'ServiceObject' has no authorable key for a`,
+          `  // federated object's remote primary key (#11000): 'fields.<f>.primaryKey' is`,
+          `  // not part of the field schema, so emitting it produced a draft that neither`,
+          `  // 'tsc' nor 'ObjectSchema' accepted. Nothing below reads this line.`,
+          `  // It names the column(s) THIS DRAFT WAS GIVEN as the key. For a COMPOSITE key`,
+          `  // some drivers report only the first column (#10997), so treat the list as a`,
+          `  // lower bound and check it against the remote table before relying on it.`,
+        ]
+      : [];
 
   const externalLine = external.remoteSchema
     ? `  external: { remoteSchema: '${external.remoteSchema}', remoteName: '${external.remoteName}' },`
@@ -704,6 +766,7 @@ function renderObjectSource(
     `  label: '${definition.label as string}',`,
     `  datasource: '${definition.datasource as string}',`,
     externalLine,
+    ...primaryKeyComment,
     `  fields: {`,
     ...fieldLines,
     `  },`,

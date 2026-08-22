@@ -58,12 +58,22 @@ import {
  * the object NAME comes from the table name and the OWD is a constant, so a
  * real introspection would add cost and no coverage.
  *
- * Every column is spelled `primaryKey: false` on purpose. That keeps the whole
- * file on the `opts.primaryKey`-unset path, where the generator emits no
- * `fields.<f>.primaryKey` — the key that is NOT authorable (#11000, an open
- * contract question in `packages/spec`, deliberately untouched here). Pinning
- * these two repairs on a draft that also carries #11000's key would produce
- * cases that cannot go green until a card this lane does not own is decided.
+ * Every column is spelled `primaryKey: false`, so the cases above run on the
+ * `opts.primaryKey`-UNSET path. That was originally a workaround: #11000's
+ * unauthorable `fields.<f>.primaryKey` made the key-set path un-buildable, and
+ * pinning these two repairs on top of it would have produced cases that could
+ * not go green until a card this lane did not own was decided.
+ *
+ * #11000 is now decided (maintainer, 2026-08-22, 「同意所有」 item 8 = D) and
+ * fixed: the generator no longer emits that key. The fixture keeps the unset
+ * spelling because these two defects genuinely do not read a column's PK-ness
+ * — but the path split is no longer a limitation, and the block at the bottom
+ * of this file re-runs the same three checks with `opts.primaryKey` SET.
+ * ⭐ Keep them separate anyway: before the namespace/OWD repairs landed, the
+ * key-set path failed on `unrecognized_keys` BEFORE the namespace check ran,
+ * so on that path the namespace defect was masked rather than absent. Error
+ * ordering hides defects in this pipeline; one path's verdict never covers the
+ * other's.
  */
 function remoteSchema(): IntrospectedSchema {
   return {
@@ -231,6 +241,48 @@ describe('an absent or blank namespace must not trade one invalid draft for anot
   it('carries NO namespace TODO once a namespace did resolve', async () => {
     const draft = await serviceWith('wh').generateObjectDraft('warehouse', 'customers');
     expect(draft.source).not.toContain('TODO(namespace)');
+  });
+});
+
+/**
+ * The `opts.primaryKey`-SET path, which #11000 removed the last blocker from.
+ *
+ * Until ruling D, this path produced a draft that failed
+ * `ObjectSchema.safeParse` on `unrecognized_keys` — and failed it EARLY ENOUGH
+ * that the namespace and OWD repairs pinned above were never reached on it.
+ * Re-running all three checks here is what makes "both paths build" a measured
+ * claim rather than an inference from the unset path.
+ */
+describe('both paths build — the key-set path is no longer the exception', () => {
+  /** The same service, driven with an explicit remote key. */
+  const withKey = (ns: string | undefined = 'wh') =>
+    serviceWith(ns).generateObjectDraft('warehouse', 'customers', { primaryKey: ['id'] });
+
+  it('stage 1 — the namespace prefix rule accepts the name on the key-set path too', async () => {
+    const draft = await withKey();
+    expect(draft.name).toBe('wh_customers');
+    expect(validateObjectNamespacePrefix(draft.name, 'wh')).toBeNull();
+  });
+
+  it('stage 2 — the definition PARSES, and carries the declared OWD', async () => {
+    const draft = await withKey();
+    const parsed = ObjectSchema.safeParse(draft.definition);
+    expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);
+    expect(draft.definition.sharingModel).toBe('private');
+    expect(CANONICAL_OWD).toContain(draft.definition.sharingModel);
+  });
+
+  it('still-generates — every field, the binding and the remote name survive the key path', async () => {
+    const draft = await withKey();
+    const fields = draft.definition.fields as Record<string, { type: string }>;
+    const external = draft.definition.external as { remoteName?: string; remoteSchema?: string };
+
+    expect(Object.keys(fields)).toEqual(['id', 'name', 'signed_up_at']);
+    expect(fields.signed_up_at.type).toBe('datetime');
+    expect(external.remoteName).toBe('customers');
+    expect(external.remoteSchema).toBe('mart');
+    expect(draft.source).toContain("remoteSchema: 'mart', remoteName: 'customers'");
+    expect(draft.source).toContain("sharingModel: 'private'");
   });
 });
 
