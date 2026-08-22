@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // refuses. Imported from `@objectstack/metadata-core` and not from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
@@ -619,14 +619,20 @@ describe('publishMetaItem — the scope probes ask the promote\'s question (#110
         // Seeded by DIRECT insert — see the describe header for why this row
         // must not come from `saveMetaItem(mode:'draft')` while PR #11139 is
         // changing that path's binding resolution. The shape mirrors what the
-        // repository's `put` writes for a package-less org draft.
+        // repository's `put` writes for a package-less org draft — `checksum`
+        // included: the post-promotion drain is an optimistic-lock delete
+        // keyed on it, and a checksum-less row makes the drain read as the
+        // benign "newer draft saved" race and survive (measured on this
+        // fixture's first run).
+        const noPackageBody = objectBody('shared_ticket', 'NO_PACKAGE');
         await engine.insert('sys_metadata', {
             type: 'object',
             name: 'shared_ticket',
             organization_id: 'org1',
             package_id: null,
             state: 'draft',
-            metadata: JSON.stringify(objectBody('shared_ticket', 'NO_PACKAGE')),
+            metadata: JSON.stringify(noPackageBody),
+            checksum: hashSpec(noPackageBody),
             version: 1,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
