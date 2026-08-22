@@ -207,7 +207,7 @@ function makeKernel(opts: { seed?: Row[] } = {}) {
 }
 
 /** The refusal this whole file is about, raised by the real producer. */
-async function destructiveRefusal(): Promise<any> {
+async function destructiveRefusal(writeFace?: string): Promise<any> {
     const { protocol } = makeKernel({
         seed: [objectRow('crm_task', ['a', 'b', 'c', 'd'])],
     });
@@ -216,6 +216,7 @@ async function destructiveRefusal(): Promise<any> {
             type: 'object',
             name: 'crm_task',
             item: { name: 'crm_task', label: 'crm_task', fields: { a: { name: 'a', type: 'text' } } },
+            ...(writeFace ? { writeFace } : {}),
         });
     } catch (e: any) {
         return e;
@@ -277,6 +278,35 @@ describe('[#10886] the 409 renders its findings into the message AND attaches th
         expect(err.message).toContain(PUT_REMEDY);
         const wire = JSON.stringify(err.issues);
         expect(wire).not.toContain('force=true');
+    });
+
+    /**
+     * [#10888] The two switches that read `writeFace` answer DIFFERENT
+     * questions, and this pin holds them independent.
+     *
+     * That card made the sibling `422 INVALID_METADATA` findings clause
+     * face-aware too, and the `/meta` HTTP write doors now state
+     * `writeFace: 'meta-envelope'` on every `saveMetaItem` call — including
+     * the ones that land on THIS gate. `'meta-envelope'` is exactly the
+     * single-segment REST `PUT` among other doors, so `?force=true` is still
+     * its real remedy and this clause must not move.
+     *
+     * Without this pin the coupling is invisible: a later edit that folds the
+     * two switches together, or that gives `destructiveChangeRemedy` a case
+     * for the new face, would change a 409 remedy on the busiest write door
+     * in the product while every 422 test stayed green.
+     */
+    it('[GUARD] a face declared for the 422 does NOT move the 409 remedy', async () => {
+        const err = await destructiveRefusal('meta-envelope');
+
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.message).toContain(PUT_REMEDY);
+        expect(err.message).not.toContain(DUPLICATE_REMEDY_HEAD);
+        // …and the findings prose is still restated here, because this gate's
+        // sole-carrier verdict (#10886) is untouched by #10888: the 422's face
+        // split applies to the 422's clause only.
+        expect(err.message).toContain(FINDING_PROSE);
     });
 });
 

@@ -5474,6 +5474,16 @@ export class RestServer {
                         name: req.params.name,
                         item,
                         organizationId,
+                        // [#10888] This door answers with an ADR-0112 error
+                        // envelope that carries the refusal's `issues[]`
+                        // structurally beside the message (`sendError` threads a
+                        // top-level `issues`), so `saveMetaItem`'s 422 renders
+                        // its findings as a headline here instead of restating
+                        // the per-key prose a console would then show twice.
+                        // Server-stated: this object is built field by field
+                        // from named `req` values and never spreads the body, so
+                        // a client cannot smuggle a face in.
+                        writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
@@ -6592,6 +6602,16 @@ export class RestServer {
                         name: compoundName,
                         item: req.body,
                         organizationId,
+                        // [#10888] This door answers with an ADR-0112 error
+                        // envelope that carries the refusal's `issues[]`
+                        // structurally beside the message (`sendError` threads a
+                        // top-level `issues`), so `saveMetaItem`'s 422 renders
+                        // its findings as a headline here instead of restating
+                        // the per-key prose a console would then show twice.
+                        // Server-stated: this object is built field by field
+                        // from named `req` values and never spreads the body, so
+                        // a client cannot smuggle a face in.
+                        writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),

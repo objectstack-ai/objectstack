@@ -2096,6 +2096,77 @@ function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
 }
 
 /**
+ * [#10888] The `422 INVALID_METADATA` findings clause, rendered PER FACE.
+ *
+ * The refusal is raised in one place ({@link
+ * ObjectStackProtocolImplementation.saveMetaItem}'s overlay spec check) and
+ * quoted onto whatever response the caller's catch builds, so one clause is
+ * read on every face at once — and the faces do not agree on whether the
+ * structured `issues[]` array reaches the consumer beside it. Where it does,
+ * restating the prose here is the #10524 duplication exactly: every console
+ * rendering both channels shows each finding twice. Where it does NOT, this
+ * clause is the SOLE carrier and trimming it deletes the author's
+ * prescription from the wire outright.
+ *
+ * ## The polarity is the load-bearing decision, not the wording
+ *
+ * Silence renders the FULL prose — byte-identical to what every face carried
+ * before this card. Only a face that positively declares it carries the
+ * structured channel gets the headline. That direction is deliberate and is
+ * the opposite of a convenience default:
+ *
+ *  - the destructive direction (deleting prose) requires an explicit,
+ *    reviewable declaration at a call site, so it can never happen by
+ *    omission;
+ *  - a new write door added later, or one whose author never read this
+ *    comment, keeps the complete sentence. The failure mode of forgetting is
+ *    a redundant sentence on a console, not an author who is told a body is
+ *    invalid and never told which key.
+ *
+ * ⛔ Do not invert this to "trim by default, message-only faces opt out".
+ * Measured on `origin/main` for THIS gate (see
+ * `protocol.invalid-metadata-422-face-inventory.test.ts`): four of the seven
+ * callers are message-only, and two of them live in OTHER packages
+ * (`@objectstack/runtime`'s ADR-0045 visibility flip, `plugin-security`'s
+ * permission-set projection) where no face can be stated without making the
+ * field caller-settable. Under the inverted polarity those two lose their
+ * prescription silently — and `plugin-security`'s remedy sentence
+ * ("make the record body spec-valid (the error names the offending key)")
+ * is written on the assumption that this clause names it.
+ *
+ * ⚠️ Unlike the 409's {@link destructiveChangeRemedy}, whose faces differ on
+ * WHAT REMEDY EXISTS, the faces here differ only on WHETHER A SECOND CHANNEL
+ * CARRIES THE SAME FACTS. Nothing is withheld from anyone: `err.issues` is
+ * attached identically on every face, and the headline still names how many
+ * findings there are and where they are.
+ */
+function specValidationFindings(
+    face: MetadataWriteFace | undefined,
+    issues: MetadataIssueEntry[],
+): string {
+    switch (face) {
+        case 'meta-envelope':
+            // The door answers with an ADR-0112 error envelope that carries
+            // `issues[]` beside the message (`@objectstack/rest`'s
+            // `sendError` threads a top-level `issues`; `@objectstack/runtime`'s
+            // dispatcher threads `details.issues`). The prose lives there,
+            // once. Same headline grammar the seed refusal and the author-time
+            // gate compose — count plus `path [zod code]` locators.
+            return metadataIssueHeadline(issues);
+        default:
+            // Byte-identical to the pre-#10888 clause: the first three findings
+            // as `<path>: <message>`, then a `(+N more)` tail. Read by
+            // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
+            // `rows[].reason`, and the two out-of-package log faces — none of
+            // which carry `issues[]`.
+            return issues.slice(0, 3)
+                .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
+                .join('; ')
+                + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
+    }
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -3242,8 +3313,31 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * guessed at. Adding a face value here is one of the two candidate repairs it
  * weighs.
  */
+/**
+ * [#11015 / #10888] Which write door a `saveMetaItem` refusal is being
+ * rendered FOR. Stated by the SERVER — either by the protocol's own internal
+ * call ({@link ObjectStackProtocolImplementation.duplicatePackage}) or by the
+ * in-process HTTP boundary that owns the response envelope — never by a remote
+ * caller: no write door spreads a request body into the `saveMetaItem` request
+ * object, so there is no path for a client to smuggle a face in (pinned in
+ * both face-inventory suites).
+ *
+ * Two refusals read this, and they read it for DIFFERENT questions:
+ *
+ *  - {@link destructiveChangeRemedy} (409) — which remedy actually exists on
+ *    this door;
+ *  - {@link specValidationFindings} (422) — whether a structured `issues[]`
+ *    channel reaches the consumer beside the message.
+ *
+ * A door therefore answers both questions by naming itself once, and neither
+ * switch may assume the other's default. `'meta-envelope'` deliberately keeps
+ * the 409's `?force=true` wording (it is the single-segment REST `PUT`'s
+ * genuine remedy) while changing the 422's clause.
+ */
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope';
+
 function destructiveChangeRemedy(
-    face: 'package-duplicate' | undefined,
+    face: MetadataWriteFace | undefined,
     name: string,
 ): string {
     switch (face) {
@@ -12905,7 +12999,7 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: 'package-duplicate' }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
         // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -13441,25 +13535,24 @@ export class ObjectStackProtocolImplementation implements
                 const parsed = schema.safeParse(request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
-                    // [#10524] Deliberately NOT trimmed to the headline the
-                    // author-time gate and `seedRequestValidationError` now
-                    // compose, although this is the same duplication shape on
-                    // the 422 envelope face (message prose + `details.issues`).
-                    // Measured during that card: this message is quoted on
-                    // faces where it is the SOLE carrier — `duplicatePackage`'s
-                    // `failed[].error` threads no `issues`, and three #8333
-                    // GUARD pins hold the author's prescription ("Unrecognized
-                    // key(s) …", the `defineView(` spelling) to it. Trimming
-                    // here without first declaring a structured channel on
-                    // those faces deletes the prescription from the wire —
-                    // the declare-then-trim order, violated. Filed as its own
-                    // card; see the #10524 PR for the measurement.
-                    const summary = issues.slice(0, 3)
-                        .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
-                        .join('; ');
+                    // [#10524 → #10888] The findings clause is rendered PER
+                    // FACE — see {@link specValidationFindings}. #10524's
+                    // headline is applied on the faces that carry the same
+                    // findings structurally beside the message (the `/meta`
+                    // HTTP write doors, which declare `'meta-envelope'`), and
+                    // the full prose is kept everywhere else, because on those
+                    // faces this sentence is the SOLE carrier of the author's
+                    // prescription — `duplicatePackage`'s `failed[].error`
+                    // above all, whose three #8333 GUARD pins hold
+                    // "Unrecognized key(s) …" and the `defineView(` spelling to
+                    // it. A blanket trim here was tried during #10524 and
+                    // reverted for exactly that reason; the face split is what
+                    // lets the duplication go without the prescription going
+                    // with it. `err.issues` below is unconditional — the split
+                    // decides only what the SENTENCE repeats.
                     const err = new Error(
-                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: ${summary}`
-                        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
+                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: `
+                        + specValidationFindings(request.writeFace, issues)
                     );
                     (err as any).code = 'INVALID_METADATA';
                     (err as any).status = 422;

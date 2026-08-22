@@ -414,7 +414,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // the REST `/meta` write doors run the same one.
                     const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
                     const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
-                    const result = await protocol.saveMetaItem({ type, name, item, organizationId, ...(packageId ? { packageId } : {}) });
+                    // [#10888] Server-stated face: this branch answers through
+                    // `deps.errorFromThrown`, which carries the refusal's
+                    // `issues[]` in `details` (see the `details.issues` pin in
+                    // `http-dispatcher.test.ts`), so `saveMetaItem`'s 422 renders
+                    // a headline rather than restating the per-key prose that
+                    // already rides the envelope structurally. Not client-settable:
+                    // the request object names each field explicitly.
+                    const result = await protocol.saveMetaItem({
+                        type, name, item, organizationId,
+                        writeFace: 'meta-envelope',
+                        ...(packageId ? { packageId } : {}),
+                    });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
                     // Preserve the 422 + structured spec-validation `issues` so
