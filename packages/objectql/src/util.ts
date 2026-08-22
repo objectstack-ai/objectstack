@@ -1,23 +1,35 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ServiceObject } from '@objectstack/spec/data';
+import type { IntrospectedColumn as SpecIntrospectedColumn } from '@objectstack/spec/contracts';
 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
 /**
  * Column metadata from database introspection.
+ *
+ * DERIVED from `packages/spec/src/contracts/schema-diff-service.ts` — the one
+ * introspection contract — rather than declared a second time next to it.
+ *
+ * This file used to carry an independent declaration spelling primary-key
+ * membership `isPrimary?`, while `packages/spec` spells it `primaryKey`. A
+ * driver result flowed from one contract into a consumer typed against the
+ * other with no compiler between them, and the remote primary key was dropped
+ * on the way. Maintainer ruling, 2026-08-22 (live session, 「同意所有」 item 9
+ * = 驱动侧对齐 spec 契约): `packages/spec` is the one contract, producers align
+ * to it, and this local declaration converges on the spec import rather than
+ * keeping a second contract.
+ *
+ * `defaultValue` stays `unknown` rather than the spec's `string`: SQL
+ * introspection reports whatever the driver read (`null`, a number, a boolean
+ * literal), and narrowing the declaration without normalising the value would
+ * move the lie rather than remove it. `isUnique` / `maxLength` are extra facts
+ * SQL introspection carries and the spec's diff-facing contract does not
+ * declare.
  */
-export interface IntrospectedColumn {
-  /** Column name */
-  name: string;
-  /** Native database type (e.g., 'varchar', 'integer', 'timestamp') */
-  type: string;
-  /** Whether the column is nullable */
-  nullable: boolean;
-  /** Default value if any */
+export interface IntrospectedColumn extends Omit<SpecIntrospectedColumn, 'defaultValue'> {
+  /** Default value if any — raw, as the driver reported it. */
   defaultValue?: unknown;
-  /** Whether this is a primary key */
-  isPrimary?: boolean;
   /** Whether this column has a unique constraint */
   isUnique?: boolean;
   /** Maximum length for string types */

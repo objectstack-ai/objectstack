@@ -11,8 +11,8 @@
  * the first member of a composite key and silently dropped the rest.
  *
  * Both output signals were wrong together and for the same reason:
- * `introspectSchema` derives `col.isPrimary` FROM `primaryKeys`
- * (`if (primaryKeys.includes(col.name)) col.isPrimary = true`), so a consumer
+ * `introspectSchema` derives `col.primaryKey` FROM `primaryKeys`
+ * (`if (primaryKeys.includes(col.name)) col.primaryKey = true`), so a consumer
  * could not recover the missing member by cross-checking the two. Both are
  * asserted here.
  *
@@ -80,7 +80,7 @@ describe('SqlDriver composite primary-key introspection (SQLite)', () => {
     expect(pkByName).toEqual({ order_id: 1, line_no: 2, sku: 0 });
   });
 
-  it('reports every member of a composite key, and derives isPrimary for all of them', async () => {
+  it('reports every member of a composite key, and derives primaryKey for all of them', async () => {
     await knexInstance.schema.createTable('order_lines', (t: any) => {
       t.string('order_id').notNullable();
       t.integer('line_no').notNullable();
@@ -95,8 +95,8 @@ describe('SqlDriver composite primary-key introspection (SQLite)', () => {
     expect(table.primaryKeys).toEqual(['order_id', 'line_no']);
 
     // Signal 2: the per-column flag, derived FROM signal 1 — repaired with it.
-    const isPrimaryByName = Object.fromEntries(table.columns.map((c) => [c.name, c.isPrimary === true]));
-    expect(isPrimaryByName).toEqual({ order_id: true, line_no: true, sku: false });
+    const primaryKeyByName = Object.fromEntries(table.columns.map((c) => [c.name, c.primaryKey === true]));
+    expect(primaryKeyByName).toEqual({ order_id: true, line_no: true, sku: false });
   });
 
   it('orders primaryKeys by pk ordinal, not by column position', async () => {
@@ -164,7 +164,7 @@ describe('SqlDriver composite primary-key introspection (SQLite)', () => {
     expect(schema.tables['widgets'].primaryKeys).toEqual(['id']);
     expect(schema.tables['audit_lines'].primaryKeys).toEqual([]);
 
-    const auditPrimary = schema.tables['audit_lines'].columns.map((c) => c.isPrimary === true);
+    const auditPrimary = schema.tables['audit_lines'].columns.map((c) => c.primaryKey === true);
     expect(auditPrimary).toEqual([false, false]);
   });
 });

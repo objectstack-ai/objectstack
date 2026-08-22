@@ -8,6 +8,10 @@
  */
 
 import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
+// The ONE introspection contract (ADR-0015 / `ISchemaDiffService`). This
+// driver's introspection types are DERIVED from these rather than
+// re-declared next to them — see the `Introspection Types` region below.
+import type { IntrospectedColumn as SpecIntrospectedColumn } from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
@@ -3645,16 +3649,45 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
-export interface IntrospectedColumn {
-  name: string;
-  type: string;
-  nullable: boolean;
+/**
+ * `IntrospectedColumn` is DERIVED from
+ * `packages/spec/src/contracts/schema-diff-service.ts`, never re-declared
+ * beside it.
+ *
+ * It used to be a second, independent declaration that happened to describe
+ * the same idea in a different vocabulary: this file spelled a column's key
+ * membership `isPrimary?`, the spec spells it `primaryKey`. `plugin.ts` hands
+ * this driver's result straight to `ExternalDatasourceService`, which is typed
+ * against the spec — so the consumer read a key no driver ever set and every
+ * federated object drafted from a remote table silently lost its primary key.
+ * Nothing was type-unsound; the two contracts simply never met a compiler.
+ *
+ * Maintainer ruling, 2026-08-22 (live session, 「同意所有」 item 9 =
+ * 驱动侧对齐 spec 契约): `packages/spec` is the one contract and the DRIVER
+ * aligns to it. Deriving rather than copying is what makes that mechanical —
+ * a key added to the spec contract now fails this file's `tsc` until the
+ * driver emits it, which is exactly the failure that was missing.
+ *
+ * Two divergences remain, deliberately, and neither is a second spelling of
+ * something the spec declares:
+ *
+ *  - the SQL layer carries EXTRA per-column facts (`isUnique`, `maxLength`)
+ *    that the spec's diff-facing contract does not declare;
+ *  - `defaultValue` is `unknown` here rather than the spec's `string`, because
+ *    that is what Knex's `columnInfo()` actually returns (measured on live
+ *    SQLite: `null`). Narrowing the declaration without normalising the value
+ *    would move the lie rather than remove it.
+ */
+export interface IntrospectedColumn extends Omit<SpecIntrospectedColumn, 'defaultValue'> {
+  /** Raw driver-reported default. See the note above on why this is not `string`. */
   defaultValue?: unknown;
-  isPrimary?: boolean;
+  /** SQL-introspection extra: the column carries a UNIQUE constraint. */
   isUnique?: boolean;
+  /** SQL-introspection extra: declared maximum length for string types. */
   maxLength?: number;
 }
 
+/** No spec counterpart — foreign keys are a SQL-introspection extra. */
 export interface IntrospectedForeignKey {
   columnName: string;
   referencedTable: string;
@@ -9837,7 +9870,7 @@ export class SqlDriver implements IDataDriver {
       const uniqueConstraints = await this.introspectUniqueConstraints(tableName);
 
       for (const col of columns) {
-        if (primaryKeys.includes(col.name)) col.isPrimary = true;
+        if (primaryKeys.includes(col.name)) col.primaryKey = true;
         if (uniqueConstraints.includes(col.name)) col.isUnique = true;
       }
 
@@ -12548,7 +12581,9 @@ export class SqlDriver implements IDataDriver {
         type,
         nullable: info.nullable !== false,
         defaultValue: info.defaultValue,
-        isPrimary: false,
+        // The spec contract's spelling, and the only one this driver emits.
+        // `introspectSchema` flips it from the table's key list below.
+        primaryKey: false,
         isUnique: false,
         maxLength,
       });
@@ -12695,7 +12730,7 @@ export class SqlDriver implements IDataDriver {
         // of the key", `1` for the first key column, `2` for the second, and so
         // on. Filtering on `pk === 1` therefore kept only the first member of a
         // composite key and silently dropped the rest, and because
-        // `introspectSchema` derives `col.isPrimary` FROM this list, both output
+        // `introspectSchema` derives `col.primaryKey` FROM this list, both output
         // signals were wrong together.
         //
         // Ordering by the ordinal (rather than taking `table_info`'s row order,

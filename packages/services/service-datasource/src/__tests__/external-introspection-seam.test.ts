@@ -6,12 +6,15 @@
  *
  * `external-datasource-service.test.ts` hand-writes its fixture with
  * `primaryKey: true` — the `packages/spec` contract spelling
- * (`contracts/schema-diff-service.ts`). The driver emits the OTHER spelling:
- * `SqlDriver.introspectSchema` sets `col.isPrimary` and fills
- * `table.primaryKeys` (the `packages/objectql/src/util.ts` shape). `plugin.ts`
- * hands the driver's result to this service unmodified, so the two contracts
- * meet — and disagree — exactly here. A fixture written in EITHER spelling is
- * blind to that; only a live introspection can see it, so every case below
+ * (`contracts/schema-diff-service.ts`). The driver USED TO emit the other
+ * spelling: `SqlDriver.introspectSchema` set `col.isPrimary` and filled
+ * `table.primaryKeys` (the `packages/objectql/src/util.ts` shape), `plugin.ts`
+ * handed that result to this service unmodified, and the two contracts met —
+ * and disagreed — exactly here. Since the driver was aligned to the spec
+ * contract (maintainer ruling 2026-08-22, 「同意所有」 item 9; #10676/#10998)
+ * the producer spells it `primaryKey`, and the first case below pins that
+ * rather than the collision. A fixture written in EITHER spelling is blind to
+ * this seam; only a live introspection can see it, so every case below
  * introspects a real in-memory SQLite database rather than describing one.
  *
  * Both directions are pinned deliberately: an implementation that stamped the
@@ -77,7 +80,7 @@ async function catalogColumns(
 }
 
 describe('the introspection seam, as a real SqlDriver actually spells it', () => {
-  it('the driver speaks isPrimary/primaryKeys and never the spec spelling', async () => {
+  it('the driver speaks the spec spelling: primaryKey/primaryKeys', async () => {
     const schema = (await introspectReal(async (knex: never) => {
       await (knex as { schema: { createTable(n: string, cb: (t: never) => void): Promise<void> } }).schema.createTable(
         'customers',
@@ -93,14 +96,18 @@ describe('the introspection seam, as a real SqlDriver actually spells it', () =>
     const table = schema.tables.customers;
     const id = table.columns.find((c) => c.name === 'id')!;
 
-    // This is the whole defect, stated as an assertion on the producer's own
-    // output. If it ever flips — the driver starting to emit the spec
-    // spelling, or the two contracts being reconciled upstream — the union
-    // read in `primaryKeyReader` stops being load-bearing and should be
-    // re-derived rather than quietly relaxed.
+    // The producer's own output, stated as an assertion. This case was written
+    // asserting the OPPOSITE — `isPrimary: true`, `primaryKey: undefined` —
+    // so that it would redden the moment the driver was aligned. That flip has
+    // now happened (#10676/#10998), and it is pinned here in its new
+    // direction: the driver emits the spec spelling and no longer emits the
+    // retired one. The union read in `primaryKeyReader` below therefore no
+    // longer has an in-tree producer needing its `isPrimary` arm; collapsing
+    // it is this lane's call to make, deliberately not made from the driver
+    // change, and until then this file keeps both arms pinned.
     expect(table.primaryKeys).toEqual(['id']);
-    expect(id.isPrimary).toBe(true);
-    expect(id.primaryKey).toBeUndefined();
+    expect(id.primaryKey).toBe(true);
+    expect(id.isPrimary).toBeUndefined();
   });
 
   it('refreshCatalog carries the introspected key onto the right column only', async () => {
