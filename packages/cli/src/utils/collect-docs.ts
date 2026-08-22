@@ -8,7 +8,9 @@
  * (`docs: DocSchema[]`). This module owns both halves of that contract:
  *
  *   - **Collection**: filename stem → `name`, frontmatter `title:` or the
- *     first `#` heading → `label`, body → `content`. Subdirectories are a
+ *     first `#` heading → `label`, body → `content`; the optional
+ *     `description:`/`order:`/`group:` scalars and the `tags:` list are read
+ *     through to the `doc` item. Subdirectories are a
  *     build error — flatness is the contract that keeps cross-references
  *     stable (a link is `[text](./<name>.md)`; resolution is a basename
  *     lookup with zero path arithmetic).
@@ -45,6 +47,18 @@ export interface DocItem {
   order?: number;
   group?: string;
   /**
+   * Membership tags — the operand of a book group's `include: { tag: '<t>' }`
+   * rule (ADR-0046 §5), read from frontmatter `tags:`.
+   *
+   * `DocSchema.tags` was declared to make `include: { tag }` reachable (the
+   * enforce half of ADR-0049), and the resolver's `matchesInclude` has always
+   * compared against it — but this collector had no list case, so on the flat
+   * `src/docs/*.md` path every doc reached the resolver with `tags ===
+   * undefined` and a tag rule matched nothing. Absent leaves the key out so
+   * the schema default applies.
+   */
+  tags?: string[];
+  /**
    * Per-locale variants (ADR-0046 i18n), compiled from sibling
    * `<name>.<locale>.md` files. The base file is the default + fallback.
    */
@@ -74,16 +88,94 @@ function frontmatterScalar(block: string, key: string): string | undefined {
   return value || undefined;
 }
 
+/** Strip one leading and one trailing quote, matching `frontmatterScalar`. */
+function unquote(value: string): string {
+  return value.replace(/^['"]|['"]$/g, '').trim();
+}
+
+/**
+ * The result of reading a list-valued frontmatter key: absent, parsed, or
+ * present in a spelling this reader does not handle.
+ *
+ * The third state is the point. This parser is deliberately minimal — it is
+ * not a YAML engine — and a minimal reader that returns `undefined` for
+ * everything it cannot read is indistinguishable from one the author never
+ * wrote to. Silently dropping authored input is exactly the defect this key
+ * was added to fix, so an unreadable spelling is reported instead.
+ */
+type FrontmatterList =
+  | { kind: 'absent' }
+  | { kind: 'list'; values: string[] }
+  | { kind: 'unreadable'; spelling: string };
+
+/**
+ * Extract a list-valued `key:` from a frontmatter block, in the two ordinary
+ * YAML sequence spellings and no others:
+ *
+ * ```yaml
+ * tags: [tutorial, beginner]   # inline
+ * tags:                        # block
+ *   - tutorial
+ *   - beginner
+ * ```
+ *
+ * Anything else present under `key:` — a bare scalar, an unterminated inline
+ * sequence, a key with nothing under it — comes back `unreadable` for the
+ * caller to report as a `DocIssue`. Deliberately NOT handled (and therefore
+ * reported rather than half-read): nested/mapping items, block scalars, and
+ * quoted items containing commas.
+ */
+function frontmatterList(block: string, key: string): FrontmatterList {
+  const re = new RegExp(`^${key}\\s*:`, 'i');
+  const lines = block.split(/\r?\n/);
+  const at = lines.findIndex((l) => re.test(l));
+  if (at === -1) return { kind: 'absent' };
+  const here = lines[at].trim();
+
+  // ── inline form: `key: [a, b]` ──
+  const inline = lines[at].replace(re, '').trim();
+  if (inline) {
+    if (!inline.startsWith('[') || !inline.endsWith(']')) {
+      return { kind: 'unreadable', spelling: here };
+    }
+    const values = inline
+      .slice(1, -1)
+      .split(',')
+      .map((item) => unquote(item.trim()))
+      .filter((item) => item.length > 0);
+    return { kind: 'list', values };
+  }
+
+  // ── block form: `- item` lines under the key, at any indent. Blank lines
+  // are skipped; the first line that is neither blank nor an item ends the
+  // sequence (normally the next frontmatter key).
+  const values: string[] = [];
+  for (let i = at + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const item = line.match(/^-\s*(.*)$/);
+    if (!item) break;
+    const value = unquote(item[1].trim());
+    if (value) values.push(value);
+  }
+  if (values.length === 0) return { kind: 'unreadable', spelling: `${here} (no list items follow)` };
+  return { kind: 'list', values };
+}
+
 /**
  * Strip a leading `---` frontmatter block; extract `title:`, `description:`,
- * `order:`, and `group:` if present (all optional, single-line scalars).
- * `order:` is parsed to a number and dropped when non-numeric.
+ * `order:`, and `group:` if present (all optional, single-line scalars), plus
+ * the list-valued `tags:` (see `frontmatterList`). `order:` is parsed to a
+ * number and dropped when non-numeric. A `tags:` this reader cannot parse is
+ * returned as `unreadableTags` so the caller can report it — never dropped.
  */
 function parseFrontmatter(raw: string): {
   title?: string;
   description?: string;
   order?: number;
   group?: string;
+  tags?: string[];
+  unreadableTags?: string;
   body: string;
 } {
   if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) return { body: raw };
@@ -94,11 +186,16 @@ function parseFrontmatter(raw: string): {
   const body = bodyStart === -1 ? '' : raw.slice(bodyStart + 1);
   const orderRaw = frontmatterScalar(block, 'order');
   const order = orderRaw !== undefined ? Number(orderRaw) : undefined;
+  const tags = frontmatterList(block, 'tags');
   return {
     title: frontmatterScalar(block, 'title'),
     description: frontmatterScalar(block, 'description'),
     ...(order !== undefined && !Number.isNaN(order) ? { order } : {}),
     group: frontmatterScalar(block, 'group'),
+    // An authored-but-empty `tags: []` is left out: it parses fine and means
+    // the same as absent to `matchesInclude`, so it is not a dropped value.
+    ...(tags.kind === 'list' && tags.values.length > 0 ? { tags: tags.values } : {}),
+    ...(tags.kind === 'unreadable' ? { unreadableTags: tags.spelling } : {}),
     body,
   };
 }
@@ -144,12 +241,35 @@ export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issue
 
     const stem = entry.name.slice(0, -3);
     const raw = fs.readFileSync(path.join(docsDir, entry.name), 'utf-8');
-    const { title, description, order, group, body } = parseFrontmatter(raw);
+    const { title, description, order, group, tags, unreadableTags, body } = parseFrontmatter(raw);
+
+    // A `tags:` the reader could not parse is REPORTED, never dropped: the
+    // symptom of a drop is a book group that renders empty with nothing
+    // anywhere saying why, which is the failure this key exists to prevent.
+    if (unreadableTags !== undefined) {
+      issues.push({
+        severity: 'warning',
+        rule: 'docs/frontmatter-tags',
+        message: `Frontmatter \`tags:\` in "${entry.name}" is not a list this reader understands, so no tags were collected and a book group's \`include: { tag }\` cannot match this doc. Write either \`tags: [tutorial, beginner]\` or a block of \`- item\` lines under \`tags:\`. Found: ${unreadableTags}`,
+        path: rel,
+      });
+    }
 
     // Locale variant `<base>.<locale>.md` (ADR-0046 i18n) — checked before the
     // bare-name rule, since a variant stem legitimately contains a dot.
     const variantMatch = stem.match(DOC_VARIANT_RE);
     if (variantMatch) {
+      // Tags are a property of the DOC, not of a translation — a
+      // `DocTranslationItem` carries only label/description/content. Parsed
+      // tags here would otherwise vanish exactly as unparsed ones used to.
+      if (tags) {
+        issues.push({
+          severity: 'warning',
+          rule: 'docs/frontmatter-tags',
+          message: `Locale variant "${entry.name}" declares frontmatter \`tags:\`, but tags belong to the doc rather than to one translation and are read from the base file "${variantMatch[1]}.md" only — these tags were not collected. Move them to the base file.`,
+          path: rel,
+        });
+      }
       variants.push({
         base: variantMatch[1],
         locale: variantMatch[2],
@@ -176,6 +296,7 @@ export function collectDocsFromSrc(configPath: string): { docs: DocItem[]; issue
       content: body,
       ...(order !== undefined ? { order } : {}),
       ...(group ? { group } : {}),
+      ...(tags ? { tags } : {}),
     });
   }
 
