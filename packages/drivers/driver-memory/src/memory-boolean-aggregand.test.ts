@@ -36,18 +36,28 @@
  *
  * With both coercions reverted to `origin/main`'s expressions
  * (`values.filter(v => typeof v === 'number')` on the data face, a bare
- * `{ $avg: '$path' }` on the analytics face), predicted: **10 of the 15 fail**,
+ * `{ $avg: '$path' }` on the analytics face), predicted: **10 of the 15 fail** (11 measured; see below),
  * every one of them on the VALUE `null` or `0` rather than on a throw, because
  * both faces drop the aggregands silently. The `count` controls do not survive
  * as separate rows — they are asserted beside the rate they control, so the
  * rows carrying them go red on the rate — which is the intended reading: the
  * control's job is to make a stopped aggregator visible, not to stay green.
  *
- * Named before running, the five predicted survivors are the fixture row, the
- * two non-numeric-text rows (one per face), and the empty-column row — every
- * one of them a case the reverted expressions answer the same way.
+ * Measured: **11 failed / 4 passed.** The predicted DIRECTION held exactly —
+ * every failure landed on a value (`expected null to be 0.4`, `expected [+0,
+ * +0] to deeply equal [2, 1]`, and `expected 'object' to be 'number'` where the
+ * declared-type row read the `null`), not one on a throw. The predicted COUNT
+ * was off by one: 10 was written, 11 measured. The survivors are the four rows
+ * the reverted expressions answer identically — the fixture row, one
+ * non-numeric-text row per face, and the empty-column row — and naming them was
+ * the half of the prediction worth having, since a survivor list is what
+ * distinguishes "the pin works" from "the pin is red for some other reason".
  *
- * Measured: ABLATION_RESULT_PLACEHOLDER
+ * No build stands between this file and the mutation: it imports the driver by
+ * relative path, so vitest runs `src`. That is measured rather than assumed —
+ * the package's `dist/` was built from `origin/main` before the fix and still
+ * contains neither coercion, yet the unmutated run is green, which it could not
+ * be if these assertions were reading `dist`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
