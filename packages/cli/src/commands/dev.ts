@@ -189,10 +189,31 @@ export default class Dev extends Command {
         }
         printStep('Compiling objectstack.config.ts → dist/objectstack.json...');
         const binPath = process.argv[1];
+        // NOTE: Do NOT set NODE_ENV='development' on this child — the same rule
+        // the serve spawn below carries, for a second, independently measured
+        // reason. Oclif's tsx-based TypeScript source loader is activated when
+        // NODE_ENV is 'test' or 'development', and tsx honours the *cwd*
+        // tsconfig's `paths`. Example apps map workspace packages to their
+        // TypeScript SOURCE there — `@objectstack/formula` →
+        // `../../packages/formula/src/index.ts` — so a loader-activating child
+        // resolves a CJS package to `.ts`, after which Node's CJS resolver
+        // walks that file's siblings and knows nothing about `.ts`:
+        // `Cannot find module './registry'`, and `os dev` dies before the
+        // server starts. Measured: the failures map 1:1 onto each app's `paths`
+        // entries — app-showcase (formula + plugin-email) fails on both,
+        // app-crm (formula only) on one, app-todo (no `paths` block) on none.
+        // The import SPELLING was never the variable: plugin-email already
+        // ships the explicit `./email-plugin.js` extension and fails
+        // identically. This is a TYPE-resolution directive leaking into RUNTIME
+        // resolution, so it is fixed on the side that leaks it. `compile` reads
+        // NODE_ENV nowhere, and the artifact is byte-identical either way apart
+        // from the `/runtimeModule` hash, which differs run-to-run regardless
+        // (the bundle embeds `builtAt`). Pinned by
+        // dev-child-source-loader.pin.test.ts.
         const compileResult = spawnSync(
           process.execPath,
           [binPath, 'compile', '--output', artifactPath],
-          { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'development' } },
+          { stdio: 'inherit' },
         );
         if (compileResult.status !== 0) {
           printError('Compile failed — fix errors above before starting dev server');
@@ -294,6 +315,15 @@ export default class Dev extends Command {
       // flag below already opts the serve command into dev semantics,
       // and serve.ts will set NODE_ENV='development' internally before
       // any runtime modules are imported.
+      //
+      // The rule is not local to this spawn: it holds for EVERY child this
+      // command starts, and the compile spawn above states the second reason
+      // (a `paths`-carrying cwd redirecting CJS packages to `.ts` source).
+      // That spawn carried NODE_ENV='development' for months while this one
+      // did not, which is exactly how `os dev` came to fail on any example app
+      // whose tsconfig had gained a `paths` block. Adding a third child?
+      // Neither reason is about serve or compile in particular — leave the
+      // loader off.
       // ── Dev admin seeding (in-process) ──────────────────────────────
       // Seeding is performed IN-PROCESS by the runtime
       // (@objectstack/plugin-auth → maybeSeedDevAdmin) on an empty DB — no
