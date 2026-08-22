@@ -170,6 +170,35 @@ expect allow 'grep -rn "he said \"sed -i\" once" .claude/'
 expect block 'node -e "console.log(\"hi\")" > pkg/out.json'
 expect block 'sed -i "s/\"a\"/\"b\"/" pkg/x.ts'
 
+echo "== a shell COMMENT is text, not a command (#10570) =="
+CWD="$MAIN"
+# The measured false blocks: prose in a comment put a real `>` in operator position and the
+# next word was named as a write target. Nothing in either command writes anything.
+expect allow "$(printf '# rename foo -> bar\necho hello\n')"
+expect allow "$(printf '# sitting 1 landed; card stays open for sitting 2 -> pm:dispatched goes, pm:queue returns\ncurl -s https://example.com/a\ncurl -s https://example.com/b\n')"
+expect allow 'echo hi   # then; tee pkg/x.ts would write it down'
+expect allow "$(printf '# step one; then a -> b\n# 2> is not a redirect here either\ngit status\n')"
+# Recall is untouched: a real redirect on a LATER line still blocks, and so does one on the
+# SAME line ahead of an inline comment.
+expect block "$(printf '# rename foo -> bar\necho x > pkg/x.ts\n')"
+expect block 'echo x > pkg/x.ts   # write it down'
+expect block "$(printf '# a comment; with a separator\nsed -i s/a/b/ pkg/x.ts\n')"
+# Word start is the whole rule: these `#`s are not comments and must not change a verdict.
+expect block 'touch foo#bar'
+expect block 'rm -rf pkg/x.ts#old'
+expect allow 'curl -s "https://example.com/docs#frag"'
+expect allow "curl -s https://example.com/docs#a-real-redirect-would-be > /dev/null"
+expect allow "grep -n '#' README.md"
+expect allow "sed 's/#//' README.md"
+expect allow 'echo "# not a comment > pkg/x.ts"'
+# `${x#y}` / `${#arr[@]}` — a parameter expansion, not a comment. Swallowing the line here
+# would drop the redirect behind it, so the negative twin is the load-bearing case.
+expect allow 'echo ${x#pkg/} '
+expect block 'echo ${#TOK[@]} > pkg/x.ts'
+expect block 'echo ${x#a} > pkg/x.ts'
+# an escaped `\#` outside quotes is a literal, not a comment opener
+expect allow 'echo \# not a comment'
+
 echo "== shapes this guard deliberately does NOT claim (documented fail-open) =="
 CWD="$MAIN"
 expect allow "bash -c \"sed -i s/a/b/ $MAIN/pkg/x.ts\""
