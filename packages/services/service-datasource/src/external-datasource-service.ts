@@ -22,6 +22,7 @@ import type {
   SchemaValidationReport,
   IntrospectedSchema,
   IntrospectedTable,
+  IntrospectedColumn,
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import {
@@ -92,6 +93,63 @@ export interface ExternalDatasourceServiceConfig {
 
 /** Columns ObjectStack manages itself — never validated against the remote. */
 const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
+
+/**
+ * Read "is this column part of the remote primary key" across the TWO
+ * introspection contracts that meet at this service.
+ *
+ * `plugin.ts` hands the driver's `introspectSchema()` result to this service
+ * unmodified, and the driver does not speak the contract this file is typed
+ * against:
+ *
+ * | producer                                       | per-column     | table-level    |
+ * | ---------------------------------------------- | -------------- | -------------- |
+ * | `SqlDriver` (+ `SqliteWasmDriver`, which extends it) | `isPrimary`    | `primaryKeys`  |
+ * | `packages/spec` `IntrospectedColumn` (what this file's types say) | `primaryKey`   | —              |
+ *
+ * Measured against a live SQLite database at `368e7a06f`: the driver's column
+ * for a `primary key (id)` table carries `isPrimary: true` and the table
+ * carries `primaryKeys: ['id']`, while `primaryKey` is `undefined`. Reading
+ * only `col.primaryKey` therefore reads a key no in-tree driver ever sets, and
+ * the remote key is silently lost.
+ *
+ * This reads the UNION of all three signals rather than picking one:
+ *
+ *  - No in-tree producer uses `primaryKey: false` / `isPrimary: false` to
+ *    NEGATE a key another signal asserts — the falses are just "not a key",
+ *    written by producers that fill exactly one of the three. A precedence
+ *    chain would therefore drop a real key whenever the winning signal is the
+ *    one its producer left blank, which is the defect being repaired here.
+ *  - A producer that fills only `table.primaryKeys` (the shape a table-level
+ *    reader would naturally emit) is covered without needing a per-column flag,
+ *    and vice versa.
+ *
+ * When the per-column flag and the table-level list DISAGREE, the union takes
+ * both. That is deliberate: for a federated table, under-reporting the key
+ * costs the caller its addressing key, and no in-tree consumer treats a
+ * column's PK-ness as an exclusive claim. Note that no in-tree driver produces
+ * such a disagreement today — `SqlDriver` derives `isPrimary` FROM
+ * `primaryKeys`, so the two always agree, including where both are wrong (a
+ * SQLite composite key reports only its first column, because
+ * `introspectPrimaryKeys` filters `PRAGMA table_info` on `pk === 1` while
+ * SQLite numbers composite members `1, 2, ...`). That truncation is upstream
+ * of this seam and is not repaired here.
+ *
+ * Deliberately structural: the extra spellings are read off the value without
+ * widening any declared contract, because reconciling
+ * `packages/objectql/src/util.ts` with
+ * `packages/spec/src/contracts/schema-diff-service.ts` is a spec-owned change.
+ */
+function primaryKeyReader(table: IntrospectedTable): (col: IntrospectedColumn) => boolean {
+  const declared = (table as unknown as { primaryKeys?: unknown }).primaryKeys;
+  const listed = new Set(
+    Array.isArray(declared) ? declared.filter((n): n is string => typeof n === 'string') : [],
+  );
+  return (col) =>
+    col.primaryKey === true ||
+    (col as { isPrimary?: unknown }).isPrimary === true ||
+    listed.has(col.name);
+}
 
 /** Split a possibly schema-qualified name (`mart.fact_orders`). */
 function parseQualified(raw: string): { schema?: string; name: string } {
@@ -302,6 +360,12 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       dialect: schema.dialect,
       tables: Object.values(schema.tables).map((t) => {
         const { schema: s, name } = parseQualified(t.name);
+        // The introspection seam: a real driver spells this `isPrimary` /
+        // `primaryKeys`, never `primaryKey`. `ExternalCatalogSchema` defaults
+        // the key to `false`, so reading only `c.primaryKey` persisted a
+        // catalog in which EVERY column claimed not to be part of the remote
+        // key — including the ones that are.
+        const isPk = primaryKeyReader(t);
         return {
           remoteSchema: s,
           remoteName: name,
@@ -309,7 +373,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
             name: c.name,
             sqlType: c.type,
             nullable: c.nullable,
-            primaryKey: c.primaryKey,
+            primaryKey: isPk(c),
             suggestedFieldType: suggestFieldTypeForSqlType(c.type, schema.dialect as SqlDialect),
           })),
         };
