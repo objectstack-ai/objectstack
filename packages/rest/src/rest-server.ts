@@ -3950,9 +3950,24 @@ export class RestServer {
                         // [#6877] Both narrow the draft list to one package /
                         // one type; an array reached `listDrafts` untouched.
                         if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
+                        // [#11087] Read in the CALLER'S org scope, symmetric with
+                        // the save route (`saveMetaItem`'s `organizationId:
+                        // ctx?.tenantId`, below): a draft saved by a session
+                        // carrying an active org lands in that org's overlay
+                        // scope, and this route used to read with NO org —
+                        // `getOverlayRepo(null)` sees only env-wide
+                        // (`organization_id IS NULL`) rows, so every org-scoped
+                        // draft was invisible to the pending-changes surfaces
+                        // while single reads (which thread the ctx) and the
+                        // publisher (which resolves each draft's own scope)
+                        // saw it fine — the write-org/read-null split behind
+                        // cloud#1593. With the org threaded, the repository's
+                        // own `$or` contract surfaces BOTH the caller's org
+                        // overlay and env-wide drafts.
                         const result = await (p as any).listDrafts({
                             packageId: (req.query?.packageId as string | undefined) || undefined,
                             type: (req.query?.type as string | undefined) || undefined,
+                            organizationId: ctx?.tenantId ?? undefined,
                         });
                         res.json(result);
                     } catch (error: any) {
