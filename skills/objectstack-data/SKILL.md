@@ -91,7 +91,7 @@ Toggle system behaviours per object:
 |:-----|:--------|:--------|
 | `trackHistory` | `false` | Field-level audit trail |
 | `searchable` | `true` | Index records for global search |
-| `apiEnabled` | `true` | Expose via automatic REST / GraphQL APIs |
+| `apiEnabled` | `true` | Expose via automatic REST + MCP APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
 | `files` | `false` | Attachments & document management |
 | `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
