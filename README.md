@@ -172,8 +172,11 @@ as a human:
 claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
 ```
 
-Objects are exposed automatically; actions opt in with `ai: { exposed: true }`.
-See [Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp).
+The first tool call opens a browser to sign you in — each deployment is its own
+OAuth server, so there's no token to copy-paste. Headless setups (CI,
+containers) use an API key instead. Objects are exposed automatically; actions
+opt in with `ai: { exposed: true }`. See
+[Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp) for both flows.
 
 ## This repo
 
