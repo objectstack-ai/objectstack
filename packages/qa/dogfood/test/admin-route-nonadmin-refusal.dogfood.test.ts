@@ -258,7 +258,7 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
     'POST /api/v1/auth/admin/sso/verify-domain': {
       bucket: 'objectstack-gate',
       body: { providerId: 'refusal-probe-oidc' },
-      note: 'admin passes the gate and lands on 404 DOMAIN_VERIFICATION_FAILED while SSO is off',
+      note: 'admin passes the gate and lands on 400 DOMAIN_VERIFICATION_DISABLED while SSO is off (#10859 — it answered 404 DOMAIN_VERIFICATION_FAILED before, out of step with the sibling above)',
     },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────

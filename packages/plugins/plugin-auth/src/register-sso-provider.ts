@@ -457,11 +457,21 @@ export async function runVerifyDomain(
   if (resp.ok) {
     return { status: 200, body: { success: true, data: { providerId, verified: true, message: 'Domain ownership verified — this provider can now sign users in.' } } };
   }
+  // The feature is OFF for this env: `@better-auth/sso` never mounted the inner
+  // endpoint, so its `404` describes the INNER route. THIS route is mounted
+  // unconditionally, so passing that status through says "no such endpoint"
+  // about a resource that exists. Answer the sibling's answer instead — same
+  // condition, same code, same status (#10859). Before this, the branch
+  // rewrote only the `message` and let the code fall through to the generic
+  // default below, so the machine-readable field said "verification failed"
+  // while the human-readable one said "the feature is off"; a caller can only
+  // act on the first.
+  if (resp.status === 404 && !parsed?.code) {
+    return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
+  }
   // Friendlier copy for the expected failure modes.
   let message = parsed?.message || 'Domain verification failed';
-  if (resp.status === 404 && !parsed?.code) {
-    message = 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).';
-  } else if (parsed?.code === 'NO_PENDING_VERIFICATION') {
+  if (parsed?.code === 'NO_PENDING_VERIFICATION') {
     message = 'No pending verification — click “Request Domain Verification” first to get the DNS record.';
   } else if (parsed?.code === 'DOMAIN_VERIFICATION_FAILED') {
     message = 'DNS TXT record not found yet. Add the record shown when you requested verification, allow time for DNS to propagate, then retry.';
