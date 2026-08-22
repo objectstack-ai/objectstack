@@ -675,6 +675,7 @@ grep <branch>`),复升级时逐条**跑**一遍,零命中/变形的就地改写�
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
 | `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;轮报载体,本地枚举零 API,仅归因走查询) |
 | `scripts/pm/dispatch-gates.mjs` | 文件面 → 该跑的门禁族(派发令取数) |
+| `scripts/pm/git-history.mjs` | 窗口化 commit 计数:回答或 REFUSE —— 浅 clone 对窗口化 `git log`/`rev-list` 以 exit 0 无警告答错;`historyHorizon()` 是自答工具的只读谓词 |
 | `scripts/pm/os-regen-merge.sh` | 碰生成物 PR 的 merge 四步序(防静默吞并与锚点倒退) |
 | `scripts/pm/ensure-pm-labels.sh` | pm 标签词表的幂等一次性创建;退役车道刻意不在 ⛔ 不加回,理由与对象清理以脚本头为权威 |
 | `check:skill-frame-sync` / `-freshness` | 四维决策框架四份拷贝的同构与新鲜度 |

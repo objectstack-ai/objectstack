@@ -31,10 +31,8 @@ the script's own header is the authority on detail.
   就是改写裁决。上面那段引用即是一例:它是维护者的原话,一个字未动。
 - 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文为主),不要因本节而改写。
 
-The rules are split per channel because a merged rule was measured to fail: an agent
-holding one instruction that claimed explanatory PR text for Chinese and another
-demanding English produced half-Chinese, half-English PR bodies on the same day. One
-rule per channel, no overlap.
+The rules are split per channel because a merged rule was measured to fail (it produced
+half-Chinese, half-English PR bodies in one day). One rule per channel, no overlap.
 
 ---
 
@@ -216,9 +214,8 @@ every linked worktree pushes onto and pops off **one shared LIFO stack**. Two ag
 stashing at the same time swap entries — your `pop` restores the other agent's changes,
 your own work stays on the stack for them to take, and **`pop` reports success**; the
 only symptom is another agent's files in your `git status`, after which a `git add -A`
-commits their half-finished work into your PR. It has really happened to two parallel
-agents mid reverse-verification, both changesets recoverable only as unreachable
-commits. A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`; details and the
+commits their half-finished work into your PR. It has really happened, mid reverse-
+verification. A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`; details and the
 `OS_ALLOW_STASH=1` escape in its header, self-test alongside) blocks the mutating forms
 — including `stash@{N}`, a *position* in a stack you don't own — and allows
 `list`/`show`/`create` and `apply`/`store` pinned to a literal hex object id. It fails
@@ -259,6 +256,12 @@ real PR had 157 such deletions staged, caught only by the `MM`). Restore with
 stage it at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree
 only — porcelain shows a lone unstaged `M`, not `MM` — so prefer it when standing
 another ref's version up for a counterfactual.
+
+**A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
+`scripts/pm/git-history.mjs` — answer, or REFUSE.** A shallow clone answers windowed
+`git log`/`rev-list` questions from truncated history at exit 0 with no warning; the tool
+proves the window is covered first. `historyHorizon()` is the read-only predicate for
+tools that answer their own question.
 
 **Claim the issue BEFORE you write any code.** Assign it to yourself
 (`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
@@ -320,8 +323,7 @@ Even inside your own worktree, operate defensively:
    `claude/issue-<n>-<slug>`. The issue number in the name is what makes in-flight work
    *discoverable* — `git ls-remote --heads origin | grep issue-<n>` is a one-command
    pre-check, and the Duplicate Fix Guard workflow warns on fix PRs whose branch names
-   no declared issue. A duplicated implementation once stayed invisible partly because
-   one branch carried the issue number and the other didn't.
+   no declared issue (how one implementation once got duplicated).
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
    force-push can clobber a parallel agent's work; `main` is shared — land everything
    via PR.
@@ -658,8 +660,7 @@ their output is current; the wrapper reports that each run rather than staying s
 
 Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
 working in its domain — browse the directory, never a hand-written list here (two
-such lists drifted stale as skills landed; a reader who trusts a list cannot see
-what it is missing):
+such lists drifted stale as skills landed):
 
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
@@ -897,14 +898,13 @@ legal**: `AutomationEngine.getUnknownNodeTypeAudit()` reads the executor registr
 every call, records nothing, and is correct.
 
 **Why this is a rule and not a preference.** One showcase cold start produced three
-instances in three unrelated subsystems, written by three people at three times: an
-auth plugin froze an `undefined` cache handle into its config for the life of the
-process (the printed warning sent operators to provision Redis for a problem they did
-not have); the automation service asserted eight flows "will fail at execution time"
-0.8s before their executor registered — indistinguishable from a deployment that
-genuinely lacked the plugin; and the query engine persisted a schema attestation the
-same boot was still contradicting, so the next restart rejected its predecessor's
-data.
+instances in three unrelated subsystems: an auth plugin froze an `undefined` cache
+handle into its config for the life of the process (the printed warning sent operators
+to provision Redis for a problem they did not have); the automation service asserted
+eight flows "will fail at execution time" 0.8s before their executor registered —
+indistinguishable from a deployment that genuinely lacked the plugin; and the query
+engine persisted a schema attestation the same boot was still contradicting, so the
+next restart rejected its predecessor's data.
 
 **The three cures, in preference order:**
 
