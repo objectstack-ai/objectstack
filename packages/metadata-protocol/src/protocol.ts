@@ -4480,8 +4480,9 @@ export class ObjectStackProtocolImplementation implements
         // caller states one the promote IS package-scoped while these probes
         // stay package-agnostic, and the two can then ask different questions.
         // Behaviour is deliberately UNCHANGED here: closing that asymmetry is
-        // its own fix with its own fixture, filed separately rather than ridden
-        // in on a comment repair. What is corrected is the claim, so the next
+        // its own fix with its own fixture and its own precedence ruling
+        // (ADR-0005 overlay order vs the ADR-0048 package key), filed as #11003
+        // rather than ridden in on a comment repair. What is corrected is the claim, so the next
         // reader does not conclude the per-item door still cannot name one.
         const inOrg = await this.engine.findOne('sys_metadata', {
             where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
