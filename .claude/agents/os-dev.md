@@ -269,12 +269,15 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   缺口,⛔ 不自行扩写、不自行抬预算 —— 预算是 PM 的,抬它是维护者裁决。
 - **`skip-changeset` 标签按仓库分流——先认清目标仓库有没有这个机制。** 仅含 tests/
   workflow/`.claude/` 的 PR 不发布任何东西,但「不发布」的声明方式因仓库而异。**本仓库**:
-  标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一建立就打;**先读回、再写并集**——标
-  签写入是整组 PUT(裸集合会抹掉机器人刚打的标签,CI 的写入也可能抹掉你的;changeset 门的
-  首轮可能与你的写入竞态),等机器人稳定后读一次、把清单引进报告:关闭此步骤的是读回,不
-  是写入;口头声明不算打上。**objectui:该标签不存在**——tests/docs-only 的声明方式是空
-  frontmatter 的 changeset;⛔ 永不在那边创建或施加该标签——一次 label add 会静默铸出一
-  个仓库标签,被下一个 agent 读成真实机制。
+  标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一建立就打;写入走**加法端点**——不碰
+  已有标签、无并集可算、无读写窗口(实测从 dev 座位可达;权限集已放行此拼写,别改写):
+  `curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/<n>/labels -H "Authorization: Bearer $GITHUB_TOKEN" -d '{"labels":["skip-changeset"]}'`
+  加法写必要但**不充分**:实测 size-labeler 的整组 PUT 曾在 ~1 秒内抹掉一次正确的加法写。
+  所以收尾仍是**读回**,且在机器人稳定之后——读一次、把清单引进报告;标签消失读作被抹,
+  **重新加上**,不是你的错。仅当加法调用被拒才用回退:读→并集→整组写,**申报**用了回退
+  并报告其读回。关闭此步骤的是读回,不是写入;口头声明不算打上。**objectui:该标签不存
+  在**——tests/docs-only 的声明方式是空 frontmatter 的 changeset;⛔ 永不在那边创建或施
+  加该标签——一次 label add 会静默铸出一个仓库标签,被下一个 agent 读成真实机制。
 - **报告在 draft PR 时点交付 —— CI 收敛等待归 PM,不归你**(维护者 2026-08-10 拍板)。
   分支一推上、draft PR 一开出,立刻交报告;门禁状态如实记录 —— `in_progress` 是诚实
   值。⛔ draft PR 开出后永不 sleep、定时等待或空转轮询 CI(实测:空转轮询烧掉的恰是一个
