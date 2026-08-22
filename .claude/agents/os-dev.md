@@ -29,7 +29,8 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 
 1. **Worktree-first。** 任何编辑之前:
    `git worktree add ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`,然后
-   `cd` 进去 `pnpm install`。永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时
+   `cd` 进去 `pnpm install`,并在动笔前记下基点 `BASE=$(git rev-parse HEAD)`(「标准条
+   款」家族规则的锚)。永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时
    **一仓一 worktree**。**建好分支后的第一个动作:先把空分支
    推上去**(任何编辑之前 `git push -u origin <branch>`)——它既是认领评论所指分支的落地
    标记,又是第一分钟的写路由探针:容器凭据是不对称的,等门禁全绿才发现推不上去就太晚了。
@@ -84,14 +85,12 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 5. **永不按进程名杀**(`pkill -f` 能把并行 agent 的运行一起带走)。记下你启动的 PID,只
    对那个 PID 操作。
 6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
-   ⛔ 永不把验证挂在后台 watcher 上然后停轮(禁令与两种合法终态见「干净收尾」)。唯一合
-   法的长等待是规则 1 的锁排队——主动、在轮内(规则 7),从不是停轮的理由。
+   ⛔ 永不把验证挂在后台 watcher 上然后停轮(禁令与两种合法终态见「干净收尾」)。
    **平台事实(2026-08-20 实测):容器把前台命令钉在 ~10 分钟上限,超时 SIGTERM 杀掉
    (`exit 143`,日志常常连一个发现都没写出)。** 这不改前台纪律,它划定前台里放什么:
    重活走规则 1 的锁 —— 串行化之后不再与并行 build 抢 CPU,争用下顶到上限的命令轻载只要
    ~2 分钟;仓级扫描归 CI(见「本地验证范围」);消融/变异脚本自带还原 trap(硬线在「标
-   准条款」的 ablation 条)。一次 SIGTERM 实测正落在消融中途,把变异树留给了之后的每一
-   次测量。
+   准条款」的 ablation 条)。
 7. **排队不是停摆 —— 在轮内主动等。** 持锁的是你不拥有的进程,它的完成不会以任何方式唤
    醒你:⛔ 永不为「等锁」结束一轮(实测:这么做的每个 agent 都无通知地停摆,赔进一轮探
    活)。循环:拿到 99 就把间隔花在无锁工作上(写测试、changeset、PR 正文、包内
@@ -186,11 +185,16 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   械化:`bash scripts/pm/os-regen-merge.sh`)。姊妹陷阱:`gen:schema` 的清理会抹掉
   `gen:openapi` 的产物(rest 里冒出假 5xx 失败);用
   `pnpm --filter @objectstack/spec gen:openapi` 恢复。
-- **⛔ 取出修复用临时 commit 或 patch 文件——永不 `git stash`。** worktree 隔离文件与
-  HEAD,不隔离 `refs/stash`:所有 worktree 共享一个 LIFO 栈,两个 agent 同时 stash 会互换
-  条目而 `pop` 照样报成功(机制与 hook 见 AGENTS.md)。安全替代,都在自己 worktree 内:
-  `git commit -am wip` 再 `git reset --soft HEAD~1`;
-  `git diff > /tmp/wip.patch && git checkout -- <paths>` 再 `git apply /tmp/wip.patch`。
+- **家族规则:`git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切 —— refs(含
+  `refs/remotes/*`)、stash 栈、config、hooks —— 全 worktree 共享;配方只有不点名共享态
+  才 worktree-safe。家族同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他
+  人文件。** ⛔ 永不 `git stash`(共享一个 LIFO 栈,两个 agent 同时 stash 互换条目;机
+  制与 hook 见 AGENTS.md);取出修复用临时 commit 或 patch 文件,都在自己 worktree 内:
+  `git commit -am wip` 再 `git reset --soft HEAD~1`;`git diff > /tmp/wip.patch &&
+  git checkout -- <paths>` 再 `git apply /tmp/wip.patch`。⛔ `origin/main` 是共享指针,
+  别的 agent 一次 fetch 就推进它:`git reset --soft origin/main` 把你分支点之后**他人
+  已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮住)。
+  「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑,
   `git checkout origin/main -- <path>` 不留任何恢复点 —— 工作树曾是唯一副本,而丢弃它是

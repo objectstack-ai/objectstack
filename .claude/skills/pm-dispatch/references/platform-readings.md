@@ -11,9 +11,8 @@
   405 `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一致(objectos 2026-08-18 起有队列,hotcrm 只有 ruleset)⇒ 新仓落地约定靠实测确立,⛔ 不由缺席推断(2026-08-20 实测)。
 - 判「在不在合并队列」看 timeline 事件 `added_to_merge_queue`(REST
   `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 ——
-  入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支读法
-  (`git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`)正命中是「已
-  入队」的充分证据,反向推断作废 —— 队列满载时 PR 已入队而分支尚未建出。
+  入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支(ls-remote 拼写见
+  「零成本等价物」)正命中即已入队,缺席不作反证 —— 队列满载时分支尚未建出。
 - **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged`
   是落地不是被踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查
@@ -93,6 +92,7 @@
   更硬判据是查声明式(`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
   (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`;
   **容器里没有 `gh`**(实测:`command -v gh` 退出 1、`/usr/bin/gh` 与 `/usr/local/bin/gh` 都不存在),于是 `gh … || echo "none"` 是个**不可证伪的否定** —— 127「命令不存在」与「grep 没命中」在输出上同值,实测五张 PR 上跑五次「无重叠文件」全部打印安心结论、一次都没检查,险些作为已核验声明进 PR 正文(与隔管道读退出码同类:仪器对两种结局回同一个值,重跑多少次都不自相矛盾)。安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态;⛔ 一般规则:**任何可能不存在的命令上挂 `|| 回退` 都是不可证伪的否定**,PR / 查重类核验改走 MCP GitHub 工具或 git。
+- **`refs/remotes/origin/main` 全 worktree 共享,别的 agent 一次 fetch 就推进它**(worktree 只隔离工作树与 HEAD,`.git/` 下 refs、stash 栈、config、hooks 皆共享):`git reset --soft origin/main` 把你分支点之后**他人已合并的文件**整批 stage 成你的改动 —— 报成功、唯一症状是 `git status` 里的他人文件(实测一次 stage 进四个 agent 的合并文件,commit 前才逮住);「我从哪开始」的 reset/diff/log/rebase 一律锚建分支时记录的 base sha(`BASE=$(git rev-parse HEAD)`),⛔ 永不锚 `origin/main`。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上
   缺一个已合修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即是。
 - **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的
