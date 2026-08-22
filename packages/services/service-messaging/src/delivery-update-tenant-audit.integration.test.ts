@@ -11,6 +11,13 @@
  * | `SqlHttpOutbox.ack`             | dispatcher tick    | global sweep        |
  * | `SqlHttpOutbox.redeliver`       | POST /api/v1/…     | request-contextual  |
  *
+ * [#11009] `redeliver`'s reset now rides the PREDICATE path (`multi: true`,
+ * `driver.updateMany`) so its terminal-status compare-and-set is actually
+ * evaluated — the by-id path silently discarded it. Its audit op is therefore
+ * `updateMany`, and its spy below records `SqlDriver.updateMany`; the
+ * tenant-classification contract this file pins (#10740) is unchanged —
+ * threaded `tenantId`, never `bypassTenantAudit`.
+ *
  * The `ack` pair is declared global (`dispatcherAckOptions`, warrant in
  * `outbox-dispatcher-scope.ts`). `redeliver` is NOT: it is served to any
  * authenticated user, so it threads the caller's tenant instead. ⛔ A
@@ -67,10 +74,16 @@ let driver: SqlDriver;
 let warns: Array<{ msg: string; meta: any }>;
 /** Every `options` bag that reached `SqlDriver.update` — the `update` op only. */
 let driverUpdates: Array<{ object: string; id: unknown; options: any }>;
+/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009. */
+let driverUpdateManys: Array<{ object: string; where: unknown; options: any }>;
 
 /** The audit line for the SINGLE-RECORD op, matched on object + op. */
 const auditedUpdate = (object: string): boolean =>
     warns.some((w) => w.msg.includes(`[tenant-audit] update on tenant-scoped object "${object}"`));
+
+/** The audit line for the PREDICATE op — `redeliver`'s write since #11009. */
+const auditedUpdateMany = (object: string): boolean =>
+    warns.some((w) => w.msg.includes(`[tenant-audit] updateMany on tenant-scoped object "${object}"`));
 
 beforeEach(async () => {
     // Read LIVE by `isMultiTenantMode()` (#5262), so this really arms the gate.
@@ -84,6 +97,7 @@ beforeEach(async () => {
     });
     warns = [];
     driverUpdates = [];
+    driverUpdateManys = [];
     (driver as any).logger = { warn: (msg: string, meta: any) => warns.push({ msg, meta }) };
 
     // Spy on the driver's by-id UPDATE — the method that calls
@@ -95,6 +109,14 @@ beforeEach(async () => {
     (driver as any).update = async (object: string, id: unknown, data: any, options: any) => {
         driverUpdates.push({ object, id, options });
         return realUpdate(object, id, data, options);
+    };
+    // [#11009] The same reading for the predicate op: `redeliver`'s reset now
+    // reaches the driver through `updateMany`, and the options bag IT received
+    // is the only truthful record of what that write was scoped by.
+    const realUpdateMany = (driver as any).updateMany.bind(driver);
+    (driver as any).updateMany = async (object: string, query: any, data: any, options: any) => {
+        driverUpdateManys.push({ object, where: query?.where, options });
+        return realUpdateMany(object, query, data, options);
     };
 
     engine = new ObjectQL();
@@ -134,6 +156,23 @@ async function controlUnscopedUpdate(object: string, existingId: string): Promis
         auditedUpdate(object),
         `positive control failed: an unscoped by-id update on ${object} produced no [tenant-audit] `
             + 'line, so every "no finding" assertion in this file is vacuous',
+    ).toBe(true);
+}
+
+/**
+ * The positive control for the `updateMany` op — `redeliver`'s op since
+ * #11009. An unscoped predicate write with no bypass MUST produce the
+ * `updateMany` audit line, or the silence assertions on that op are vacuous.
+ * Run AFTER the assertion it guards (one warning per object+op key).
+ */
+async function controlUnscopedUpdateMany(object: string, existingId: string): Promise<void> {
+    // Scalar id + a second predicate key + multi — the #11009 predicate-path
+    // spelling, exactly the shape `redeliver` writes.
+    await engine.update(object, { attempts: 98 }, { where: { id: existingId, attempts: { $gte: 0 } }, multi: true } as any);
+    expect(
+        auditedUpdateMany(object),
+        `positive control failed: an unscoped predicate update on ${object} produced no `
+            + '[tenant-audit] updateMany line, so the silence assertions on that op are vacuous',
     ).toBe(true);
 }
 
@@ -264,8 +303,13 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         const replayed = await outbox.redeliver('h_a', { tenantId: 'org_a' });
         expect(replayed.status).toBe('pending');
 
-        const writes = driverUpdates.filter((u) => u.object === SYS_HTTP_DELIVERY);
+        // [#11009] The reset rides the predicate path now, so the truthful
+        // record of its scoping is the options `SqlDriver.updateMany`
+        // received — and the write must carry its full compare-and-set
+        // predicate, id AND terminal status.
+        const writes = driverUpdateManys.filter((u) => u.object === SYS_HTTP_DELIVERY);
         expect(writes).toHaveLength(1);
+        expect(writes[0].where).toMatchObject({ id: 'h_a', status: { $in: ['success', 'failed', 'dead'] } });
         // ⛔ The forbidden implementation, named: a bypass here would silence
         // the audit for an authenticated user's unscoped write.
         expect(writes[0].options?.bypassTenantAudit).toBeUndefined();
@@ -273,9 +317,9 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         expect(writes[0].options?.tenantId).toBe('org_a');
         // The line is absent BECAUSE the write is scoped — the two assertions
         // above are what make this one mean something.
-        expect(auditedUpdate(SYS_HTTP_DELIVERY)).toBe(false);
+        expect(auditedUpdateMany(SYS_HTTP_DELIVERY)).toBe(false);
 
-        await controlUnscopedUpdate(SYS_HTTP_DELIVERY, 'h_a');
+        await controlUnscopedUpdateMany(SYS_HTTP_DELIVERY, 'h_a');
     });
 
     it('refuses a cross-tenant redeliver — the row is not found, not merely forbidden', async () => {
@@ -294,6 +338,7 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         const [row] = (await engine.find(SYS_HTTP_DELIVERY, { where: {} })) as any[];
         expect(`${row.status}:${row.attempts}`).toBe('dead:3');
         expect(driverUpdates.filter((u) => u.object === SYS_HTTP_DELIVERY)).toHaveLength(0);
+        expect(driverUpdateManys.filter((u) => u.object === SYS_HTTP_DELIVERY)).toHaveLength(0);
     });
 
     it('still works: an in-tenant redeliver succeeds while a foreign one does not', async () => {
@@ -324,9 +369,13 @@ describe('redeliver — the request-reachable site is SCOPED, never bypassed', (
         const outbox = new SqlHttpOutbox(engine as any, { partitionCount: 1 });
         await outbox.redeliver('h_a', { tenantId: undefined });
 
-        const writes = driverUpdates.filter((u) => u.object === SYS_HTTP_DELIVERY);
+        // [#11009] `redeliver`'s op is `updateMany` now; the audit line moves
+        // with it. The dispatcher sweeps on this object carry
+        // `bypassTenantAudit` and return before the throttle, so they cannot
+        // have consumed this op's one warning.
+        const writes = driverUpdateManys.filter((u) => u.object === SYS_HTTP_DELIVERY);
         expect(writes).toHaveLength(1);
         expect(writes[0].options?.bypassTenantAudit).toBeUndefined();
-        expect(auditedUpdate(SYS_HTTP_DELIVERY)).toBe(true);
+        expect(auditedUpdateMany(SYS_HTTP_DELIVERY)).toBe(true);
     });
 });

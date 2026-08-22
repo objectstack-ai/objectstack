@@ -9537,7 +9537,14 @@ export class ObjectQL implements IObjectQLEngine {
        // Keyed on the SAME falsy-`id` test the #2982 AST seed above uses, so
        // seed, ladder and branch cannot disagree.
        const isByIdWrite = Boolean(id);
-       const isPredicatePath = !isByIdWrite && Boolean(options?.multi) && typeof driver.updateMany === 'function';
+       // [#11009] Keyed on the LADDER's verdict, not on `options?.multi`: the
+       // dispatch can now return `reject` for a call that carries a truthy
+       // `multi` (a scalar `data.id` beside an unhonourable `where`
+       // predicate), and branching on the raw flag would silently promote
+       // that refusal into a bulk write. For every pre-#11009 input the two
+       // spellings agree (`kind === 'multi'` ⇔ `options.multi` truthy when
+       // not by-id), so this narrows nothing else.
+       const isPredicatePath = !isByIdWrite && dispatch.kind === 'multi' && typeof driver.updateMany === 'function';
        if (!isByIdWrite && !isPredicatePath) {
            // [#5480] The `reject` verdict of resolveEngineUpdateDispatch. It
            // used to be re-asked AFTER the before phase, because a hook could
@@ -9545,7 +9552,15 @@ export class ObjectQL implements IObjectQLEngine {
            // the ladder resolved first there is no such conversion, so the
            // refusal lands where it costs least — before any handler runs and
            // before anything is read.
-           throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
+           //
+           // [#11009] The dispatch's OWN message: the unhonoured-predicate
+           // refusal names the `where` keys the by-id path would have
+           // dropped, while the classic no-id-no-multi shape keeps
+           // `ENGINE_UPDATE_REJECT_MESSAGE` verbatim. The fallback arm covers
+           // the one non-reject way in here — a `multi` verdict against a
+           // driver with no `updateMany`, which stays the generic refusal it
+           // has always been.
+           throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_UPDATE_REJECT_MESSAGE);
        }
 
        // [#6966] The ladder verdict, stated on the contract. Bound HERE and
@@ -11159,12 +11174,20 @@ export class ObjectQL implements IObjectQLEngine {
       // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
       // test the #2982 AST seed above uses.
       const isByIdDelete = Boolean(id);
-      const isPredicatePath = !isByIdDelete && Boolean(options?.multi) && typeof driver.deleteMany === 'function';
+      // [#11009] Keyed on the LADDER's verdict, not on `options?.multi` — the
+      // update twin says why; for every pre-#11009 input the two spellings
+      // agree.
+      const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
       if (!isByIdDelete && !isPredicatePath) {
         // [#4550] The `reject` verdict of resolveEngineDeleteDispatch. It used
         // to be re-asked after the before phase because a hook could still bind
         // the id; with the ladder resolved first there is no such conversion.
-        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
+        //
+        // [#11009] The dispatch's OWN message — the unhonoured-predicate
+        // refusal names the dropped `where` keys; the classic shape keeps
+        // `ENGINE_DELETE_REJECT_MESSAGE`; the fallback arm is a `multi`
+        // verdict against a driver with no `deleteMany`.
+        throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_DELETE_REJECT_MESSAGE);
       }
 
       // [#6966] See update()'s twin — same rule, same single binding point.

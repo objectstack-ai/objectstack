@@ -26,6 +26,9 @@ export * from './objects/index.js';
 // See `scripts/check-engine-double-contract.mjs` — the gate over the doubles.
 export * from './engine-delete-dispatch.js';
 export * from './engine-update-dispatch.js';
+// [#11009] The refusal both write dispatches share: a by-id call whose
+// `where` carries keys the by-id path would silently discard.
+export * from './engine-dispatch-unhonoured-predicate.js';
 
 // [#4513] The audit-family GOVERNANCE table (#4447) and its normalizer, sunk
 // here for the same reason and by the same criterion as the two dispatch

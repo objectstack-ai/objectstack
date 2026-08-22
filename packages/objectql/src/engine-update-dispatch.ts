@@ -21,6 +21,11 @@ export {
   resolveEngineUpdateDispatch,
   assertEngineUpdateDispatch,
   ENGINE_UPDATE_DISPATCH_CASES,
+  // [#11009] The unhonoured-by-id-predicate refusal, shared by BOTH write
+  // dispatches (the delete twin imports the same two symbols); re-exported
+  // once, here, so `objectql` callers can quote the refusal verbatim.
+  engineByIdUnhonouredPredicateMessage,
+  unhonouredByIdPredicateKeys,
 } from '@objectstack/metadata-core';
 
 export type {

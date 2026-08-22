@@ -176,6 +176,20 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         // [#8069] Refuse BEFORE any mutation — a refused redelivery must leave
         // the row byte-identical, including its `dead` status and its reason.
         await assertRedeliverAllowed({ ...row }, options.guard);
+        // [#11009] The compare-and-set half of the check-then-act, mirroring
+        // `SqlHttpOutbox.redeliver`'s predicate-path write: the guard above is
+        // awaited, so a dispatcher tick can claim this row `in_flight` between
+        // the read and this mutation. A row no longer terminal is NOT reset —
+        // the same refusal (and the same code) the SQL store reports when its
+        // predicate write matches zero rows. Without this, the two
+        // implementations of one `IHttpOutbox.redeliver` contract would
+        // disagree on exactly the race the contract exists to close.
+        if (row.status !== 'success' && row.status !== 'failed' && row.status !== 'dead') {
+            throw new HttpRedeliverError(
+                `Delivery row '${id}' state changed during redeliver`,
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
         const now = Date.now();
         row.status = 'pending';
         row.attempts = 0;

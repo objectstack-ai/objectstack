@@ -5,6 +5,7 @@ import {
   ENGINE_DELETE_DISPATCH_CASES,
   ENGINE_DELETE_REJECT_MESSAGE,
   assertEngineDeleteDispatch,
+  resolveEngineDeleteDispatch,
 } from '@objectstack/objectql';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
@@ -276,7 +277,13 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
       if (c.expect === 'reject') {
         // Not merely "throws": the same message a real server answers with, so
         // the fake's rejection surface cannot drift from the producer's.
-        await expect(call).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
+        // [#11009] `reject` no longer has one spelling — the unhonoured-
+        // predicate refusal composes its message from the dropped keys — so
+        // the expected words are read from the PREDICATE itself, per case,
+        // instead of from the one classic constant.
+        const predicted = resolveEngineDeleteDispatch(c.options);
+        if (predicted.kind !== 'reject') throw new Error(`case-set drift: ${_what} is not a reject`);
+        await expect(call).rejects.toThrow(predicted.message);
         // …and a refused call must not have deleted anything on its way out.
         expect(engine.tables.get('sys_job_queue')).toHaveLength(1);
         return;
