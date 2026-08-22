@@ -4500,7 +4500,16 @@ export class ObjectQL implements IObjectQLEngine {
           this.logger.debug('Registering kinds from manifest', { id, kindCount: manifest.contributes.kinds.length });
           for (const kind of manifest.contributes.kinds) {
             this._registry.registerKind(kind);
-            this.logger.debug('Registered Kind', { kind: kind.name || kind.type, from: id });
+            // [#10729] Name the kind by its declared `id`. `contributes.kinds`
+            // items are `{ id, globs, description? }` (`manifest.zod.ts`) and
+            // `registerKind` keys the item on `id` (`registerItem('kind', kind, 'id')`),
+            // so `id` is BOTH the only identifying field the schema declares and the
+            // exact key the item is stored under — a reader of this line can look the
+            // item straight back up. The previous `kind.name || kind.type` reached for
+            // two fields NEITHER shape declares, so every conforming manifest logged
+            // `kind: undefined`. Do not re-add those as a fallback: reading undeclared
+            // aliases here is the consumer-side tolerance Prime Directive #12 rejects.
+            this.logger.debug('Registered Kind', { kind: kind.id, from: id });
           }
        }
 
