@@ -179,9 +179,15 @@ function seed(engine: ReturnType<typeof makeEngine>) {
   engine._tables['sys_approval_action'] = [];
 }
 
-/** The `$or` arms of the last pushed-down request predicate. */
+/**
+ * The `$or` arms of the last pushed-down request predicate.
+ *
+ * Indexed from the end by hand rather than with `Array.prototype.at`: this
+ * package compiles against `lib: ES2021`, where `at` does not exist.
+ */
 function lastFreeTextArms(engine: ReturnType<typeof makeEngine>): any[] {
-  const where = engine._requestWheres.filter(w => w && '$or' in w).at(-1);
+  const pushed = engine._requestWheres.filter(w => w && '$or' in w);
+  const where = pushed.length > 0 ? pushed[pushed.length - 1] : undefined;
   return (where?.$or ?? []) as any[];
 }
 
