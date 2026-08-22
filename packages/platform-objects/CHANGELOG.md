@@ -1,5 +1,215 @@
 # @objectstack/platform-objects
 
+## 17.2.0
+
+### Minor Changes
+
+- dccbcec: Declare an ADR-0057 lifecycle policy on `sys_session` (#7826): the object is
+  now `class: 'transient'` with
+  `ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } }`.
+  
+  **Ordinary expired sessions are now reaped** by the LifecycleService Reaper one
+  day after `expires_at` passes — the same window `sys_device_code` uses. Until
+  now nothing swept this table: better-auth's only expiry-driven collector fires
+  inside `GET /get-session`, so it can never reach a row whose cookie is never
+  presented again, and an abandoned session was effectively immortal.
+  
+  **Revoked tombstones are deliberately spared.** The `onlyWhen` filter (#10165)
+  is load-bearing, not defensive: the #7732 revocation write backdates
+  `expires_at` to `now - 1000` and clears nothing, so an ADR-0069 D4 audit
+  tombstone looks *maximally* expired — a TTL on `expires_at` without the filter
+  would reap the audit trail first and hardest.
+  
+  Deliberate, known consequence: because tombstones are spared entirely,
+  `sys_session` still grows without bound on the revoked arm. How long a
+  revoked-session tombstone should be retained is compliance / audit-trail
+  policy and is not settled here.
+
+### Patch Changes
+
+- 8f04d9a: Correct a false vendor claim in the `organization/add-member` source comments:
+  `teamId` has **no** active-team fallback (#10532). Two comments — the
+  `sys_member` `add_member` action metadata (the origin) and the
+  `organization-add-member.ts` module header that cited it as authority — stated
+  that "organizationId/teamId default to the caller's active org/team when
+  omitted". Measured on the installed better-auth 1.7.1
+  (`dist/plugins/organization/routes/crud-members.mjs`, inside `addMember`), only
+  the organization half is true:
+  
+  ```js
+  const orgId = ctx.body.organizationId || session?.session.activeOrganizationId;
+  const teamId = "teamId" in ctx.body ? ctx.body.teamId : void 0;
+  ```
+  
+  `activeOrganizationId` is read 8 times in that module; `activeTeamId`, never. An
+  omitted `teamId` therefore stays `undefined` and the member joins no team — every
+  `if (teamId)` branch (team lookup, `TEAM_NOT_FOUND`, per-team limit) is skipped.
+  
+  No runtime behaviour changes, and no deployment was ever misled: the `add_member`
+  action's `params` list carries no `teamId`, so the toolbar never sent one and the
+  claim was never exercised. What the comment did mislead was the next reader of
+  the mount, which cited it as the justification for forwarding request headers —
+  forwarding buys the organization default only. Forwarding `teamId` itself remains
+  correct: pass it and it works.
+  
+  The asymmetry the docs now publish is held by a new pin,
+  `organization-add-member-team-fallback.test.ts`, which reads the fact out of the
+  installed vendor artifact (not out of our own comments) so that a future
+  better-auth bump *adding* an active-team fallback reddens instead of silently
+  putting the docs out of date.
+- 02b3b07: Point every runtime-emitted documentation URL at the canonical host, and retarget the
+  metadata-protection `docsUrl` at a page that actually exists.
+  
+  Two defects, one string. The host half: `docs.objectstack.ai` is an alias that redirects
+  to `https://objectstack.ai` path-preservingly, so nothing here was a broken link — it was
+  the unratified spelling sitting in the places a user copies from. The CLI's spec-version
+  advisory, the Setup and Studio in-app overview pages (English and Chinese alike), and a
+  showcase demo action now all name the canonical host.
+  
+  The path half is the real fix. All 29 `protection.docsUrl` values on the platform's
+  system objects and apps pointed at `/adr/0010-metadata-protection`, and `/adr/...` is not
+  a route on any host: the docs site mounts `content/docs` under `/docs`, `docs/adr/` is
+  not published, and no redirect source lives outside the `/docs` space. The slug was wrong
+  too — the record is `0010-metadata-protection-model.md`. Studio renders this URL as a
+  link in the lock banner, so an operator asking why an item is locked was being sent
+  nowhere. They now point at `https://objectstack.ai/docs/references/shared/protection`,
+  the published reference for the very schema that carries the field.
+- 0ab81d1: fix(metadata-protocol): the seed/API tenancy repair now records each applied run in `sys_migration`, so "was my data rewritten, and when" survives the container being replaced (#9451)
+  
+  `backfillSeedTenancy` (#8686) is the platform's only row-rewriting repair that
+  runs unattended: it stamps `organization_id` onto business rows, merges one
+  autonumber counter and deletes another. It persisted nothing about having done
+  so. The only evidence was one `logger.info` line, and the healthy path is silent
+  by design — so once that line had scrolled, a silent boot and a boot that
+  rewrote data were indistinguishable. The operator most likely to need the record
+  (a fresh install, repaired during the first admin sign-up, where nobody is
+  reading server stdout) was the one least likely to have captured it.
+  
+  An `applied` run now writes one row into the **existing** `sys_migration`
+  deployment ledger — the face that already answers "has this deployment run this
+  data migration", and is already written at boot by the ADR-0104 attestation
+  path:
+  
+  ```sql
+  SELECT last_run_at, advisory, details FROM sys_migration
+  WHERE id = 'seed-tenancy-backfill';
+  ```
+  
+  `details` carries the run's status, the objects stamped, the organization
+  adopted and the identifiers that could not be adopted because they were already
+  minted on both sides of the split.
+  
+  Deliberately narrow:
+  
+  - **`applied` only.** `no-split` stays silent — a row per healthy boot would be
+    a ledger of non-events.
+  - **`verified_at: null`, `blocking: 0`, always.** This repair runs no self-check
+    and gates no consumer, so it claims no certificate; the collision count goes
+    to `advisory`, which never gates. Every reader of this ledger looks a row up
+    by `id`, so the new id cannot reach another migration's gate.
+  - **Best-effort, and loud when it fails.** A boot is never failed by
+    bookkeeping (2026-08-15 ruling), so a failed receipt write is reported at
+    `error` — naming that the rows *were* rewritten, that the repair is not
+    retried, and what to do — rather than rethrown.
+  - **No new schema, no new authoring surface, no new dependency.** The row is
+    written against the `@objectstack/spec/system` contract that
+    `metadata-protocol` already depends on.
+- 266654d: Show 2FA backup codes on the surface a user can actually reach — the reachable
+  regeneration path was a lockout (#10681).
+  
+  `sys_user.generate_backup_codes` is mounted at Setup → People & Organization →
+  Users (Security tab, via `record:quick_actions { location: 'record_section' }`
+  in `pages/sys-user.page.ts`). It declared no `resultDialog`: it toasted "New
+  backup codes generated — save them somewhere safe", issued the request, and
+  dropped the response. The previous code set is invalidated wholesale the moment
+  that request succeeds, so the reachable path was *old codes destroyed, new codes
+  discarded* — with no way to get them back:
+  
+  - better-auth's `twoFactor()` defaults to `storeBackupCodes: 'encrypted'` and
+    `auth-manager.ts` passes no `backupCodeOptions`, so `sys_two_factor.backup_codes`
+    holds `symmetricEncrypt(JSON.stringify(codes))` — one opaque ciphertext.
+  - `auth-route-ledger.ts` publishes `generate-backup-codes` and **no** route that
+    reads codes back. There is no re-reveal endpoint, by design.
+  
+  So the API response is the user's one and only sight of those codes.
+  `generate_backup_codes` now declares the one-shot reveal
+  (`{ path: 'backupCodes', format: 'code-list' }`) and `enable_two_factor` the QR
+  equivalent (`totpURI` as `qrcode` + `backupCodes`), which suppresses the toast
+  and opens an acknowledge-only dialog instead. Both copy the shapes
+  `sys_two_factor.enable_two_factor` / `regenerate_backup_codes` already carried —
+  deliberately not a third and fourth spelling of the same declaration.
+  
+  **Why the correct declarations existed and still did not help.** `sys_two_factor`
+  carries them and is mounted in **no** app — it appears in no navigation
+  contribution — so the only 2FA surface a user can reach was the one missing them.
+  That is why the new pin
+  (`packages/platform-objects/src/identity/two-factor-one-shot-reveal.test.ts`)
+  walks the Setup-navigation → page → quick-actions → action chain rather than
+  asserting a key is present, and holds coverage over a **derived** set: every
+  identity action targeting a route known to return an unrecoverable secret must
+  reveal it. A fifth 2FA surface added later is held to the same rule with no edit
+  to the test. It also fails a `successMessage` declared alongside a
+  `resultDialog` — the toast is suppressed, so such a message is dead text, and in
+  this case it was the very string that made the defect look handled.
+  
+  The declaration-to-response join is measured over a booted stack in
+  `packages/qa/dogfood/test/two-factor-backup-code-reveal.dogfood.test.ts`: the
+  declared paths are resolved against the live route's real response, because a
+  path that stops matching better-auth's response shape opens an **empty** dialog
+  and loses the codes just as thoroughly, while every declaration-shape assertion
+  stays green.
+  
+  **Also corrected, same area:** `sys_two_factor.backup_codes` was described as
+  "JSON-serialized backup recovery codes". It is JSON *before* encryption; what the
+  column stores is the ciphertext above. The description now says so, since the
+  whole reason the reveal must happen at generation time is that this column
+  cannot be read back.
+  
+  **Not addressed here:** mounting `sys_two_factor` into navigation is a larger
+  product-surface decision and is only raised, not taken; `#10700` (re-enrolment
+  rotating the TOTP secret while keeping `verified=1`) is a separate defect and
+  remains open.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/spec@17.2.0
+  - @objectstack/metadata-core@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

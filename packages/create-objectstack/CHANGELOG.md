@@ -1,5 +1,280 @@
 # create-objectstack
 
+## 17.2.0
+
+### Minor Changes
+
+- 5a616d5: `create-objectstack` now closes with a "Created files" summary derived from a
+  walk of the finished project directory, so it names everything the run wrote —
+  including the files written after the template copy (#10323).
+  
+  The old summary was the template copy's own list, printed before
+  `<pm> install` and before `npx skills add`. Measured against published
+  `create-objectstack@17.1.0` (`create-objectstack demo-app`, then a full walk of
+  the result): 12 entries printed, 18,045 paths on disk, **18,033 of them
+  unreachable from the summary** — `AGENTS.md`, `.github/copilot-instructions.md`,
+  `pnpm-lock.yaml`, `skills-lock.json`, `node_modules/`, and two ~968 KB trees of
+  agent instructions at `.agents/skills/` and `agent/skills/`.
+  
+  That mattered because the same run ends with the `skills` CLI printing *"Review
+  skills before use; they run with full agent permissions."* Advice to review
+  files the run never named, at paths it never showed, is advice a newcomer
+  cannot act on — the wrong failure direction for a security-flavoured warning.
+  
+  The list could not have been correct where it stood: two of the three write
+  phases belong to other processes, and the `skills` installer's destination set
+  moves with **its** releases, not ours. Reading the directory afterwards makes
+  the summary self-correcting instead. Large directories collapse to one line
+  carrying their path, entry count and size, so the bulk stays reviewable without
+  18,000 lines of output, and the paths the skills installer created are marked
+  `⚠ skills` with the permissions warning tied to them.
+  
+  Same run, after the change: 20 entries printed, **0 written paths unreachable**.
+
+### Patch Changes
+
+- cec9d23: Fix `create-objectstack`'s startup banner hardcoding `◆ Create ObjectStack v6.x`
+  regardless of the package's real, released version — eleven majors stale, on
+  the first line of output a newcomer ever sees (#10325). The banner now calls
+  `readCliVersion()`, the same reader `.version()` already used, instead of a
+  literal string.
+  
+  Dropping the real version in without recomputing the box's padding would have
+  reintroduced the same defect one line later — the border is a fixed run of
+  `═` computed for the 4-character `v6.x`, and a longer real version (`v17.1.0`
+  is 7 characters) would push the right border out of alignment (the sibling
+  bug fixed in #10322, one function away in the same file). The box now derives
+  its width from the version string's plain length and widens the frame — never
+  truncates — for a version long enough to need more room; ordinary versions
+  still render at the historical box size.
+  
+  No behaviour change beyond the printed banner.
+- 3a3f209: Tell a newcomer that the `blank` starter ships no app, so an empty Console
+  reads as the intended starting point rather than a broken install (#10317).
+  
+  Measured on a real scaffold-and-boot (`create-objectstack my-app -t blank`,
+  published 17.1.0 packages, `objectstack dev --ui`): `GET /api/v1/meta/app`
+  returns the two platform apps (Setup, Account) and nothing of the project's
+  own, while `GET /api/v1/data/my_app_note` serves the scaffolded object the
+  whole time. The template ships `src/objects/` only — deliberately, as every
+  scaffolder template in this repo does — but nothing the newcomer could reach
+  said so, and `pnpm dev` advertises the Console URL on every boot.
+  
+  Documentation only: a new "The Console" section in the generated `README.md`
+  naming the Console path, the consequence, and `src/apps/*.app.ts` as the
+  remedy. No change to what the scaffolder writes into `src/`.
+- 7bf3fb7: Point every documentation link in these packages' published READMEs — and in
+  the project `create-objectstack` scaffolds — at the canonical docs origin
+  `https://objectstack.ai`, replacing the `docs.objectstack.ai` spelling.
+  
+  Both spellings reach the same pages (the alias redirects to the apex,
+  path-preserving), so no link was broken. The reason it needs a release rather
+  than an in-repo fix alone: a README ships inside the npm tarball, so the
+  version already on npm keeps showing the old host to every reader of the
+  package page until a new one is published.
+- 675ab57: **First-run polish:** a brand-new scaffold's very first `pnpm install` no longer reports two unmet peer dependencies (#10326).
+  
+  Reproduced on a clean scaffold from published `create-objectstack@17.1.0` — no lockfile, `node_modules` removed, nothing configured by the user — and again on the second scaffold path, `objectstack init`. Both printed the same two:
+  
+  ```
+  ✕ unmet peer better-call
+    Installed: 1.4.0
+    Wanted:
+      1.3.7:
+        @better-auth/scim@1.7.0-rc.1
+  
+  ✕ unmet peer better-sqlite3
+    Installed: 13.0.3
+    Wanted:
+      ^12.0.0:
+        better-auth@1.7.1
+  ```
+  
+  Nothing was broken — but it is the first screen a newcomer sees, and there is nothing they did to cause it or can do about it.
+  
+  **`better-sqlite3`: the pin is right and the upstream range is stale — so it is widened, not corrected.** better-auth 1.7.1 declares `better-sqlite3` as an **optional** peer at `^12.0.0`, and it governs exactly one configuration: a raw better-sqlite3 `Database` handed to better-auth's `database` option, which its Kysely dialect then drives. ObjectStack never takes that path — `AuthManager.createDatabaseConfig()` returns `createObjectQLAdapterFactory(dataEngine)`, and every `better-sqlite3` use under `plugin-auth` is knex's `client: 'better-sqlite3'` beneath ObjectQL. Measured anyway on the configuration the range *does* govern: better-auth 1.7.1 with `database: new Database(':memory:')`, running `getMigrations().runMigrations()`, `signUpEmail`, `signInEmail` and adapter `findOne`/`update`/`delete`, is green on **better-sqlite3 13.0.3** and byte-for-byte equivalent on **12.11.1**. The same probe with `Database.prototype.prepare` neutered fails, so that green is the driver's and not an unexercised path. Pinning our own `^13.0.3` declarations back to `^12` would downgrade a native module across the platform to satisfy a range measurement shows is simply behind.
+  
+  **`@better-auth/scim`: the rc pin stays, and one `better-call` copy is the correct tree.** `npm view @better-auth/scim dist-tags` reads `latest: '1.7.1'`, but stable 1.7.x ships the rc.2 whole-model rewrite, so adopting it is a separate migration rather than a version bump; the exact `1.7.0-rc.1` pin is deliberate. The rc peers an exact `better-call@1.3.7` while better-auth 1.7.1 depends on `1.4.0` — and a better-auth plugin has to share the **host's** better-call instance, so the single 1.4.0 copy every install already resolves is right, not a skew to repair. This declaration retires together with the rc pin.
+  
+  **What changed, and what deliberately did not.** Both remedies are pnpm `peerDependencyRules.allowedVersions` entries, scoped `<declaring package>><peer>` so each widens exactly one declaration. They ship *inside* the scaffold — the bundled `pnpm-workspace.yaml` template and the one `objectstack init` renders — because a block in this repo's own workspace file does not travel with published packages. `allowedVersions` changes what pnpm **reports**, never what it resolves: measured on both scaffold paths, the lockfile is byte-identical with and without it (0 lines of diff), and no dependency version, range or resolution moved anywhere. This repo's own resolutions are untouched.
+- e85182d: Converge the blank scaffold template's `README.md` docs links on the ruled
+  canonical origin, `https://objectstack.ai` (maintainer ruling, 2026-08-21:
+  「这个仓的文档站规范 URL 是 https://objectstack.ai」; enforced by
+  `CANONICAL_DOCS_ORIGIN` in `scripts/check-published-readme-links.mjs`). The
+  template previously linked the accepted-but-unratified `docs.objectstack.ai`
+  alias in three places, which disagreed with the root `README.md`'s already-
+  canonical spelling — so a single `npm create objectstack@latest` run handed
+  the user two different hostnames for the same docs site.
+- aea1e64: Fix the declared bin (`bin/create-objectstack.js`) being tracked non-executable
+  in git. It carries a `#!/usr/bin/env node` shebang and is pnpm's link target
+  for the `create-objectstack` command, but was committed `100644` instead of
+  `100755` — matching the sibling declared bin `packages/cli/bin/run.js`, which
+  was already tracked executable.
+  
+  Patch bump: this is a packaging-mode correction with no content, API or
+  behavior change (the blob hash is identical) — it only fixes how the file is
+  tracked in git and therefore how it is packed for npm.
+- 818e027: Fix `objectstack init`'s closing "Created files" summary omitting `pnpm-lock.yaml` / `package-lock.json` and `node_modules/` (#10557).
+  
+  The summary used to be printed from a list accumulated while the template
+  files were written — before `<pm> install` ran — so it could never name what
+  the package manager wrote. `init` now prints it after the install attempt
+  (succeeded or failed) from a walk of the finished project directory, reusing
+  `create-objectstack`'s `created-summary.ts` (now published as the
+  `create-objectstack/created-summary` subpath) instead of a second copy of the
+  same renderer.
+- 568de19: Scaffolded projects declare an explicit empty `packages: []` in their
+  `pnpm-workspace.yaml` (#10933). Both scaffold paths render it —
+  `renderPnpmWorkspaceYaml` in `objectstack init`, and the bundled `blank`
+  template `npx create-objectstack` copies.
+  
+  The file was deliberately keyless so it would act purely as a settings file.
+  That intent is now written down rather than inferred from a missing key, and
+  writing it down is what fixes a first-command failure: pnpm 9.x and 10.0–10.4
+  parse `pnpm-workspace.yaml` **before** they read `engines`, so they refused a
+  brand-new project outright with
+  
+  ```
+   ERROR  packages field missing or empty
+  ```
+  
+  naming a file the user never wrote and giving no hint that the cause is their
+  pnpm version — and no `engines.pnpm` floor could reach them, because they never
+  got as far as the engines check. Measured, one clean install per pnpm version,
+  each with its own store:
+  
+  | pnpm | before | after |
+  |---|---|---|
+  | 9.15.9, 10.0.0, 10.4.0 | `ERROR packages field missing or empty` | `ERR_PNPM_UNSUPPORTED_ENGINE`, naming `>=10.15` |
+  | 10.5.0–10.14.0 | `ERR_PNPM_UNSUPPORTED_ENGINE` | unchanged |
+  | 10.15.0, 10.34.5, 11.22.0 | installs | installs, byte-identical `pnpm-lock.yaml` |
+  
+  So every unsupported pnpm now reports the same actionable cause, and supported
+  pnpm is unaffected: the empty key was measured equivalent to omission on
+  10.15.0, 10.34.5 and 11.22.0 — identical lockfile bytes, identical
+  `node_modules/.modules.yaml` once the run-local `prunedAt`/`storeDir` fields are
+  dropped, identical `pnpm ls -r --depth -1`, and an identical second-install
+  "Already up to date".
+  
+  The declaration is an **empty** list on purpose. `packages: ['.']` satisfies the
+  same parsers but declares the project root a workspace *member* — a monorepo
+  root — which a single-package scaffold is not, and which reads to the next
+  author (human or AI) as an invitation to add member packages to an app.
+  
+  `engines.pnpm` is unchanged at `>=10.15`.
+- 8d21f7a: Fix `create-objectstack`'s closing "Next steps" and install-failure remedy
+  hardcoding `npm` regardless of which package manager the run actually used
+  (#10322). `detectPackageManager()` already prefers `pnpm` and falls back to
+  `npm` only when `pnpm` is unreachable — confirmed still true at HEAD, and
+  confirmed empirically: a real run with `pnpm` on `PATH` installs with `pnpm`
+  (`pnpm-lock.yaml`, "Done in … using pnpm vX") and then told the newcomer to
+  run `npm run dev` / `npm run validate` next, a package manager the run never
+  touched. The detected package manager is now read once, up front, and reused
+  consistently for the install command, the install-failure remedy, and every
+  line of "Next steps" — so the printed guidance always names the tool the run
+  actually used, in both the `pnpm` and the `npm`-fallback case.
+  
+  Also names `validate` — the step the generated `AGENTS.md` calls
+  unskippable — in the "Getting started" section of the generated `blank`
+  template's README, not only in its later "Verify your changes" section, so a
+  newcomer reading top-to-bottom sees it at first touch.
+  
+  No install behaviour changes: the scaffolder still installs by default and
+  still supports `--skip-install`; this is a messaging-only fix.
+- 9d101d2: Declare a pnpm floor (`engines.pnpm: ">=10.15"`) in the `package.json` both
+  scaffolders write, so an unsupported pnpm reports its own version instead of an
+  error about a file the user never wrote.
+  
+  Both scaffold paths emit a settings-only `pnpm-workspace.yaml` with no
+  `packages:` key. Early pnpm 10 refuses that file outright — `pnpm install` exits
+  1 with `ERROR packages field missing or empty` before resolving a single
+  dependency, so a brand-new project could not be installed at all. Measured on
+  the rendered shape, one clean install per pnpm version, each with its own store:
+  
+  | pnpm | before | after |
+  | --- | --- | --- |
+  | 10.0.0 – 10.4.0 | `packages field missing or empty` | unchanged — see below |
+  | 10.5.0 – 10.14.0 | `packages field missing or empty` | `ERR_PNPM_UNSUPPORTED_ENGINE`, naming the expected range |
+  | >= 10.15.0 | installs | installs |
+  
+  The floor is a diagnosis, not a repair: pnpm 10.0.0–10.4.0 parse
+  `pnpm-workspace.yaml` *before* they read `engines`, so they still print the raw
+  workspace error. Closing that remaining sliver requires deciding what a
+  single-package scaffold should declare under `packages:`, which is tracked
+  separately and deliberately not decided here.
+  
+  `engines.pnpm` rather than a `packageManager` stamp: npm, yarn and bun ignore
+  `engines.pnpm` entirely, so the scaffold keeps working for all four package
+  managers `objectstack init` hands off to. A `packageManager: "pnpm@x.y.z"` stamp
+  would declare the project pnpm-only (corepack-driven yarn refuses to run in such
+  a project) and pin one exact version that goes stale on every pnpm release — and
+  it buys nothing on 10.0–10.4, which reach the workspace error before reading
+  that field either.
+  
+  No existing project is affected; this only changes what a newly scaffolded
+  `package.json` contains.
+- 6d441e4: Correct the pnpm boundary the blank template states for `allowBuilds`, and gate
+  the two scaffold paths against each other (#10498, #10499).
+  
+  `packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml` is copied
+  verbatim into every scaffolded project, so its header comment is prose that
+  ships **inside the user's own repository**. It said `allowBuilds` needs
+  pnpm >= 10.31 and that `onlyBuiltDependencies` covers pnpm 10.0–10.30. Measured
+  on a probe depending on `esbuild@0.28.2`, with a workspace file carrying only
+  `allowBuilds`, one clean install per pnpm version and each with its own
+  `--store-dir` (isolation matters — pnpm's side-effects cache will otherwise hand
+  a later run a build an earlier run performed, and it reads as "the key worked"):
+  
+  | pnpm | `allowBuilds` alone |
+  |:--|:--|
+  | 10.15.0 – 10.25.0 | ignored — build not run |
+  | **10.26.0** | **honoured — build ran** |
+  | 10.28.0 – 10.33.0 | honoured — build ran |
+  
+  So the floor is 10.26.0 and the older-key band is 10.0–10.25. A user on pnpm
+  10.28 was being told by the file in front of them that their pnpm cannot read
+  the key it is in fact reading. Both load-bearing claims in that comment were
+  correct and are unchanged: both keys are needed, and pnpm 11 reads only
+  `allowBuilds`. No setting, no assertion and no install behaviour changes — the
+  rendered `onlyBuiltDependencies` / `allowBuilds` values are byte-identical.
+  
+  The reason it was wrong for so long is the second half of this change.
+  `objectstack init` renders the same file from `renderPnpmWorkspaceYaml()` in
+  `packages/cli`, it was corrected to the measured numbers separately, and each
+  package's ratchets are package-local — so neither could ever fail for the other
+  file's regression, and the two scaffold paths shipped contradictory prose about
+  the same rule with every gate green. `packages/cli/test/scaffold-workspace-consistency.test.ts`
+  now compares the two **rendered outputs**: the packages each key actually grants
+  a build to, and the pnpm versions each file actually names for each key. It was
+  confirmed failing against the live divergence before this correction landed.
+  
+  Bumped `patch` rather than left out: the corrected text is user-visible — it is
+  delivered into every new project — while nothing executable moves.
+- ecd06f6: Rewrite the scaffolded project's starter comments so a newcomer can actually
+  follow them (#10324). `objectstack.config.ts` and `src/objects/note.object.ts`
+  are the first two files opened after scaffolding, and between them they cited
+  four ADR identifiers, one bare issue number and the path of a release-time
+  script in this monorepo — none of which ship in, or are linked from, a
+  scaffolded project. `// per ADR-0097` read as a reference the reader was
+  failing to follow rather than as the context it was meant to be.
+  
+  The explanations are kept and made self-contained; only the dead ends are
+  gone. Each now states the fact the identifier stood for — the protocol range
+  is checked before anything loads and was stamped to match the installed
+  version rather than hand-tuned; `automation` must stay whenever `plugins:`
+  lists a connector or the executors have nowhere to register; a declarative
+  `mcp` stdio transport is denied by default; the org-wide default is required
+  so the baseline is an authored decision — and points at the public docs page
+  that covers it in full. The blank `Dockerfile` likewise stops pointing at a
+  file in this repo and points at the self-hosting guide it already links.
+  
+  A pin (`starter-comments-self-contained.test.ts`) keeps it that way from both
+  sides: no shipped template file may cite an ADR identifier, a bare issue
+  number or a repo script path, and the facts those references carried must
+  still be stated — so the comments cannot be "fixed" by deleting them. It also
+  resolves every canonical-origin docs URL in the shipped tree against
+  `content/docs`, because a link that 404s is the same defect one level out.
+
 ## 17.1.0
 
 ### Minor Changes

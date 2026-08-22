@@ -1,5 +1,159 @@
 # @objectstack/driver-sql
 
+## 17.2.0
+
+### Patch Changes
+
+- 6936d07: `engine.aggregate` honours a per-aggregation `filter` (#10576, the contract
+  half of #10413). `AggregationNodeSchema.filter` — declared since #4286 but
+  marked experimental and enforced by nothing — is now live with SQL
+  `FILTER (WHERE …)` semantics: the predicate narrows the SOURCE rows that one
+  aggregation reads while sibling aggregations in the same call keep seeing
+  every row of the group, so a measure-scoped filter (`stage: 'closed_won'`)
+  can finally reach the engine instead of being silently dropped (the #10413
+  wrong-numbers defect on the ObjectQL analytics path). The
+  `StrategyContext.executeAggregate` bridge (`@objectstack/spec/contracts`)
+  gains the same optional `filter` on its aggregation entries so analytics
+  strategies can lower measure filters into it (#10413 phase 2 consumes this
+  seam next).
+  
+  Execution is the correct-first two-tier shape date bucketing and HAVING use:
+  the engine lowers filtered aggregations in memory for every driver (unknown
+  operators refuse loudly with `INVALID_FILTER`/400 naming the aggregation
+  position; a group emptied by its filter answers the ruled empty-group values
+  — count/sum 0, avg/min/max null). No driver compiles conditional aggregation
+  natively today, so each native aggregate face (driver-sql — inherited by
+  driver-sqlite-wasm and Turso local —, the Turso remote transport,
+  driver-mongodb's pipeline builder, driver-memory's `performAggregation`)
+  refuses a directly-delivered per-aggregation filter with
+  `NOT_IMPLEMENTED`/501 instead of silently aggregating the unfiltered rows.
+  Aggregations without a `filter` are byte-identically unchanged, including
+  their native pushdown path.
+- 46cfa5b: **Bug fix:** on Postgres, index and schema introspection now resolve tables the way the session does, instead of assuming the `public` schema (#9350).
+  
+  `introspectIndexes` pinned `n.nspname = 'public'` and `introspectSchema` pinned `table_schema = 'public'`. For a driver whose connection carries a `searchPath` pointing anywhere else, both returned **empty** — not an error, an empty result. Measured on a live Postgres 16: for a table carrying a primary key *and* a declared unique index, `introspectIndexes` returned `[]` and `introspectSchema` listed no tables at all.
+  
+  Empty does not read as "I could not see" downstream; it reads as "there are no indexes". `assertConflictTargetHonoured` turns that into a refusal, so an `upsert` against a perfectly well-indexed table would be rejected with *no PRIMARY KEY or UNIQUE index backs them* — and index-drift detection would propose creating indexes that already exist.
+  
+  - `introspectIndexes` now resolves the table with `to_regclass(?)` and reads `pg_index` by OID. That is the same resolution every other statement in the session performs — first match along `search_path` — and it removes an ambiguity a schema list would introduce, since two schemas on the path can hold the same table name and only one of them is the one a query reaches.
+  - `introspectSchema` now lists `table_schema = ANY (current_schemas(false))`.
+  
+  **No change for a default deployment.** With the default `search_path`, `current_schemas(false)` is exactly `{public}` and `to_regclass` resolves into `public`, so both queries return what they returned before. The behaviour only differs where the old queries returned nothing.
+- a037f7c: Fix JSON-field writes on Postgres deployments that manage DDL out-of-band
+  (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`): a non-empty array and a bare
+  string were rejected with a 500, and an empty array was **silently stored as an
+  empty object** (#10995).
+  
+  The SQL driver does `JSON.stringify` a JSON field's value on every non-SQLite
+  dialect — but only for fields listed in its per-object `jsonFields` registry,
+  and that registry (like the boolean / numeric / date / datetime / time /
+  auto_number registries and the tenant-isolation column) was filled **only** as
+  the first step of a DDL call. A deployment that skips boot schema sync therefore
+  served every write knowing nothing about its objects, and values reached
+  node-postgres to be encoded by its per-type defaults:
+  
+  - an **object** became JSON text — accidentally correct;
+  - an **array** became a Postgres ARRAY LITERAL (`{…}`) — `22P02 invalid input
+    syntax for type json`, a 500 on every write;
+  - **except `[]`**, whose array literal `{}` is valid JSON, so an empty array was
+    accepted and stored as an empty **object** — corruption, not an error;
+  - a **bare string** was passed raw (`x` is not JSON text, `"x"` is) — a 500,
+    while a number survived because `42` already is valid JSON.
+  
+  SQLite never showed any of it: `formatInput` ends with a bind-safety net gated
+  on that dialect, so the same empty registry is invisible there — which is why
+  tenant environments on Turso/SQLite and the suites that run on them were blind
+  to a defect live on every Postgres deployment.
+  
+  The registration is now separable from the DDL, on the ruling #7737/#10629
+  already made for federated objects — that flag is about DDL, and a binding that
+  is DDL-free must not ride on it:
+  
+  - `SqlDriver.registerObjectMetadata(objects)` installs a managed object's
+    coercion metadata with no `CREATE TABLE`, no `ALTER TABLE`, no existence probe
+    and no round-trip — the managed sibling of `registerExternalObject`, declared
+    optional on `IDataDriver` so drivers that don't need it omit it;
+  - a `skipSchemaSync` boot (and metadata reload) now takes that route instead of
+    doing nothing, keeping the cold-start budget the flag exists to protect;
+  - `initObjects` registers before the ADR-0015 DDL gate refuses, so objects on a
+    datasource ObjectStack is only a guest in are encoded from their declared
+    field types too. The refusal itself is unchanged.
+- f59035c: SQLite introspection now reports every member of a composite primary key, in
+  declared key order. `SqlDriver.introspectPrimaryKeys` filtered
+  `PRAGMA table_info` rows on `row.pk === 1`, but SQLite does not report `pk` as
+  a boolean — it is the column's **1-based position within the primary key**
+  (`0` = not part of the key, `1` = first key column, `2` = second, and so on).
+  The filter therefore kept only the first member of a composite key and silently
+  dropped the rest.
+  
+  Measured on in-memory SQLite, table declared `primary key (order_id, line_no)`:
+  
+  | signal | reported | reports instead |
+  | --- | --- | --- |
+  | `table.primaryKeys` | `['order_id']` | `['order_id', 'line_no']` |
+  | `column.isPrimary` for `line_no` | `false` | `true` |
+  
+  Both signals were wrong together and for the same reason: `introspectSchema`
+  derives `col.isPrimary` from `primaryKeys`, so a consumer could not recover the
+  dropped member by cross-checking the two. Fixing the list repairs the flag with
+  it.
+  
+  The rows are now also ordered by the `pk` ordinal rather than taken in
+  `table_info` row order (which is *column* order). The two differ whenever a key
+  is declared out of column sequence — a table with columns
+  `(carrier_code, shipment_id, leg_seq)` and `primary key (shipment_id,
+  carrier_code)` now reports `['shipment_id', 'carrier_code']` — and
+  `primaryKeys` is consumed as an addressing / upsert-conflict-target key, where
+  the order is load-bearing.
+  
+  Consumers affected: the federated-object codegen and the persisted
+  `external_catalog` (ADR-0015) recorded a partial addressing/upsert key, and
+  schema-drift comparison against a declared composite key read as drift on the
+  dropped member. `SqliteWasmDriver` and `TursoDriver` extend `SqlDriver` and
+  override neither method, so they inherit the repair. The Postgres and MySQL
+  arms did not have this defect and are unchanged.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+  - @objectstack/observability@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

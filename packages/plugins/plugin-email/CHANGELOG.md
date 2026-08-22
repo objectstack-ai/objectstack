@@ -1,5 +1,216 @@
 # @objectstack/plugin-email
 
+## 17.2.0
+
+### Minor Changes
+
+- a16ff50: `SweepLogger` and `ProjectionLogger` now declare `warn` as a REQUIRED channel, so a sink handed to the boot outbox sweep or to permission-set reconciliation can no longer be one that prints nothing (#9754)
+  
+  Both interfaces declared every member optional — `info?`, `warn?`, `error?` — which made `{ info }` a legal sink. Against such a sink both durability reports evaporated: each reaches for `error`, finds none, falls back to `warn`, and finds none of that either. For the sweep that is mail the platform accepted and never delivered, summarised to nobody; for reconciliation it is a permission set that will not survive a re-provision, with the `info` "reconciled" line skipped as well, so the sink heard neither the failure nor the reassurance.
+  
+  #9657 and #9748 repaired the call-site spellings. This is the other half, and the half that cannot regress: an optional `error` with no guaranteed alternative is a contract that permits silence, so an author reading the interface can write a report that never prints and be right about the type. Requiring `warn` makes that unrepresentable at the point of authoring rather than catchable one gate-run later.
+  
+  `error` deliberately stays optional on both types — hosts do inject reduced sinks, and requiring `error` would foreclose the `{ warn }`-only host the drivers were written for.
+  
+  If you pass a logger of your own and it declares no `warn`, add one; the kernel `Logger`, `ctx.logger` and `console` all satisfy the tightened shape unchanged. Consumers reach these types through `@objectstack/plugin-security`'s exported `ProjectionDeps`; `SweepLogger` is internal to `@objectstack/plugin-email`.
+  
+  The rule now has a checker of its own: `pnpm check:optional-error-sink` scans every sink type in `packages/**`, reports the population as a census on every run, and carries a shrink-only ledger of the 15 sinks that still permit silence.
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+
+### Patch Changes
+
+- b20c8d2: **Durability fix:** the two boot-time **summary** reports now reach a logger sink that has no `error` method, instead of printing nothing at all (#9748).
+  
+  `SweepLogger.error` and `ProjectionLogger.error` are both declared **optional**, and both summaries were spelled `logger?.error?.(…)` — an optional call that emits **nothing** when the method is absent. #9657 repaired the six per-row reports of this shape; it could not see these two, because `check:durability-log-level` only judges a call inside a `catch`, and a summary sits after the loop. Against a `{ info, warn }` sink the result was that the repair made the split **worse**: the per-row detail arrived at `warn` while the count of failures vanished, so the detail and the total reported through different channels.
+  
+  - `sweepStrandedOutbox()` — *"N stranded `sys_email` row(s) could NOT be delivered"*. Mail the platform **accepted** and never delivered, previously summarised to nobody.
+  - `reconcilePermissionSetProjection()` — *"N FAILED backfill(s)"*. Worse than a plain omission here: the `else` branch carrying the `info` "reconciled" line is skipped too, so such a sink heard **neither** — the reassuring half-truth this rule exists to remove, arrived at from the other side.
+  
+  Both now reach for `error` and fall back to `warn`, never to silence — the same repair shape #9657 applied to the per-row lines. A sink that **does** have `error` is unaffected and still gets the summary at `error`; a downgraded level is a degradation of the channel, never of the message, so the consequence and the fix survive the fallback intact.
+  
+  Also enforced from now on: `check:durability-log-level` grew a **summary limb** that judges a report keyed on the counter a durability-critical `catch` accumulated into, so this class cannot regress silently. The limb never second-guesses a chosen log **level** — it only checks that a call that reaches for `error` can actually print.
+- 047ac86: Five `Plugin` implementations now release their resources from `destroy()`, the
+  only teardown hook the kernel calls (#10772).
+  
+  `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+  `destroy?()`. `ObjectKernel.performShutdown()` and `LiteKernel.destroy()` walk
+  the plugins in reverse calling `plugin.destroy()` — and nothing anywhere calls
+  `stop()`, `dispose()`, `close()` or `shutdown()` on a plugin. Each of these five
+  spelled its teardown with one of those names instead, so what it released was
+  still held after `await kernel.shutdown()` had **resolved**:
+  
+  | package | class | was spelled | what outlived shutdown |
+  |:--|:--|:--|:--|
+  | `@objectstack/metadata` | `MetadataPlugin` | `stop` (arrow property) | artifact watcher, `manager.dispose()`, repository handle |
+  | `@objectstack/runtime` | `AppPlugin` | `stop` (arrow property) | the `app:unregistered` catalog event, never emitted |
+  | `@objectstack/runtime` | `ExternalValidationPlugin` | `stop` (arrow property) | every armed drift-check `setInterval` |
+  | `@objectstack/plugin-email` | `EmailServicePlugin` | `dispose` | two metadata subscriptions, the SMTP transport, an engine binding |
+  | `@objectstack/plugin-webhooks` | `WebhookOutboxPlugin` | `dispose` | the auto-enqueuer (2 realtime subscriptions + a refresh interval) and two engine hooks |
+  
+  `ExternalValidationPlugin` is the one with teeth: it is one of only two `Plugin`
+  implementations in the tree that own `setInterval` directly, it is mounted on
+  the real `os serve` path, and its `stop()`'s only caller anywhere was the class
+  itself re-arming. Measured against a real kernel, its drift checker performed
+  five further reads in the five intervals after a resolved shutdown — the #9371
+  mechanism verbatim. `WebhookOutboxPlugin.dispose()` had **zero** callers in the
+  entire repo, so its teardown had never run in any process at all.
+  
+  **Nothing is removed and no signature narrows.** Each old name is retained as a
+  delegating alias, because it is public API of an exported class and an embedder
+  may have learned to call it directly precisely BECAUSE the kernel never did.
+  `stop` stays an arrow property where it was one (so a detached
+  `const { stop } = plugin` keeps working) and stays synchronous on
+  `ExternalValidationPlugin` (so a non-awaiting call site is unaffected). The two
+  `stop(ctx)` aliases widen their parameter to optional.
+  
+  One behavioural note for direct callers, since `destroy()` takes no context:
+  `MetadataPlugin.stop(ctx)` and `AppPlugin.stop(ctx)` now use the context
+  captured in `init()` and ignore the argument. In a real composition these are
+  the same object. The visible difference is confined to a plugin whose `init()`
+  never ran — for `MetadataPlugin` a dropped `warn` line, for `AppPlugin` a
+  catalog event that is no longer emitted for an app that was never registered.
+- a24b7fa: Make the settings ordering contract **declared and enforced**, and make the
+  residual pre-bind READ audible (#10250).
+  
+  `SettingsServicePlugin` binds its data engine from a `kernel:ready` hook
+  registered in its `start()`. Three shipped plugins read a settings namespace
+  from a `kernel:ready` hook registered in *their* `start()` — `plugin-email`
+  (`mail`: SMTP/provider/from-address), `service-sms` (`sms`: provider
+  credentials and the daily cost ceiling) and `service-storage` (`storage`:
+  backend and credentials). Hooks fire in registration order, so a reader that
+  started before the settings plugin read `SettingsService`'s in-memory fallback,
+  which is empty at boot: the caller received the manifest **default** with
+  `source: 'default'` and `locked: false`, no diagnostic anywhere, while the
+  operator's saved row sat unread in `sys_setting`.
+  
+  Nothing constrained that order. None of the three declared any dependency on
+  `com.objectstack.service.settings`, so their position was pure `kernel.use()`
+  order. It was correct under `os serve` only because the always-on slate happens
+  to list `settings` first — and `serve` *prepends* an app's declared `requires`,
+  so an ordinary `requires: ['email']` produced email-before-settings and bypassed
+  that; cloud's per-tenant runtime mounts the slate from its own wiring.
+  
+  Three changes, one contract:
+  
+  - **Declared order.** Each of the three plugins now declares
+    `optionalDependencies: ['com.objectstack.service.settings']`. The kernel
+    resolves both the init and the start phase from that graph
+    (`resolvePluginOrder`, ADR-0116), so the bind is ordered ahead of the read
+    wherever the plugin is composed, in any host. Soft, not hard: a kernel with
+    no settings service still boots these plugins unchanged.
+  - **The residual is audible.** A settings read issued while a bind is
+    *declared but pending* now emits one operator-actionable `warn` per namespace
+    naming the repair. Deliberately not a refusal — an in-window read of a
+    setting with genuinely no persisted row must answer the manifest default, and
+    refusing would turn a correct startup sequence into an error. It stays silent
+    in every case that is not the window: after `bindEngine`, on a kernel with no
+    `objectql` at all (`settleWithoutEngine`), for a directly constructed
+    `SettingsService`, and for a read satisfied by an `OS_*` env override.
+  - **The slate pin now derives its boundary.** The foundational-prefix
+    assertion covered `slice(0, 6)` while `sms` — a settings reader — sits at
+    index 6, one past the end. The new pin
+    (`packages/cli/src/commands/serve-settings-ordering.pin.test.ts`) states the
+    rule instead of the count: every always-on entry that is not one of the
+    services others bind into at `kernel:ready` must be mounted after all of
+    them. An entry added tomorrow is covered wherever it lands.
+  
+  No behaviour changes for a deployment whose order was already correct.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/formula@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

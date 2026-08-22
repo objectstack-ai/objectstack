@@ -1,5 +1,266 @@
 # @objectstack/rest
 
+## 17.2.0
+
+### Minor Changes
+
+- 67630c4: The `/meta` FSM state route is singular: `meta.getLegalNextStates` moves, the plural registration is retired (#10077)
+  
+  Step 2 of the #9180 ruling — the `/meta` type segment is always singular, no
+  exception and no tolerated plural alias. Maintainer re-weigh, 2026-08-17,
+  verbatim: 「② 照原样做；只需要修正 objectstack objectui cloud 中错误的写法。」
+  
+  - `client.meta.getLegalNextStates(object, field, from?)` now requests
+    `GET /api/v1/meta/object/:name/state/:field`. Same method, same arguments,
+    same response body — only the path segment changes.
+  - `GET /api/v1/meta/objects/:name/state/:field` is **no longer registered**.
+    The singular twin has been mounted alongside it since #7526, so the
+    migration for a hand-rolled HTTP caller is to drop the `s`. A request to the
+    retired spelling now gets the transport 404, which is the loud answer; the
+    one shape that changes hands rather than 404ing is a field literally named
+    `published`, which the compound `/:type/:section/:name/published` route
+    picks up.
+  - The two route ledgers follow what is mounted and what the SDK calls: the
+    plural row is deleted from `rest-route-ledger.ts` and the dispatcher ledger's
+    mirror row is respelled.
+  
+  **What this does not change.** The boundary fold `META_URL_TO_SINGULAR` is
+  untouched, so no `/meta/:type/...` spelling that is accepted today becomes
+  refused: the retired route matched a **literal** path segment and never
+  consulted the fold. The 2026-08-17 re-weigh (item 3) defers that break with no
+  scheduled window. The legacy dispatcher branch in `runtime/src/domains/meta.ts`
+  also still matches both literals; narrowing it is not part of this step.
+
+### Patch Changes
+
+- e634ecf: fix(rest): `POST /datasources/:name/external/validate` does URL-scoped work (#10537)
+  
+  The route asked the `external-datasource` service for `validateAll()` — every
+  federated object on every federated datasource, each validation driving a live
+  `introspect(datasource)` remote-schema read — and then kept only the rows whose
+  `datasource` matched the URL. The rows it kept were correct; the *work* was not
+  scoped, so one datasource's health check paid for N datasources' remote
+  round-trips and threw most of the measurement away. An unreachable *unrelated*
+  remote slowed the answer for the datasource actually asked about (and produced
+  rows that were then filtered off).
+  
+  Measured at the branch point, through the real Hono adapter and the real
+  `ExternalDatasourceService` over a recording introspector: a request for one of
+  three federated datasources introspected `['wh_a', 'wh_b', 'wh_c']`. A request
+  naming a datasource that does not exist introspected all three as well, to
+  answer the empty report it already answered.
+  
+  `ExternalDatasourceService` now carries `validateDatasource(datasource)`, the
+  scoped twin of the sweep composed from the same primitives (`listObjects` →
+  filter → `validateObject`) and the same per-object catch, and the route calls
+  it. Same request answers `['wh_a']`; an unknown name answers `[]`.
+  
+  **No response change.** The rows the post-filter used to keep are the rows the
+  scoped composition returns — same objects, same diffs, same `data.ok` verdict,
+  same `200`, the same `400 EXTERNAL_DATASOURCE_ERROR` when the service refuses,
+  the same `503 SERVICE_UNAVAILABLE` when federation is not wired in, and an
+  unknown `:name` still answers an empty, vacuously `ok` report rather than a
+  `404`. The selection is keyed on `o.datasource ?? 'default'`, which is exactly
+  the value `validateObject` reports back as `result.datasource`, so "the rows the
+  sweep would have kept" and "the objects this selects" are the same set — pinned
+  directly, in both packages, by comparing the scoped answer against the
+  sweep-then-filter answer rather than against a remembered body.
+  
+  Because the output was already right, the pins that matter here are about the
+  CALL RECORD, not the body: `external-datasource-validate-scope.test.ts` asserts
+  which datasources were introspected and that `validateAll()` is not called at
+  all, over a fixture carrying three federated datasources so the assertion can
+  actually fail. A body-only test passes on both sides of this change.
+  
+  `validateDatasource` is **not** on `IExternalDatasourceService`: the contract
+  offers `validateObject(objectName)` and `validateAll()`, and adding a
+  per-datasource spelling to it is a spec-surface decision to take on its own
+  terms. The composition therefore lives in the service — the only registrant of
+  the `external-datasource` slot — and the REST registrar probes for it. A wired
+  service with no scoped spelling takes the same `503` arm every other route in
+  this family takes when the service cannot serve it, deliberately *not* a silent
+  fallback to the fan-out: a fallback would leave the old behaviour reachable on a
+  path no test drives.
+  
+  Unchanged: `validateAll()` itself, and the boot-validation sweep in
+  `packages/runtime` that legitimately validates every federated object.
+- 6ce58a7: **Behaviour change (tightening) — `POST /datasources/:name/external/validate` now requires `manage_platform_settings`** (#10255, completing the #9901 federation-family gate). This was the one route of the external-datasource federation family still admitting **any authenticated caller**; it now requires the same capability as the family's two read routes. Maintainer ruling, 2026-08-20 (verbatim: 「同意你的意见。」, accepting option A on #10255).
+  
+  **This is published SDK surface.** `datasources.external.validate` on `ObjectStackClient` and the CLI's `os datasource validate` reach exactly this route. An existing integration that presents a valid credential — a better-auth session or a `sys_api_key` — and does not hold `manage_platform_settings` was served before and is **refused now**: `403` with the standard catalog code `PERMISSION_DENIED` (ADR-0112), the message naming the missing capability so the caller knows which grant to request. The anonymous floor is unchanged: no identity is still `401 UNAUTHENTICATED`.
+  
+  **Why the read capability.** `validateAll` drives the same live remote-schema introspection the family's gated read routes expose (`introspect` per datasource), and its report — schema diffs naming remote columns and types, driver error strings for unreachable remotes — is a read of the same federation surface. An unentitled caller refused at `GET /:name/external/tables` could previously still trigger live remote introspection through this route and read what it found. One family, one door-type: reads on `manage_platform_settings`, writes on `manage_metadata`.
+  
+  **Migration.** Grant the calling credential's permission set `manage_platform_settings` — the same grant the family's read routes have required since #10254, so an integration already migrated for those is covered. The platform's `admin_full_access` set carries it; a purpose-built operator set is the case to check.
+- 9a1ed7a: **Behaviour change (tightening) — a capability is now required on the external-datasource federation family** (`/api/v1/datasources/:name/external/*`, #9901). These routes previously admitted **any authenticated caller**; four of the five now also require a platform capability. Maintainer ruling, 2026-08-20 (verbatim: 「其他接受你的建议。」).
+  
+  **This is published SDK surface.** `datasources.external.*` on `ObjectStackClient` reaches exactly these routes, and the CLI's `datasource` commands go through them. An existing integration that presents a valid credential — a better-auth session or a `sys_api_key` — and holds neither capability was served before and is **refused now**. Nothing about the credential itself changed; what changed is what the credential must carry.
+  
+  | route | SDK call | now requires |
+  | --- | --- | --- |
+  | `GET /:name/external/tables` | `datasources.external.listTables` | `manage_platform_settings` |
+  | `POST /:name/external/tables/:remote/draft` | `datasources.external.draft` | `manage_platform_settings` |
+  | `POST /:name/external/tables/:remote/import` | `datasources.external.import` | `manage_metadata` |
+  | `POST /:name/external/refresh-catalog` | `datasources.external.refreshCatalog` | `manage_metadata` |
+  | `POST /:name/external/validate` | `datasources.external.validate` | *(unchanged — authentication only)* |
+  
+  A refusal is **`403` with the standard catalog code `PERMISSION_DENIED`** (ADR-0112; deliberately not the grandfathered `FORBIDDEN` synonym), and the message names the missing capability so the caller knows which grant to request. The anonymous floor is unchanged: no identity is still `401 UNAUTHENTICATED`.
+  
+  **Why these two capabilities.** The first two routes are the declared twins of `GET /:name/remote-tables` and `POST /:name/object-draft` on the datasource-admin spelling, which has required `manage_platform_settings` since #9593 — the same operation was reachable through two mounted routes with two different admission policies, so an agent or integration refused at one spelling was served at the other. The two write routes have no twin and create live metadata (the import mounts a runtime-origin federated object; the refresh rewrites the cached catalog snapshot), so they take `manage_metadata`, this package's existing gate for metadata creation.
+  
+  **Migration.** Grant the caller's permission set the capability its routes need — `manage_platform_settings` for remote-schema introspection, `manage_metadata` for import/refresh. The platform's `admin_full_access` set already carries both, so admin-credentialed integrations are unaffected; a purpose-built operator set is the case to check.
+- 5b39785: `KernelResolver` gains an optional environment-only member so a REST request
+  pays ONE kernel-waiter window instead of two (#10988).
+  
+  `RestApiPlugin` wraps the host's ADR-0006 `kernel-resolver` so `RestServer` can
+  ask "which environment is this request in?". It asked `resolveKernel` — a
+  kernel-ACQUISITION api — and kept only `context.environmentId`. A host resolver
+  writes the id and then awaits that environment's kernel, so the wrapper paid a
+  full waiter window and discarded what it bought; `resolveProtocol` then acquired
+  the kernel again. Free on a warm environment (a cache hit, which is why this was
+  invisible), a second serial wait on a cold or wedged one. Measured on a live
+  multi-tenant host with `waiterTimeoutMs: 20s`: REST-owned routes
+  (`/api/v1/discovery`, `/api/v1/data/:object`) answered 503 after ~42s where
+  dispatcher-owned routes answered after ~21s.
+  
+  `KernelResolver.resolveEnvironment?(context, defaultKernel)` resolves ONLY the
+  request's environment onto the context, acquiring no kernel; the REST wrapper
+  prefers it when the host implements it, leaving `resolveProtocol` as the single
+  kernel-acquisition point on the path.
+  
+  **Non-breaking, and no flag day.** The member is `?.`-optional: a host that
+  implements only `resolveKernel` type-checks and behaves exactly as before (it
+  keeps paying the discarded acquisition on cold builds), so this ships before any
+  host implements the new half. Adding an optional member to an interface the
+  framework CONSUMES cannot invalidate an existing implementation — every resolver
+  already in the field still satisfies the contract. Marked `minor` on
+  `@objectstack/runtime` because it is a new public capability on an exported
+  contract, `patch` on `@objectstack/rest` because the wrapper change is a fix
+  with no surface of its own.
+  
+  Fail-closed is unchanged and pinned: the surviving `getOrCreate` still rejects
+  for a genuinely unavailable kernel, so the caller still gets the host's declared
+  503 — a shorter wait to the same verdict, never a response served against no
+  kernel. `waiterTimeoutMs` is a host setting and is untouched; the defect was
+  waiting twice, not waiting wrong.
+- 26f3588: **Fix:** the REST `/meta` doors now decide **organization scope on the folded type**, never on the raw URL spelling (#10340).
+  
+  Storage folds `/meta/:type` through `META_URL_TO_SINGULAR` — the complete spelling map — while the doors' scope predicate (`declaresOrgOverride`) tolerates only the manifest-collection spellings. For the two registry-derived spellings, `translations` and `email_templates`, the doors therefore read and wrote **env-wide** where the singular twin was org-scoped: an org-active author's `PUT /meta/translations/:name` landed an env-wide row their own org-scoped read then shadowed (persisted, receipted as live, served by nothing), and `GET` under one spelling answered a different partition than the other — one item, two namespaces, addressed by spelling (#4432 / #7894's defect one layer down).
+  
+  - All nine `/meta` org-scope call sites (list, single read, layers view, compound read, save, compound save, delete, publish, rollback) fold the segment through `canonicalMetaUrlType` **before** calling `organizationIdForMetaRead` / `organizationIdForMetaWrite`, exactly as `metadata-url-spelling.ts` mandates: folding happens at the boundary and only there.
+  - The `GET /meta/:type/:name/published` code-store fallback folds too — the smaller second site of the same class: it reads a registry keyed by canonical types, so a recognised plural of a code-published item answered 404 while the singular answered 200.
+  - **Deliberately unchanged:** `GET /meta/_drafts` still applies no fold (it filters by the draft row's *stored* type, which is canonical because the protocol folds on save), the request `type` handed to the protocol stays the raw segment (the protocol owns its own fold), and `declaresOrgOverride` does **not** absorb the URL map — a predicate below the boundary consuming the URL spelling contract is the repair #7894 forbids. `@objectstack/metadata-core` changes are documentation and pins only: the predicate's header no longer claims parity with the protocol's normalization (measured false), and new tests pin both the composed fold→predicate contract and the predicate's deliberate limit.
+  
+  No stored rows move: rows previously minted env-wide through a plural spelling stay env-wide and keep serving org-less callers (and org-active callers until an org overlay exists), which is the same layering the singular spelling always had.
+- 9e04c3e: **Additive:** `POST /meta/:type/:name/publish` now accepts `?package=<id>`, so a single-item draft→active promotion can state the package it belongs to (#10063).
+  
+  #9612 taught the runtime publish gate to narrow `objects` to the written item's package closure, but only for callers that can NAME a package. Of the three write doors that reach the gate, `saveMetaItem` (`?package=` on the `PUT` door) and `publishPackageDrafts` (the batch names it) both did; the single-item promotion door named nothing — so every HTTP-driven promotion, which is exactly Studio's designer save→publish loop on every edit, handed the gate the whole tenant. The protocol half already existed and was waiting: `promoteDraftForPublish` declares `packageId?: string | null` and threads it into both the gate and `repo.promoteDraft`. Only the REST caller was mute.
+  
+  - **Wire spelling:** `?package=<id>`, deliberately the same parameter name and the same normalisation the `PUT` door states it with — `all` and the empty value mean "env-local overlay, no package", not a package literally named `all`. One value, one spelling across both steps of the save→publish loop.
+  - **Multiplicity:** a repeated `?package=a&package=b` is refused `400 VALIDATION_ERROR` in the ADR-0112 nested envelope, via the shared `refuseRepeatedQueryParams` rule the sibling doors already carry; a single occurrence encoded as a one-element array is unwrapped and accepted. Previously the parameter was ignored outright on this route, so no caller relying on a documented behaviour changes.
+  - **Ordering:** the read sits AFTER the `manage_metadata` capability gate, so an uncapable caller still gets `403` rather than a `400` that would let it probe the shape of the surface.
+  - **Absent behaviour is unchanged, deliberately down to key presence.** The key is omitted from the `publishMetaItem` request when no package is stated, rather than passed as `undefined`. `promoteDraftForPublish` forwards to `repo.promoteDraft` on `'packageId' in request` — the KEY, not the value — because `null` there is a meaningful scope (pin the lookup to the unbound row) while an absent key means "match any package". A present-and-`undefined` key would therefore coerce to `null` downstream and stop package-bound drafts from being found, answering `no_draft` on a path this change was not supposed to touch.
+  
+  ⚠️ **The acceptance criterion is that the narrowing is now REACHABLE from HTTP, not that publishing got faster.** Package-closure narrowing has a second, independent gate this change does not touch: `narrowObjectsToPackageClosure` keeps any object carrying no `_packageId` provenance, unconditionally, and a tenant-authored overlay corpus carries none. On such a corpus supplying the package still narrows nothing. On a provenance-stamped corpus the shipped deriver measures 421 objects → 45. Both gates must hold; this closes the caller-side one.
+- 490879a: Declare `packageId` on `publishMetaItem`'s request type, and correct three
+  in-tree comments that claimed the per-item publish door "names no package"
+  (#10350).
+  
+  `publishMetaItem` declared `type / name / organizationId / actor / message /
+  _skipSeedApply` and no `packageId`, while since #10063 `POST
+  /meta/:type/:name/publish?package=PKG_ID` states one on every HTTP-driven
+  promotion that names a package — which is Studio's designer save-then-publish
+  loop.
+  
+  **No runtime behaviour changes, and nothing was broken at runtime.** The value
+  already flowed end to end: `publishMetaItem` forwards its whole request object,
+  the one transform in between (`canonicalizeMetaRequestType`) is a spread that
+  drops no key, and `promoteDraftForPublish` already declared
+  `packageId?: string | null` and threaded it into both the #9612 gate closure and
+  `repo.promoteDraft`. What was wrong was the *declared* contract: the binding was
+  invisible to every typed caller, and the only caller that states one reaches the
+  method through a cast, so it was enforced by nothing — one destructuring
+  refactor away from being dropped in silence.
+  
+  `packageId` is `string | null | undefined`, and the three states are distinct:
+  an **absent** key keeps the historical "match any package" resolution, `null`
+  pins the lookup to the unbound row, and a present-and-`undefined` key coerces to
+  `null` downstream and makes a package-bound draft unfindable. Spread it in
+  conditionally; never write `packageId: maybeUndefined`.
+  
+  `environmentId` is deliberately **not** added, though it sits in the same
+  cast-hidden position on the REST call site. It is the multi-kernel routing key
+  and is out of the protocol request shape by the maintainer ruling recorded
+  2026-08-18 on #9741 — `resolveProtocol(environmentId)` selects the kernel before
+  the call, and `request.environmentId` is read nowhere in
+  `@objectstack/metadata-protocol`. `packages/rest` types that one transport-level
+  member on top of the declared shape (`TransportScopedMetaRequest`) instead.
+  
+  Three pins land in `protocol-publish-drafts-package-scope.test.ts`, on the same
+  two-colliding-drafts fixture the #8907 batch-door cases use, so a promote that
+  loses the package dimension resolves the *wrong* row rather than merely
+  succeeding.
+- 4389fe9: Reworded the `501 NOT_IMPLEMENTED` message on `GET /meta/:type/:name/published` (and its
+  compound-name arity) to state its true post-#8278 condition. Since #8278 put the
+  runtime-published overlay consult ahead of this arm, the 501 no longer means "this kernel
+  cannot answer `/published`" — it means "nothing is runtime-published for this item, and
+  this kernel has no code/package store" (i.e. `metadata.getPublished()` is unavailable).
+  The old message ("metadata.getPublished() is not available in this kernel") overstated
+  that condition. Status code, `error.code`, and routing order are unchanged — only the
+  message text changed.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [ab47f69]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [145ba75]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/observability@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/service-package@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

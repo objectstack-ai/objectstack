@@ -1,5 +1,85 @@
 # @objectstack/core
 
+## 17.2.0
+
+### Patch Changes
+
+- 47cd3ec: The kernel's two `Promise.race` timeout guards — the startup guard around each
+  plugin's `init`/`start`, and the shutdown guard around `performShutdown()` —
+  now reclaim **both** halves of the guard when the race settles: the timer is
+  cleared *and* the losing promise is settled (#10604).
+  
+  Neither site settled its loser, so the timeout promise and the reaction
+  `Promise.race` held on it were retained for the life of the process — four
+  leaking promises per showcase test run under `vitest --detectAsyncLeaks`, now
+  zero. The two hand-rolled copies had also drifted into doing opposite halves of
+  the same cleanup: the startup site cleared its timer and never `unref`'d, the
+  shutdown site `unref`'d and never cleared. Both now go through one internal
+  `TimeoutGuard`, so they cannot drift apart again. No exported API changes.
+  
+  **Behaviour change, at the shutdown guard:** the shutdown timer is no longer
+  `unref()`d. Two consequences for an embedding host (CLI, auth-proxy, test
+  runner):
+  
+  - After a **successful** shutdown, no timer is left armed. Previously the guard
+    survived its own race and stayed scheduled to fire against a kernel already
+    `'stopped'`. That late rejection was *handled* — `Promise.race` had attached a
+    rejection handler to it — so this was never an unhandled-rejection risk; it
+    was retained work and a wakeup after teardown.
+  - When teardown **hangs**, the guard now actually fires. An unref'd timer does
+    not keep the event loop alive, so a process with nothing else to run could
+    exit silently — status 0, teardown incomplete — before `shutdownTimeout`
+    elapsed, leaving `Shutdown timed out — forcing exit` and its `exit(1)`
+    unreachable in exactly the case they exist for. Reclaiming on settle keeps the
+    guard ref'd exactly as long as the race is undecided, which is the guarantee
+    the startup guard already had (#4813).
+  
+  If your host relied on a hung `shutdown()` letting the process fall out of the
+  event loop on its own, it will now wait up to `shutdownTimeout` (default 60s)
+  and then hard-exit with status 1. Lower `shutdownTimeout` in the kernel config
+  to shorten that window.
+- 9d7d2de: `resolveLocalizationContext` now memoizes a FAILED read's fallback per `(ql, tenantId, userId)` for 30s (#10221).
+  
+  On a fresh environment whose `sys_setting` table hasn't been created/migrated yet, every authenticated request re-ran the same `sys_setting` localization read, and every one of those reads failed the same way ("no such table"). The `#2409` batching had already collapsed the three per-key reads a single request used to issue into one query, but that one query still repeated on every subsequent request, and `driver-sql`'s `backendStatementFault` logs a `[sql-driver] DATABASE_ERROR` warning on every failed read — so the identical warning printed once per request and buried real errors in between.
+  
+  Only the case where the underlying read genuinely fails (a backend fault, e.g. the missing table) is cached; a successful read — including a legitimate "nothing configured yet" empty result — is never cached and always re-reads on the next call, so a settings write takes effect immediately. (An earlier version of this fix cached every outcome, mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`'s existing TTL cache of this same read — safe there because audit-trail enrichment is best-effort, but not safe for `@objectstack/rest`'s use of this function: analytics date-bucketing reads the org timezone on every query and `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` — the #1982/#2018 golden regression — asserts the very next read reflects a just-written timezone.) The `UTC` / `en-US` fallback behavior itself is unchanged; this only stops the failing query — and its log line — from re-running every request. The cache is keyed on the `ql` engine instance first, so two environments/tenants sharing one process never share a cached outcome, and self-heals within one TTL window once `sys_setting` exists.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

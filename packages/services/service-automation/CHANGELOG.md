@@ -1,5 +1,85 @@
 # @objectstack/service-automation
 
+## 17.2.0
+
+### Minor Changes
+
+- 73d9795: Time-relative sweeps are now idempotent per matched window (#10220). Previously the sweep
+  held no cross-tick memory, so every re-scan of the same window re-dispatched the same
+  records — a 5s-interval flow minted 15 duplicate reminders in ~70s, and even under a daily
+  cron a kernel rebuild re-dispatched the day's window.
+  
+  - `@objectstack/service-automation` — new platform object `sys_flow_dispatch`: a persisted
+    dispatch-claim ledger (ADR-0057 telemetry retention, 30 days), registered alongside
+    `sys_automation_run` and exposed as `AutomationEngine.claim(key): Promise<boolean>` on
+    the automation service surface (check-and-record; a concurrent duplicate insert re-reads
+    and reports the key as already claimed). When no ObjectQL engine / registration is
+    available the engine degrades to in-process dedup and logs the weakened guarantee once;
+    when the ledger errors, the claim falls back to the in-process check for that key so a
+    store outage never blocks a dispatch (availability over strict-once).
+  - `@objectstack/trigger-schedule` — the time-relative sweep computes a dispatch key from
+    the MATCHED WINDOW's identity and claims it before launching: offset mode keys on
+    `(flowName, recordId, windowDay, offset)` — so a dateField edit that moves the window
+    legitimately re-fires — and range mode keys on `(flowName, recordId, sweepDay,
+    rangeSpec)`, preserving the documented `withinDays` semantic ("fires every day the
+    record stays in range") while never firing twice in one day. The trigger resolves the
+    claim surface structurally from the automation service; without one it dedups
+    in-process and warns once.
+  - `@objectstack/spec` — `sys_flow_dispatch` added to `PLATFORM_OBJECTS_BY_PACKAGE` under
+    `service-automation` (registry conformance).
+
+### Patch Changes
+
+- 7bf3fb7: Point every documentation link in these packages' published READMEs — and in
+  the project `create-objectstack` scaffolds — at the canonical docs origin
+  `https://objectstack.ai`, replacing the `docs.objectstack.ai` spelling.
+  
+  Both spellings reach the same pages (the alias redirects to the apex,
+  path-preserving), so no link was broken. The reason it needs a release rather
+  than an in-repo fix alone: a README ships inside the npm tarball, so the
+  version already on npm keeps showing the old host to every reader of the
+  package page until a new one is published.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/formula@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

@@ -1,5 +1,416 @@
 # @objectstack/runtime
 
+## 17.2.0
+
+### Minor Changes
+
+- 914c413: fix(observability): **BREAKING** — `http_request_errors_total` is retired (ADR-0049 enforce-or-remove, #9834)
+  
+  **⛔ If you have a Grafana panel, an alert rule or a recording rule keyed on
+  `http_request_errors_total`, it will read a FLAT ZERO after this upgrade.** That
+  zero is the removal, not a healthy server, and it is the one way this change can
+  hurt you — nothing throws, nothing warns, the series simply stops receiving
+  samples. Rewrite the query before you deploy.
+  
+  Maintainer ruling 2026-08-20: **RETIRE**. The name was declared in `SEMCONV` as
+  part of a stable namespace *"so hosts can wire alerts/dashboards against it"*,
+  but the only emitter was `@objectstack/runtime`'s `instrumentRouteHandler`,
+  applied only by the dispatcher's own route Proxy — so the series never saw
+  auth's `getRawApp()` mount, the REST data API via `RouteManager`, or any other
+  inbound surface. Its two siblings in the same HTTP family moved to the
+  `IHttpServer.afterResponse` transport seam (`http_requests_total`, #9650/#9835;
+  `http_request_duration_ms`, #9834/#10004) and this one could not follow:
+  `HttpResponseObservation` carries `{method, routePattern, status, elapsedMs}`
+  and **no throw signal of any kind**, so every transport-side shape would have
+  counted a *different* population rather than the same one more widely.
+  
+  Migration (FROM → TO):
+  
+  | Wrote | Write instead |
+  |---|---|
+  | `rate(http_request_errors_total[5m])` in a panel or alert | `rate(http_requests_total{status=~"5.."}[5m])` — emitted by the transport, so it covers every inbound surface instead of the dispatcher's routes only |
+  | `sum by (route) (http_request_errors_total)` | `sum by (route) (http_requests_total{status=~"5.."})` |
+  | `SEMCONV.httpRequestErrorsTotal` / `RUNTIME_METRICS.httpRequestErrorsTotal` in host code | Delete the read. Both members are gone; `tsc` reports the missing property at the read site. |
+  
+  One-line fix: replace the metric name with `http_requests_total{status=~"5.."}`.
+  
+  <!-- adr-0087: registered http-request-errors-total-retired -->
+  
+  **The replacement is wider, not merely different.** The retired counter was
+  divergent from a 5xx rate in *both* directions, measured: the dispatcher answers
+  its own errors through `errorResponseBase`, which sets a status and does **not**
+  re-throw — so the counter **missed** those — while its `catch` incremented
+  unconditionally, so a **thrown 4xx WAS counted** as an error. And
+  `http_requests_total` already carries a `status` label, so a status-class error
+  counter was fully derivable from data the transport already publishes. Prove the
+  new query wider rather than merely non-empty: make an auth route or a REST
+  data-API route answer 5xx and confirm it moves, where the retired counter would
+  not have moved at all.
+  
+  **If what you were actually alerting on was "a handler threw rather than
+  returning an error envelope"** — the one signal this counter uniquely carried —
+  that is the `errorReporter`, not a metric. Wire an `ErrorReporter` adapter
+  (Sentry / Datadog / your own); it still fires on every 5xx throw and is
+  untouched by this change.
+  
+  What is NOT removed: `http_requests_total`, `http_request_duration_ms`,
+  request-id propagation, the 5xx error reporter, and the
+  `res.__obsRecordedError` side channel that carries a swallowed error to it. The
+  dispatcher still instruments every route it mounts; it just no longer publishes
+  a fourth series whose name promised more coverage than it had.
+- 5b39785: `KernelResolver` gains an optional environment-only member so a REST request
+  pays ONE kernel-waiter window instead of two (#10988).
+  
+  `RestApiPlugin` wraps the host's ADR-0006 `kernel-resolver` so `RestServer` can
+  ask "which environment is this request in?". It asked `resolveKernel` — a
+  kernel-ACQUISITION api — and kept only `context.environmentId`. A host resolver
+  writes the id and then awaits that environment's kernel, so the wrapper paid a
+  full waiter window and discarded what it bought; `resolveProtocol` then acquired
+  the kernel again. Free on a warm environment (a cache hit, which is why this was
+  invisible), a second serial wait on a cold or wedged one. Measured on a live
+  multi-tenant host with `waiterTimeoutMs: 20s`: REST-owned routes
+  (`/api/v1/discovery`, `/api/v1/data/:object`) answered 503 after ~42s where
+  dispatcher-owned routes answered after ~21s.
+  
+  `KernelResolver.resolveEnvironment?(context, defaultKernel)` resolves ONLY the
+  request's environment onto the context, acquiring no kernel; the REST wrapper
+  prefers it when the host implements it, leaving `resolveProtocol` as the single
+  kernel-acquisition point on the path.
+  
+  **Non-breaking, and no flag day.** The member is `?.`-optional: a host that
+  implements only `resolveKernel` type-checks and behaves exactly as before (it
+  keeps paying the discarded acquisition on cold builds), so this ships before any
+  host implements the new half. Adding an optional member to an interface the
+  framework CONSUMES cannot invalidate an existing implementation — every resolver
+  already in the field still satisfies the contract. Marked `minor` on
+  `@objectstack/runtime` because it is a new public capability on an exported
+  contract, `patch` on `@objectstack/rest` because the wrapper change is a fix
+  with no surface of its own.
+  
+  Fail-closed is unchanged and pinned: the surviving `getOrCreate` still rejects
+  for a genuinely unavailable kernel, so the caller still gets the host's declared
+  503 — a shorter wait to the same verdict, never a response served against no
+  kernel. `waiterTimeoutMs` is a host setting and is untouched; the defect was
+  waiting twice, not waiting wrong.
+- 67630c4: The `/meta` FSM state route is singular: `meta.getLegalNextStates` moves, the plural registration is retired (#10077)
+  
+  Step 2 of the #9180 ruling — the `/meta` type segment is always singular, no
+  exception and no tolerated plural alias. Maintainer re-weigh, 2026-08-17,
+  verbatim: 「② 照原样做；只需要修正 objectstack objectui cloud 中错误的写法。」
+  
+  - `client.meta.getLegalNextStates(object, field, from?)` now requests
+    `GET /api/v1/meta/object/:name/state/:field`. Same method, same arguments,
+    same response body — only the path segment changes.
+  - `GET /api/v1/meta/objects/:name/state/:field` is **no longer registered**.
+    The singular twin has been mounted alongside it since #7526, so the
+    migration for a hand-rolled HTTP caller is to drop the `s`. A request to the
+    retired spelling now gets the transport 404, which is the loud answer; the
+    one shape that changes hands rather than 404ing is a field literally named
+    `published`, which the compound `/:type/:section/:name/published` route
+    picks up.
+  - The two route ledgers follow what is mounted and what the SDK calls: the
+    plural row is deleted from `rest-route-ledger.ts` and the dispatcher ledger's
+    mirror row is respelled.
+  
+  **What this does not change.** The boundary fold `META_URL_TO_SINGULAR` is
+  untouched, so no `/meta/:type/...` spelling that is accepted today becomes
+  refused: the retired route matched a **literal** path segment and never
+  consulted the fold. The 2026-08-17 re-weigh (item 3) defers that break with no
+  scheduled window. The legacy dispatcher branch in `runtime/src/domains/meta.ts`
+  also still matches both literals; narrowing it is not part of this step.
+
+### Patch Changes
+
+- 128684d: **Behaviour change (security tightening):** the `/api/v1/automation` **definition writes** now require the `manage_metadata` capability (#10145).
+  
+  `POST /api/v1/automation`, `PUT /api/v1/automation/:name` and `DELETE /api/v1/automation/:name` — `automation.create` / `automation.update` / `automation.delete` on the SDK — were reachable by **any authenticated caller**. They now answer **403 `PERMISSION_DENIED`** unless the caller holds `manage_metadata` (ADR-0066 D1's authoring capability), the same key the sibling `PUT /api/v1/meta/:type/:name` and every state-changing `/api/v1/packages/*` route already demand. Engine self-invocation (`isSystem`) bypasses, as on every other capability gate.
+  
+  **Existing credentialed callers that author flows over HTTP will start getting 403** and must be granted `manage_metadata`. A flow is authored metadata: this closes the last write door onto the metadata plane that did not ask the metadata plane's question.
+  
+  What was measured on a walled multi-organization deployment (`OS_TENANCY_POSTURE=isolated`): a plain tenant org owner holding `organization_admin` — the same session answered 403 by `PUT /meta/:type/:name`, `POST /ai/tools/:tool/execute` and `POST /packages/*` — created, modified and deleted flows through this door, all 200. Flow definitions are registered at **environment** scope, not organization scope, so the write crossed the tenant wall: a shipped flow deleted by one tenant read 404 for the actor, for an unrelated tenant **and** for the platform admin, and an injected flow read 200 for all three.
+  
+  **Deliberately unchanged — execution is not authoring:**
+  
+  - `POST /automation/:name/trigger` and the legacy `POST /automation/trigger/:name` **run** a flow. They keep their existing posture (authenticated, plus the flow's own `runAs` authorization envelope).
+  - `POST /automation/:name/runs/:runId/resume` is already fail-closed through the suspended node's `resumeAuthority`; a metadata capability in front of it would refuse the very user the flow paused for.
+  - `POST /automation/:name/toggle` mutates engine enablement rather than a definition, and is filed separately rather than folded into a security fix.
+  - The reads (`GET /automation`, `GET /automation/:name`, the run surfaces) are untouched; run-state reads keep their `sys_automation_run` grant.
+  
+  The gate sits ahead of the service probe and ahead of body validation, so a refused caller neither writes anything nor learns from a 501-vs-403 whether the deployment mounts automation at all.
+- 047ac86: Five `Plugin` implementations now release their resources from `destroy()`, the
+  only teardown hook the kernel calls (#10772).
+  
+  `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+  `destroy?()`. `ObjectKernel.performShutdown()` and `LiteKernel.destroy()` walk
+  the plugins in reverse calling `plugin.destroy()` — and nothing anywhere calls
+  `stop()`, `dispose()`, `close()` or `shutdown()` on a plugin. Each of these five
+  spelled its teardown with one of those names instead, so what it released was
+  still held after `await kernel.shutdown()` had **resolved**:
+  
+  | package | class | was spelled | what outlived shutdown |
+  |:--|:--|:--|:--|
+  | `@objectstack/metadata` | `MetadataPlugin` | `stop` (arrow property) | artifact watcher, `manager.dispose()`, repository handle |
+  | `@objectstack/runtime` | `AppPlugin` | `stop` (arrow property) | the `app:unregistered` catalog event, never emitted |
+  | `@objectstack/runtime` | `ExternalValidationPlugin` | `stop` (arrow property) | every armed drift-check `setInterval` |
+  | `@objectstack/plugin-email` | `EmailServicePlugin` | `dispose` | two metadata subscriptions, the SMTP transport, an engine binding |
+  | `@objectstack/plugin-webhooks` | `WebhookOutboxPlugin` | `dispose` | the auto-enqueuer (2 realtime subscriptions + a refresh interval) and two engine hooks |
+  
+  `ExternalValidationPlugin` is the one with teeth: it is one of only two `Plugin`
+  implementations in the tree that own `setInterval` directly, it is mounted on
+  the real `os serve` path, and its `stop()`'s only caller anywhere was the class
+  itself re-arming. Measured against a real kernel, its drift checker performed
+  five further reads in the five intervals after a resolved shutdown — the #9371
+  mechanism verbatim. `WebhookOutboxPlugin.dispose()` had **zero** callers in the
+  entire repo, so its teardown had never run in any process at all.
+  
+  **Nothing is removed and no signature narrows.** Each old name is retained as a
+  delegating alias, because it is public API of an exported class and an embedder
+  may have learned to call it directly precisely BECAUSE the kernel never did.
+  `stop` stays an arrow property where it was one (so a detached
+  `const { stop } = plugin` keeps working) and stays synchronous on
+  `ExternalValidationPlugin` (so a non-awaiting call site is unaffected). The two
+  `stop(ctx)` aliases widen their parameter to optional.
+  
+  One behavioural note for direct callers, since `destroy()` takes no context:
+  `MetadataPlugin.stop(ctx)` and `AppPlugin.stop(ctx)` now use the context
+  captured in `init()` and ignore the argument. In a real composition these are
+  the same object. The visible difference is confined to a plugin whose `init()`
+  never ran — for `MetadataPlugin` a dropped `warn` line, for `AppPlugin` a
+  catalog event that is no longer emitted for an app that was never registered.
+- a79bd35: Publish refusals no longer render each validation finding twice (#10524) — declare-then-trim.
+  
+  **Declared (spec, additive):** `PublishPackageDraftsResponseSchema.failed[]` elements now
+  declare `issues[]` (the `RuntimeAuthoringIssueSchema` findings the producer has emitted
+  since #8333 but no declared parse could carry), and `seedApplied` declares `issues[]`
+  (`{ path, message, code? }`, the seed-body schema refusal's findings). Typed consumers —
+  the SDK's `PublishPackageDraftsResponse`, any `parse` through the schema — can now read
+  the structured findings back instead of having them silently stripped.
+  
+  **Trimmed (producers):** the #4463 author-time gate's 422 message and
+  `seedRequestValidationError`'s message are one-sentence headlines — total count plus up to
+  three `path [rule]` / `path [zod-code]` locators — instead of restating the issue prose
+  that `issues[]` carries on the same response. Consumers that render only `error` (CLI,
+  logs) keep what failed, where, under which rule, and how many; consumers that render both
+  channels stop repeating themselves. The old `(+N more)` tail is subsumed by the leading
+  count. Both catches that surface the seed refusal onto `seedApplied` now thread the
+  structured findings beside the headline.
+  
+  Error `code`/`status` vocabularies, `advisories`, the DESTRUCTIVE_CHANGE (409) message,
+  and `saveMetaItem`'s spec-validation 422 message are unchanged. Messages are not contract
+  (the machine-readable channels are `code` and `issues[]`), so this is not a breaking
+  change and registers no migration.
+- 145ba75: docs: repair the dead repo-relative targets in four published READMEs (#10813)
+  
+  A published README ships inside the npm tarball, so a dead relative link in one
+  is shipped to every reader who installs the package. Nine of them were measured
+  across four packages, and nothing read them: `check:published-readme-links`
+  checked docs-site URLs, `check:published-readme-exports` checked fenced import
+  lines, and the lychee lane never sees `packages/**/README.md`.
+  
+  `@objectstack/runtime` carried six dead targets. Each was traced to where the
+  content actually went rather than deleted:
+  
+  - `MINI_KERNEL_GUIDE.md`, `MINI_KERNEL_ARCHITECTURE.md` and
+    `MINI_KERNEL_IMPLEMENTATION.md` were deleted from the repo root in January as
+    "redundant markdown files" (d709ecce68 — 14 files, 5051 deletions, nothing
+    added). The kernel reference they described is the docs site now, so the
+    Documentation section is the same footer eight sibling READMEs already use.
+  - `examples/host/` was renamed to `examples/app-host`, then `apps/server`, then
+    `apps/objectos`, and finally split out to `objectstack-ai/cloud`. In-repo, an
+    HTTP server in front of the runtime is `@objectstack/plugin-hono-server` plus
+    the `@objectstack/hono` adapter, so the bullet points there.
+  - `examples/msw-react-crud/` became `examples/app-react-crud`, then
+    `apps/console`, and now ships as `@object-ui/console` from another repo.
+  - `test-mini-kernel.ts` was a root-level scratch script; this package's suite is
+    179 test files under `src/`.
+  - The section also ended on a truncated bullet with an unterminated backtick
+    (`` - `packages/runtime/src/ ``), which is now a real pointer to that suite.
+  
+  The other three packages: `@objectstack/hono` and `@objectstack/service-package`
+  still spelled `@objectstack/driver-sql` as `../../plugins/driver-sql`, stale
+  since the driver moved to `packages/drivers/` (#5618). `@objectstack/plugin-security`
+  and `@objectstack/service-package` linked three packages that are in no directory
+  of this repo (`plugin-org-scoping`, `service-tenant`, `service-marketplace`);
+  those links are dropped and the names kept as code spans, which is the spelling
+  those same files already use for a package they cannot point at in-tree. Whether
+  those three packages exist at all is a separate question, filed separately.
+- 13a6cb4: **Tests (log hygiene):** the sixteen remaining passing `@objectstack/runtime`
+  fixtures that printed expected `refused a read on` failures into the shared
+  shard log now **withhold and assert** that noise instead of emitting it
+  (#10629). No runtime behaviour changes and no test was skipped, loosened or
+  removed — the same 78 tests pass, and 268 lines of expected-failure output
+  (134 `[sql-driver] DATABASE_ERROR — the backend refused a read on '<table>'`
+  envelopes plus their 134 matching `ERROR Find operation failed` engine frames)
+  leave the `Test Core` log.
+  
+  Why this is worth a release note at all: turbo interleaves package logs without
+  attribution, so an ERROR-shaped line from a **green** test is indistinguishable
+  from a real failure in a shard log. Lines of exactly this shape were once
+  lifted verbatim into a p1 flake signature (#10293) and sent a whole dispatch
+  cycle at the wrong mechanism. Expected-failure noise from a passing test is a
+  diagnosis tax on every future red shard.
+  
+  Each fixture provokes a **fail-soft probe** — a read the runtime issues to find
+  out whether something is installed, and whose missing-table answer it swallows
+  by design: `resolveUserAuthzGrants`' six `sys_*` `tryFind`s,
+  `ObjectQL.probeInstallOrganizations`, `SeedLoaderService.resolveSoleOrganizationId`,
+  the lifecycle governance snapshot, `runBuildProbes`' view read, and the boot
+  metadata load. Every one of them was judged expected rather than diagnostic;
+  none was silenced on the strength of "it looks like noise".
+  
+  ⛔ This is not a mute. PR #10630 ruled the shape for this class on two files —
+  withhold only a line that names an expected table **and** carries that same
+  table's `no such table` reason, count what was withheld, and assert the counts —
+  and this applies that shape verbatim through one shared, test-only module,
+  `packages/runtime/src/expected-read-refusal-noise.ts`. A fixture that stopped
+  provoking its probe, or whose table started resolving, now goes **red** instead
+  of merely going quiet; the engine frame is withheld only when it sits directly
+  above a driver refusal the capture already recognised, so an identically-shaped
+  fault from any other cause still reaches the log with both halves intact.
+- 9f483d9: Repair six false API claims in the published `@objectstack/runtime` README
+  (#10368). The README is in the package's `files` array, so it is the page npm
+  renders — a reader following it wrote code that could not compile.
+  
+  Found by hand-adjudicating every call site in that document that
+  `check:published-readme-exports` reports under `NOT read:` — receivers built
+  from free variables, parameters and globals, which neither the gate nor a human
+  reader can type by looking. 30 sites on 17 receivers were read; the repairs below
+  are what came out.
+  
+  - `engine.update('user', user.id, { name: 'Jane' })` → `engine.update('user',
+    { id: user.id, name: 'Jane' })`. `IDataEngine.update` is
+    `(objectName, data, options?)`; there is no `id` parameter. A by-id update is
+    identified by a truthy scalar `data.id` (or `options.where.id`) — the rule
+    `resolveEngineUpdateDispatch` in `@objectstack/metadata-core` defines.
+  - `engine.delete('user', user.id)` → `engine.delete('user', { where: { id: user.id } })`.
+    `IDataEngine.delete` is `(objectName, options?)`; the id belongs in
+    `options.where.id` (`assertEngineDeleteDispatch`). Passing it positionally
+    landed the id in the options bag.
+  - The **Interface Methods** bullet list restated both wrong signatures, so it is
+    corrected in the same edit — a repaired example beside a bullet list that still
+    contradicts it is not a repair.
+  - `reply.code(429).send({ retryAfterMs })` in the rate-limiting recipe →
+    `res.status(429).json({ retryAfterMs })`. `reply.code()` is Fastify; this
+    package's HTTP contract is `IHttpResponse`, which spells the step
+    `status(code)` and whose `send` takes `string | Uint8Array | ArrayBuffer`, not
+    an object. The `docs/HARDENING.md` recipe the same section links to already
+    answers 429 through the framework's own JSON responder.
+  - `status: res.statusCode` in the middleware example → dropped.
+    `IHttpResponse` has no `statusCode`; a response's status is observed through
+    `IHttpServer.afterResponse` (`HttpResponseObservation.status`), not read off
+    the response inside middleware.
+  - The `PluginContext` interface block declared `logger: Console` and
+    `getKernel?(): any`. The real contract (`@objectstack/core`) is
+    `logger: Logger` and a required `getKernel(): ObjectKernel`.
+  
+  Documentation only — no runtime, type or export change.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [4d7c564]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d483e1]
+- Updated dependencies [530c1df]
+- Updated dependencies [163a162]
+- Updated dependencies [5337ef1]
+- Updated dependencies [7d2d112]
+- Updated dependencies [03bdd14]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [7bf3fb7]
+- Updated dependencies [02b3b07]
+- Updated dependencies [2570ab0]
+- Updated dependencies [5886ee6]
+- Updated dependencies [e634ecf]
+- Updated dependencies [02d56b4]
+- Updated dependencies [46cfa5b]
+- Updated dependencies [82cb6e8]
+- Updated dependencies [b20c8d2]
+- Updated dependencies [f76fe42]
+- Updated dependencies [4257e4e]
+- Updated dependencies [3e26359]
+- Updated dependencies [6ce58a7]
+- Updated dependencies [d23e3a0]
+- Updated dependencies [9a1ed7a]
+- Updated dependencies [f3a8134]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [5b0af2b]
+- Updated dependencies [5b39785]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [9e04c3e]
+- Updated dependencies [67630c4]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [2866d5f]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [a16ff50]
+- Updated dependencies [e222a53]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [a037f7c]
+- Updated dependencies [c49007a]
+- Updated dependencies [047ac86]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [0c24898]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [490879a]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [145ba75]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [d29e271]
+- Updated dependencies [4389fe9]
+- Updated dependencies [923c424]
+- Updated dependencies [b419135]
+- Updated dependencies [88e32a8]
+- Updated dependencies [38bc74e]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [f59035c]
+- Updated dependencies [af1636c]
+- Updated dependencies [86a8ec9]
+- Updated dependencies [d9353b9]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [45204a5]
+- Updated dependencies [9b0172d]
+- Updated dependencies [24ba050]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/plugin-auth@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/objectql@17.2.0
+  - @objectstack/driver-sql@17.2.0
+  - @objectstack/driver-memory@17.2.0
+  - @objectstack/plugin-security@17.2.0
+  - @objectstack/service-i18n@17.2.0
+  - @objectstack/metadata-protocol@17.2.0
+  - @objectstack/rest@17.2.0
+  - @objectstack/service-datasource@17.2.0
+  - @objectstack/observability@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/metadata@17.2.0
+  - @objectstack/driver-sqlite-wasm@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/service-cluster@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

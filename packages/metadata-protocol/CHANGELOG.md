@@ -1,5 +1,567 @@
 # @objectstack/metadata-protocol
 
+## 17.2.0
+
+### Minor Changes
+
+- 5886ee6: Stop issuing two DB queries for questions already answered earlier in the same
+  request (#10757). One authenticated `GET /data/:object?$top=1` measured **24 DB
+  queries before, 23 after** — **22** when the caller opts out of the count.
+  Measured with `X-OS-Debug-Timing: json` on `pnpm dev:crm`, whose `Server-Timing`
+  carries `db;dur=…;desc="N queries"`.
+  
+  **`$count=false` now skips the COUNT query** (`@objectstack/metadata-protocol`).
+  The parameter has been declared (`ODataQuerySchema.$count`), aliased on the wire
+  (`$count` → `count`), reserved out of the implicit-field-filter bucket,
+  arity-checked and boolean-coerced for a long time — and then deleted unread, so
+  every paginated list ran `engine.count()` whether or not the caller wanted a
+  total. It is honoured now:
+  
+  ```
+  GET /data/task?$top=25              → { records, total, hasMore }   (unchanged)
+  GET /data/task?$top=25&$count=true  → { records, total, hasMore }   (unchanged)
+  GET /data/task?$top=25&$count=false → { records, hasMore }          (no COUNT query)
+  ```
+  
+  Read the shape of that carefully before adopting it:
+  
+  - **Only an explicit `false` opts out.** An ABSENT `$count` still counts and
+    still reports `total`. OData reads absent as "omit the count", and taking that
+    reading here would silently strip `total` from every existing caller — none of
+    them send the parameter, all of them read the number. The asymmetry is
+    deliberate and pinned by tests.
+  - **`total` is OMITTED, never estimated.** `FindDataResponse.total` is declared
+    optional ("if requested"), so absent is the declared shape for "not
+    requested". A caller that opted out and then reads `total` gets `undefined`,
+    not a plausible-looking guess — guard the read (`total ?? undefined`) or do
+    not send `$count=false`.
+  - **`hasMore` is still answered**, from the page alone: a full page means there
+    may be more. Same page-local rule the `$search` path already uses.
+  
+  **A find and its COUNT resolve permission sets once, not twice**
+  (`@objectstack/plugin-security`). `findData` answers a paginated list with two
+  engine operations, and the security middleware runs on both; each pass re-read
+  `sys_permission_set` for the same context with identical bindings. The
+  resolution is now memoized per execution context — a `WeakMap` keyed on the
+  context object, which is built once per request and collected with it, so
+  nothing outlives the caller it was resolved for — and **retired by any write**:
+  a process-wide epoch is bumped on every `insert`/`update`/`delete` the engine
+  middleware sees, ahead of the `isSystem` bypass so a seeder, a package publish
+  or an auto-org-admin grant invalidates too. A context whose grants are rewritten
+  in place re-resolves as well (the memo key covers `positions`, `permissions`,
+  `principalKind` and the presence of `userId`). No authorization answer is reused
+  across a write, across a context, or across a request.
+  
+  Not a fix for the whole cost: the remaining ~22 queries per authenticated
+  request are session resolution, grant resolution, localization and metadata
+  reads that repeat on every request. Removing those needs cross-request caching
+  with an invalidation design, which is deliberately not in this change.
+- 2866d5f: `os migrate duplicates` now reports the rows blocking the three `kernel:ready`
+  NULL-safe index tightenings, and the three migrations' conflict messages point
+  there instead of at `os migrate plan` (#8725).
+  
+  **The gap.** Three migrations replace a declared UNIQUE index with the NULL-safe
+  — and sometimes active-rows-only — form it was always meant to have, at
+  `kernel:ready` on a serving boot:
+  
+  | table | index(es) | migration |
+  | --- | --- | --- |
+  | `sys_metadata` | overlay `active` + `draft` | `ensureMetadataOverlayIndexes` |
+  | `sys_view_definition` | `idx_sys_view_def_active` | `ensureViewDefinitionActiveIndex` |
+  | `sys_setting` | the declared row identity | `ensureSysSettingIdentityIndex` |
+  
+  Each is a tightening, so rows an installation already holds can block it. The
+  migration then refuses — previous index kept, no row touched, boot continues —
+  and reports at `error` on the boot channel. That channel was the only one:
+  these indexes are invisible to `os migrate plan` **by construction**, twice
+  over. After the tightening, `isRuntimeManagedIndex` excludes the index (without
+  that exclusion a boot would propose rebuilding away the guarantee it had just
+  created); before it, each migration deliberately reuses the *declared* index's
+  name, so the reconciler's name-matched slot reads as filled whichever physical
+  form is really there. Measured with a matched control — one database carrying
+  the same duplicate damage under a declared index and under
+  `sys_view_definition`'s runtime one — `plan` named the declared one in full and
+  said nothing whatsoever about the runtime one.
+  
+  **What is new.** The report gains a `runtimeIndexPreflight` section, one entry
+  per index, each `blocked` (with every colliding key group and its row count),
+  `clear`, `table-absent` (`sys_setting` arrives with the optional settings
+  service) or `unreadable` (with the driver's own message), plus
+  `summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows`.
+  `reportVersion` moves `1` → `2`. Every `1` field keeps its name, shape and
+  meaning; the bump says there is more in the document, for consumers that
+  validate it strictly.
+  
+  The probes are the migrations' own duplicate-listing statements —
+  `@objectstack/metadata-protocol` exports `collectRuntimeIndexPreflight` and
+  `runtimeIndexProbes`, which read those builders rather than restating the keys,
+  so the pre-flight and the boot report cannot describe different duplicates. On
+  MySQL the `sys_setting` probe uses the migration's MySQL spelling, where the
+  bare form is `ERROR 1064` on the reserved word `key`.
+  
+  **The referral, repointed rather than deleted** (maintainer ruling, 2026-08-22).
+  All three conflict messages told the operator to "run `os migrate plan`" as an
+  alternative way to list the blocking rows, and that instruction was false: they
+  now name `os migrate duplicates`, which answers it. The six doc comments that
+  state the same referral as part of the ADR-0120 D4 disposition are updated with
+  them.
+  
+  **Nothing about a migration's behaviour changes.** No tightening is armed,
+  deferred or altered, and `os migrate plan`'s drift contract is untouched. The
+  pre-flight only makes the refusal's evidence readable one command before the
+  restart — from a command that boots read-only and writes nothing, which is
+  pinned logically (schema plus every row, ordered) rather than by a file hash: a
+  raw hash over a SQLite file moves on any read-write open and would accuse this
+  command of mutating the install it exists to describe.
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+- 16cef97: Declare `outcome: 'published' | 'refused' | 'nothing_to_publish'` as a required
+  key on the `publishPackageDrafts` response (#10462) — the first-class
+  discriminant for WHICH exit answered, the fact `success` compresses into one
+  boolean. Before this field, a publish with nothing to promote and a genuine
+  refusal (pre-flight violation or ADR-0067 D2 rollback) were indistinguishable:
+  both answer `success: false` with `publishedCount: 0` on a 200, and the no-op
+  left no trace at all — an AI consumer graded the no-op as "refused and rolled
+  back" and burned two repair rounds on artifacts that were already correct
+  (cloud#1488; cloud#1492's patch discriminates on `failed.length > 0`, an
+  invariant the producer never stated).
+  
+  The producer invariants, now stated and pinned in the conformance suites, both
+  directions of each: `outcome === 'refused'` ⟺ `failed.length > 0`;
+  `outcome === 'nothing_to_publish'` ⟺
+  `published.length === 0 && failed.length === 0`;
+  `success === (outcome === 'published')`. `success` keeps its exact pre-#10462
+  value on every exit — a no-op still answers `success: false` — so consumers
+  reading only `success` see no change, and cloud#1492's `failed.length`
+  discrimination stays valid during its convergence onto `outcome`. The no-op
+  exit additionally logs one `info` line naming the package and both facts
+  (nothing pending, nothing refused), so that exit is no longer traceless.
+  
+  Additive for response consumers. A custom protocol implementation that serves
+  `publishPackageDrafts` must now emit `outcome` on every return —
+  `PublishPackageDraftsResponseSchema` declares it required, and the conformance
+  suites treat a producer return without it as a drifted seam.
+- f334d66: `MetadataRepository.watch()` — a numeric `since` now replays from the durable
+  log, and what a bare `watch(filter)` owes is written into the contract.
+  
+  **`SysMetadataRepository.watch(filter, since)`** read `since` only as a drop
+  filter on live events, so an event that had already committed was unreachable
+  through `watch()` however low `since` was set — even though the repository holds
+  a durable per-org `event_seq` log in `sys_metadata_history` and already reads it
+  org-wide in `nextEventSeq()`. Invariant 6 of the repository contract
+  ("`watch(_, since)` MUST replay all events with `seq > since` before delivering
+  live events") was therefore unimplemented in the repository backing every
+  production metadata write. It now replays through that same query, using the
+  row-to-event mapping extracted out of `history()`. The live listener is
+  registered before the durable read is issued and a set of delivered `seq`
+  numbers closes the replay-to-live seam, so an event committing mid-read arrives
+  exactly once; a failed durable read is raised to the consumer rather than
+  degraded into a silent live-only tail.
+  
+  **No behaviour change for a `watch()` with no `since`** — deliberately. Both
+  in-repo production subscribers (`MetadataManager.startRepositoryWatch()` and
+  `MetadataCache.start()`) attach that way, and replaying for them would push an
+  org's entire history through cache invalidation and HMR as "this just changed"
+  at every attach.
+  
+  **Contract text (`@objectstack/metadata-core`, `repository.ts`).** Invariant 6
+  now states its own boundary: a `watch()` with no `since` is owed **live events
+  only**; an implementation MAY additionally deliver events that had already
+  committed, but a caller MUST NOT rely on it, and a caller that needs the
+  already-committed prefix passes a numeric `since` or reads `history()`. That
+  half was previously unwritten and load-bearing — "no `since` replays
+  everything" existed only as `InMemoryRepository`'s implementation, and the
+  shared contract suite silently depended on it.
+  
+  **If you run `runRepositoryContractTests` from
+  `@objectstack/metadata-core/testing` against your own implementation**, one
+  clause changed shape. `watch filters by type and name` (which wrote twice, then
+  opened a watch and expected the match back) is replaced by `watch filters by
+  type and name — over the live stream`, which opens the subscription first and
+  writes after. FROM: an implementation passed by replaying its whole matching log
+  on a bare `watch(filter)`. TO: it passes by delivering, and filtering, the
+  events that commit after the subscription is established. An implementation that
+  replays as well still passes — the new clause asserts the floor, not the
+  maximum. If yours only replayed and never delivered live events, it was relying
+  on unspecified behaviour and now needs a live path.
+
+### Patch Changes
+
+- 02d56b4: fix(metadata-protocol): `getMetaDiagnostics` refuses an unrecognised `type` spelling with the producer's 400 instead of answering "scanned 1 type, 0 problems" (#8924)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The same one-method
+  `catch` #8855 narrowed is narrowed once more: the request-classification 400
+  `canonicalizeMetaRequestType` already raises inside `getMetaItems` is rethrown
+  the same way the 503 is. No authorable key is added, renamed, retired or
+  tombstoned, no stored shape changes, and the response payload type is
+  byte-identical — there is nothing for a conversion entry to convert. -->
+  
+  This is a **narrowing that makes an already-classified 400 reach the caller**.
+  `GET /api/v1/meta/diagnostics?type=<unrecognised-plural-of-a-declared-type>`
+  (and the SDK method `client.meta.getDiagnostics({ type })`) used to answer
+  `200 {"entries":[],"total":0,"scannedTypes":1,"scannedItems":0,"stats":{}}` —
+  "scanned 1 type, no issues" — for a spelling every sibling `/meta` door
+  refuses with a 400 that names both accepted spellings. The producer had
+  already classified the mistake (`status: 400`, `code: 'INVALID_REQUEST'`,
+  raised by `canonicalizeMetaRequestType` inside `getMetaItems`); the
+  diagnostics sweep's per-type `catch` swallowed the verdict into a benign
+  skip, and `scannedTypes: 1` then published a sweep that scanned nothing as
+  coverage. Maintainer ruling 2026-08-20: rethrow the 400 the same way #8855's
+  fix rethrows the 503.
+  
+  **Measured on a booted kernel (real HTTP), before → after:**
+  
+  ```
+  GET /api/v1/meta/diagnostics?type=fieldes   200 {"scannedTypes":1,"stats":{}}  →  400 [invalid_request] "… Address it as 'field' or 'fields'."
+  GET /api/v1/meta/diagnostics?type=fields    200 (recognised plural)            →  200 unchanged
+  GET /api/v1/meta/fieldes                    400                                →  400 unchanged
+  ```
+  
+  What is unchanged: recognised plurals (`fields`, `views`, …) still fold and
+  answer; a name that is a plural of nothing (`fieldz`) still answers an honest
+  `count: 0` entry; a genuine, unclassified listing failure still skips that
+  one type instead of failing the sweep; the whole-corpus sweep (no `?type=`)
+  cannot produce the refusal at all — its target set comes canonical out of the
+  registry. A caller that treated the old `200`-with-empty-stats answer as
+  "clean" now hears the refusal that names the accepted spellings.
+- 82cb6e8: fix(metadata-protocol): stop prescribing `?force=true` on the duplicate door, which accepts no `force` (#11015)
+  
+  `saveMetaItem`'s Phase 3a-destructive refusal ended every message with
+  `— re-submit with ?force=true to proceed.` The refusal is raised in one place
+  and quoted onto whatever response the caller's catch builds, so that one
+  sentence went out on every face that reaches the gate — including
+  `POST /packages/:id/duplicate`, which has no `force` to set.
+  
+  Measured: the duplicate route accepts `targetPackageId`, `targetName`,
+  `targetNamespace`, `organizationId` and `actor` — no `force` in the query
+  string or the body — and `duplicatePackage`'s own request type has no `force`
+  field either, so its internal `saveMetaItem` call cannot carry one. The gate is
+  reached on the ordinary duplicate-**again** workflow, where the target
+  namespace already holds the renamed object from an earlier duplicate; the copy
+  is refused and the refusal is reported as data on a `200`:
+  
+  ```
+  "error": "[destructive_change] object/crm2_task would drop or transform existing
+            data: Field 'b' removed — … — re-submit with ?force=true to proceed."
+  ```
+  
+  A caller who does what that sentence says gets the identical refusal back. The
+  remedies that do exist on that face — duplicate into a target namespace that is
+  free, or reconcile the colliding object first — were never stated.
+  
+  The clause is now rendered per face. The duplicate door says:
+  
+  ```
+  … — this copy cannot be forced: the duplicate door accepts no `force`.
+  Duplicate into a target namespace that does not already hold 'crm2_task', or
+  reconcile that item with the source first.
+  ```
+  
+  Three narrowings, each pinned:
+  
+  - **The clause is repaired, not the door.** No `force` parameter is added to
+    `POST /packages/:id/duplicate`; that would widen a public surface and is a
+    contract decision, not a message fix. Which face is being served is stated by
+    the server on the internal call, exactly as `source` already is — a caller
+    cannot smuggle one in.
+  - **Nothing else in the message moved.** #10886 measured that
+    `duplicatePackage`'s `failed[].error` is the sole carrier of the per-field
+    destructive findings, so the findings prose stays verbatim. Only the trailing
+    remedy sentence is face-dependent.
+  - **No accept/reject behaviour changed.** The copy is still refused, still
+    reported as `failed[]` data on the `200`, still counted. Faces that state no
+    door — the single-segment REST `PUT /api/v1/meta/:type/:name`, where
+    `?force=true` is a real query parameter the route threads — keep the previous
+    wording byte for byte.
+- d728325: Per-item publish (`POST /api/v1/meta/:type/:name/publish`) now re-binds runtime consumers
+  and finds drafts authored env-wide — the two things the package-scoped publish door
+  already did.
+  
+  **A metadata publish now announces `metadata:reloaded` on BOTH doors.** The event that
+  tells boot-cached consumers to re-read had two announcers: the dev-artifact watcher and
+  the runtime dispatcher after `POST /packages/:id/publish-drafts`. Publishing item by item
+  — what AI authoring and the item-level Studio doors do — announced nothing, so a flow
+  published while the server ran stayed `state='active'` and completely inert (no trigger
+  bound, no execution) until the kernel was rebuilt. `publishMetaItem` now notifies its host
+  through a new `onMetaItemPublished` seam and `ObjectQLPlugin` turns that into the kernel
+  announce, so `service-automation`'s flow re-bind, the authored hook/action re-sync,
+  declarative connectors and authored translations all catch up without a restart. The
+  announce is awaited, so the publish's own 2xx means the re-bind was attempted; a
+  subscriber failure is logged and never fails the publish. The batch door is unchanged —
+  it keeps its single per-publish announce rather than gaining one per promoted draft.
+  
+  **A per-item publish now resolves the draft's own org scope.** For the types the registry
+  declares `allowOrgOverride: true` (`view`, `dashboard`, `report`, `translation`,
+  `email_template`) the REST seam threads the session's active organization into the
+  publish, while package/AI authoring writes the draft env-wide — so the strict org lookup
+  matched nothing and answered `404 [no_draft] … nothing to publish` over a draft the
+  console's pending-changes banner was listing and the batch button published fine. The
+  per-item door now discovers the draft's scope the way `publishPackageDrafts` has since
+  #3115, with the ADR-0005 precedence (an org holding its own draft publishes that one) and
+  the same `NO_DRAFT` refusal when no scope holds a draft.
+- 0c24898: fix: a package publishes as a self-consistent unit — `publishPackageDrafts` judges each draft against the batch's own pending declarations
+  
+  The batch publish door built the author-time validation context from
+  `engine.registry` alone, i.e. the ALREADY-LIVE universe. A draft is not in that
+  registry, and the batch's own promotions do not put it there either: the
+  registry write-through runs in Phase 2, after the Phase-1 transaction that gates
+  and promotes every draft. So while a batch was being judged, no member of it was
+  visible to any other member — in any order.
+  
+  Measured consequence: a package shipping `dataset/x` together with a `dashboard`
+  whose widget binds `x` could NEVER publish. `validateWidgetBindings` raises
+  `widget-dataset-unknown` at `severity: 'error'`, which refuses the promotion,
+  and the batch being all-or-nothing rolls the whole package back. Renaming the
+  dataset could not help, and neither could re-ordering the items.
+  
+  `publishPackageDrafts` now reads its own pending drafts once, before any
+  promotion, and folds them into all four context collections the closure carries
+  (`objects`, `permissions`, `books`, `datasets`) — pending declarations replace a
+  live one of the same name, never sit beside it. A binding that resolves to
+  neither the batch nor the live universe is still refused exactly as before.
+- a79bd35: Publish refusals no longer render each validation finding twice (#10524) — declare-then-trim.
+  
+  **Declared (spec, additive):** `PublishPackageDraftsResponseSchema.failed[]` elements now
+  declare `issues[]` (the `RuntimeAuthoringIssueSchema` findings the producer has emitted
+  since #8333 but no declared parse could carry), and `seedApplied` declares `issues[]`
+  (`{ path, message, code? }`, the seed-body schema refusal's findings). Typed consumers —
+  the SDK's `PublishPackageDraftsResponse`, any `parse` through the schema — can now read
+  the structured findings back instead of having them silently stripped.
+  
+  **Trimmed (producers):** the #4463 author-time gate's 422 message and
+  `seedRequestValidationError`'s message are one-sentence headlines — total count plus up to
+  three `path [rule]` / `path [zod-code]` locators — instead of restating the issue prose
+  that `issues[]` carries on the same response. Consumers that render only `error` (CLI,
+  logs) keep what failed, where, under which rule, and how many; consumers that render both
+  channels stop repeating themselves. The old `(+N more)` tail is subsumed by the leading
+  count. Both catches that surface the seed refusal onto `seedApplied` now thread the
+  structured findings beside the headline.
+  
+  Error `code`/`status` vocabularies, `advisories`, the DESTRUCTIVE_CHANGE (409) message,
+  and `saveMetaItem`'s spec-validation 422 message are unchanged. Messages are not contract
+  (the machine-readable channels are `code` and `issues[]`), so this is not a breaking
+  change and registers no migration.
+- 490879a: Declare `packageId` on `publishMetaItem`'s request type, and correct three
+  in-tree comments that claimed the per-item publish door "names no package"
+  (#10350).
+  
+  `publishMetaItem` declared `type / name / organizationId / actor / message /
+  _skipSeedApply` and no `packageId`, while since #10063 `POST
+  /meta/:type/:name/publish?package=PKG_ID` states one on every HTTP-driven
+  promotion that names a package — which is Studio's designer save-then-publish
+  loop.
+  
+  **No runtime behaviour changes, and nothing was broken at runtime.** The value
+  already flowed end to end: `publishMetaItem` forwards its whole request object,
+  the one transform in between (`canonicalizeMetaRequestType`) is a spread that
+  drops no key, and `promoteDraftForPublish` already declared
+  `packageId?: string | null` and threaded it into both the #9612 gate closure and
+  `repo.promoteDraft`. What was wrong was the *declared* contract: the binding was
+  invisible to every typed caller, and the only caller that states one reaches the
+  method through a cast, so it was enforced by nothing — one destructuring
+  refactor away from being dropped in silence.
+  
+  `packageId` is `string | null | undefined`, and the three states are distinct:
+  an **absent** key keeps the historical "match any package" resolution, `null`
+  pins the lookup to the unbound row, and a present-and-`undefined` key coerces to
+  `null` downstream and makes a package-bound draft unfindable. Spread it in
+  conditionally; never write `packageId: maybeUndefined`.
+  
+  `environmentId` is deliberately **not** added, though it sits in the same
+  cast-hidden position on the REST call site. It is the multi-kernel routing key
+  and is out of the protocol request shape by the maintainer ruling recorded
+  2026-08-18 on #9741 — `resolveProtocol(environmentId)` selects the kernel before
+  the call, and `request.environmentId` is read nowhere in
+  `@objectstack/metadata-protocol`. `packages/rest` types that one transport-level
+  member on top of the declared shape (`TransportScopedMetaRequest`) instead.
+  
+  Three pins land in `protocol-publish-drafts-package-scope.test.ts`, on the same
+  two-colliding-drafts fixture the #8907 batch-door cases use, so a promote that
+  loses the package dimension resolves the *wrong* row rather than merely
+  succeeding.
+- 38bc74e: `backfillSeedTenancy` no longer reports `no-split` over a driver it never queried
+  (#10789). The boot-time seed/API tenancy repair answered `status: 'no-split'` —
+  *"I looked, there is no split"* — on the memory driver, having looked at nothing,
+  and its own `absent` branch was unreachable there despite the branch's comment
+  saying *"Absent on a memory engine"*.
+  
+  `InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver`
+  and returns `null`. It neither throws nor is absent, so `resolveSeedTenancySeam`'s
+  shape test (`typeof d.execute === 'function'`) was satisfied and the `no-driver`
+  guard never fired; `normalizeRows(null)` is `[]`, which is also what a real driver
+  returns for a SELECT that matched nothing. Every branch of this migration reads
+  "no rows" as "healthy install, nothing to do", so the two collapsed into one
+  answer.
+  
+  The migration now separates the cases the guard used to conflate: **a seam that
+  cannot answer is absent, not empty.** Its READ probes are held to the standard
+  that actually distinguishes them — a driver that answers returns a RESULT SET —
+  so a probe that hands back no result set reports `absent` (with a `detail` naming
+  the reason) instead of being read as zero rows. Nothing names a driver: any host
+  with the same no-op shape is covered without an allowlist to maintain. This is the
+  consumer-side shape #10677 / PR #10788 landed for `os migrate duplicates`, applied
+  to this module's own probes. No driver package was modified.
+  
+  Three behaviours are deliberately unchanged:
+  
+  - **A real SQL install does not move.** An empty result set is an ANSWER in every
+    dialect spelling — a bare `[]`, `{ rows: [] }`, and the `[rows, fields]` tuple —
+    so a healthy install still reports `no-split`. The counter-table presence probe
+    is a `WHERE 1 = 0` SELECT that matches nothing by construction and runs on every
+    boot, which is exactly why "no rows" must stay distinct from "no answer".
+  - **Write statements are not held to "must answer".** An UPDATE or DELETE does not
+    return a result set on every dialect, so the repair's stamp and counter-merge
+    statements stay on the bare seam.
+  - **A seam that THROWS keeps its behaviour.** Throwing is a driver present and
+    refusing loudly, and step 1's `catch` already reported it as `absent`; only a
+    seam that RETURNS a non-answer was invisible.
+  
+  Boot-time behaviour is otherwise untouched: neither status logs anything, and
+  neither writes a ledger receipt, so a memory-driver boot logs exactly what it
+  logged before. What changes is the reported `status`, which is the value a caller
+  uses to tell "nothing to repair" from "could not look".
+- 0ab81d1: fix(metadata-protocol): the seed/API tenancy repair now records each applied run in `sys_migration`, so "was my data rewritten, and when" survives the container being replaced (#9451)
+  
+  `backfillSeedTenancy` (#8686) is the platform's only row-rewriting repair that
+  runs unattended: it stamps `organization_id` onto business rows, merges one
+  autonumber counter and deletes another. It persisted nothing about having done
+  so. The only evidence was one `logger.info` line, and the healthy path is silent
+  by design — so once that line had scrolled, a silent boot and a boot that
+  rewrote data were indistinguishable. The operator most likely to need the record
+  (a fresh install, repaired during the first admin sign-up, where nobody is
+  reading server stdout) was the one least likely to have captured it.
+  
+  An `applied` run now writes one row into the **existing** `sys_migration`
+  deployment ledger — the face that already answers "has this deployment run this
+  data migration", and is already written at boot by the ADR-0104 attestation
+  path:
+  
+  ```sql
+  SELECT last_run_at, advisory, details FROM sys_migration
+  WHERE id = 'seed-tenancy-backfill';
+  ```
+  
+  `details` carries the run's status, the objects stamped, the organization
+  adopted and the identifiers that could not be adopted because they were already
+  minted on both sides of the split.
+  
+  Deliberately narrow:
+  
+  - **`applied` only.** `no-split` stays silent — a row per healthy boot would be
+    a ledger of non-events.
+  - **`verified_at: null`, `blocking: 0`, always.** This repair runs no self-check
+    and gates no consumer, so it claims no certificate; the collision count goes
+    to `advisory`, which never gates. Every reader of this ledger looks a row up
+    by `id`, so the new id cannot reach another migration's gate.
+  - **Best-effort, and loud when it fails.** A boot is never failed by
+    bookkeeping (2026-08-15 ruling), so a failed receipt write is reported at
+    `error` — naming that the rows *were* rewritten, that the repair is not
+    retried, and what to do — rather than rethrown.
+  - **No new schema, no new authoring surface, no new dependency.** The row is
+    written against the `@objectstack/spec/system` contract that
+    `metadata-protocol` already depends on.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [78818ec]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [047ac86]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [e2bb237]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [adbcbfd]
+- Updated dependencies [f1b5ad3]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/lint@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/metadata@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes
