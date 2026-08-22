@@ -330,11 +330,25 @@ describe('[#8136] a real sys_metadata failure, walked in process through this do
 // route: all four handlers exit through the same `sendThrownError`, so each is
 // driven separately rather than assumed to share the fix.
 //
-// `GET /packages` is different BY DESIGN: both of its data sources sit in their
-// own inner `try { … } catch {}`, so nothing below reaches the outer catch.
-// What does is the gate — `refusePackageRequest` calls
-// `options.resolveExecutionContext(req)`, and a resolver that throws
-// SYNCHRONOUSLY throws before the `.catch(() => undefined)` is attached.
+// [#11063] `GET /packages` used to be different BY DESIGN — the sentence here
+// read: "both of its data sources sit in their own inner `try { … } catch {}`,
+// so nothing below reaches the outer catch". That is no longer true of the
+// DURABLE source: #11063 removed its inner catch, because absorbing a failed
+// durable read reported it as a 200 whose `total` claimed a complete count. A
+// throw from `packageService.list()` now reaches this same outer catch and this
+// same `sendThrownError`.
+//
+// This site is nevertheless left driving the GATE, deliberately: the resolver
+// throw is the one path that reaches the outer catch on this route regardless of
+// what either data source does, so it keeps proving the DOOR rather than one
+// source — `refusePackageRequest` calls `options.resolveExecutionContext(req)`,
+// and a resolver that throws SYNCHRONOUSLY throws before the
+// `.catch(() => undefined)` is attached. The list door's durable-read arm is
+// pinned separately in `package-list-durable-read-refusal.test.ts`.
+//
+// ⚠️ Still true of the REGISTRY source: `protocol.getMetaItems` keeps its own
+// inner catch, which #11063 deliberately did not touch (different producer, no
+// declared refusal to carry, and widening the change there was not authorized).
 
 interface Site {
   name: string;
