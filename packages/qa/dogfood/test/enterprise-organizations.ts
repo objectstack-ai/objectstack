@@ -97,7 +97,16 @@ export async function probeOrganizations(
   declared: boolean = process.env[MULTI_ORG_ENV] === '1',
 ): Promise<OrganizationsProbe> {
   const root = hostRoot ?? process.cwd();
-  const importFromHost = createHostImporter(root);
+  // #10943: hand the helper THIS module's resolver. Its undeclared fallback is
+  // documented as "the importing package's own resolution", and a bare
+  // `import()` written inside `@objectstack/types` is that package's
+  // resolution, not this one's — it can see only `@objectstack/spec`. Measured
+  // to change nothing for `@objectstack/organizations` itself (cloud-private,
+  // resolvable from nowhere in the framework workspace); it makes the
+  // documented sentence true for this probe.
+  const importFromHost = createHostImporter(root, {
+    fallbackImport: (specifier) => import(/* webpackIgnore: true */ specifier),
+  });
   try {
     await importFromHost(ORGANIZATIONS_PKG);
     return { available: true };

@@ -475,11 +475,26 @@ export async function bootStack(
     // bin shim a fixture app that never declared the enterprise runtime still
     // booted multi-tenant off a hoisted copy — and the RLS posture a fixture
     // then asserted against depended on the launcher.
+    //
+    // #10943: the undeclared FALLBACK is this package's own resolution only if
+    // this package supplies it. A bare `import()` written inside
+    // `@objectstack/types` resolves against THAT package — which declares
+    // `@objectstack/spec` and nothing else — so the helper's documented
+    // "falls back to the importing package's own resolution" was not true for
+    // any caller until each one handed in its base. `(s) => import(s)` here is
+    // literally this module's resolver, so the sentence now holds for
+    // `bootStack`. Measured: it changes nothing for THIS specifier —
+    // `@objectstack/organizations` is cloud-private and resolves from nowhere
+    // in the framework workspace — and it is what stops the next app-supplied
+    // package added to this path from silently missing `packages/verify`'s own
+    // dependencies.
     const organizationsPkg = '@objectstack/organizations';
     const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {
-      mod = await createHostImporter(hostRoot)(organizationsPkg);
+      mod = await createHostImporter(hostRoot, {
+        fallbackImport: (specifier) => import(/* webpackIgnore: true */ specifier),
+      })(organizationsPkg);
     } catch (e) {
       restoreTenancyPosture();
       // Two absences, two remedies (#4719). "Install/link it in THIS APP" is

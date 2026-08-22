@@ -31,6 +31,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as NodeModule from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   createHostImporter,
   createHostRequire,
@@ -176,12 +177,21 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
   });
 
   it(
-    "falls back to the importing package's own resolution when the host does not declare",
+    'the DEFAULT fallback is this package\'s own resolution — @objectstack/spec and nothing else',
     async () => {
-      // Whatever the host app does not declare must still load from the framework
-      // package's own dependencies — that fallback is what keeps every
-      // framework-owned load in `serve` (plugin-auth, plugin-security,
-      // service-i18n, …) and in `bootStack` working exactly as before.
+      // ⚠️ Read this case for what it measures, not for what it used to be
+      // called (#10943). It was named "falls back to the importing package's
+      // own resolution", which is the helper's DOCUMENTED contract — but it
+      // passes because `@objectstack/spec` is the one dependency
+      // `@objectstack/types` declares, so it is green whether the fallback
+      // resolves from the caller or from here. It could never have failed on
+      // the defect it appeared to guard, and it is why that defect survived to
+      // be found by measurement instead.
+      //
+      // What it legitimately pins is the DEFAULT (no `fallbackImport`) base:
+      // unchanged by #10943, so an out-of-tree caller keeps working. The
+      // documented contract is pinned by the caller-anchored matrix below,
+      // where every row can actually fail.
       const mod = await createHostImporter(undeclaringRoot)('@objectstack/spec');
       expect(mod).toBeTypeOf('object');
     },
@@ -395,5 +405,173 @@ describe('what counts as a declaration (#4719)', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * #10943 — the undeclared fallback resolves from the CALLER, not from
+ * `@objectstack/types`.
+ *
+ * The card's own 4-row matrix, measured on `main` from an app declaring
+ * nothing, is what these cases pin:
+ *
+ *                                via host importer    bare import() from packages/cli
+ *   @objectstack/plugin-auth     MODULE_NOT_FOUND     OK
+ *   @objectstack/plugin-audit    MODULE_NOT_FOUND     OK
+ *   chalk                        MODULE_NOT_FOUND     OK
+ *   @objectstack/spec            OK                   —
+ *
+ * Rows 1-3 are packages the CALLER resolves and this package does not — the
+ * helper's docblock promised them and delivered a `MODULE_NOT_FOUND`. Row 4 is
+ * the single dependency `@objectstack/types` declares, and it is the row that
+ * made the defect look absent: it resolves under EITHER base, so a pin written
+ * on it alone is green in both worlds (the `@objectstack/spec` case above says
+ * so in place, which is what it now legitimately guards).
+ *
+ * ── Why fixture packages and not the real four ──────────────────────────────
+ *
+ * The real four would make this test read `packages/cli`'s `node_modules`,
+ * which is a cross-package input (`pnpm check:cross-package-test-inputs`) and
+ * would hold the matrix hostage to whether those packages are BUILT — measured
+ * here: with only this package's own closure built, `@objectstack/plugin-auth`
+ * reads MODULE_NOT_FOUND from `packages/cli` too, for the unrelated reason that
+ * its `dist/` does not exist yet. The fixtures carry the same four facts with
+ * none of that: three packages only the caller can see (two scoped, one
+ * unscoped — `chalk`'s shape), and `@objectstack/spec` itself for row 4.
+ *
+ * ── Row 4 is the row that catches a WIDENED implementation ──────────────────
+ *
+ * Rows 1-3 fail if the base does not move. Row 4 fails if the base moves but
+ * the old one is kept ALONGSIDE it — a fallback that tried the caller and then
+ * this package would satisfy rows 1-3 while quietly leaving every caller able
+ * to reach `@objectstack/spec` without declaring it. That is a second de-facto
+ * contract (Prime Directive #12), not the documented one.
+ *
+ * ⚠️ ORDER IS LOAD-BEARING WITHIN EACH ROW, and here is the measurement that
+ * makes it so. Under this runner a dynamic `import()` inside the module under
+ * test is cached by SPECIFIER, not by resolved URL: probed with one fixture
+ * package and one name, the default base threw MODULE_NOT_FOUND before the
+ * caller base had loaded it and RESOLVED the same name afterwards. So a
+ * "the default base cannot see this" assertion is only true before anything has
+ * loaded that name — which is why each row asserts its LEFT column first and
+ * its RIGHT column second, in one case, on a name no other case touches. Split
+ * a row into two cases, or reorder them, and the left column starts passing for
+ * a reason that has nothing to do with this package.
+ */
+describe('the undeclared fallback resolves from the CALLER (#10943)', () => {
+  /** Stand-ins for `plugin-auth` / `plugin-audit` / `chalk` — rows 1-3. */
+  const CALLER_SCOPED_A = '@fixture/caller-scoped-a';
+  const CALLER_SCOPED_B = '@fixture/caller-scoped-b';
+  const CALLER_UNSCOPED = 'caller-unscoped';
+  /**
+   * Present in the caller fixture but NEVER loaded through any base — reserved
+   * for the failure-text case, which needs a name the specifier cache has not
+   * seen (see the ⚠️ above).
+   */
+  const CALLER_NEVER_LOADED = '@fixture/caller-never-loaded';
+
+  /** A framework package that calls the helper, with its own `node_modules`. */
+  let callerRoot: string;
+  /** `(s) => import(s)` evaluated INSIDE `callerRoot` — a real caller base. */
+  let fallbackImport: (specifier: string) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  beforeAll(async () => {
+    callerRoot = mkdtempSync(join(tmpdir(), 'os-import-caller-pkg-'));
+    writeFileSync(
+      join(callerRoot, 'package.json'),
+      JSON.stringify({ name: '@fixture/caller-pkg', version: '0.0.0-fixture', type: 'module' }),
+      'utf8',
+    );
+    for (const name of [CALLER_SCOPED_A, CALLER_SCOPED_B, CALLER_UNSCOPED, CALLER_NEVER_LOADED]) {
+      writeFixturePackage(callerRoot, name, `export const from = ${JSON.stringify(name)};\n`);
+    }
+    // The caller's own resolver, as a real module on disk at `callerRoot`. This
+    // IS the fixture: `import()` written here resolves against THIS file,
+    // exactly as `(s) => import(s)` written in `harness.ts` resolves against
+    // `packages/verify`.
+    writeFileSync(
+      join(callerRoot, 'importer.mjs'),
+      'export const fallbackImport = (s) => import(s);\nexport const here = import.meta.url;\n',
+      'utf8',
+    );
+    const mod = await import(pathToFileURL(join(callerRoot, 'importer.mjs')).href);
+    // PRECONDITION for every row below: the resolver really is anchored in the
+    // fixture. Had the runner loaded that module through its own pipeline
+    // instead of Node's, `import()` inside it would resolve from the runner's
+    // root and this whole matrix would be measuring the wrong base.
+    expect(mod.here).toBe(pathToFileURL(join(callerRoot, 'importer.mjs')).href);
+    fallbackImport = mod.fallbackImport;
+  });
+
+  afterAll(() => {
+    if (callerRoot) rmSync(callerRoot, { recursive: true, force: true });
+  });
+
+  // Rows 1-3. One case per row so each is independently sensitive: delete the
+  // fix and all three go red on their own, naming their own package.
+  for (const [row, pkg] of [
+    [1, CALLER_SCOPED_A],
+    [2, CALLER_SCOPED_B],
+    [3, CALLER_UNSCOPED],
+  ] as const) {
+    it(`row ${row}: ${pkg} — unreachable from here, loads through the caller's base`, async () => {
+      // LEFT column, first and in this case (see the ⚠️ on ordering above):
+      // the default base is this package's own resolution, and this package
+      // declares only `@objectstack/spec`.
+      const withoutBase = await createHostImporter(undeclaringRoot)(pkg).catch(
+        (e: unknown) => e,
+      );
+      expect(hostImportFailureKind(withoutBase)).toBe('undeclared');
+
+      // RIGHT column: the same name, the same host app, the caller's base.
+      const mod = await createHostImporter(undeclaringRoot, { fallbackImport })(pkg);
+      expect(mod.from).toBe(pkg);
+    });
+  }
+
+  it("row 4: @objectstack/spec is not the caller's to resolve, and no longer leaks in", async () => {
+    // The row that made the defect invisible, pointed the other way. The caller
+    // fixture does not declare `@objectstack/spec`, so a fallback that is
+    // genuinely the caller's cannot produce it — and one that ORs in this
+    // package's own resolution still can. (Safe to assert after the default-base
+    // case above loaded `@objectstack/spec`: that cache belongs to the module
+    // under test, while this path runs entirely inside the fixture's own
+    // resolver, which cannot see the package at all.)
+    const err = await createHostImporter(undeclaringRoot, { fallbackImport })(
+      '@objectstack/spec',
+    ).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('undeclared');
+    expect((err as { code?: string }).code).toBe('MODULE_NOT_FOUND');
+  });
+
+  it('the host DECLARATION still wins over the caller base (#4719 untouched)', async () => {
+    // The fix moves one branch. The declared path must still resolve from the
+    // host app, and an undeclared-but-NODE_PATH-reachable package must still be
+    // refused: a caller base is not a way back into the hoisted store.
+    const mod = await createHostImporter(hostRoot, { fallbackImport })(ORGANIZATIONS);
+    expect(new mod.OrganizationsPlugin().name).toBe('com.objectstack.organizations');
+    const err = await createHostImporter(undeclaringRoot, { fallbackImport })(
+      HOISTED_ONLY,
+    ).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('undeclared');
+  });
+
+  it('the undeclared failure NAMES a missing caller base instead of hiding it', async () => {
+    // The pre-#10943 default is retained so an out-of-tree caller (cloud's
+    // loader) cannot break under this parameter's arrival — so the one thing it
+    // must not be is silent. A `MODULE_NOT_FOUND` naming no base is exactly what
+    // let this defect survive being read.
+    const withoutBase = await createHostImporter(undeclaringRoot)(CALLER_NEVER_LOADED).catch(
+      (e: Error) => e,
+    );
+    expect(withoutBase.message).toMatch(/did not pass `fallbackImport`/);
+    expect(withoutBase.message).toMatch(/@objectstack\/types/);
+
+    // And it must NOT appear when the caller did state its base — a false note
+    // sends the next reader to a parameter that is already correct.
+    const withBase = await createHostImporter(undeclaringRoot, { fallbackImport })(
+      '@fixture/nowhere-at-all',
+    ).catch((e: Error) => e);
+    expect(withBase.message).not.toMatch(/did not pass `fallbackImport`/);
   });
 });
