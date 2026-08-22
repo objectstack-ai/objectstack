@@ -90,17 +90,9 @@
  * every respect: nothing is threaded, and the first row is the row.
  */
 
-const SYSTEM_CTX = { isSystem: true };
+import { resolveOwnOrganizationRow, seedCtx as lookupCtx } from './per-organization-catalog.js';
 
-/** The context one scoped read runs under. Bare when no organization applies. */
-function lookupCtx(organizationId?: string): { isSystem: true; tenantId?: string } {
-  return organizationId ? { isSystem: true, tenantId: organizationId } : SYSTEM_CTX;
-}
 
-/** The organization a stored row belongs to, `null` when it belongs to none. */
-function rowOrg(row: any): string | null {
-  return (row?.organization_id ?? row?.organizationId) ?? null;
-}
 
 /** Names bound into one `$in` read. See the chunking note in the module header. */
 export const NAME_CHUNK_SIZE = 500;
@@ -223,20 +215,23 @@ function perItemIndex(ql: any, object: string, organizationId?: string): Existin
 }
 
 /**
- * Which of the rows a read returned for ONE name is this organization's.
+ * Which of the rows a read returned for ONE name is this organization's,
+ * expressed as this module's tri-state.
+ *
+ * The organization split itself is NOT decided here — it delegates to
+ * {@link resolveOwnOrganizationRow}, the one spelling of that question the
+ * catalog has. Two spellings of "which row is mine" is exactly the shape that
+ * produced the defect this scoping repairs (one question, two implementations,
+ * the ungoverned copy winning), so this function only translates that answer
+ * into `present` / `absent` + leftover.
  *
  * Unscoped (the `single`-posture pass) the first row is the row, exactly as
- * before. Scoped, a row stamped with this organization is the answer, and an
- * organization-less one is a leftover reported alongside `absent` — never
- * returned as `present`. See the module header for the failure that separation
- * exists to prevent.
+ * before.
  */
 function resolveForOrganization(rows: any[], organizationId?: string): ExistingLookupResult {
-  if (!organizationId) return rows[0] ? { status: 'present', row: rows[0] } : ABSENT;
-  const own = rows.find((r) => rowOrg(r) === organizationId);
+  const { own, organizationLessResidue } = resolveOwnOrganizationRow(rows, organizationId);
   if (own) return { status: 'present', row: own };
-  const residue = rows.find((r) => rowOrg(r) === null);
-  return residue ? { status: 'absent', organizationLessResidue: residue } : ABSENT;
+  return organizationLessResidue ? { status: 'absent', organizationLessResidue } : ABSENT;
 }
 
 /**

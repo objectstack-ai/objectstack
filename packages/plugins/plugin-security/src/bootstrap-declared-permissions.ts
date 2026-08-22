@@ -46,7 +46,6 @@
  */
 
 import {
-  SYSTEM_CTX,
   genId,
   permissionSetRowFields,
   recordDiffersFromBody,
@@ -91,7 +90,8 @@ async function defaultLookup(ql: any, name: string, organizationId?: string): Pr
   const list = Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : null;
   if (list === null) return { status: 'unknown' };
   // [#10103] This organization's own row answers; an organization-less leftover
-  // is reported beside `absent` and never returned as `present`.
+  // is reported beside `absent` and never returned as `present`. One spelling of
+  // that question for the whole catalog — see `per-organization-catalog.ts`.
   const { own, organizationLessResidue } = resolveOwnOrganizationRow(list, organizationId);
   if (own) return { status: 'present', row: own };
   return organizationLessResidue
