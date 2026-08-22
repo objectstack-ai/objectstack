@@ -36,7 +36,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveSeedTenancyExec, normalizeRows, GLOBAL_TENANT, ORGANIZATION_FIELD, SEQUENCES_TABLE } from '@objectstack/metadata-protocol';
+import { resolveSeedTenancyExec, normalizeRows, collectRuntimeIndexPreflight, GLOBAL_TENANT, ORGANIZATION_FIELD, SEQUENCES_TABLE } from '@objectstack/metadata-protocol';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import MigrateDuplicates, {
   answeringSeam,
@@ -204,6 +204,7 @@ describe('#10677 the memory driver, booted for real', () => {
         globalTenant: GLOBAL_TENANT,
         organizationField: ORGANIZATION_FIELD,
         sequencesTable: SEQUENCES_TABLE,
+        runtimeIndexPreflight: [],
       };
 
       // The population is real, so "nothing was scanned" cannot explain the
@@ -224,6 +225,17 @@ describe('#10677 the memory driver, booted for real', () => {
       for (const entry of after.skipped) expect(entry.reason).toMatch(/no result set/);
       // The counter table is no longer claimed as read, either.
       expect(after.counters.status).toBe('absent');
+
+      // ── The same separation, on the #8725 pre-flight ────────────────────
+      // Its per-index presence question reads a refusal as "this table is not
+      // installed", which is right on a working seam and catastrophic on this
+      // one — four tightenings reported as absent by a probe that never ran.
+      // So the pre-flight proves the SEAM live first, against a statement whose
+      // failure cannot mean "absent", and reports every index as `unreadable`.
+      const preflight = await collectRuntimeIndexPreflight(answeringSeam(exec));
+      expect(preflight.length).toBeGreaterThan(0);
+      expect(new Set(preflight.map((p) => p.status))).toEqual(new Set(['unreadable']));
+      for (const entry of preflight) expect(String(entry.detail)).toMatch(/no result set/);
     } finally {
       await stack.shutdown();
     }

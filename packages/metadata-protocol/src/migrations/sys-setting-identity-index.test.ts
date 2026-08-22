@@ -292,7 +292,9 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             expect(message).toContain('The previous index is left in place');
             expect(message).toContain('no row is discarded automatically');
             expect(message).toContain(buildSysSettingDuplicateProbeSql());
-            expect(message).toContain('os migrate plan');
+            expect(message).toContain('os migrate duplicates');
+            // The repointing (#8725) is only done if the FALSE referral is gone.
+            expect(message).not.toContain('os migrate plan');
             // #9434 stays out of THIS arm: a conflict means real rows blocked a
             // build the server was willing to attempt, which only SQLite and
             // PostgreSQL ever are. MySQL refuses the statement outright and

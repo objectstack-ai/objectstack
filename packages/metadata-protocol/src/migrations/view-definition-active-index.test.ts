@@ -379,7 +379,9 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         expect(logger.error).toHaveBeenCalledTimes(1);
         const msg = String(logger.error.mock.calls[0]![0]);
         expect(msg).toContain("COALESCE(owner, '')");
-        expect(msg).toContain('os migrate plan');
+        expect(msg).toContain('os migrate duplicates');
+        // The repointing (#8725) is only done if the FALSE referral is gone.
+        expect(msg).not.toContain('os migrate plan');
         expect(msg).toContain(buildDuplicateProbeSql());
 
         // …and that shipped query really does name the offending rows, on this
@@ -425,7 +427,9 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         expect(logger.error).toHaveBeenCalledTimes(1);
         const msg = String(logger.error.mock.calls[0]![0]);
         expect(msg).toContain("COALESCE(organization_id, '__global__')");
-        expect(msg).toContain('os migrate plan');
+        expect(msg).toContain('os migrate duplicates');
+        // The repointing (#8725) is only done if the FALSE referral is gone.
+        expect(msg).not.toContain('os migrate plan');
     });
 
     /**

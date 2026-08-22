@@ -677,7 +677,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
-| `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
+| `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes nothing at all; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 ```bash
 os migrate files-to-references            # Dry run: full report, writes nothing
@@ -1010,6 +1010,57 @@ that could not be probed is listed under `skipped` with its reason, because
 "found nothing" and "never looked" must not read the same. For the same reason
 a driver with no raw SQL seam (memory, MongoDB) fails the whole run with
 `error: "no_sql_seam"` rather than returning an empty inventory.
+
+##### The `kernel:ready` index pre-flight
+
+The report carries a second section, `runtimeIndexPreflight`, answering a
+different question: **will the next server start be able to finish tightening
+the platform's own unique indexes?**
+
+Three migrations run at `kernel:ready` on a serving boot (`os dev`, `os serve`,
+`os start`) and replace a declared UNIQUE index with the NULL-safe — and
+sometimes active-rows-only — form it was always meant to have:
+
+| Table | Index | What the tightening adds |
+| :--- | :--- | :--- |
+| `sys_metadata` | overlay `active` and `draft` | package-less overlays stop being NULL-distinct |
+| `sys_view_definition` | `idx_sys_view_def_active` | shared and environment-level views stop being NULL-distinct, and only active rows are constrained |
+| `sys_setting` | the declared row identity | tenant- and global-scope rows stop being NULL-distinct on `user_id` |
+
+Each is a **tightening**, so rows an installation already holds can block it.
+When that happens the migration refuses — the previous index stays in place, no
+row is touched, and the server keeps running — and reports it at `error` in the
+boot log. Until this section existed that log line was the only channel: these
+indexes are invisible to `os migrate plan` by construction, because the drift
+reconciler deliberately excludes runtime-managed indexes (otherwise the next
+boot would propose rebuilding away the guarantee it just created), and because
+each migration reuses the *declared* index's name, so the reconciler's slot for
+it reads as correctly filled whichever form is physically there.
+
+So the pre-flight lives here instead, on the command that already boots
+read-only and repairs nothing. It runs the migrations' own duplicate-listing
+queries — the exact statements the boot log prints — and reports one entry per
+index:
+
+| `status` | Meaning |
+| :--- | :--- |
+| `blocked` | Rows collide under the tightened key. `groups` lists each colliding key and how many rows hold it. The next serving boot will refuse this index |
+| `clear` | The probe ran and nothing collides |
+| `table-absent` | The table is not installed here. `sys_setting`, for instance, arrives with the optional settings service |
+| `unreadable` | The probe could not run; `detail` carries the driver's message |
+
+`summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows` are the
+same finding counted at the head of the document.
+
+Read `blocked` as **work to do before the restart, not damage**: nothing is
+lost while an index stays untightened, but the guarantee it carries is not in
+force until the listed rows are resolved — and only an operator can decide which
+of two colliding rows survives, which is why the platform refuses rather than
+picking one.
+
+`--object` does not narrow this section. It is a fixed set of platform indexes
+rather than a slice of your registry, and `filter` describes the object scan
+only.
 
 ### Scaffolding
 

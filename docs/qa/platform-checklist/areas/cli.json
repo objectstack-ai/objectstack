@@ -1047,7 +1047,7 @@
       "title": "os migrate duplicates: a read-only JSON inventory of identifiers minted across partitions — within-partition repeats excluded, nothing written, the live two-counter condition reported, and runnable BEFORE the #8686 repair destroys the evidence",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell, pre-repair audit)"],
@@ -1066,7 +1066,8 @@
         "boot the scratch app once with `os dev -d file:/tmp/<run>/dup.db` so the base schema exists; stop it",
         "seed via direct SQL per the fixture recipe: the cross-partition duplicate, the within-partition repeat, an organizations row for '<org>', and the paired sequence counters",
         "md5sum the DB file; run `os migrate duplicates > report.json; echo $?`; md5sum again and byte-compare",
-        "jq the report: .report/.reportVersion/.generatedAt/.database/.globalPartition/.filter/.counters/.scanned/.skipped/.duplicates/.liveConditions/.summary",
+        "jq the report: .report/.reportVersion/.generatedAt/.database/.globalPartition/.filter/.counters/.scanned/.skipped/.duplicates/.liveConditions/.runtimeIndexPreflight/.summary",
+        "seed the kernel:ready blocker too (#8725): two ACTIVE sys_view_definition rows with the SAME name and organization_id/owner both NULL — then jq .runtimeIndexPreflight and .summary.runtimeIndexesBlocked",
         "run `os migrate duplicates --object <the-object>` and `--object <an-object-with-no-findings>` — capture .filter in both payloads",
         "run `os migrate duplicates --database-url file:/tmp/<run>/dup.db` and confirm it reaches the same DB (the flag also honors OS_DATABASE_URL)",
         "negative: from the memory-driver scratch config run `os migrate duplicates; echo $?` and capture the refusal payload",
@@ -1074,7 +1075,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the report is the declared machine-readable contract on stdout: report 'duplicate-identifiers', reportVersion 1, generatedAt, database, globalPartition, filter, counters {table, status read|absent}, scanned[], skipped[], duplicates[], liveConditions[], summary — and each duplicate carries object/field/value/holderCount/partitions plus per-holder id/organization/partition/createdAt (createdAt null when the object has no such column, never a failed probe)",
+          "clause": "the report is the declared machine-readable contract on stdout: report 'duplicate-identifiers', reportVersion 2, generatedAt, database, globalPartition, filter, counters {table, status read|absent}, scanned[], skipped[], duplicates[], liveConditions[], runtimeIndexPreflight[], summary {…, runtimeIndexesBlocked, runtimeIndexBlockingRows} — and each duplicate carries object/field/value/holderCount/partitions plus per-holder id/organization/partition/createdAt (createdAt null when the object has no such column, never a failed probe)",
           "oracle": "log",
           "verify": "jq walks every declared key of the seeded run's payload; shape pinned by duplicates.contract.test.ts — cite its pass for the full-shape guarantee, drive the CLI for the instance",
           "evidence": "report.json + the jq walk"
@@ -1090,6 +1091,12 @@
           "oracle": "log",
           "verify": "the two md5sums match; duplicates.pre-repair.test.ts pins the same invariant down to _objectstack_sequences",
           "evidence": "the md5 pair"
+        },
+        {
+          "clause": "the kernel:ready pre-flight (#8725) reports the RUNTIME-migration class os migrate plan cannot see: one entry per index the three kernel:ready migrations tighten (four — the overlay migration owns two), each blocked|clear|table-absent|unreadable, a blocked one naming every colliding key group and its row count",
+          "oracle": "log",
+          "verify": ".runtimeIndexPreflight names idx_sys_view_def_active as blocked with the seeded view name, organization_id_key '__global__' and owner_key '' — and the SAME database run through `os migrate plan` mentions neither the index nor the view name (the matched control: the declared-index duplicate above IS reported by plan, this one is not)",
+          "evidence": "the pre-flight section beside the plan output for one database"
         },
         {
           "clause": "the live condition (#8928 point 4) fires exactly when a __global__ counter sits beside an org-scoped counter for the same object/field — reported as a prediction with globalLastValue and the per-org counters, and counters.status says where it was read from ('absent' still yields a complete duplicates inventory)",
