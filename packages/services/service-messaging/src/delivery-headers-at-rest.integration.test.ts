@@ -55,6 +55,15 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import type { FetchImpl } from './http-sender.js';
 
+/**
+ * [#10740] `IHttpOutbox.redeliver` now requires its caller to state the
+ * requesting tenant. These fixtures boot an engine with no tenancy posture and
+ * no organization, so `undefined` is the honest answer — the property is
+ * required, not optional, precisely so that answer has to be written down.
+ */
+const NO_TENANT = { tenantId: undefined } as const;
+
+
 /** A credential a real deployment would put in `headers`. Distinctive on purpose. */
 const BEARER = 'Bearer prod_tok_8118_do_not_serve';
 /** The flow half's credential — "interpolated per run", so a run-scoped value. */
@@ -222,7 +231,7 @@ describe('sys_http_delivery — authored headers vs the data API (#8118)', () =>
 
         // `redeliver()` itself returns the REDACTED view (it is an admin verb,
         // not a dispatch path)…
-        const redelivered = await outbox.redeliver(id);
+        const redelivered = await outbox.redeliver(id, NO_TENANT);
         expect(redelivered.status).toBe('pending');
         expect(redelivered.headers).toBeUndefined();
 

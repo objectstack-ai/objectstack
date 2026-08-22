@@ -12,7 +12,7 @@ import type {
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
 
 export const DELIVERY_OBJECT = 'sys_notification_delivery';
 
@@ -246,7 +246,10 @@ export class SqlNotificationOutbox implements INotificationOutbox {
                 next_attempt_at: nextAttemptAt,
                 error,
             },
-            { where: { id }, multi: false } as any,
+            // Single-record dispatcher write, audited under the `update` op.
+            // Declared a global-sweep site — no request context exists on the
+            // tick that reaches here. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherAckOptions(id) as any,
         );
     }
 
