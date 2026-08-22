@@ -61,8 +61,12 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `9a3daf8d3`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-08-21 — originally measured at `6314e87f2`):
+  // (`.objectui-sha` = `190fbd01d`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-08-22 — previously measured at `9a3daf8d3`, originally at
+  // `6314e87f2`. `ObjectGrid.tsx` DID change across that move, so both claims
+  // below were re-derived rather than carried over, and they now carry line
+  // anchors: `ObjectGrid.tsx:2492-2507` and `hooks/useBulkExecutor.ts:284-288`,
+  // the latter byte-identical at both pins):
   //
   //  · No checkbox column is rendered. None of the object's four list views
   //    declares `bulkActions` / `bulkActionDefs` / `selection`, and `ObjectGrid`
