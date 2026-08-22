@@ -249,8 +249,8 @@ skills,类似分诊」)—— 贴内指针指向其车道文件,升级走技能 
 **工具加载纪律(fire 开局)**:互斥检查/自退判断只按名加载所需工具 —— `ToolSearch` 用 `select:mcp__github__list_issues,mcp__github__issue_read` 形式,判定「本轮有活」之后才加载其余;⛔ 开局不做泛关键词 ToolSearch(一次注入全家桶 schema —— 分诊席 2026-08-20 自测:空转轮 ~12 万 token,~8 万是这张门票);可验判据:空转轮 ~4 万以内,分诊下轮自测读数回报。只约束分诊 fresh session 的开局;执行座位(常驻会话)与 dev(需全工具面)不受此约束。
 
 **Backlog sweep(常设职责,不等请求)。** 每轮扫任一析取命中的卡:① 全裸(无`pm:*`、
-无 `needs-user-decision`、无 `domain:*`);② 有 `pm:queue` 无 `domain:*`(**仅限主仓** —— 姊妹
-仓没有车道标签,这形状是它们队列卡的常态);③ 有 `domain:*` 无 pm-state。②③ 只取 `updated_at`
+无 `needs-user-decision`、无 `domain:*`);② 有 `pm:queue` 无 `domain:*`(**凡有车道标签的仓皆扫**,
+今日为主仓与 objectui —— 三流拆分见多仓协调;豁免仅余真无车道标签的仓 cloud、objectos,该形状在那里才是队列卡常态);③ 有 `domain:*` 无 pm-state。②③ 只取 `updated_at`
 早于 ~2 分钟的卡且不是可选项 —— 半标注卡是协议自己按设计生产的(一次标签写入即把老卡打成半标
 注),只带路由或状态机其一的卡对两个视图同时不可见。排除:`tracking`、`status:parked`(其正常形
 状恰是「带域标签无 pm-state」)、全部 `pm:seat` 贴、`qa-run` 记录(协议载体非工作);存量大时每轮限量 —— 新入卡①优先最新,半状态治愈积压②③**最老优先、P0 嫌疑先行**,⛔ 优先最新不适用(细则见 runbook)。**紧急卡直接分诊**
