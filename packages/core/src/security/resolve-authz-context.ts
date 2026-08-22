@@ -373,13 +373,26 @@ export async function resolveUserAuthzGrants(
   }
   grants.accessible_org_ids = Array.from(accessibleOrgIds);
 
-  // Positions come from the ACTIVE org's membership only (unchanged): a role
-  // held in one organization must not grant its capabilities while the caller
-  // operates in another. With no active org, every membership contributes —
-  // exactly the pre-D2 behavior of the org-less read.
-  const activeMembers = tenantId
-    ? members.filter((m) => (m.organization_id ?? m.organizationId) === tenantId)
-    : members;
+  // Positions come from the ACTIVE org's membership only: a role held in one
+  // organization must not grant its capabilities while the caller operates in
+  // another. With no active org, every membership contributes — exactly the
+  // pre-D2 behavior of the org-less read.
+  //
+  // [ADR-0091 D2] Rows outside their validity window are dropped BEFORE the
+  // role derivation — the same discipline §6 gives `sys_user_permission_set`,
+  // so a lapsed membership can no more yield `org_owner` than an expired
+  // `admin_full_access` can yield `platform_admin`. Maintainer ruling
+  // 2026-08-22 (live session, item 2): a lapsed membership is NO MEMBERSHIP,
+  // not merely no org access — so this half now answers the same question as
+  // `accessible_org_ids` above, off the same rows, and (a)'s "correct the
+  // moment they do" promise covers BOTH derivations rather than one. Fail
+  // closed (D2). `sys_member` declares neither bound today and `isGrantActive`
+  // reads an absent bound as unbounded, so no shipped row changes answer.
+  const activeMembers = members.filter(
+    (m) =>
+      isGrantActive(m, nowMs)
+      && (!tenantId || (m.organization_id ?? m.organizationId) === tenantId),
+  );
   for (const m of activeMembers) {
     if (m.role && typeof m.role === 'string') {
       for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
