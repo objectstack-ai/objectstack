@@ -4467,10 +4467,22 @@ export class ObjectStackProtocolImplementation implements
         requestOrgId: string | null,
     ): Promise<string | null> {
         if (requestOrgId === null) return null;
-        // The package dimension is deliberately absent from both probes: the
-        // per-item door names no package, so `promoteDraft` resolves the draft
-        // with "match any package" and these reads must ask the same question
-        // it will (see `SysMetadataRepository.whereFor`).
+        // The package dimension is absent from both probes, and the rule
+        // behind that is the LIVE one: these reads must ask the same question
+        // `promoteDraft` will (see `SysMetadataRepository.whereFor`), because
+        // their whole job is to name the scope the promote then addresses. A
+        // probe NARROWER than the promote hides a draft the promote can see; a
+        // probe WIDER names a scope it cannot.
+        //
+        // [#10350] ⚠️ The justification this comment used to carry — "the
+        // per-item door names no package" — is STALE. Since #10063
+        // `publishMetaItem` accepts a `packageId` and forwards it, so when the
+        // caller states one the promote IS package-scoped while these probes
+        // stay package-agnostic, and the two can then ask different questions.
+        // Behaviour is deliberately UNCHANGED here: closing that asymmetry is
+        // its own fix with its own fixture, filed separately rather than ridden
+        // in on a comment repair. What is corrected is the claim, so the next
+        // reader does not conclude the per-item door still cannot name one.
         const inOrg = await this.engine.findOne('sys_metadata', {
             where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
         });
@@ -14265,6 +14277,44 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         message?: string;
         /**
+         * [#10350] ADR-0048 — the software package the draft being promoted was
+         * listed under, when the caller has one to state. Forwarded whole to
+         * {@link promoteDraftForPublish}, which threads it into BOTH the #9612
+         * gate closure and `repo.promoteDraft`, so the gate and the write
+         * resolve the draft under the SAME key it was listed by.
+         *
+         * Declared because it is REAL on this door, not merely tolerated:
+         * since #10063 `POST /meta/:type/:name/publish?package=PKG_ID` states it
+         * on every HTTP-driven promotion that names a package — which is
+         * Studio's designer save-then-publish loop. Until it was declared the
+         * value flowed correctly but was invisible to every typed caller, and
+         * the only caller that states one reaches this method through a cast,
+         * so the binding was enforced by nothing. `#10350` added the pins in
+         * `protocol-publish-drafts-package-scope.test.ts`.
+         *
+         * ⚠️ `null` is NOT the same as absent, and the difference is load
+         * bearing the whole way down: {@link promoteDraftForPublish} branches on
+         * the KEY BEING PRESENT (`'packageId' in request`), so an ABSENT key
+         * keeps the historical "match any package" resolution while `null` pins
+         * the lookup to the UNBOUND row. Spread it in conditionally; never write
+         * `packageId: maybeUndefined`, which arrives as a present-and-undefined
+         * key, coerces to `null` downstream, and makes a package-bound draft
+         * unfindable — a silent `no_draft` on the untouched path.
+         */
+        packageId?: string | null;
+        // [#10350] `environmentId` is deliberately NOT declared here, although
+        // the REST door spreads it into this very request literal. It is the
+        // multi-kernel ROUTING key, and it is out of the protocol request shape
+        // by explicit maintainer ruling (recorded 2026-08-18 on #9741):
+        // `resolveProtocol(environmentId)` has already selected the target
+        // kernel before this method is entered, and this class reads its
+        // environment off the INSTANCE (`this.environmentId`, set at
+        // construction) and never off a request — measured, `request.environmentId`
+        // occurs nowhere in this file. `packages/rest` declares that one
+        // transport-level member on top of the declared shape instead
+        // (`TransportScopedMetaRequest`), which is where a routing key belongs.
+        // Adding it here would reverse that ruling rather than record it.
+        /**
          * INTERNAL — `publishPackageDrafts` publishes many drafts and batch-applies
          * every seed body in ONE loader pass afterwards (cross-seed references need
          * multi-pass over the whole set), so it suppresses the per-item apply here.
@@ -14545,10 +14595,14 @@ export class ObjectStackProtocolImplementation implements
          * SAME key it was listed by, exactly as `organizationId` above threads
          * the draft's own org scope for the #3115 partition analogue.
          *
-         * `undefined` (the `publishMetaItem` path, which names no package)
-         * keeps the historical "match any package" resolution. `null` pins the
-         * lookup to the unbound row — so the field is passed through only when
-         * the caller actually has a binding to state.
+         * `undefined` (any caller with no binding to state) keeps the
+         * historical "match any package" resolution. `null` pins the lookup to
+         * the unbound row — so the field is passed through only when the caller
+         * actually has a binding to state. [#10350] That parenthetical used to
+         * read "the `publishMetaItem` path, which names no package"; since
+         * #10063 the per-item door names one whenever its HTTP caller does, so
+         * `undefined` is now about the ABSENCE of a binding, never about which
+         * caller is on the other end.
          */
         packageId?: string | null;
         /**
@@ -14652,12 +14706,17 @@ export class ObjectStackProtocolImplementation implements
                 // [#9612] The package binding the CALLER stated for this
                 // promotion — the same value threaded into `repo.promoteDraft`
                 // below, so the gate and the write resolve the draft under one
-                // key rather than two. `publishPackageDrafts` states it (a
-                // package publish, which is exactly the write this card is
-                // about); bare `publishMetaItem` names no package and so
-                // narrows nothing, which is the correct answer rather than a
-                // gap — a promotion whose package is unstated has no declared
-                // dependency set to bound it.
+                // key rather than two. BOTH callers can state it:
+                // `publishPackageDrafts` always does (a package publish, which
+                // is exactly the write #9612 was about), and [#10350] since
+                // #10063 `publishMetaItem` does too — whenever the HTTP caller
+                // named one on `POST /meta/:type/:name/publish?package=PKG_ID`.
+                // An UNSTATED package still narrows nothing, and that remains
+                // the correct answer rather than a gap — a promotion whose
+                // package is unstated has no declared dependency set to bound
+                // it. (This comment used to say the per-item door names no
+                // package at all, which stopped being true at #10063 and would
+                // read the REST door's forwarding as dead code.)
                 //
                 // ⚠️ Deliberately NOT read off `draftForGate`: `rowToItem`
                 // projects `sys_metadata` into a `MetadataItem`, which carries

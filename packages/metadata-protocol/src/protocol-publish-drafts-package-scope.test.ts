@@ -303,3 +303,93 @@ describe('publishPackageDrafts — two packages holding drafts for one (type, na
         expect(labelOf(active[0])).toBe('SOLO');
     });
 });
+
+/**
+ * [#10350] The PER-ITEM door's half of the same key.
+ *
+ * `POST /meta/:type/:name/publish?package=PKG_ID` (#10063) made
+ * `publishMetaItem` a package-naming caller too, so the narrowing the cases
+ * above pin for `publishPackageDrafts` now has a SECOND entry point. The
+ * runtime path already carried the value — `publishMetaItem` forwards its
+ * whole request object and the one transform in between
+ * (`canonicalizeMetaRequestType`) is a spread that drops no key — but nothing
+ * pinned it, and the DECLARED request type did not carry `packageId` at all.
+ *
+ * ⚠️ What these cases ARE, stated so nobody reads more into a green run than
+ * it holds: they are REGRESSION PINS on a path that is already correct, NOT a
+ * defect control. There is no pre-fix red to show at runtime, and
+ * manufacturing one would misrepresent the card. The defect was on the TYPE
+ * surface, and its control is the compiler — before the declared shape carried
+ * `packageId`, the literal in the first case below did not typecheck
+ * (`TS2353`, `'packageId' does not exist in type ...`), which is exactly why
+ * the only caller that states one is a REST door reaching it through a cast.
+ *
+ * What makes these pins able to FAIL is the fixture they inherit: with the
+ * package dimension absent from the promote's lookup the first-scanned row
+ * (`app.other`) wins, which is the wrong one. A pin that only asserted
+ * `success: true` would pass either way — and the failure mode this card names
+ * is precisely a future refactor that DESTRUCTURES the request instead of
+ * forwarding it wholesale, dropping the key while every existing assertion
+ * stays green.
+ */
+describe('publishMetaItem — the per-item door names a package too (#10350)', () => {
+    it('promotes the STATED package draft, not the first row that shares the name', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+        });
+
+        expect(res).toMatchObject({ success: true });
+        // Drop `packageId` on the way through `publishMetaItem` and the
+        // promote's lookup goes package-agnostic, landing on `app.other` —
+        // the same inversion the batch door carried before #8907.
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].package_id).toBe('app.demo');
+        expect(labelOf(active[0])).toBe('FROM_DEMO');
+    });
+
+    it('drains the stated package own draft and leaves the other package draft pending', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+        await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+        });
+
+        const drafts = draftRowsOf(rows);
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0].package_id).toBe('app.other');
+        expect(labelOf(drafts[0])).toBe('FROM_OTHER');
+    });
+
+    it('keeps the historical match-any resolution when the caller states NO package', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+
+        await protocol.publishMetaItem({ type: 'object', name: 'shared_ticket' });
+
+        // The contract `promoteDraftForPublish` spells as
+        // `...('packageId' in request ? ... : {})`: an ABSENT key means "match
+        // any package" (this fixture's first-scanned row), while a
+        // present-and-`undefined` key would coerce to `null` downstream and pin
+        // the lookup to UNBOUND rows — finding neither draft and answering
+        // `no_draft`. Declaring `packageId` optional must not turn the first
+        // spelling into the second, so the untouched path is pinned here.
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].package_id).toBe('app.other');
+        expect(labelOf(active[0])).toBe('FROM_OTHER');
+    });
+});
