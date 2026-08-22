@@ -4121,8 +4121,79 @@ export class ApprovalService implements IApprovalService {
 
   // ── Read API ─────────────────────────────────────────────────
 
+  /**
+   * [#11040] May the free-text pushdown carry an arm on the SNAPSHOT column,
+   * for THIS caller over THIS query's scope?
+   *
+   * `payload_json` is the one searched column whose contents the serve path
+   * masks per reader (`redactPayloads`, #10749). A predicate over it is
+   * evaluated by the driver against the column AT REST — unmasked, before
+   * anything is served — so for a caller whose view of the snapshot is masked,
+   * row membership answers questions about contents that caller may not read.
+   * The other four arms are columns of `sys_approval_request` itself, which
+   * every caller who can see the row reads whole; they are untouched.
+   *
+   * ## The invariant this method exists to hold
+   *
+   * "This caller's view is masked" is read from **the same authority and the
+   * same per-caller call as the serve path** — `resolveReadableSnapshotFields`,
+   * asked as the CALLER (never `SYSTEM_CTX`). A second, independently derived
+   * notion of "redacted" — comparing the readable set against the object's
+   * schema, say — would be a fresh source of drift, and drift between the
+   * serve rule and the filter rule IS the defect this closes, reconstituted one
+   * layer down. So the only "not masked" answer accepted here is the one serve
+   * itself acts on: `undefined`, the seam's documented do-not-narrow branch.
+   * When the seam holds a concrete list the mask is IN FORCE, whether or not it
+   * happens to remove a key from any particular row — a row-dependent question
+   * no predicate can answer before rows exist.
+   *
+   * ## The two predicate-time cases
+   *
+   * Redaction is decided per ROW (each row names its own subject object, hence
+   * its own readable set), but a filter is built before any row exists:
+   *
+   *  - **authority absent** — `resolveReadableSnapshotFields` answers
+   *    `undefined` for EVERY object, so serve hands over every snapshot whole.
+   *    Keeping the arm leaks nothing serve does not already hand over, and this
+   *    is the shape every deployment that has not wired the security plugin
+   *    gets: search is byte-for-byte unchanged. Checked first, and that order
+   *    is load-bearing — see the object-scope note below.
+   *  - **authority wired** — the readable set is per object, so the arm is
+   *    admissible only for a scope of exactly one KNOWN object. With
+   *    `filter.object` present that object is known at predicate time and the
+   *    seam is asked about it directly. Absent, the query spans every object
+   *    and there is nothing sound to ask, so the arm is dropped.
+   *
+   * Dropping an arm is strictly NARROWING: it never refuses a query and never
+   * widens what comes back, so the fail-closed direction is cheap here and is
+   * taken rather than reaching for a per-object predicate machine to avoid it.
+   * Refusing the query outright would be the louder behaviour change, and is
+   * deliberately not what this does.
+   */
+  private async freeTextMayMatchSnapshot(
+    objectInScope: string | undefined,
+    context: ExecutionContext,
+  ): Promise<boolean> {
+    // Authority absent ⇒ serve narrows NOTHING, for every object. Must be
+    // tested before the object-scope test below: `resolveReadableSnapshotFields`
+    // also answers `undefined` for a BLANK object name, and reading that as
+    // "not masked" would hand the unfiltered query an arm on exactly the
+    // grounds that make it unanswerable.
+    const authority = this.fieldVisibility;
+    if (!authority || typeof authority.getReadableFields !== 'function') return true;
+    // Authority wired: the scope must be one known object, or nothing is sound.
+    const object = String(objectInScope ?? '').trim();
+    if (!object) return false;
+    // ⛔ Asked as the CALLER — the same question, of the same seam, that
+    // `redactPayloads` asks for this object on the way out.
+    const readable = await resolveReadableSnapshotFields(
+      authority, object, context, this.logger,
+    );
+    return readable === undefined;
+  }
+
   /** Filter type accepted by {@link listRequests} / {@link countRequests}. */
-  private buildRequestWhere(
+  private async buildRequestWhere(
     filter: {
       object?: string;
       recordId?: string;
@@ -4131,7 +4202,7 @@ export class ApprovalService implements IApprovalService {
       q?: string;
     } | undefined,
     context: ExecutionContext,
-  ): { where: any; tenantOrg: string | null } {
+  ): Promise<{ where: any; tenantOrg: string | null }> {
     const f: any = {};
     if (filter?.object) f.object_name = filter.object;
     if (filter?.recordId) f.record_id = filter.recordId;
@@ -4145,18 +4216,27 @@ export class ApprovalService implements IApprovalService {
     // `organizationId` is not on the envelope — see isOverrideActor().
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
     if (tenantOrg) f.organization_id = tenantOrg;
-    // Free-text search, pushed down: `payload_json` carries the record
-    // snapshot, so record titles match without any join. `$contains` is the
-    // driver's escaped-LIKE operator.
+    // Free-text search, pushed down. `$contains` is the driver's escaped-LIKE
+    // operator. These four are columns of `sys_approval_request` itself, read
+    // whole by anyone who can see the row, and are always present — the `$or`
+    // is never empty (an empty `$or: []` reads as match-none on some drivers
+    // and match-all on others, so it would be a silent second defect).
     const q = filter?.q?.trim();
     if (q) {
-      f.$or = [
+      const arms: any[] = [
         { process_name: { $contains: q } },
         { object_name: { $contains: q } },
         { record_id: { $contains: q } },
         { submitter_id: { $contains: q } },
-        { payload_json: { $contains: q } },
       ];
+      // [#11040] The fifth arm — `payload_json`, the record snapshot — is
+      // conditional: it is a predicate over contents the serve path masks per
+      // reader. See `freeTextMayMatchSnapshot` for the rule and the invariant
+      // that binds it to the serve seam.
+      if (await this.freeTextMayMatchSnapshot(filter?.object, context)) {
+        arms.push({ payload_json: { $contains: q } });
+      }
+      f.$or = arms;
     }
     // Status pushes down whole: `$in` for arrays (all bundled drivers
     // support it), equality for a single value.
@@ -4406,7 +4486,7 @@ export class ApprovalService implements IApprovalService {
     } | undefined,
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow[]> {
-    const { where, tenantOrg } = this.buildRequestWhere(filter, context);
+    const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
       .map(t => String(t).trim())
       .filter(Boolean);
@@ -4455,7 +4535,7 @@ export class ApprovalService implements IApprovalService {
     filter: Parameters<IApprovalService['listRequests']>[0],
     context: ExecutionContext,
   ): Promise<number> {
-    const { where, tenantOrg } = this.buildRequestWhere(filter, context);
+    const { where, tenantOrg } = await this.buildRequestWhere(filter, context);
     const approverTargets = (Array.isArray(filter?.approverId) ? filter!.approverId : filter?.approverId ? [filter.approverId] : [])
       .map(t => String(t).trim())
       .filter(Boolean);
