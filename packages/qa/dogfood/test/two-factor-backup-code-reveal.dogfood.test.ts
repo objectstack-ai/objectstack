@@ -145,6 +145,18 @@ describe('#10681 — the declared reveal resolves against the live response', ()
       `generate-backup-codes: ${await generated.clone().text()}`,
     ).toBe(200);
     generateBody = await generated.json();
+
+    // Extracted HERE, not inside the first `it`. When it was assigned at the
+    // end of that test, a failure there left `revealedCodes` undefined and
+    // cascaded into the two legs below — one broken declaration reported as
+    // three red tests, only one of which named the actual cause. Each test now
+    // stands on fixture state instead of on its predecessor having run.
+    const codes = resolvePath(actionResultData(generateBody), 'backupCodes');
+    expect(
+      Array.isArray(codes),
+      `no backupCodes array in the live response: ${JSON.stringify(generateBody)}`,
+    ).toBe(true);
+    revealedCodes = codes as string[];
   }, 180_000);
 
   afterAll(async () => {
@@ -166,16 +178,13 @@ describe('#10681 — the declared reveal resolves against the live response', ()
       ).toBeDefined();
     }
 
-    const codes = resolvePath(data, 'backupCodes');
-    expect(Array.isArray(codes), 'backupCodes is not an array').toBe(true);
     // `format: 'code-list'` requires an array of strings; anything else renders
     // as nothing useful even though the path resolved.
-    for (const code of codes as unknown[]) {
+    for (const code of revealedCodes) {
       expect(typeof code, 'a backup code is not a string').toBe('string');
-      expect((code as string).length, 'an empty backup code').toBeGreaterThan(0);
+      expect(code.length, 'an empty backup code').toBeGreaterThan(0);
     }
-    expect((codes as string[]).length).toBeGreaterThan(0);
-    revealedCodes = codes as string[];
+    expect(revealedCodes.length).toBeGreaterThan(0);
   });
 
   it('the declared paths need no `data.` prefix — one unwrap, not two', () => {
