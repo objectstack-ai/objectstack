@@ -12690,10 +12690,24 @@ export class SqlDriver implements IDataDriver {
 
         const result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);
 
-        for (const row of result) {
-          if (row.pk === 1) {
-            primaryKeys.push(row.name);
-          }
+        // `PRAGMA table_info` does not report `pk` as a boolean. It reports the
+        // column's 1-based position WITHIN the primary key — `0` for "not part
+        // of the key", `1` for the first key column, `2` for the second, and so
+        // on. Filtering on `pk === 1` therefore kept only the first member of a
+        // composite key and silently dropped the rest, and because
+        // `introspectSchema` derives `col.isPrimary` FROM this list, both output
+        // signals were wrong together.
+        //
+        // Ordering by the ordinal (rather than taking `table_info`'s row order,
+        // which is COLUMN order) makes `primaryKeys` the declared key order. The
+        // two differ whenever a key is declared out of column sequence, and this
+        // list is used as an addressing / upsert-conflict-target key, where the
+        // order is load-bearing.
+        const keyedRows = (result as { name: string; pk: number }[]).filter((row) => row.pk > 0);
+        keyedRows.sort((a, b) => a.pk - b.pk);
+
+        for (const row of keyedRows) {
+          primaryKeys.push(row.name);
         }
       }
     } catch {
