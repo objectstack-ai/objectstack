@@ -744,6 +744,17 @@ export interface RestEnvRegistry {
  * built-in chain must NOT second-guess it. Only a thrown error falls back to
  * the legacy chain, so a misbehaving resolver degrades to pre-seam behavior
  * instead of taking down REST routing.
+ *
+ * **Cost.** Answering this question must not acquire a kernel. `RestApiPlugin`
+ * builds the adapter over the host's `kernel-resolver` and prefers its
+ * environment-only member (`KernelResolver.resolveEnvironment`, ADR-0006) for
+ * exactly that reason: asking the kernel-ACQUISITION method for an id bought a
+ * kernel and discarded it, and on a cold or wedged environment that discard is
+ * a full waiter window — after which {@link RestServer.resolveProtocol} opens
+ * a second one to acquire the kernel for real. Measured on a live host with a
+ * 20s `waiterTimeoutMs`: 42s to a 503 on REST-owned routes against 21s on
+ * dispatcher-owned ones. A host that implements only `resolveKernel` still
+ * works, and still pays twice.
  */
 export interface RestRequestEnvResolver {
     resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
@@ -1109,6 +1120,25 @@ export class RestServer {
         return undefined;
     }
 
+    /**
+     * Resolve the protocol that serves this request — and THE single
+     * kernel-acquisition point on the path a REST-owned route takes to answer.
+     *
+     * Two steps, deliberately of different kinds: {@link
+     * resolveRequestEnvironmentId} answers *which environment* (cheap, and
+     * kernel-free wherever the host implements `resolveEnvironment` — see
+     * {@link RestRequestEnvResolver}), then `getOrCreate` acquires that
+     * environment's kernel. Anything that collapses them back together
+     * re-creates the double waiter window: the env question routed through a
+     * kernel-acquisition API, paid for, discarded, then paid again here.
+     *
+     * **This `getOrCreate` fails closed and must keep doing so.** A genuinely
+     * unavailable kernel rejects here, the rejection propagates to the route's
+     * `handleRouteError`, and the caller gets the host's declared 503 — never a
+     * response served against no kernel. Removing the first (wasted) window
+     * shortened the wait to that 503; it did not, and must not, turn it into a
+     * success.
+     */
     private async resolveProtocol(environmentId?: string, req?: any): Promise<RestProtocol> {
         if (environmentId === 'platform') return this.protocol;
         const envId = await this.resolveRequestEnvironmentId(environmentId, req);
