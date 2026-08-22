@@ -23,9 +23,29 @@
  *   - defensively, any stale pre-built package that still registers an old
  *     `owner`-type / unmapped-recipient shape.
  *
- * Seeding upserts via `SharingRuleService.defineRule` (idempotent by name) and
- * MUST run before `listRules()`/`bindRuleHooks` so the lifecycle hooks bind to
- * a populated table.
+ * Seeding upserts via `SharingRuleService.defineRule` and MUST run before
+ * `listRules()`/`bindRuleHooks` so the lifecycle hooks bind to a populated
+ * table.
+ *
+ * ## Per organization under a walled posture
+ *
+ * `defineRule` already keys its upsert on `(name, organization_id)` whenever the
+ * calling context carries an organization — it is the SEEDER that never
+ * supplied one, so every declared rule landed organization-less and, on a walled
+ * deployment, unreadable by every principal (Layer 0's strict
+ * `organization_id = :tenant` AND-composes over the driver's compatibility arm
+ * and the conjunction is the strict equality alone). This pass therefore runs
+ * ONCE PER ORGANIZATION under a walled posture, threading `tenantId` so
+ * `callerOrgId` resolves and the rule is stamped with its owner.
+ *
+ * `single` posture keeps exactly ONE organization-less pass, byte for byte the
+ * pre-existing behaviour: there an organization-less rule is the correct shape,
+ * and it is also the platform-global class `deleteRule` guards (#7795).
+ *
+ * Nothing is reaped. Pre-fix organization-less rows for names this pass seeds
+ * are named loudly instead, with their remedy — see
+ * `plugin-security/src/per-organization-catalog.ts` for why a reap is the wrong
+ * instrument on tables that grants point at.
  */
 
 import type { SharingRuleService } from './sharing-rule-service.js';
@@ -34,6 +54,45 @@ import { compileCelToFilter } from '@objectstack/formula';
 import { isMatchAllCriteria } from './rule-criteria.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * The context ONE seeding pass runs under. With an organization it makes
+ * `SharingRuleService.callerOrgId` resolve, so `defineRule` keys its upsert on
+ * `(name, organization_id)` and stamps the row with its owner. Without one it is
+ * `SYSTEM_CTX` unchanged — the `single`-posture pass.
+ */
+function seedRuleCtx(organizationId?: string): any {
+  return organizationId ? { ...SYSTEM_CTX, tenantId: organizationId } : SYSTEM_CTX;
+}
+
+/**
+ * Which of the names this pass seeded ALSO still have a pre-fix
+ * organization-less row standing.
+ *
+ * Read under the organization's own scope on purpose: that read routes through
+ * `SqlDriver.applyTenantScope`, whose compatibility arm is the only reason an
+ * organization-less row is visible from inside a tenant at all. A bare
+ * unscoped read would answer a different question (every organization's rows),
+ * and a bare equality would answer none.
+ */
+async function findOrganizationLessRules(
+  engine: any,
+  names: string[],
+  organizationId: string,
+): Promise<string[]> {
+  if (names.length === 0) return [];
+  try {
+    const rows = await engine.find('sys_sharing_rule', {
+      where: { name: { $in: names } },
+      limit: Math.max(names.length * 4, 50),
+      context: seedRuleCtx(organizationId),
+    });
+    return (Array.isArray(rows) ? rows : [])
+      .filter((r: any) => ((r?.organization_id ?? r?.organizationId) ?? null) === null)
+      .map((r: any) => r?.name)
+      .filter((n: unknown): n is string => typeof n === 'string' && n !== '');
+  } catch { return []; }
+}
 
 type Logger = { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
 
@@ -98,6 +157,11 @@ export async function bootstrapDeclaredSharingRules(
   metadataService: any,
   engine: any,
   logger?: Logger,
+  /**
+   * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
+   * one place an organization-less sharing rule is the correct shape.
+   */
+  organizationId?: string,
 ): Promise<{ seeded: number; skipped: number }> {
   let rules: any[] = readDeclared(engine, 'sharing_rule');
   if (rules.length === 0) {
@@ -110,6 +174,7 @@ export async function bootstrapDeclaredSharingRules(
 
   let seeded = 0;
   let skipped = 0;
+  const seededNames: string[] = [];
   for (const r of rules) {
     if (!r?.name || !r?.object) { skipped += 1; continue; }
     const recipientType = mapRecipientType(r.sharedWith?.type);
@@ -153,13 +218,35 @@ export async function bootstrapDeclaredSharingRules(
         // pristine rows keep receiving declared updates; admin-authored or
         // customized rows are never clobbered (defineRule seed-not-clobber).
         managedBy: 'package',
-      } as any, SYSTEM_CTX as any);
+      } as any, seedRuleCtx(organizationId) as any);
+      seededNames.push(r.name);
       seeded += 1;
     } catch (err: any) {
       logger?.warn?.('[sharing-rule] seed failed', { rule: r.name, error: err?.message });
       skipped += 1;
     }
   }
-  logger?.info?.('[sharing-rule] declared rules seeded into sys_sharing_rule', { seeded, skipped, total: rules.length });
+  // The loud guard that stands in place of a reap, measured rather than
+  // inferred. `defineRule` keys its upsert on `(name, organization_id)` once an
+  // organization is in hand, so a pre-fix organization-less row can never be
+  // mistaken for this organization's — which is precisely why the leftover is
+  // INVISIBLE to the pass itself and has to be looked for. Reading the return
+  // value of `defineRule` instead would be a check that can never fire: the row
+  // it hands back is always this organization's own.
+  const residue = organizationId ? await findOrganizationLessRules(engine, seededNames, organizationId) : [];
+  if (organizationId && residue.length > 0) {
+    logger?.warn?.(
+      '[sharing-rule] declared rules did not resolve to this organization\u2019s own rows — a pre-fix ' +
+        'organization-less sys_sharing_rule row is standing in for names this organization seeds. Under ' +
+        'a walled posture a rule that belongs to no organization is invalid state, not a platform-wide ' +
+        'default. Remedy: re-initialize the deployment, or adopt each row by hand by stamping it with ' +
+        'the organization that should own it. They are NOT deleted automatically — sys_record_share ' +
+        'rows reference these rules by id, so reaping them would revoke standing access with no signal.',
+      { object: 'sys_sharing_rule', organization: organizationId, names: [...residue].sort(), count: residue.length },
+    );
+  }
+  logger?.info?.('[sharing-rule] declared rules seeded into sys_sharing_rule', {
+    seeded, skipped, total: rules.length, ...(organizationId ? { organization: organizationId } : {}),
+  });
   return { seeded, skipped };
 }

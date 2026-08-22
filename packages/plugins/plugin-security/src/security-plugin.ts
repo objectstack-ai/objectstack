@@ -46,6 +46,12 @@ import {
 } from './suggested-audience-bindings.js';
 import { cleanupPackagePermissions } from './cleanup-package-permissions.js';
 import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
+import {
+  catalogIsPerOrganization,
+  listSeedOrganizationIds,
+  resolveOwnOrganizationRow,
+  seedCtx,
+} from './per-organization-catalog.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
@@ -720,7 +726,39 @@ export class SecurityPlugin implements Plugin {
    * cleared on metadata change alongside the other schema-derived caches.
    */
   private readonly objectSecurityMetaCache = new Map<string, ObjectSecurityMeta>();
-  private dbLoader?: (names: string[]) => Promise<PermissionSet[]>;
+  /**
+   * Permission-set loader FACTORY, parameterised by the caller's organization.
+   * A factory rather than a bare loader because the read is organization-scoped
+   * and the organization is a per-request fact — see where it is built for why
+   * an unscoped by-name read stops being correct once the catalog is
+   * materialized per organization.
+   */
+  private dbLoaderFor?: (organizationId?: string) => (names: string[]) => Promise<PermissionSet[]>;
+
+  /**
+   * The organization a permission-set resolution runs in — the caller's own
+   * active organization, never a scan across all of them.
+   *
+   * Undefined for a `single`-posture caller (and for any context carrying no
+   * organization at all), which lands on the organization-less surface that
+   * posture correctly has. Both spellings are read for the same reason the
+   * sharing service reads both: `tenantId` is the declared envelope field and
+   * `organizationId` is the cast one, and a hand-built context may carry
+   * either.
+   */
+  private callerOrganizationId(context: any): string | undefined {
+    const id = (context?.organizationId ?? context?.tenantId);
+    return typeof id === 'string' && id !== '' ? id : undefined;
+  }
+
+  /**
+   * The permission-set loader for ONE caller. `undefined` when no engine is
+   * wired, exactly as the un-parameterised loader used to be, so
+   * `resolvePermissionSets` keeps its "no db source" branch.
+   */
+  private dbLoaderForContext(context: any): ((names: string[]) => Promise<PermissionSet[]>) | undefined {
+    return this.dbLoaderFor?.(this.callerOrganizationId(context));
+  }
   /**
    * [#10757] Per-EXECUTION-CONTEXT memo for
    * {@link SecurityPlugin.resolvePermissionSetsForContext}.
@@ -984,23 +1022,49 @@ export class SecurityPlugin implements Plugin {
       );
     }
 
-    // Construct a dbLoader once that lets resolvePermissionSets
+    // Construct a dbLoader FACTORY once that lets resolvePermissionSets
     // surface user-defined permission sets from `sys_permission_set`
-    // (created via the admin UI) in addition to plugin-registered
-    // ones. Uses `isSystem` to bypass tenant RLS.
-    const dbLoader = ql
-      ? async (names: string[]) => {
+    // (created via the admin UI) in addition to plugin-registered ones.
+    //
+    // Scoped to the CALLER's organization rather than unscoped. Once the
+    // catalog is materialized per organization, several organizations hold a
+    // row for the same name, and a by-name `$in` under a bare
+    // `{ isSystem: true }` resolves whichever copy the driver ordered first —
+    // one tenant's grants answering another tenant's request. Threading the
+    // organization routes the read through `SqlDriver.applyTenantScope` (the
+    // governed chokepoint, unchanged by this work), and
+    // `resolveOwnOrganizationRow` then prefers this organization's own row over
+    // any organization-less one still standing.
+    //
+    // The `limit` moves with it. `names.length` was exactly right while one row
+    // existed per name, and is a TRUNCATION the moment copies exist: the driver
+    // returns this organization's rows AND any organization-less ones, so the
+    // cap must admit both or a caller silently loses sets. It stays bounded — a
+    // multiple of the names asked for, never unbounded.
+    const dbLoaderFor = ql
+      ? (organizationId?: string) => async (names: string[]) => {
           let rows: any;
           try {
             rows = await ql.find(
               'sys_permission_set',
-              { where: { name: { $in: names } }, limit: names.length },
-              { context: { isSystem: true } },
+              { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
+              { context: seedCtx(organizationId) },
             );
           } catch {
             rows = [];
           }
-          const all = Array.isArray(rows) ? rows : rows?.records ?? [];
+          const fetched = Array.isArray(rows) ? rows : rows?.records ?? [];
+          // One row per NAME: this organization's own where it has one, an
+          // organization-less leftover only where it does not.
+          const byName = new Map<string, any>();
+          for (const name of new Set(names)) {
+            const own = resolveOwnOrganizationRow(
+              fetched.filter((r: any) => r?.name === name),
+              organizationId,
+            ).own;
+            if (own) byName.set(name, own);
+          }
+          const all = Array.from(byName.values());
           // [ADR-0049] A DEACTIVATED set grants nothing. Not defence in depth
           // that nothing reaches: `resolvePermissionSetsForContext` requests
           // `context.positions` as permission-set NAMES too (a position name is
@@ -1040,7 +1104,7 @@ export class SecurityPlugin implements Plugin {
           }));
         }
       : undefined;
-    this.dbLoader = dbLoader;
+    this.dbLoaderFor = dbLoaderFor;
 
     // [ADR-0090 D12] Delegated-admin gate shares the SAME permission-set
     // resolution as the CRUD middleware, so a delegate's authority and their
@@ -2782,6 +2846,118 @@ export class SecurityPlugin implements Plugin {
     // transform is idempotent, but the once-flag avoids re-reading the registry /
     // re-logging on every runBootstrap re-entry). See managed-object-write-denies.ts.
     let managedDeniesApplied = false;
+
+    // ── The RBAC catalog, materialized PER ORGANIZATION ──────────────────
+    //
+    // `sys_position` and `sys_permission_set` both spell their name index
+    // `unique: 'organization'`, and both were seeded organization-less. On a
+    // walled deployment that made the whole catalog unreadable to EVERY
+    // principal at every rung: this plugin's Layer 0 composes a strict
+    // `organization_id = :tenant` and the middleware ANDs it over the driver's
+    // `(organization_id = :tenant OR organization_id IS NULL)`, and the
+    // conjunction of the two is the strict equality alone. Nothing about the
+    // wall changes here, at either layer — the rows get an owner instead.
+    //
+    // The four steps are named ONCE and driven from two places (the boot sweep
+    // below, and the organization-creation hook further down) so a newly
+    // created organization can never be seeded differently from one present at
+    // boot. See `per-organization-catalog.ts` for the doctrine, the loud guard
+    // that stands in place of a reap, and why the boot sweep is O(changed
+    // declarations) rather than O(organizations x rows) of blind writes.
+    //
+    // `organizationId` undefined is the `single`-posture pass and reproduces
+    // the pre-existing organization-less behaviour exactly.
+    const seedCatalogPositions = async (organizationId?: string): Promise<void> => {
+      try {
+        await bootstrapDeclaredPositions(ql, this.metadata, { logger: ctx.logger, organizationId });
+      } catch (e) {
+        ctx.logger.warn('[security] declared-position seeding failed', { error: (e as Error).message, organization: organizationId });
+      }
+    };
+    const seedCatalogPermissions = async (organizationId?: string): Promise<void> => {
+      try {
+        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId });
+      } catch (e) {
+        ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message, organization: organizationId });
+      }
+    };
+    const seedCatalogBuiltins = async (organizationId?: string): Promise<void> => {
+      try {
+        await bootstrapBuiltinRoles(ql, { logger: ctx.logger, organizationId });
+      } catch (e) {
+        ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message, organization: organizationId });
+      }
+    };
+    // [ADR-0090 D5] Bind the configured baseline set(s) to THIS organization's
+    // `everyone` anchor. Scoped for the same reason the anchors themselves are:
+    // once each organization holds its own `everyone` row, an unscoped
+    // `where: { name: 'everyone' }` would bind whichever copy the driver
+    // happened to order first — one organization's baseline landing in
+    // another's catalog.
+    const bindBaselineToEveryone = async (organizationId?: string): Promise<void> => {
+      try {
+        for (const baselineName of this.baselinePermissionSets) {
+          const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
+          const offending = boot ? describeHighPrivilegeBits(boot) : null;
+          if (offending) {
+            ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
+              set: baselineName, offending,
+            });
+            continue;
+          }
+          // Limit 5, not 1: a tenant-scoped read returns organization-less rows
+          // alongside this organization's own, and the two are not
+          // interchangeable — `resolveOwnOrganizationRow` is what tells them
+          // apart.
+          const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 5, context: seedCtx(organizationId) });
+          const everyone: any = resolveOwnOrganizationRow(Array.isArray(everyoneRows) ? everyoneRows : [], organizationId).own;
+          const setRows = await ql.find('sys_permission_set', { where: { name: baselineName }, limit: 5, context: seedCtx(organizationId) });
+          const set: any = resolveOwnOrganizationRow(Array.isArray(setRows) ? setRows : [], organizationId).own;
+          if (everyone?.id && set?.id) {
+            const existing = await ql.find('sys_position_permission_set', {
+              where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: seedCtx(organizationId),
+            });
+            if (!(Array.isArray(existing) && existing[0])) {
+              await ql.insert('sys_position_permission_set', {
+                id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                position_id: everyone.id,
+                permission_set_id: set.id,
+              }, { context: seedCtx(organizationId) });
+              ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', {
+                set: baselineName, ...(organizationId ? { organization: organizationId } : {}),
+              });
+            }
+          }
+        }
+      } catch (e) {
+        ctx.logger.warn('[security] everyone-anchor baseline binding failed (non-fatal)', { error: (e as Error).message });
+      }
+    };
+    /**
+     * Every catalog step for ONE organization, in boot order. Used by the
+     * organization-creation hook; the boot sweep drives the same four steps
+     * interleaved with the organization-independent bootstrap work.
+     */
+    const seedCatalogForOrganization = async (organizationId?: string): Promise<void> => {
+      await seedCatalogPositions(organizationId);
+      await seedCatalogPermissions(organizationId);
+      await seedCatalogBuiltins(organizationId);
+      await bindBaselineToEveryone(organizationId);
+    };
+    /**
+     * Which passes this boot performs: one per organization under a walled
+     * posture, exactly one organization-less pass under `single`, and NONE when
+     * the organization enumeration failed (already warned — an unreadable
+     * `sys_organization` is "we do not know", never "there are no tenants").
+     * A walled deployment with zero organizations yet is also none; each
+     * organization is seeded as it is created.
+     */
+    const catalogSeedPasses = async (): Promise<Array<string | undefined>> => {
+      if (!catalogIsPerOrganization(this.tenancyPosture)) return [undefined];
+      const ids = await listSeedOrganizationIds(ql, ctx.logger);
+      return ids ?? [];
+    };
+
     const runBootstrap = async () => {
       try {
         if (!managedDeniesApplied) {
@@ -2800,12 +2976,15 @@ export class SecurityPlugin implements Plugin {
         const report = await bootstrapPlatformAdmin(ql, this.bootstrapPermissionSets, {
           logger: ctx.logger,
         });
+        // Which organizations this boot seeds. Resolved ONCE per bootstrap run
+        // and reused by all four catalog steps, so a sweep costs one
+        // organization enumeration rather than four.
+        const catalogPasses = await catalogSeedPasses();
         // [ADR-0057 D6 / #2077] Seed stack-declared positions into sys_position so they
         // stop being decorative (position→permission-set resolution + recipients).
-        try {
-          await bootstrapDeclaredPositions(ql, this.metadata, { logger: ctx.logger });
-        } catch (e) {
-          ctx.logger.warn('[security] declared-position seeding failed', { error: (e as Error).message });
+        // One pass per organization under a walled posture.
+        for (const organizationId of catalogPasses) {
+          await seedCatalogPositions(organizationId);
         }
         // [ADR-0086 D5] Seed stack-declared permission sets into
         // sys_permission_set with package provenance (managed_by:'package' +
@@ -2813,10 +2992,8 @@ export class SecurityPlugin implements Plugin {
         // objects, and the admin surface finally sees them. Runs AFTER
         // bootstrapPlatformAdmin so the platform defaults keep their
         // insert-once, provenance-less shape (env config, never clobbered).
-        try {
-          await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger });
-        } catch (e) {
-          ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message });
+        for (const organizationId of catalogPasses) {
+          await seedCatalogPermissions(organizationId);
         }
 
         // [ADR-0090 D5] The baseline→`everyone` binding runs LATER — after
@@ -2927,10 +3104,8 @@ export class SecurityPlugin implements Plugin {
         }
         // [ADR-0068 D2] Seed the framework's reserved built-in identity positions
         // (platform_admin / org_*) so the role catalog is self-describing.
-        try {
-          await bootstrapBuiltinRoles(ql, { logger: ctx.logger });
-        } catch (e) {
-          ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message });
+        for (const organizationId of catalogPasses) {
+          await seedCatalogBuiltins(organizationId);
         }
         // [ADR-0090 D5] Bind the configured baseline set(s) to the `everyone`
         // audience anchor (idempotent). This makes the CLI/dev baseline
@@ -2951,36 +3126,8 @@ export class SecurityPlugin implements Plugin {
         // narrower default than the runtime actually applies. The refusal is
         // PER SET: a high-privilege name is skipped loudly and the rest still
         // bind (the D5/D9 anchor gate is untouched, and each set faces it).
-        try {
-          for (const baselineName of this.baselinePermissionSets) {
-            const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
-            const offending = boot ? describeHighPrivilegeBits(boot) : null;
-            if (offending) {
-              ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
-                set: baselineName, offending,
-              });
-              continue;
-            }
-            const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 1, context: { isSystem: true } });
-            const everyone: any = Array.isArray(everyoneRows) && everyoneRows[0] ? everyoneRows[0] : null;
-            const setRows = await ql.find('sys_permission_set', { where: { name: baselineName }, limit: 1, context: { isSystem: true } });
-            const set: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-            if (everyone?.id && set?.id) {
-              const existing = await ql.find('sys_position_permission_set', {
-                where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: { isSystem: true },
-              });
-              if (!(Array.isArray(existing) && existing[0])) {
-                await ql.insert('sys_position_permission_set', {
-                  id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-                  position_id: everyone.id,
-                  permission_set_id: set.id,
-                }, { context: { isSystem: true } });
-                ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', { set: baselineName });
-              }
-            }
-          }
-        } catch (e) {
-          ctx.logger.warn('[security] everyone-anchor baseline binding failed (non-fatal)', { error: (e as Error).message });
+        for (const organizationId of catalogPasses) {
+          await bindBaselineToEveryone(organizationId);
         }
         // [ADR-0090 D5/D9] Reconcile the suggested-audience-binding surface:
         // every declared `isDefault: true` set that is not already bound to
@@ -3157,10 +3304,80 @@ export class SecurityPlugin implements Plugin {
       void runOrgAdminBackfill();
     }
 
-    // Per-organization seed data replay on `sys_organization` insert
-    // moved to `@objectstack/organizations` (along with
-    // `claimOrphanOrgRows` / `cloneOrgSeedData`). Install that
-    // plugin for multi-tenant deployments.
+    // ── Seed the RBAC catalog for a NEWLY CREATED organization ──────────
+    //
+    // The boot sweep covers the organizations that exist when the kernel is
+    // ready. Every organization minted afterwards needs the same catalog, and
+    // waiting for the next restart is not a repair: until it runs, that
+    // tenant's Setup lists no positions, no permission sets and no sharing
+    // rules — the exact symptom per-organization materialization exists to fix,
+    // only scoped to the newest tenant. Steady state therefore rides THIS hook,
+    // which is also why the boot sweep can afford to be a read-mostly
+    // reconciliation rather than a blind rewrite.
+    //
+    // Walled postures only: under `single` there is no organization to seed
+    // for, and the one organization-less pass at boot is the correct shape.
+    // Idempotent by construction (every seeder upserts by
+    // `(name, organization_id)`), so a double-fire is harmless.
+    ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+      await next();
+      if (opCtx?.object !== 'sys_organization') return;
+      const op = opCtx?.operation;
+      if (op !== 'insert' && op !== 'create') return;
+      if (!catalogIsPerOrganization(this.tenancyPosture)) return;
+      const organizationId = this.extractOrganizationIdFromWrite(opCtx);
+      if (!organizationId) {
+        // Never fall back to an organization-less pass here. That is the
+        // `single`-posture shape, and running it on a walled deployment would
+        // mint exactly the invalid-state row this change exists to remove.
+        ctx.logger.warn?.(
+          '[security] an organization was created but its id could not be read off the write — its ' +
+            'RBAC catalog was NOT seeded now; the next boot sweep covers it',
+          { object: 'sys_organization' },
+        );
+        return;
+      }
+      try {
+        await seedCatalogForOrganization(organizationId);
+        ctx.logger.info?.('[security] RBAC catalog seeded for a newly created organization', {
+          organization: organizationId,
+        });
+      } catch (e) {
+        ctx.logger.warn?.('[security] catalog seeding for a new organization failed (retried on next boot)', {
+          organization: organizationId, error: (e as Error).message,
+        });
+      }
+    });
+
+    // Per-organization seed DATA replay on `sys_organization` insert (business
+    // records) lives in `@objectstack/organizations`, along with
+    // `claimOrphanOrgRows` / `cloneOrgSeedData`. Install that plugin for
+    // multi-tenant deployments. The hook above is a different thing: the RBAC
+    // CATALOG, which plugin-security owns and seeds from declarations.
+  }
+
+  /**
+   * The id of the organization a `sys_organization` insert just created.
+   *
+   * Read from the write's own result first and its input second, because the
+   * two disagree in the case that matters: an insert that lets the engine mint
+   * the id carries none on the way in. Returns `undefined` rather than guessing
+   * — the caller refuses to run an organization-less pass on a walled
+   * deployment, which is the whole point.
+   */
+  private extractOrganizationIdFromWrite(opCtx: any): string | undefined {
+    const candidates = [
+      opCtx?.result?.id,
+      Array.isArray(opCtx?.result) ? opCtx.result[0]?.id : undefined,
+      opCtx?.data?.id,
+      opCtx?.doc?.id,
+      opCtx?.record?.id,
+      opCtx?.id,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c !== '') return c;
+    }
+    return undefined;
   }
 
   async destroy(): Promise<void> {
@@ -3854,7 +4071,7 @@ export class SecurityPlugin implements Plugin {
       // only for a caller carrying `userId`, so a guest/anonymous caller lands
       // here with nothing. Resolve the configured fallback set explicitly —
       // the same two-step `/auth/me/permissions` performs.
-      permissionSets = await this.resolveFallbackPermissionSets();
+      permissionSets = await this.resolveFallbackPermissionSets(context);
     }
     // No sets resolved (e.g. unauthenticated) → no field mask applies, exactly
     // as the middleware (getFieldPermissions([]) === {} → nothing deleted).
@@ -4074,7 +4291,7 @@ export class SecurityPlugin implements Plugin {
       requested,
       this.metadata,
       this.bootstrapPermissionSets,
-      this.dbLoader,
+      this.dbLoaderForContext(context),
       { logger: this.logger },
     );
     // Post-resolution fallback — closes the fail-open hole where a populated
@@ -4091,7 +4308,7 @@ export class SecurityPlugin implements Plugin {
         baseline,
         this.metadata,
         this.bootstrapPermissionSets,
-        this.dbLoader,
+        this.dbLoaderForContext(context),
         { logger: this.logger },
       );
     }
@@ -4134,14 +4351,17 @@ export class SecurityPlugin implements Plugin {
    *
    * Returns `[]` when no baseline is configured or none of it resolves.
    */
-  private async resolveFallbackPermissionSets(): Promise<PermissionSet[]> {
+  private async resolveFallbackPermissionSets(context?: any): Promise<PermissionSet[]> {
     const fallback = this.baselinePermissionSets;
     if (fallback.length === 0) return [];
     return this.permissionEvaluator.resolvePermissionSets(
       fallback,
       this.metadata,
       this.bootstrapPermissionSets,
-      this.dbLoader,
+      // Scoped like every other resolution: a guest of one organization must
+      // resolve THAT organization's baseline set, not whichever copy of the
+      // name the driver ordered first.
+      this.dbLoaderForContext(context),
       { logger: this.logger },
     );
   }

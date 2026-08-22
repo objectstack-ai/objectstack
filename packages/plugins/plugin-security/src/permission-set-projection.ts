@@ -68,6 +68,7 @@
  */
 
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { seedCtx } from './per-organization-catalog.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -77,17 +78,27 @@ export function genId(prefix: string): string {
   return `${prefix}_${ts}${rand}`;
 }
 
-export async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+/**
+ * The three write helpers take an optional `organizationId`, threaded into the
+ * execution context so reads route through `SqlDriver.applyTenantScope` and
+ * writes are stamped with that organization. Omitting it reproduces the
+ * pre-existing organization-less behaviour EXACTLY, which is what the ADR-0094
+ * environment door still wants (its residue is deliberately outside the
+ * per-organization catalog work) and what a `single`-posture deployment wants.
+ * The PACKAGE door passes an organization under a walled posture — see
+ * `per-organization-catalog.ts`.
+ */
+export async function tryFind(ql: any, object: string, where: any, limit = 100, organizationId?: string): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+    const rows = await ql.find(object, { where, limit }, { context: seedCtx(organizationId) });
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-export async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: SYSTEM_CTX }); } catch { return null; }
+export async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
+  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
 }
-export async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
-  try { await ql.update(object, data, { context: SYSTEM_CTX }); return true; } catch { return false; }
+export async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
+  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
 }
 
 export interface ProjectionLogger {

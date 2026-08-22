@@ -12,7 +12,7 @@
  * package's sets, uninstall is undefined, and no provenance axis exists. This
  * seeder closes that gap:
  *
- *  - each declared set is upserted by `name` with `managed_by: 'package'` and
+ *  - each declared set is upserted by `(name, organization_id)` with `managed_by: 'package'` and
  *    `package_id` = the registering package (`_packageId` stamped by the
  *    SchemaRegistry / ADR-0010 `applyProtection`, with the spec-level
  *    `packageId` (ADR-0086 D3) as the author-declared fallback);
@@ -33,6 +33,20 @@
  * (ADR-0094) — this module is the PACKAGE door only. Both project through the
  * shared {@link permissionSetRowFields} row shape so they can never hydrate
  * differently.
+ *
+ * ## Per organization under a walled posture
+ *
+ * The PACKAGE door runs ONE PASS PER ORGANIZATION when a wall is in force:
+ * `sys_permission_set` spells its name index `unique: 'organization'`, and an
+ * organization-less row was measured unreadable by every principal on a walled
+ * deployment — Layer 0's strict `organization_id = :tenant` AND-composes over
+ * the driver's compatibility arm and the conjunction is the strict equality
+ * alone. `single` posture keeps exactly one organization-less pass.
+ *
+ * The ENVIRONMENT door is deliberately NOT converted here: its
+ * organization-less residue (and `bootstrapPlatformAdmin`'s three platform
+ * defaults) stays outside this change, unreaped and warned about loudly. See
+ * `per-organization-catalog.ts` for the doctrine and the guard.
  */
 
 import {
@@ -44,11 +58,21 @@ import {
   type PermissionSeedOutcome,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import {
+  resolveOwnOrganizationRow,
+  rowMatchesDeclaration,
+  warnPreFixOrganizationLessRows,
+} from './per-organization-catalog.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
 
 interface SeedOptions {
   logger?: ProjectionLogger;
+  /**
+   * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
+   * one place an organization-less catalog row is the correct shape.
+   */
+  organizationId?: string;
 }
 
 /**
@@ -96,8 +120,11 @@ export async function upsertPackagePermissionSet(
   ps: any,
   packageId: string | null | undefined,
   logger?: SeedOptions['logger'],
-): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  organizationId?: string,
+): Promise<PermissionSeedOutcome & { organizationLessResidue: boolean }> {
+  const out: PermissionSeedOutcome & { organizationLessResidue: boolean } = {
+    seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0, organizationLessResidue: false,
+  };
   if (!ps?.name) return out;
   // A `managed_by:'package'` row without a `package_id` would make uninstall
   // undefined again — the exact ambiguity ADR-0086 D3 exists to remove — so a
@@ -107,7 +134,15 @@ export async function upsertPackagePermissionSet(
     return out;
   }
 
-  const existing = (await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1))[0];
+  // Limit 5, not 1: a tenant-scoped read passes through `applyTenantScope`,
+  // whose compatibility arm returns organization-less rows alongside this
+  // organization's own, and reading a pre-fix organization-less row as
+  // "already seeded" is the silent no-op the per-organization catalog exists to
+  // prevent. `resolveOwnOrganizationRow` is what tells the two apart.
+  const found = await tryFind(ql, 'sys_permission_set', { name: ps.name }, 5, organizationId);
+  const { own, organizationLessResidue } = resolveOwnOrganizationRow(found, organizationId);
+  if (organizationLessResidue) out.organizationLessResidue = true;
+  const existing = own;
   if (!existing?.id) {
     const created = await tryInsert(ql, 'sys_permission_set', {
       id: genId('ps'),
@@ -116,7 +151,7 @@ export async function upsertPackagePermissionSet(
       active: true,
       package_id: packageId,
       managed_by: 'package',
-    });
+    }, organizationId);
     if (created) out.seeded += 1;
     return out;
   }
@@ -125,7 +160,12 @@ export async function upsertPackagePermissionSet(
     if (existing.package_id === packageId) {
       // Our own row — re-seed so the record always reflects the shipped/published
       // declaration (idempotent; covers version bumps without bookkeeping).
-      if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) })) {
+      // O(changed declarations): a row that already carries every declared
+      // field costs NO write, so the common boot (nothing declared changed)
+      // performs reads only, per organization.
+      const fields = permissionSetRowFields(ps);
+      if (rowMatchesDeclaration(existing, fields)) return out;
+      if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...fields }, organizationId)) {
         out.updated += 1;
       }
     } else {
@@ -163,20 +203,28 @@ export async function bootstrapDeclaredPermissions(
   }
   if (!Array.isArray(sets) || sets.length === 0) return out;
 
+  const organizationId = options.organizationId;
+  const residue: string[] = [];
   for (const ps of sets) {
     if (!ps?.name) continue;
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
-    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger);
+    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, organizationId);
     out.seeded += r.seeded;
     out.updated += r.updated;
     out.skippedEnvAuthored += r.skippedEnvAuthored;
     out.skippedForeign += r.skippedForeign;
+    if (r.organizationLessResidue) residue.push(ps.name);
   }
 
-  options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {
-    ...out, total: sets.length,
-  });
+  if (organizationId) {
+    warnPreFixOrganizationLessRows(options.logger, 'sys_permission_set', residue, organizationId);
+  }
+  if (out.seeded + out.updated > 0) {
+    options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {
+      ...out, total: sets.length, ...(organizationId ? { organization: organizationId } : {}),
+    });
+  }
   return out;
 }

@@ -118,10 +118,25 @@ function safeJsonParse<T>(s: string, fallback: T): T {
   try { return JSON.parse(s) as T; } catch { return fallback; }
 }
 
-async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+async function tryFind(
+  ql: any,
+  object: string,
+  where: any,
+  limit = 100,
+  /**
+   * Resolve inside ONE organization. Threaded into the execution context, so
+   * the read routes through `SqlDriver.applyTenantScope` — the governed
+   * chokepoint — rather than being re-implemented here as a bare equality.
+   * Omitted keeps the pre-existing installation-wide read, which is what the
+   * user-keyed reads above want (they are already narrowed by `user_id`) and
+   * what a `single`-posture deployment wants everywhere.
+   */
+  organizationId?: string,
+): Promise<any[]> {
   if (!ql || typeof ql.find !== 'function') return [];
   try {
-    let rows = await ql.find(object, { where, limit, context: { isSystem: true } } as any);
+    const context = organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
+    let rows = await ql.find(object, { where, limit, context } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -462,7 +477,31 @@ export async function resolveUserAuthzGrants(
   //     with no `sys_position` row at all (`org_owner`, a membership-derived
   //     role) has no flag to read and is untouched.
   if (grants.positions.length > 0) {
-    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 100);
+    //     [#10103] Scoped to the CALLER's organization. `sys_position` spells
+    //     its name index `unique: 'organization'` and its rows are materialized
+    //     per organization, so several organizations hold a row named
+    //     `everyone` (and one named after every declared position). Swept by
+    //     name alone, this read returned EVERY organization's rows, and the
+    //     junction read below then collected another organization's bindings —
+    //     a cross-organization grant bleed, measured reachable from one tenant's
+    //     resolution to another tenant's `everyone` binding. It also made the
+    //     sweep O(organizations) on a table that is read on every request.
+    //
+    //     Scoped by threading the organization into the context rather than by
+    //     adding an `organization_id` predicate here: the driver's
+    //     `applyTenantScope` is the one governed spelling of this wall, and a
+    //     bare equality written at this call site would be a second, ungoverned
+    //     implementation of it — the exact shape that produced the defect this
+    //     card repairs. Per-request cost stays O(the caller's own organization's
+    //     catalog).
+    //
+    //     Limit raised with it: the cap has to admit this organization's rows
+    //     alongside any organization-less ones the driver's compatibility arm
+    //     still returns, or a caller silently loses positions. Those
+    //     organization-less rows stay REACHABLE on purpose — they are not
+    //     reaped, and grants point at them by row id, so dropping them here
+    //     would revoke standing access silently.
+    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId);
     const deactivatedNames = new Set<string>(
       positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
     );

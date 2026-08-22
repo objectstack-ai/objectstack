@@ -39,6 +39,69 @@ import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.j
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
 import { bindRecordShareCascade } from './record-share-cascade.js';
 import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
+import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
+
+/**
+ * How many organizations one boot-time sharing-rule seeding sweep enumerates.
+ * Bounded for the same reason plugin-security bounds its own: this runs during
+ * plugin start and each organization costs a bounded number of writes. An
+ * organization past the bound is covered by the organization-creation hook and
+ * by the next boot.
+ */
+const RULE_SEED_ORGANIZATION_SCAN_LIMIT = 500;
+
+/**
+ * Which passes one boot performs: exactly one organization-less pass under
+ * `single`, one per organization under a wall, and NONE when the organization
+ * enumeration failed — an unreadable `sys_organization` means "we do not know",
+ * never "there are no tenants", and seeding organization-less on that reading
+ * would mint precisely the invalid-state rows this change removes.
+ */
+async function resolveRuleSeedPasses(
+  engine: any,
+  posture: TenancyPosture,
+  logger?: { warn?: (m: string, meta?: any) => void },
+): Promise<Array<string | undefined>> {
+  if (!postureEnforcesWall(posture)) return [undefined];
+  let rows: any;
+  try {
+    rows = await engine.find('sys_organization', {
+      fields: ['id'],
+      limit: RULE_SEED_ORGANIZATION_SCAN_LIMIT,
+      context: { isSystem: true },
+    });
+  } catch (e: any) {
+    logger?.warn?.('SharingServicePlugin: could not enumerate organizations — declared sharing rules ' +
+      'were NOT seeded per organization at this boot; seeding retries on the next boot and on ' +
+      'organization creation', { error: e?.message });
+    return [];
+  }
+  return (Array.isArray(rows) ? rows : [])
+    .map((r: any) => r?.id)
+    .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
+}
+
+/**
+ * The id of the organization a `sys_organization` insert just created. Read
+ * from the write's result first and its input second, because an insert that
+ * lets the engine mint the id carries none on the way in. Returns `undefined`
+ * rather than guessing — the caller refuses to run an organization-less pass on
+ * a walled deployment, which is the point.
+ */
+function createdOrganizationId(opCtx: any): string | undefined {
+  const candidates = [
+    opCtx?.result?.id,
+    Array.isArray(opCtx?.result) ? opCtx.result[0]?.id : undefined,
+    opCtx?.data?.id,
+    opCtx?.doc?.id,
+    opCtx?.record?.id,
+    opCtx?.id,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c !== '') return c;
+  }
+  return undefined;
+}
 
 export interface SharingPluginOptions {
   /** Extra object names that bypass sharing entirely. */
@@ -567,14 +630,73 @@ export class SharingServicePlugin implements Plugin {
           // [ADR-0057 D6 / #2077] Seed stack-declared sharingRules into
           // sys_sharing_rule BEFORE listRules so the lifecycle hooks bind to a
           // populated table (previously rules were decorative — ruleCount: 0).
-          try {
-            let metadataService: IMetadataService | null = null;
-            try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
-            if (metadataService) {
-              await bootstrapDeclaredSharingRules(this.ruleService, metadataService, engine, ctx.logger as any);
+          //
+          // [#10103] ONE PASS PER ORGANIZATION under a walled posture. A rule
+          // seeded organization-less was measured unreadable by every principal
+          // there: plugin-security's Layer 0 composes a strict
+          // `organization_id = :tenant` and the middleware ANDs it over the
+          // driver's compatibility arm, so the conjunction is the strict
+          // equality alone and `sys_sharing_rule` listed ZERO. `single` posture
+          // keeps exactly one organization-less pass — which is also the
+          // platform-global rule class `deleteRule` guards (#7795).
+          // The posture, read EXACTLY the way this plugin already reads it for
+          // the hierarchy org gate (the `tenancy` service, ADR-0105 D1 / #5859),
+          // so the two layers can never disagree about whether a wall is in
+          // force. An unresolvable posture is NOT evidence of `single`: it is
+          // treated as walled, because seeding organization-less on a walled
+          // deployment is the failure this change removes, while an unnecessary
+          // per-organization pass on a `single` deployment costs one wasted read.
+          const sharingPosture = (): TenancyPosture => {
+            try {
+              const probe = ctx.getService<SharingTenancyProbe>('tenancy');
+              const normalized = normalizeTenancyPosture(probe?.posture);
+              if (normalized) return normalized;
+              if (probe?.isolationActive === false) return 'single';
+            } catch { /* absent — fall through to the walled default */ }
+            return 'isolated';
+          };
+          const seedDeclaredRules = async (organizationId?: string): Promise<void> => {
+            try {
+              let metadataService: IMetadataService | null = null;
+              try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
+              if (metadataService && this.ruleService) {
+                await bootstrapDeclaredSharingRules(
+                  this.ruleService, metadataService, engine, ctx.logger as any, organizationId,
+                );
+              }
+            } catch (err: any) {
+              ctx.logger.warn('SharingServicePlugin: sharing-rule seeding failed', {
+                error: err?.message, organization: organizationId,
+              });
             }
-          } catch (err: any) {
-            ctx.logger.warn('SharingServicePlugin: sharing-rule seeding failed', { error: err?.message });
+          };
+          for (const organizationId of await resolveRuleSeedPasses(engine, sharingPosture(), ctx.logger as any)) {
+            await seedDeclaredRules(organizationId);
+          }
+
+          // Seed a NEWLY CREATED organization's rules too, not only the ones
+          // present at boot. Without it a tenant created after startup
+          // administers an empty sharing surface until the next restart — the
+          // same symptom, scoped to the newest tenant. Idempotent: `defineRule`
+          // upserts by `(name, organization_id)`.
+          if (typeof engine.registerMiddleware === 'function') {
+            engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+              await next();
+              if (opCtx?.object !== 'sys_organization') return;
+              const op = opCtx?.operation;
+              if (op !== 'insert' && op !== 'create') return;
+              if (!postureEnforcesWall(sharingPosture())) return;
+              const organizationId = createdOrganizationId(opCtx);
+              if (!organizationId) {
+                // Never fall back to an organization-less pass on a walled
+                // deployment: that is the `single`-posture shape and would mint
+                // exactly the invalid-state row this change removes.
+                ctx.logger.warn('SharingServicePlugin: an organization was created but its id was ' +
+                  'unreadable — its declared sharing rules were NOT seeded now; the next boot covers it');
+                return;
+              }
+              await seedDeclaredRules(organizationId);
+            });
           }
 
           if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
