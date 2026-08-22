@@ -91,6 +91,7 @@
 
 import type { SharingRuleRow, SharingRuleRecipientType } from '@objectstack/spec/contracts';
 import { ruleRegrantQueue } from './rule-hooks.js';
+import type { OptionalSharingLogger } from './logger-shapes.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -149,11 +150,6 @@ interface MinimalEngine {
     options?: { object?: string | string[]; priority?: number; packageId?: string },
   ): void;
   unregisterHooksByPackage(packageId: string): number;
-}
-
-interface MinimalLogger {
-  info?: (msg: any, ...rest: any[]) => void;
-  warn?: (msg: any, ...rest: any[]) => void;
 }
 
 /** The slice of {@link SharingRuleService} this module drives. */
@@ -220,7 +216,7 @@ export function writeCanChangeExpansion(objectName: string, event: string, hookC
 export function bindBusinessUnitTreeRecompute(
   engine: MinimalEngine,
   service: BuTreeRecomputeRuleService,
-  logger?: MinimalLogger,
+  logger?: OptionalSharingLogger,
 ): void {
   if (typeof engine.registerHook !== 'function') return;
   if (typeof engine.unregisterHooksByPackage === 'function') {
