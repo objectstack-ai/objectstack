@@ -35,7 +35,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { createRestApiPlugin } from './rest-api-plugin';
+import { createRestApiPlugin } from './rest-api-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Doubles
@@ -222,9 +222,12 @@ async function bootRest(args: HostArgs) {
       headersSent: false,
     };
     await routeFor(path)(req, res);
+    // `.at(-1)` is not in this program's lib target — read the last call the
+    // long way rather than widening the package's frozen tsc debt.
+    const lastArg = (calls: any[][]): any => (calls.length ? calls[calls.length - 1][0] : undefined);
     return {
-      status: res.status.mock.calls.at(-1)?.[0],
-      body: res.json.mock.calls.at(-1)?.[0],
+      status: lastArg(res.status.mock.calls),
+      body: lastArg(res.json.mock.calls),
       res,
     };
   };
