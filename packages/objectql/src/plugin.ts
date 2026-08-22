@@ -543,6 +543,14 @@ export class ObjectQLPlugin implements Plugin {
         //      manage DDL out-of-band, and serializes through
         //      `reloadSchemaSync` so overlapping reload events can't race DDL.
         this.ingestReloadedObjects(ctx, payload);
+        if (this.skipSchemaSync) {
+            // DDL is managed out-of-band here, but the objects this reload just
+            // ingested still have to be TOLD to the driver, or every JSON /
+            // datetime / boolean value written to them is encoded by the
+            // client's per-type defaults. No DDL, no round-trip, nothing to
+            // serialize against — see `registerSchemasWithoutDdl`.
+            await this.registerSchemasWithoutDdl(ctx);
+        }
         if (!this.skipSchemaSync) {
             this.reloadSchemaSync = this.reloadSchemaSync.then(async () => {
                 try {
@@ -647,11 +655,7 @@ export class ObjectQLPlugin implements Plugin {
     // table; we only assume the DDL is in place and skip straight to
     // hydration. This avoids one round-trip per table × N objects on
     // every cold boot.
-    if (this.skipSchemaSync) {
-      ctx.logger.info('Skipping schema sync (OS_SKIP_SCHEMA_SYNC=1) — assuming DDL is managed out-of-band');
-    } else {
-      await this.syncRegisteredSchemas(ctx);
-    }
+    await this.installRegisteredSchemas(ctx);
 
     // Phase 2: Hydrate SchemaRegistry from sys_metadata (loads custom/template objects).
     // Project kernels (environmentId set) USUALLY source metadata from the
@@ -674,9 +678,7 @@ export class ObjectQLPlugin implements Plugin {
 
     // Phase 3: Sync any new schemas that were just hydrated from the DB
     // (e.g. CRM objects seeded via template — they must have tables before use).
-    if (!this.skipSchemaSync) {
-      await this.syncRegisteredSchemas(ctx);
-    }
+    await this.installRegisteredSchemas(ctx);
 
     // Bridge all SchemaRegistry objects to metadata service.
     //
@@ -1338,6 +1340,125 @@ export class ObjectQLPlugin implements Plugin {
         `Fix the datasource/driver named above and restart (or trigger a metadata reload) to re-run this binding.`,
       undefined,
       { bound, unbound: unbound.length, unsupported: unsupported.length, failed: failed.length },
+    );
+  }
+
+  /**
+   * Install every registered object's schema with its driver — the ONE seam
+   * `start()` uses for that, on both the syncing and the DDL-free path.
+   *
+   * `skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1` opts a deployment out of **DDL**,
+   * not out of telling the driver what its objects look like. Those were the
+   * same thing until now: {@link syncRegisteredSchemas} is the only caller of
+   * `syncSchema()`, and a SQL driver builds its per-object coercion registries
+   * (JSON, boolean, numeric, date/datetime/time, auto_number, and the
+   * tenant-isolation column) as the first step of that DDL call. So a boot that
+   * skipped it came up with those registries EMPTY and every value written
+   * afterwards encoded by whatever the underlying client does with a bare JS
+   * value.
+   *
+   * On Postgres that is a live data-correctness defect, not a slow path: an
+   * array value on a `json` field reaches node-postgres, which renders it as a
+   * Postgres ARRAY LITERAL — `22P02 invalid input syntax for type json`, a 500
+   * on every write — **except `[]`, whose literal `{}` is valid JSON**, so an
+   * empty array is accepted and silently stored as an empty OBJECT. A bare
+   * string 500s for the same reason (`x` is not JSON text; `"x"` is). SQLite
+   * hides all of it behind a dialect-local bind-safety net, which is why the
+   * SQLite/Turso suites never saw it.
+   *
+   * The split is the same ruling #7737/#10629 made for federated objects —
+   * that flag is about DDL, and a binding that is DDL-free must not ride on it
+   * — applied to the managed ones.
+   */
+  private async installRegisteredSchemas(ctx: PluginContext): Promise<void> {
+    if (!this.skipSchemaSync) {
+      await this.syncRegisteredSchemas(ctx);
+      return;
+    }
+    await this.registerSchemasWithoutDdl(ctx);
+  }
+
+  /**
+   * Tell every driver about its objects **without running any DDL** — what a
+   * `skipSchemaSync` boot does instead of {@link syncRegisteredSchemas}.
+   *
+   * Pure in-memory metadata assignment on the driver side
+   * (`registerObjectMetadata`, the managed sibling of
+   * `registerExternalObject`): no `CREATE TABLE`, no `ALTER TABLE`, no
+   * existence probe, no round-trip. That matters, because the reason
+   * `skipSchemaSync` exists is a cold-start budget shorter than "one round-trip
+   * per table × N objects" — this pass costs one pass over the object list and
+   * keeps the promise the flag actually makes.
+   *
+   * Federated (external) objects are skipped here on purpose: their DDL-free
+   * binding is `registerExternalObject`, driven by {@link syncRegisteredSchemas}
+   * on a syncing boot and unconditionally by {@link reconcileFederatedBindings}
+   * at `kernel:ready` — i.e. they were already correct under this flag, and
+   * managed objects were the half with nothing.
+   *
+   * Idempotent, so it is safe to re-drive after every metadata reload.
+   */
+  private async registerSchemasWithoutDdl(ctx: PluginContext): Promise<void> {
+    if (!this.ql) return;
+
+    // [#9285] Same propagation contract as the sync pass: "the registry holds
+    // nothing" and "the registry could not be read" have opposite consequences
+    // and only the first is a truthful reason to register nothing.
+    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl');
+    if (allObjects.length === 0) return;
+
+    const groups = new Map<any, ServiceObject[]>();
+    let federated = 0;
+    let unsupported = 0;
+    let unbound = 0;
+
+    for (const obj of allObjects) {
+      if ((obj as any).external != null) {
+        federated++;
+        continue;
+      }
+      const driver: any = this.ql.getDriverForObject(obj.name);
+      if (!driver) {
+        unbound++;
+        continue;
+      }
+      if (typeof driver.registerObjectMetadata !== 'function') {
+        unsupported++;
+        continue;
+      }
+      let group = groups.get(driver);
+      if (!group) {
+        group = [];
+        groups.set(driver, group);
+      }
+      group.push(obj);
+    }
+
+    let registered = 0;
+    for (const [driver, objects] of groups) {
+      try {
+        await driver.registerObjectMetadata(objects);
+        registered += objects.length;
+      } catch (e: unknown) {
+        // Reported at `error` per the AGENTS.md degradation-log-level rule: the
+        // deployment looks healthy — the tables exist, the objects are served —
+        // while the values written to them are encoded by the client's
+        // per-type defaults rather than by their declared field types.
+        ctx.logger.error(
+          `[ObjectQLPlugin] DDL-free schema registration FAILED for driver '${driver?.name}' — its objects stay registered and ` +
+            `served, but the driver was never told their field types, so values written to them are encoded by the database ` +
+            `client's per-type defaults instead: on Postgres an array on a JSON field is rejected as a malformed array literal ` +
+            `and an empty array is silently stored as an empty object. Fix the driver error below and restart.`,
+          e instanceof Error ? e : new Error(String(e)),
+          { driver: driver?.name, objects: objects.length },
+        );
+      }
+    }
+
+    ctx.logger.info(
+      'Skipping schema sync (OS_SKIP_SCHEMA_SYNC=1) — assuming DDL is managed out-of-band; ' +
+        `registered ${registered} object schema(s) with their drivers WITHOUT DDL`,
+      { registered, federated, unsupported, unbound, total: allObjects.length },
     );
   }
 

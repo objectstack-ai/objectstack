@@ -7750,6 +7750,144 @@ export class SqlDriver implements IDataDriver {
     if (timeCols.length) this.timeFields[key] = new Set(timeCols);
   }
 
+  /**
+   * Register one MANAGED object's in-memory metadata — and run no DDL.
+   *
+   * Everything the write and read paths need to encode a value correctly is
+   * installed here: the JSON / boolean / numeric / date / datetime / time
+   * coercion registries, the auto_number descriptors, the tenant-isolation
+   * column, and the `managedObjectFields` / `managedObjectIndexes` entries
+   * drift detection diffs against. {@link SqlDriver.initObjects} calls it as
+   * its first step and then issues DDL; {@link registerObjectMetadata} calls
+   * it and stops.
+   *
+   * @returns the physical table name registered, and the tenant column
+   *          {@link computeAndRecordTenantField} resolved for it — both of
+   *          which `initObjects` goes on to use for its DDL.
+   */
+  protected registerManagedObjectMetadata(
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any },
+  ): { tableName: string; tenantField: string | null } {
+    const tableName = StorageNameMapping.resolveTableName(obj);
+    // #2186: remember the authoritative metadata field set for this table so
+    // drift detection / `os migrate` can diff the physical schema against it.
+    this.managedObjectFields.set(tableName, obj.fields ?? {});
+    // Always overwrite — a metadata change that REMOVES `indexes` must clear
+    // the previous entry, or drift detection keeps expecting an index nobody
+    // declares any more (and never reports it as orphaned).
+    if (Array.isArray((obj as any).indexes)) {
+      this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+    } else {
+      this.managedObjectIndexes.delete(tableName);
+    }
+    // [#8621] This call may create the table, or add a unique index to one
+    // that already exists, so whatever the upsert pre-flight introspected
+    // before it is stale. Dropping the entry is enough — the entry is
+    // re-read lazily, and a refusal re-reads unconditionally.
+    this.physicalKeyIndexes.delete(tableName);
+
+    const jsonCols: string[] = [];
+    const booleanCols: string[] = [];
+    const numericCols: string[] = [];
+    const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
+    // Tenant-isolation column: explicit tenancy opt-out → declared field →
+    // implicit `organization_id`. See {@link computeAndRecordTenantField}
+    // (shared with registerExternalObject so the two paths can't drift).
+    const tenantField = this.computeAndRecordTenantField(tableName, obj);
+    if (obj.fields) {
+      for (const [name, field] of Object.entries<any>(obj.fields)) {
+        const type = field.type || 'string';
+        if (this.isJsonField(type, field)) {
+          jsonCols.push(name);
+        }
+        // `toggle` shares boolean storage/affinity, so it needs the same
+        // read coercion (stored 1/0 → JS true/false) or it leaks back as a
+        // number/string instead of a boolean (#field-zoo).
+        if (type === 'boolean' || type === 'toggle') {
+          booleanCols.push(name);
+        }
+        // Numeric scalars are coerced back to JS numbers on read so legacy
+        // TEXT-affinity columns (created before they were mapped to a numeric
+        // column) still return numbers, not strings — see NUMERIC_SCALAR_TYPES.
+        if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
+          numericCols.push(name);
+        }
+        if (type === 'date') {
+          (this.dateFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'datetime') {
+          (this.datetimeFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'time') {
+          (this.timeFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'auto_number' || type === 'autonumber') {
+          const fmt = resolveAutonumberFormat(field);
+          // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
+          // field interpolation (`{island_zone}`) and the sequence slot at
+          // fill time. The counter scopes to whatever renders before the slot.
+          const tokens = parseAutonumberFormat(fmt);
+          autoNumberCols.push({ name, format: fmt, tokens, tenantField });
+        }
+      }
+    }
+    this.jsonFields[tableName] = jsonCols;
+    this.booleanFields[tableName] = booleanCols;
+    this.numericFields[tableName] = numericCols;
+    this.autoNumberFields[tableName] = autoNumberCols;
+    this.tenantFieldByTable[tableName] = tenantField;
+    return { tableName, tenantField };
+  }
+
+  /**
+   * Install the read/write metadata for MANAGED objects WITHOUT running DDL —
+   * the managed sibling of {@link SqlDriver.registerExternalObject}.
+   *
+   * ## Why this exists as its own entry point
+   *
+   * Until this method, the ONLY way to tell this driver a managed object's
+   * field types was {@link initObjects} / `syncSchema()` — which also runs
+   * CREATE TABLE / ALTER TABLE. A deployment that manages DDL out-of-band
+   * (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`, the documented posture after
+   * running migrations manually) therefore booted with EVERY coercion
+   * registry empty, and value encoding silently degraded to whatever the
+   * underlying client does with a bare JS value.
+   *
+   * On Postgres that is not a cosmetic difference. `formatInput` stringifies a
+   * JSON field ONLY when the field is in `jsonFields`; with the registry empty
+   * the value reaches node-postgres, whose per-type defaults are:
+   *
+   *  - object -> JSON text (accidentally correct);
+   *  - array  -> a Postgres ARRAY LITERAL (`{…}`) -> `22P02 invalid input
+   *    syntax for type json` -> 500, **except `[]`, whose literal `{}` is
+   *    valid JSON**, so an empty array is accepted and silently stored as an
+   *    empty OBJECT — data corruption, not an error;
+   *  - bare string -> passed raw -> not valid JSON text -> 500 (a number
+   *    survives because `42` already is valid JSON).
+   *
+   * SQLite never showed it: `formatInput` ends with a bind-safety net that
+   * stringifies any leftover object/array on that dialect, so the same empty
+   * registry is invisible there — which is why the SQLite/Turso suites are
+   * blind to this and every Postgres deployment inherited it.
+   *
+   * Registration is the DDL-free half, so it is safe on any datasource and on
+   * any boot: no `assertSchemaMutable` gate (nothing here mutates a schema),
+   * no `ensureDatabaseExists` probe, no round-trip at all. That is what makes
+   * it affordable on exactly the cold-start-sensitive boots `skipSchemaSync`
+   * exists to protect: it costs one pass over the object list, in memory.
+   *
+   * It is the same ruling #7737/#10629 already made for FEDERATED objects —
+   * `OS_SKIP_SCHEMA_SYNC` is about DDL, and a binding that is DDL-free must
+   * not ride on it — extended to the managed ones.
+   *
+   * Idempotent: pure metadata assignment, safe to re-drive on every reload.
+   */
+  registerObjectMetadata(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+  ): void {
+    for (const obj of objects) this.registerManagedObjectMetadata(obj);
+  }
+
   // `tenancy` is part of what this method READS — each object flows into
   // `computeAndRecordTenantField`, which consumes `obj.tenancy` to pick the
   // tenant column and to set or clear the sticky explicit-opt-out. It went
@@ -7757,82 +7895,30 @@ export class SqlDriver implements IDataDriver {
   // `computeAndRecordTenantField` both had it), so a caller spelling the key
   // correctly was rejected by the type while the driver read it regardless.
   async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
+    // In-memory registration FIRST, and deliberately ahead of the DDL gate
+    // below: being refused permission to alter a schema is not a reason to stay
+    // ignorant of the objects we were just told about. On a datasource we are a
+    // guest in (`schemaMode !== 'managed'`) the gate throws — and before this
+    // line ran here, it threw with every coercion registry still empty, so the
+    // very next write to a JSON field on that datasource was bound by the
+    // client's per-type defaults (see {@link registerObjectMetadata} for what
+    // node-postgres does with an array and with `[]`). Nothing in this call
+    // touches the database; the refusal it precedes is unchanged.
+    this.registerObjectMetadata(objects);
+
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
     await this.ensureDatabaseExists();
 
     for (const obj of objects) {
+      // Re-read what the registration above recorded, rather than recomputing:
+      // `computeAndRecordTenantField` carries a sticky explicit-opt-out, so the
+      // recorded answer IS the answer.
       const tableName = StorageNameMapping.resolveTableName(obj);
-      // #2186: remember the authoritative metadata field set for this table so
-      // drift detection / `os migrate` can diff the physical schema against it.
-      this.managedObjectFields.set(tableName, obj.fields ?? {});
-      // Always overwrite — a metadata change that REMOVES `indexes` must clear
-      // the previous entry, or drift detection keeps expecting an index nobody
-      // declares any more (and never reports it as orphaned).
-      if (Array.isArray((obj as any).indexes)) {
-        this.managedObjectIndexes.set(tableName, (obj as any).indexes);
-      } else {
-        this.managedObjectIndexes.delete(tableName);
-      }
-      // [#8621] This call may create the table, or add a unique index to one
-      // that already exists, so whatever the upsert pre-flight introspected
-      // before it is stale. Dropping the entry is enough — the entry is
-      // re-read lazily, and a refusal re-reads unconditionally.
-      this.physicalKeyIndexes.delete(tableName);
+      const tenantField = this.tenantFieldByTable[tableName] ?? null;
 
-      const jsonCols: string[] = [];
-      const booleanCols: string[] = [];
-      const numericCols: string[] = [];
-      const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
-      // Tenant-isolation column: explicit tenancy opt-out → declared field →
-      // implicit `organization_id`. See {@link computeAndRecordTenantField}
-      // (shared with registerExternalObject so the two paths can't drift).
-      const tenantField = this.computeAndRecordTenantField(tableName, obj);
-      if (obj.fields) {
-        for (const [name, field] of Object.entries<any>(obj.fields)) {
-          const type = field.type || 'string';
-          if (this.isJsonField(type, field)) {
-            jsonCols.push(name);
-          }
-          // `toggle` shares boolean storage/affinity, so it needs the same
-          // read coercion (stored 1/0 → JS true/false) or it leaks back as a
-          // number/string instead of a boolean (#field-zoo).
-          if (type === 'boolean' || type === 'toggle') {
-            booleanCols.push(name);
-          }
-          // Numeric scalars are coerced back to JS numbers on read so legacy
-          // TEXT-affinity columns (created before they were mapped to a numeric
-          // column) still return numbers, not strings — see NUMERIC_SCALAR_TYPES.
-          if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
-            numericCols.push(name);
-          }
-          if (type === 'date') {
-            (this.dateFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'datetime') {
-            (this.datetimeFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'time') {
-            (this.timeFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'auto_number' || type === 'autonumber') {
-            const fmt = resolveAutonumberFormat(field);
-            // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
-            // field interpolation (`{island_zone}`) and the sequence slot at
-            // fill time. The counter scopes to whatever renders before the slot.
-            const tokens = parseAutonumberFormat(fmt);
-            autoNumberCols.push({ name, format: fmt, tokens, tenantField });
-          }
-        }
-      }
-      this.jsonFields[tableName] = jsonCols;
-      this.booleanFields[tableName] = booleanCols;
-      this.numericFields[tableName] = numericCols;
-      this.autoNumberFields[tableName] = autoNumberCols;
-      this.tenantFieldByTable[tableName] = tenantField;
-
-      // Deferred-DDL mode (#3917): everything above is in-memory metadata
+      // Deferred-DDL mode (#3917): the call above is in-memory metadata
       // registration — coercion maps, tenancy, and the `managedObjectFields`
       // entry `detectManagedDrift()` diffs against. Everything below issues
       // DDL. `os migrate plan` / `apply` boot with the deferral armed so the
