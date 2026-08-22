@@ -1527,6 +1527,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugin-hono-server
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
