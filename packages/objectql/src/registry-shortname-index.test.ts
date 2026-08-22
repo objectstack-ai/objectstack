@@ -296,10 +296,20 @@ describe('#10945 — the curve flattens', () => {
    * The defect is a SHAPE, not a constant, so this asserts a shape: the cost of
    * resolving one name per registered object, at two registry sizes 8x apart.
    *
-   * Linear resolution tracks the input at ~8x. The pre-fix full-registry scan
-   * lands near 64x — 8x more lookups, each scanning an 8x longer registry. The
-   * 24x ceiling therefore keeps 3x headroom over healthy while still catching a
-   * return to quadratic with room to spare.
+   * Measured here, one container, same run: with the index the ratio is
+   * **5.7–11.1**; with `resolveObjectKey` reverted to the full-registry scan it
+   * is **62.5** — 8x more lookups, each scanning an 8x longer registry, which
+   * is the quadratic signature exactly. (Absolutes, big window: **2.3ms** with
+   * the index, **4,888ms** without.) The healthy ratio sits above a flat 8x
+   * because a 4,000-entry `Map` has worse locality than a 500-entry one, which
+   * is real and does not average away.
+   *
+   * The 30x ceiling is placed between those two populations rather than close
+   * to either: ~2.7x above the worst healthy sample, ~2x below the ablated one.
+   * Erring toward the quadratic side is deliberate and follows the same
+   * reasoning as `protocol-handshake.test.ts` — a scaling assertion that reds
+   * on scheduler noise gets weakened or deleted, so the flake margin is worth
+   * more than the last factor of detection sensitivity.
    *
    * Method follows `packages/metadata-core/src/protocol-handshake.test.ts`: the
    * registries and name lists are built ONCE outside the clock, the JIT is
@@ -312,7 +322,10 @@ describe('#10945 — the curve flattens', () => {
   it('resolves N names over N objects in time that grows ~linearly, not quadratically', () => {
     const SMALL = 500;
     const BIG = 4_000; // 8x
-    const PASSES = 8; // lifts both windows clear of timer noise; scales both alike
+    // Lifts both windows clear of timer noise (the small one measured 0.15ms at
+    // PASSES=8, low enough for scheduler jitter to move the ratio); scales both
+    // alike, so the 8x the ratio is testing is untouched.
+    const PASSES = 40;
 
     const build = (n: number) => {
       const r = quiet();
@@ -348,6 +361,6 @@ describe('#10945 — the curve flattens', () => {
       ratio = Math.min(ratio, scan(big) / scan(small));
     }
 
-    expect(ratio).toBeLessThan(24);
+    expect(ratio).toBeLessThan(30);
   });
 });
