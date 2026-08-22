@@ -40,16 +40,25 @@
  * `ctx.crypto.*` access patterns and add the matching capability tokens to
  * `body.capabilities` automatically.
  *
- * ⚠️ REACH of the `// @capabilities api.read api.write` override (#10678): it is
- * read off `String(fn)`, so it survives only when the LOADED config still has
- * the comment. A TypeScript `objectstack.config.ts` does not — `loadConfig`
- * runs it through `bundle-require` -> esbuild, which strips `//` line comments
- * before the handler is ever a runtime function — so through `os build` the
- * directive reaches this code from **pre-bundled JS that preserved its comments
- * only**. Every unit test below feeds a raw JS function literal and therefore
- * cannot see that: they are why the override read as working for so long. The
- * real reach is measured over a spawned `os build` in
- * `test/hook-body-build-reach.e2e.test.ts` — change the reach, change that test.
+ * ⛔ RETIRED — the `// @capabilities api.read api.write` hook-body directive was
+ * removed in @objectstack/cli 17.1 (#10917, ADR-0049 enforce-or-remove). It was
+ * read off `String(fn)`, and `loadConfig` runs every config through
+ * `bundle-require` -> esbuild, which strips `//` line comments before the
+ * handler is ever a runtime function. Measured on all four ordinary authoring
+ * shapes (#10678) — `objectstack.config.ts`, `.js`, `.mjs`, and a handler
+ * imported from a local module — the directive reached this code from NONE of
+ * them: the build shipped the inferred capabilities alone, at exit 0, with no
+ * error and no warning, and the mismatch surfaced far from its cause as a
+ * sandbox refusal at runtime. Declare the tokens as DATA instead —
+ * `body: { language: 'js', source, capabilities: [...] }` on the hook or action
+ * — which is measured to survive the build.
+ *
+ * ⛔ Do not re-add a comment-borne override. A directive every ordinary
+ * authoring path strips cannot be typed wrongly-but-visibly, so it can only
+ * teach a wrong convention silently; that is why it was retired rather than
+ * re-documented. `test/hook-body-build-reach.e2e.test.ts` pins both halves —
+ * the directive contributing nothing, and `body.capabilities` surviving — over
+ * a real spawned `os build`.
  *
  * Self-containment (#1876): a handler that references a module-scope identifier
  * (helper, import, top-level const) cannot be shipped body-only — the reference
@@ -98,9 +107,10 @@ export interface ExtractedBody {
   /** Pure function-body source (without the surrounding `(ctx) => {...}`). */
   source: string;
   /**
-   * Inferred capability tokens — merged with an explicit `// @capabilities`
-   * line when one survives into `String(fn)`. See the REACH note in this
-   * file's header: through `os build` on a TS config, it does not.
+   * Capability tokens INFERRED from the body source (see CAPABILITY_PATTERNS).
+   * Inference is the only thing that fills this in: the comment-borne override
+   * is retired (see this file's header). An author whose needs differ from what
+   * inference derives writes `body.capabilities` on the hook instead.
    */
   capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>;
   /** True when source is a single expression (arrow with implicit return). */
@@ -154,24 +164,6 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   const inferred = new Set<ExtractedBody['capabilities'][number]>();
   for (const { rx, cap } of CAPABILITY_PATTERNS) {
     if (rx.test(block.source)) inferred.add(cap);
-  }
-
-  // Honour an explicit override: `// @capabilities api.read api.write`.
-  // Reachable only when the caller handed us a function whose source still
-  // carries `//` comments — see the REACH note in this file's header (#10678).
-  const overrideMatch = block.source.match(/^[\s\n]*\/\/\s*@capabilities\s+([a-z.\s]+)/m);
-  if (overrideMatch) {
-    const tokens = overrideMatch[1].split(/\s+/).filter(Boolean);
-    for (const t of tokens) {
-      if (
-        t === 'api.read' ||
-        t === 'api.write' ||
-        t === 'crypto.uuid' ||
-        t === 'log'
-      ) {
-        inferred.add(t);
-      }
-    }
   }
 
   return {

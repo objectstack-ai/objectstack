@@ -1232,14 +1232,14 @@
       "title": "Hook/action body extraction: --strict-body refuses every forbidden pattern with its own worded reason, capability tokens are inferred (and crypto.hash is NOT, #4391), free identifiers fall back to bundling — and the DEFAULT build's silent fallback contradicts the extractor's own contract (expected-fail)",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["build-time author (no session)"],
       "fixtures": {
         "app": "scaffold",
         "requires": [
-          "a scratch blank scaffold whose config authors the probe hooks — one per FORBIDDEN_PATTERNS entry, one per CAPABILITY_PATTERNS shape, the ctx.crypto.hash regression probe, the @capabilities override, the const-api alias, an implicit-return arrow, and one handler calling a module-scope helper",
+          "a scratch blank scaffold whose config authors the probe hooks — one per FORBIDDEN_PATTERNS entry, one per CAPABILITY_PATTERNS shape, the ctx.crypto.hash regression probe, a probe carrying the RETIRED @capabilities first-line comment, a hook declaring body.capabilities as data instead of a handler, the const-api alias, an implicit-return arrow, and one handler calling a module-scope helper",
           "jq over dist/objectstack.json — body presence and body.capabilities per hook are the artifact-side oracle"
         ],
         "knownGaps": [
@@ -1250,7 +1250,7 @@
       "steps": [
         "author the forbidden seven, one hook each: dynamic import(, require(, fetch(, process.<x>, globalThis.<x>, eval(, new Function( — then run `os build --strict-body; echo $?` and capture every per-callable diagnostic verbatim",
         "the default-path pair on the SAME config: `os build; echo $?` — capture the exit, the 'Bundling N handler(s)…' line, and jq the artifact for each hook's body (expect ABSENT) and handler ref (expect present)",
-        "the inference matrix, one hook each on a clean config: ctx.api.object('x').find(…) · ctx.api.object('x').update(…) · const api = ctx.api; api.object('x').find(…) · ctx.crypto.randomUUID() · ctx.log.info(…) · a body whose ONLY crypto call is ctx.crypto.hash(…) · a body with '// @capabilities api.read api.write' as its first line and no matching calls · an implicit-return arrow — `os build` then jq each hook's body.capabilities and isExpression handling",
+        "the inference matrix, one hook each on a clean config: ctx.api.object('x').find(…) · ctx.api.object('x').update(…) · const api = ctx.api; api.object('x').find(…) · ctx.crypto.randomUUID() · ctx.log.info(…) · a body whose ONLY crypto call is ctx.crypto.hash(…) · a body carrying the retired @capabilities first-line comment and no matching calls (#10917 — it must contribute nothing) · a hook supplying body.capabilities as data instead of a handler · an implicit-return arrow — `os build` then jq each hook's body.capabilities and isExpression handling",
         "free-identifier probe: a handler calling a module-scope helper function — `os build; echo $?` (expect green, handler bundled, no body) then `os build --strict-body; echo $?` (expect exit 1 naming the identifier)",
         "all-body-only run: remove every non-extractable handler and confirm the 'Skipping legacy runtime bundle (all N callables are body-only)' line and that no objectstack-runtime.*.mjs remains in dist/",
         "re-run the strict-body failure with --json and capture the { success: false, error: 'strict-body: missing body', issues } payload"
@@ -1275,10 +1275,10 @@
           "evidence": "the three jq captures"
         },
         {
-          "clause": "the '// @capabilities …' first-line override adds exactly the named tokens (from the closed set api.read/api.write/crypto.uuid/log) even when no call pattern matches, merged with any inference — the author's declaration wins additively",
+          "clause": "capabilities the body's own code does not reveal are declared as DATA: a hook supplying body: { language, source, capabilities: [...] } ships exactly those tokens into the artifact. The RETIRED @capabilities first-line comment (#10917, ADR-0049 enforce-or-remove) adds nothing — a config that still carries one builds identically to one that does not, which is the guarantee owed to apps authored while it was documented",
           "oracle": "build",
-          "verify": "the override hook with no matching calls carries ['api.read','api.write'] in the artifact (extract-hook-body.ts:118-131; documented at content/docs/automation/hook-bodies.mdx:320-327)",
-          "evidence": "the jq capture"
+          "verify": "jq shows the declared tokens verbatim on the body-supplying hook; the retired-comment hook carries ONLY what inference derives (['api.read'] for a body reading .object(x).find(…) — never the api.write/log the comment names) and os build exits 0 saying nothing about it. No override branch is left in extract-hook-body.ts to read the comment (retirement note :43-59); content/docs/automation/hook-bodies.mdx documents the removal, not the spelling",
+          "evidence": "both jq captures + the exit code"
         },
         {
           "clause": "#1876 self-containment: a handler referencing a module-scope identifier throws out of extraction naming the identifier(s), the caller catches and keeps the handler BUNDLED (no body, handler ref into the .mjs) so the default build stays green with no behavior change — while --strict-body surfaces the same message as a hard failure",
@@ -1308,15 +1308,16 @@
       ],
       "traps": ["stale-dist", "absence-inference"],
       "source": [
-        "packages/cli/src/utils/extract-hook-body.ts (contract header :3-29 — whose fail-the-build sentence the expected-fail clause tests; FORBIDDEN_PATTERNS :33-41; CAPABILITY_PATTERNS :43-57 with the #4391 removal note :52-55; #1876 free-identifier throw :94-109; @capabilities override :118-131)",
+        "packages/cli/src/utils/extract-hook-body.ts (contract header :4-67, carrying the #10917 retirement note at :43-59; FORBIDDEN_PATTERNS :71-88; CAPABILITY_PATTERNS :90-104 with the #4391 removal note :99-102; #1876 free-identifier throw :146-161 — the @capabilities override branch this item used to cite is retired and gone)",
         "packages/cli/src/utils/lower-callables.ts (:33-36 the warnings field, :63-78 tryExtractBody's catch-all fallback-to-bundle — the seam the default path's silence flows from)",
         "packages/cli/src/commands/compile.ts (:126-149 the --strict-body gate, :366-393 the needsBundle decision + skip line, :437 the --json warnings key that excludes extraction warnings)",
-        "content/docs/automation/hook-bodies.mdx (:254-256 the documented default + --strict-body posture; :311-327 the inference table + override)",
+        "content/docs/automation/hook-bodies.mdx (the documented default + --strict-body posture; the Capability inference section — the inference table, the body.capabilities route, and the callout recording the retired directive)",
         "packages/cli/src/utils/lower-callables.test.ts (the existing unit seam pin — cited, not a substitute for driving os build)",
         "sibling items records-forms (runtime sandbox side, body-runner.ts) and cli.build-own-contract (the build's own exit/output contract)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): a security grant derived from a regex had no checklist item — only the runtime side of one token (records-forms) and the build's generic exit contract were covered. RE-VERIFIED against source with one material correction to the hunter brief: a forbidden pattern does NOT fail a default `os build` — lower-callables.ts:63-78 catches every extraction error and falls back to the bundle, the warnings print nowhere on that path, and only --strict-body (compile.ts:126-149) produces the worded refusals; hook-bodies.mdx:256 documents exactly that, while the extractor's own header still promises fail-with-no-fallback. The worded-refusal clauses are therefore pinned to --strict-body, and the default path's silence is encoded as the expected-fail contradiction clause", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): a security grant derived from a regex had no checklist item — only the runtime side of one token (records-forms) and the build's generic exit contract were covered. RE-VERIFIED against source with one material correction to the hunter brief: a forbidden pattern does NOT fail a default `os build` — lower-callables.ts:63-78 catches every extraction error and falls back to the bundle, the warnings print nowhere on that path, and only --strict-body (compile.ts:126-149) produces the worded refusals; hook-bodies.mdx:256 documents exactly that, while the extractor's own header still promises fail-with-no-fallback. The worded-refusal clauses are therefore pinned to --strict-body, and the default path's silence is encoded as the expected-fail contradiction clause", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-22", "change": "the '// @capabilities' first-line override was RETIRED (#10917, maintainer ruling under ADR-0049 enforce-or-remove): measured on all four ordinary authoring shapes (.ts/.js/.mjs/an imported handler) it reached the extractor from NONE of them, so a documented directive silently taught a wrong convention and the mismatch surfaced far from its cause as a sandbox refusal. Its acceptance clause asserted behaviour that no longer exists — a runner would have filed a FAIL against the ruling — and is replaced by the covered route (body.capabilities as data) plus the inertness guarantee owed to configs that still carry the comment. Steps, fixtures and the extract-hook-body.ts line citations moved with it. No other clause changed; note the expected-fail clause still describes the pre-#10678 silent default and is stale on its own account, which is NOT this revision's subject", "ref": "claude/issue-10917-retire-capabilities-hook-directive" }
       ]
     },
     {
