@@ -45,6 +45,10 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 import { validationFailureDetails, resolveThrownHttpError } from '@objectstack/types';
 
 const PARENT = { name: 'bd_parent', fields: { name: { type: 'text' } } };
@@ -63,7 +67,20 @@ const NOTE = {
     },
 };
 
+/**
+ * [#10629] This fixture provisions its own business objects and nothing else,
+ * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
+ * memoised once per engine) reads a `sys_organization` that was never created.
+ * The probe is fail-soft by construction — it catches `isMissingTableError` and
+ * only that — but the driver and the engine each log the fault on the way out.
+ * Withheld and asserted rather than muted; `expected-read-refusal-noise.ts`
+ * says why.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
+
 describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
+    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    let noise: ExpectedReadRefusalCapture | null = null;
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
 
@@ -71,6 +88,12 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+        // [#10629] The capture is a PIN, not a mute — asserted after teardown so
+        // a failure here can never leave the engine running. Every test in this
+        // file rigs and writes, so the probe fires for each of them: this holds
+        // for a single `-t` run as well as for the whole file.
+        expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+        noise = null;
     });
 
     async function rig() {
@@ -80,6 +103,11 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
             connection: { filename: join(dir, 'data.sqlite') },
             useNullAsDefault: true,
         });
+        // [#10629] Installed on the REAL driver (the one that logs) before it
+        // runs a statement — the `Object.create(real)` wrapper below resolves
+        // `logger` through the prototype chain to this sink.
+        noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+        noise.captureDriver(real);
         await real.initObjects([PARENT, CHILD, NOTE]);
 
         // Capture the RAW driver error at the seam and let it propagate
@@ -94,6 +122,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         }
 
         engine = new ObjectQL();
+        noise.captureEngine(engine);
         engine.registerDriver(driver, true);
         await engine.init();
         for (const o of [PARENT, CHILD, NOTE]) {

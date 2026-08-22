@@ -42,6 +42,10 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 
 /** `maxLength` is what the real record validator rejects against. */
@@ -61,7 +65,29 @@ const CHILD = {
     },
 };
 
+/**
+ * [#10629] This fixture provisions its three business objects and nothing else,
+ * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
+ * memoised once per engine) reads a `sys_organization` that was never created.
+ * The probe is fail-soft by construction — it catches `isMissingTableError` and
+ * only that — but the driver and the engine each log the fault on the way out.
+ *
+ * ⛔ Asserted in the three tests that WRITE rather than in `afterEach`: the
+ * probe runs on the system-write org resolution, so the not-found test (which
+ * only deletes a ghost id) never reaches it. An `afterEach` assertion would
+ * make that test red for a reason that has nothing to do with it.
+ * `expected-read-refusal-noise.ts` says why this withholds instead of muting.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
+
+/** [#10629] The capture is a PIN, not a mute — this is the assertion half. */
+const expectExpectedNoiseWithheld = (noise: ExpectedReadRefusalCapture | null): void => {
+    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+};
+
 describe('[#8570] a batch row carries the status its producer DECLARED — real driver', () => {
+    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    let noise: ExpectedReadRefusalCapture | null = null;
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
 
@@ -78,6 +104,11 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
             connection: { filename: join(dir, 'data.sqlite') },
             useNullAsDefault: true,
         });
+        // [#10629] Installed on the REAL driver (the one that logs) before it
+        // runs a statement — the `Object.create(real)` wrapper below resolves
+        // `logger` through the prototype chain to this sink.
+        noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+        noise.captureDriver(real);
         await real.initObjects([TASK, PARENT, CHILD]);
 
         // Capture the RAW error at the seam and let it propagate untouched, so
@@ -92,6 +123,7 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
         }
 
         engine = new ObjectQL();
+        noise.captureEngine(engine);
         engine.registerDriver(driver, true);
         await engine.init();
         for (const o of [TASK, PARENT, CHILD]) {
@@ -141,6 +173,8 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
 
         // …and the record is unchanged, so the refusal was a refusal.
         expect((await engine!.findOne('hs_task', { where: { id: 'ok1' } }))?.name).toBe('ok');
+
+        expectExpectedNoiseWithheld(noise);
     });
 
     it('the same row in a MIXED batch — the asymmetry the card measured is gone', async () => {
@@ -164,6 +198,8 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
         });
         expect(res.results[1].errors[0].code).toBe('VALIDATION_FAILED');
         expect(res.results[1].errors[0].httpStatus).toBe(400);
+
+        expectExpectedNoiseWithheld(noise);
     });
 
     it('a REAL driver fault still carries NO status — the over-broad direction', async () => {
@@ -195,6 +231,8 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
         // causal row's text onto its siblings, so a row-only scan can miss a
         // live path.
         expect(JSON.stringify(res)).not.toContain('httpStatus');
+
+        expectExpectedNoiseWithheld(noise);
     });
 
     it('a not-found row still answers 404 — the population that already worked', async () => {

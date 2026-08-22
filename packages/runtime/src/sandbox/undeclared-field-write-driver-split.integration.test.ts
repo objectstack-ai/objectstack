@@ -149,6 +149,10 @@ import { InMemoryDriver } from '@objectstack/driver-memory';
 import { hookBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from '../expected-read-refusal-noise.js';
 
 /**
  * The read-back query, TYPED rather than cast. The `as any` reads elsewhere in
@@ -211,14 +215,35 @@ const UPDATE_TYPO_HOOK = {
   body: { language: 'js', source: `ctx.input.stagee = 'won';` },
 };
 
+/**
+ * [#10629] The SQL half of this fixture provisions `deal` and nothing else, so
+ * the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
+ * memoised once per engine) reads a `sys_organization` that was never created.
+ * The probe is fail-soft by construction — it catches `isMissingTableError` and
+ * only that — but the driver and the engine each log the fault on the way out.
+ * The schemaless half has no missing table and so declares NOTHING expected:
+ * its capture withholds nothing and asserts nothing, which is the honest
+ * reading rather than a skipped assertion. `expected-read-refusal-noise.ts`
+ * says why this withholds instead of muting.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
+
 describe('#4271 an undeclared field written by an L2 body — the real runtime split', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
+  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // failure here can never leave the engine running. Unconditional on purpose:
+    // a memory boot declares an EMPTY expectation, so this still fails loudly if
+    // a boot ever forgets to install a capture at all.
+    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    noise = null;
   });
 
   async function bootSql(hook?: unknown) {
@@ -228,16 +253,26 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
+    // [#10629] Installed before the driver runs a statement — the sink the
+    // expected refusal's first half travels out on.
+    noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+    noise.captureDriver(driver);
     await driver.initObjects([DEAL]); // a REAL table, with only the declared columns
     return boot(driver, hook);
   }
 
   async function bootMemory(hook?: unknown) {
+    // [#10629] A schemaless driver never refuses a read on a missing table, so
+    // this family expects no noise at all — an EMPTY declaration rather than a
+    // skipped one, which keeps the shared `afterEach` assertion honest.
+    noise = captureExpectedReadRefusals([]);
     return boot(new InMemoryDriver(), hook);
   }
 
   async function boot(driver: unknown, hook?: unknown) {
     engine = new ObjectQL();
+    // [#10629] The engine frame that sits directly above the driver's refusal.
+    noise?.captureEngine(engine);
     engine.registerDriver(driver as any, true);
     await engine.init();
     engine.registry.registerObject(DEAL as any);
