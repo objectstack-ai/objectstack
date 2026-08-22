@@ -5922,6 +5922,33 @@ export class RestServer {
                         // org-scope comment for the measurement.
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
+                    // [#10350] The cast stays, and what it is load-bearing
+                    // FOR is worth stating so this is not re-filed as a missing
+                    // contract. It is NOT hiding the request shape: measured by
+                    // deleting it and running `pnpm --filter @objectstack/rest
+                    // typecheck`, the compiler answers
+                    //   `TS2339: Property 'publishMetaItem' does not exist on
+                    //    type 'RestProtocol'`
+                    // — not a TS2353 about an unknown key. `publishMetaItem` is
+                    // an ADR-0076 D9 SERVER-ONLY extension: `RestProtocol` is
+                    // `DataProtocol & MetadataProtocol`, and `MetadataProtocol`
+                    // (`packages/spec`) declares no such member — only
+                    // `PublishMetaItemResponseSchema` (#7294) exists there, with
+                    // no request schema and no interface entry. So the cast is
+                    // feature detection, exactly like the `auditMetaItem` twin
+                    // a few hundred lines up, and the same measurement holds
+                    // AFTER #10350 declared `packageId` on the implementation's
+                    // request type: that type lives in
+                    // `@objectstack/metadata-protocol`, which `packages/rest`
+                    // deliberately does not depend on.
+                    //
+                    // Removing it therefore needs `MetadataProtocol` to declare
+                    // the member (plus a `PublishMetaItemRequest` to hang the
+                    // #9741 `TransportScopedMetaRequest` typing off) — a
+                    // `packages/spec` contract decision, promoting an undeclared
+                    // optional extension into a declared one, which is the same
+                    // call the 501 refusal above declines to pre-empt. Filed
+                    // rather than taken here.
                     const result = await (p as any).publishMetaItem({
                         type: req.params.type,
                         name: req.params.name,
