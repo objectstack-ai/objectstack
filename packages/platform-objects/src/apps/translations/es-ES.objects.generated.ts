@@ -267,10 +267,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       enable_two_factor: {
         label: "Habilitar autenticación de dos factores",
-        successMessage: "Autenticación de dos factores habilitada. Escanea el código QR o pega el URI otpauth en tu aplicación de autenticación y verifica un código para completar la configuración.",
         params: {
           password: {
             label: "Contraseña actual"
+          }
+        },
+        resultDialog: {
+          title: "Autenticación de doble factor habilitada",
+          description: "Escanee el código QR con su aplicación de autenticación y guarde los códigos de respaldo en un lugar seguro. Los códigos de respaldo se muestran una sola vez.",
+          acknowledge: "He guardado mis códigos de respaldo",
+          fields: {
+            totpURI: "URI del autenticador",
+            backupCodes: "Códigos de respaldo"
           }
         }
       },
@@ -287,10 +295,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       generate_backup_codes: {
         label: "Regenerar códigos de respaldo",
         description: "¿Generar un nuevo juego de códigos de respaldo? Los códigos generados anteriormente dejarán de funcionar.",
-        successMessage: "Nuevos códigos de respaldo generados; guárdalos en un lugar seguro.",
         params: {
           password: {
             label: "Contraseña actual"
+          }
+        },
+        resultDialog: {
+          title: "Nuevos códigos de respaldo generados",
+          description: "Los códigos de respaldo anteriores ya no son válidos. Guarde estos nuevos códigos en un lugar seguro: se muestran una sola vez.",
+          acknowledge: "He guardado los nuevos códigos",
+          fields: {
+            backupCodes: "Códigos de respaldo"
           }
         }
       }
