@@ -38,6 +38,7 @@ import {
   withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
+import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
@@ -1715,6 +1716,18 @@ export class AuthManager {
           // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
           // corrects the echoed VALUE only; resolver precedence is untouched.
           await echoInstalledSessionToken(ctx);
+
+          // ── #10700: `verified` must describe the secret stored beside it ──
+          // A second `/two-factor/enable` on an already-confirmed account
+          // rewrites the TOTP secret on the one `sys_two_factor` row the
+          // account has and INHERITS `verified` from the enrollment before it,
+          // so a secret nobody confirmed is honoured at the sign-in challenge.
+          // better-auth already gates that challenge on the flag — a first
+          // enrollment is inert until the session-lane verify flips it — so
+          // restoring the flag restores the gate rather than adding a second
+          // one. See `two-factor-reenrollment-verified-reset.ts`, whose header
+          // also states what this deliberately does NOT do.
+          await resetVerifiedOnTwoFactorReenrollment(ctx);
 
           // ── ADR-0069 D2: account lockout (counter) ──────────────────
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
