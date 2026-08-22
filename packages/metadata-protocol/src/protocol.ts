@@ -4603,6 +4603,28 @@ export class ObjectStackProtocolImplementation implements
      * scope is returned unchanged, so a genuinely absent draft still raises the
      * same `NO_DRAFT` refusal, from the scope the caller asked about.
      *
+     * [#11003] `packageId` — the ADR-0048 package dimension, threaded into BOTH
+     * probes exactly as {@link promoteDraftForPublish} threads it into
+     * `repo.promoteDraft`: stated (string, or `null` pinning the unbound row),
+     * each probe adds `package_id` to its `where`, so the scope probes ask the
+     * promote's question and the ADR-0005 precedence above is applied WITHIN
+     * the stated package's rows. `undefined` (caller stated no package) keeps
+     * the historical package-agnostic probes — the promote is then
+     * package-agnostic too, so the two questions still agree.
+     *
+     * Maintainer ruling 2026-08-22 (#11003, option A — recorded on the issue):
+     * a package-stating publish resolves the scope of the draft it NAMED.
+     * Without the dimension, probe 1 could match ANOTHER package's row in the
+     * caller's org, name a scope the package-exact promote then finds empty,
+     * and answer `404 [no_draft]` over a publishable draft sitting env-wide.
+     * Accepted cost, on the record: a caller stating a package no longer
+     * discovers a no-package draft of the same `(type, name)` — it 404s and the
+     * caller retries without `?package=`; that narrowing is the ruling, not a
+     * side effect. A package-first probe FALLING BACK to package-agnostic was
+     * rejected by name (it reintroduces the two-question resolution #8907
+     * removed, and a mistyped package would silently publish another package's
+     * draft instead of failing loudly).
+     *
      * ⛔ This is discovery, not a tolerant fallback: it names the one row the
      * promote will then address, and it reads DRAFT rows in `sys_metadata` (the
      * thing being promoted) rather than the history lineage
@@ -4617,31 +4639,32 @@ export class ObjectStackProtocolImplementation implements
         singularType: string,
         name: string,
         requestOrgId: string | null,
+        packageId?: string | null,
     ): Promise<string | null> {
         if (requestOrgId === null) return null;
-        // The package dimension is absent from both probes, and the rule
-        // behind that is the LIVE one: these reads must ask the same question
-        // `promoteDraft` will (see `SysMetadataRepository.whereFor`), because
-        // their whole job is to name the scope the promote then addresses. A
-        // probe NARROWER than the promote hides a draft the promote can see; a
-        // probe WIDER names a scope it cannot.
+        // These reads must ask the same question `promoteDraft` will (see
+        // `SysMetadataRepository.whereFor`), because their whole job is to name
+        // the scope the promote then addresses. A probe NARROWER than the
+        // promote hides a draft the promote can see; a probe WIDER names a
+        // scope it cannot.
         //
-        // [#10350] ⚠️ The justification this comment used to carry — "the
-        // per-item door names no package" — is STALE. Since #10063
-        // `publishMetaItem` accepts a `packageId` and forwards it, so when the
-        // caller states one the promote IS package-scoped while these probes
-        // stay package-agnostic, and the two can then ask different questions.
-        // Behaviour is deliberately UNCHANGED here: closing that asymmetry is
-        // its own fix with its own fixture and its own precedence ruling
-        // (ADR-0005 overlay order vs the ADR-0048 package key), filed as #11003
-        // rather than ridden in on a comment repair. What is corrected is the claim, so the next
-        // reader does not conclude the per-item door still cannot name one.
+        // [#11003] That rule is what threads the package dimension in: since
+        // #10063 the per-item door names a package whenever its HTTP caller
+        // does (`?package=PKG_ID`), and the promote's `whereFor` then
+        // constrains `package_id` — so a package-agnostic probe here was the
+        // WIDER shape, naming a scope off another package's row (ADR-0048 keys
+        // overlay rows by `(org, type, name, package_id)`, so two packages'
+        // same-name drafts coexist in different scopes). `undefined` spreads
+        // NOTHING — the caller stated no package, the promote matches any
+        // package, and these probes keep asking that same question. See the
+        // docblock above for the #11003 ruling and its accepted narrowing.
+        const packageDim = packageId !== undefined ? { package_id: packageId } : {};
         const inOrg = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
+            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft', ...packageDim },
         });
         if (inOrg) return requestOrgId;
         const inEnv = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: null, type: singularType, name, state: 'draft' },
+            where: { organization_id: null, type: singularType, name, state: 'draft', ...packageDim },
         });
         return inEnv ? null : requestOrgId;
     }
@@ -14649,10 +14672,21 @@ export class ObjectStackProtocolImplementation implements
         // #6190 org-scoped-write refusal and the promote all judge ONE scope —
         // the one the row is actually in. Resolving it later would gate against
         // a partition the promotion never touches.
+        //
+        // [#11003] The package dimension rides along under the SAME
+        // present/absent contract `promoteDraftForPublish` spells as
+        // `...('packageId' in request ? { packageId: request.packageId ?? null }
+        // : {})`: an ABSENT key keeps the historical package-agnostic probes,
+        // a stated one (string, or `null` for the unbound row) makes both
+        // probes ask the promote's package-exact question. Passing
+        // `request.packageId` bare would collapse "absent" and
+        // "present-and-undefined" into one spelling — the coercion trap the
+        // request type's own TSDoc warns against.
         {
             const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
             const resolvedOrgId = await this.resolveDraftOrgScopeForPublish(
                 singular, request.name, request.organizationId ?? null,
+                'packageId' in request ? (request.packageId ?? null) : undefined,
             );
             if (resolvedOrgId !== (request.organizationId ?? null)) {
                 const { organizationId: _requested, ...rest } = request;
