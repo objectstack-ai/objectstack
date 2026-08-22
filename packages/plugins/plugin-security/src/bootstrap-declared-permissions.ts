@@ -36,16 +36,40 @@
  */
 
 import {
+  SYSTEM_CTX,
   genId,
   permissionSetRowFields,
-  tryFind,
+  recordDiffersFromBody,
   tryInsert,
   tryUpdate,
   type PermissionSeedOutcome,
   type ProjectionLogger,
 } from './permission-set-projection.js';
+import {
+  buildExistingByName,
+  type ExistingByNameIndex,
+  type ExistingLookupResult,
+} from './seed-name-lookup.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
+
+/**
+ * The per-name existence read used when no batched oracle was supplied (the
+ * ADR-0086 P2 publish materializer, which upserts exactly one set). Reports the
+ * same three outcomes the batched oracle does — a failed read must not read as
+ * "absent" on this path either.
+ */
+async function defaultLookup(ql: any, name: string): Promise<ExistingLookupResult> {
+  let rows: any;
+  try {
+    rows = await ql.find('sys_permission_set', { where: { name }, limit: 1 }, { context: SYSTEM_CTX });
+  } catch {
+    return { status: 'unknown' };
+  }
+  const list = Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : null;
+  if (list === null) return { status: 'unknown' };
+  return list[0] ? { status: 'present', row: list[0] } : { status: 'absent' };
+}
 
 interface SeedOptions {
   logger?: ProjectionLogger;
@@ -96,8 +120,17 @@ export async function upsertPackagePermissionSet(
   ps: any,
   packageId: string | null | undefined,
   logger?: SeedOptions['logger'],
+  opts?: {
+    /**
+     * Existence oracle to consult instead of this function's own per-name
+     * `SELECT` (#10946). The boot loop passes ONE batched read covering every
+     * declared name; the publish materializer, which upserts a single set,
+     * passes nothing and keeps the per-name read.
+     */
+    existingByName?: ExistingByNameIndex;
+  },
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ps?.name) return out;
   // A `managed_by:'package'` row without a `package_id` would make uninstall
   // undefined again — the exact ambiguity ADR-0086 D3 exists to remove — so a
@@ -107,17 +140,35 @@ export async function upsertPackagePermissionSet(
     return out;
   }
 
-  const existing = (await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1))[0];
+  // ⛔ Three outcomes, not two (#10946 / #3807). `unknown` — the read FAILED —
+  // is not "no such row": inserting on it would re-create a set that already
+  // exists, and on a batched read one failure speaks for every declared name at
+  // once. Declining is the answer; the caller's warn reports it.
+  const lookup = opts?.existingByName
+    ? await opts.existingByName.get(String(ps.name))
+    : await defaultLookup(ql, String(ps.name));
+  if (lookup.status === 'unknown') {
+    out.unreadable += 1;
+    return out;
+  }
+  const existing = lookup.status === 'present' ? lookup.row : undefined;
   if (!existing?.id) {
-    const created = await tryInsert(ql, 'sys_permission_set', {
+    const row = {
       id: genId('ps'),
       name: ps.name,
       ...permissionSetRowFields(ps),
       active: true,
       package_id: packageId,
       managed_by: 'package',
-    });
-    if (created) out.seeded += 1;
+    };
+    const created = await tryInsert(ql, 'sys_permission_set', row);
+    if (created) {
+      out.seeded += 1;
+      // A batched oracle is a snapshot taken before the loop — tell it about
+      // the row we just made, so a name declared twice in one batch still
+      // reaches the collision branch below instead of a second insert.
+      opts?.existingByName?.remember(String(ps.name), row);
+    }
     return out;
   }
 
@@ -125,7 +176,23 @@ export async function upsertPackagePermissionSet(
     if (existing.package_id === packageId) {
       // Our own row — re-seed so the record always reflects the shipped/published
       // declaration (idempotent; covers version bumps without bookkeeping).
-      if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) })) {
+      //
+      // [#10946] "Idempotent" was implemented as "write the same columns every
+      // time", which on a remote libsql/Turso database is two HTTP round trips
+      // per set on every boot to change nothing. `recordDiffersFromBody` is the
+      // SAME comparison the ADR-0094 boot reconciler already trusts to decide
+      // whether a record drifted, over exactly the columns
+      // `permissionSetRowFields` writes — so a row it calls equal is a row this
+      // UPDATE could not have changed.
+      //
+      // ⚠️ The skip is on EQUALITY, never on "we have seen this name". A row
+      // whose stored value differs — a version bump, a hand-edit, a partially
+      // applied write — still gets its UPDATE, because dropping that leg would
+      // turn the loop into a no-op that reconciles nothing while showing a
+      // beautiful round-trip curve.
+      if (!recordDiffersFromBody(existing, ps)) {
+        out.unchanged += 1;
+      } else if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) })) {
         out.updated += 1;
       }
     } else {
@@ -151,7 +218,7 @@ export async function bootstrapDeclaredPermissions(
   metadataService: any,
   options: SeedOptions = {},
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
   let sets: any[] = readDeclared(ql, 'permission');
@@ -163,16 +230,38 @@ export async function bootstrapDeclaredPermissions(
   }
   if (!Array.isArray(sets) || sets.length === 0) return out;
 
+  // [#10946] ONE existence read for the whole declaration, before the loop —
+  // the set of names is known in full here. See `seed-name-lookup.ts` for why
+  // a read that cannot ANSWER must not be read as "none of them exist".
+  const existingByName = await buildExistingByName(
+    ql,
+    'sys_permission_set',
+    sets.map((ps) => ps?.name),
+    options.logger,
+  );
+
   for (const ps of sets) {
     if (!ps?.name) continue;
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
-    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger);
+    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName });
     out.seeded += r.seeded;
     out.updated += r.updated;
+    out.unchanged += r.unchanged;
+    out.unreadable += r.unreadable;
     out.skippedEnvAuthored += r.skippedEnvAuthored;
     out.skippedForeign += r.skippedForeign;
+  }
+
+  if (out.unreadable > 0) {
+    // Said once, with the count: these sets were neither seeded nor reconciled
+    // because the record could not be READ. Silence here would read exactly
+    // like "everything was already in order".
+    options.logger?.warn?.(
+      '[security] declared permission sets left untouched — their records could not be read',
+      { unreadable: out.unreadable, total: sets.length },
+    );
   }
 
   options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {

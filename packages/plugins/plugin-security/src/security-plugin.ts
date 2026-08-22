@@ -2837,7 +2837,17 @@ export class SecurityPlugin implements Plugin {
               'permission',
               async (args: { body: unknown; packageId: string | null; organizationId: string | null }) => {
                 const r = await upsertPackagePermissionSet(ql, args.body, args.packageId, ctx.logger);
-                const applied = r.seeded + r.updated;
+                // [#10946] `unchanged` counts here. The question this line asks
+                // is "did the record end up matching the published body", NOT
+                // "was a write issued" — and until the seeder stopped re-writing
+                // rows it had nothing to change, those two were accidentally the
+                // same number. A re-publish of an identical body now lands in
+                // `unchanged`, and reading only `seeded + updated` would report
+                // that converged publish as a FAILURE and skip the audience
+                // reconcile below. The three refusal branches (foreign package,
+                // env-authored name, no owning package) all leave `unchanged` at
+                // 0, so every case that reported 0 before still reports 0.
+                const applied = r.seeded + r.updated + r.unchanged;
                 // [ADR-0090 D5] A published set carrying the install-time
                 // suggestion flag surfaces (or retires) its pending
                 // suggestion row right away — same convergent sync as boot.
