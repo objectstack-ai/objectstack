@@ -384,6 +384,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
       'scripts/check-nul-bytes.mjs',
+      // This gate's OWN script, the third entry of the mention shape on this
+      // package: test/scaffold-workspace-consistency.test.ts quotes it while
+      // explaining where its cross-package read is declared. Settled the way
+      // check-nul-bytes.mjs above is — the literal collector takes quoted paths
+      // without parsing, so a mention forces a declaration, and declaring one
+      // rarely-touched file is cheaper than rewording prose to dodge a scanner.
+      'scripts/check-cross-package-test-inputs.mjs',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
       // `translation.zod.ts` is the second entry no test READS -- named in a

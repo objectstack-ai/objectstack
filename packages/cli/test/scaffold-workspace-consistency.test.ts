@@ -60,14 +60,20 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderPnpmWorkspaceYaml } from '../src/commands/init';
+// `.js`, not extensionless: this package is `moduleResolution: NodeNext`, where a
+// relative import without the extension does not resolve — every symbol it names
+// becomes `any` (TS2835 + a TS7006 cascade). packages/cli/test is a HIDDEN
+// typecheck layer (tsconfig `include` is `src` only) held by a shrink-only
+// ledger in scripts/check-type-check-coverage.mjs, so an extensionless import
+// here raises that count and reddens check:type-check-debt for everyone.
+import { renderPnpmWorkspaceYaml } from '../src/commands/init.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
-const TEMPLATE_WORKSPACE_YAML = resolve(
-  HERE,
-  '../../create-objectstack/src/templates/blank/pnpm-workspace.yaml',
-);
+// One line on purpose: `check:cross-package-test-inputs` reconstructs this read
+// by SOURCE SCAN, and a `resolve(HERE, …)` split across lines is a spelling it
+// does not recognise — which would leave the glob declared and held by nothing.
+const TEMPLATE_WORKSPACE_YAML = resolve(HERE, '../../create-objectstack/src/templates/blank/pnpm-workspace.yaml');
 
 /** The rendered output of each scaffold path, keyed by the command a user runs. */
 const RENDERED = {
