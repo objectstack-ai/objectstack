@@ -3203,6 +3203,62 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
 }
 
 /**
+ * [#11015] The remedy clause the Phase 3a-destructive refusal ends with — one
+ * sentence per FACE, because the mechanism that lifts the refusal is not the
+ * same on every door that raises it.
+ *
+ * The refusal is raised in ONE place ({@link ObjectStackProtocolImplementation.saveMetaItem}'s
+ * Phase 3a-destructive gate) and is quoted onto whatever response the caller's
+ * catch builds, so the clause used to read `re-submit with ?force=true to
+ * proceed.` on every face. That is correct prose for exactly one of them —
+ * `PUT /api/v1/meta/:type/:name`, whose route reads `?force` and threads it
+ * into the request — and a caller on any OTHER face who does what the sentence
+ * says gets the identical refusal back.
+ *
+ * MEASURED on the face this card was filed on: `POST /packages/:id/duplicate`
+ * accepts `targetPackageId`, `targetName`, `targetNamespace`, `organizationId`
+ * and `actor` — no `force`, in the query string or the body — and
+ * {@link ObjectStackProtocolImplementation.duplicatePackage}'s own request type
+ * has no `force` field either, so its internal `saveMetaItem` call cannot carry
+ * one. There is nothing on that door for the caller to set.
+ *
+ * ⛔ What is repaired is the CLAUSE, not the door. Giving the duplicate route a
+ * `force` would widen a public surface and is a contract decision, deliberately
+ * NOT taken here. Nor is the clause deleted on that face: #10886 measured that
+ * `duplicatePackage`'s `failed[].error` is the SOLE carrier of this
+ * prescription, so deleting the remedy there deletes it from the wire outright.
+ * Each face therefore states the remedy it actually has.
+ *
+ * ⚠️ An absent `face` renders the `?force=true` wording, byte-identical to what
+ * every face carried before. That default is right on the single-segment REST
+ * `PUT` — but `protocol.destructive-409-face-inventory.test.ts` inventories two
+ * further doors that reach this gate and never thread `force` either
+ * (`@objectstack/rest`'s compound-name `PUT /meta/:type/:a/:b`, and
+ * `@objectstack/runtime`'s dispatcher `PUT /meta`). Those are wrong for the
+ * same reason and are deliberately NOT repaired here: unlike the duplicate
+ * gesture, which has a genuine collision-free alternative to prescribe, the
+ * right repair for a `PUT` that cannot acknowledge a risk may well be to thread
+ * `force` on those routes — a contract question, filed rather than guessed at.
+ */
+function destructiveChangeRemedy(
+    face: 'package-duplicate' | undefined,
+    name: string,
+): string {
+    switch (face) {
+        case 'package-duplicate':
+            // The duplicate-AGAIN workflow: the target namespace already holds
+            // the renamed item this copy is about to overwrite. Both remedies
+            // are things the caller can actually do on THIS door — choose a
+            // free target namespace, or make the collision non-destructive.
+            return `this copy cannot be forced: the duplicate door accepts no \`force\`. `
+                + `Duplicate into a target namespace that does not already hold '${name}', `
+                + `or reconcile that item with the source first.`;
+        default:
+            return 're-submit with ?force=true to proceed.';
+    }
+}
+
+/**
  * Result of projecting a published metadata body into its data-plane
  * representation. `success:false` with an `error` is the surfaced-not-thrown
  * failure contract — publishing the metadata itself always succeeds.
@@ -12847,7 +12903,7 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: 'package-duplicate' }) {
         // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -13198,16 +13254,22 @@ export class ObjectStackProtocolImplementation implements
                         // `protocol.destructive-409-face-inventory.test.ts`
                         // carries the whole inventory and pins this face.
                         //
-                        // ⛔ Whatever else a future trim does, the `?force=true`
-                        // remedy below must survive it: this is a
+                        // ⛔ Whatever else a future trim does, the remedy
+                        // clause below must survive it: this is a
                         // risk-acknowledgement refusal, not a validation one,
                         // and no structured channel on any face carries the
                         // remedy.
+                        //
+                        // [#11015] Which remedy that IS depends on the face —
+                        // `?force=true` names a query parameter only the
+                        // single-segment REST `PUT` reads, and prescribing it
+                        // to a caller who has no way to set it sends them in a
+                        // circle. See {@link destructiveChangeRemedy}.
                         const summary = issues.slice(0, 3).map((i) => i.message).join('; ');
                         const err = new Error(
                             `[destructive_change] ${request.type}/${request.name} would drop or transform existing data: ${summary}`
                             + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
-                            + ` — re-submit with ?force=true to proceed.`
+                            + ` — ${destructiveChangeRemedy(request.writeFace, request.name)}`
                         );
                         (err as any).code = 'DESTRUCTIVE_CHANGE';
                         (err as any).status = 409;
@@ -16847,6 +16909,14 @@ export class ObjectStackProtocolImplementation implements
                     item: rewritten,
                     mode: 'publish',
                     packageId: request.targetPackageId,
+                    // [#11015] Which door the refusal below will be prescribing
+                    // a remedy FOR. Stated by the server, never by the caller —
+                    // `duplicatePackage`'s own request type has no such field,
+                    // exactly as `source` is server-stated one gate down. The
+                    // Phase 3a-destructive gate reaches this call on the
+                    // duplicate-AGAIN workflow, and its `?force=true` default
+                    // would name a parameter this door does not accept.
+                    writeFace: 'package-duplicate',
                     ...(copyOrgId ? { organizationId: copyOrgId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });

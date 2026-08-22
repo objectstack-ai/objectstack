@@ -81,6 +81,23 @@
  * the ablation therefore needs no rebuild, and its RED result is what rules
  * out the stale-artifact false green.
  *
+ * ## [#11015] The same inventory, read one column further left
+ *
+ * The `force` column above is not decoration: it says which faces can lift
+ * this refusal, and only ROW 1 can. Rows 2, 3 and 6 all reach the gate with no
+ * way to set `force` — rows 2 and 3 because their routes never thread the
+ * parameter, row 6 because `duplicatePackage` has no `force` field at all —
+ * yet every one of them used to be handed the sentence `re-submit with
+ * ?force=true to proceed.` A caller who does what it says gets the identical
+ * refusal back.
+ *
+ * #11015 repairs the clause on ROW 6, where a genuinely different remedy
+ * exists to prescribe (a free target namespace, or reconciling the collision).
+ * Rows 2 and 3 are left as measured and filed separately: the honest repair
+ * for a `PUT` that cannot acknowledge a risk may be to thread `force` on those
+ * routes, which is a contract decision and not a message fix. Section 4 pins
+ * row 6; section 1's remedy guard pins that row 1's wording is untouched.
+ *
  * ⛔ Never a bare `toThrow()` here. `duplicatePackage` does not throw, it
  * REPORTS, and what the report says IS the defect; and for the throw itself
  * the minimum assertion is `code` + `status` (ADR-0112 envelope), with the
@@ -206,8 +223,19 @@ async function destructiveRefusal(): Promise<any> {
     throw new Error('expected saveMetaItem to refuse the destructive change');
 }
 
-/** The remedy sentence that must survive ANY future trim (#10886 non-effect). */
-const REMEDY = 're-submit with ?force=true to proceed.';
+/**
+ * The remedy sentence that must survive ANY future trim (#10886 non-effect),
+ * as the ordinary REST `PUT` door renders it. `?force=true` is a real query
+ * parameter THERE — the route reads it and threads it into the request.
+ */
+const PUT_REMEDY = 're-submit with ?force=true to proceed.';
+/**
+ * [#11015] …and as the DUPLICATE door renders it, which is a different
+ * sentence because `?force=true` is not a thing a caller can set on that face.
+ * See section 4 — the remedy stays, the mechanism it names becomes one that
+ * exists.
+ */
+const DUPLICATE_REMEDY_HEAD = 'this copy cannot be forced';
 /** One finding's prose, as `detectDestructiveObjectChanges` words it. */
 const FINDING_PROSE = "Field 'b' removed — existing data in this column will become inaccessible.";
 
@@ -243,7 +271,10 @@ describe('[#10886] the 409 renders its findings into the message AND attaches th
         // refusal, this is a risk-ACKNOWLEDGEMENT flow: the remedy is the
         // whole point, it is not one of the `issues`, and nothing else on any
         // face carries it.
-        expect(err.message).toContain(REMEDY);
+        // No `writeFace` on this request — the ordinary REST/Studio save, the
+        // one door where `?force=true` is real. [#11015] made this clause
+        // face-aware; this default is byte-identical to what it always said.
+        expect(err.message).toContain(PUT_REMEDY);
         const wire = JSON.stringify(err.issues);
         expect(wire).not.toContain('force=true');
     });
@@ -317,18 +348,119 @@ describe('[#10886] [GUARD] `duplicatePackage`’s `failed[].error` is the SOLE c
         expect(entry.issues).toBeUndefined();
     });
 
-    it('⛔ carries the `?force=true` remedy, on a response with no other channel for it', async () => {
+    it('⛔ carries the remedy, on a response with no other channel for it', async () => {
         const { protocol } = duplicateIntoOccupiedNamespace();
 
         const r = await protocol.duplicatePackage({
             sourcePackageId: PKG, targetPackageId: TARGET_PKG,
         });
 
-        expect(r.failed[0].error).toContain(REMEDY);
+        // ⚠️ [#11015] This assertion USED to read `toContain(REMEDY)` with
+        // REMEDY = the `?force=true` sentence, and it passed — because the
+        // producer rendered that sentence on every face. It was pinning the
+        // defect: this door accepts no `force`, so the prescription it quoted
+        // was unactionable. Replaced rather than re-spelled, because what it
+        // asserted stopped being true of a correct producer. What #10886 put
+        // it here to protect is unchanged and still asserted: SOME remedy
+        // reaches the caller through this string and through nothing else.
+        expect(r.failed[0].error).toContain(DUPLICATE_REMEDY_HEAD);
         // The whole response, not just the entry: nothing anywhere else on it
         // states the remedy or the findings.
         const wire = JSON.stringify({ ...r, failed: r.failed.map((f: any) => ({ ...f, error: '' })) });
-        expect(wire).not.toContain('force=true');
+        expect(wire).not.toContain('cannot be forced');
         expect(wire).not.toContain('inaccessible');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. [#11015] [GUARD] The remedy names a mechanism THIS face actually has
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#11015] [GUARD] the destructive remedy clause is face-aware', () => {
+    /** Same reachability fixture as section 3 — the duplicate-AGAIN workflow. */
+    const duplicateIntoOccupiedNamespace = () => makeKernel({
+        seed: [
+            objectRow('crm_task', ['a']),
+            objectRow('crm2_task', ['a', 'b', 'c', 'd'], TARGET_PKG),
+        ],
+    });
+
+    const duplicateFailure = async (extra: Record<string, unknown> = {}) => {
+        const { protocol } = duplicateIntoOccupiedNamespace();
+        const r = await protocol.duplicatePackage({
+            sourcePackageId: PKG, targetPackageId: TARGET_PKG, ...extra,
+        });
+        return r;
+    };
+
+    it('⛔ the duplicate face never prescribes `force` — the door accepts none', async () => {
+        const r = await duplicateFailure();
+
+        // The defect, stated as the assertion that would have failed before
+        // the fix. Not `not.toContain(PUT_REMEDY)` alone: the substring that
+        // must be gone is the MECHANISM NAME, because a caller reading it goes
+        // looking for a parameter that does not exist on this door.
+        expect(r.failed[0].error).not.toContain('force=true');
+        expect(r.failed[0].error).not.toContain(PUT_REMEDY);
+    });
+
+    it('prescribes the remedies that DO exist on this face, and names the collision', async () => {
+        const r = await duplicateFailure();
+        const error: string = r.failed[0].error;
+
+        // Both real remedies, in the caller's own vocabulary — `targetNamespace`
+        // is a parameter this door genuinely accepts.
+        expect(error).toContain('target namespace');
+        expect(error).toContain('reconcile');
+        // …and WHICH item collides, which is the copy's re-namespaced name
+        // (`crm_task` → `crm2_task`), not the source row's.
+        expect(error).toContain('crm2_task');
+    });
+
+    it('[#10886 non-effect] the per-field findings prose is still there, untrimmed', async () => {
+        const r = await duplicateFailure();
+
+        // ⛔ This card repaired the remedy clause ONLY. #10886's verdict — the
+        // findings prose stays, because `failed[].error` is its sole carrier on
+        // this face — is untouched, and this is the assertion that says so.
+        expect(r.failed[0].error).toContain(FINDING_PROSE);
+        expect(r.failed[0].error).toContain('[destructive_change]');
+    });
+
+    it('the refusal still REFUSES — this is a message repair, not a behaviour one', async () => {
+        const r = await duplicateFailure();
+
+        // Clause-② line: no accept/reject behaviour moved. The copy is still
+        // rejected, still reported as data on the 200, still counted.
+        expect(r.success).toBe(false);
+        expect(r.copiedCount).toBe(0);
+        expect(r.failedCount).toBe(1);
+        expect(r.copied).toEqual([]);
+    });
+
+    it('⛔ the face is stated by the SERVER — a caller cannot smuggle one in', async () => {
+        // The duplicate route builds `duplicatePackage`'s request field by
+        // field and this method hard-codes the face on its internal
+        // `saveMetaItem` call, so neither a `force` nor a `writeFace` on the
+        // caller's request can reach the gate. Asserted from the OUTSIDE
+        // rather than by reading the type, because the type is what a future
+        // edit would widen: if adding `force` to this door ever becomes the
+        // decision, this test is the one that has to be rewritten deliberately
+        // instead of quietly starting to pass.
+        const smuggled = await duplicateFailure({ force: true, writeFace: undefined });
+
+        expect(smuggled.failedCount).toBe(1);
+        expect(smuggled.failed[0].error).toContain(DUPLICATE_REMEDY_HEAD);
+        expect(smuggled.failed[0].error).not.toContain('force=true');
+    });
+
+    it('the OTHER faces keep the `?force=true` wording — a switch, not a global delete', async () => {
+        // Row 1 of the inventory, driven at the producer with no face stated.
+        const err = await destructiveRefusal();
+
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.message).toContain(PUT_REMEDY);
+        expect(err.message).not.toContain(DUPLICATE_REMEDY_HEAD);
     });
 });
