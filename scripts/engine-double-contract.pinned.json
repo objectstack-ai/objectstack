@@ -872,6 +872,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-package-inherit.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.draft-package-inherit.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts",
       "verb": "delete",
       "pinned": 1

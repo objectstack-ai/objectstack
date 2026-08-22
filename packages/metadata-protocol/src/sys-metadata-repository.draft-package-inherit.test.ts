@@ -27,6 +27,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The engine-double contract gate: a fake looser than ObjectQL's own verb
+// dispatch is how #4434 shipped a dead route with its suite green.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -68,11 +71,15 @@ function makeFakeEngine(seed: Row[] = []) {
       return row;
     },
     async update(table: string, data: Row, opts: { where: Record<string, unknown> }) {
+      assertEngineUpdateDispatch(data, opts);
       const row = tableOf(table).find((r) => matches(r, opts.where));
       if (row) Object.assign(row, data);
       return row;
     },
-    async delete() { /* not exercised here */ },
+    async delete(_table: string, opts: { where?: Record<string, unknown> }) {
+      assertEngineDeleteDispatch(opts);
+      /* not exercised here */
+    },
   };
 }
 
