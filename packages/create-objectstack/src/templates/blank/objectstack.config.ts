@@ -12,27 +12,31 @@ export default defineStack({
     type: 'app',
     name: 'Blank Starter',
     description: 'Minimal ObjectStack environment — a clean slate for building.',
-    // Protocol compatibility range (ADR-0087 D1): lets an incompatible runtime
-    // refuse this package at the boundary with the exact migration command,
-    // instead of crashing later. Kept in lockstep with releases by
-    // scripts/sync-template-versions.mjs.
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the exact
+    // migration command instead of crashing later. Scaffolding stamped it to
+    // match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^17' },
   },
 
-  // `automation` backs flow execution and, per ADR-0097, materializes any
-  // declarative `connectors:` entry into a live, dispatchable connector at boot.
-  // The connector executors below register their provider factories with it —
-  // without `automation` loaded they have nowhere to register and boot fails, so
-  // keep this capability whenever `plugins:` lists a connector.
+  // `automation` backs flow execution and materializes any declarative
+  // `connectors:` entry into a live, dispatchable connector at boot. The
+  // connector executors below register their provider factories with it —
+  // without `automation` loaded they have nowhere to register and boot fails,
+  // so keep this capability whenever `plugins:` lists a connector.
   requires: ['automation'],
 
-  // Generic connector executors (ADR-0022/0023/0024 + ADR-0097), default-present
-  // so you can add a `connectors:` entry naming `provider: 'rest' | 'openapi' |
-  // 'mcp'` and have it materialize with zero host code. Zero-arg = contribute the
-  // provider factory only. Brand connectors (Slack, …) stay marketplace/opt-in.
-  // Security (#3055): a declarative `mcp` stdio transport spawns a local process
-  // from metadata and is denied by default — opt in per host with
+  // Generic connector executors, default-present so you can add a `connectors:`
+  // entry naming `provider: 'rest' | 'openapi' | 'mcp'` and have it materialize
+  // with zero host code. Zero-arg = contribute the provider factory only. Brand
+  // connectors (Slack, …) stay marketplace/opt-in.
+  // Security: a declarative `mcp` stdio transport spawns a local process from
+  // metadata, so it is denied by default — opt in per host with
   // `new ConnectorMcpPlugin({ declarativeStdio: ['<trusted-command>'] })`.
+  // Authoring guide: https://objectstack.ai/docs/automation/connectors
   plugins: [
     new ConnectorRestPlugin(),
     new ConnectorOpenApiPlugin(),
