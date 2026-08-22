@@ -398,6 +398,22 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `@objectstack/spec` is a real dependency of this package, so the graph
       // already re-runs these tests on any spec change.
       'packages/spec/src/system/translation.zod.ts',
+      // The blank template's rendered `pnpm-workspace.yaml`, READ by
+      // test/scaffold-workspace-consistency.test.ts (#10499). Two scaffold
+      // paths write that file into a new user's project — this package's
+      // `renderPnpmWorkspaceYaml()` and create-objectstack's literal
+      // template — and each package's own ratchets are package-local, so
+      // neither could ever fail for the other's regression. The consistency
+      // test compares the two RENDERED outputs, which makes the template file
+      // a real input to this package's verdict: a template-only diff changes
+      // what that test measures. Without this declaration such a diff reaches
+      // neither layer — `turbo ls --affected` would still pick cli up (it
+      // depends on create-objectstack for the shared `created-summary`
+      // renderer), but `@objectstack/cli#test` would hash the same and replay
+      // a cached green over the divergence, which is #7802's Layer B exactly.
+      // One file, not `packages/create-objectstack/**`: the test reads that
+      // template and nothing else across the boundary.
+      'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
     ],
   },
   '@objectstack/client': {
