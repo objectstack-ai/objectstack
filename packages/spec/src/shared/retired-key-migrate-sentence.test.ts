@@ -69,6 +69,25 @@ const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC_SRC_ROOT = path.resolve(HERE, '..');
 /** #7030: `packages/lint/src`, the one other corpus carrying this sentence. */
 const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
+/**
+ * [#10848] The population widens by EXACTLY ONE governed file (maintainer
+ * ruling 2026-08-22, deliberately not all of `.claude/**`): the retirement
+ * playbook every new tombstone's guidance string is authored from. It sat
+ * outside both corpora and prescribed the withdrawn sentence, so the skill
+ * taught authors to red this very pin — and a red pin over a skill-taught
+ * sentence invites weakening the PIN rather than the skill. It cannot ride
+ * the corpus walk: it is markdown (the walk yields `.ts` only), its `--from`
+ * operand is a placeholder like `<N-1>` (never `\d+`), its sentences end at a
+ * code-span close (never at a string-literal quote), and `reconstruct()`
+ * would drop every markdown line that opens with `*`/`**`. So it is judged
+ * below as its own corpus: raw text, whitespace-normalised, with
+ * placeholder-aware anchors — the withdrawn-claim direction reuses
+ * `WITHDRAWN_CLAIM` verbatim.
+ */
+const RETIREMENT_SKILL_MD = path.resolve(
+  HERE,
+  '../../../../.claude/skills/spec-property-retirement/SKILL.md',
+);
 
 /** One scanned corpus: a root directory, plus its own out-of-scope exemptions. */
 interface Corpus {
@@ -368,5 +387,66 @@ describe('`os migrate meta` sentences are the house sentence, across corpora (#6
       "const live = 'unrelated string';",
     ].join('\n');
     expect(judgeMigrateSentences(commented, 'comments.zod.ts')).toHaveLength(0);
+  });
+});
+
+/**
+ * [#10848] Markdown-corpus anchors for the retirement skill (see the
+ * `RETIREMENT_SKILL_MD` docblock). Same two legal shapes as
+ * `HOUSE_AT_MARKER`/`MIXED_AT_MARKER`, adapted on exactly three axes: the
+ * `--from` operand may be a placeholder (`<N-1>`, `<N>`) as well as a literal
+ * major; the judged text is the whole file with runs of whitespace collapsed
+ * (markdown wraps sentences mid-clause); and "last sentence of its literal"
+ * becomes "last sentence of its double-backtick code span" (`.``), so prose
+ * cannot bury the command mid-span either. The marker requires the leading
+ * `Run` on purpose: the skill legitimately NAMES the command mid-prose
+ * (`migrate meta --from <old>` in §3's `retiredFromLoadPath` bullet) without
+ * prescribing a sentence — only taught sentence templates are judged.
+ */
+const SKILL_FROM_OPERAND = /(?:\d+|<[^>`]+>)/.source;
+const SKILL_MARKER = new RegExp(
+  `Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\``,
+  'g',
+);
+const SKILL_HOUSE_AT_MARKER = new RegExp(
+  `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for existing sources; apply them by hand\\.\`\``,
+);
+const SKILL_MIXED_AT_MARKER = new RegExp(
+  `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for the [^;]+ case[^;]*; [^;]+\\.\`\``,
+);
+
+describe('the spec-property-retirement skill agrees with this pin (#10848 — the one-file population widening)', () => {
+  const raw = fs.readFileSync(RETIREMENT_SKILL_MD, 'utf8');
+  const flat = raw.replace(/\s+/g, ' ');
+
+  it('every prescription sentence the skill teaches is house-form or MIXED two-clause', () => {
+    const bad = [...flat.matchAll(SKILL_MARKER)]
+      .filter((m) => {
+        const rest = flat.slice(m.index ?? 0);
+        return !(SKILL_HOUSE_AT_MARKER.test(rest) || SKILL_MIXED_AT_MARKER.test(rest));
+      })
+      .map((m) => flat.slice(m.index ?? 0, (m.index ?? 0) + 120));
+    expect(bad, bad.join('\n')).toEqual([]);
+  });
+
+  it('anti-vacuity: the skill teaches BOTH shapes, so the scan judges at least two sites', () => {
+    // Convention 5 carries the house template and its one allowed variant
+    // (the partial-conversion two-clause shape). Zero or one marker means the
+    // skill stopped teaching a shape — or this scan went blind on the file.
+    const rests = [...flat.matchAll(SKILL_MARKER)].map((m) => flat.slice(m.index ?? 0));
+    expect(rests.length).toBeGreaterThanOrEqual(2);
+    expect(rests.some((r) => SKILL_HOUSE_AT_MARKER.test(r))).toBe(true);
+    expect(rests.some((r) => SKILL_MIXED_AT_MARKER.test(r))).toBe(true);
+  });
+
+  it('[#9529] the withdrawn automatic-rewrite claim is absent from the skill, in every spelling', () => {
+    // Judged over the raw text rather than reconstruct(): a markdown line
+    // opening with `*`/`**` would be dropped as a comment line, hiding a
+    // claim. WITHDRAWN_CLAIM is English-only, so the skill's Chinese prose
+    // cannot fabricate a match; a hit is a real regression of the ruling.
+    const claims = [...flat.matchAll(WITHDRAWN_CLAIM)].map(
+      (m) => flat.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 60),
+    );
+    expect(claims, claims.join('\n')).toEqual([]);
   });
 });

@@ -264,6 +264,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     schema files it inventories, so the ledger IS an input to the ratchet.
       'content/docs/api/error-catalog.mdx',
       'docs/audits/2026-07-unknown-key-strictness-ledger.md',
+      // src/shared/retired-key-migrate-sentence.test.ts judges the ONE
+      // governed markdown file its population was widened by (#10848,
+      // maintainer-ruled): the retirement playbook that teaches authors the
+      // prescription sentence the pin holds. One file, not `.claude/**`.
+      '.claude/skills/spec-property-retirement/SKILL.md',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
