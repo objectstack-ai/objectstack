@@ -1,0 +1,2098 @@
+{
+  "empty-principal": {
+    "sequentialLegs": 5,
+    "grants": {
+      "positions": [
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_empty"
+      ],
+      "accessible_org_ids": [],
+      "email": "empty@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_empty"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_empty"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_empty"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_empty"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "multi-org-membership": {
+    "sequentialLegs": 6,
+    "grants": {
+      "positions": [
+        "org_owner",
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_multi",
+        "peer_1"
+      ],
+      "accessible_org_ids": [
+        "org_a",
+        "org_b"
+      ],
+      "email": "multi@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_multi"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_multi"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_multi"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_owner",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_multi"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "lapsed-own-membership-among-active-peers": {
+    "sequentialLegs": 6,
+    "grants": {
+      "positions": [
+        "org_member",
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_lapsed",
+        "peer_1",
+        "peer_2"
+      ],
+      "accessible_org_ids": [],
+      "email": "lapsed@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_lapsed"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_lapsed"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_lapsed"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_member",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_lapsed"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "position-derived-grants": {
+    "sequentialLegs": 8,
+    "grants": {
+      "positions": [
+        "org_member",
+        "contributor",
+        "auditor",
+        "everyone"
+      ],
+      "permissions": [
+        "write_all",
+        "read_all",
+        "base_access"
+      ],
+      "systemPermissions": [
+        "record_write"
+      ],
+      "org_user_ids": [
+        "u_pos"
+      ],
+      "accessible_org_ids": [
+        "org_a"
+      ],
+      "email": "pos@x.com",
+      "tabPermissions": {
+        "crm": "visible"
+      },
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_pos"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_pos"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_pos"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_member",
+              "contributor",
+              "auditor",
+              "retired",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position_permission_set",
+        "where": {
+          "position_id": {
+            "$in": [
+              "p_contrib",
+              "p_auditor",
+              "p_everyone"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "id": {
+            "$in": [
+              "ps_write",
+              "ps_read",
+              "ps_base"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_pos"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "permission-set-derived-grants": {
+    "sequentialLegs": 7,
+    "grants": {
+      "positions": [
+        "platform_admin",
+        "org_member",
+        "everyone"
+      ],
+      "permissions": [
+        "admin_full_access",
+        "org_tools"
+      ],
+      "systemPermissions": [
+        "manage_users"
+      ],
+      "org_user_ids": [
+        "u_ps"
+      ],
+      "accessible_org_ids": [
+        "org_a"
+      ],
+      "email": "ps@x.com",
+      "tabPermissions": {
+        "crm": "hidden"
+      },
+      "posture": "PLATFORM_ADMIN"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_ps"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_ps"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_ps"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "platform_admin",
+              "org_member",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "id": {
+            "$in": [
+              "ps_admin",
+              "ps_org",
+              "ps_dead"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_ps"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "tenant-admin-via-position": {
+    "sequentialLegs": 8,
+    "grants": {
+      "positions": [
+        "org_admin",
+        "everyone"
+      ],
+      "permissions": [
+        "low",
+        "organization_admin"
+      ],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_ta"
+      ],
+      "accessible_org_ids": [
+        "org_a"
+      ],
+      "email": "ta@x.com",
+      "tabPermissions": {
+        "crm": "default_on"
+      },
+      "posture": "TENANT_ADMIN"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_ta"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_ta"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_ta"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_admin",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position_permission_set",
+        "where": {
+          "position_id": {
+            "$in": [
+              "p_orgadmin",
+              "p_everyone"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "id": {
+            "$in": [
+              "ps_low",
+              "ps_oa"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_ta"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "ai-seat-and-email-from-sys-user": {
+    "sequentialLegs": 6,
+    "grants": {
+      "positions": [
+        "org_member",
+        "everyone"
+      ],
+      "permissions": [
+        "ai_seat"
+      ],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_ai"
+      ],
+      "accessible_org_ids": [
+        "org_a"
+      ],
+      "email": "ai@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_ai"
+        },
+        "limit": 1,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_ai"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_ai"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_ai"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_member",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      }
+    ]
+  },
+  "ai-seat-denied": {
+    "sequentialLegs": 5,
+    "grants": {
+      "positions": [
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_noai"
+      ],
+      "accessible_org_ids": [],
+      "email": "noai@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_noai"
+        },
+        "limit": 1,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_noai"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_noai"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_noai"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      }
+    ]
+  },
+  "seeded-permissions-and-email": {
+    "sequentialLegs": 6,
+    "grants": {
+      "positions": [
+        "org_member",
+        "everyone"
+      ],
+      "permissions": [
+        "key_scope_b",
+        "key_scope_a",
+        "ai_seat",
+        "extra"
+      ],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_seed"
+      ],
+      "accessible_org_ids": [
+        "org_a"
+      ],
+      "email": "seed@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_seed"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_seed"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_a"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_seed"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_member",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_permission_set",
+        "where": {
+          "id": {
+            "$in": [
+              "ps_x"
+            ]
+          }
+        },
+        "limit": 500,
+        "isSystem": true
+      }
+    ]
+  },
+  "read-limits-truncate": {
+    "sequentialLegs": 6,
+    "grants": {
+      "positions": [
+        "org_member",
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_lim",
+        "peer_0000",
+        "peer_0001",
+        "peer_0002",
+        "peer_0003",
+        "peer_0004",
+        "peer_0005",
+        "peer_0006",
+        "peer_0007",
+        "peer_0008",
+        "peer_0009",
+        "peer_0010",
+        "peer_0011",
+        "peer_0012",
+        "peer_0013",
+        "peer_0014",
+        "peer_0015",
+        "peer_0016",
+        "peer_0017",
+        "peer_0018",
+        "peer_0019",
+        "peer_0020",
+        "peer_0021",
+        "peer_0022",
+        "peer_0023",
+        "peer_0024",
+        "peer_0025",
+        "peer_0026",
+        "peer_0027",
+        "peer_0028",
+        "peer_0029",
+        "peer_0030",
+        "peer_0031",
+        "peer_0032",
+        "peer_0033",
+        "peer_0034",
+        "peer_0035",
+        "peer_0036",
+        "peer_0037",
+        "peer_0038",
+        "peer_0039",
+        "peer_0040",
+        "peer_0041",
+        "peer_0042",
+        "peer_0043",
+        "peer_0044",
+        "peer_0045",
+        "peer_0046",
+        "peer_0047",
+        "peer_0048",
+        "peer_0049",
+        "peer_0050",
+        "peer_0051",
+        "peer_0052",
+        "peer_0053",
+        "peer_0054",
+        "peer_0055",
+        "peer_0056",
+        "peer_0057",
+        "peer_0058",
+        "peer_0059",
+        "peer_0060",
+        "peer_0061",
+        "peer_0062",
+        "peer_0063",
+        "peer_0064",
+        "peer_0065",
+        "peer_0066",
+        "peer_0067",
+        "peer_0068",
+        "peer_0069",
+        "peer_0070",
+        "peer_0071",
+        "peer_0072",
+        "peer_0073",
+        "peer_0074",
+        "peer_0075",
+        "peer_0076",
+        "peer_0077",
+        "peer_0078",
+        "peer_0079",
+        "peer_0080",
+        "peer_0081",
+        "peer_0082",
+        "peer_0083",
+        "peer_0084",
+        "peer_0085",
+        "peer_0086",
+        "peer_0087",
+        "peer_0088",
+        "peer_0089",
+        "peer_0090",
+        "peer_0091",
+        "peer_0092",
+        "peer_0093",
+        "peer_0094",
+        "peer_0095",
+        "peer_0096",
+        "peer_0097",
+        "peer_0098",
+        "peer_0099",
+        "peer_0100",
+        "peer_0101",
+        "peer_0102",
+        "peer_0103",
+        "peer_0104",
+        "peer_0105",
+        "peer_0106",
+        "peer_0107",
+        "peer_0108",
+        "peer_0109",
+        "peer_0110",
+        "peer_0111",
+        "peer_0112",
+        "peer_0113",
+        "peer_0114",
+        "peer_0115",
+        "peer_0116",
+        "peer_0117",
+        "peer_0118",
+        "peer_0119",
+        "peer_0120",
+        "peer_0121",
+        "peer_0122",
+        "peer_0123",
+        "peer_0124",
+        "peer_0125",
+        "peer_0126",
+        "peer_0127",
+        "peer_0128",
+        "peer_0129",
+        "peer_0130",
+        "peer_0131",
+        "peer_0132",
+        "peer_0133",
+        "peer_0134",
+        "peer_0135",
+        "peer_0136",
+        "peer_0137",
+        "peer_0138",
+        "peer_0139",
+        "peer_0140",
+        "peer_0141",
+        "peer_0142",
+        "peer_0143",
+        "peer_0144",
+        "peer_0145",
+        "peer_0146",
+        "peer_0147",
+        "peer_0148",
+        "peer_0149",
+        "peer_0150",
+        "peer_0151",
+        "peer_0152",
+        "peer_0153",
+        "peer_0154",
+        "peer_0155",
+        "peer_0156",
+        "peer_0157",
+        "peer_0158",
+        "peer_0159",
+        "peer_0160",
+        "peer_0161",
+        "peer_0162",
+        "peer_0163",
+        "peer_0164",
+        "peer_0165",
+        "peer_0166",
+        "peer_0167",
+        "peer_0168",
+        "peer_0169",
+        "peer_0170",
+        "peer_0171",
+        "peer_0172",
+        "peer_0173",
+        "peer_0174",
+        "peer_0175",
+        "peer_0176",
+        "peer_0177",
+        "peer_0178",
+        "peer_0179",
+        "peer_0180",
+        "peer_0181",
+        "peer_0182",
+        "peer_0183",
+        "peer_0184",
+        "peer_0185",
+        "peer_0186",
+        "peer_0187",
+        "peer_0188",
+        "peer_0189",
+        "peer_0190",
+        "peer_0191",
+        "peer_0192",
+        "peer_0193",
+        "peer_0194",
+        "peer_0195",
+        "peer_0196",
+        "peer_0197",
+        "peer_0198",
+        "peer_0199",
+        "peer_0200",
+        "peer_0201",
+        "peer_0202",
+        "peer_0203",
+        "peer_0204",
+        "peer_0205",
+        "peer_0206",
+        "peer_0207",
+        "peer_0208",
+        "peer_0209",
+        "peer_0210",
+        "peer_0211",
+        "peer_0212",
+        "peer_0213",
+        "peer_0214",
+        "peer_0215",
+        "peer_0216",
+        "peer_0217",
+        "peer_0218",
+        "peer_0219",
+        "peer_0220",
+        "peer_0221",
+        "peer_0222",
+        "peer_0223",
+        "peer_0224",
+        "peer_0225",
+        "peer_0226",
+        "peer_0227",
+        "peer_0228",
+        "peer_0229",
+        "peer_0230",
+        "peer_0231",
+        "peer_0232",
+        "peer_0233",
+        "peer_0234",
+        "peer_0235",
+        "peer_0236",
+        "peer_0237",
+        "peer_0238",
+        "peer_0239",
+        "peer_0240",
+        "peer_0241",
+        "peer_0242",
+        "peer_0243",
+        "peer_0244",
+        "peer_0245",
+        "peer_0246",
+        "peer_0247",
+        "peer_0248",
+        "peer_0249",
+        "peer_0250",
+        "peer_0251",
+        "peer_0252",
+        "peer_0253",
+        "peer_0254",
+        "peer_0255",
+        "peer_0256",
+        "peer_0257",
+        "peer_0258",
+        "peer_0259",
+        "peer_0260",
+        "peer_0261",
+        "peer_0262",
+        "peer_0263",
+        "peer_0264",
+        "peer_0265",
+        "peer_0266",
+        "peer_0267",
+        "peer_0268",
+        "peer_0269",
+        "peer_0270",
+        "peer_0271",
+        "peer_0272",
+        "peer_0273",
+        "peer_0274",
+        "peer_0275",
+        "peer_0276",
+        "peer_0277",
+        "peer_0278",
+        "peer_0279",
+        "peer_0280",
+        "peer_0281",
+        "peer_0282",
+        "peer_0283",
+        "peer_0284",
+        "peer_0285",
+        "peer_0286",
+        "peer_0287",
+        "peer_0288",
+        "peer_0289",
+        "peer_0290",
+        "peer_0291",
+        "peer_0292",
+        "peer_0293",
+        "peer_0294",
+        "peer_0295",
+        "peer_0296",
+        "peer_0297",
+        "peer_0298",
+        "peer_0299",
+        "peer_0300",
+        "peer_0301",
+        "peer_0302",
+        "peer_0303",
+        "peer_0304",
+        "peer_0305",
+        "peer_0306",
+        "peer_0307",
+        "peer_0308",
+        "peer_0309",
+        "peer_0310",
+        "peer_0311",
+        "peer_0312",
+        "peer_0313",
+        "peer_0314",
+        "peer_0315",
+        "peer_0316",
+        "peer_0317",
+        "peer_0318",
+        "peer_0319",
+        "peer_0320",
+        "peer_0321",
+        "peer_0322",
+        "peer_0323",
+        "peer_0324",
+        "peer_0325",
+        "peer_0326",
+        "peer_0327",
+        "peer_0328",
+        "peer_0329",
+        "peer_0330",
+        "peer_0331",
+        "peer_0332",
+        "peer_0333",
+        "peer_0334",
+        "peer_0335",
+        "peer_0336",
+        "peer_0337",
+        "peer_0338",
+        "peer_0339",
+        "peer_0340",
+        "peer_0341",
+        "peer_0342",
+        "peer_0343",
+        "peer_0344",
+        "peer_0345",
+        "peer_0346",
+        "peer_0347",
+        "peer_0348",
+        "peer_0349",
+        "peer_0350",
+        "peer_0351",
+        "peer_0352",
+        "peer_0353",
+        "peer_0354",
+        "peer_0355",
+        "peer_0356",
+        "peer_0357",
+        "peer_0358",
+        "peer_0359",
+        "peer_0360",
+        "peer_0361",
+        "peer_0362",
+        "peer_0363",
+        "peer_0364",
+        "peer_0365",
+        "peer_0366",
+        "peer_0367",
+        "peer_0368",
+        "peer_0369",
+        "peer_0370",
+        "peer_0371",
+        "peer_0372",
+        "peer_0373",
+        "peer_0374",
+        "peer_0375",
+        "peer_0376",
+        "peer_0377",
+        "peer_0378",
+        "peer_0379",
+        "peer_0380",
+        "peer_0381",
+        "peer_0382",
+        "peer_0383",
+        "peer_0384",
+        "peer_0385",
+        "peer_0386",
+        "peer_0387",
+        "peer_0388",
+        "peer_0389",
+        "peer_0390",
+        "peer_0391",
+        "peer_0392",
+        "peer_0393",
+        "peer_0394",
+        "peer_0395",
+        "peer_0396",
+        "peer_0397",
+        "peer_0398",
+        "peer_0399",
+        "peer_0400",
+        "peer_0401",
+        "peer_0402",
+        "peer_0403",
+        "peer_0404",
+        "peer_0405",
+        "peer_0406",
+        "peer_0407",
+        "peer_0408",
+        "peer_0409",
+        "peer_0410",
+        "peer_0411",
+        "peer_0412",
+        "peer_0413",
+        "peer_0414",
+        "peer_0415",
+        "peer_0416",
+        "peer_0417",
+        "peer_0418",
+        "peer_0419",
+        "peer_0420",
+        "peer_0421",
+        "peer_0422",
+        "peer_0423",
+        "peer_0424",
+        "peer_0425",
+        "peer_0426",
+        "peer_0427",
+        "peer_0428",
+        "peer_0429",
+        "peer_0430",
+        "peer_0431",
+        "peer_0432",
+        "peer_0433",
+        "peer_0434",
+        "peer_0435",
+        "peer_0436",
+        "peer_0437",
+        "peer_0438",
+        "peer_0439",
+        "peer_0440",
+        "peer_0441",
+        "peer_0442",
+        "peer_0443",
+        "peer_0444",
+        "peer_0445",
+        "peer_0446",
+        "peer_0447",
+        "peer_0448",
+        "peer_0449",
+        "peer_0450",
+        "peer_0451",
+        "peer_0452",
+        "peer_0453",
+        "peer_0454",
+        "peer_0455",
+        "peer_0456",
+        "peer_0457",
+        "peer_0458",
+        "peer_0459",
+        "peer_0460",
+        "peer_0461",
+        "peer_0462",
+        "peer_0463",
+        "peer_0464",
+        "peer_0465",
+        "peer_0466",
+        "peer_0467",
+        "peer_0468",
+        "peer_0469",
+        "peer_0470",
+        "peer_0471",
+        "peer_0472",
+        "peer_0473",
+        "peer_0474",
+        "peer_0475",
+        "peer_0476",
+        "peer_0477",
+        "peer_0478",
+        "peer_0479",
+        "peer_0480",
+        "peer_0481",
+        "peer_0482",
+        "peer_0483",
+        "peer_0484",
+        "peer_0485",
+        "peer_0486",
+        "peer_0487",
+        "peer_0488",
+        "peer_0489",
+        "peer_0490",
+        "peer_0491",
+        "peer_0492",
+        "peer_0493",
+        "peer_0494",
+        "peer_0495",
+        "peer_0496",
+        "peer_0497",
+        "peer_0498",
+        "peer_0499",
+        "peer_0500",
+        "peer_0501",
+        "peer_0502",
+        "peer_0503",
+        "peer_0504",
+        "peer_0505",
+        "peer_0506",
+        "peer_0507",
+        "peer_0508",
+        "peer_0509",
+        "peer_0510",
+        "peer_0511",
+        "peer_0512",
+        "peer_0513",
+        "peer_0514",
+        "peer_0515",
+        "peer_0516",
+        "peer_0517",
+        "peer_0518",
+        "peer_0519",
+        "peer_0520",
+        "peer_0521",
+        "peer_0522",
+        "peer_0523",
+        "peer_0524",
+        "peer_0525",
+        "peer_0526",
+        "peer_0527",
+        "peer_0528",
+        "peer_0529",
+        "peer_0530",
+        "peer_0531",
+        "peer_0532",
+        "peer_0533",
+        "peer_0534",
+        "peer_0535",
+        "peer_0536",
+        "peer_0537",
+        "peer_0538",
+        "peer_0539",
+        "peer_0540",
+        "peer_0541",
+        "peer_0542",
+        "peer_0543",
+        "peer_0544",
+        "peer_0545",
+        "peer_0546",
+        "peer_0547",
+        "peer_0548",
+        "peer_0549",
+        "peer_0550",
+        "peer_0551",
+        "peer_0552",
+        "peer_0553",
+        "peer_0554",
+        "peer_0555",
+        "peer_0556",
+        "peer_0557",
+        "peer_0558",
+        "peer_0559",
+        "peer_0560",
+        "peer_0561",
+        "peer_0562",
+        "peer_0563",
+        "peer_0564",
+        "peer_0565",
+        "peer_0566",
+        "peer_0567",
+        "peer_0568",
+        "peer_0569",
+        "peer_0570",
+        "peer_0571",
+        "peer_0572",
+        "peer_0573",
+        "peer_0574",
+        "peer_0575",
+        "peer_0576",
+        "peer_0577",
+        "peer_0578",
+        "peer_0579",
+        "peer_0580",
+        "peer_0581",
+        "peer_0582",
+        "peer_0583",
+        "peer_0584",
+        "peer_0585",
+        "peer_0586",
+        "peer_0587",
+        "peer_0588",
+        "peer_0589",
+        "peer_0590",
+        "peer_0591",
+        "peer_0592",
+        "peer_0593",
+        "peer_0594",
+        "peer_0595",
+        "peer_0596",
+        "peer_0597",
+        "peer_0598",
+        "peer_0599",
+        "peer_0600",
+        "peer_0601",
+        "peer_0602",
+        "peer_0603",
+        "peer_0604",
+        "peer_0605",
+        "peer_0606",
+        "peer_0607",
+        "peer_0608",
+        "peer_0609",
+        "peer_0610",
+        "peer_0611",
+        "peer_0612",
+        "peer_0613",
+        "peer_0614",
+        "peer_0615",
+        "peer_0616",
+        "peer_0617",
+        "peer_0618",
+        "peer_0619",
+        "peer_0620",
+        "peer_0621",
+        "peer_0622",
+        "peer_0623",
+        "peer_0624",
+        "peer_0625",
+        "peer_0626",
+        "peer_0627",
+        "peer_0628",
+        "peer_0629",
+        "peer_0630",
+        "peer_0631",
+        "peer_0632",
+        "peer_0633",
+        "peer_0634",
+        "peer_0635",
+        "peer_0636",
+        "peer_0637",
+        "peer_0638",
+        "peer_0639",
+        "peer_0640",
+        "peer_0641",
+        "peer_0642",
+        "peer_0643",
+        "peer_0644",
+        "peer_0645",
+        "peer_0646",
+        "peer_0647",
+        "peer_0648",
+        "peer_0649",
+        "peer_0650",
+        "peer_0651",
+        "peer_0652",
+        "peer_0653",
+        "peer_0654",
+        "peer_0655",
+        "peer_0656",
+        "peer_0657",
+        "peer_0658",
+        "peer_0659",
+        "peer_0660",
+        "peer_0661",
+        "peer_0662",
+        "peer_0663",
+        "peer_0664",
+        "peer_0665",
+        "peer_0666",
+        "peer_0667",
+        "peer_0668",
+        "peer_0669",
+        "peer_0670",
+        "peer_0671",
+        "peer_0672",
+        "peer_0673",
+        "peer_0674",
+        "peer_0675",
+        "peer_0676",
+        "peer_0677",
+        "peer_0678",
+        "peer_0679",
+        "peer_0680",
+        "peer_0681",
+        "peer_0682",
+        "peer_0683",
+        "peer_0684",
+        "peer_0685",
+        "peer_0686",
+        "peer_0687",
+        "peer_0688",
+        "peer_0689",
+        "peer_0690",
+        "peer_0691",
+        "peer_0692",
+        "peer_0693",
+        "peer_0694",
+        "peer_0695",
+        "peer_0696",
+        "peer_0697",
+        "peer_0698",
+        "peer_0699",
+        "peer_0700",
+        "peer_0701",
+        "peer_0702",
+        "peer_0703",
+        "peer_0704",
+        "peer_0705",
+        "peer_0706",
+        "peer_0707",
+        "peer_0708",
+        "peer_0709",
+        "peer_0710",
+        "peer_0711",
+        "peer_0712",
+        "peer_0713",
+        "peer_0714",
+        "peer_0715",
+        "peer_0716",
+        "peer_0717",
+        "peer_0718",
+        "peer_0719",
+        "peer_0720",
+        "peer_0721",
+        "peer_0722",
+        "peer_0723",
+        "peer_0724",
+        "peer_0725",
+        "peer_0726",
+        "peer_0727",
+        "peer_0728",
+        "peer_0729",
+        "peer_0730",
+        "peer_0731",
+        "peer_0732",
+        "peer_0733",
+        "peer_0734",
+        "peer_0735",
+        "peer_0736",
+        "peer_0737",
+        "peer_0738",
+        "peer_0739",
+        "peer_0740",
+        "peer_0741",
+        "peer_0742",
+        "peer_0743",
+        "peer_0744",
+        "peer_0745",
+        "peer_0746",
+        "peer_0747",
+        "peer_0748",
+        "peer_0749",
+        "peer_0750",
+        "peer_0751",
+        "peer_0752",
+        "peer_0753",
+        "peer_0754",
+        "peer_0755",
+        "peer_0756",
+        "peer_0757",
+        "peer_0758",
+        "peer_0759",
+        "peer_0760",
+        "peer_0761",
+        "peer_0762",
+        "peer_0763",
+        "peer_0764",
+        "peer_0765",
+        "peer_0766",
+        "peer_0767",
+        "peer_0768",
+        "peer_0769",
+        "peer_0770",
+        "peer_0771",
+        "peer_0772",
+        "peer_0773",
+        "peer_0774",
+        "peer_0775",
+        "peer_0776",
+        "peer_0777",
+        "peer_0778",
+        "peer_0779",
+        "peer_0780",
+        "peer_0781",
+        "peer_0782",
+        "peer_0783",
+        "peer_0784",
+        "peer_0785",
+        "peer_0786",
+        "peer_0787",
+        "peer_0788",
+        "peer_0789",
+        "peer_0790",
+        "peer_0791",
+        "peer_0792",
+        "peer_0793",
+        "peer_0794",
+        "peer_0795",
+        "peer_0796",
+        "peer_0797",
+        "peer_0798",
+        "peer_0799",
+        "peer_0800",
+        "peer_0801",
+        "peer_0802",
+        "peer_0803",
+        "peer_0804",
+        "peer_0805",
+        "peer_0806",
+        "peer_0807",
+        "peer_0808",
+        "peer_0809",
+        "peer_0810",
+        "peer_0811",
+        "peer_0812",
+        "peer_0813",
+        "peer_0814",
+        "peer_0815",
+        "peer_0816",
+        "peer_0817",
+        "peer_0818",
+        "peer_0819",
+        "peer_0820",
+        "peer_0821",
+        "peer_0822",
+        "peer_0823",
+        "peer_0824",
+        "peer_0825",
+        "peer_0826",
+        "peer_0827",
+        "peer_0828",
+        "peer_0829",
+        "peer_0830",
+        "peer_0831",
+        "peer_0832",
+        "peer_0833",
+        "peer_0834",
+        "peer_0835",
+        "peer_0836",
+        "peer_0837",
+        "peer_0838",
+        "peer_0839",
+        "peer_0840",
+        "peer_0841",
+        "peer_0842",
+        "peer_0843",
+        "peer_0844",
+        "peer_0845",
+        "peer_0846",
+        "peer_0847",
+        "peer_0848",
+        "peer_0849",
+        "peer_0850",
+        "peer_0851",
+        "peer_0852",
+        "peer_0853",
+        "peer_0854",
+        "peer_0855",
+        "peer_0856",
+        "peer_0857",
+        "peer_0858",
+        "peer_0859",
+        "peer_0860",
+        "peer_0861",
+        "peer_0862",
+        "peer_0863",
+        "peer_0864",
+        "peer_0865",
+        "peer_0866",
+        "peer_0867",
+        "peer_0868",
+        "peer_0869",
+        "peer_0870",
+        "peer_0871",
+        "peer_0872",
+        "peer_0873",
+        "peer_0874",
+        "peer_0875",
+        "peer_0876",
+        "peer_0877",
+        "peer_0878",
+        "peer_0879",
+        "peer_0880",
+        "peer_0881",
+        "peer_0882",
+        "peer_0883",
+        "peer_0884",
+        "peer_0885",
+        "peer_0886",
+        "peer_0887",
+        "peer_0888",
+        "peer_0889",
+        "peer_0890",
+        "peer_0891",
+        "peer_0892",
+        "peer_0893",
+        "peer_0894",
+        "peer_0895",
+        "peer_0896",
+        "peer_0897",
+        "peer_0898",
+        "peer_0899",
+        "peer_0900",
+        "peer_0901",
+        "peer_0902",
+        "peer_0903",
+        "peer_0904",
+        "peer_0905",
+        "peer_0906",
+        "peer_0907",
+        "peer_0908",
+        "peer_0909",
+        "peer_0910",
+        "peer_0911",
+        "peer_0912",
+        "peer_0913",
+        "peer_0914",
+        "peer_0915",
+        "peer_0916",
+        "peer_0917",
+        "peer_0918",
+        "peer_0919",
+        "peer_0920",
+        "peer_0921",
+        "peer_0922",
+        "peer_0923",
+        "peer_0924",
+        "peer_0925",
+        "peer_0926",
+        "peer_0927",
+        "peer_0928",
+        "peer_0929",
+        "peer_0930",
+        "peer_0931",
+        "peer_0932",
+        "peer_0933",
+        "peer_0934",
+        "peer_0935",
+        "peer_0936",
+        "peer_0937",
+        "peer_0938",
+        "peer_0939",
+        "peer_0940",
+        "peer_0941",
+        "peer_0942",
+        "peer_0943",
+        "peer_0944",
+        "peer_0945",
+        "peer_0946",
+        "peer_0947",
+        "peer_0948",
+        "peer_0949",
+        "peer_0950",
+        "peer_0951",
+        "peer_0952",
+        "peer_0953",
+        "peer_0954",
+        "peer_0955",
+        "peer_0956",
+        "peer_0957",
+        "peer_0958",
+        "peer_0959",
+        "peer_0960",
+        "peer_0961",
+        "peer_0962",
+        "peer_0963",
+        "peer_0964",
+        "peer_0965",
+        "peer_0966",
+        "peer_0967",
+        "peer_0968",
+        "peer_0969",
+        "peer_0970",
+        "peer_0971",
+        "peer_0972",
+        "peer_0973",
+        "peer_0974",
+        "peer_0975",
+        "peer_0976",
+        "peer_0977",
+        "peer_0978",
+        "peer_0979",
+        "peer_0980",
+        "peer_0981",
+        "peer_0982",
+        "peer_0983",
+        "peer_0984",
+        "peer_0985",
+        "peer_0986",
+        "peer_0987",
+        "peer_0988",
+        "peer_0989",
+        "peer_0990",
+        "peer_0991",
+        "peer_0992",
+        "peer_0993",
+        "peer_0994",
+        "peer_0995",
+        "peer_0996",
+        "peer_0997",
+        "peer_0998"
+      ],
+      "accessible_org_ids": [
+        "org_0000",
+        "org_0001",
+        "org_0002",
+        "org_0003",
+        "org_0004",
+        "org_0005",
+        "org_0006",
+        "org_0007",
+        "org_0008",
+        "org_0009",
+        "org_0010",
+        "org_0011",
+        "org_0012",
+        "org_0013",
+        "org_0014",
+        "org_0015",
+        "org_0016",
+        "org_0017",
+        "org_0018",
+        "org_0019",
+        "org_0020",
+        "org_0021",
+        "org_0022",
+        "org_0023",
+        "org_0024",
+        "org_0025",
+        "org_0026",
+        "org_0027",
+        "org_0028",
+        "org_0029",
+        "org_0030",
+        "org_0031",
+        "org_0032",
+        "org_0033",
+        "org_0034",
+        "org_0035",
+        "org_0036",
+        "org_0037",
+        "org_0038",
+        "org_0039",
+        "org_0040",
+        "org_0041",
+        "org_0042",
+        "org_0043",
+        "org_0044",
+        "org_0045",
+        "org_0046",
+        "org_0047",
+        "org_0048",
+        "org_0049",
+        "org_0050",
+        "org_0051",
+        "org_0052",
+        "org_0053",
+        "org_0054",
+        "org_0055",
+        "org_0056",
+        "org_0057",
+        "org_0058",
+        "org_0059",
+        "org_0060",
+        "org_0061",
+        "org_0062",
+        "org_0063",
+        "org_0064",
+        "org_0065",
+        "org_0066",
+        "org_0067",
+        "org_0068",
+        "org_0069",
+        "org_0070",
+        "org_0071",
+        "org_0072",
+        "org_0073",
+        "org_0074",
+        "org_0075",
+        "org_0076",
+        "org_0077",
+        "org_0078",
+        "org_0079",
+        "org_0080",
+        "org_0081",
+        "org_0082",
+        "org_0083",
+        "org_0084",
+        "org_0085",
+        "org_0086",
+        "org_0087",
+        "org_0088",
+        "org_0089",
+        "org_0090",
+        "org_0091",
+        "org_0092",
+        "org_0093",
+        "org_0094",
+        "org_0095",
+        "org_0096",
+        "org_0097",
+        "org_0098",
+        "org_0099",
+        "org_0100",
+        "org_0101",
+        "org_0102",
+        "org_0103",
+        "org_0104",
+        "org_0105",
+        "org_0106",
+        "org_0107",
+        "org_0108",
+        "org_0109",
+        "org_0110",
+        "org_0111",
+        "org_0112",
+        "org_0113",
+        "org_0114",
+        "org_0115",
+        "org_0116",
+        "org_0117",
+        "org_0118",
+        "org_0119",
+        "org_0120",
+        "org_0121",
+        "org_0122",
+        "org_0123",
+        "org_0124",
+        "org_0125",
+        "org_0126",
+        "org_0127",
+        "org_0128",
+        "org_0129",
+        "org_0130",
+        "org_0131",
+        "org_0132",
+        "org_0133",
+        "org_0134",
+        "org_0135",
+        "org_0136",
+        "org_0137",
+        "org_0138",
+        "org_0139",
+        "org_0140",
+        "org_0141",
+        "org_0142",
+        "org_0143",
+        "org_0144",
+        "org_0145",
+        "org_0146",
+        "org_0147",
+        "org_0148",
+        "org_0149",
+        "org_0150",
+        "org_0151",
+        "org_0152",
+        "org_0153",
+        "org_0154",
+        "org_0155",
+        "org_0156",
+        "org_0157",
+        "org_0158",
+        "org_0159",
+        "org_0160",
+        "org_0161",
+        "org_0162",
+        "org_0163",
+        "org_0164",
+        "org_0165",
+        "org_0166",
+        "org_0167",
+        "org_0168",
+        "org_0169",
+        "org_0170",
+        "org_0171",
+        "org_0172",
+        "org_0173",
+        "org_0174",
+        "org_0175",
+        "org_0176",
+        "org_0177",
+        "org_0178",
+        "org_0179",
+        "org_0180",
+        "org_0181",
+        "org_0182",
+        "org_0183",
+        "org_0184",
+        "org_0185",
+        "org_0186",
+        "org_0187",
+        "org_0188",
+        "org_0189",
+        "org_0190",
+        "org_0191",
+        "org_0192",
+        "org_0193",
+        "org_0194",
+        "org_0195",
+        "org_0196",
+        "org_0197",
+        "org_0198",
+        "org_0199"
+      ],
+      "email": "lim@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_lim"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_lim"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_0000"
+        },
+        "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_lim"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_member",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_lim"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  },
+  "no-active-org": {
+    "sequentialLegs": 5,
+    "grants": {
+      "positions": [
+        "org_owner",
+        "org_member",
+        "org_admin",
+        "everyone"
+      ],
+      "permissions": [],
+      "systemPermissions": [],
+      "org_user_ids": [
+        "u_noorg"
+      ],
+      "accessible_org_ids": [
+        "org_a",
+        "org_b"
+      ],
+      "email": "noorg@x.com",
+      "posture": "MEMBER"
+    },
+    "queries": [
+      {
+        "object": "sys_member",
+        "where": {
+          "user_id": "u_noorg"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_position",
+        "where": {
+          "user_id": "u_noorg"
+        },
+        "limit": 200,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user_permission_set",
+        "where": {
+          "user_id": "u_noorg"
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_position",
+        "where": {
+          "name": {
+            "$in": [
+              "org_owner",
+              "org_member",
+              "org_admin",
+              "everyone"
+            ]
+          }
+        },
+        "limit": 100,
+        "isSystem": true
+      },
+      {
+        "object": "sys_user",
+        "where": {
+          "id": "u_noorg"
+        },
+        "limit": 1,
+        "isSystem": true
+      }
+    ]
+  }
+}

@@ -332,17 +332,55 @@ export async function resolveUserAuthzGrants(
     return userRow;
   };
 
+  // Single clock for every validity-window check in this resolution
+  // (ADR-0091 D2 — a grant row outside [valid_from, valid_until) does not
+  // resolve, fail-closed, with no background job involved).
+  const nowMs = opts.nowMs ?? Date.now();
+
+  // ── WAVE 1 [#10825] ────────────────────────────────────────────────────
+  // The reads below share NO data dependency with one another, so they are
+  // issued TOGETHER: one sequential leg instead of five. cloud#1539 measured
+  // (latency injection, R² = 0.9994) that an authenticated request's cost is
+  // driven by its count of sequential LEGS, not by its count of queries —
+  // `server_ms ≈ 33 + L × 36.6` — so parallelising reads is worth exactly as
+  // much as deleting them, at none of the risk.
+  //
+  // ⛔ Parallelising is the ONLY thing that changed. Every read keeps its own
+  // object, its own `where` (including tenancy scoping) and its own `limit`,
+  // and every result is consumed in the same order as before, because on an
+  // authorization path a batch that returns different rows is a privilege bug
+  // no "the request still succeeds" test can see. In particular the two
+  // `sys_member` reads are NOT merged into one `$or` read that partitions in
+  // memory: they answer different questions under different limits (200 vs
+  // 1000), and a merged read would feed OTHER members' rows to the
+  // `accessible_org_ids` / role loops below — silently granting this caller
+  // their org access and their org-admin role.
+  // `resolve-authz-context.batch-equivalence.test.ts` is the differential
+  // control for all of this: the whole envelope and the exact multiset of
+  // issued `{object, where, limit}` triples, captured from the sequential
+  // implementation and asserted against this one.
+  //
+  // `sys_user` joins the wave only when it will actually be consulted — the
+  // #2409 memo below still guarantees it is read at most once, and a caller
+  // that already supplied both an email and the `ai_seat` scope still causes
+  // no read at all.
+  const needsUserRow = !grants.email || !grants.permissions.includes('ai_seat');
+  const [members, userPositionRows, orgMembers, upsRowsAll] = await Promise.all([
+    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
+    tenantId
+      ? tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000)
+      : Promise.resolve([] as any[]),
+    tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100),
+    needsUserRow ? getUserRow() : Promise.resolve(undefined),
+  ]);
+
   // Resolve the caller's unique email for `current_user.email` RLS owner
   // policies when the caller didn't supply it (e.g. API-key auth).
   if (!grants.email) {
     const u = await getUserRow();
     if (u?.email) grants.email = String(u.email);
   }
-
-  // Single clock for every validity-window check in this resolution
-  // (ADR-0091 D2 — a grant row outside [valid_from, valid_until) does not
-  // resolve, fail-closed, with no background job involved).
-  const nowMs = opts.nowMs ?? Date.now();
 
   // 3. Memberships via sys_member (better-auth). ONE read serves two purposes,
   //    so the two facts can never disagree about what the user belongs to:
@@ -364,7 +402,7 @@ export async function resolveUserAuthzGrants(
   //        columns are absent on `sys_member` today, and `isGrantActive` treats
   //        an absent bound as unbounded, so this is a no-op until they exist and
   //        correct the moment they do.
-  const members = await tryFind(ql, 'sys_member', { user_id: userId }, 200);
+  //    (Read in WAVE 1 above.)
   const accessibleOrgIds = new Set<string>();
   for (const m of members) {
     if (!isGrantActive(m, nowMs)) continue;
@@ -392,7 +430,7 @@ export async function resolveUserAuthzGrants(
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
   //    `organization_id = null` = global (cross-tenant); else match active org.
-  const userPositionRows = await tryFind(ql, 'sys_user_position', { user_id: userId }, 200);
+  //    (Read in WAVE 1 above.)
   for (const ur of userPositionRows) {
     const org = ur.organization_id ?? null;
     if (org && tenantId && org !== tenantId) continue;
@@ -402,8 +440,9 @@ export async function resolveUserAuthzGrants(
   }
 
   // 5. Fellow-org user IDs so RLS can scope identity tables to collaborators.
+  //    (Read in WAVE 1 above — issued only when there IS an active org, and
+  //    scoped to it there exactly as it was here.)
   if (tenantId) {
-    const orgMembers = await tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000);
     const ids = new Set<string>(
       orgMembers
         .map((m) => m.user_id ?? m.userId)
@@ -416,7 +455,7 @@ export async function resolveUserAuthzGrants(
   // 6. Permission sets — user-scoped grants (null org = global, else active org).
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
-  const upsRowsAll = await tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100);
+  //    (Read in WAVE 1 above.)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const psIds = new Set<string>(
     upsRows
@@ -461,6 +500,15 @@ export async function resolveUserAuthzGrants(
   //     Only a name whose row is explicitly deactivated is dropped — a name
   //     with no `sys_position` row at all (`org_owner`, a membership-derived
   //     role) has no flag to read and is untouched.
+  //
+  //     ── WAVE 2 / WAVE 3 [#10825] ──────────────────────────────────────
+  //     These two reads are the resolver's only genuine chain: the position
+  //     NAMES are not known until wave 1 answers, and the junction table keys
+  //     on `position_id`, so the id lookup cannot be issued until
+  //     `sys_position` has answered. Nothing else is left to run beside them,
+  //     so four waves — not the card's hoped-for two or three — is the floor
+  //     reachable without a join/traversal the generic `ql` seam cannot
+  //     guarantee across engines (see the test file's leg table).
   if (grants.positions.length > 0) {
     const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 100);
     const deactivatedNames = new Set<string>(
@@ -481,6 +529,12 @@ export async function resolveUserAuthzGrants(
 
   // 6b. Resolve permission-set details (names → grants.permissions; system_permissions;
   //     tab_permissions merged by highest visibility).
+  //
+  //     ── WAVE 4 [#10825] ───────────────────────────────────────────────
+  //     Deliberately ONE read over the UNION of directly-granted and
+  //     position-granted set ids, not two reads issued as they become known:
+  //     `grants.permissions` is appended in the order the driver returns these
+  //     rows, and splitting the `$in` would reorder it.
   if (psIds.size > 0) {
     const psRowsAll = await tryFind(ql, 'sys_permission_set', { id: { $in: Array.from(psIds) } }, 500);
     // [ADR-0049] A DEACTIVATED permission set grants nothing — the
