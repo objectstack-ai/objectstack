@@ -173,11 +173,136 @@ function declaresHttpAnswer(error: unknown): boolean {
  *   - Some drivers may return `{ rows: [...] }` wrappers in other contexts.
  *
  * This helper accepts any of those shapes and always returns an array.
+ *
+ * ⚠️ [#10965] It returns `[]` for EVERYTHING else too, and that is the whole
+ * defect this file's seam guard exists for — see {@link isResultSet}. Flatten
+ * with this only AFTER the result has been established as an answer.
  */
 function normalizeRows(result: any): any[] {
   if (Array.isArray(result)) return result;
   if (result && Array.isArray(result.rows)) return result.rows;
   return [];
+}
+
+/**
+ * ── The seam that ACCEPTS a query but never ANSWERS one (#10965) ───────────
+ *
+ * {@link normalizeRows} flattens the result-set shapes a raw SELECT comes back
+ * as. A seam can hand back one more thing, and it means something else
+ * entirely: `null` — "I did not run your query". `InMemoryDriver.execute()` is
+ * the measured case; it logs `Raw execution not supported in InMemory driver`
+ * and returns `null`. It neither throws nor is absent, so `start()`'s
+ * `objectql.execute` shape test is satisfied, and `normalizeRows(null)` is `[]`
+ * — which is also what a real driver returns for a SELECT that matched nothing.
+ *
+ * Both read paths in this service then reported that emptiness as a fact about
+ * the data, and unlike its two siblings (#10677 / PR #10788 for
+ * `os migrate duplicates`, #10789 / PR #10964 for `backfillSeedTenancy`) what
+ * they hand back is a PRODUCT ANSWER a caller acts on:
+ *
+ *   - `get()` returned `null` ⇒ "this package is not installed".
+ *   - `list()` returned `[]`  ⇒ "no packages are installed".
+ *
+ * Measured on a real booted stack (LiteKernel + ObjectQLPlugin +
+ * `InMemoryDriver`), `start()`'s own rehydration reaches `list()`: the three
+ * statements it issues (CREATE TABLE, CREATE INDEX, the latest-per-id SELECT)
+ * each return `null`, `list()` answers `[]`, and the hydration loop iterates
+ * zero times — a SILENT skip, because its only log is behind `hydrated > 0`.
+ * Nothing downstream WRITES on that reading (the loop's only write is
+ * per-row; `installPackage`/`updatePackage`/`deletePackage` in
+ * `metadata-protocol` call `publish`/`delete` unconditionally, never gated on
+ * this read), so the blast radius is a silent hydration skip plus two false
+ * answers on the HTTP read doors — not a re-install.
+ *
+ * ⭐ **A seam that cannot ANSWER is absent, not empty.** The separation keys on
+ * the only thing that distinguishes them: a driver that answers returns a
+ * RESULT SET. Nothing here names a driver, so any host with the same no-op
+ * shape is covered without an allowlist to maintain.
+ */
+
+/**
+ * Is `result` one of the result-set shapes a raw SELECT can come back as?
+ *
+ * The shapes {@link normalizeRows} accepts, asked as a yes/no: a bare row array
+ * (better-sqlite3 through knex, and the mysql2 `[rows, fields]` tuple, which is
+ * an array too) and `{ rows }` (pg). An empty result set in any of those
+ * spellings is still a result set, and still `true` — that is what keeps a
+ * legitimately-empty install answering "not installed" / "nothing installed",
+ * and it is the half of this change that stops it being a rename.
+ *
+ * This cannot lose a row {@link normalizeRows} would have found: every shape it
+ * rejects is one that flattener already maps to `[]`, so the only change is
+ * "refused as unreadable" replacing "reported as zero rows".
+ *
+ * ⛔ A LOCAL copy, deliberately. `metadata-protocol` does not publish its own
+ * from the package index, the CLI keeps a third for its probes, and
+ * `@objectstack/metadata-protocol` is not a dependency of this package at all.
+ * Unifying the three is its own decision, not a rider on this fix.
+ */
+function isResultSet(result: unknown): boolean {
+  if (Array.isArray(result)) return true;
+  if (typeof result === 'object' && result !== null) {
+    return Array.isArray((result as { rows?: unknown }).rows);
+  }
+  return false;
+}
+
+/**
+ * [#10965] The caller-facing sentence a read over a non-answering seam gets.
+ *
+ * Like {@link PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE}, a CONSTANT that
+ * interpolates nothing: no driver text, no statement, no table name. It says
+ * the one thing a caller can act on — the answer is UNKNOWN, not "no".
+ *
+ * Exported so the doors and their pins assert the POSITIVE shape rather than
+ * the absence of the old empty answer (an absence assertion passes for any
+ * rewrite, including a worse one).
+ */
+export const PACKAGE_SEAM_UNREADABLE_MESSAGE =
+  'The package registry could not be read: the storage seam accepted the query but returned no '
+  + 'result set. Whether this package is installed is UNKNOWN — this is not an answer of "no".';
+
+/** Brand for the refusal below, so only IT is re-thrown out of the read catches. */
+const SEAM_UNREADABLE = Symbol.for('objectstack.service-package.seam-unreadable');
+
+/**
+ * [#10965] The refusal a read raises when the seam did not answer.
+ *
+ * ADR-0112 envelope: a `status` AND a `code`, both declared, so it leaves by
+ * the door's shared `errorFromThrown` mapping as the producer's own answer
+ * rather than a 500 catch-all. `SERVICE_UNAVAILABLE` / 503 is the standard
+ * catalog's own pairing and the spelling `metadata-protocol` already uses for
+ * exactly this condition (`metadataStoreUnavailableError`: the store is
+ * unreachable, so existence is unknown) — no new code is registered, and
+ * nothing in `packages/spec` is touched.
+ */
+function packageSeamUnreadableError(): Error {
+  const err = new Error(PACKAGE_SEAM_UNREADABLE_MESSAGE) as Error & {
+    code?: string;
+    status?: number;
+    [SEAM_UNREADABLE]?: true;
+  };
+  err.code = 'SERVICE_UNAVAILABLE';
+  err.status = 503;
+  err[SEAM_UNREADABLE] = true;
+  return err;
+}
+
+/**
+ * [#10965] Is this the seam refusal above?
+ *
+ * ⛔ Deliberately NOT {@link declaresHttpAnswer}. That predicate asks the much
+ * broader "did this throw declare an envelope?", and widening the two READ
+ * catches to re-throw every such error would change how this service answers
+ * driver faults it has always swallowed — a behaviour change this card did not
+ * measure and does not need. Only the refusal this file raises escapes.
+ */
+function isSeamUnreadable(error: unknown): boolean {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && (error as Record<symbol, unknown>)[SEAM_UNREADABLE] === true
+  );
 }
 
 /**
@@ -287,6 +412,15 @@ export class PackageServicePlugin implements Plugin {
 
           const args = version === 'latest' ? [packageId] : [packageId, version];
           const result = await objectql.execute!({ sql, args });
+
+          // [#10965] Before reading emptiness as a fact, establish that there
+          // was an answer to read. A seam that did not run the SELECT hands
+          // back no result set, and `normalizeRows` maps that to `[]` — the
+          // same value a real driver returns when the package genuinely is not
+          // installed. Refusing here is what makes those two distinguishable;
+          // a result set with zero rows still falls through to `null` below.
+          if (!isResultSet(result)) throw packageSeamUnreadableError();
+
           const rows = normalizeRows(result);
 
           if (rows.length === 0) {
@@ -304,6 +438,15 @@ export class PackageServicePlugin implements Plugin {
             updated_at: row.updated_at,
           };
         } catch (error) {
+          // [#10965] The seam refusal is the ONE throw this catch must not
+          // swallow: swallowing it would restore the exact `null` the refusal
+          // exists to replace, and the caller would be back to reading "not
+          // installed" off a query that never ran. Everything else keeps the
+          // behaviour it has always had.
+          if (isSeamUnreadable(error)) {
+            logger.error(`Cannot answer whether package '${packageId}' is installed`, error as Error);
+            throw error;
+          }
           logger.error(`Failed to get package: ${packageId}`, error as Error);
           return null;
         }
@@ -321,6 +464,11 @@ export class PackageServicePlugin implements Plugin {
             `,
           });
 
+          // [#10965] Same separation as `get()`: a seam that never ran this
+          // SELECT must not be reported as "no packages are installed". An
+          // answering seam with zero rows still returns `[]` below.
+          if (!isResultSet(result)) throw packageSeamUnreadableError();
+
           return normalizeRows(result).map((row: any) => ({
             id: row.id,
             version: row.version,
@@ -331,6 +479,13 @@ export class PackageServicePlugin implements Plugin {
             updated_at: row.updated_at,
           }));
         } catch (error) {
+          // [#10965] As in `get()`: only the seam refusal escapes, because
+          // swallowing it would answer "nothing installed" over a driver this
+          // method never queried.
+          if (isSeamUnreadable(error)) {
+            logger.error('Cannot answer which packages are installed', error as Error);
+            throw error;
+          }
           logger.error('Failed to list packages', error as Error);
           return [];
         }
@@ -433,7 +588,25 @@ export class PackageServicePlugin implements Plugin {
         }
       }
     } catch (error) {
-      logger.debug(`Package hydration from sys_packages skipped: ${(error as Error)?.message}`);
+      // [#10965] The measured consequence of the conflation, and the half that
+      // made it invisible. `list()` used to answer `[]` over a seam that never
+      // ran the SELECT, so this loop iterated zero times and said nothing —
+      // its only log sits behind `hydrated > 0`. A durable package was then
+      // absent from the registry for the whole process lifetime, with no line
+      // anywhere distinguishing that from an environment with no packages.
+      //
+      // Now `list()` refuses, and the refusal is reported at WARN naming what
+      // is unknown. Boot still continues: an unreadable seam must not brick the
+      // environment, exactly as a stale package does not (above).
+      if (isSeamUnreadable(error)) {
+        logger.warn(
+          'Package hydration from sys_packages SKIPPED — the storage seam accepted the query but '
+          + 'returned no result set, so durable packages could NOT be read. Any package persisted in '
+          + 'sys_packages is absent from the registry for this process. This is not "no packages installed".',
+        );
+      } else {
+        logger.debug(`Package hydration from sys_packages skipped: ${(error as Error)?.message}`);
+      }
     }
   }
 
