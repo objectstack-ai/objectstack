@@ -125,7 +125,20 @@ function makeCountingQl(
   return ql;
 }
 
-const declaredSets = (n: number) =>
+/**
+ * `objects` is typed rather than inferred: the upgrade fixtures below widen a
+ * grant (`{ allowRead }` -> `{ allowRead, allowEdit }`) to simulate a package
+ * version bump, which an inferred literal type rejects.
+ */
+interface DeclaredSet {
+  name: string;
+  label: string;
+  objects: Record<string, Record<string, boolean>>;
+  systemPermissions: string[];
+  _packageId: string;
+}
+
+const declaredSets = (n: number): DeclaredSet[] =>
   Array.from({ length: n }, (_, i) => ({
     name: `pkg_set_${i}`,
     label: `Set ${i}`,
