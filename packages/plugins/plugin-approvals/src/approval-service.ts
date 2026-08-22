@@ -49,6 +49,11 @@ import {
   type ApproverOrgScopeDeps,
   type ApproverOrgScopeEngine,
 } from './approver-org-scope.js';
+import {
+  redactSnapshot,
+  resolveReadableSnapshotFields,
+  type FieldVisibilitySource,
+} from './payload-redaction.js';
 
 /**
  * Node-era approval runtime (ADR-0019).
@@ -561,6 +566,14 @@ export interface ApprovalServiceOptions {
    */
   tenancyPosture?: () => string | undefined;
   /**
+   * [#10749] Field-visibility authority used to redact the payload snapshot at
+   * serve time. Usually attached after construction via
+   * {@link ApprovalService.attachFieldVisibility}, because the security plugin
+   * may register after this one. Absent ⇒ snapshots are served unredacted,
+   * exactly as before this seam landed.
+   */
+  fieldVisibility?: FieldVisibilitySource;
+  /**
    * [#8652] Objects on which a user holding READ access to the target business
    * record may also see that record's approval requests and action history —
    * read-only. Empty or absent (the default) leaves visibility exactly as it
@@ -578,6 +591,7 @@ export class ApprovalService implements IApprovalService {
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
   private tenancyPosture?: () => string | undefined;
+  private fieldVisibility?: FieldVisibilitySource;
   /**
    * [#8652] The enabled object set for the record-reader visibility tier.
    * EMPTY means the tier is off — the default, and the shape every existing
@@ -593,6 +607,7 @@ export class ApprovalService implements IApprovalService {
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
     this.tenancyPosture = opts.tenancyPosture;
+    this.fieldVisibility = opts.fieldVisibility;
     this.recordReaderVisibleObjects = new Set(
       (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
         .map((n) => String(n ?? '').trim())
@@ -603,6 +618,53 @@ export class ApprovalService implements IApprovalService {
   /** Attach (or replace) the ADR-0105 D9 posture provider. */
   attachTenancyPosture(provider: () => string | undefined): void {
     this.tenancyPosture = provider;
+  }
+
+  /**
+   * [#10749] Attach (or replace) the field-visibility authority the payload
+   * redaction seam reads. Late-bound: plugin load order does not guarantee the
+   * security service exists when this one is constructed.
+   */
+  attachFieldVisibility(source: FieldVisibilitySource | undefined): void {
+    this.fieldVisibility = source;
+  }
+
+  /**
+   * [#10749] Redact each row's payload snapshot down to the fields the READING
+   * caller may see on that row's subject object.
+   *
+   * Runs BEFORE {@link ApprovalService.enrichRows}, and that ordering is
+   * load-bearing rather than incidental: `enrichRows` derives `payload_display`
+   * (lookup foreign keys inside the snapshot resolved to referenced record
+   * titles) and `payload_labels` (a label per snapshot key) by WALKING THE
+   * SNAPSHOT'S OWN KEYS. Redact first and both derived maps are clean for free;
+   * redact after and a restricted field's name, its authored label and the
+   * title of the record it points at all still ship — the value would be gone
+   * and the disclosure would not.
+   *
+   * Rows are grouped by subject object so one `getReadableFields` call covers a
+   * whole page of same-object requests.
+   */
+  private async redactPayloads(rows: ApprovalRequestRow[], context: ExecutionContext): Promise<void> {
+    const withPayload = rows.filter((r: any) => r?.payload != null);
+    if (withPayload.length === 0) return;
+    const byObject = new Map<string, ApprovalRequestRow[]>();
+    for (const r of withPayload) {
+      const key = String((r as any).object_name ?? '');
+      let list = byObject.get(key);
+      if (!list) { list = []; byObject.set(key, list); }
+      list.push(r);
+    }
+    for (const [object, group] of byObject) {
+      const readable = await resolveReadableSnapshotFields(
+        this.fieldVisibility, object, context, this.logger,
+      );
+      if (readable === undefined) continue;
+      for (const r of group as any[]) {
+        const { payload } = redactSnapshot(r.payload, readable);
+        r.payload = payload;
+      }
+    }
   }
 
   /** Deps bundle for the ADR-0105 D9 org-scope helpers. */
@@ -4382,6 +4444,8 @@ export class ApprovalService implements IApprovalService {
 
     const rows = await this.engine.find('sys_approval_request', findOpts);
     const list = Array.isArray(rows) ? rows.map(rowFromRequest) : [];
+    // [#10749] Redact before enrichment — see `redactPayloads`.
+    await this.redactPayloads(list, context);
     await this.enrichRows(list);
     this.attachViewers(list, context);
     return list;
@@ -4473,6 +4537,8 @@ export class ApprovalService implements IApprovalService {
       if (visible && !visible.has(String(rows[0].id))) return null;
     }
     const row = rowFromRequest(rows[0]);
+    // [#10749] Redact before enrichment — see `redactPayloads`.
+    await this.redactPayloads([row], context);
     await this.enrichRows([row]);
     await this.attachFlowSteps(row);
     await this.attachDecisionProgress(row, rows[0]);
