@@ -86,19 +86,32 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  /**
+   * [#10961] The fake answers the SCOPED spelling, because that is what the
+   * checker now calls: a timer armed for one datasource asks the service about
+   * that datasource, instead of sweeping the farm and filtering the report.
+   * The rows below live behind that scoping so the fixture cannot hand back a
+   * foreign datasource's row by accident — the cross-datasource claim is
+   * carried here by the ARGUMENT, and against the real service by
+   * `external-validation-drift-scope.test.ts`.
+   */
+  const scopedService = (rows: Array<{ ok: boolean; datasource: string; object: string; diffs: SchemaDiffEntry[] }>) => ({
+    validateAll: async () => ({ ok: rows.every((r) => r.ok), results: rows }),
+    validateDatasource: async (datasource: string) => {
+      const scoped = rows.filter((r) => r.datasource === datasource);
+      return { ok: scoped.every((r) => r.ok), results: scoped };
+    },
+  });
+
   it('runDriftCheck emits one external.schema.drift event per drifted object', async () => {
     const { ctx } = makeCtx({
-      'external-datasource': {
-        validateAll: async () => ({
-          ok: false,
-          results: [
-            { ok: false, datasource: 'warehouse', object: 'wh_order', diffs: sampleDiffs },
-            { ok: true, datasource: 'warehouse', object: 'wh_ok', diffs: [] },
-            // A failure on a *different* datasource must not bleed into warehouse's check.
-            { ok: false, datasource: 'other', object: 'x', diffs: sampleDiffs },
-          ],
-        }),
-      },
+      'external-datasource': scopedService([
+        { ok: false, datasource: 'warehouse', object: 'wh_order', diffs: sampleDiffs },
+        { ok: true, datasource: 'warehouse', object: 'wh_ok', diffs: [] },
+        // A failure on a *different* datasource must not bleed into warehouse's
+        // check — and must not be introspected for it either (drift-scope test).
+        { ok: false, datasource: 'other', object: 'x', diffs: sampleDiffs },
+      ]),
     });
     const emitted = await new ExternalValidationPlugin().runDriftCheck(ctx, 'warehouse');
     expect(emitted).toBe(1);
@@ -110,9 +123,12 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
     });
   });
 
-  it('runDriftCheck is a no-op (no throw) when validateAll rejects', async () => {
+  it('runDriftCheck is a no-op (no throw) when the scoped validation rejects', async () => {
     const { ctx, warnings } = makeCtx({
-      'external-datasource': { validateAll: async () => { throw new Error('remote unreachable'); } },
+      'external-datasource': {
+        validateAll: async () => ({ ok: true, results: [] }),
+        validateDatasource: async () => { throw new Error('remote unreachable'); },
+      },
     });
     const emitted = await new ExternalValidationPlugin().runDriftCheck(ctx, 'warehouse');
     expect(emitted).toBe(0);
@@ -140,9 +156,9 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
 
   it('the armed timer fires runDriftCheck on its interval and emits drift', async () => {
     const { ctx } = makeCtx({
-      'external-datasource': {
-        validateAll: async () => ({ ok: false, results: [{ ok: false, datasource: 'warehouse', object: 'wh_order', diffs: sampleDiffs }] }),
-      },
+      'external-datasource': scopedService([
+        { ok: false, datasource: 'warehouse', object: 'wh_order', diffs: sampleDiffs },
+      ]),
       metadata: {
         list: async () => [{ name: 'warehouse', external: { validation: { checkIntervalMs: 1000 } } }],
       },
