@@ -109,7 +109,7 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
   const noise = captureExpectedReadRefusals([...ABSENT_AUTHZ_TABLES]);
 
   beforeAll(async () => {
-    kernel = new ObjectKernel({ logLevel: 'silent' });
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
     // In-memory SQLite backs persistence; ObjectQL (registered after the
     // driver so it discovers it) provides `objectql` + `data` + `manifest`;
     // MessagingServicePlugin registers the `notification` service the dispatcher

@@ -123,7 +123,7 @@ describe('an approval decision cascades as the deciding user (#3783)', () => {
   });
 
   beforeEach(async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
