@@ -76,7 +76,7 @@ function makeFakeEngine(seed: Row[] = []) {
   };
 }
 
-const REF = { type: 'view', name: 'k9qk_member.member_list' } as const;
+const REF = { org: 'system', type: 'view' as const, name: 'k9qk_member.member_list' };
 
 function makeRepo(engine: ReturnType<typeof makeFakeEngine>) {
   return new SysMetadataRepository({
@@ -90,11 +90,11 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
   it('a package-less draft save over a bound active row inherits the binding, and scoped listDrafts counts it', async () => {
     const engine = makeFakeEngine();
     const repo = makeRepo(engine);
-    await repo.put(REF, { label: 'Member' }, { parentVersion: null, packageId: 'app.k9qk' });
+    await repo.put(REF, { label: 'Member' }, { parentVersion: null, actor: 't', packageId: 'app.k9qk' });
     const active = engine.rows.find((r) => r.state === 'active')!;
     expect(active.package_id).toBe('app.k9qk');
 
-    await repo.put(REF, { label: 'Member', description: 'edited' }, { parentVersion: null, state: 'draft' });
+    await repo.put(REF, { label: 'Member', description: 'edited' }, { parentVersion: null, actor: 't', state: 'draft' as const });
     const draft = engine.rows.find((r) => r.state === 'draft')!;
     expect(draft.package_id).toBe('app.k9qk');
 
@@ -105,8 +105,8 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
   it('an explicit packageId on the draft save is never overridden by inheritance', async () => {
     const engine = makeFakeEngine();
     const repo = makeRepo(engine);
-    await repo.put(REF, { label: 'Member' }, { parentVersion: null, packageId: 'app.k9qk' });
-    await repo.put(REF, { label: 'Member v2' }, { parentVersion: null, state: 'draft', packageId: 'app.other' });
+    await repo.put(REF, { label: 'Member' }, { parentVersion: null, actor: 't', packageId: 'app.k9qk' });
+    await repo.put(REF, { label: 'Member v2' }, { parentVersion: null, actor: 't', state: 'draft' as const, packageId: 'app.other' });
     const draft = engine.rows.find((r) => r.state === 'draft')!;
     expect(draft.package_id).toBe('app.other');
   });
@@ -114,7 +114,7 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
   it('a brand-new item drafted first keeps package-less semantics (nothing to inherit)', async () => {
     const engine = makeFakeEngine();
     const repo = makeRepo(engine);
-    await repo.put(REF, { label: 'Member' }, { parentVersion: null, state: 'draft' });
+    await repo.put(REF, { label: 'Member' }, { parentVersion: null, actor: 't', state: 'draft' as const });
     const draft = engine.rows.find((r) => r.state === 'draft')!;
     expect(draft.package_id ?? null).toBeNull();
   });
@@ -134,7 +134,7 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
     await repo.put(
       REF,
       { label: 'Member', description: 'orphan edited' },
-      { parentVersion: 'sha-orphan', state: 'draft' },
+      { parentVersion: 'sha-orphan', actor: 't', state: 'draft' as const },
     );
     const drafts = engine.rows.filter((r) => r.state === 'draft');
     expect(drafts).toHaveLength(1); // updated in place, never forked
