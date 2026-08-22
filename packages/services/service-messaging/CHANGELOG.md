@@ -1,5 +1,144 @@
 # @objectstack/service-messaging
 
+## 17.2.0
+
+### Minor Changes
+
+- cdaa72f: fix(service-messaging,plugin-webhooks): the `update`-op tenant-audit surface on the delivery outboxes is classified — `ack` is a dispatcher sweep, `redeliver` threads the caller's tenant (#10740)
+  
+  **BREAKING** signature change on `IHttpOutbox.redeliver` and
+  `MessagingService.redeliverHttp`, shipped as `minor` under the repo's
+  launch-window convention for breaking changes.
+  
+  `sys_http_delivery` and `sys_notification_delivery` carry three single-record
+  (`multi: false`) writes that the SQL driver audits under the **`update`** op —
+  a different op, and a different throttle key, from the `updateMany` half
+  classified previously. Their correct classifications are **opposite**, and
+  treating them as one sweep is the dangerous reading:
+  
+  | site | reachable from | classification |
+  | --- | --- | --- |
+  | `SqlNotificationOutbox.ack` | dispatcher tick only | global sweep |
+  | `SqlHttpOutbox.ack` | dispatcher tick only | global sweep |
+  | `SqlHttpOutbox.redeliver` | `POST /api/v1/webhooks/redeliver` | request-contextual |
+  
+  **The two `ack` sites** are declared global sweeps through a new
+  `dispatcherAckOptions()` helper, sibling to `dispatcherSweepOptions()` and
+  deliberately not the same function — that one returns `& { multi: true }`, so a
+  `multi: false` site cannot borrow it by accident. The warrant was re-derived
+  against the current tree rather than inherited: `ack` has exactly two callers,
+  both inside `runPartition()` on a `setInterval` tick holding a per-partition
+  cluster lock, so no request context exists to thread; and the row being acked
+  was claimed by a sweep that crosses organizations by construction
+  (`hash(refId | notificationId | digestKey) mod N` is a load-spreading key, and
+  one outbox per environment drains the whole queue). Passing the claimed row's
+  own `organization_id` is documented at the helper as the tempting wrong answer:
+  a predicate read off the row you are about to write matches exactly that row,
+  adds no isolation, and silences the audit anyway — the appearance of scoping
+  without the substance.
+  
+  **`redeliver` is not that**, and it is the reason this shipped separately. The
+  route in front of it is served to any authenticated user, so on a walled
+  deployment (`OS_TENANCY_POSTURE=isolated|group`) an unscoped replay is an
+  authenticated user writing another organization's delivery row — the case the
+  tenant audit exists to catch. It now carries the caller's tenant, applied to
+  the rows it reads as well as the row it writes, and it must never be given
+  `bypassTenantAudit`: a scoped write and a bypassed write produce the same
+  silence in the log, so the flag would convert a detectable hole into an
+  undetectable one. The webhook route resolves the session's
+  `activeOrganizationId` and threads it.
+  
+  Behaviour change at the endpoint: a delivery row outside the caller's
+  organization is now **not found** (`RESOURCE_NOT_FOUND`, HTTP 404) rather than
+  replayed. It is deliberately invisible rather than forbidden, so the endpoint
+  is not an existence oracle for other tenants' delivery ids. An in-tenant
+  redelivery is unchanged.
+  
+  Migrating a caller: `redeliver(id, guard?)` becomes
+  `redeliver(id, { tenantId, guard? })`, and `redeliverHttp(id)` becomes
+  `redeliverHttp(id, { tenantId })`. `tenantId` is a **required** property typed
+  `string | undefined`, so omitting it does not compile — a caller with no tenant
+  has to write `tenantId: undefined` and mean it. That is the point of the shape:
+  an optional property would let the dangerous case, a request path that simply
+  forgot, type-check in silence. Passing `undefined` leaves the write unscoped
+  and the audit line still fires, which is the intended reporting behaviour on a
+  deployment that cannot resolve an organization for the caller.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-messaging/src/http-outbox.ts#IHttpOutbox, packages/services/service-messaging/src/http-outbox.ts#RedeliverOptions) The surface that changed shape is `IHttpOutbox.redeliver`, plus the new `RedeliverOptions` argument type beside it. Both are TypeScript declarations in a service package with no `packages/spec` schema behind them: no metadata author writes a `redeliver` key, there is no authorable spelling and no `retiredKey()` tombstone, so `os migrate meta` has no stack source to rewrite. The change is a required second argument on an in-process method — a compile error at every call site, which is the notification channel, not a silent runtime gap. `MessagingService.redeliverHttp` moves with it and is deliberately NOT in the list above: this gate refuses that symbol as unresolvable, because `packages/spec/src/api/protocol.zod.ts` mentions the class name in a prose comment about `MessagingService.listInbox` while neither declaring nor importing it. The claim would be true and the gate cannot check it, so it is stated here for a reviewer instead of asserted where it would read as verified. It is a thin delegate to `IHttpOutbox.redeliver` in the same package and carries no schema of its own either. -->
+
+### Patch Changes
+
+- 8163a1c: Classify the delivery dispatchers' predicate writes on `sys_http_delivery` and
+  `sys_notification_delivery` as global environment sweeps (#10673). On a walled
+  deployment (`OS_TENANCY_POSTURE=isolated|group`) the SQL driver's tenant-audit
+  gate reported every `updateMany` these outboxes issue from the claim path as an
+  un-isolated write. The audit was right to ask: both objects are tenant-scoped
+  via `organization_id`. The answer is that these six writes — the
+  visibility-timeout reap and the atomic claim in `SqlHttpOutbox.claim`,
+  `SqlNotificationOutbox.claim` and `SqlNotificationOutbox.claimDigest` — are
+  issued by a `setInterval` dispatcher tick under a cluster lock, with no request
+  context and no tenant anywhere in the `ClaimOptions` contract, and they must
+  cross organizations: one outbox drains the whole environment's queue, so a
+  per-organization predicate would strand every other organization's deliveries.
+  They now pass `bypassTenantAudit` through a single documented helper that
+  carries that warrant. Diagnostics only — per its spec the flag never changes
+  what a write touches, and the row-level `ack` / `redeliver` writes are
+  unaffected.
+- 900e489: **Fix:** `MessagingServicePlugin` now releases its delivery dispatchers on `kernel.shutdown()`. Previously they kept running after shutdown had resolved (#9371).
+  
+  The plugin starts two `setInterval` dispatchers at `kernel:ready` — `NotificationDispatcher` over `sys_notification_delivery` and `HttpDispatcher` over `sys_http_delivery` — and released them from a method named `stop()`. The kernel's plugin teardown hook is `destroy()` (`Plugin.destroy?()` in `@objectstack/core`; the only teardown `ObjectKernel.performShutdown()` and `LiteKernel.destroy()` invoke), and `stop()` is not on that interface, so **nothing ever called it**. Both dispatchers went on claiming and updating delivery rows after `await kernel.shutdown()` returned. Measured on the new pin: 48 further delivery reads/writes in the 80 ms following a resolved shutdown.
+  
+  The teardown body now lives on `destroy()`. `stop()` is **retained as an alias** — it is public API of an exported class, and an embedder may well have learned to call it directly precisely because the kernel never did. No call site has to change, and no accept/reject behaviour of any contract moves.
+  
+  **Why it was invisible in production, and where the bill landed.** `start()` `unref()`s both timers, so a long-lived host process still exits and the leak is silent. Under vitest the worker process is alive throughout teardown, so a tick fires *after* a test file is over, reads a delivery table through a driver the suite already disconnected, and `SqlDriver`'s console fallback warns. `console.*` inside a vitest worker is an RPC to the main process (`onUserConsoleLog`); one issued after `rpcDone()` has snapshotted the pending set is rejected by `$rejectPendingCalls` as `EnvironmentTeardownError: [vitest-worker]: Closing rpc while "onUserConsoleLog" was pending`. Nothing awaits that promise, so it lands as an unhandled rejection and fails a run in which every test passed — twice measured on `examples/app-showcase` (334/334 and 337/337 green, exit 1, a merge-queue eviction each time). The width of the window is the duration of `rpcDone()`, which is why it only ever fired on a loaded queue runner and never on the PR-side run of the identical diff.
+  
+  Suites that boot a kernel with this plugin get quieter and finish cleaner as a result: over 48 loaded runs of the affected showcase file, console output emitted after the file's own `afterAll` went 3 → 0, and console RPC round-trips per run roughly halved (6574 → 3456 in aggregate).
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

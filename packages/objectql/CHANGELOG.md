@@ -1,5 +1,360 @@
 # @objectstack/objectql
 
+## 17.2.0
+
+### Minor Changes
+
+- 6936d07: `engine.aggregate` honours a per-aggregation `filter` (#10576, the contract
+  half of #10413). `AggregationNodeSchema.filter` — declared since #4286 but
+  marked experimental and enforced by nothing — is now live with SQL
+  `FILTER (WHERE …)` semantics: the predicate narrows the SOURCE rows that one
+  aggregation reads while sibling aggregations in the same call keep seeing
+  every row of the group, so a measure-scoped filter (`stage: 'closed_won'`)
+  can finally reach the engine instead of being silently dropped (the #10413
+  wrong-numbers defect on the ObjectQL analytics path). The
+  `StrategyContext.executeAggregate` bridge (`@objectstack/spec/contracts`)
+  gains the same optional `filter` on its aggregation entries so analytics
+  strategies can lower measure filters into it (#10413 phase 2 consumes this
+  seam next).
+  
+  Execution is the correct-first two-tier shape date bucketing and HAVING use:
+  the engine lowers filtered aggregations in memory for every driver (unknown
+  operators refuse loudly with `INVALID_FILTER`/400 naming the aggregation
+  position; a group emptied by its filter answers the ruled empty-group values
+  — count/sum 0, avg/min/max null). No driver compiles conditional aggregation
+  natively today, so each native aggregate face (driver-sql — inherited by
+  driver-sqlite-wasm and Turso local —, the Turso remote transport,
+  driver-mongodb's pipeline builder, driver-memory's `performAggregation`)
+  refuses a directly-delivered per-aggregation filter with
+  `NOT_IMPLEMENTED`/501 instead of silently aggregating the unfiltered rows.
+  Aggregations without a `filter` are byte-identically unchanged, including
+  their native pushdown path.
+- 2570ab0: The `__search` companion is no longer provisioned or backfilled on objects whose only companion source is the primary key (#10290)
+  
+  `resolveSearchCompanionSources` resolves the companion's source through
+  ADR-0079's `resolveDisplayField`. That derivation ends at "first title-eligible
+  field by declaration order", and on a table whose only text column IS its
+  primary key — system tables, junction tables, append-only logs — it lands on
+  `id`. `id` is `type: 'text'`, not hidden and carries no `requiredPermissions`,
+  so it passed the eligibility gate: `provisionSearchCompanion` declared a
+  `__search` column on those objects and `plugin-pinyin-search`'s backfill walked
+  them at every boot.
+  
+  That work is doomed by construction rather than merely unlikely. Both writers —
+  the `beforeInsert`/`beforeUpdate` stamp and the boot backfill — gate on
+  `containsCJK(row[source])`, and a platform-generated primary key is ASCII by
+  construction, so the predicate can never be true. Measured on a real
+  `bootStack` of `examples/app-showcase`: **20 of the 66 objects** the backfill
+  enumerated were in this state, walking whole platform tables to compute nothing
+  — `sys_secret`, `sys_oauth_access_token` and `sys_jwks` among them.
+  
+  `resolveSearchCompanionSources` now returns `[]` when the resolved display
+  field is the record's primary key, and `isPrimaryKeyField` is exported as the
+  named judgement behind it.
+  
+  **Keyed on the field's ROLE, not on "resolved by fallback".** The registry's
+  materialization seam runs `provisionPrimary(schema, { synthesize: false })`
+  before this module — a contractual order — and that pass writes `nameField:
+  'id'` onto the document, so by the time provisioning asks, a derived fallback
+  and an author's explicit pointer are byte-identical. The role is readable from
+  the name because that is where the platform keeps it: the driver provisions
+  `id` on every physical table unconditionally and there is no per-field
+  `primaryKey` marker in the spec, which is why `isPreservableUnderAudit` already
+  keys on `SystemFieldName.ID` for the same reason. `_id` is refused as the
+  alternate spelling of the same address.
+  
+  **This interprets ADR-0079, it does not amend it.** The title contract is
+  untouched: `resolveDisplayField` still resolves `id`, `provisionPrimary` still
+  designates it, and `resolveRecordDisplayName` still renders the `Record #<id>`
+  floor. Only the search normalizer declines to take its input from there — the
+  same distinction #4483 drew one seam over on the READ path, where the display
+  field's job in the `$search` auto-default is to ORDER the set and never to
+  ADMIT a field the exclusions already rejected (`SEARCH_AUTO_EXCLUDED_FIELDS`
+  names `id` and `_id`).
+  
+  **What does not change.** Existing permanently-NULL `__search` columns on
+  already-migrated tables stay: ADR-0045 migrations are additive and dropping a
+  physical column is a separate decision. Those deployments still stop walking —
+  the backfill skips an object whose sources resolve empty even when its schema
+  still declares the column. Objects with a real name/title field are unaffected:
+  provisioning, write-time stamping and the query-time `$or` clause all behave
+  exactly as before, including when the object also declares an `id` field and
+  when its display field is a plain text column that is not named `name`/`title`.
+- 8012960: `lifecycle.ttl` now accepts an `onlyWhen` row filter mirroring `retention.onlyWhen`, and the shared `onlyWhen` value union gains the platform's canonical null predicate `{$null: boolean}` (on both blocks). A `transient` object that interleaves live rows with terminal audit tombstones can now spare rows defined by a value's absence — e.g. `ttl: { field: 'expires_at', expireAfter: '1d', onlyWhen: { revoked_at: { $null: true } } }` — instead of the TTL reaping backdated tombstones first. The LifecycleService Reaper passes `ttl.onlyWhen` into the same reap scope `retention.onlyWhen` already rides; declaring `ttl.onlyWhen` together with rotation storage or archive is refused at parse time, mirroring retention's guards.
+
+### Patch Changes
+
+- 7d483e1: The Archiver resolves its window through ADR-0057 P4 governance (#10528).
+  `LifecycleService.archiveObject` read `archive.after` — and, since #10347,
+  `ttl.expireAfter` — straight off the declaration, so for any object declaring
+  `lifecycle.archive` an operator's settings override was silently ignored, a
+  registered `LifecycleRetentionFloor` was never evaluated, and per-tenant windows
+  did not apply.
+  
+  This was not a forgotten call. `reapObject` **returns** into `archiveObject` for
+  any object declaring `archive`, so the three `effectiveWindowMs` resolutions on
+  the reap path sat on a branch archive-declaring objects skip entirely — which is
+  why the divergence was total rather than partial, and why threading an override
+  into the cutoff alone would still have left floors and tenant windows unreached.
+  
+  All three legs now run, through the same resolver the Reaper uses:
+  
+  - a per-object `retention_overrides` entry beats the declaration, on the key that
+    matches which window the selection picked — `expireAfter` for a ttl-selected
+    archive, `maxAge` for an age-selected one;
+  - an override below a registered floor is rejected (the declared window stands),
+    logged at `error` naming the registrar, consequence and fix, and recorded in
+    `report.floorViolations` — the leg whose absence was *silent*, since an empty
+    `floorViolations` is indistinguishable from a healthy sweep. A *declared*
+    archive window below a floor is reported the same way and still enforced;
+  - tenant-scoped windows issue one candidate read per overriding tenant, then one
+    global pass covering everyone else including NULL-org rows — the shape `reap()`
+    already used, with tenant overrides going through the same floor.
+  
+  Unchanged on purpose: #10347's cutoff **selection** (a declared `ttl` still
+  decides which rows move, on `ttl.field`); the retain-first posture (no archive
+  datasource ⇒ `archive-pending`, hot-delete only what the cold store took); the
+  per-batch abort checks, now the first act of every pass; and the cold-side
+  `archive.keep` prune, which bounds the archive rather than the hot store and has
+  no settings key. An object with no override and no floor sweeps exactly as
+  before, as one pass over exactly the predicate it ran before.
+- 530c1df: **Behaviour change:** a `lifecycle` that declares both `ttl` and `archive` now
+  has its **`ttl` enforced** — the Archiver selects the rows it moves by the
+  declared TTL cutoff (`ttl.field` past `ttl.expireAfter`) instead of by
+  `created_at` age (#10347).
+  
+  That pair has always parsed — ADR-0057 §3.5 is satisfied because `ttl` is a
+  bounding policy, and the `archive.after === retention.maxAge` refine only fires
+  when `retention` is present — but it did nothing: `LifecycleService.reapObject`
+  returns into `archiveObject` before its `ttl` branch is reachable, so no reap on
+  `ttl.field` ever ran and the Archiver copied and hot-deleted by `created_at` age
+  alone. Declared, not enforced. What the author wrote is now what executes; they
+  no longer have to discover that the two keys cannot usefully be written
+  together.
+  
+  **Lifecycles that declare `archive` without `ttl` are unaffected** — they keep
+  selecting rows by `created_at` past `archive.after`, unchanged. Every
+  archive-declaring object shipped with the platform (`sys_audit_log`,
+  `sys_metadata_audit`) is that shape, so no bundled object changes behaviour.
+  
+  Two details of the new selection, both deliberate:
+  
+  - A row whose `ttl.field` is **null or absent is retained, not archived**. `$lt`
+    is a positive comparison and a value that is not there satisfies none of them
+    (the platform-wide null answer settled in #5298/#5299), which is also the
+    right reading: a row with no expiry stamp has not been given one, and treating
+    "absent" as "expired at the epoch" would archive exactly the rows whose expiry
+    the author has not yet decided.
+  - The cold-side `archive.keep` prune is unchanged. It bounds how long **archived**
+    rows survive in cold storage, not which hot rows are due, and it still measures
+    from `created_at` under either policy.
+  
+  If you declare `retention` beside `ttl` and `archive`, the TTL cutoff is what
+  selects: the age window no longer separately bounds the hot store for that
+  triple. Whether the Archiver should honour both windows is a separate open
+  question, filed as #10527 rather than decided here.
+- d23e3a0: **Waste removed:** the lifecycle dangling-reference audit no longer asks a federated (ADR-0015 `external`) remote for platform anchor columns that were never provisioned on it (#8414).
+  
+  `applySystemFields` injects `organization_id`, `owner_id`, `owning_business_unit_id` and the audit `*_by` lookups into every registered object, federated ones included — that is deliberate (#7865, direction B). `Engine.syncObjectSchema` then issues no DDL for a federated object, because the remote database owns its schema. So those five reference columns existed in the registered schema and nowhere else, and `auditDanglingReferences` — which enumerated reference fields off `fields` alone — projected all of them onto the remote table. Measured on a real boot of `examples/app-showcase`, against a `customers` table whose real columns are `id, name, email, region, lifetime_value`:
+  
+  ```
+  select `id`, `organization_id`, `created_by`, `updated_by`, `owner_id`, `owning_business_unit_id` from `customers` limit ?
+  select * from `customers` limit ?
+  ```
+  
+  The first statement cannot compile (`no such column` — a backtick-quoted identifier does not take SQLite's double-quote literal fallback, and Postgres/MySQL raise their own error); `SqlDriver.find`'s unknown-column recovery caught it and retried `select *`, fetching up to 500 whole rows to audit columns that cannot exist — once per federated object, every lifecycle sweep interval, each pass also emitting a #4363 non-deterministic-paging warning. **No answer was ever wrong**; the pass was pure waste, and it was being absorbed by a safety net rather than by a design.
+  
+  The enumerator now consults `unprovisionedInjectedColumns` (`@objectstack/spec/data`, the #7865 provenance derivation) and skips columns that are the platform's own injected anchor on an object the platform provisions no storage for.
+  
+  **This reads provenance, not `external != null`.** A federated object that declares a real remote `organization_id` — or any other anchor name — keeps its audit on that column: the author's definition is not byte-identical to the shipped one, so provenance answers `'author'` and nothing is withheld. Objects the platform provisions storage for are untouched: the derivation returns an empty set for them, so an ordinary object is still swept with its full column set.
+  
+  Two consequences worth knowing:
+  
+  - A federated object left with **no real reference column** is no longer read at all, and is deliberately not filed in `unscannedObjects` — a column that was never provisioned stores no reference, so its absence from `dangling` is proven, not assumed. A federated object that declares a real reference column is still opened and audited on it.
+  - `AuditableObject` now carries an index signature. The port was already being handed the whole registered document (the engine passes `SchemaRegistry.getAllObjects()` straight through); the type now says so, because the provenance derivation reads the injection plan's inputs off it. Hand-written doubles carrying only `name`/`fields` still satisfy the type and behave exactly as before.
+  
+  The card also named `backfillSearchCompanion` (`@objectstack/plugin-pinyin-search`) for `select `id`, `name`, `__search` from `customers``. **That statement is already gone and this release changes no code for it:** #9469 stopped `provisionSearchCompanion` from declaring `__search` on a federated object, so the backfill's existing `if (!schema.fields[SEARCH_COMPANION_FIELD]) continue` early-out drops those objects before enumerating anything. A second federation-aware guard inside the backfill would have been redundant, and — spelled as "skip external objects" — would have wrongly withheld the companion from a federated object whose author declares a real remote `__search`. The precondition is now pinned on a real boot instead.
+- f3a8134: Apply a `formula` field's declared `scale` when the formula is evaluated
+  (#10280). `Field.formula({ scale: 2 })` was accepted and then ignored: a
+  percentage formula such as `(record.num_responses * 100.0) / record.num_sent`
+  **returned** `41.666666666666664`, so the API response — and the record page
+  rendered from it — carried all fifteen digits despite the declaration.
+  
+  The value is now rounded where it is produced, in the engine's formula
+  evaluation, so all three surfaces that materialize a formula inherit it: list
+  reads, single-record reads, and the record a write responds with.
+  
+  - **Rounding is `Number(v.toFixed(scale))`** — round-half-away-from-zero, the
+    same arithmetic the console's client-side computed columns use. Negatives
+    round away from zero: `-1.5` at `scale: 0` is `-2`, not `-1`.
+  - **A formula declaring no `scale` is unchanged** and keeps full precision.
+  - **Non-numeric results are untouched** — a formula returning a string,
+    boolean or `null` is returned as-is.
+  - A formula value is **returned, never stored** — it is virtual and has no
+    column. Rounding it at the producer is what makes an app's own copy of that
+    result writable into a stored `DECIMAL(10, 2)`-style field, which previously
+    failed that field's decimal validation.
+  
+  Unchanged: `scale` on a **caller-supplied** number (`Field.number`,
+  `Field.currency`, …) is still enforced by **rejection** (`max_scale`), never by
+  rounding. A value someone sent has an author to refuse; a platform-computed
+  formula result does not.
+- d728325: Per-item publish (`POST /api/v1/meta/:type/:name/publish`) now re-binds runtime consumers
+  and finds drafts authored env-wide — the two things the package-scoped publish door
+  already did.
+  
+  **A metadata publish now announces `metadata:reloaded` on BOTH doors.** The event that
+  tells boot-cached consumers to re-read had two announcers: the dev-artifact watcher and
+  the runtime dispatcher after `POST /packages/:id/publish-drafts`. Publishing item by item
+  — what AI authoring and the item-level Studio doors do — announced nothing, so a flow
+  published while the server ran stayed `state='active'` and completely inert (no trigger
+  bound, no execution) until the kernel was rebuilt. `publishMetaItem` now notifies its host
+  through a new `onMetaItemPublished` seam and `ObjectQLPlugin` turns that into the kernel
+  announce, so `service-automation`'s flow re-bind, the authored hook/action re-sync,
+  declarative connectors and authored translations all catch up without a restart. The
+  announce is awaited, so the publish's own 2xx means the re-bind was attempted; a
+  subscriber failure is logged and never fails the publish. The batch door is unchanged —
+  it keeps its single per-publish announce rather than gaining one per promoted draft.
+  
+  **A per-item publish now resolves the draft's own org scope.** For the types the registry
+  declares `allowOrgOverride: true` (`view`, `dashboard`, `report`, `translation`,
+  `email_template`) the REST seam threads the session's active organization into the
+  publish, while package/AI authoring writes the draft env-wide — so the strict org lookup
+  matched nothing and answered `404 [no_draft] … nothing to publish` over a draft the
+  console's pending-changes banner was listing and the batch button published fine. The
+  per-item door now discovers the draft's scope the way `publishPackageDrafts` has since
+  #3115, with the ADR-0005 precedence (an org holding its own draft publishes that one) and
+  the same `NO_DRAFT` refusal when no scope holds a draft.
+- a037f7c: Fix JSON-field writes on Postgres deployments that manage DDL out-of-band
+  (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`): a non-empty array and a bare
+  string were rejected with a 500, and an empty array was **silently stored as an
+  empty object** (#10995).
+  
+  The SQL driver does `JSON.stringify` a JSON field's value on every non-SQLite
+  dialect — but only for fields listed in its per-object `jsonFields` registry,
+  and that registry (like the boolean / numeric / date / datetime / time /
+  auto_number registries and the tenant-isolation column) was filled **only** as
+  the first step of a DDL call. A deployment that skips boot schema sync therefore
+  served every write knowing nothing about its objects, and values reached
+  node-postgres to be encoded by its per-type defaults:
+  
+  - an **object** became JSON text — accidentally correct;
+  - an **array** became a Postgres ARRAY LITERAL (`{…}`) — `22P02 invalid input
+    syntax for type json`, a 500 on every write;
+  - **except `[]`**, whose array literal `{}` is valid JSON, so an empty array was
+    accepted and stored as an empty **object** — corruption, not an error;
+  - a **bare string** was passed raw (`x` is not JSON text, `"x"` is) — a 500,
+    while a number survived because `42` already is valid JSON.
+  
+  SQLite never showed any of it: `formatInput` ends with a bind-safety net gated
+  on that dialect, so the same empty registry is invisible there — which is why
+  tenant environments on Turso/SQLite and the suites that run on them were blind
+  to a defect live on every Postgres deployment.
+  
+  The registration is now separable from the DDL, on the ruling #7737/#10629
+  already made for federated objects — that flag is about DDL, and a binding that
+  is DDL-free must not ride on it:
+  
+  - `SqlDriver.registerObjectMetadata(objects)` installs a managed object's
+    coercion metadata with no `CREATE TABLE`, no `ALTER TABLE`, no existence probe
+    and no round-trip — the managed sibling of `registerExternalObject`, declared
+    optional on `IDataDriver` so drivers that don't need it omit it;
+  - a `skipSchemaSync` boot (and metadata reload) now takes that route instead of
+    doing nothing, keeping the cold-start budget the flag exists to protect;
+  - `initObjects` registers before the ADR-0015 DDL gate refuses, so objects on a
+    datasource ObjectStack is only a guest in are encoded from their declared
+    field types too. The refusal itself is unchanged.
+- d29e271: Index short name → FQN in `SchemaRegistry` so name lookups stop scanning the
+  whole registry (#10945).
+  
+  `SchemaRegistry.resolveObjectKey` answered the short-name direction by walking
+  **every** key of `objectContributors` and calling `parseFQN` on each. It is
+  reached from seven call sites — `getObject` among them — so a kernel boot that
+  registers N objects and resolves O(N) names did O(N²) string work, with
+  `parseFQN` the largest non-database entry in the CPU profile.
+  
+  The consequence was a silence rather than a failure: boot got slower purely by
+  an environment accumulating metadata, and once bootstrap outgrew the request
+  waiter every request answered `kernel_warming` and the environment could never
+  be opened — no error anywhere.
+  
+  `resolveObjectKey` now reads a short-name → FQN index `Map` maintained beside
+  `objectContributors`. Both containers are mutated only through two private
+  choke points, so they cannot drift apart: a caller cannot add a contributor
+  list and forget the index half.
+  
+  Resolution is deliberately unchanged. The index array holds the same members in
+  the same order as the list the scan built, so an ambiguous short name still
+  resolves to the **first** key registered under it, the ambiguity warning still
+  names every match, and the legacy `<ns>__<name>` fallback still works. That
+  equivalence is pinned against the old loop itself, over every registration
+  order, rather than against a hand-written expectation.
+  
+  Measured on the same container, resolving one name per registered object:
+  
+  | registry | 32,000 lookups over 4,000 objects | scaling ratio at 8× input |
+  |---|---|---|
+  | full-registry scan | 4,888 ms | 62.5× (quadratic) |
+  | short-name index | 2.3 ms | 5.7× |
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [5886ee6]
+- Updated dependencies [02d56b4]
+- Updated dependencies [82cb6e8]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [2866d5f]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [e222a53]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [a037f7c]
+- Updated dependencies [047ac86]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [0c24898]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [490879a]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [38bc74e]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/spec@17.2.0
+  - @objectstack/metadata-protocol@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/metadata@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

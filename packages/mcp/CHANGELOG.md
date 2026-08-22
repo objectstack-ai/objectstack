@@ -1,5 +1,117 @@
 # @objectstack/plugin-mcp-server
 
+## 17.2.0
+
+### Minor Changes
+
+- 502dc6f: fix(mcp): the stdio MCP transport assembles its ExecutionContext with the shared assembler, and resolves localization (#7279)
+  
+  `resolveStdioExecutionContext` was the last hand-written `ExecutionContext`
+  assembly on the platform. #6216 converged the dispatcher, REST and share-link
+  sites onto `assembleExecutionContext`; this face was not in that card's
+  inventory, so it kept building the envelope field-by-field — and fell behind it
+  in two ways.
+  
+  | field | before | after |
+  |---|---|---|
+  | `tabPermissions` | dropped | **carried** |
+  | `timezone` / `locale` / `currency` | **resolved not at all** | **carried** (workspace values) |
+  | `accessToken` | absent by omission | **withheld by decision, on the record** |
+  | `positions` / `permissions` / `systemPermissions` / `userId` / `tenantId` / `email` / `posture` / `org_user_ids` / `accessible_org_ids` | carried | carried, unchanged |
+  
+  ## ⚠️ This changes output on the stdio surface — it is NOT a no-op
+  
+  **Formula fields evaluated during a stdio call move from `UTC` to the
+  workspace timezone.** The read path threads `ExecutionContext.timezone` into
+  `ExpressionEngine.evaluate`, which defaults to `UTC` when the context carries
+  none (`cel-engine.ts`: `ctx.timezone ?? 'UTC'`). Every stdio call previously
+  carried none. **A date-bucketing formula can therefore return a different
+  calendar day than it did before this change** — for a workspace whose timezone
+  is not UTC, that is the point: the same record read over REST and over stdio
+  now agree, where before they could disagree by a day.
+  
+  Two smaller shifts ride along:
+  
+  - **Denial messages localize.** A read refused by CRUD/FLS or RLS renders in the
+    workspace language (`userFacingDenialMessage`, `opCtx.context?.locale`) instead
+    of English.
+  - **Date-dependent driver generation on the write doors** (autonumber
+    `{YYYYMMDD}` tokens) resolves its calendar day from the workspace timezone.
+    `buildDriverOptions`' `hasTz` gate (`execCtx?.timezone !== undefined`) is one
+    of the few places where a field's ABSENCE is a meaningful state, and a stdio
+    call crosses it for the first time. Pinned in both directions by
+    `packages/objectql/src/engine-timezone-presence-gate.test.ts`.
+  
+  If a deployment's workspace timezone is unset, `resolveLocalizationContext`
+  falls back to `UTC` / `en-US` — the values this face effectively used before —
+  and nothing changes for it.
+  
+  ## `accessToken` is withheld, deliberately, and now says so
+  
+  The stdio face's credential is a **long-lived `osk_` API key** read from
+  `OS_MCP_STDIO_API_KEY`, not a session bearer. `ExecutionContext.accessToken` is
+  a **published hook surface** (`session.accessToken`, `spec/data/hook.zod.ts`),
+  so handing every `beforeFind`/`afterFind` a credential with far longer life than
+  the session token that surface was designed around is a product decision nobody
+  has made. This face passes `accessToken: undefined` with the reason written
+  down, matching the REST precedent. (It is also unreachable here: the value is
+  assigned only inside `resolve-authz-context.ts`'s
+  `if (!userId && typeof input.getSession === 'function')` branch, and this call
+  passes no `getSession`. The test injects a sentinel token at the seam anyway, so
+  the *decision* is pinned rather than the accident.)
+  
+  ## Cost, and where it is paid
+  
+  `resolveStdioExecutionContext` still re-resolves the **identity** on every call,
+  deliberately — ADR-0101 D1, so a revoked key stops working on the next one.
+  Localization is resolved **once, in `start()`**, and reused: the key's tenant
+  cannot change mid-session, and up to three settings reads per MCP call on a
+  long-lived process is not acceptable steady state.
+
+### Patch Changes
+
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

@@ -1,5 +1,392 @@
 # @objectstack/plugin-approvals
 
+## 17.2.0
+
+### Minor Changes
+
+- b47ba2c: **BREAKING** (compile-time only): `ApprovalServiceOptions['logger']` now
+  declares a **non-optional** `warn`, so a durability report always has
+  somewhere to land (#9754, #10556). This is the thirteenth of the thirteen
+  mechanical repairs the card names — held out of #10691 to serialize against
+  PR #10547, which owned `approval-service.ts` while it was open; that fence
+  has since cleared.
+  
+  `minor`, not `major`: during the launch window this stack ships breaking
+  changes as `minor` — every publishable package versions in lockstep, so a
+  `major` would promote the whole release. `patch` would be wrong in the other
+  direction, because this *can* break a consumer's build. This is the same
+  reasoning #10691 used for the twelve sibling repairs; no exemption for a
+  types-only break was found there either, and none applies here.
+  
+  `error` stays optional — hosts legitimately inject reduced sinks, and
+  requiring `error` was measured and rejected as #9754 option C. What changes
+  is that its *absence* now has a declared, guaranteed destination. Call sites
+  keep the `logger?.warn?.(…)` spelling as the backstop for hosts the type
+  cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that constructs `ApprovalService` (or an `ApprovalServiceOptions`
+  value) with a `logger` object that has **no `warn` method** — for example
+  `{ error }` alone. Add a `warn` member; there is no rename, no removal, and no
+  stored value or metadata key to rewrite. The only non-test construction site
+  in this repo (`ApprovalsServicePlugin.start`, in this same package) passes the
+  kernel `ctx.logger`, whose `warn` is already required, so the in-repo cost is
+  zero.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-approvals/src/approval-service.ts#ApprovalServiceOptions) the tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and it is referenced by none -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+- 13f533a: fix(approvals): screen the `manager` approver to the request's organization (#10153)
+  
+  `expandApprovers` hands the directory organization to every graph-shaped
+  approver expansion — `department`, `position`, `org_membership_level`. The
+  `manager` branch did not: `lookupManager` read `sys_user.manager_id` under a
+  system context and took no organization argument at all. `sys_user` is a global
+  identity table with no `organization_id`, so nothing else on that path supplied
+  the tenancy fact either. A `manager_id` crossing an organization boundary
+  therefore routed the submission to an approver **in another organization** — an
+  out-of-tenant person granted approval authority over the record.
+  
+  The same column has been screened on the hierarchy side since cloud#1195. This
+  brings the approvals consumer into line for the `manager` branch.
+  
+  ## What the screen is
+  
+  `lookupManager(userId, organizationId)` now resolves the manager and then asks
+  whether he is **provably outside** the request's organization:
+  
+  | membership rows for the manager | result |
+  |---|---|
+  | some exist, none in the request's org | **screened out** — the slot falls through to the `manager:<value>` literal |
+  | one is in the request's org | resolves, unchanged |
+  | none exist at all | resolves, unchanged — the tenancy fact is absent, not negative |
+  | the `sys_member` read failed | resolves, unchanged |
+  | the request carries no organization | resolves, unchanged — and no read is performed |
+  
+  The fail-open half is this file's ruled posture on addressing paths, stated
+  twice already: `filterApproversWhoCanRead` refuses to empty a live slate on an
+  infrastructure hiccup, and `expandPositionUsers` carries "a step routing to
+  nobody is worse than one routing to a lapsed holder". A drop is logged with the
+  manager's id, his organizations and the request's, so the fix ("repair the link"
+  / "grant the membership" / "retarget the step") is legible without a debugger.
+  
+  ## ⚠️ This moves one input from accepted to refused
+  
+  A node whose **sole** approver is a cross-org `manager` and which is authored
+  with the **non-default** `onEmptyApprovers: 'fail'` used to open successfully;
+  it now throws `NO_APPROVERS`. Nothing new is thrown — a screened-out manager
+  leaves only a `type:value` literal, which the pre-existing empty-slate test
+  already classifies as empty, and `'fail'` already throws on empty. Every
+  screened sibling has reached that same bucket since it was written.
+  
+  **The default policy is unaffected**: `admin_rescue` still opens the request
+  (decidable by a privileged admin) and warns, and `auto_approve` still
+  auto-approves. Both directions and both policies are pinned in
+  `manager-approver-org-screen.test.ts`.
+  
+  ## What this does NOT decide
+  
+  - **#7497** (does approver routing imply record read visibility?) stays open.
+    The screen reads `sys_member`, which looks like the D2 read filter beside it,
+    and the code says at length why it is the *sibling* treatment instead: two of
+    the three org-scoped expansions already screen on `sys_member.organization_id`,
+    and `sys_user` offers no other tenancy fact. No reads are granted and no read
+    screen is applied to any type that lacked one.
+  - **`team`** is still unscreened — it is a sibling graph expansion that is not
+    org-scoped either, tracked as #10230, and it touches this same file.
+  - `APPROVER_ORG_SCOPED` is untouched. It answers ADR-0105 D9 *retargetability*
+    (may an author write `organization:` on this type?), not screening, and
+    `manager: false` remains correct.
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+
+### Patch Changes
+
+- 07bd1ca: Apply the subject object's field-level read controls to the approval payload
+  snapshot at serve time (#10749), so an approver no longer receives fields the
+  app author declared they may not read.
+  
+  `sys_approval_request.payload_json` stores the submitted record's raw row,
+  captured from the flow's `$record` variable — which the automation layer hands
+  over with the record's own FLS never applying. The column is a `textarea` on
+  `sys_approval_request`, so to every read door it is an opaque string: the
+  field-visibility machinery governs *columns of objects* and cannot see inside a
+  JSON column. Every field-level read control declared on the SUBJECT object —
+  `requiredPermissions` (ADR-0066 D3), a permission set marking a field
+  non-readable, a `maskingRule` — was therefore unenforceable on the approval
+  path, for every app.
+  
+  Per the maintainer's ruling (2026-08-22, Option B) the full snapshot **stays at
+  rest**: the approval record remains audit evidence of what was actually
+  submitted, which write-time trimming would have given away. Redaction happens at
+  **serve** time, keyed on the reading caller, so the same row answers an admin
+  with the whole snapshot and a restricted approver with only the fields they may
+  read. The readable set is not recomputed — it comes from the security service's
+  `getReadableFields`, documented as the same field mask the read middleware
+  applies, so this seam cannot drift from data-plane FLS.
+  
+  Two doors are covered, because `payload_json` has two independent readers and a
+  seam covering one manufactures the belief that the path is masked:
+  
+  - the **service door** (`getRequest` / `listRequests`, behind
+    `GET /api/v1/approvals/requests[/:id]`), which serves the parsed `payload`.
+    Redaction runs BEFORE display enrichment, so `payload_display` and
+    `payload_labels` — both built by walking the snapshot's own keys — cannot ship
+    a restricted field's name, its authored label, or the title of the record it
+    points at;
+  - the **generic data door**: the object declares
+    `enable.apiMethods: ['get','list']`, so a plain `find`/`findOne` returns the
+    raw string without the service ever running. Covered by object-scoped engine
+    middleware, which reaches the whole family sharing that producer (REST data
+    routes, ObjectQL, CSV/XLSX export, MCP). Middleware rather than an `afterFind`
+    hook on purpose: a hook receives `buildSession`'s output, which carries no
+    `onBehalfOf`, so a hook-based seam would drop the ADR-0090 D10 delegator
+    intersection and answer a delegated read more permissively than the service.
+  
+  **Behaviour change, argued rather than assumed.** A non-admin caller that was
+  reading restricted keys out of the snapshot now receives fewer keys, and that is
+  a real change for such a consumer. It is shipped as a fix rather than a breaking
+  change because those fields were never that caller's to read: the approval path
+  was a bypass of a declaration the platform enforces everywhere else, and the
+  served type is `payload?: unknown` — never a promised field set. This follows the
+  `__search` companion strip (#7642), which shipped the same way on the same
+  reasoning. Object-level access is deliberately untouched: an approver commonly
+  holds no read grant on the object under approval at all, and
+  `getReadableFields` answers a caller with no field-permission entries with the
+  full set, so every approval drawer shipping today keeps rendering.
+  
+  `hidden: true` is deliberately NOT acted on. It is a UI contract ("Hidden from
+  default UI") which, in the spec's own words, "has never governed serialization"
+  — measurably: no read path in the repo strips a value on it. Enforcing it here
+  alone would make the approval path stricter than a direct read of the same row
+  (closing no leak, since the approver can simply read the record) while breaking
+  drawers that render a `hidden` business column. That is a `packages/spec`
+  semantics question and is left open.
+- f0d7647: **Deliberate search-semantics change.** `ApprovalService.listRequests` /
+  `countRequests` no longer push a free-text predicate onto the payload snapshot
+  column for a caller whose view of that snapshot is masked (#11040).
+  
+  Since #10749 the approval snapshot (`sys_approval_request.payload_json`, the
+  submitted record's row) is redacted **at serve time, per reader**: each row is
+  cut down to the fields that caller may read on that row's subject object. The
+  full row deliberately stays at rest, so the approval record remains audit
+  evidence of what was actually submitted.
+  
+  The free-text filter, however, is evaluated by the driver against the stored
+  column — before anything is served, and therefore against the unmasked bytes. A
+  predicate over that column is a question about its contents whose answer is row
+  membership, so the field-level read controls #10749 enforces on the way out did
+  not hold on the way in. That is `declared ≠ enforced`, and the platform has
+  already settled the governing principle for it: under `maskingRule` (#8993) a
+  field a caller sees masked is non-filterable, refused loudly, because otherwise
+  equality probes reconstruct the hidden span. This extends that settled posture
+  to the snapshot column, which is reached through a different door.
+  
+  **What changes.** For a caller whose view of the snapshot is masked, free-text
+  search matches on `process_name`, `object_name`, `record_id` and `submitter_id`
+  — the columns of `sys_approval_request` itself, which anyone who can see the row
+  reads whole — and no longer on snapshot contents. Such a caller can still find a
+  request by process, object, record id or submitter; they can no longer find one
+  by a value they may not read. Rows returned, their order and pagination are
+  otherwise untouched, and no query is refused: the change only ever removes one
+  disjunct, never denies.
+  
+  **What does not change.** A caller the serve path hands the whole snapshot to
+  keeps today's behaviour exactly — same rows, same order. That includes every
+  deployment that has not wired a field-visibility authority (the seam is
+  late-bound, and absent it snapshots are served unredacted), and the case where a
+  wired authority declines to narrow. Consistency with the serve path is the rule
+  here rather than blanket fail-closed: where serve hands over the whole snapshot,
+  keeping the predicate discloses nothing serve does not already disclose.
+  
+  The masked/unmasked verdict is read from **the same authority and the same
+  per-caller call the serve path uses**, asked as the caller. It is deliberately
+  not a second, independently derived notion of "redacted" — two derivations drift,
+  and the drift between a serve rule and a filter rule is exactly what this fixes.
+  
+  Because redaction is decided per row while a filter is built before any row
+  exists, the predicate-time scope matters: with an `object` filter the subject
+  object is known and the seam is asked about it directly; without one the query
+  spans every object, nothing sound can be asked, and the disjunct is dropped.
+  
+  Held by `approval-free-text-scope.test.ts`.
+- 6d5c4fa: Release these plugins' resources from `destroy()`, the teardown hook the kernel
+  actually calls (#10371). `Plugin` declares `init()`, `start?(ctx)` and
+  `destroy?()` — and no `stop()` — so `ObjectKernel.performShutdown()` and
+  `LiteKernel.destroy()`, which walk the plugins in reverse calling
+  `plugin.destroy()`, walked straight past every plugin whose teardown was spelled
+  `stop()`. `await kernel.shutdown()` resolved with the reports dispatcher still
+  armed, the REST/OpenAPI/Slack connectors still registered on the automation
+  engine, the approvals SLA escalation job still scheduled, and the knowledge
+  event-sync subscription still open.
+  
+  Each teardown body now lives in `destroy()`. `stop()` is retained as a
+  delegating alias with its parameter made optional, so an embedder that learned
+  to call it directly — precisely because the kernel never did — keeps working
+  unchanged. No export is removed and the `Plugin` interface is untouched.
+  
+  Same defect as #9371 in `@objectstack/service-messaging`, which surfaced as
+  fully green test runs exiting 1 on `EnvironmentTeardownError` and being evicted
+  from the merge queue.
+- aa765b9: **Who loses access:** members of a team belonging to a *different* organization
+  than the record being approved. Concretely — a request raised in `org_a` routed
+  to a `team` approver whose `sys_team.organization_id` is `org_b` used to place
+  every `sys_team_member` of that team into `pending_approvers`, giving them the
+  approve/reject buttons on a record they are not a tenant of. They no longer
+  enter the slate, and the step falls back to the dead `team:<id>` literal with
+  the existing `#3807` "expanded to nobody" warning — the same shape a cross-org
+  `position` approver has always produced (#10230).
+  
+  `team` was the last approver expansion that resolved people without asking
+  which organization was asking; `department`, `position`, `org_membership_level`
+  and (since #10153) `manager` all do. The screen reads the team's own
+  `organization_id`, so it costs one row and a team that fails it never fans out.
+  
+  **Who does not lose access**, deliberately: a team stamped with the request's
+  own organization; a team stamped with **no** organization (`organization_id:
+  null` on a platform object means "owned by no organization" — what a seed
+  writes, since a seed cannot know the id the runtime mints at boot); a team id
+  with no `sys_team` row at all; and any request that carries no organization —
+  all four leave routing exactly as it was, because the tenancy fact is absent
+  rather than negative.
+  
+  ⚠️ One externally observable accept→reject change beyond the routing itself:
+  under the non-default `onEmptyApprovers: 'fail'` policy, a node whose *sole*
+  approver was a cross-org team used to open a request and now throws
+  `NO_APPROVERS`. Under the default (`admin_rescue`) the node still opens.
+- c5d0c2f: Screen expanded `team` approver members to the request's organization (#10547).
+  
+  #10230 made a `team` approver prove the TEAM's tenancy, and deferred the
+  members on purpose. `sys_team_member` carries `team_id` and `user_id` and no
+  organization column, so a team that passed that screen still routed every user
+  id it listed — including a user whose only `sys_member` row is in another
+  organization. Measured on a fixture, not read off the schema: an `org_a`
+  request against an `org_a` team returned `["u_outsider","u_insider"]` with zero
+  `sys_member` reads.
+  
+  The expansion now screens the members with the same provably-outside posture
+  the neighbouring screens pin, in ONE `$in` read for the whole slate:
+  
+  - membership rows exist for the user and none is the request's organization
+    (present and NEGATIVE) — dropped, with a warning naming the users, the team
+    and both organizations;
+  - no membership rows, an unreadable `sys_member`, a possibly-truncated read, or
+    a request carrying no organization (ABSENT) — routing is left exactly as it
+    was, and the no-organization case performs no read at all.
+  
+  Holding membership elsewhere is not disqualifying; holding none here is.
+  
+  ⚠️ Behaviour change, confined to one non-default policy: a node whose only
+  approver is a team staffed entirely by users provably outside the organization
+  now resolves to no one. Under the default `onEmptyApprovers: 'admin_rescue'` it
+  still opens, routed to the dead `team:<id>` literal as any unresolved slate is;
+  under `onEmptyApprovers: 'fail'` it now throws `NO_APPROVERS` where it
+  previously opened.
+  
+  Residual condition on the security value: the screen can only act on tenancy
+  facts that exist. A deployment that stamps an organization on its approval
+  requests but does not materialize `sys_member` rows sees no change — by design,
+  since #3807 recorded what treating an absent fact as a negative one costs.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

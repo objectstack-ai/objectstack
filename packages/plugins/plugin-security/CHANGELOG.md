@@ -1,5 +1,400 @@
 # @objectstack/plugin-security
 
+## 17.2.0
+
+### Minor Changes
+
+- 5337ef1: Batch the identity boot seeds' existence read and stop re-writing rows that
+  already match the declaration (#10946).
+  
+  Every permission set and every position an environment declared cost **exactly
+  4 sequential database round trips on every kernel boot** — measured on a real
+  per-environment kernel build with every `@libsql/client` call counted: slope
+  4.0000, R² = 1.000000 on both axes, with a per-statement histogram naming the
+  four legs (2 × existence `SELECT`, 1 × `UPDATE`, 1 × `SELECT`). Two of the four
+  were an `UPDATE` that fired even when nothing had changed. On a local file
+  database the loop is invisible; on a remote libsql/Turso database — every hosted
+  environment — each leg is its own sequential HTTP request. Schema sync had
+  already been batched (`TursoDriver.supports.batchSchemaSync`), which is why
+  objects, views and artifact seeds add 0.00 round trips each on the same rig;
+  identity content was the one content axis still paying per item.
+  
+  Both loops now hoist **one** `{ name: { $in: [...] } }` existence read out of the
+  loop — the declaration is known in full before the loop starts — and write only
+  when the stored row actually differs from what would be written. A steady-state
+  rebuild of both loops is now O(1) round trips: measured in-repo against a
+  call-counting ObjectQL double, a rebuild of 1, 5, 20 and 40 declared items costs
+  1 round trip in every case, for permission sets and positions alike.
+  
+  Three things the change is careful **not** to become:
+  
+  - **Drift still reconciles.** The skip is on equality, never on "we have seen
+    this name": a row whose stored value differs — a package version bump, a
+    hand-edit, a partially applied write — still gets its `UPDATE`. An
+    implementation that skipped all writes would show the same round-trip curve
+    and silently stop reconciling, so the round-trip pins are paired one-for-one
+    with drift pins over the same fixtures.
+  - **A read that could not answer is not the answer "none exist."** A batched
+    read fails for the whole set at once, so swallowing its failure into `[]`
+    would make every boot conclude nothing is seeded and re-create everything. The
+    seam is judged on whether the driver returned a result set, never on whether
+    the array came back empty; a failed batched read degrades to the per-item read
+    (loudly warned), and a name whose record cannot be read at all is declined
+    rather than inserted. That last step is deliberately stricter than the code it
+    replaces, which turned a failed read into an insert attempt and leaned on the
+    `name` unique index to refuse it.
+  - **A converged publish is still a successful publish.** `PermissionSeedOutcome`
+    gains `unchanged` (rows that already matched) and `unreadable` (names declined
+    because their record could not be read). The ADR-0086 P2 publish materializer
+    asks "did the record end up matching the published body", which was
+    accidentally identical to "was a write issued" only because the seeder always
+    wrote; it now reads `seeded + updated + unchanged`, so every case that reported
+    a materialization before still reports one. A re-publish of a byte-identical
+    body reports `inserted: 0, updated: 0` instead of `updated: 1` — the one
+    reporting difference, and the truthful reading.
+  
+  `bootstrapDeclaredPositions` likewise returns `unchanged` and `unreadable`
+  alongside `seeded`/`updated`.
+- a16ff50: `SweepLogger` and `ProjectionLogger` now declare `warn` as a REQUIRED channel, so a sink handed to the boot outbox sweep or to permission-set reconciliation can no longer be one that prints nothing (#9754)
+  
+  Both interfaces declared every member optional — `info?`, `warn?`, `error?` — which made `{ info }` a legal sink. Against such a sink both durability reports evaporated: each reaches for `error`, finds none, falls back to `warn`, and finds none of that either. For the sweep that is mail the platform accepted and never delivered, summarised to nobody; for reconciliation it is a permission set that will not survive a re-provision, with the `info` "reconciled" line skipped as well, so the sink heard neither the failure nor the reassurance.
+  
+  #9657 and #9748 repaired the call-site spellings. This is the other half, and the half that cannot regress: an optional `error` with no guaranteed alternative is a contract that permits silence, so an author reading the interface can write a report that never prints and be right about the type. Requiring `warn` makes that unrepresentable at the point of authoring rather than catchable one gate-run later.
+  
+  `error` deliberately stays optional on both types — hosts do inject reduced sinks, and requiring `error` would foreclose the `{ warn }`-only host the drivers were written for.
+  
+  If you pass a logger of your own and it declares no `warn`, add one; the kernel `Logger`, `ctx.logger` and `console` all satisfy the tightened shape unchanged. Consumers reach these types through `@objectstack/plugin-security`'s exported `ProjectionDeps`; `SweepLogger` is internal to `@objectstack/plugin-email`.
+  
+  The rule now has a checker of its own: `pnpm check:optional-error-sink` scans every sink type in `packages/**`, reports the population as a census on every run, and carries a shrink-only ledger of the 15 sinks that still permit silence.
+- 3ee8ddf: fix(security): **BREAKING** — `sys_position` retires the `permissions` column (ADR-0049 enforce-or-remove, #9885)
+  
+  Maintainer ruling 2026-08-20: **REMOVE**. The column — a "JSON-serialized array
+  of permission strings" textarea — was declared on the platform position table
+  while **no producer ever wrote it and no runtime path ever read it**. The
+  object-scoped census (every `sys_position`-naming file, with same-object
+  positive controls resolving `active` / `delegatable` / `is_default` / `name`
+  to real readers) measured it at zero on both sides: the builtin and declared
+  position bootstrappers set `label` / `description` / `managed_by` / `active` /
+  `is_default` only, and position→grant resolution consults
+  `sys_position_permission_set` rows plus the position `name` — never this
+  column. Its only reference was the `clone_position` action copying it between
+  rows (a copy of a value nothing writes), removed in the same stroke. objectui
+  was searched under the same discipline: no console surface names the column.
+  A free-text grant catalogue on a security object that no runtime enforces
+  tells an author — human or AI — that direct position-level permission strings
+  are a platform capability; they are not. This is an **accept-set narrowing**:
+  the platform stops declaring, projecting and accepting the column.
+  
+  Migration (FROM → TO):
+  
+  | Wrote | Write instead |
+  |---|---|
+  | `permissions` on a `sys_position` seed row or data-door write | Delete the key. Capability reaches a position **only** through permission-set bindings (`sys_position_permission_set` rows, created in Setup or by an app's kernel:ready binder); prose that was documenting intent belongs in `description`. |
+  
+  One-line fix: delete `permissions` from any authored `sys_position` row.
+  
+  <!-- adr-0087: registered position-permissions-column-retired -->
+  
+  Enforcement after the removal is loud, not silent: the engine's schema
+  preflight refuses an undeclared field with `400 INVALID_FIELD` before the
+  driver or any hook runs, and `PositionSchema`'s strict parse now rejects a
+  declared-position `permissions` key with guidance naming the binding table.
+  Physical columns on already-deployed databases are untouched (ADR-0045 schema
+  sync is additive). If position-level direct grants ever become a real need,
+  the column is re-declared **with a runtime reader in the same PR** —
+  declare-and-enforce or don't declare.
+
+### Patch Changes
+
+- 02b3b07: Point every runtime-emitted documentation URL at the canonical host, and retarget the
+  metadata-protection `docsUrl` at a page that actually exists.
+  
+  Two defects, one string. The host half: `docs.objectstack.ai` is an alias that redirects
+  to `https://objectstack.ai` path-preservingly, so nothing here was a broken link — it was
+  the unratified spelling sitting in the places a user copies from. The CLI's spec-version
+  advisory, the Setup and Studio in-app overview pages (English and Chinese alike), and a
+  showcase demo action now all name the canonical host.
+  
+  The path half is the real fix. All 29 `protection.docsUrl` values on the platform's
+  system objects and apps pointed at `/adr/0010-metadata-protection`, and `/adr/...` is not
+  a route on any host: the docs site mounts `content/docs` under `/docs`, `docs/adr/` is
+  not published, and no redirect source lives outside the `/docs` space. The slug was wrong
+  too — the record is `0010-metadata-protection-model.md`. Studio renders this URL as a
+  link in the lock banner, so an operator asking why an item is locked was being sent
+  nowhere. They now point at `https://objectstack.ai/docs/references/shared/protection`,
+  the published reference for the very schema that carries the field.
+- 5886ee6: Stop issuing two DB queries for questions already answered earlier in the same
+  request (#10757). One authenticated `GET /data/:object?$top=1` measured **24 DB
+  queries before, 23 after** — **22** when the caller opts out of the count.
+  Measured with `X-OS-Debug-Timing: json` on `pnpm dev:crm`, whose `Server-Timing`
+  carries `db;dur=…;desc="N queries"`.
+  
+  **`$count=false` now skips the COUNT query** (`@objectstack/metadata-protocol`).
+  The parameter has been declared (`ODataQuerySchema.$count`), aliased on the wire
+  (`$count` → `count`), reserved out of the implicit-field-filter bucket,
+  arity-checked and boolean-coerced for a long time — and then deleted unread, so
+  every paginated list ran `engine.count()` whether or not the caller wanted a
+  total. It is honoured now:
+  
+  ```
+  GET /data/task?$top=25              → { records, total, hasMore }   (unchanged)
+  GET /data/task?$top=25&$count=true  → { records, total, hasMore }   (unchanged)
+  GET /data/task?$top=25&$count=false → { records, hasMore }          (no COUNT query)
+  ```
+  
+  Read the shape of that carefully before adopting it:
+  
+  - **Only an explicit `false` opts out.** An ABSENT `$count` still counts and
+    still reports `total`. OData reads absent as "omit the count", and taking that
+    reading here would silently strip `total` from every existing caller — none of
+    them send the parameter, all of them read the number. The asymmetry is
+    deliberate and pinned by tests.
+  - **`total` is OMITTED, never estimated.** `FindDataResponse.total` is declared
+    optional ("if requested"), so absent is the declared shape for "not
+    requested". A caller that opted out and then reads `total` gets `undefined`,
+    not a plausible-looking guess — guard the read (`total ?? undefined`) or do
+    not send `$count=false`.
+  - **`hasMore` is still answered**, from the page alone: a full page means there
+    may be more. Same page-local rule the `$search` path already uses.
+  
+  **A find and its COUNT resolve permission sets once, not twice**
+  (`@objectstack/plugin-security`). `findData` answers a paginated list with two
+  engine operations, and the security middleware runs on both; each pass re-read
+  `sys_permission_set` for the same context with identical bindings. The
+  resolution is now memoized per execution context — a `WeakMap` keyed on the
+  context object, which is built once per request and collected with it, so
+  nothing outlives the caller it was resolved for — and **retired by any write**:
+  a process-wide epoch is bumped on every `insert`/`update`/`delete` the engine
+  middleware sees, ahead of the `isSystem` bypass so a seeder, a package publish
+  or an auto-org-admin grant invalidates too. A context whose grants are rewritten
+  in place re-resolves as well (the memo key covers `positions`, `permissions`,
+  `principalKind` and the presence of `userId`). No authorization answer is reused
+  across a write, across a context, or across a request.
+  
+  Not a fix for the whole cost: the remaining ~22 queries per authenticated
+  request are session resolution, grant resolution, localization and metadata
+  reads that repeat on every request. Removing those needs cross-request caching
+  with an invalidation design, which is deliberately not in this change.
+- b20c8d2: **Durability fix:** the two boot-time **summary** reports now reach a logger sink that has no `error` method, instead of printing nothing at all (#9748).
+  
+  `SweepLogger.error` and `ProjectionLogger.error` are both declared **optional**, and both summaries were spelled `logger?.error?.(…)` — an optional call that emits **nothing** when the method is absent. #9657 repaired the six per-row reports of this shape; it could not see these two, because `check:durability-log-level` only judges a call inside a `catch`, and a summary sits after the loop. Against a `{ info, warn }` sink the result was that the repair made the split **worse**: the per-row detail arrived at `warn` while the count of failures vanished, so the detail and the total reported through different channels.
+  
+  - `sweepStrandedOutbox()` — *"N stranded `sys_email` row(s) could NOT be delivered"*. Mail the platform **accepted** and never delivered, previously summarised to nobody.
+  - `reconcilePermissionSetProjection()` — *"N FAILED backfill(s)"*. Worse than a plain omission here: the `else` branch carrying the `info` "reconciled" line is skipped too, so such a sink heard **neither** — the reassuring half-truth this rule exists to remove, arrived at from the other side.
+  
+  Both now reach for `error` and fall back to `warn`, never to silence — the same repair shape #9657 applied to the per-row lines. A sink that **does** have `error` is unaffected and still gets the summary at `error`; a downgraded level is a degradation of the channel, never of the message, so the consequence and the fix survive the fallback intact.
+  
+  Also enforced from now on: `check:durability-log-level` grew a **summary limb** that judges a report keyed on the counter a durability-critical `catch` accumulated into, so this class cannot regress silently. The limb never second-guesses a chosen log **level** — it only checks that a call that reaches for `error` can actually print.
+- 6ceaa4b: docs: name packages that exist in seven published documents, and gate the class (#10893)
+  
+  A published README ships inside the npm tarball, so an install instruction in one
+  reaches every reader of the package. Nine `@objectstack/` names across seven
+  published documents named a package that is in **no directory of this repo**, and
+  five of those sat on `import` lines inside runnable fences.
+  
+  `check:published-readme-exports` could not see any of it, by construction. It
+  resolves a documented import against the package's built type surface through the
+  workspace member map, so a specifier that is not a member has no type entry to
+  compare against and the gate reads no further — strict about a member that exists,
+  silent about one that does not. The gate now makes the member-existence claim
+  first: an `@objectstack/`-scoped specifier that names no workspace member is a
+  finding, and the run header prints the scoped population as `N/N` so a recogniser
+  that stops matching shows up as a denominator that fell.
+  
+  What each dead claim now says, and why:
+  
+  - **`@objectstack/trigger-schedule`** and **`@objectstack/trigger-record-change`**
+    each misnamed **themselves**. Both READMEs — including their `# ` titles and
+    every fenced import — said `@objectstack/plugin-trigger-…`, a name that has
+    never been published. The exported class names (`ScheduleTriggerPlugin`,
+    `TimeRelativeTriggerPlugin`, `RecordChangeTriggerPlugin`) were correct all
+    along; only the package name was wrong, so this is a rename pinned by each
+    package's own `name` field.
+  - **`@objectstack/plugin-security`** told readers to `install
+    @objectstack/plugin-org-scoping` and register an `OrgScopingPlugin` from it. No
+    such package exists. The organization wall ships as the enterprise
+    `@objectstack/organizations` runtime, whose `OrganizationsPlugin` registers the
+    `org-scoping` service this plugin probes — the name `objectstack serve` and
+    `objectstack doctor` both print. Asking for the wall without it is a refusal to
+    boot (ADR-0093 D5), not a silent downgrade, and the page now says so. The
+    tenant-isolation bullet pointed at `@objectstack/service-tenant`, which is the
+    cloud control-plane runtime from the separate `cloud` repository and not where
+    the wall comes from either.
+  - **`@objectstack/service-package`** described packages being "delivered to
+    runtime kernels that load them through `@objectstack/service-marketplace`". That
+    package was never built: ADR-0003, ADR-0016 and ADR-0025 all name it as future
+    work. The loading half that does exist here is
+    `@objectstack/cloud-connection`'s `MarketplaceInstallLocalPlugin`.
+  - **`@objectstack/embedder-openai`** had a fenced example importing
+    `KnowledgeTursoPlugin` from `@objectstack/knowledge-turso` — the worst shape,
+    because a reader pastes it. No knowledge adapter in this repository consumes an
+    `IEmbedder` at all: `knowledge-memory` and `knowledge-ragflow` take no embedder
+    option, and the adapters the contract is written for are not here. The example
+    is now the `embed()` surface that does exist, with the gap stated rather than
+    papered over with a substitute package name.
+  - **`@objectstack/driver-sqlite-wasm`**'s "When to use" table compared it against
+    `@objectstack/driver-sqlite` and `@objectstack/driver-postgres`. Neither has
+    ever existed; `@objectstack/driver-sql` covers PostgreSQL, MySQL and SQLite
+    through Knex, choosing the client from its optional peers.
+  - **`@objectstack/spec`**'s published `prompts/architecture.md` instructed code
+    generators to write `import { User } from '@objectstack/protocol'`. The package
+    is `@objectstack/spec`, which the same sentence names as the path being
+    replaced.
+  
+  Four `@objectstack/` names that are **not** in this repo are deliberately left as
+  they are, because prose may name a package this repo does not build and a runnable
+  import may not: `@objectstack/security-enterprise` (the enterprise edition, whose
+  install hint the CLI prints and a CLI test pins), `@objectstack/service-tenant`
+  (the cloud runtime), `@objectstack/framework` (the umbrella install name), and the
+  two names `service-datasource`'s README recalls as its own past.
+- 145ba75: docs: repair the dead repo-relative targets in four published READMEs (#10813)
+  
+  A published README ships inside the npm tarball, so a dead relative link in one
+  is shipped to every reader who installs the package. Nine of them were measured
+  across four packages, and nothing read them: `check:published-readme-links`
+  checked docs-site URLs, `check:published-readme-exports` checked fenced import
+  lines, and the lychee lane never sees `packages/**/README.md`.
+  
+  `@objectstack/runtime` carried six dead targets. Each was traced to where the
+  content actually went rather than deleted:
+  
+  - `MINI_KERNEL_GUIDE.md`, `MINI_KERNEL_ARCHITECTURE.md` and
+    `MINI_KERNEL_IMPLEMENTATION.md` were deleted from the repo root in January as
+    "redundant markdown files" (d709ecce68 — 14 files, 5051 deletions, nothing
+    added). The kernel reference they described is the docs site now, so the
+    Documentation section is the same footer eight sibling READMEs already use.
+  - `examples/host/` was renamed to `examples/app-host`, then `apps/server`, then
+    `apps/objectos`, and finally split out to `objectstack-ai/cloud`. In-repo, an
+    HTTP server in front of the runtime is `@objectstack/plugin-hono-server` plus
+    the `@objectstack/hono` adapter, so the bullet points there.
+  - `examples/msw-react-crud/` became `examples/app-react-crud`, then
+    `apps/console`, and now ships as `@object-ui/console` from another repo.
+  - `test-mini-kernel.ts` was a root-level scratch script; this package's suite is
+    179 test files under `src/`.
+  - The section also ended on a truncated bullet with an unterminated backtick
+    (`` - `packages/runtime/src/ ``), which is now a real pointer to that suite.
+  
+  The other three packages: `@objectstack/hono` and `@objectstack/service-package`
+  still spelled `@objectstack/driver-sql` as `../../plugins/driver-sql`, stale
+  since the driver moved to `packages/drivers/` (#5618). `@objectstack/plugin-security`
+  and `@objectstack/service-package` linked three packages that are in no directory
+  of this repo (`plugin-org-scoping`, `service-tenant`, `service-marketplace`);
+  those links are dropped and the names kept as code spans, which is the spelling
+  those same files already use for a package they cannot point at in-tree. Whether
+  those three packages exist at all is a separate question, filed separately.
+- b419135: Report a metadata-store OUTAGE as an outage, not as an absent declaration
+  (#10424). When an object's security posture cannot be resolved, the refusal
+  now consumes the `degraded` verdict `IMetadataService.getDiagnosed` was already
+  computing and discarding (#5840), so a store that could not answer no longer
+  wears the sentence written for an object that was never declared — "Check that
+  the object is declared and published on this runtime" sent operators to
+  re-check a healthy declaration in the middle of an incident. The refusal now
+  names the store, says the declaration may well be fine, and the operator log
+  line carries a grep-able `DEGRADED` / `metadata-store OUTAGE`.
+  
+  Explanation and logging only. The deny is unchanged in every case — same
+  `PermissionDeniedError`, same `PERMISSION_DENIED`, same 403, still fail-closed
+  per #3545 — and the set of requests that are accepted or rejected does not
+  move: the resolving read is untouched and `getDiagnosed` is consulted as a
+  separate best-effort probe on the path that is already refusing. A metadata
+  service that does not implement the optional `getDiagnosed` reports `unknown`
+  and keeps the previous wording; it is never reported as an outage.
+- 88e32a8: `SecurityPlugin.start()` binds its report sink **above** the two bail-outs, so a
+  degraded boot no longer leaves the plugin permanently unable to report (#10706).
+  
+  `private logger … = {}` is an empty object from construction, and
+  `this.logger = ctx.logger` was its only assignment — sitting in the "capture
+  handles" block, **below** the two `return`s that fire when `objectql`/`metadata`
+  cannot be resolved, or when the engine carries no `registerMiddleware`. On
+  either path the field stayed `{}` for the **lifetime of the instance**. Every
+  report site is written `this.logger.warn?.(…)`, so an unbound sink is not a
+  state any caller can notice: the reports simply do not happen. The assignment
+  now runs immediately after the `Starting Security Plugin...` line, before either
+  bail-out can be taken.
+  
+  Boot behaviour is otherwise unchanged, and that is pinned rather than asserted:
+  both bail-outs still `return`, the middleware and the `security` service are
+  still **not** registered on those paths, and both bail-outs still report through
+  `ctx.logger` — which was always a real sink, so the bail-out itself was already
+  loud. What was silent was the plugin's own field afterwards.
+  
+  Scope note: this is independent of the open design call on #10556 about what the
+  default sink should be. Only the **placement** of the binding changes; the `= {}`
+  default itself is untouched, and the fix is correct under every option there.
+  
+  Reachability, measured rather than assumed: every in-repo caller of the two
+  public methods that report through the field (`checkAuthoredRowWrite`,
+  `getReadFilter`) reaches them through the registered `security` service, and
+  that service is registered *below* the bail-outs too — so on a bailed-out boot
+  there is no live consumer. The defect was latent, not live. It is still a defect
+  on its own terms: a sink that can never be bound after an early return is
+  unrepresentable as a state the code can notice.
+  
+  New pin: `start-logger-binding.test.ts`.
+- 24ba050: **Message change (no behaviour change):** a data-plane read against an object that exists only as an **unpublished draft** now says so, instead of reporting an internal security step (#10401).
+  
+  The refusal itself is unchanged and stays fail-closed (#3545): same `PermissionDeniedError`, same `PERMISSION_DENIED` code, same HTTP 403, same `[Security] Access denied` prefix — which is a **matcher** the transports read as "this is a 403", not house style. Nothing here widens access, and no access decision branches on the new information.
+  
+  What changed is what the refusal *says*. One sentence — "the security posture of object 'X' could not be resolved for operation 'find'" — covered two conditions with two different remedies, and described neither: because it named a *security* step, every reader took it for a permissions problem and went looking for a sharing rule to change. Measured downstream (objectstack-ai/cloud#1481): an end-user AI turn asked "how many customers do I have?" against a draft-only object, spent seven tool calls oscillating between a metadata plane that said the object existed and this refusal, then told the user the object was "missing its sharing/visibility setting" — confident, professional, and wrong. On a free plan that one turn also exhausted the daily allowance.
+  
+  The two conditions are now separated:
+  
+  - **The object has a `sys_metadata` draft and no published row** → *"object 'X' is not published — a draft declaration exists but no published one … Publish the object to make it queryable. This is NOT a permissions problem …"*.
+  - **The declaration genuinely cannot be read** (never declared, or a metadata-store outage) → the pre-existing clause **verbatim**, so any surface matching `the security posture of object 'X' could not be resolved for operation 'Y'` keeps matching, followed by the remedy and the same explicit statement that permissions are not the lever.
+  
+  Both sentences, and the operator log line beside them, are derived from one module (`unresolved-posture.ts`) shared with the explain engine's `object_crud` layer detail. Enforcement and explanation stating one refusal in two drifting wordings is the defect shape this closes, so the wording is a single source rather than two literals.
+  
+  The discriminator comes from a **best-effort** `sys_metadata` probe that runs only on the path already refusing, reads under a system context (so it cannot re-enter the middleware), and fails safe in one direction only: any failure — no `sys_metadata` in the deployment, an unprovisioned store, a driver error — reports the both-conditions wording rather than a claim. A posture that resolves never probes at all.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/formula@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

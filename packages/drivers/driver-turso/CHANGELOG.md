@@ -1,5 +1,77 @@
 # @objectstack/driver-turso
 
+## 17.2.0
+
+### Patch Changes
+
+- 6936d07: `engine.aggregate` honours a per-aggregation `filter` (#10576, the contract
+  half of #10413). `AggregationNodeSchema.filter` — declared since #4286 but
+  marked experimental and enforced by nothing — is now live with SQL
+  `FILTER (WHERE …)` semantics: the predicate narrows the SOURCE rows that one
+  aggregation reads while sibling aggregations in the same call keep seeing
+  every row of the group, so a measure-scoped filter (`stage: 'closed_won'`)
+  can finally reach the engine instead of being silently dropped (the #10413
+  wrong-numbers defect on the ObjectQL analytics path). The
+  `StrategyContext.executeAggregate` bridge (`@objectstack/spec/contracts`)
+  gains the same optional `filter` on its aggregation entries so analytics
+  strategies can lower measure filters into it (#10413 phase 2 consumes this
+  seam next).
+  
+  Execution is the correct-first two-tier shape date bucketing and HAVING use:
+  the engine lowers filtered aggregations in memory for every driver (unknown
+  operators refuse loudly with `INVALID_FILTER`/400 naming the aggregation
+  position; a group emptied by its filter answers the ruled empty-group values
+  — count/sum 0, avg/min/max null). No driver compiles conditional aggregation
+  natively today, so each native aggregate face (driver-sql — inherited by
+  driver-sqlite-wasm and Turso local —, the Turso remote transport,
+  driver-mongodb's pipeline builder, driver-memory's `performAggregation`)
+  refuses a directly-delivered per-aggregation filter with
+  `NOT_IMPLEMENTED`/501 instead of silently aggregating the unfiltered rows.
+  Aggregations without a `filter` are byte-identically unchanged, including
+  their native pushdown path.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [46cfa5b]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [f59035c]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+  - @objectstack/driver-sql@17.2.0
+  - @objectstack/core@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

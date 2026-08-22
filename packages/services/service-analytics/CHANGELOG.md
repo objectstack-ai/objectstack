@@ -1,5 +1,191 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.2.0
+
+### Minor Changes
+
+- 57e4571: **BREAKING**: `/analytics/query` now refuses a cross-object filter nested inside a
+  combinator on the ObjectQL path, instead of silently answering the wrong number
+  (#10759).
+  
+  `ObjectQLStrategy` runs one cross-object envelope check, from two call sites.
+  `generateSql()` (the `/analytics/sql` preview) asked it about every member the
+  `where` touches, flattened out of the filter tree. `execute()` asked it about the
+  built engine filter — where an AND-ed leaf sits at the top level and is seen, but
+  anything structural (an `$or`, a `$not`, a nested `$and` that cannot merge) has
+  been folded into `filter.$and`, so the only key readable for it was the literal
+  `$and`, which is never a field name.
+  
+  One query therefore got two answers, measured over one fixture in one run:
+  
+  ```
+  where: { $or: [{ 'account.region': 'West' }, { stage: 'won' }] }
+  
+  before   /analytics/sql     400 INVALID_FIELD  cross-object filter "account.region"
+           /analytics/query   200, rows
+  after    both               400 INVALID_FIELD  cross-object filter "account.region"
+  ```
+  
+  `engine.aggregate` cannot join. The half that returned rows was not answering the
+  cross-object query: the disjunct naming a column the base object does not have
+  can never match, so the query silently collapsed to its remaining branches and
+  reported a narrower figure as if it were the answer. Both call sites now derive
+  the member list from one shared view, so the invariant the strategy already
+  stated for itself — the preview accepts and rejects the same set the execution
+  door does — holds by construction rather than by two call sites agreeing.
+  
+  Who is affected: a deployment whose driver reports `objectqlAggregate` but not
+  `nativeSql` (Mongo, the memory driver), running an analytics query that puts a
+  related object's field inside `$or` or `$not`. Such a query now returns
+  `400 INVALID_FIELD` naming the member. The refusal already existed and already
+  had these words; what changed is that the execution door reaches it too. Nothing
+  an author writes in metadata changes, no stored shape is affected, and queries
+  whose combinators name only base-object fields are untouched — that set is pinned
+  in `crossobject-conjunct-refusal.test.ts` alongside the new refusal, because a
+  fix that refused every combinator would have looked identical from the refusal
+  side alone.
+  
+  The remedy for an affected query is the one the error message has always carried:
+  run it on a native-SQL driver, which can join, or drop the cross-object member
+  from the filter.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime query-shape refusal on /analytics/query, not a metadata surface: no authorable key, export or config field is removed or renamed, so `objectstack migrate meta` has nothing to rewrite and an upgrader has no stored shape to convert. The affected input is an ad-hoc request body, and the error itself names the member and the two ways out. -->
+- 13a3dca: **BREAKING**: on the ObjectQL path, a compiled dataset whose definition-level
+  `filter` is itself cross-object is now refused by both analytics doors instead
+  of reaching `engine.aggregate` with a predicate it cannot join (#10861).
+  
+  PR #10758 gave the dataset's own definition-level `filter` a route onto this
+  door for the first time. That route was outside the member view the cross-object
+  envelope check judges, so nothing ever saw it:
+  
+  ```
+  dataset: object 'opportunity', include: ['account'],
+           filter: { 'account.region': 'West' }
+  
+  before   /analytics/query   200, rows   -> engine.aggregate received
+                                             {"$and":[{"account.region":"West"}]}
+           /analytics/sql     200, SQL
+  after    both               400 INVALID_FIELD, member "account.region",
+                              cube "<dataset>"; the engine is never reached
+  ```
+  
+  `engine.aggregate` cannot join. `account.region` is not a column of
+  `opportunity`, so on any driver that evaluates the predicate honestly it matches
+  nothing, and the widget answered a number that was neither the scoped number nor
+  the unscoped one — with no error anywhere. That is the silent mis-bucket #3654's
+  loud refusal exists to prevent, arriving through a producer #3654 predates.
+  
+  **Breaking, and argued rather than assumed.** A query that returns `200` with
+  rows today starts answering `400`, on a *saved* dataset rather than on anything
+  in the request — a dashboard that renders today can start showing an error. That
+  is the strongest reading of "breaking" and it is why this is called out here
+  rather than filed as a quiet fix. What is *not* lost is any correct answer: the
+  rows that stop being served were already wrong, and wrong in the way that hides
+  itself. The refusal names the member, names the dataset, and says the same
+  definition is valid on a native-SQL deployment, so the operator has somewhere to
+  go; the previous behaviour gave them a plausible number and nothing to notice.
+  Rejecting the dataset at compile time in `dataset-compiler.ts` was considered and
+  not taken (maintainer ruling, 2026-08-22): the compiler cannot see which driver
+  will serve the dataset, and the same definition is legal on a native-SQL one.
+  
+  Who is affected: a deployment whose driver reports `objectqlAggregate` but not
+  `nativeSql` (Mongo, the memory driver), serving a dataset whose definition-level
+  `filter` names a field on a related object. Nothing an author writes changes
+  shape, no stored document is rewritten, and an **ordinary** dataset scope
+  (`filter: { is_deleted: false }`) still passes both doors and still reaches the
+  engine carrying its predicate — that direction is pinned one character away from
+  the new refusal in `crossobject-conjunct-refusal.test.ts`, because an
+  implementation that refused *every* dataset scope would look identical from the
+  refusal side alone and would break every scoped dataset shipping today.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is
+  retired, renamed or re-shaped: `DatasetSchema`'s `filter` key stays exactly as it
+  is, every stored dataset document stays valid as written, and the very same
+  document remains correct on a native-SQL deployment. There is therefore nothing
+  `objectstack migrate meta` could rewrite — a mechanical rewrite would have to
+  know which driver will serve the dataset, which is precisely the capability the
+  2026-08-22 ruling records as invisible to the compile-time placement. This is a
+  query-time refusal on one driver family, not a surface retirement, so the ledger
+  has no entry to carry and the upgrade guide has no prescription to print. -->
+
+### Patch Changes
+
+- 7bf3fb7: Point every documentation link in these packages' published READMEs — and in
+  the project `create-objectstack` scaffolds — at the canonical docs origin
+  `https://objectstack.ai`, replacing the `docs.objectstack.ai` spelling.
+  
+  Both spellings reach the same pages (the alias redirects to the apex,
+  path-preserving), so no link was broken. The reason it needs a release rather
+  than an in-repo fix alone: a README ships inside the npm tarball, so the
+  version already on npm keeps showing the old host to every reader of the
+  package page until a new one is published.
+- 112a8c6: Apply a dataset's definition-level `filter` on the ObjectQL analytics path
+  (#10413, phase 1). `/api/v1/analytics/query` served by a driver that reports
+  `objectqlAggregate` but not `nativeSql` (MongoDB, the memory driver) reached
+  `engine.aggregate` with no `filter` key at all: the dataset's own scope — a
+  `filter: { is_deleted: false }` on the dataset definition — was dropped, so
+  every measure aggregated the whole table while the dashboard door, on the same
+  cube and the same measure names, answered the scoped numbers. The scope is now
+  ANDed into the strategy's whole-call filter (never merged key-by-key, so a
+  caller's own `where` and the time windows cannot be overwritten by it), and the
+  representative SQL echo renders it too.
+  
+  Per-MEASURE `filter`s on this path are still not applied: an
+  `engine.aggregate` aggregation is `{ field, method, alias }` and cannot carry a
+  predicate of its own. Widening that contract is #10576; lowering the measure
+  filters into it is phase 2 of #10413. The native-SQL path already applies both
+  (#10298).
+- 6439f8b: Analytics measures are now compiled from everything they declare — `aggregate`, `field` **and** `filter` — on both the dashboard path and `POST /api/v1/analytics/query`.
+  
+  **Reported figures change, and the new ones are the declared ones.** Two corrections, both of which move numbers a dashboard or an API consumer is already reading:
+  
+  - A measure written `{ aggregate: 'count', field: 'some_column' }` used to compile to `COUNT(*)` and count **rows**. It now compiles to `COUNT("some_column")` and counts **non-null values**. Any such measure will report the same number as before or a **smaller** one, and a rate built on top of it (a numerator over a total) will drop accordingly — a "100%" tile whose column was mostly empty was reading its own denominator.
+  - `POST /api/v1/analytics/query` used to drop every per-measure `filter`, and the dataset's definition-level `filter` with it, returning unfiltered aggregates under the author's measure names. It now applies both, so the endpoint answers what the dashboard already answered for the same cube. Figures pulled through the API — agent tools, exports, downstream reports — will move to the filtered values; a measure declaring `filter: { stage: 'closed_won' }` stops counting every row.
+  
+  Measures that declare no `field` still compile to `COUNT(*)`, and a cube that is not a compiled dataset (an inferred or manifest cube) emits byte-for-byte the statement it did before. Measure filters lower to portable `CASE WHEN` conditional aggregates rather than `FILTER (WHERE …)`, which MySQL does not have.
+  
+  If a saved figure or a screenshot disagrees with what the platform now reports, the new number is the one the metadata declares.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

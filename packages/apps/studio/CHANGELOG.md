@@ -1,5 +1,85 @@
 # @objectstack/studio
 
+## 17.2.0
+
+### Patch Changes
+
+- 02b3b07: Point every runtime-emitted documentation URL at the canonical host, and retarget the
+  metadata-protection `docsUrl` at a page that actually exists.
+  
+  Two defects, one string. The host half: `docs.objectstack.ai` is an alias that redirects
+  to `https://objectstack.ai` path-preservingly, so nothing here was a broken link — it was
+  the unratified spelling sitting in the places a user copies from. The CLI's spec-version
+  advisory, the Setup and Studio in-app overview pages (English and Chinese alike), and a
+  showcase demo action now all name the canonical host.
+  
+  The path half is the real fix. All 29 `protection.docsUrl` values on the platform's
+  system objects and apps pointed at `/adr/0010-metadata-protection`, and `/adr/...` is not
+  a route on any host: the docs site mounts `content/docs` under `/docs`, `docs/adr/` is
+  not published, and no redirect source lives outside the `/docs` space. The slug was wrong
+  too — the record is `0010-metadata-protection-model.md`. Studio renders this URL as a
+  link in the lock banner, so an operator asking why an item is locked was being sent
+  nowhere. They now point at `https://objectstack.ai/docs/references/shared/protection`,
+  the published reference for the very schema that carries the field.
+- 28ad84a: Corrected the package header's transitional NOTE, which had drifted stale in
+  two opposite directions.
+  
+  Verified directly against the boot path at head, not against the header's
+  own narrative: `plugin-dev`'s `DevPlugin` boot loop and `cli`'s `os serve`
+  app-package loop both deliberately register only `@objectstack/setup` and
+  `@objectstack/account` — Studio's exclusion is a settled decision, not a
+  pending follow-up, because the console ships its own dedicated Studio
+  surface. `plugin-auth`'s manifest has likewise already stopped registering
+  Studio (ADR-0048); that removal is done, not "landing separately" as the
+  stale header implied.
+  
+  The header's other transitional claim is still accurate and was left
+  unchanged: `STUDIO_APP` is still imported from
+  `@objectstack/platform-objects/apps` rather than defined in this package.
+  
+  Comment-only: no export, behaviour, or boot path changed.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

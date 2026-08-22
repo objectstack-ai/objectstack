@@ -1,5 +1,149 @@
 # @objectstack/service-storage
 
+## 17.2.0
+
+### Patch Changes
+
+- da891e0: **Behaviour change (tightening):** updates of `sys_attachment` rows are now authorization-gated, where they previously ran with **no record-level check at all** (#10091).
+  
+  `installAttachmentAccessHooks` gated insert (parent-edit access, `uploaded_by` server-stamped) and delete (uploader-or-parent-editor), but registered **no `beforeUpdate` hook** — so under the default member permission sets (wildcard CRUD, no row scoping) any member could rewrite any attachment row: re-point `parent_id` at a record they cannot read, or rewrite `uploaded_by` and then walk through the delete gate's uploader shortcut. The `sys_comment` kit — explicitly derived from this one — has gated update with the same rule since #4630; the source kit was missing the limb its derivative copied.
+  
+  The new `beforeUpdate` gate narrows the accept set as follows; if a currently-working update starts failing, the caller lacked rights the other two verbs already required:
+  
+  - **Row rule:** the caller must be the attachment's uploader OR hold edit on its parent record (`ISharingService.canEdit`; degrades to caller-scoped parent READ visibility when no sharing service is present). A multi-row update requires EVERY matched row to pass. Refusals are HTTP 403 with the **standard catalog code `RECORD_NOT_ACCESSIBLE`** (ADR-0112: generic permission conditions take the catalog — the same envelope the comment kit's update gate emits; the insert/delete gates keep their grandfathered `ATTACHMENT_*` codes).
+  - **Re-point rule:** an update that changes `parent_object`/`parent_id` must additionally satisfy the attach rule on the NEW parent (edit access, read visibility in degraded mode) — 403 `ATTACHMENT_PARENT_ACCESS` otherwise, and a re-point half that names no record (`null`/empty) is refused rather than left to validation.
+  - **Unscoped shape:** an unscoped `multi: true` update (no `where` at all) is refused outright via the `dispatchUnscopedMultiWrite` whole-operation dispatch (#9974), mirroring the delete verb's #4757 refusal. The explicit match-all `where: {}` is still accepted and authorized per row.
+  
+  System-context operations and context-less programmatic calls on bare kernels bypass the gate exactly as the insert/delete gates do. `uploaded_by` is deliberately not re-stamped on update: the caller is already verified as uploader or parent editor before the write proceeds, so the rewrite-then-uploader-delete escalation is closed by the row rule itself.
+- a38c3ff: **Bug fix (retention leak):** an UPDATE that re-points a `sys_attachment` row's `file_id` now detaches the PRIOR file the same way deleting that row would — tombstoning it when the re-pointed row was its last reference (#10171).
+  
+  `installAttachmentLifecycleHooks` registered only delete-side and insert-side handlers, so a `file_id` re-point left the old `sys_file` sitting at `status='committed'` with zero join rows and no `deleted_at`. That is not the module's "fail toward retention" bias, which buys a **later** look: `sys_file`'s declared lifecycle nominates a row for the sweep only through `ttl { field: 'deleted_at' }` or `retention { onlyWhen: { status: 'pending' } }`, and a silently detached file matches neither — so the reap guard is never asked about it and the storage bytes are stranded permanently, with no later re-examination.
+  
+  The new `afterUpdate` handler fires only when the payload actually carries `file_id` and the value actually changes, then runs the existing orphan rule (zero remaining join rows, attachments-scope, committed) on the prior id. It is best-effort like its siblings and never blocks the user's write; with no pre-image available it tombstones nothing, keeping the file.
+  
+  The departed id comes from the engine-bound pre-image `ctx.previous`, **not** from a `beforeUpdate` stash mirroring the delete pair. Since #5574 (ADR-0058 Addendum II D1/D2) a predicate write dispatches one fresh context per matched row in each phase, so a stash written in `beforeUpdate` reaches `afterUpdate` on the by-id path and is lost on the predicate path — a stash-based twin would have been silently half-dead on exactly the multi-row updates that orphan the most files. Reading `previous` also adds no driver round trip: the prior-row read is memoized per operation and already demanded on this object.
+  
+  **No revival leg was added**, deliberately. Re-pointing a row ONTO a grace-window tombstone is already handled by the reap guard's sweep-time re-verification, which resolves current references, un-tombstones the file and vetoes the reap rather than reclaiming bytes. A second revival mechanism here would be a duplicate answer to a question that already has one.
+- a24b7fa: Make the settings ordering contract **declared and enforced**, and make the
+  residual pre-bind READ audible (#10250).
+  
+  `SettingsServicePlugin` binds its data engine from a `kernel:ready` hook
+  registered in its `start()`. Three shipped plugins read a settings namespace
+  from a `kernel:ready` hook registered in *their* `start()` — `plugin-email`
+  (`mail`: SMTP/provider/from-address), `service-sms` (`sms`: provider
+  credentials and the daily cost ceiling) and `service-storage` (`storage`:
+  backend and credentials). Hooks fire in registration order, so a reader that
+  started before the settings plugin read `SettingsService`'s in-memory fallback,
+  which is empty at boot: the caller received the manifest **default** with
+  `source: 'default'` and `locked: false`, no diagnostic anywhere, while the
+  operator's saved row sat unread in `sys_setting`.
+  
+  Nothing constrained that order. None of the three declared any dependency on
+  `com.objectstack.service.settings`, so their position was pure `kernel.use()`
+  order. It was correct under `os serve` only because the always-on slate happens
+  to list `settings` first — and `serve` *prepends* an app's declared `requires`,
+  so an ordinary `requires: ['email']` produced email-before-settings and bypassed
+  that; cloud's per-tenant runtime mounts the slate from its own wiring.
+  
+  Three changes, one contract:
+  
+  - **Declared order.** Each of the three plugins now declares
+    `optionalDependencies: ['com.objectstack.service.settings']`. The kernel
+    resolves both the init and the start phase from that graph
+    (`resolvePluginOrder`, ADR-0116), so the bind is ordered ahead of the read
+    wherever the plugin is composed, in any host. Soft, not hard: a kernel with
+    no settings service still boots these plugins unchanged.
+  - **The residual is audible.** A settings read issued while a bind is
+    *declared but pending* now emits one operator-actionable `warn` per namespace
+    naming the repair. Deliberately not a refusal — an in-window read of a
+    setting with genuinely no persisted row must answer the manifest default, and
+    refusing would turn a correct startup sequence into an error. It stays silent
+    in every case that is not the window: after `bindEngine`, on a kernel with no
+    `objectql` at all (`settleWithoutEngine`), for a directly constructed
+    `SettingsService`, and for a read satisfied by an `OS_*` env override.
+  - **The slate pin now derives its boundary.** The foundational-prefix
+    assertion covered `slice(0, 6)` while `sms` — a settings reader — sits at
+    index 6, one past the end. The new pin
+    (`packages/cli/src/commands/serve-settings-ordering.pin.test.ts`) states the
+    rule instead of the count: every always-on entry that is not one of the
+    services others bind into at `kernel:ready` must be mounted after all of
+    them. An entry added tomorrow is covered wherever it lands.
+  
+  No behaviour changes for a deployment whose order was already correct.
+- 9e93fc6: Fix attachment tombstoning silently no-opping on a predicate (`multi: true`) delete
+  
+  Deleting `sys_attachment` join rows by PREDICATE left the file they referenced at
+  `status='committed'` with `deleted_at` NULL, even when the deleted row was the
+  file's last reference. The tombstone hooks handed file ids from `beforeDelete` to
+  `afterDelete` on the hook context itself, on the premise that the engine passes
+  the same `HookContext` to both events. Since ADR-0058 Addendum II (D1/D2) a
+  predicate write dispatches one FRESH context per matched row in each phase, so
+  that hand-off never arrived and no tombstone was written.
+  
+  The bytes were stranded permanently rather than late: `sys_file`'s declared
+  lifecycle nominates a sweep candidate only via `ttl { field: 'deleted_at' }` or
+  `retention { onlyWhen: { status: 'pending' } }`, and an untombstoned orphan
+  matches neither — so the reap guard was never asked about it. The by-id delete
+  verb, and both dispatch paths of the update verb, were unaffected.
+  
+  The departed id now comes from `ctx.previous.file_id`, which the engine binds on
+  both phases and both dispatch paths — the same slot the update verb's detach leg
+  already reads.
+  
+  **What an upgrader needs to know.** New predicate deletes tombstone correctly
+  from this version on. Files ALREADY stranded by the old behaviour are not
+  retro-actively tombstoned by this change: they sit at `status='committed'` with
+  live storage bytes and no join row, and nothing in the platform sweep will
+  nominate them. Recovering that existing backlog needs a one-off reconciliation
+  pass over `sys_file` (attachments-scope, `status='committed'`, zero
+  `sys_attachment` references) and is deliberately not part of this fix.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/observability@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

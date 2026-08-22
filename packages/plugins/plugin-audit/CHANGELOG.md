@@ -1,5 +1,147 @@
 # @objectstack/plugin-audit
 
+## 17.2.0
+
+### Minor Changes
+
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+
+### Patch Changes
+
+- 76deca2: **Docs (published README) + ruling:** record-view auditing now documents how to turn it on under `objectstack serve`, and the answer to "should `os serve` grow an `appAuditPluginOptions(config)` helper?" is **no** (#9863).
+  
+  The README and `content/docs/permissions/record-view-auditing.mdx` both said the audited set is configured "where you compose the kernel", and the docs page went further: *"The CLI's `os serve` registers `AuditPlugin` with no options, so a stack served that way has record-view auditing off and no knob to turn it on."* That last clause stopped being true when #9864 declared and pinned the duplicate-registration contract. The knob is the stack's `plugins` array — a configured `new AuditPlugin({ readAudit: { objects: [...] } })` there supersedes the CLI's option-less instance by name, last-one-wins, on both kernels, with the displaced instance never reaching `init()`. Both pages now spell that path, and name the `Plugin superseded: 'com.objectstack.audit'` boot line as the opt-in working rather than a misconfiguration.
+  
+  **No new configuration surface was added, deliberately.** A `config.audit` key read by an `appAuditPluginOptions(config)` helper would reproduce, in `objectstack.config.ts`, exactly the failure #8992's ruling refused for the object-metadata spelling: a declaration that survives in a deployment which never installs this package, reading as coverage while recording nothing. It would also be a *second* configuration surface that silently loses to the first, since an app's own `plugins` entry supersedes whatever the CLI constructed. The `#7001` symmetry argument does not carry it either — `@objectstack/verify`'s `bootStack` constructs no `AuditPlugin` and does not depend on this package, so there is no second boot path to disagree with.
+  
+  No runtime behaviour changed. `packages/cli` gains only the reasoning at its registration site and `serve-audit-registration.contract.test.ts`, which pins the three facts the ruling rests on — including the load-bearing ordering (`AuditPlugin` registered above the stack `plugins` loop) that until now was asserted by a comment and nothing else.
+- 7bf3fb7: Point every documentation link in these packages' published READMEs — and in
+  the project `create-objectstack` scaffolds — at the canonical docs origin
+  `https://objectstack.ai`, replacing the `docs.objectstack.ai` spelling.
+  
+  Both spellings reach the same pages (the alias redirects to the apex,
+  path-preserving), so no link was broken. The reason it needs a release rather
+  than an in-repo fix alone: a README ships inside the npm tarball, so the
+  version already on npm keeps showing the old host to every reader of the
+  package page until a new one is published.
+- dd41df3: **Behaviour change (tightening):** `enable.files` / `enable.feeds` are now enforced on the **update** verb, not only on insert (#10170).
+  
+  Both capability gates in `audit-writers.ts` registered on `beforeInsert` only. `enable.files` says whether `sys_attachment` rows may **target** an object and `enable.feeds` whether `sys_comment` rows may target it — properties of the target object, not of the verb that got a row there — so a re-point via update landed rows the declaration refuses: a caller who could not *create* an attachment on an object without `enable.files: true` could *move* an existing one onto it, and a comment could be re-threaded into a `feeds: false` object's thread. The access kits authorize the re-point (`comment-access-hooks.ts` since #4630, `attachment-access-hooks.ts` since #10091), but those are **access** checks — the capability half was never asked on update.
+  
+  What an operator will now observe:
+  
+  - An update of `sys_attachment` whose payload sets `parent_object` to an object that does not declare `enable: { files: true }` is refused with **403 `FILES_DISABLED`** — the same envelope the insert path has emitted since #2727 (ADR-0112: `code` + `status`). Fail-closed as on insert: an absent `enable` block, an absent flag, and an unknown parent object all reject.
+  - An update of `sys_comment` whose payload sets `thread_id` to a thread on an object declaring `enable: { feeds: false }` is refused with **403 `FEEDS_DISABLED`**. Opt-out semantics as on insert: only an explicit `false` rejects, and a missing or free-form `thread_id` is still allowed through — this is capability gating, not access control.
+  - Both apply on **both dispatch shapes**: a by-id update (`dispatch.mode` `record`) and a predicate `multi: true` update, which is evaluated per matched row (#5574 / ADR-0058 Addendum II). An unscoped predicate update is refused on its first matched row.
+  
+  **No existing row is newly refused, and no update that is not a re-point changes.** The gates read the payload: an update that never names `parent_object` / `thread_id` returns on the gate's first line, so renames, body edits, reaction writes and other column updates on a row whose parent object has since had the capability flipped off keep working exactly as before. Only a write that makes a row *newly target* a walled object is refused.
+  
+  **Blast radius.** A structural sweep of the 4 660 in-tree source files found **no** caller — none in `packages/` source, `examples/`, or the dogfood apps — that issues an update whose payload names `parent_object`, and none that re-points `thread_id`; in the console the only `sys_attachment` write is a create, and the only `sys_comment` update writes `reactions`. If you have your own "move this attachment" or "move this comment" flow, point it at a target object that declares the capability, or declare it on the target.
+  
+  No new error code: both codes are existing standard-catalog members already registered in `packages/spec/src/api/error-code-ledger.zod.ts` and already mapped to 403 by `packages/rest/src/error-response.ts`.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d483e1]
+- Updated dependencies [530c1df]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [2570ab0]
+- Updated dependencies [d23e3a0]
+- Updated dependencies [f3a8134]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [2306a76]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [d29e271]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/objectql@17.2.0
+  - @objectstack/core@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes
