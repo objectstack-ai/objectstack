@@ -267,10 +267,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       enable_two_factor: {
         label: "二要素認証を有効化",
-        successMessage: "二要素認証を有効にしました。認証アプリで QR コードをスキャンするか otpauth URI を貼り付け、コードを検証して設定を完了してください。",
         params: {
           password: {
             label: "現在のパスワード"
+          }
+        },
+        resultDialog: {
+          title: "二要素認証を有効化しました",
+          description: "認証アプリで QR コードをスキャンし、バックアップコードを安全な場所に保存してください。バックアップコードの表示は一度きりです。",
+          acknowledge: "バックアップコードを保存しました",
+          fields: {
+            totpURI: "認証アプリ URI",
+            backupCodes: "バックアップコード"
           }
         }
       },
@@ -287,10 +295,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       generate_backup_codes: {
         label: "バックアップコードを再生成",
         description: "新しいバックアップコードを生成しますか？以前に生成されたコードはすべて使用できなくなります。",
-        successMessage: "新しいバックアップコードを生成しました。安全な場所に保管してください。",
         params: {
           password: {
             label: "現在のパスワード"
+          }
+        },
+        resultDialog: {
+          title: "新しいバックアップコードを生成しました",
+          description: "以前のバックアップコードは無効になりました。新しいコードを安全な場所に保存してください。表示は一度きりです。",
+          acknowledge: "新しいコードを保存しました",
+          fields: {
+            backupCodes: "バックアップコード"
           }
         }
       }

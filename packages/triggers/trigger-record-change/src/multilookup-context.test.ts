@@ -56,7 +56,7 @@ function makeDriver(): any {
 
 describe('record-change context hydrates multi-lookup from input (#1872)', () => {
   it('fires a record-after-create flow gated on a multi-lookup the driver did not echo', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());

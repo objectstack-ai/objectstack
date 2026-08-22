@@ -267,10 +267,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       enable_two_factor: {
         label: "启用双因素认证",
-        successMessage: "双因素认证已启用。用身份验证器 App 扫描二维码或粘贴 otpauth URI，然后验证一次动态码以完成设置。",
         params: {
           password: {
             label: "当前密码"
+          }
+        },
+        resultDialog: {
+          title: "双因素认证已启用",
+          description: "请用身份验证器应用扫描二维码，并将备用码妥善保存。备用码只显示一次。",
+          acknowledge: "我已保存备用码",
+          fields: {
+            totpURI: "身份验证器 URI",
+            backupCodes: "备用码"
           }
         }
       },
@@ -287,10 +295,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       generate_backup_codes: {
         label: "重新生成备用码",
         description: "要生成一组新的备用码吗？之前生成的备用码将全部失效。",
-        successMessage: "新备用码已生成——请妥善保存。",
         params: {
           password: {
             label: "当前密码"
+          }
+        },
+        resultDialog: {
+          title: "已生成新的备用码",
+          description: "之前的备用码已全部失效。请妥善保存这些新备用码——它们只显示一次。",
+          acknowledge: "我已保存新备用码",
+          fields: {
+            backupCodes: "备用码"
           }
         }
       }

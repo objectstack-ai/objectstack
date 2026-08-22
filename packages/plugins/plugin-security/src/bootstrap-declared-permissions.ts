@@ -34,37 +34,70 @@
  * shared {@link permissionSetRowFields} row shape so they can never hydrate
  * differently.
  *
- * ## Per organization under a walled posture
- *
- * The PACKAGE door runs ONE PASS PER ORGANIZATION when a wall is in force:
- * `sys_permission_set` spells its name index `unique: 'organization'`, and an
- * organization-less row was measured unreadable by every principal on a walled
- * deployment — Layer 0's strict `organization_id = :tenant` AND-composes over
- * the driver's compatibility arm and the conjunction is the strict equality
- * alone. `single` posture keeps exactly one organization-less pass.
- *
- * The ENVIRONMENT door is deliberately NOT converted here: its
- * organization-less residue (and `bootstrapPlatformAdmin`'s three platform
- * defaults) stays outside this change, unreaped and warned about loudly. See
- * `per-organization-catalog.ts` for the doctrine and the guard.
+ * [#10103] The PACKAGE door runs ONE PASS PER ORGANIZATION when a wall is in
+ * force: `sys_permission_set` spells its name index `unique: 'organization'`,
+ * and an organization-less row was measured unreadable by every principal on a
+ * walled deployment — Layer 0's strict `organization_id = :tenant` AND-composes
+ * over the driver's compatibility arm and the conjunction is the strict equality
+ * alone. `single` posture keeps exactly one organization-less pass. The
+ * ENVIRONMENT door is deliberately NOT converted: its organization-less residue
+ * (and `bootstrapPlatformAdmin`'s platform defaults) stays outside this change,
+ * unreaped and warned about loudly. See `per-organization-catalog.ts`.
  */
 
 import {
+  SYSTEM_CTX,
   genId,
   permissionSetRowFields,
-  tryFind,
+  recordDiffersFromBody,
   tryInsert,
   tryUpdate,
   type PermissionSeedOutcome,
   type ProjectionLogger,
 } from './permission-set-projection.js';
 import {
+  buildExistingByName,
+  type ExistingByNameIndex,
+  type ExistingLookupResult,
+} from './seed-name-lookup.js';
+import {
   resolveOwnOrganizationRow,
-  rowMatchesDeclaration,
+  seedCtx,
   warnPreFixOrganizationLessRows,
 } from './per-organization-catalog.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
+
+/**
+ * The per-name existence read used when no batched oracle was supplied (the
+ * ADR-0086 P2 publish materializer, which upserts exactly one set). Reports the
+ * same three outcomes the batched oracle does — a failed read must not read as
+ * "absent" on this path either.
+ */
+async function defaultLookup(ql: any, name: string, organizationId?: string): Promise<ExistingLookupResult> {
+  let rows: any;
+  try {
+    // Limit 5, not 1, when scoped: a scoped read returns organization-less rows
+    // alongside this organization's own, and one row would be whichever the
+    // driver ordered first (#10103).
+    rows = await ql.find(
+      'sys_permission_set',
+      { where: { name }, limit: organizationId ? 5 : 1 },
+      { context: seedCtx(organizationId) },
+    );
+  } catch {
+    return { status: 'unknown' };
+  }
+  const list = Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : null;
+  if (list === null) return { status: 'unknown' };
+  // [#10103] This organization's own row answers; an organization-less leftover
+  // is reported beside `absent` and never returned as `present`.
+  const { own, organizationLessResidue } = resolveOwnOrganizationRow(list, organizationId);
+  if (own) return { status: 'present', row: own };
+  return organizationLessResidue
+    ? { status: 'absent', organizationLessResidue }
+    : { status: 'absent' };
+}
 
 interface SeedOptions {
   logger?: ProjectionLogger;
@@ -120,11 +153,25 @@ export async function upsertPackagePermissionSet(
   ps: any,
   packageId: string | null | undefined,
   logger?: SeedOptions['logger'],
-  organizationId?: string,
-): Promise<PermissionSeedOutcome & { organizationLessResidue: boolean }> {
-  const out: PermissionSeedOutcome & { organizationLessResidue: boolean } = {
-    seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0, organizationLessResidue: false,
-  };
+  opts?: {
+    /**
+     * Existence oracle to consult instead of this function's own per-name
+     * `SELECT` (#10946). The boot loop passes ONE batched read covering every
+     * declared name; the publish materializer, which upserts a single set,
+     * passes nothing and keeps the per-name read.
+     */
+    existingByName?: ExistingByNameIndex;
+    /**
+     * Seed THIS organization's copy (#10103). Omitted = the pre-existing
+     * organization-less behaviour, which the `single`-posture pass and the
+     * ADR-0086 P2 publish materializer both want.
+     */
+    organizationId?: string;
+    /** Collects names whose pre-fix organization-less row is still standing. */
+    residue?: string[];
+  },
+): Promise<PermissionSeedOutcome> {
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ps?.name) return out;
   // A `managed_by:'package'` row without a `package_id` would make uninstall
   // undefined again — the exact ambiguity ADR-0086 D3 exists to remove — so a
@@ -134,25 +181,44 @@ export async function upsertPackagePermissionSet(
     return out;
   }
 
-  // Limit 5, not 1: a tenant-scoped read passes through `applyTenantScope`,
-  // whose compatibility arm returns organization-less rows alongside this
-  // organization's own, and reading a pre-fix organization-less row as
-  // "already seeded" is the silent no-op the per-organization catalog exists to
-  // prevent. `resolveOwnOrganizationRow` is what tells the two apart.
-  const found = await tryFind(ql, 'sys_permission_set', { name: ps.name }, 5, organizationId);
-  const { own, organizationLessResidue } = resolveOwnOrganizationRow(found, organizationId);
-  if (organizationLessResidue) out.organizationLessResidue = true;
-  const existing = own;
+  // ⛔ Three outcomes, not two (#10946 / #3807). `unknown` — the read FAILED —
+  // is not "no such row": inserting on it would re-create a set that already
+  // exists, and on a batched read one failure speaks for every declared name at
+  // once. Declining is the answer; the caller's warn reports it.
+  const organizationId = opts?.organizationId;
+  const lookup = opts?.existingByName
+    ? await opts.existingByName.get(String(ps.name))
+    : await defaultLookup(ql, String(ps.name), organizationId);
+  if (lookup.status === 'unknown') {
+    out.unreadable += 1;
+    return out;
+  }
+  // [#10103] `absent` can still carry a PRE-FIX organization-less row that is
+  // merely VISIBLE here through the driver's compatibility arm. It is not this
+  // organization's row, so the copy below is created either way — the leftover
+  // is only reported. Reading it as "already seeded" is the silent no-op the
+  // per-organization catalog exists to prevent.
+  if (lookup.status === 'absent' && lookup.organizationLessResidue && ps.name) {
+    opts?.residue?.push(String(ps.name));
+  }
+  const existing = lookup.status === 'present' ? lookup.row : undefined;
   if (!existing?.id) {
-    const created = await tryInsert(ql, 'sys_permission_set', {
+    const row = {
       id: genId('ps'),
       name: ps.name,
       ...permissionSetRowFields(ps),
       active: true,
       package_id: packageId,
       managed_by: 'package',
-    }, organizationId);
-    if (created) out.seeded += 1;
+    };
+    const created = await tryInsert(ql, 'sys_permission_set', row, organizationId);
+    if (created) {
+      out.seeded += 1;
+      // A batched oracle is a snapshot taken before the loop — tell it about
+      // the row we just made, so a name declared twice in one batch still
+      // reaches the collision branch below instead of a second insert.
+      opts?.existingByName?.remember(String(ps.name), row);
+    }
     return out;
   }
 
@@ -160,12 +226,23 @@ export async function upsertPackagePermissionSet(
     if (existing.package_id === packageId) {
       // Our own row — re-seed so the record always reflects the shipped/published
       // declaration (idempotent; covers version bumps without bookkeeping).
-      // O(changed declarations): a row that already carries every declared
-      // field costs NO write, so the common boot (nothing declared changed)
-      // performs reads only, per organization.
-      const fields = permissionSetRowFields(ps);
-      if (rowMatchesDeclaration(existing, fields)) return out;
-      if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...fields }, organizationId)) {
+      //
+      // [#10946] "Idempotent" was implemented as "write the same columns every
+      // time", which on a remote libsql/Turso database is two HTTP round trips
+      // per set on every boot to change nothing. `recordDiffersFromBody` is the
+      // SAME comparison the ADR-0094 boot reconciler already trusts to decide
+      // whether a record drifted, over exactly the columns
+      // `permissionSetRowFields` writes — so a row it calls equal is a row this
+      // UPDATE could not have changed.
+      //
+      // ⚠️ The skip is on EQUALITY, never on "we have seen this name". A row
+      // whose stored value differs — a version bump, a hand-edit, a partially
+      // applied write — still gets its UPDATE, because dropping that leg would
+      // turn the loop into a no-op that reconciles nothing while showing a
+      // beautiful round-trip curve.
+      if (!recordDiffersFromBody(existing, ps)) {
+        out.unchanged += 1;
+      } else if (await tryUpdate(ql, 'sys_permission_set', { id: existing.id, ...permissionSetRowFields(ps) }, organizationId)) {
         out.updated += 1;
       }
     } else {
@@ -191,7 +268,7 @@ export async function bootstrapDeclaredPermissions(
   metadataService: any,
   options: SeedOptions = {},
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
 
   let sets: any[] = readDeclared(ql, 'permission');
@@ -203,28 +280,51 @@ export async function bootstrapDeclaredPermissions(
   }
   if (!Array.isArray(sets) || sets.length === 0) return out;
 
+  // [#10946] ONE existence read for the whole declaration, before the loop —
+  // the set of names is known in full here. See `seed-name-lookup.ts` for why
+  // a read that cannot ANSWER must not be read as "none of them exist".
   const organizationId = options.organizationId;
+  const existingByName = await buildExistingByName(
+    ql,
+    'sys_permission_set',
+    sets.map((ps) => ps?.name),
+    options.logger,
+    organizationId,
+  );
+  // Names for which a PRE-FIX organization-less row is still standing. This
+  // organization's own row is created regardless — the leftover is reported,
+  // never treated as "already seeded" (#10103).
   const residue: string[] = [];
+
   for (const ps of sets) {
     if (!ps?.name) continue;
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
-    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, organizationId);
+    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue });
     out.seeded += r.seeded;
     out.updated += r.updated;
+    out.unchanged += r.unchanged;
+    out.unreadable += r.unreadable;
     out.skippedEnvAuthored += r.skippedEnvAuthored;
     out.skippedForeign += r.skippedForeign;
-    if (r.organizationLessResidue) residue.push(ps.name);
   }
 
   if (organizationId) {
     warnPreFixOrganizationLessRows(options.logger, 'sys_permission_set', residue, organizationId);
   }
-  if (out.seeded + out.updated > 0) {
-    options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {
-      ...out, total: sets.length, ...(organizationId ? { organization: organizationId } : {}),
-    });
+  if (out.unreadable > 0) {
+    // Said once, with the count: these sets were neither seeded nor reconciled
+    // because the record could not be READ. Silence here would read exactly
+    // like "everything was already in order".
+    options.logger?.warn?.(
+      '[security] declared permission sets left untouched — their records could not be read',
+      { unreadable: out.unreadable, total: sets.length, ...(organizationId ? { organization: organizationId } : {}) },
+    );
   }
+
+  options.logger?.info?.('[security] declared permission sets seeded into sys_permission_set (ADR-0086 D5)', {
+    ...out, total: sets.length, ...(organizationId ? { organization: organizationId } : {}),
+  });
   return out;
 }

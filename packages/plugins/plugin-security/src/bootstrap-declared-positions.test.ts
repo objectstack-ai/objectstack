@@ -26,7 +26,19 @@ function makeQl(declared: any[] = []) {
     async find(object: string, q: any) {
       if (object !== 'sys_position') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+      // Membership is modelled because the real engine supports it and the
+      // #10946 boot seeders now hoist ONE `$in` existence read out of their
+      // loop. A double that silently answered `[]` to `$in` would report
+      // "nothing is seeded" and make every re-seed look like a first boot.
+      return rows.filter((r) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const inList = (v as any).$in;
+          if (Array.isArray(inList)) return inList.includes(r[k]);
+          throw new Error(`fake driver: unsupported operator ${Object.keys(v).join(',')}`);
+        }
+        return r[k] === v;
+      }));
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_position') return null;
