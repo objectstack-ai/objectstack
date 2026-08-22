@@ -9,6 +9,11 @@ pnpm install
 pnpm dev
 ```
 
+After editing any metadata (an object, view, flow, …), run `pnpm validate` —
+see [Verify your changes](#verify-your-changes) below. It is the one command
+this project's `AGENTS.md` calls unskippable: it catches mistakes that
+otherwise fail silently at runtime.
+
 The REST API is served at `http://localhost:3000/api/v1`. Data endpoints
 require a session — the dev server seeds a login-ready admin
 (`admin@objectos.ai` / `admin123`) on an empty database:
