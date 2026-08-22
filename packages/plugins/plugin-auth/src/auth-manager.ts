@@ -1905,7 +1905,28 @@ export class AuthManager {
         // `*.localhost` subdomains so per-project tenant subdomains (the dev
         // default root domain — see project-provisioning.ts) pass CSRF checks
         // without operators having to configure trustedOrigins manually.
-        if (!origins.length && (!corsOrigin || corsOrigin === '*')) {
+        //
+        // NON-PRODUCTION ONLY (#10366). This substitution is a development
+        // convenience and is now gated on the same `NODE_ENV` dev signal used
+        // by the fallback auth secret and the dev Origin synthesis below, so
+        // the boundary this comment claims is the boundary that is enforced.
+        // Previously the condition tested only emptiness, so a production
+        // deployment whose trusted-origin list resolved empty silently
+        // CSRF-trusted every `localhost` / `*.localhost` origin.
+        //
+        // What production gets instead: `trustedOrigins` is omitted from the
+        // better-auth config entirely (see the tail of this block). That is
+        // NOT an absent policy — better-auth seeds its trusted set from the
+        // resolved `baseURL` origin and treats `trustedOrigins` as purely
+        // ADDITIVE, so an empty list and an omitted key are equivalent and
+        // both leave exactly the deployment's own origin trusted; every other
+        // origin is refused with `403 INVALID_ORIGIN`. Measured against
+        // better-auth 1.7.1 (`getTrustedOrigins` in `dist/context/helpers.mjs`,
+        // `validateOrigin` in `dist/api/middlewares/origin-check.mjs`).
+        if (
+          process.env.NODE_ENV !== 'production' &&
+          !origins.length && (!corsOrigin || corsOrigin === '*')
+        ) {
           origins.push('http://localhost:*');
           origins.push('http://*.localhost:*');
           origins.push('https://*.localhost:*');
