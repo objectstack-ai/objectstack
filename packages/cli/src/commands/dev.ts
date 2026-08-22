@@ -209,7 +209,7 @@ export default class Dev extends Command {
         // NODE_ENV nowhere, and the artifact is byte-identical either way apart
         // from the `/runtimeModule` hash, which differs run-to-run regardless
         // (the bundle embeds `builtAt`). Pinned by
-        // dev-child-source-loader.pin.test.ts.
+        // child-env-source-loader.pin.test.ts.
         const compileResult = spawnSync(
           process.execPath,
           [binPath, 'compile', '--output', artifactPath],
