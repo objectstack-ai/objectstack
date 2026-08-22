@@ -67,7 +67,7 @@ B. Terminology
  * ALWAYS emphasize "Polyglot Data". We are not just a SQL wrapper; we handle Redis and Excel native files.
  * Studio vs. Cloud: Studio is for "Local Data & Development". Cloud is for "Deployment & Collaboration".
 C. Coding Style
- * Monorepo: Use generic imports (e.g., import { User } from '@objectstack/protocol') instead of relative paths like ../../packages/spec.
+ * Monorepo: Use generic imports (e.g., import { User } from '@objectstack/spec') instead of relative paths like ../../packages/spec.
  * UI: Use Shadcn UI + Tailwind CSS. Dark mode default for developer tools (Studio/Console).
  * Data Fetching: All UI components must be Server-Driven or strongly typed against the Schema.
 5. Execution Context

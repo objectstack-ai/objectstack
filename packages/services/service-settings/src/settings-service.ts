@@ -548,6 +548,16 @@ export class SettingsService {
    * otherwise repeat one operator-actionable line per attempt.
    */
   private readonly reportedCryptoRefusals = new Set<string>();
+  /**
+   * Namespaces whose pre-bind READ has already been reported (#10250). Deduped
+   * for the same reason the two sets above are, and keyed by NAMESPACE rather
+   * than by key: `getNamespace()` resolves every specifier in the namespace
+   * through `get()`, so one in-window `getNamespace('mail')` reaches
+   * {@link loadRows} once per declared key. One operator-actionable line per
+   * namespace per window is the report; a dozen identical ones is noise that
+   * gets filtered.
+   */
+  private readonly reportedPreBindReads = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
   /**
@@ -653,6 +663,63 @@ export class SettingsService {
   private assertEngineBound(namespace: string, keys: string[]): void {
     if (!this.engineBindPending || this.engine) return;
     throw new SettingsEngineNotBoundError(namespace, keys);
+  }
+
+  /**
+   * Report a READ issued inside the pre-bind window (#10250) — the read half of
+   * the same window {@link assertEngineBound} refuses writes in.
+   *
+   * ## Why this reports instead of refusing
+   *
+   * The write half could refuse because a write in the window has no correct
+   * outcome: nothing durable exists to write to. A READ does. An in-window read
+   * of a setting that genuinely has no persisted row must answer the manifest
+   * `default`, and that is an ordinary, common thing for a boot-time reader to
+   * do. Refusing it would turn a correct startup sequence into an error — which
+   * is why #10159's fix deliberately left reads open.
+   *
+   * What is wrong is not the answer, it is that the answer was produced WITHOUT
+   * CONSULTING the store. In the window {@link loadRows} takes its `this.memory`
+   * branch, which at boot holds nothing, so the caller receives the declared
+   * `default` with `source: 'default'` and `locked: false` — an assertion about
+   * persisted state made without reading persisted state — while a real
+   * `sys_setting` row with a different value sits unread. Nothing distinguishes
+   * that from "no row exists", at any level, which is what made this quieter
+   * than the write half it was found beside.
+   *
+   * So the residual is made AUDIBLE rather than fatal, and the line names the
+   * repair rather than the symptom: the reader declares
+   * `optionalDependencies: ['com.objectstack.service.settings']` and the kernel
+   * orders it after the bind (ADR-0116). The three shipped always-on readers
+   * (`plugin-email`, `service-sms`, `service-storage`) declare exactly that as
+   * of this change, so on a correct boot this reporter never fires — see
+   * `settings-prebind-read-warning.test.ts`, whose load-bearing half is the
+   * SILENCE on an ordinary boot.
+   *
+   * ## When it stays quiet, and why each case is not the window
+   *
+   *  - engine bound              — `loadRows` never reaches here.
+   *  - `settleWithoutEngine()`   — no engine is EVER coming; the in-memory
+   *                                fallback IS this deployment's store, so a
+   *                                read of it is correct, not premature.
+   *  - no declared pending bind  — a directly constructed `SettingsService`
+   *                                ("unit tests, bootstrap, control-plane
+   *                                mock"). Only `SettingsServicePlugin` sets
+   *                                `engineBindPending`.
+   */
+  private reportPreBindRead(namespace: string): void {
+    if (!this.engineBindPending || this.engine) return;
+    if (this.reportedPreBindReads.has(namespace)) return;
+    this.reportedPreBindReads.add(namespace);
+    const message =
+      `[SettingsService] Pre-bind READ of namespace '${namespace}': the data engine is ` +
+      'declared but not yet bound, so this read was answered from the in-memory fallback ' +
+      'and the manifest defaults — any persisted `sys_setting` row was NOT consulted. ' +
+      "Declare optionalDependencies: ['com.objectstack.service.settings'] on the reading " +
+      'plugin so it starts after the settings engine binds (earliest safe phase: ' +
+      'kernel:bootstrapped).';
+    if (this.logger?.warn) this.logger.warn(message);
+    else console.warn(message);
   }
 
   /**
@@ -2020,6 +2087,15 @@ export class SettingsService {
         updated_by: r.updated_by ?? null,
       }));
     }
+    // The engine branch above was not taken. When a bind is DECLARED-but-pending
+    // that is the pre-bind window, and this read is about to be answered from a
+    // store the deployment does not actually keep its settings in — say so
+    // (#10250). Placed here rather than in `get()` because this is the exact
+    // point at which persisted state would have been consulted: an in-window
+    // read satisfied by an `OS_*` env override returns before ever reaching
+    // `loadRows`, and that answer IS correct (env outranks every persisted
+    // scope), so it must not be reported.
+    this.reportPreBindRead(namespace);
     return this.memory.filter(
       (r) =>
         r.namespace === namespace &&

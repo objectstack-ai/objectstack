@@ -104,6 +104,22 @@ export {
     // asserted, which is also what an operator copies out of the docs page.
 } from './migrations/seed-tenancy-backfill.js';
 export type { SeedTenancySeam } from './migrations/seed-tenancy-backfill.js';
+// [#8725] The read-only duplicate PRE-FLIGHT for the three `kernel:ready` index
+// tightenings above. Exported because it has a real consumer outside this
+// package — `os migrate duplicates`, the reporting path the maintainer ruled
+// (2026-08-22) for a class the drift differ cannot see by construction, and
+// which the three migrations' conflict reports now name. Nothing about when a
+// migration runs or what it does changes here; only its evidence becomes
+// readable one command before the restart.
+export {
+    collectRuntimeIndexPreflight,
+    runtimeIndexProbes,
+} from './migrations/runtime-index-preflight.js';
+export type {
+    RuntimeIndexProbe,
+    RuntimeIndexPreflight,
+    RuntimeIndexDuplicateGroup,
+} from './migrations/runtime-index-preflight.js';
 export type {
     SeedTenancyExec,
     SeedTenancyLogger,

@@ -29,8 +29,12 @@
 // This package's `tsconfig.json` includes `src` (tests and all), so the
 // compile-time witness below is real: `pnpm --filter @objectstack/cli
 // typecheck` fails on a config the schema cannot express, before any test runs.
-// The spec-side companion (`packages/spec/src/system/email-config.test.ts`) has
-// to be runtime-only — that package excludes `**/*.test.ts` from its tsconfig
+// The spec-side companion — `@objectstack/spec`'s own `system/email-config.test.ts`,
+// named without its repo-relative path here for the reason this directory's
+// `serve-multi-node-cap-advisory.pin.test.ts` gives for the same gate: a quoted
+// literal starting at `packages/` would force `check:cross-package-test-inputs`
+// to demand a glob for a file this test never actually reads — has to be
+// runtime-only, since that package excludes `**/*.test.ts` from its tsconfig
 // (#5286).
 
 import { describe, it, expect } from 'vitest';
@@ -40,11 +44,25 @@ import { fileURLToPath } from 'node:url';
 import { EmailServiceConfigSchema } from '@objectstack/spec/system';
 import type { EmailServiceConfig } from '@objectstack/spec/system';
 import { resolveEmailCapabilityArg } from './serve.js';
+// The repo's one comment/code separator (#9367). This file used to scan RAW
+// source with no separator at all (#10514): a docblock or a `// TODO: also
+// read cfgEmail.foo` line was indistinguishable from a real dot access. Typed
+// by the hand-written `scripts/js-comment-mask.d.mts` next to it (this
+// package's `tsconfig.json` includes `src`), so this import needs no
+// suppression.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const SERVE_SOURCE = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'serve.ts'),
   'utf8',
 );
+
+/**
+ * `serve.ts` with every comment span blanked (offsets preserved, bytes
+ * replaced with spaces) — see `keysReadFromConfigEmail` below for why the
+ * scan reads this instead of `SERVE_SOURCE` directly (#10514).
+ */
+const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
 
 /**
  * Every `config.email` key the resolver reads, straight from its source — the
@@ -57,9 +75,14 @@ const SERVE_SOURCE = readFileSync(
  * keys), which is what makes a source scan an exact measure rather than an
  * approximation. Should that ever stop being true, this comment is the place
  * the next reader learns the scan has to change with it.
+ *
+ * Takes `source` explicitly (default the real file's masked text, #10514)
+ * rather than closing over `SERVE_SOURCE`/`MASKED_SERVE_SOURCE` directly, so
+ * the vacuity-proof tests below can drive the exact same regex over a raw vs.
+ * a masked variant of a shape and show the two disagree.
  */
-function keysReadFromConfigEmail(): string[] {
-  const reads = SERVE_SOURCE.match(/cfgEmail\.[A-Za-z_$][\w$]*/g) ?? [];
+function keysReadFromConfigEmail(source: string = MASKED_SERVE_SOURCE): string[] {
+  const reads = source.match(/cfgEmail\.[A-Za-z_$][\w$]*/g) ?? [];
   return [...new Set(reads.map((r) => r.slice('cfgEmail.'.length)))].sort();
 }
 
@@ -124,6 +147,52 @@ describe('EmailServiceConfigSchema ↔ resolveEmailCapabilityArg', () => {
       'queueDelivery',
       'retries',
     ]);
+  });
+});
+
+/**
+ * Vacuity proof (#10514): both directions the raw scan was one ordinary
+ * comment away from getting wrong, reproduced on synthetic sources shaped
+ * like the real resolver so the two legs (raw vs. masked) can be compared
+ * without waiting for `serve.ts` to actually regress. Each `it` shows the RAW
+ * leg producing the wrong verdict — the verdict this file's scan would have
+ * produced before #10514 — and the MASKED leg producing the right one.
+ */
+describe('the key scan ignores prose that looks like a cfgEmail read (#10514)', () => {
+  it('does not let a comment fabricate an undeclared key ("declares every key" direction)', () => {
+    const synthetic = [
+      'function resolveEmailCapabilityArg(cfgEmail = {}) {',
+      '  // TODO: someday also read cfgEmail.bogusKey from the config',
+      "  const provider = cfgEmail.provider;",
+      '  return { provider };',
+      '}',
+    ].join('\n');
+
+    // Pre-#10514 (raw): the comment's `cfgEmail.bogusKey` is indistinguishable
+    // from a real dot access — this is what would have made "declares every
+    // config.email key the resolver reads" go RED over a comment alone.
+    expect(keysReadFromConfigEmail(synthetic)).toEqual(['bogusKey', 'provider']);
+    // Post-#10514 (masked): the comment is blanked, so only the real read
+    // survives.
+    expect(keysReadFromConfigEmail(maskComments(synthetic))).toEqual(['provider']);
+  });
+
+  it('does not let a comment fabricate a read of a declared-but-unread key — the #5447 shape, "the worse one" ("reads every key" direction)', () => {
+    const synthetic = [
+      'function resolveEmailCapabilityArg(cfgEmail = {}) {',
+      "  const provider = cfgEmail.provider;",
+      '  // historically we also honoured cfgEmail.persist here',
+      '  return { provider };',
+      '}',
+    ].join('\n');
+
+    // Pre-#10514 (raw): the comment alone counts as a "read" of `persist` —
+    // silently restoring the exact `DECLARED_BUT_UNREAD` exemption this
+    // file's docblock (above) says was deleted for good after #5447/#5470.
+    expect(keysReadFromConfigEmail(synthetic)).toContain('persist');
+    // Post-#10514 (masked): the comment does not count, so a schema key with
+    // no real reader still reads as unread here.
+    expect(keysReadFromConfigEmail(maskComments(synthetic))).not.toContain('persist');
   });
 });
 

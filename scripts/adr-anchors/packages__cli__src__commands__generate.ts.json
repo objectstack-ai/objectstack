@@ -1,0 +1,7 @@
+{
+  "file": "packages/cli/src/commands/generate.ts",
+  "adrs": [
+    "ADR-0063"
+  ],
+  "invariant": "There is no `agent` scaffolder, and the absence is a decision, not an oversight. ADR-0063 §2 closed `*.agent.ts` to third parties — the kernel ships exactly two agents (`ask`, `build`) and the runtime catalog filters out every other agent record — so a scaffolded `src/agents/*.ts` validated, published, and then vanished with no error at any step. Do not re-add an `agent` entry to `GENERATORS`. `agent` lives in `RETIRED_GENERATORS` instead, and that branch owes both halves of the message: the decision that withdrew the surface, and skills (`src/skills/<name>.skill.ts`, `defineSkill`) as the surface to author instead. Falling back to the generic `Unknown type:` roster drops the pointer and leaves the author as stranded as the silent strip did, one step earlier."
+}

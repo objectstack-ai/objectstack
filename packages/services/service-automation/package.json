@@ -27,6 +27,7 @@
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
+    "@objectstack/refd-timer-testkit": "workspace:*",
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@types/node": "^26.2.0",

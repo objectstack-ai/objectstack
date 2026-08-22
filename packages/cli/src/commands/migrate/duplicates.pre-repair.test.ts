@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
   backfillSeedTenancy,
+  collectRuntimeIndexPreflight,
   normalizeRows,
   GLOBAL_TENANT,
   ORGANIZATION_FIELD,
@@ -47,7 +48,7 @@ async function snapshot(): Promise<unknown> {
   };
 }
 
-const report = () =>
+const report = async () =>
   collectDuplicateIdentifierReport({
     exec,
     normalize: normalizeRows,
@@ -57,6 +58,10 @@ const report = () =>
     organizationField: ORGANIZATION_FIELD,
     sequencesTable: SEQUENCES_TABLE,
     client: 'better-sqlite3',
+    // The real pre-flight (#8725), so the byte-identity assertions below cover
+    // its four SELECTs too — a section that writes would destroy the same
+    // evidence the ruling's timing note is about.
+    runtimeIndexPreflight: await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' }),
   });
 
 beforeEach(async () => {

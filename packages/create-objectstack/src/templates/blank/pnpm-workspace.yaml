@@ -1,3 +1,12 @@
+# An explicit EMPTY workspace: this project has no member packages, so
+# this file is settings-only. The key is not decoration — pnpm 9.x and
+# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file
+# without a `packages:` key outright ("ERROR packages field missing or
+# empty") before resolving a single dependency.
+# Not `packages: ['.']`: that would declare this project a workspace
+# MEMBER — a monorepo root, which it is not.
+packages: []
+
 # pnpm does not run dependency install scripts unless they are approved here.
 # Without this file a fresh `pnpm install` on pnpm 11 exits 1 with
 # ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard error.

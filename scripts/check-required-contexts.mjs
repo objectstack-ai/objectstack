@@ -181,7 +181,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shellCommands } from './check-shard-attestation.mjs';
+// Both layers of the shell lexer, from the one home that owns them. This file
+// wrote `invokes` (and the `commandWords` under it) first (#10877), but they
+// belong beside `shellCommands`, whose output they consume: the import edge
+// between these two files runs THIS way only, so a helper kept here could never
+// be reached from check-shard-attestation without a cycle — and that file needed
+// the same narrow reading for the same defect one flag over (#10889).
+import { invokes, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 /**
@@ -694,102 +700,6 @@ function runCommands(node) {
   const commands = [];
   visitLive(node, { onCommand: (command) => commands.push(command) });
   return commands;
-}
-
-/**
- * One shell command, split into words, each marked as QUOTED or not.
- *
- * ⚠️ Not a third comment stripper — it handles no `#` at all. It runs on
- * `shellCommands()` OUTPUT, where comments are already gone, and recovers the
- * one thing that function does not expose: where the words are, and which of
- * them came out of a quoted region. Shell word-splitting does not happen inside
- * quotes, so `echo "pnpm check:required-contexts is below"` is TWO words — the
- * program `echo`, and one quoted blob — and no amount of splitting on
- * whitespace will make the blob look like a program being run.
- *
- * That distinction is the whole narrow recognizer. `invokesScript()` in
- * check-shard-attestation splits on `/\s+/` and strips the quotes off each
- * piece, which is right for the question IT asks and cannot answer this one:
- * it would read the `echo` above as running `pnpm`.
- *
- * @param {string} command one command from `shellCommands()`
- * @returns {{ word: string, quoted: boolean }[]}
- */
-function commandWords(command) {
-  const words = [];
-  let word = '';
-  let quoted = false;
-  let started = false;
-  let quote = '';
-  const flush = () => {
-    if (started) words.push({ word, quoted });
-    word = '';
-    quoted = false;
-    started = false;
-  };
-  for (let i = 0; i < command.length; i += 1) {
-    const ch = command[i];
-    if (quote) {
-      // Inside double quotes a backslash escapes the next character; inside
-      // single quotes it is literal. Either way the result stays in this word.
-      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
-        word += command[i + 1];
-        i += 1;
-        continue;
-      }
-      if (ch === quote) {
-        quote = '';
-        continue;
-      }
-      word += ch;
-      continue;
-    }
-    if (ch === '\\' && i + 1 < command.length) {
-      word += command[i + 1];
-      i += 1;
-      started = true;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      quoted = true;
-      started = true;
-      continue;
-    }
-    if (ch === ' ' || ch === '\t') {
-      flush();
-      continue;
-    }
-    word += ch;
-    started = true;
-  }
-  flush();
-  return words;
-}
-
-/**
- * Does this command RUN `program`, with `arg` among the arguments it passes?
- *
- * Adjacency, as check-shard-attestation's `invokesScript()` reads it (#6589):
- * the argument must belong to a command that runs the program, not merely
- * appear near it. Plus one condition that function does not impose — the
- * PROGRAM word must be UNQUOTED. A quoted word is a string being passed to
- * something else, and the something else is usually `echo`.
- *
- * Arguments may be quoted freely: `--verify-required-set` and
- * `"--verify-required-set"` are the same argument to the same invocation, and
- * refusing the quoted spelling would narrow a PRESENCE assertion into a false
- * red — the failure mode that gets a pin loosened rather than fixed.
- *
- * @param {string} command one command from `shellCommands()`
- * @param {string} program an executable or script basename, e.g. `pnpm`
- * @param {string} arg the argument that makes it THE invocation
- */
-function invokes(command, program, arg) {
-  const words = commandWords(command);
-  const at = words.findIndex(({ word, quoted }) => !quoted && (word === program || word.endsWith(`/${program}`)));
-  if (at === -1) return false;
-  return words.slice(at + 1).some(({ word }) => word === arg || word.startsWith(`${arg}=`));
 }
 
 /**
@@ -2852,8 +2762,10 @@ async function selfTest() {
     );
     // (l) the same thing one grammar down: a quoted string being handed to
     // `echo`. Splitting the command on whitespace and stripping quotes off each
-    // piece — which is what the sibling's `invokesScript()` does — would read
-    // this as running `pnpm`, so `commandWords` tracks quoting instead.
+    // piece — which is what the sibling's `invokesScript()` did until #10889 —
+    // would read this as running `pnpm`, so `invokes` tracks quoting instead.
+    // That sibling now shares this exact reading rather than mirroring it: the
+    // helper moved to the lexer it consumes and both files import it (#10889).
     assert(
       !pinWiredIn(
         lintJobFixture('      - name: talk about it', '        run: |', `          echo "run: pnpm ${PIN_SCRIPT} is wired below"`),

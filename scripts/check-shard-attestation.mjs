@@ -399,6 +399,117 @@ export function shellCommands(runText) {
 }
 
 /**
+ * One shell command, split into words, each marked as QUOTED or not.
+ *
+ * ⚠️ Not a second comment stripper — it handles no `#` at all. It runs on
+ * `shellCommands()` OUTPUT, where comments are already gone, and recovers the
+ * one thing that function does not expose: where the words are, and which of
+ * them came out of a quoted region.
+ *
+ * Shell does not word-split inside quotes, so
+ * `echo "node scripts/check-shard-attestation.mjs --verify is how you check"`
+ * is TWO words — the program `echo`, and one quoted blob — and no amount of
+ * splitting on whitespace will make the blob look like a program being run.
+ * The tokenizer this replaced did exactly that (`command.split(/\s+/)` then
+ * `token.replace(/^['"]|['"]$/g, '')`), which tore the blob into pieces and
+ * read the script name plus its flag inside a STRING as an invocation (#10889).
+ *
+ * ## Why this lives HERE and not beside its first caller
+ *
+ * It arrived in `check-required-contexts.mjs` (#10877/#10884), which needed the
+ * same narrow reading first. It is defined here because the two files already
+ * have exactly ONE import edge and it points `check-required-contexts` →
+ * `check-shard-attestation` (that file imports `shellCommands` from this one).
+ * A helper kept in the importer cannot be reached from the importee without a
+ * cycle, so "adopt the sibling's helper" mechanically means moving it DOWN to
+ * the lexer it already consumes — commands out of a `run:` block, then words
+ * out of a command, one layer above the other in one home. The alternative,
+ * re-typing it here, is the hand-mirror #10628 had to undo; the obstacle that
+ * justified the mirror there (a module that ran its gate on import) does not
+ * exist here, because this file has been behind `isEntrypoint()` all along.
+ *
+ * @param {string} command one command from `shellCommands()`
+ * @returns {{ word: string, quoted: boolean }[]}
+ */
+export function commandWords(command) {
+  const words = [];
+  let word = '';
+  let quoted = false;
+  let started = false;
+  let quote = '';
+  const flush = () => {
+    if (started) words.push({ word, quoted });
+    word = '';
+    quoted = false;
+    started = false;
+  };
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote) {
+      // Inside double quotes a backslash escapes the next character; inside
+      // single quotes it is literal. Either way the result stays in this word.
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        word += command[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        quote = '';
+        continue;
+      }
+      word += ch;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < command.length) {
+      word += command[i + 1];
+      i += 1;
+      started = true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      quoted = true;
+      started = true;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      flush();
+      continue;
+    }
+    word += ch;
+    started = true;
+  }
+  flush();
+  return words;
+}
+
+/**
+ * Does this command RUN `program`, with `arg` among the arguments it passes?
+ *
+ * Two conditions, and the ASYMMETRY between them is the whole recognizer:
+ *
+ *   - the PROGRAM word must be UNQUOTED. A quoted word is a string being
+ *     handed to something else, and the something else is usually `echo`;
+ *   - ARGUMENTS may be quoted freely. `--verify` and `"--verify"` are the same
+ *     argument to the same invocation, and refusing the quoted spelling would
+ *     narrow a PRESENCE assertion into a false red — the failure mode that
+ *     gets a pin loosened rather than fixed.
+ *
+ * Plus adjacency (#6589), which the co-occurrence spelling lacked: the argument
+ * must belong to a command that runs the program, not merely appear near it.
+ *
+ * @param {string} command one command from `shellCommands()`
+ * @param {string} program an executable or script basename, e.g. `pnpm`
+ * @param {string} arg the argument that makes it THE invocation
+ */
+export function invokes(command, program, arg) {
+  const words = commandWords(command);
+  const at = words.findIndex(({ word, quoted }) => !quoted && (word === program || word.endsWith(`/${program}`)));
+  if (at === -1) return false;
+  return words.slice(at + 1).some(({ word }) => word === arg || word.startsWith(`${arg}=`));
+}
+
+/**
  * Does this `run:` text INVOKE this script with `flag`?
  *
  * Adjacency, not co-occurrence (#6589): the flag must be an argument of a
@@ -406,16 +517,35 @@ export function shellCommands(runText) {
  * flag spelled in another — or in a comment, or as an argument of some other
  * program entirely — no longer add up to an invocation.
  *
+ * ## …and the command that "runs" it must not be an `echo` (#10889)
+ *
+ * Adjacency alone was still satisfied by PROSE, because the tokenizer under it
+ * split on whitespace and stripped the quotes off each piece. Measured on the
+ * tree that had it:
+ *
+ *     echo "node scripts/check-shard-attestation.mjs --verify is how you check"
+ *
+ * read as a genuine `--verify` invocation. The direction is what makes it worth
+ * fixing: `invokesScript` feeds PRESENCE questions — does an attesting job end
+ * with the `--emit` pair, does an aggregate gate run `--verify` — and a
+ * presence assertion fails toward a silent GREEN, so the symptom is this guard
+ * reporting that a leg attests when it does not.
+ *
+ * ⚠️ One spelling of that was green already, and only by ACCIDENT:
+ * `echo "::error::check-shard-attestation.mjs --verify exited 1"` missed
+ * because `::error::` fuses onto the basename token, matching neither
+ * `=== SCRIPT_BASENAME` nor `endsWith('/' + SCRIPT_BASENAME)`. Write the same
+ * annotation with a SPACE after `::error::` and it counted. Both spellings are
+ * pinned in the self-test, because a fix that only handles the obvious one
+ * leaves the fragile one behind — and writing a diagnostic ABOUT this script is
+ * the #4890 shape that keeps re-arming this family (#6589's own second-order
+ * trap was a comment; this one is an `echo`).
+ *
  * @param {unknown} runText a step's `run:` string
  * @param {string} flag e.g. `--verify` or `--emit`
  */
 export function invokesScript(runText, flag) {
-  return shellCommands(runText).some((command) => {
-    const tokens = command.split(/\s+/).map((token) => token.replace(/^['"]|['"]$/g, ''));
-    const at = tokens.findIndex((token) => token === SCRIPT_BASENAME || token.endsWith(`/${SCRIPT_BASENAME}`));
-    if (at === -1) return false;
-    return tokens.slice(at + 1).some((token) => token === flag || token.startsWith(`${flag}=`));
-  });
+  return shellCommands(runText).some((command) => invokes(command, SCRIPT_BASENAME, flag));
 }
 
 /**
@@ -792,6 +922,81 @@ async function selfTest() {
   assert(invokesScript('node scripts/check-shard-attestation.mjs --gate "a # b" --verify', '--verify'), 'a quoted `#` is an argument, not a comment — the command must not be truncated');
   assert(invokesScript("node scripts/check-shard-attestation.mjs --gate 'a || b' --verify", '--verify'), 'a quoted separator is an argument, not a command boundary');
   assert(!invokesScript(undefined, '--verify') && !invokesScript(null, '--verify'), 'a step with no run: is not an invocation');
+
+  // ── …and the PROGRAM word must be unquoted (#10889) ───────────────────────
+  //
+  // Adjacency (above) closed co-occurrence but not PROSE. The tokenizer under
+  // it split on whitespace and stripped the quotes off each piece, so a quoted
+  // string handed to `echo` was torn into "tokens" and the script name plus its
+  // flag INSIDE that string read as a program being run with an argument.
+  //
+  // ⭐ Direction, because it decides which limb is the dangerous one to lose:
+  // these feed PRESENCE questions (does this job end with the `--emit` pair,
+  // does this gate run `--verify`), and a presence assertion fails toward a
+  // silent GREEN — the guard reporting that a leg attests when it does not.
+  // So every "prose" case below is paired with the same text made REAL, and
+  // #6589's cases above stay exactly as they were: a recognizer tightened until
+  // nothing satisfies it is a worse defect than the prose it excluded, because
+  // what a permanently red pin gets is loosened.
+  assert(
+    !invokesScript('echo "node scripts/check-shard-attestation.mjs --verify is how you would check"', '--verify'),
+    '#10889: an `echo` QUOTING the invocation is prose — the quoted blob is ONE argument, not a program being run',
+  );
+  assert(
+    !invokesScript("echo 'node scripts/check-shard-attestation.mjs --verify is how you would check'", '--verify'),
+    '#10889: …and single quotes word-split no more than double quotes do',
+  );
+  assert(
+    !invokesScript('echo "run node scripts/check-shard-attestation.mjs --verify to reproduce"', '--verify'),
+    '#10889: prose WRAPPED AROUND the invocation is still prose',
+  );
+  // ⚠️ The two `::error::` spellings are pinned together on purpose. The FUSED
+  // one was already false before this fix — but only incidentally, because
+  // `::error::` runs into the basename and the joined token matches neither
+  // `=== SCRIPT_BASENAME` nor `endsWith('/' + SCRIPT_BASENAME)`. The SPACED one
+  // is the same annotation, one space different, and it COUNTED. Keeping only
+  // the fused case would let the accident stand in for the fix.
+  assert(
+    !invokesScript('echo "::error::check-shard-attestation.mjs --verify exited 1"', '--verify'),
+    '#10889: a `::error::` annotation about this script is not an invocation of it',
+  );
+  assert(
+    !invokesScript('echo "::error:: check-shard-attestation.mjs --verify exited 1"', '--verify'),
+    '#10889: …and the same annotation written with a SPACE, which is the spelling that used to count',
+  );
+  // The `--emit` half of the same question: an attesting shard job is judged by
+  // whether its LAST step invokes `--emit`, so prose there is the same silent
+  // green one flag over.
+  assert(
+    !invokesScript('echo "the attestation step runs check-shard-attestation.mjs --emit --job test"', '--emit'),
+    '#10889: the same defect on the `--emit` presence question, which decides whether a shard ATTESTS',
+  );
+  // ⭐ The asymmetry, stated as a fact and not left to the docblock: only the
+  // PROGRAM word has to be unquoted. Refusing a quoted ARGUMENT would turn a
+  // presence assertion into a false red.
+  assert(
+    invokesScript('node scripts/check-shard-attestation.mjs "--verify" --gate x', '--verify'),
+    '#10889: quoting the ARGUMENT does not un-invoke the script — only the PROGRAM word must be unquoted',
+  );
+  assert(
+    invokesScript("node scripts/check-shard-attestation.mjs '--verify' --gate \"a b\"", '--verify'),
+    '#10889: …in either quote style, alongside other quoted arguments',
+  );
+  assert(
+    !invokesScript('echo "scripts/check-shard-attestation.mjs" --verify', '--verify'),
+    '#10889: a QUOTED program word is a string being passed to something else — here, to `echo`',
+  );
+  // The word-splitter itself, at the seam the readings above rest on.
+  assert(
+    commandWords('echo "a b c" d').map(({ word, quoted }) => `${quoted ? 'Q' : 'U'}:${word}`).join('|') === 'U:echo|Q:a b c|U:d',
+    'commandWords: a quoted region is ONE word and is marked as quoted; unquoted words split on whitespace',
+  );
+  assert(
+    invokes('pnpm check:shard-attestation', 'pnpm', 'check:shard-attestation') &&
+      !invokes('echo "pnpm check:shard-attestation is wired below"', 'pnpm', 'check:shard-attestation'),
+    'invokes: the same reading generalised over any program — this is the seam check-required-contexts imports (#10877/#10889)',
+  );
+
   assert(
     shellCommands('a \\\n  b\n# c\nd; e | f')
       .map((command) => command.split(/\s+/).join(' '))
@@ -945,7 +1150,7 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins).`,
+    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins).`,
   );
 }
 

@@ -58,10 +58,20 @@
  * and only once that has demonstrably succeeded drop the real name and rebuild
  * it — and reports every failure the way ADR-0120 D4 requires: keep the
  * previous index, name the key that is NOT enforced, ship the exact query that
- * lists the offending rows, point at `os migrate plan`, never block the boot.
- * `SqlDriver.createNullSafeUniqueIndex` is the in-repo precedent for that
+ * lists the offending rows, point at `os migrate duplicates`, never block the
+ * boot. `SqlDriver.createNullSafeUniqueIndex` is the in-repo precedent for that
  * disposition; the sibling `view-definition-active-index.ts` is the precedent
  * for the order.
+ *
+ * ⚠️ The referral named `os migrate plan` until #8725, and it was FALSE for
+ * this class: the differ never sees these indexes — `isRuntimeManagedIndex`
+ * excludes the partial form once it is built, and before that the migration
+ * reuses the DECLARED index's name, so the name-matched slot reads as filled
+ * either way — and `PendingSchemaWork` carries no index kind at all. Maintainer
+ * ruling 2026-08-22 routes the class to `os migrate duplicates`, which boots
+ * read-only and owns the "inventory, never repair" contract, keeping `os
+ * migrate plan`'s drift contract untouched. Both overlay states are probed
+ * there, because either can be blocked independently.
  *
  * ## Why the fallback stays NON-unique
  *
@@ -183,7 +193,12 @@ export function buildOverlayFallbackIndexSql(indexName: string): string {
 /**
  * The query that lists the rows blocking the tightening — ADR-0120 D4's "name
  * the offending rows", shipped inside the report so an operator has it without
- * waiting for `os migrate plan`.
+ * waiting for `os migrate duplicates`.
+ *
+ * The same statement is what `os migrate duplicates` issues for this index
+ * (#8725), once per state: the command reads this builder rather than restating
+ * the key, so the pre-flight and the boot report cannot describe different
+ * duplicates.
  *
  * It GROUPs by exactly the index's own key parts, so what it reports and what
  * the index rejects cannot diverge. The nullable column is projected through
@@ -359,7 +374,7 @@ function reportDegradation(
             `(${columns}) is enforced only as far as it was before; ADR-0005 overlay uniqueness is NOT ` +
             `enforced until the duplicates are resolved, and getMetaItem has no defined answer for ` +
             `which of the colliding rows wins. List them with: ${duplicateQuery} — or run ` +
-            `"os migrate plan" — then restart (ADR-0120 D4, #6418).`,
+            `"os migrate duplicates" — then restart (ADR-0120 D4, #6418, #8725).`,
             detail,
         );
         return;

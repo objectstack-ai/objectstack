@@ -540,7 +540,7 @@ os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日�
 
 每轮向维护者打**中文**轮次报告(chat 通道,语言政策显式例外):issue → 判决 → PR 链接 → 备注的表
 ,加升级项、代裁清单(分诊)、awaiting a human merge 项、governed 合并审计清单(实跑
-`node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总)。健康指标四个(总 open 数刻意不在其
+`node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总)、**`UNRECOGNISED` 行**(对本轮门禁日志 grep `UNRECOGNISED`,逐行照录,`NOT APPLICABLE` 行也在内 —— 缺行读作「无未识别项」,实则可能是没人 grep)。健康指标四个(总 open 数刻意不在其
 中 —— 债密区发现快于关闭是循环在工作):**可派发库存**(dispatchable inventory;open `pm:queue` 未
 认领及趋势);**决策箱**(decision inbox;待维护者数,分诊简报还要点名带开放下游依赖的决策
 卡 —— 从 `Blocked-by:` 反向索引现算);**finding 数与中位年龄**(裸标签数即未定级数,hold 已换标不

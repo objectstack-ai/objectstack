@@ -6,90 +6,158 @@ on:
 
 jobs:
   # ===========================================================================
-  # Both label-writing jobs below write this PR's label set with a WHOLE-SET PUT
-  # (`PUT /issues/{n}/labels`), never an additive POST. Read out of the pinned
-  # sources rather than inferred from the docs (#5649):
+  # LABEL WRITES IN THIS FILE ARE ADDITIVE. Nothing here may issue
+  # `PUT /issues/{n}/labels`.
+  #
+  # A whole-set PUT REPLACES a PR's label set, so every whole-set write is a
+  # read-modify-write across a network round trip and destroys any label that
+  # lands in between -- silently, with an `unlabeled` event nobody watches for.
+  # Only three verbs exist and only one is destructive:
+  #
+  #   POST   /issues/{n}/labels          adds the named labels, touches nothing else
+  #   DELETE /issues/{n}/labels/{name}   removes ONE label, BY NAME
+  #   PUT    /issues/{n}/labels          replaces the whole set -- DESTRUCTIVE
+  #
+  # Both jobs below used to reach the third verb through a third-party action.
+  # Read out of the pinned sources rather than inferred from the docs (#5649):
   #
   #   * codelytv/pr-size-labeler@v1.10.4 -- src/github.sh:68-91
   #     (`github::add_label_to_pr`): GETs the PR, greps its OWN size family out
   #     of the result, appends the new size label, then
-  #     `curl -X PUT .../issues/$pr_number/labels` with the whole set.
+  #     `curl -X PUT .../issues/$pr_number/labels` with the whole set. No
+  #     mitigation of any kind: the window is the entire round trip.
   #   * actions/labeler@v7.0.0 -- src/labeler.ts:56,111-133 plus
   #     src/api/set-labels.ts: snapshots `preexistingLabels` at run start,
-  #     unions in the config matches, re-reads the live label list once, then
-  #     calls `client.rest.issues.setLabels` -- which IS the PUT.
+  #     unions in the config matches, re-reads the live label list once and
+  #     carries forward whatever appeared in between, then calls
+  #     `client.rest.issues.setLabels` -- which IS the PUT. That re-read
+  #     NARROWS the window to [re-read .. PUT]; it does not close it.
   #
-  # Neither action exposes an input that makes its write additive, and
-  # `sync-labels` is NOT that input: it only decides whether a label the CONFIG
-  # owns is dropped once its globs stop matching (labeler.ts:81-83). It is
-  # pinned explicitly below for upgrade-drift protection only. It does not, and
-  # cannot, stop the clobbering described here.
+  # Neither action exposed an input that made its write additive, and
+  # `sync-labels` was never that input: it only decided whether a label the
+  # CONFIG owns is dropped once its globs stop matching (labeler.ts:81-83).
   #
-  # A whole-set PUT only destroys someone else's label when that label lands
-  # inside the window between the writer's read and its PUT. What this file can
-  # therefore fix is the OVERLAP, and two changes below do exactly that:
+  # ## The measured loss (#10703)
   #
-  #   1. The two writers no longer run concurrently -- `auto-label` needs
-  #      `pr-size`. They used to be started by the same event and overlapped
-  #      exactly. Live specimen, PR #5650 run 31051251795 (the `opened` run):
-  #      `Add size label` ran 22:03:47->22:03:49 and
-  #      `Label based on changed files` ran 22:03:47->22:03:49, and the
-  #      labeler's PUT emitted `unlabeled size/s` at 22:03:49 -- one second
-  #      after the size job added it, for a label the labeler does not manage.
-  #   2. Neither writer runs on `labeled`/`unlabeled` any more. Their only input
-  #      is the diff, which a label event cannot change, so such a run could
-  #      only ever re-PUT the same set -- one more chance to erase a concurrent
-  #      writer in exchange for no new information. Same PR, run 31051273625
-  #      (started by a label event): `Auto Label` recomputed and wrote nothing,
-  #      `Check PR Size` re-PUT at 22:04:22. The two event types stay in `on:`
-  #      because `changeset-check` genuinely needs them (#5580).
+  # PR #10698, every label event from the timeline API:
   #
-  # NOT closed by either change, and deliberately recorded rather than implied:
-  # a writer OUTSIDE this workflow -- an agent or a human labelling the PR
-  # seconds after `gh pr create`, i.e. exactly while these jobs run -- can still
-  # land inside a PUT window and be erased. That is how #5533 lost its
-  # `skip-changeset` exemption for one second (15:46:44 applied, 15:46:45 erased
-  # by the labeler's PUT of `{size/m, tests}`). Closing that half needs the
-  # writes themselves to become additive, not merely better ordered; it is the
-  # open half of #5649 and no configuration here can stand in for it.
+  #   09:05:29Z  labeled    skip-changeset  claude[bot]          (additive POST, HTTP 200)
+  #   09:05:30Z  unlabeled  skip-changeset  github-actions[bot]  <-- the size labeler's PUT
+  #   09:05:30Z  labeled    size/l          github-actions[bot]
+  #   09:05:42Z  labeled    ci/cd           github-actions[bot]
+  #   09:06:03Z  labeled    skip-changeset  claude[bot]          (re-applied after read-back)
+  #
+  # One second. The writer did everything right -- additive POST, HTTP 200,
+  # read-back confirmed -- and still lost the label. `skip-changeset` is the
+  # exemption for a PR that publishes nothing, so its erasure makes
+  # `changeset-check` demand a changeset from a PR that legitimately has none.
+  # #5533 lost the same label the same way, that time to the path labeler's PUT
+  # of `{size/m, tests}`.
+  #
+  # ## Why this is a fix and not another narrowing
+  #
+  # Both steps now call `scripts/pr-labels.mjs`, which issues POST and targeted
+  # DELETE only. Neither verb carries a label the writer does not name, so
+  # neither can destroy a concurrent writer's label -- at ANY interleaving, with
+  # no ordering constraint between writers and no window left to narrow.
+  # Correctness no longer depends on timing, which is what every configuration
+  # change before it could only ever improve. The plan builders in that script
+  # are pure functions and its `--self-test` asserts they emit no PUT, so a
+  # future edit that reaches for a whole-set write goes red in lint before it
+  # can reach a PR.
+  #
+  # Two earlier ordering changes are RETAINED below, now as belt-and-braces
+  # rather than as the mitigation:
+  #
+  #   1. `auto-label` still `needs: pr-size`. They used to be started by the
+  #      same event and overlapped exactly -- live specimen, PR #5650 run
+  #      31051251795: `Add size label` ran 22:03:47->22:03:49 and `Label based
+  #      on changed files` ran 22:03:47->22:03:49, and the labeler's PUT emitted
+  #      `unlabeled size/s` at 22:03:49, one second after the size job added it,
+  #      for a label the labeler does not manage. Additive writes make that
+  #      overlap harmless; the edge is kept because removing it is an unrelated
+  #      change to this file's job graph and it costs one job's queue time.
+  #   2. Neither writer runs on `labeled`/`unlabeled`. Their only input is the
+  #      diff, which a label event cannot change, so such a run could only ever
+  #      recompute the same answer. It no longer risks an erasure, but it still
+  #      buys nothing. The two event types stay in `on:` because
+  #      `changeset-check` genuinely needs them (#5580).
+  #
+  # ## What is still open
+  #
+  # This file no longer writes a whole set, but nothing MECHANICALLY stops a
+  # future workflow, action or agent from doing so -- a seat calling the labels
+  # endpoint with a `labels` array, or a re-introduced third-party labeler,
+  # reopens exactly this defect with no gate to catch it. There is no repo gate
+  # that bans the verb; until there is, this paragraph and the script's
+  # self-test are the whole guard.
   # ===========================================================================
   pr-size:
     name: Check PR Size
     # A `labeled`/`unlabeled` event cannot change this job's input (the diff),
-    # so running it there buys nothing and costs one whole-set PUT. See above.
+    # so running it there recomputes the same answer for a fee. See above.
     if: github.event.action != 'labeled' && github.event.action != 'unlabeled'
     runs-on: ubuntu-latest
     permissions:
+      # `contents: read` is for the checkout the label writer needs. Declaring
+      # any `permissions:` block drops every scope not listed, so it has to be
+      # spelled even though the default token would have had it.
+      contents: read
       pull-requests: write
 
     steps:
-      - name: Add size label
-        uses: codelytv/pr-size-labeler@v1.10.4
-        with:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # The self-test runs BEFORE the write, in the same job, so a matcher or a
+      # plan builder that has drifted fails without touching the PR.
+      - name: Self-test the additive label writer
+        run: node scripts/pr-labels.mjs --self-test
+
+      # Every threshold and label below carries the SAME name and the SAME value
+      # the retired `codelytv/pr-size-labeler` input had, so this replacement is
+      # auditable value-for-value against the diff that introduced it. The
+      # comparison is `<` and not `<=`, matching that action's labeler.sh:50-60
+      # (`-lt`): a 10-line PR is `size/s`, not `size/xs`.
+      #
+      # Two of its inputs are deliberately NOT carried over:
+      #   * `fail_if_xl: 'false'` -- it selected the do-nothing branch.
+      #   * `message_if_xl` -- DEAD as this workflow configured it. labeler.sh
+      #     calls `add_label_to_pr` and only then asks
+      #     `! github::has_label "$pr_number" "$xl_label"`, i.e. it tests for the
+      #     label it has just written, so the guard is false and the comment
+      #     never posts. Reimplementing it here would be adding a comment this
+      #     repo has never actually seen, which is a feature request, not a
+      #     port. Ask for it on its own card if it is wanted.
+      #
+      # Unlike the action, this paginates `pulls/{n}/files` (github.sh:23 caps at
+      # `per_page=100` and says so in its own NOTE), so a PR over 100 files is
+      # now sized on all of them and may land a larger, correct label.
+      - name: Add size label (additive POST, then a targeted DELETE)
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          xs_label: 'size/xs'
-          xs_max_size: '10'
-          s_label: 'size/s'
-          s_max_size: '100'
-          m_label: 'size/m'
-          m_max_size: '500'
-          l_label: 'size/l'
-          l_max_size: '1000'
-          xl_label: 'size/xl'
-          fail_if_xl: 'false'
-          message_if_xl: 'This PR is very large. Consider breaking it into smaller PRs for easier review.'
-          files_to_ignore: 'pnpm-lock.yaml package-lock.json yarn.lock'
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          XS_LABEL: 'size/xs'
+          XS_MAX_SIZE: '10'
+          S_LABEL: 'size/s'
+          S_MAX_SIZE: '100'
+          M_LABEL: 'size/m'
+          M_MAX_SIZE: '500'
+          L_LABEL: 'size/l'
+          L_MAX_SIZE: '1000'
+          XL_LABEL: 'size/xl'
+          FILES_TO_IGNORE: 'pnpm-lock.yaml package-lock.json yarn.lock'
+        run: node scripts/pr-labels.mjs --size
 
   auto-label:
     name: Auto Label
-    # ORDERING ONLY, not a dependency: this job wants `pr-size`'s PUT to be
-    # already done, so that the label set this one reads includes the size
-    # label and its own PUT carries it forward. `!cancelled()` is written out
-    # because GitHub would otherwise wrap this `if:` in an implicit `success()`
-    # -- a failed or skipped size job must not silently stop path labelling.
-    # (Same reasoning the check-workflow-status-functions gate exists to make
-    # explicit; that gate scans only `needs.*.outputs.*` reads, so this one is
-    # out of its scope and has to state its intent by hand.)
+    # ORDERING ONLY, not a dependency: see point 1 in the header. `!cancelled()`
+    # is written out because GitHub would otherwise wrap this `if:` in an
+    # implicit `success()` -- a failed or skipped size job must not silently
+    # stop path labelling. (Same reasoning the
+    # check-workflow-status-functions gate exists to make explicit; that gate
+    # scans only `needs.*.outputs.*` reads, so this one is out of its scope and
+    # has to state its intent by hand.)
     needs: pr-size
     if: >-
       !cancelled()
@@ -104,19 +172,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Label based on changed files
-        uses: actions/labeler@v7.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          configuration-path: .github/labeler.yml
-          # Pinned at the value it already defaults to (action.yml), because a
-          # default is not a decision: an upgrade may move it, and `true` would
-          # make this step REMOVE a label of its own config whenever the globs
-          # stop matching -- on a `synchronize` that reverts a docs file, for
-          # instance. Pinning it is upgrade-drift protection and nothing more:
-          # `sync-labels` never governed foreign labels, so it is NOT the fix
-          # for the clobbering documented at the top of this file (#5649).
-          sync-labels: false
+      # Path labels are ADD-ONLY, which is what `sync-labels: false` meant for
+      # the retired `actions/labeler`: a label whose globs stop matching is left
+      # alone. So this half issues POST and has no DELETE at all.
+      #
+      # `.github/labeler.yml` stays the single source of truth. The script
+      # implements the minimatch subset that config actually uses -- `*`, `?`,
+      # `**` as a whole segment, `dot: true` semantics (which is what
+      # actions/labeler v7 defaults to) -- and REFUSES anything else with a
+      # non-zero exit naming the offending line. The self-test parses the real
+      # checked-in config, so a pattern that drifts outside the subset fails
+      # there rather than silently mislabelling PRs.
+      - name: Label based on changed files (additive POST)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LABELER_CONFIG: .github/labeler.yml
+        run: node scripts/pr-labels.mjs --paths
 
   changeset-check:
     name: Check Changeset

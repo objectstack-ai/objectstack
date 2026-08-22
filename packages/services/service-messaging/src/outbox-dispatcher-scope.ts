@@ -44,9 +44,15 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  * touches". It silences a warning about a write that was already, and
  * correctly, environment-wide. It must never be reached for to quiet a write
  * that a request context could have scoped — that is the failure mode the
- * audit exists to prevent, and the row-level writes on these same objects
- * (`ack`, `redeliver`) are single-record `multi: false` writes that do **not**
- * use this helper.
+ * audit exists to prevent.
+ *
+ * ⛔ **`multi: false` sites do not use this helper** — its return type says
+ * `multi: true` so they cannot, deliberately. The single-record writes on
+ * these same objects are audited under a DIFFERENT op (`update`, not
+ * `updateMany`) and they do **not** share one classification:
+ * {@link dispatcherAckOptions} carries the sweep warrant to the two `ack`
+ * sites, and `SqlHttpOutbox.redeliver` — request-reachable — carries a
+ * threaded tenant and no bypass at all.
  *
  * @param where Predicate identifying the rows this sweep claims or reaps.
  */
@@ -54,4 +60,58 @@ export function dispatcherSweepOptions(
     where: Record<string, unknown>,
 ): EngineUpdateOptions & { multi: true; bypassTenantAudit: true } {
     return { where, multi: true, bypassTenantAudit: true };
+}
+
+
+/**
+ * The write options for a dispatcher **`ack`** — the single-record
+ * (`multi: false`) write that records one delivery attempt's outcome, on
+ * `SqlNotificationOutbox.ack` and `SqlHttpOutbox.ack`.
+ *
+ * ## Why a second helper instead of {@link dispatcherSweepOptions}
+ * These are audited under the driver's **`update`** op, not `updateMany`, and
+ * the two ops are separate keys in `auditMissingTenant`'s throttle — so a
+ * classification made for the sweeps says nothing about these. The sweep
+ * helper's return type is `& { multi: true }`, which makes the confusion a
+ * compile error rather than a judgement call.
+ *
+ * ## The warrant, re-derived rather than inherited
+ * It is the same warrant as the sweeps', and every limb was re-checked
+ * against this tree:
+ *
+ *  1. **No request context exists to thread.** `ack` has exactly two callers,
+ *     `NotificationDispatcher.dispatchOne` / `HttpDispatcher.dispatchOne`,
+ *     both inside `runPartition()` — a `setInterval` tick holding the
+ *     `notify.dispatcher.partition.<n>` / `http.dispatcher.partition.<n>`
+ *     cluster lock. There is no HTTP request, no session and no active
+ *     organization anywhere on that path.
+ *  2. **The row being acked was claimed by a deliberately global sweep.**
+ *     `claim()` crosses organizations by construction (partitioning is
+ *     `hash(refId | notificationId | digestKey) mod N`, a load-spreading key,
+ *     never an org key), and one outbox per ENVIRONMENT drains the whole
+ *     queue. An `ack` that could not write the row its own tick just claimed
+ *     would leave that row `in_flight` until the visibility timeout, forever,
+ *     for every organization but one.
+ *
+ * ## ⛔ Why not "just pass the claimed row's own organization_id"
+ * It is available on the notification claim result, so it is the tempting
+ * answer, and it is the WRONG one — worse than this bypass, not better. A
+ * predicate derived from the row you are about to write is tautological: it
+ * matches exactly the row it was read from and can never exclude anything, so
+ * it adds no isolation whatsoever. What it does add is the appearance of
+ * isolation — it silences the audit line, and the next reader finds a
+ * tenant-scoped write instead of a declared global one. The audit's question
+ * is "did the CALLER's tenant reach this write?", and on a dispatcher tick
+ * the honest answer is "there is no caller tenant", which is what this flag
+ * states.
+ *
+ * ⚠️ Diagnostics only, exactly as above: it never changes what the write
+ * touches. `ack` already targets one row by primary key.
+ *
+ * @param id Primary key of the delivery row this attempt outcome belongs to.
+ */
+export function dispatcherAckOptions(
+    id: string,
+): EngineUpdateOptions & { multi: false; bypassTenantAudit: true } {
+    return { where: { id }, multi: false, bypassTenantAudit: true };
 }

@@ -142,8 +142,10 @@ in seconds — instead of a silent runtime failure nobody traces back.
 
 The other half is size. The bundled example CRM — [`examples/app-crm`](./examples/app-crm):
 six objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
-translations — is **31 files, 1,792 lines, roughly 16k tokens**. That's the whole
-example app, in about 8% of a 200k-token context window. Count it yourself:
+translations — is **31 files, 1,930 lines, roughly 18k tokens** as of this writing
+(about 9% of a 200k-token context window). That's the whole example app. These
+counts move as the example evolves — the command below is the source of truth,
+not the sentence you just read. Count it yourself:
 
 ```bash
 find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l
@@ -170,8 +172,11 @@ as a human:
 claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
 ```
 
-Objects are exposed automatically; actions opt in with `ai: { exposed: true }`.
-See [Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp).
+The first tool call opens a browser to sign you in — each deployment is its own
+OAuth server, so there's no token to copy-paste. Headless setups (CI,
+containers) use an API key instead. Objects are exposed automatically; actions
+opt in with `ai: { exposed: true }`. See
+[Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp) for both flows.
 
 ## This repo
 
@@ -262,7 +267,7 @@ For the browser, the typed client SDK and React hooks (`useQuery` / `useMutation
 ## Package Directory
 
 <details>
-<summary><b>72 published packages</b> across core, engine, drivers, client, plugins, services, adapters, tools, and examples — click to expand.</summary>
+<summary><b>45 packages</b> (as of this writing) across core, engine, drivers, client, plugins, services, adapters, tools, and examples — click to expand for the current list, which is the source of truth for this count.</summary>
 
 ### Core
 

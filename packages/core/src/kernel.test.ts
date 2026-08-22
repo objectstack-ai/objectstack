@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel } from './kernel';
 import { ServiceLifecycle, PluginMetadata } from './plugin-loader';
 import type { Plugin, PluginContext } from './types';
-import { recordGuards, stillPinningTheLoop } from './refd-timer-probe.testkit.js';
+import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
 
 describe('ObjectKernel', () => {
     let kernel: ObjectKernel;
@@ -243,7 +243,7 @@ describe('ObjectKernel', () => {
         /**
          * The real value that hung one-shot CLI processes: ObjectQLPlugin's.
          * It is also what tells these guards apart from every other timer on
-         * the shared loop — see `refd-timer-probe.testkit.ts`, which explains
+         * the shared loop — see `@objectstack/refd-timer-testkit`, which explains
          * why these pins name their guards instead of counting the process
          * (#10685).
          */

@@ -34,6 +34,15 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The repo's one comment/code separator (#9367). The four shape assertions
+// below used to match against RAW `SERVE_SOURCE` (#10514): a trailing comment
+// describing the old call shape (e.g. quoting a reverted
+// `checkMultiNodeAllowed(replicas)`) was indistinguishable from the real call.
+// `interfaceFields()` further down does its own narrower, brace-matched strip
+// over an `export interface` body and is deliberately left alone — out of
+// scope for #10514, noted there so a future re-derivation doesn't read it as
+// the same defect.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +51,15 @@ const REPO_ROOT = resolve(HERE, '../../../..');
 
 /** `packages/cli/src/commands/serve.ts` — the consumer. */
 const SERVE_SOURCE = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
+
+/**
+ * `SERVE_SOURCE` with every comment span blanked (offsets preserved) — what
+ * the four shape assertions below actually match against (#10514), so a
+ * comment naming `checkMultiNodeAllowed(…)` cannot satisfy — or hide behind —
+ * any of them. `interfaceFields()` still reads raw `SERVE_SOURCE`; see the
+ * import comment above for why that is out of scope here.
+ */
+const MASKED_SERVE_SOURCE = maskComments(SERVE_SOURCE);
 
 /**
  * The producer, read from source rather than imported: the CLI has no
@@ -115,8 +133,8 @@ describe('os serve ↔ multi-node gate', () => {
   it('calls the gate WITH a requested node count', () => {
     // The exact regression: `checkMultiNodeAllowed()`. Passing nothing makes the
     // licensed-overflow verdict unreachable rather than merely unread.
-    expect(SERVE_SOURCE).not.toMatch(/checkMultiNodeAllowed\(\s*\)/);
-    expect(SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
+    expect(MASKED_SERVE_SOURCE).not.toMatch(/checkMultiNodeAllowed\(\s*\)/);
+    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
   });
 
   it('passes the operator-declared replica count', () => {
@@ -124,11 +142,11 @@ describe('os serve ↔ multi-node gate', () => {
     // desired count, identical in every replica, not a live membership count —
     // which is right for an advisory message about the operator's own
     // configuration, and is NOT sufficient for enforcement.
-    expect(SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\)\s*\)/);
+    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\)\s*\)/);
   });
 
   it('types the dynamic import with the mirrored verdict, not an inline literal', () => {
-    expect(SERVE_SOURCE).toMatch(
+    expect(MASKED_SERVE_SOURCE).toMatch(
       /checkMultiNodeAllowed:\s*\(requested\?:\s*number\)\s*=>\s*MultiNodeGateVerdict/,
     );
   });
@@ -150,5 +168,36 @@ describe('os serve ↔ multi-node gate', () => {
       + 'packages/cli/src/commands/serve.ts to match — and decide whether the operator warning '
       + 'should now read the new field.',
     ).toEqual(producer);
+  });
+});
+
+/**
+ * Vacuity proof (#10514): a synthetic regression shaped exactly like the
+ * issue's own repro — the zero-arg call reintroduced, with a trailing comment
+ * quoting the OLD argued call, the way a careless revert reads. Both legs are
+ * shown so the RAW leg's wrong verdict — what this pin's assertions would
+ * have produced before #10514 — is visible next to the MASKED leg's correct
+ * one, not just asserted.
+ */
+describe('the shape assertions ignore a comment that quotes the old call (#10514)', () => {
+  it('a reverted zero-arg call cannot hide behind a comment describing the argued call it replaced', () => {
+    const regressed = [
+      'const __gate = checkMultiNodeAllowed();',
+      '// checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS)) used to be called here',
+    ].join('\n');
+
+    // Pre-#10514 (raw): the negative assertion correctly catches the bad
+    // shape…
+    expect(regressed).toMatch(/checkMultiNodeAllowed\(\s*\)/);
+    // …but the positive assertion is ALSO satisfied — by the comment alone —
+    // which is exactly how this pin's "calls the gate WITH a requested node
+    // count" test would have stayed green over the regression it exists to
+    // catch.
+    expect(regressed).toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
+
+    // Post-#10514 (masked): the comment is blanked, so the positive assertion
+    // correctly fails to find an argued call — the regression is no longer
+    // hidden.
+    expect(maskComments(regressed)).not.toMatch(/checkMultiNodeAllowed\(\s*[^)\s]/);
   });
 });

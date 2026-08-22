@@ -1198,13 +1198,26 @@ export class LifecycleService {
     // author has not decided yet — against the retain-first posture that makes
     // this method refuse to hot-delete anything the cold store has not taken.
     //
-    // ⚠️ Deliberately NOT decided here: `retention` declared beside `ttl` +
-    // `archive`. The ttl cutoff selects, so the age window (`archive.after`,
-    // which the spec pins equal to `retention.maxAge`) no longer separately
-    // bounds the hot store for that triple. Whether the Archiver should union
-    // the two windows, or the triple be refused at parse time (a
-    // `packages/spec` accept-set question, outside this card's fence), is
-    // #10527 rather than a choice this diff makes silently.
+    // [#10643] `retention` declared beside `ttl` + `archive`: once an open
+    // question at this line (#10527), since decided — and decided at parse
+    // time rather than here. `LifecycleSchema` (`packages/spec`, the
+    // superRefine on the lifecycle block) refuses that triple unless the ttl
+    // restates the age bound exactly: `ttl.field` must be `created_at` and
+    // `ttl.expireAfter` must equal `retention.maxAge` — which the alignment
+    // refine beside it already pins equal to `archive.after`. So every triple
+    // that reaches this method arrives narrowed to that one shape, and on it
+    // the selection below reads the same column at the same declared instant
+    // whichever branch it takes; the hazard the old note raised (the ttl
+    // cutoff selects, so the age window no longer separately bounds the hot
+    // store) is no longer a shape the spec accepts.
+    //
+    // Still load-bearing: that equality is enforced in `packages/spec` and
+    // re-checked nowhere in this file. Widening the triple accept-set there
+    // puts the original question — union the two windows, or keep refusing —
+    // straight back on this line, so it is not a spec-local change. Which
+    // WINDOW governs is a separate leg either way: with `ttl` declared it is
+    // the `expireAfter` override key that applies, not `maxAge` (see the
+    // #10528 block below).
     const dueField = lc.ttl ? lc.ttl.field : 'created_at';
 
     // [#10528] WHICH WINDOW IS DUE — resolved through ADR-0057 P4 governance,

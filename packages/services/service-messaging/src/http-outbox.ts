@@ -216,6 +216,50 @@ export type RedeliverGuard = (
     row: HttpDelivery,
 ) => Promise<string | undefined> | string | undefined;
 
+/**
+ * [#10740] Everything {@link IHttpOutbox.redeliver} needs from its CALLER —
+ * the requesting tenant, and the producer's veto.
+ *
+ * ## Why the tenant is a REQUIRED property typed `string | undefined`
+ * `redeliver` is the one door on `sys_http_delivery` that a request can reach:
+ * `POST /api/v1/webhooks/redeliver` is served to any authenticated user. The
+ * object is tenant-scoped (the kernel provisions `organization_id`), so on a
+ * walled deployment (`OS_TENANCY_POSTURE=isolated|group`) a `redeliver` that
+ * does not carry its caller's tenant is an unscoped write reachable by a user
+ * — precisely the finding the driver's `auditMissingTenant` gate exists to
+ * raise.
+ *
+ * ⛔ The remedy for that finding is this field, and it is NEVER
+ * `bypassTenantAudit`. Silencing the line would leave the hole and remove the
+ * only thing that reports it: a scoped write and a bypassed write are
+ * indistinguishable from the log, so the flag converts a detectable defect
+ * into an undetectable one. The dispatcher-side classification
+ * (`outbox-dispatcher-scope.ts`) does not extend here and must not be
+ * borrowed — that warrant rests on there being no request context at all.
+ *
+ * The property is REQUIRED so that omitting it cannot compile, and typed
+ * `string | undefined` so a genuinely tenant-less caller (an unwalled
+ * single-tenant deployment, an internal tool, a test) has to write
+ * `tenantId: undefined` and mean it. An optional property would let the
+ * dangerous case — a request path that simply forgot — pass type-checking
+ * silently, which is the shape this contract change exists to remove.
+ *
+ * ⚠️ Passing `undefined` is honest, not a bypass: the write stays unscoped and
+ * the audit line still fires. That is the intended behaviour on a deployment
+ * that cannot resolve an organization for the caller — the gap is reported
+ * rather than hidden.
+ */
+export interface RedeliverOptions {
+    /**
+     * Organization id of the caller requesting the replay, threaded to the
+     * driver as `DriverOptions.tenantId`. `undefined` only when the caller
+     * genuinely has no tenant (see the interface docs).
+     */
+    tenantId: string | undefined;
+    /** Optional producer verdict; see {@link RedeliverGuard}. */
+    guard?: RedeliverGuard;
+}
+
 export interface HttpClaimOptions {
     /** Identifier of the node doing the claim (for `claimedBy`). */
     nodeId: string;
@@ -441,12 +485,21 @@ export interface IHttpOutbox {
      * signature). Throws {@link HttpRedeliverError}.
      *
      * [#8069] Implementations MUST call {@link assertHttpRedeliverable} before
-     * writing anything, and MUST consult `guard` — the producer's verdict on
-     * whether the configuration this row depends on is still available — with
-     * the same "refuse before you write" ordering. A refused redelivery leaves
-     * the row exactly as it was.
+     * writing anything, and MUST consult `options.guard` — the producer's
+     * verdict on whether the configuration this row depends on is still
+     * available — with the same "refuse before you write" ordering. A refused
+     * redelivery leaves the row exactly as it was.
      *
-     * @param guard Optional producer verdict; see {@link RedeliverGuard}.
+     * [#10740] Implementations backed by a tenant-scoped store MUST apply
+     * `options.tenantId` to the rows they read and to the row they write, so a
+     * caller can only replay a delivery inside its own organization. A row in
+     * another tenant is INVISIBLE, not forbidden — the refusal surfaces as
+     * `RESOURCE_NOT_FOUND`, which is also what keeps this endpoint from being
+     * an existence oracle for other tenants' delivery ids. ⛔ An implementation
+     * must never reach for `bypassTenantAudit` here; see
+     * {@link RedeliverOptions}.
+     *
+     * @param options The caller's tenant and the producer's veto.
      */
-    redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery>;
+    redeliver(id: string, options: RedeliverOptions): Promise<HttpDelivery>;
 }

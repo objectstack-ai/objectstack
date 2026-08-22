@@ -866,6 +866,16 @@ export class SecurityPlugin implements Plugin {
   async start(ctx: PluginContext): Promise<void> {
     ctx.logger.info('Starting Security Plugin...');
 
+    // [#10706] Bind the report sink FIRST — above the two bail-outs below.
+    // Both of them `return` before the "capture handles" block, so binding the
+    // sink there left `this.logger` at its `= {}` construction default for the
+    // whole LIFETIME of the instance on a degraded boot: every report site is
+    // written `this.logger.warn?.(...)`, so an unbound sink is not a state any
+    // caller can notice — it silently reports nothing. Assigning here is
+    // correct under every option on #10556's open default-sink question, so it
+    // does not wait on that ruling; the `= {}` default itself is #10556's.
+    this.logger = ctx.logger;
+
     // Get required services
     let ql: IObjectQLEngine | undefined;
     let metadata: IMetadataService | undefined;
@@ -887,7 +897,6 @@ export class SecurityPlugin implements Plugin {
     // engine middleware AND the public getReadFilter service method.
     this.metadata = metadata;
     this.ql = ql;
-    this.logger = ctx.logger;
     this.rlsCompiler.setLogger?.(ctx.logger);
     // [C2 / ADR-0095] Late-bound resolver for the optional `sharing` service.
     this.resolveKernelService = (name: string) => {

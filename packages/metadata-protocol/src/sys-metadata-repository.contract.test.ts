@@ -58,6 +58,7 @@ import {
   hashSpec,
 } from '@objectstack/metadata-core';
 import { runRepositoryContractTests } from '@objectstack/metadata-core/testing';
+import type { MetadataEvent } from '@objectstack/metadata-core';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
 interface Row {
@@ -182,17 +183,13 @@ runRepositoryContractTests('SysMetadataRepository', makeRepo, {
   // type — is not, on purpose (packaged objects are locked); `'dashboard'` is.
   primaryType: 'view',
   secondaryType: 'dashboard',
-  // #10842 — the one invariant this implementation does NOT satisfy, found by
-  // this very file: `watch()` registers an in-memory listener and reads `since`
-  // only as a drop-filter on live events, so it never replays from
-  // `sys_metadata_history`. Declaring it does not skip the clauses: the suite
-  // swaps in two that pin the divergence and re-ask the filter question over
-  // the live stream, so this line has to be deleted the day replay lands.
-  // Not fixed here — both production `watch()` consumers subscribe with no
-  // `since`, so a full-log replay would flood HMR and cache invalidation at
-  // every `setRepository()`, and what `watch()` with no `since` owes is not
-  // written in `repository.ts` at all. #10842 carries the fork.
-  declaredDivergences: { resumableWatch: '#10842' },
+  // #10842 — the `declaredDivergences: { resumableWatch: '#10842' }` line that
+  // stood here is GONE, deleted by the PR that made invariant 6 true for this
+  // implementation: `watch(filter, since)` now replays from
+  // `sys_metadata_history` before going live. The pin clause the declaration
+  // swapped in went red the moment replay landed, which is the mechanism
+  // working — it is what told this call site to delete the line rather than
+  // let a fixed divergence keep being declared.
 });
 
 /**
@@ -250,5 +247,204 @@ describe('SysMetadataRepository — what the contract suite does and does not re
     expect(got!.ref.org).toBe('system');
     expect(got!.hash).toBe(a.version);
     expect(got!.hash).toBe(hashSpec(got!.body));
+  });
+});
+
+/**
+ * #10842 — invariant 6's TWO halves, pinned where they are implementation
+ * facts rather than table entries.
+ *
+ * The shared suite asserts the floor every `MetadataRepository` owes and
+ * deliberately carries no per-implementation column — that is the property
+ * that keeps it one table. The half below is precisely per-implementation:
+ * `repository.ts` says a `watch()` with no `since` MAY additionally replay,
+ * and `SysMetadataRepository` is the implementation that does NOT. That is a
+ * load-bearing choice, not an omission, so it is pinned here.
+ *
+ * ⛔ Why it is load-bearing: both production subscribers attach with no
+ * `since` — `MetadataManager.startRepositoryWatch()` issues `repo.watch({})`
+ * from `setRepository()`, and `MetadataCache.start()` issues
+ * `repo.watch(this.watchFilter)`. Every event they receive invalidates a
+ * registry entry, drops the `list()` cache and re-emits to every watcher
+ * (ObjectQLPlugin, Studio HMR). A replay here means the org's whole
+ * `sys_metadata_history` arrives as "this just changed" at every attach —
+ * thousands of rows on a mature environment. That flood is the option the
+ * maintainer explicitly declined, so its absence gets a test, not a comment.
+ */
+describe('SysMetadataRepository — invariant 6, both halves (#10842)', () => {
+  const ref = { org: 'system', type: 'view' as const, name: 'sample_view' };
+
+  /** Drain up to `n` events, or until `timeoutMs` elapses. Never throws. */
+  async function drain(
+    iter: AsyncIterator<MetadataEvent>,
+    n: number,
+    timeoutMs: number,
+  ): Promise<MetadataEvent[]> {
+    const out: MetadataEvent[] = [];
+    const deadline = Date.now() + timeoutMs;
+    while (out.length < n) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      const r = await Promise.race([
+        iter.next(),
+        new Promise<IteratorResult<MetadataEvent>>((resolve) =>
+          setTimeout(() => resolve({ value: undefined as any, done: true }), remaining),
+        ),
+      ]);
+      if (r.done) break;
+      out.push(r.value);
+    }
+    return out;
+  }
+
+  // ── THE ACCIDENTAL-OPTION-A GUARD ──────────────────────────────────────
+  //
+  // ⛔ This case FAILS if `watch()` ever starts replaying without `since`.
+  // That is its entire job: it is the falsifiable form of the sentence
+  // `repository.ts` now carries, and the tripwire on the attach-time flood.
+  it.each([
+    ['MetadataManager.startRepositoryWatch()', {}],
+    ['MetadataCache.start() with the default filter', {}],
+    ['MetadataCache.start() with a type filter', { type: 'view' as const }],
+  ])('replays NOTHING at attach time for %s', async (_label, filter) => {
+    const repo = makeRepo();
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+    await repo.put(ref, { label: '2' }, { parentVersion: a.version, actor: 't' });
+
+    // Two events are committed and durably logged. A no-`since` subscriber is
+    // owed none of them.
+    const iter = repo.watch(filter)[Symbol.asyncIterator]();
+    expect(await drain(iter, 5, 250)).toEqual([]);
+    await iter.return?.(undefined);
+  });
+
+  it('…and the same no-`since` subscriber still receives what commits AFTER it attached', async () => {
+    const repo = makeRepo();
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+
+    const iter = repo.watch({})[Symbol.asyncIterator]();
+    const pending = drain(iter, 1, 2000);
+    const b = await repo.put(ref, { label: '2' }, { parentVersion: a.version, actor: 't' });
+
+    expect((await pending).map((e) => e.seq)).toEqual([b.seq]);
+    await iter.return?.(undefined);
+  });
+
+  // ── FACE 1 — the durable replay ────────────────────────────────────────
+
+  it('a numeric `since` replays `seq > since` from `sys_metadata_history`, in seq order, then goes live', async () => {
+    const repo = makeRepo();
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+    const b = await repo.put(ref, { label: '2' }, { parentVersion: a.version, actor: 't' });
+    const c = await repo.put(ref, { label: '3' }, { parentVersion: b.version, actor: 't' });
+
+    const iter = repo.watch({ org: 'system' }, a.seq)[Symbol.asyncIterator]();
+    // b and c committed BEFORE the subscription and are replayed out of the
+    // durable log — the read this repository used to never issue.
+    expect((await drain(iter, 2, 2000)).map((e) => e.seq)).toEqual([b.seq, c.seq]);
+
+    const pending = drain(iter, 1, 2000);
+    const d = await repo.put(ref, { label: '4' }, { parentVersion: c.version, actor: 't' });
+    expect((await pending).map((e) => e.seq)).toEqual([d.seq]);
+    await iter.return?.(undefined);
+  });
+
+  it('the replayed event carries the ROW’s own (type, name), not the filter’s', async () => {
+    const repo = makeRepo();
+    const view = await repo.put(ref, { label: 'v' }, { parentVersion: null, actor: 't' });
+    await repo.put(
+      { org: 'system', type: 'dashboard', name: 'board' },
+      { label: 'd' },
+      { parentVersion: null, actor: 't' },
+    );
+
+    // Org-wide watch: the replay is org-scoped, so the two rows must come back
+    // wearing their own refs. A mapping that stamped one ref on every row (the
+    // shape `history()` legitimately uses, because it resolved a single ref
+    // first) would pass a same-type fixture and silently mislabel this one.
+    const iter = repo.watch({ org: 'system' }, view.seq - 1)[Symbol.asyncIterator]();
+    const got = await drain(iter, 2, 2000);
+    expect(got.map((e) => `${e.ref.type}/${e.ref.name}`)).toEqual([
+      'view/sample_view',
+      'dashboard/board',
+    ]);
+    await iter.return?.(undefined);
+  });
+
+  it('an event committing DURING the durable read is delivered exactly once', async () => {
+    const base = makeFakeEngine();
+    let onHistoryRead: (() => void) | null = null;
+    const gated = {
+      ...base,
+      async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+        if (table === 'sys_metadata_history' && onHistoryRead) {
+          const fire = onHistoryRead;
+          onHistoryRead = null;
+          fire();
+          // Hold the read open long enough for the interleaved write to commit
+          // and broadcast, so the same event is in BOTH the replay batch and
+          // the live queue — which is the seam `delivered` exists to close.
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        return base.find(table, opts);
+      },
+    };
+    const repo = new SysMetadataRepository({
+      engine: gated,
+      organizationId: null,
+      orgLabel: 'system',
+    });
+    created.push(repo);
+
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+    const b = await repo.put(ref, { label: '2' }, { parentVersion: a.version, actor: 't' });
+
+    let cSeq = -1;
+    onHistoryRead = () => {
+      void repo
+        .put(ref, { label: '3' }, { parentVersion: b.version, actor: 't' })
+        .then((r) => {
+          cSeq = r.seq;
+        });
+    };
+    const iter = repo.watch({ org: 'system' }, a.seq)[Symbol.asyncIterator]();
+
+    // Ask for THREE; only two exist. The third slot is what would catch a
+    // duplicate, so the assertion is on the whole drained list, not a prefix.
+    const got = await drain(iter, 3, 2000);
+    expect(cSeq).toBeGreaterThan(0);
+    expect(got.map((e) => e.seq)).toEqual([b.seq, cSeq]);
+    await iter.return?.(undefined);
+  });
+
+  it('a durable-read failure reaches the consumer instead of silently degrading to live-only', async () => {
+    const base = makeFakeEngine();
+    let failHistoryReads = false;
+    const flaky = {
+      ...base,
+      async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+        if (table === 'sys_metadata_history' && failHistoryReads) {
+          throw new Error('connection reset');
+        }
+        return base.find(table, opts);
+      },
+    };
+    const repo = new SysMetadataRepository({
+      engine: flaky,
+      organizationId: null,
+      orgLabel: 'system',
+    });
+    created.push(repo);
+
+    const a = await repo.put(ref, { label: '1' }, { parentVersion: null, actor: 't' });
+    await repo.put(ref, { label: '2' }, { parentVersion: a.version, actor: 't' });
+
+    failHistoryReads = true;
+    const iter = repo.watch({ org: 'system' }, a.seq)[Symbol.asyncIterator]();
+    // A consumer that asked to resume from `a.seq` and got a quiet live tail
+    // would believe it holds events it does not hold. #4867's rule, one seam
+    // over: a cursor we could not read is not a cursor we may invent.
+    await expect(iter.next()).rejects.toThrow('connection reset');
+    await iter.return?.(undefined);
   });
 });

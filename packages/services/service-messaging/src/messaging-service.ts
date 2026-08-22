@@ -16,6 +16,7 @@ import type {
     HttpDeliveryStatus,
     IHttpOutbox,
     RedeliverGuard,
+    RedeliverOptions,
 } from './http-outbox.js';
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 
@@ -280,12 +281,24 @@ export class MessagingService {
      * (a parked drop record — sending it would be a FIRST delivery, unsigned),
      * and for a row whose producer's {@link registerRedeliverGuard} verdict
      * refuses. Both refusals happen before anything is written.
+     *
+     * [#10740] `options.tenantId` is the REQUESTING caller's organization, and
+     * it is the whole reason this method takes a second argument: the door in
+     * front of it (`POST /api/v1/webhooks/redeliver`) is open to any
+     * authenticated user, and `sys_http_delivery` is tenant-scoped. The
+     * outbox applies it to the rows it reads and the row it writes, so a
+     * caller can only replay deliveries in its own organization; a row
+     * elsewhere is `RESOURCE_NOT_FOUND`. ⛔ There is no `bypassTenantAudit`
+     * anywhere on this path and there must not be — see `RedeliverOptions`.
      */
-    async redeliverHttp(id: string): Promise<HttpDelivery> {
+    async redeliverHttp(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
         if (!this.httpOutbox) {
             throw new Error('messaging: HTTP delivery outbox not configured');
         }
-        return this.httpOutbox.redeliver(id, (row) => this.redeliverGuards.get(row.source)?.(row));
+        return this.httpOutbox.redeliver(id, {
+            tenantId: options.tenantId,
+            guard: (row) => this.redeliverGuards.get(row.source)?.(row),
+        });
     }
 
     /** List HTTP delivery rows (admin/tests). Empty when no outbox is wired. */

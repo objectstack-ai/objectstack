@@ -21,7 +21,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import {
+  collectRuntimeIndexPreflight,
   normalizeRows,
+  runtimeIndexProbes,
   GLOBAL_TENANT,
   ORGANIZATION_FIELD,
   SEQUENCES_TABLE,
@@ -120,7 +122,7 @@ afterAll(async () => {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-const collect = (objectFilter?: string) =>
+const collect = async (objectFilter?: string) =>
   collectDuplicateIdentifierReport({
     exec,
     normalize: normalizeRows,
@@ -131,14 +133,31 @@ const collect = (objectFilter?: string) =>
     sequencesTable: SEQUENCES_TABLE,
     client: 'better-sqlite3',
     now: () => new Date('2026-08-17T12:00:00.000Z'),
+    // The real pre-flight against the real fixture — never a stand-in. This
+    // database has none of the four platform tables, so every entry is
+    // `table-absent`, and the `blocked` shape is pinned in its own test below
+    // over a database that really carries the damage.
+    runtimeIndexPreflight: await collectRuntimeIndexPreflight(exec, { client: 'better-sqlite3' }),
     ...(objectFilter ? { objectFilter } : {}),
   });
+
+/**
+ * The four probes, as `@objectstack/metadata-protocol` declares them.
+ *
+ * Read from the producer rather than restated here: the descriptor (table,
+ * index name, key parts, row scope, the two statements) is the migration's own
+ * definition of its key, and a second copy in this file would be a second
+ * definition to keep in step. What this file pins is that the report carries
+ * that descriptor through UNCHANGED, plus a status and its groups.
+ */
+const PROBES = runtimeIndexProbes({ client: 'better-sqlite3' });
 
 describe('#8928 os migrate duplicates — the report document', () => {
   it('is exactly this shape, whole', async () => {
     expect(await collect()).toEqual({
       report: 'duplicate-identifiers',
-      reportVersion: 1,
+      // #8725 added `runtimeIndexPreflight` and its two summary counters.
+      reportVersion: 2,
       generatedAt: '2026-08-17T12:00:00.000Z',
       database: 'better-sqlite3 (fixture)',
       globalPartition: '__global__',
@@ -212,14 +231,38 @@ describe('#8928 os migrate duplicates — the report document', () => {
           organizationCounters: [{ organization: 'org_x', lastValue: 4 }],
         },
       ],
+      // One entry per index the three `kernel:ready` migrations tighten — FOUR,
+      // because the overlay migration builds one per state and either can be
+      // blocked on its own. Present whatever the outcome: an index left out
+      // would make "nothing blocks it" and "it was never probed" the same
+      // absence, which is the rule this command already applies to `skipped`.
+      runtimeIndexPreflight: PROBES.map((probe) => ({
+        ...probe,
+        status: 'table-absent',
+        groups: [],
+      })),
       summary: {
         objectsScanned: 2,
         fieldsScanned: 3,
         duplicateValues: 3,
         duplicateRows: 6,
         liveConditions: 1,
+        runtimeIndexesBlocked: 0,
+        runtimeIndexBlockingRows: 0,
       },
     });
+  });
+
+  it('names the four kernel:ready indexes, and the migration behind each', async () => {
+    const report = await collect();
+    expect(
+      report.runtimeIndexPreflight.map((p) => `${p.migration}:${p.table}:${p.index}`),
+    ).toEqual([
+      'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_active',
+      'ensureMetadataOverlayIndexes:sys_metadata:idx_sys_metadata_overlay_draft',
+      'ensureViewDefinitionActiveIndex:sys_view_definition:idx_sys_view_def_active',
+      'ensureSysSettingIdentityIndex:sys_setting:uniq_sys_setting_organization_id_namespace_key_scope_user_id',
+    ]);
   });
 
   it('does NOT report a value repeated inside ONE partition — the narrow ruled definition', async () => {
@@ -248,6 +291,7 @@ describe('#8928 os migrate duplicates — the report document', () => {
       organizationField: ORGANIZATION_FIELD,
       sequencesTable: SEQUENCES_TABLE,
       client: 'better-sqlite3',
+      runtimeIndexPreflight: [],
     });
     expect(report.skipped).toEqual([
       expect.objectContaining({

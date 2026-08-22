@@ -252,7 +252,10 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         const msg = String(logger.error.mock.calls[0]![0]);
         expect(msg).toContain("COALESCE(package_id, '')");
         expect(msg).toContain('The previous index is left in place');
-        expect(msg).toContain('os migrate plan');
+        expect(msg).toContain('os migrate duplicates');
+        // The repointing (#8725) is only done if the FALSE referral is gone:
+        // `os migrate plan` cannot report this index, by construction.
+        expect(msg).not.toContain('os migrate plan');
         expect(msg).toContain(buildOverlayDuplicateProbeSql('active'));
 
         // …and that shipped query really does name the offenders, on this very
@@ -374,7 +377,8 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         expect(result.status).toBe('conflict');
         expect(indexDdl(OVERLAY_INDEX_NAMES.active)).toEqual(DECLARED_ACTIVE_INDEX_DDL);
         expect(logger.error).toHaveBeenCalledTimes(1);
-        expect(String(logger.error.mock.calls[0]![0])).toContain('os migrate plan');
+        expect(String(logger.error.mock.calls[0]![0])).toContain('os migrate duplicates');
+        expect(String(logger.error.mock.calls[0]![0])).not.toContain('os migrate plan');
     });
 
     it('an unclassifiable failure is reported at error and leaves the index alone', async () => {

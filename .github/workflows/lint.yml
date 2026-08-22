@@ -377,6 +377,28 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # PM bare-root worklist self-test (#10840). The step above proves the
+      # dispatch derivation still WORKS; this one proves the recorded triage of
+      # the gates that derivation structurally cannot see is still true of the
+      # tree. A gate whose population is spelled as a bare single-segment word
+      # builds no watch hint at all — not a dead hint, not a silent verdict,
+      # nothing — so it is unnameable by any dispatch brief and leaves no residue
+      # saying so. The worklist enumerates that species and carries one recorded
+      # verdict per row; this step fails when a verdict outlives its row (the
+      # shrink) or when a new gate joins the species unjudged.
+      #
+      # ⛔ It runs the SELF-TEST only, never the sweep as a verdict: recognising
+      # this species needs a heuristic over constant NAMES, and #10705 refused to
+      # put one on the path that derives every PR's gate list. Nothing in
+      # `dispatch-gates.mjs` reads the worklist, and no verdict in it reaches a
+      # dispatch prompt.
+      #
+      # Unconditional, for the same reason as the step above: a self-test that
+      # can be skipped is the gap moving rather than closing. Reads the workflow
+      # tree and every gate source once; ~0.5s.
+      - name: PM bare-root worklist self-test
+        run: node scripts/pm/bare-root-worklist.mjs --self-test
+
       # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
       # PR-scoped blocking check in its own workflow — it needs a pull request
       # body to judge, which this job does not have — so what runs HERE is its
@@ -1476,6 +1498,26 @@ jobs:
       - name: Workflow status-function guard
         run: pnpm check:workflow-status-functions
 
+      # Additive-label-write self-test (#10703). `pr-automation.yml` writes this
+      # PR's labels with `scripts/pr-labels.mjs`, whose whole contract is that it
+      # emits POST and targeted DELETE and NEVER a whole-set
+      # `PUT /issues/{n}/labels` -- the verb that erased a seat-applied
+      # `skip-changeset` one second after it was written on PR #10698, turning a
+      # PR that publishes nothing into a false `changeset-check` red. The
+      # self-test pins the pure write-plan builders (asserting no plan any input
+      # can produce carries that verb), the size buckets (`<`, not `<=`, matching
+      # the action it replaced) and the minimatch subset the path matcher
+      # implements -- and it parses the REAL checked-in `.github/labeler.yml`, so
+      # a pattern that drifts outside that subset fails here instead of silently
+      # mislabelling PRs.
+      #
+      # It runs in THIS job and not only in `Check PR Size` because that context
+      # is deliberately excluded from the required set (a `labeled` event
+      # republishes it as `skipped`, which washes green -- see
+      # check-required-contexts.mjs), so a red there blocks nothing.
+      - name: Additive label-write self-test
+        run: node scripts/pr-labels.mjs --self-test
+
       # Cross-repo closer outcome contract (#9595, and #9575 before it).
       # `cross-repo-issue-closer.yml` carries ~150 lines of inline
       # github-script, and it is code nobody has ever seen run: over the 1176
@@ -1858,6 +1900,33 @@ jobs:
       - name: Test-source alias gate
         run: pnpm check:test-source-alias
 
+      # The process-global ref'd-timer probe lives in ONE module (#10785). A
+      # `'Timeout'` count derived from `getActiveResourcesInfo()` reports the
+      # WHOLE process, so comparing two readings across an `await` scores a
+      # subject against a number the test does not own — every co-tenant file's
+      # timers and the runner's own non-unref'd 100ms throttle. The shape was
+      # found FIVE times over four cards and repaired at the site each time;
+      # twice the first signal was a shard-only intermittent red (once in CI,
+      # `expected 2 to be 4`; once in the MERGE QUEUE, where it stalls every
+      # lane at once) whose message names a timer count rather than the change
+      # that caused it. Nothing prevented the sixth.
+      # ⛔ The rule is deliberately NOT "is there an `await` between these two
+      # readings" — that is an AST question, and a text scan that answers it
+      # approximately fails SILENTLY on spellings it does not know, which is the
+      # failure mode AGENTS.md already records for source-scanning gates. This
+      # bans the RAW PROBE outside the one approved module instead: a
+      # grep-level question, a one-entry allowlist, and a RED default that names
+      # the file, the line and the import to write. Matched by IDENTIFIER rather
+      # than by `process.`-receiver, so a destructure or a `node:process` named
+      # import cannot slip past; comments are masked, so the docblocks that must
+      # NAME the probe to explain the rule do not have to dodge the scanner.
+      # A clean run also asserts the approved module is present and still reads
+      # the probe — otherwise "nobody reads it" would be true of a tree where
+      # the instrument was deleted.
+      # Static scan of ~4.8k sources; sub-second.
+      - name: Ref'd-timer probe containment
+        run: pnpm check:refd-timer-probe
+
       # The TYPE axis of the same invariant (#8180). The gate above reads
       # `vitest.config.*` and nothing else, so the identical exposure on the
       # type axis was unguarded repo-wide — and its symptom is likewise a GREEN
@@ -2133,6 +2202,37 @@ jobs:
       # report OK while reading nothing.
       - name: Read-side tenant chokepoint gate
         run: pnpm check:tenant-chokepoint
+
+      # Every committed `pnpm --filter <name>` must name a real workspace
+      # package (#10853).
+      #
+      # ⛔ `pnpm --filter <name>` EXITS 0 when the filter matches nothing:
+      #
+      #     $ pnpm --filter @objectstack/definitely-not-a-package test; echo $?
+      #     No projects matched the filters in "..."
+      #     0
+      #
+      # So a step here, a package.json script or a `scripts/**` helper can name
+      # a package that does not exist and stay GREEN forever, measuring nothing
+      # and reporting success. `cmd > log 2>&1; ec=$?` captures the 0 perfectly;
+      # the log even says what happened and nothing reads it. Same family as the
+      # `--`-before-vitest-args trap: exit 0, nothing measured, output that reads
+      # like success — #4690, sitting underneath the command used to PROVE
+      # results.
+      #
+      # This gate reads SPELLINGS THAT ARE CHECKED IN, and that is the whole of
+      # its claim. It cannot see a filter an agent types at a prompt, which is
+      # the population that actually bit; that half is covered, only for callers
+      # of the shared verify lock, by `scripts/pm/os-verify-lock.sh`'s filter
+      # preflight. Disjoint populations, neither a substitute for the other.
+      #
+      # Reads package.json, pnpm-workspace.yaml and text under `scripts/**` and
+      # `.github/workflows/**`. No build, no pnpm invocation, no network,
+      # sub-second. The `check:` key runs the shared resolver's --self-test
+      # first, then the gate's, then the gate: a checker whose resolver is
+      # broken has no verdict worth printing.
+      - name: Every committed pnpm --filter names a real package
+        run: pnpm check:pnpm-filter-targets
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

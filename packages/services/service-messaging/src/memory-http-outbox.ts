@@ -13,7 +13,7 @@ import {
     type HttpDelivery,
     type HttpDeliveryStatus,
     type IHttpOutbox,
-    type RedeliverGuard,
+    type RedeliverOptions,
     type UndeliverableHttpInput,
 } from './http-outbox.js';
 
@@ -156,14 +156,26 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         return all;
     }
 
-    async redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery> {
+    /**
+     * [#10740] `options.tenantId` is accepted and deliberately not applied:
+     * this outbox is a `Map` of in-process rows with no tenant column and no
+     * driver behind it, so there is nothing to scope and nothing that could
+     * emit a tenant-audit finding. It is a test/dev double, never the
+     * request-reachable production store — `SqlHttpOutbox.redeliver` is the
+     * site that owes the isolation, and it applies the field.
+     *
+     * ⚠️ Stated rather than left implicit, because "the parameter is ignored"
+     * and "the isolation is missing" look identical from a call site. A future
+     * memory implementation that DOES store a tenant owes the predicate here.
+     */
+    async redeliver(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
         const row = this.rows.get(id);
         if (!row) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         // [#8069] Refuse BEFORE any mutation — a refused redelivery must leave
         // the row byte-identical, including its `dead` status and its reason.
-        await assertRedeliverAllowed({ ...row }, guard);
+        await assertRedeliverAllowed({ ...row }, options.guard);
         const now = Date.now();
         row.status = 'pending';
         row.attempts = 0;

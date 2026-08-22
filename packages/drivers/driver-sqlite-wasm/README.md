@@ -1,7 +1,7 @@
 # @objectstack/driver-sqlite-wasm
 
 SQLite-on-WASM driver for ObjectStack. Runs the same `SqlDriver` codepath as
-`@objectstack/driver-sqlite` but swaps the native `better-sqlite3` N-API binding
+`@objectstack/driver-sql` but swaps the native `better-sqlite3` N-API binding
 for [`sql.js`](https://sql.js.org) (SQLite compiled to WebAssembly), so it works
 in environments where native modules are unavailable — most notably
 **StackBlitz WebContainer** (Node-in-browser).
@@ -14,14 +14,18 @@ in environments where native modules are unavailable — most notably
 
 | Driver | Backend | Runs in WebContainer | Native binary |
 |---|---|---|---|
-| `@objectstack/driver-sqlite` | `better-sqlite3` | ❌ | yes |
+| `@objectstack/driver-sql` (SQLite) | `better-sqlite3`, an optional dependency | ❌ | yes |
 | **`@objectstack/driver-sqlite-wasm`** | `sql.js` (WASM) | ✅ | no |
-| `@objectstack/driver-postgres` | `pg` | ✅ (with TCP) | no |
+| `@objectstack/driver-sql` (Postgres) | `pg`, an optional peer dependency | ✅ (with TCP) | no |
+
+Two rows name the same package on purpose: `@objectstack/driver-sql` covers
+PostgreSQL, MySQL and SQLite through Knex, selecting the client from its optional
+peers. There is no separate `driver-sqlite` or `driver-postgres` package.
 
 Pick the WASM driver when you need a zero-binary SQLite that boots in the
 browser sandbox, in serverless edge runtimes that expose Node `fs`, or in
 CI environments where building `better-sqlite3` against the host Node is
-painful. For production servers, prefer the native driver.
+painful. For production servers, prefer `@objectstack/driver-sql` with a native client.
 
 ## Install
 
