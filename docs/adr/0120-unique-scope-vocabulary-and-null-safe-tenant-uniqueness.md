@@ -35,7 +35,7 @@ the per-organization meaning **NULL-safe**:
 | D1 | Scope is said, not inferred | `unique: 'global' \| 'organization'` on **both** spellings; bare `true` on a *declared index* is deprecated (17.x warn → protocol 18 reject) |
 | D2 | Stored metadata converts losslessly | ADR-0087 D2 entry rewrites declared-index `unique: true → 'global'` — byte-identical physical shape, **zero drift** |
 | D3 | Per-organization unique survives NULL | organization key part materializes as `COALESCE(organization_id, '__global__')` — fixes #5030 for field-level and new `'organization'` indexes alike; ships in 17.x |
-| D4 | Tightening migrates through ceremony | `recreate_index` drift + duplicate pre-flight in `os migrate plan`; auto-apply only on a clean probe |
+| D4 | Tightening migrates through ceremony | `recreate_index` drift + duplicate pre-flight, routed **per index class** — declared/differ-visible through `os migrate plan`, runtime-managed/differ-excluded through `os migrate duplicates` (2026-08-22 amendment); auto-apply only on a clean probe |
 | D5 | Authoring gates carry the contract | new lint rule for unscoped declared uniques (authoring-time checkable, no tenancy guessing); R10 rewritten in the new vocabulary |
 | D6 | Written surfaces tell one truth | the five #3696 surfaces, the pin tests, and the false single-tenant claim in `UniqueScopeSchema` are updated in the same wave |
 | D7 | Staged over 17.x → 18 | additive in 17.x, rejection + conversion at protocol 18 |
@@ -352,6 +352,46 @@ with pre-existing duplicate NULL-row data — data the old index wrongly admitte
 
 No constraint-*relaxing* rebuild exists under this ADR by construction; the migration
 planner asserts that invariant.
+
+> **Amendment (2026-08-22, [#8725](https://github.com/objectstack-ai/objectstack/issues/8725) / [#11032](https://github.com/objectstack-ai/objectstack/issues/11032)) — the duplicate pre-flight is per index CLASS: `os migrate plan` for the declared, differ-visible indexes; `os migrate duplicates` for the runtime-managed ones the differ excludes by construction.**
+>
+> The sentence above — "`os migrate plan` gains a **duplicate pre-flight probe** per affected
+> index" — was written for the **declared** class, the `recreate_index` drift ops the
+> reconciler can see, and it is true there: `os migrate plan` reports a blocked tightening of
+> a declared organization-unique index in full, quoting the offending group and its row count.
+>
+> It cannot reach a second class. Three `kernel:ready` migrations in
+> `packages/metadata-protocol` tighten an index at runtime —
+> `ensureMetadataOverlayIndexes` (`sys_metadata`), `ensureViewDefinitionActiveIndex`
+> (`sys_view_definition`), `ensureSysSettingIdentityIndex` (`sys_setting`) — and every one of
+> them is invisible to the drift differ **by construction**. *After* the tightening,
+> `isRuntimeManagedIndex` excludes the index (`isSyncReproducibleIndex` is false for a partial
+> index and for a `COALESCE` key part over a non-tenant column), and that exclusion is
+> correct — without it a boot would propose rebuilding away the guarantee it just created.
+> *Before* it there is nothing to see either: each migration deliberately reuses the DECLARED
+> index's name, so the name-matched slot reads as filled whichever physical form is there. A
+> command that reports **drift** can therefore never report these rows — measured with a
+> matched control, one database carrying the same duplicate damage under both classes, where
+> `plan` named the declared index in full and said nothing about the runtime-managed one.
+>
+> **Ruled (maintainer, 2026-08-22, on #8725).** The pre-flight is per class:
+>
+> - **declared, differ-visible indexes** → reported through `os migrate plan`, exactly as
+>   decided above. Its drift contract is untouched by this amendment.
+> - **runtime-managed indexes the differ excludes by construction** → reported through
+>   `os migrate duplicates`, which boots read-only and owns the "inventory, never repair"
+>   contract.
+>
+> Everything else D4 decides is unchanged and holds for both classes: the previous index stays
+> in place, the report names the key that is not enforced and the rows that block it, and no
+> op is auto-applied on a dirty probe.
+>
+> **The split has an expiry.** It exists only because these three platform indexes are
+> tightened at runtime rather than declared. The route #8629's ruling parked to the
+> ADR-0120 / v18 train — NULL-safe uniqueness declared in the spec, so a declaration states
+> its own row identity and no runtime migration is needed — retires all three migrations, at
+> which point the class collapses back into the declared one and the pre-flight has a single
+> route again.
 
 ### D5 — Authoring gates
 
