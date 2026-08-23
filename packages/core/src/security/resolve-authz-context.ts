@@ -347,6 +347,30 @@ export async function resolveUserAuthzGrants(
     return userRow;
   };
 
+  // ── [#10825] Leg 1: every read that depends only on (userId, tenantId) is
+  // issued CONCURRENTLY — sys_user, both sys_member reads, sys_user_position
+  // and sys_user_permission_set used to run as five sequential round trips
+  // (legs 6–9 + 13 of an authenticated request; cloud#1539 measured that LEGS,
+  // not queries, are the latency multiplier). Same queries, same filters, same
+  // limits, same tenancy scoping — only the waiting overlaps, so the rows each
+  // downstream block sees are byte-identical to the sequential version
+  // (equivalence pinned in resolve-authz-context.batch-equivalence.test.ts).
+  // `getUserRow` stays memoized; issuing it here is not a new read on any
+  // path that reads it at all — the email fallback below and §7's ai_seat
+  // synthesis consume the same memo. The CONDITION mirrors the sequential
+  // implementation exactly: `sys_user` was read iff the caller seeded no
+  // email OR did not seed `ai_seat` — a fully-seeded API-key principal never
+  // touched the table, and the batch must not start (equivalence suite pins
+  // the query multiset per fixture).
+  const needsUserRow = !grants.email || !grants.permissions.includes('ai_seat');
+  const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
+    needsUserRow ? getUserRow() : Promise.resolve(undefined),
+    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000) : Promise.resolve([] as any[]),
+    tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100),
+  ]);
+
   // Resolve the caller's unique email for `current_user.email` RLS owner
   // policies when the caller didn't supply it (e.g. API-key auth).
   if (!grants.email) {
@@ -379,7 +403,7 @@ export async function resolveUserAuthzGrants(
   //        columns are absent on `sys_member` today, and `isGrantActive` treats
   //        an absent bound as unbounded, so this is a no-op until they exist and
   //        correct the moment they do.
-  const members = await tryFind(ql, 'sys_member', { user_id: userId }, 200);
+  // (read in Leg 1 above)
   const accessibleOrgIds = new Set<string>();
   for (const m of members) {
     if (!isGrantActive(m, nowMs)) continue;
@@ -420,7 +444,7 @@ export async function resolveUserAuthzGrants(
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
   //    `organization_id = null` = global (cross-tenant); else match active org.
-  const userPositionRows = await tryFind(ql, 'sys_user_position', { user_id: userId }, 200);
+  // (read in Leg 1 above)
   for (const ur of userPositionRows) {
     const org = ur.organization_id ?? null;
     if (org && tenantId && org !== tenantId) continue;
@@ -431,7 +455,7 @@ export async function resolveUserAuthzGrants(
 
   // 5. Fellow-org user IDs so RLS can scope identity tables to collaborators.
   if (tenantId) {
-    const orgMembers = await tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000);
+    const orgMembers = orgMembersLeg; // (read in Leg 1 above)
     const ids = new Set<string>(
       orgMembers
         .map((m) => m.user_id ?? m.userId)
@@ -444,7 +468,7 @@ export async function resolveUserAuthzGrants(
   // 6. Permission sets — user-scoped grants (null org = global, else active org).
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
-  const upsRowsAll = await tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100);
+  // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const psIds = new Set<string>(
     upsRows
