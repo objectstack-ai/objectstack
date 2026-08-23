@@ -7049,20 +7049,55 @@ export class SqlDriver implements IDataDriver {
    * carries the speculative case so a hand-migrated table that genuinely lacks
    * the column keeps working instead of gaining a new rejection.
    *
-   * ⚠️ `data` is still passed through WITHOUT `formatInput` / `applyWriteColumnMap`,
-   * unlike every other write door. That gap is real and measured, but it is not
-   * this card's — it changes which VALUES a caller may write, not whether
-   * `updated_at` advances, and closing it belongs in its own change. The stamp
-   * added here is the literal post-map column name, matching how `created_at` is
-   * spelled everywhere else in this file.
+   * [#11223] The payload goes through `formatInput` + `applyWriteColumnMap`, the
+   * pair every other write door in this file applies (`create`, `update`,
+   * `bulkCreate`, `upsert`, `rotatedUpdateById`). This door was the only one that
+   * did not, and the WHERE side of the very same statement WAS translated by
+   * `applyFilters` — so the gap produced three measured failures, two loud and
+   * one silent:
+   *
+   *   - a `json` / `Field.multiple` value was REFUSED, because nothing stringified
+   *     it for the bind: `22P02 invalid input syntax for type json` on live
+   *     Postgres, `SQLite3 can only bind numbers, strings, bigints, buffers, and
+   *     null` on SQLite, and on MySQL an array expanded into the SET list itself
+   *     (`set \`tags\` = 'y', 'z'`) — a SYNTAX error, not a bind error;
+   *   - an external object with an `external.columnMap` emitted a SET clause
+   *     naming a LOCAL field beside a WHERE naming the physical column, in one
+   *     statement — ``update `legacy_p` set `name` = 'Bulk' where `full_name` =
+   *     'Renamed'`` → `no such column: name`. The door was unusable on every
+   *     remapped federated object;
+   *   - a zone-naive datetime was stored VERBATIM. On SQLite that is the
+   *     pre-#3912 `'YYYY-MM-DD HH:MM:SS'` storage form being newly written into a
+   *     column `canonicalDatetimeFields` has certified — and a certified column
+   *     has had its read-side repair dropped, so nothing downstream corrects it.
+   *     On live Postgres the same literal is resolved in the SERVER's timezone
+   *     rather than UTC: measured 8 hours off on an `Asia/Shanghai` server, the
+   *     hazard `formatInput`'s own ADR-0053 note describes. `update()` stored the
+   *     canonical instant from the identical input in the same run.
+   *
+   * Ordering is the other doors' ordering and matters: `formatInput` coerces by
+   * LOGICAL field name, `applyWriteColumnMap` renames afterwards. The `updated_at`
+   * stamp stays where #11176 put it — applied to the assembled payload as the
+   * literal post-map column name, the spelling `created_at` carries everywhere in
+   * this file.
    */
   async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'updateMany', options);
 
-    const stamping = this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(data ?? {}, options);
+    // `data ?? {}` keeps the nullish tolerance this door already had on the
+    // stamping line below: a null payload normalises to "no keys", which emits
+    // the same stamp-only statement `main` emitted for it, instead of newly
+    // throwing inside `formatInput`.
+    const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data ?? {}));
+
+    // Read from `formatted` rather than the caller's `data`, exactly as
+    // {@link update} and {@link rotatedUpdateById} do. On an external object
+    // whose columnMap remaps `updated_at` the two spellings disagree, and this
+    // door must reach the SAME decision those two reach rather than a private one.
+    const stamping = this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options);
     // Untouched when nothing is stamped, so a timestamp-less object's statement
     // is byte-identical to the one `main` emits.
-    const payload = stamping ? { ...data, updated_at: this.updatedAtStamp() } : data;
+    const payload = stamping ? { ...formatted, updated_at: this.updatedAtStamp() } : formatted;
     // A rotation-managed object is recorded in `tablesWithTimestamps` by
     // `initObjects` before `ensureRotation` runs, so it is never in the
     // speculative state — the same property `rotatedUpdateById` relies on. The
