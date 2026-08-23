@@ -13,8 +13,7 @@
   `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 ——
   入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支(ls-remote 拼写见
   「零成本等价物」)正命中即已入队,缺席不作反证 —— 队列满载时分支尚未建出。
-- **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged`
-  是落地不是被踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
+- **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查
   永远两个读数:**队列成员资格 和 `origin/main`**,缺一不可。
 - **`mergeable_state` 惰性计算**:首次 GET 可能回 `unknown` —— 重读一次拿真值;
@@ -62,6 +61,7 @@
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
 - **查重先 `search_issues`**(2026-08-18 23:3xZ 实测:单次调用按 issue body 内文本命中且 `total_count` 精确 ——「search API 对本会话不可用/回错误对象」的继承说法实测为**假**;继承说法不是读数,复述必须带实测日期):body 文本匹配是 repo-scoped `list` 做不到的(全量抓取再 grep 才等价),`list` + 对照组降为回退。
+- **`search_issues` 可整会话静默归零 —— 控制词一并归零**(2026-08-23 实测:某会话对**每个**查询回 `total_count: 0`,含已知必中的控制词;同时刻另一会话同工具正常 ⇒ 故障是**会话级**,不是工具/平台级)。诊断:结果可疑时先跑一个带 `repo:` 限定、已知必中的控制词;回 0 ⇒ 本会话 search 已坏,**立刻换通道,⛔ 不重试**(重试只烧配额)。正确退路 = **REST 列表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=100&page=N`(走 core 桶、结果**完整**;`GET /search/issues` **不是**退路 —— 出口代理按设计只放 repo-scoped 路径);⛔ **不要用 MCP `list_issues` 手扫**:它走 GraphQL 稀缺桶,且分页手扫极易半途而废(实测 226 张 open 只扫了 100 张)—— **不完整枚举比零结果更危险,它读作「搜过了,没有」**。⛔ 已推翻的候选机理,别再追:「查询串里带 GitHub 限定符(`repo:`/`is:open`)把语义 search 打成零」—— 两次实测反证:带 `repo:` 的控制词回 `total_count: 5`;另一席同工具两腿对照,`repo:… is:open …` 回 1(精确命中)而裸词回 13(语义扩散),限定符在那儿**收窄**结果而非破坏。归零机理仍未定(候选:scope 过滤层静默清空 / search 桶 403 被 MCP 层吞成空结果),要定它必须在复现会话里抓原始响应。
 - **`search_issues` 不可靠地返回分钟级新卡**:同轮发现的东西查重,搜索之外必须按创建时间列近期 issue(`list_issues` + `orderBy: CREATED_AT`)—— 实测一张 ~7 分钟大的同实例卡被关键词与语义搜索双双漏掉,靠按日期列表才逮到;边界:两次观察、索引延迟未实测,断言只到「search 可能漏掉分钟级 issue」,更硬的窗口要另测(2026-08-20 实测)。
 - **会话中途轮换凭据把 GitHub MCP 服务器杀到不可恢复**:此后一切 `mcp__github__*`
   回 `Streamable HTTP error: invalid session`(含几分钟前还好的工具),只有新会话
@@ -70,7 +70,7 @@
   盘仍是合法 JSON,期待列表的脚本会静默报假「0 issues」—— 零命中纪律覆盖 list 读:空车道先对仓库 `open_issues_count` 反查再信。
 - **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR(并集)**不是 AND —— 混入别
   车道同状态卡与本车道全状态卡,结果良构、失效全静默;正确读法 = **整车道单标签一
-  次读全 + 本地对 labels 求交**。`issue_write` 的 `labels` 是**整组替换**不是追加
+  次读全 + 本地对 labels 求交**,或改走 REST —— **两个通道的 `labels` 语义相反**:REST 列表端点的 `labels=a,b` 是**真 AND**(交集),MCP `list_issues` 的 `labels` 数组是 **OR**,要交集就用 REST(2026-08-23 两席各自独立实测 OR 侧:一席请求 `domain:ui` ∩ `pm:queue` 回来 154 张、含 `domain:spec`/`domain:devx`/`pm:blocked`,另一席 `[domain:skills, finding]` 回来别车道的 finding 卡)。`issue_write` 的 `labels` 是**整组替换**不是追加
   —— 同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST `POST /issues/{n}/labels`;写后照标签纪律回读。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已
   认领卡与空闲卡响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
