@@ -708,15 +708,25 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     proofId: 'sharing-rule-org-less-caller',
     proofRef:
       'packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts#sharing-rule-org-less-caller',
-    bound: false,
-    ledgerBindings: [],
-    blockedReason:
-      'binding PROPOSED, not adopted: the file authors `system_permissions: [\'manage_sharing\']` on a '
-      + 'permission set, so `permission.systemPermissions` (live, carrying no proof) is a candidate — '
-      + "but that entry's note scopes it to \"app-entry/nav visibility only, not a general capability "
-      + 'gate\", which this proof measures as narrower than reality. Re-verifying the note is part of '
-      + 'the binding decision, and a ledger edit is the spec seat\'s review (#10773), not a '
-      + 'registration side effect.',
+    bound: true,
+    // Bound 2026-08-23 (#10959) on the spec seat's adjudication of PR #10934,
+    // whose item ③ was conditional: bind only if the entry's note turned out
+    // stale. The re-verification says stale on BOTH halves, so the note was
+    // corrected in the same PR and the binding follows.
+    //   • The old evidence pointer (`plugin-hono-server/src/hono-plugin.ts:1222`)
+    //     does not exist — that file is 717 lines and never mentions
+    //     `systemPermissions`; the app-entry consumer moved to
+    //     `current-user-endpoints.ts` (`/auth/me/apps`).
+    //   • The old note's scoping claim ("app-entry/nav visibility only, not a
+    //     general capability gate") is falsified by ADR-0111 D6:
+    //     `SharingRuleService.assertCanManageRules` reads
+    //     `context.systemPermissions` and refuses every sharing-rule verb
+    //     without `manage_sharing` — a data-layer gate, not nav visibility.
+    // The proof authors the key and proves the gate was CLEARED by it: the
+    // refusal it asserts is the org-scope one and explicitly NOT
+    // /requires the manage_sharing capability/, with the org-bound holder of
+    // the same grant reading its own tenant as the entitled contrast.
+    ledgerBindings: [{ type: 'permission', path: 'systemPermissions' }],
   },
   {
     id: 'crud-persona-matrix',
@@ -733,14 +743,22 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     proofId: 'showcase-crud-persona-matrix',
     proofRef:
       'packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix',
-    bound: false,
-    ledgerBindings: [],
-    blockedReason:
-      'binding PROPOSED, not adopted: the four cells map exactly onto `permission.objects.allowCreate '
-      + '/ allowRead / allowEdit / allowDelete` (all live, none carrying a proof), and a multi-entry '
-      + 'binding has precedent in `semantic-roles`. Whether a persona-breadth matrix should anchor '
-      + 'four entries or a chosen subset is a judgment call, and the ledger edit is the spec seat\'s '
-      + 'review (#10773).',
+    bound: true,
+    // Bound 2026-08-23 (#10959) — ADOPT ALL FOUR, on the spec seat's
+    // adjudication of PR #10934. The scope worry the registration raised (one
+    // breadth proof anchoring four properties) is answered by the file's own
+    // shape: the EXACT allow/deny split is asserted (54 allow / 54 deny, one
+    // verdict per set × object × verb), so a narrowing sweep — or a persona
+    // silently failing to provision — breaks the build instead of quietly
+    // shrinking what these four entries cite. Each verb is exercised in both
+    // directions per cell and on post-state, not just on status codes.
+    // Multi-entry binding has precedent in `semantic-roles`, which binds three.
+    ledgerBindings: [
+      { type: 'permission', path: 'objects.allowCreate' },
+      { type: 'permission', path: 'objects.allowRead' },
+      { type: 'permission', path: 'objects.allowEdit' },
+      { type: 'permission', path: 'objects.allowDelete' },
+    ],
   },
   {
     id: 'fls-read-strip',
@@ -756,15 +774,18 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     proofId: 'showcase-fls-read-mask-strip',
     proofRef:
       'packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts#showcase-fls-read-mask-strip',
-    bound: false,
-    ledgerBindings: [],
-    blockedReason:
-      'binding PROPOSED, not adopted — the strongest of the three: the file AUTHORS a scratch '
-      + 'permission set carrying `readable: false` and asserts the runtime outcome both ways, and '
-      + '`permission.fields.readable` (live, note "FLS read-mask") carries no proof. Not '
-      + '`fields.editable` alongside it: the file authors that key but asserts its refusal as a '
-      + 'consequence of unreadability rather than as the write-deny axis, which '
-      + '`showcase-permission-zoo` already pins. The ledger edit is the spec seat\'s review (#10773).',
+    bound: true,
+    // Bound 2026-08-23 (#10959) — the strongest of the three, on the spec
+    // seat's adjudication of PR #10934. The file AUTHORS a scratch permission
+    // set carrying `readable: false` and asserts the runtime outcome both ways
+    // on the SAME field, row and request, so `permission.fields.readable`'s
+    // `live` status is exactly what it gates.
+    // NOT `fields.editable` alongside it: the file authors that key but
+    // asserts its refusal as a CONSEQUENCE of unreadability rather than as the
+    // write-deny axis, which `showcase-permission-zoo` already pins. Binding it
+    // would repeat the owner-anchor / `allowTransfer` mistake — a proof cited
+    // for a property it does not exercise.
+    ledgerBindings: [{ type: 'permission', path: 'fields.readable' }],
   },
 ];
 
