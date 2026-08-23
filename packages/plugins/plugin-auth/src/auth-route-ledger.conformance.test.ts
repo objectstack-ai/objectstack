@@ -150,6 +150,14 @@ describe('auth route ledger ↔ the live better-auth route table', () => {
 
 describe('auth route ledger hygiene', () => {
   it('every `sdk` entry names its client method; every non-sdk entry carries a rationale', () => {
+    // PRESENCE only — `!e.client` is falsy-on-absent, so this cannot tell a
+    // real method name from a typo'd or renamed one, and nothing here can:
+    // resolving the name needs an ObjectStackClient, and plugin-auth has no
+    // dependency on the client (nor should it — the edge would be backwards).
+    // That half is the client-side guard added by #11359 —
+    // `packages/client/src/auth-route-ledger-coverage.test.ts` — which imports
+    // this ledger as a relative source file and asserts every name resolves to
+    // a real function. Read the two together before trusting this test's title.
     const sdkWithout = AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'sdk' && !e.client).map((e) => e.route);
     expect(sdkWithout, 'sdk-disposition entries missing a client method name').toEqual([]);
 
