@@ -125,6 +125,19 @@
  *      OTHER governed path still forks the whole PR — 「混合 diff 一条命中即整
  *      PR 分叉」.
  *
+ * ### The generator co-edit is fenced out (#11084) — a NARROWING, not a widening
+ *
+ * Constraint 1 makes the recompute run the tree under test's OWN
+ * `scripts/docs-audit/**` (it must — the derivation has to reflect the PR's
+ * own docs). So a PR that edits the generator AND hand-edits the artifact in
+ * one diff could in principle construct a derivation whose recomputed splice
+ * byte-equals its hand-edited block: the tree would be certifying itself.
+ * Cheap fence, `--test` only: if the submitted path list contains ANY
+ * `scripts/docs-audit/**` path, the recompute is SKIPPED and the path stays
+ * governed with that reason stated. This only ever moves verdicts toward
+ * governed — the pure-regeneration path with an untouched generator lifts
+ * exactly as it did before, and no path that was governed becomes clear.
+ *
  * The exception applies to the `--test` predicate only. The post-merge SWEEP
  * still lists a pure-regeneration merge: under-enumeration is the one
  * direction the sweep must never be wrong in (#9902), recomputing a generator
@@ -415,6 +428,41 @@ export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
     what: "the docs-audit workflow's generated ALL_HANDWRITTEN scope block (a gate-owned --write artifact, not instruction-tree prose)",
   }),
 ]);
+
+/**
+ * The generator tree the exception's recompute TRUSTS: constraint 1 executes
+ * this directory's `affected-docs.mjs` and imports its `check-audit-scope.mjs`
+ * `replaceBlock`, both from the tree under test. A PR that edits anything
+ * here is editing the instrument the certificate is measured with.
+ */
+export const TRUSTED_GENERATOR_PREFIX = 'scripts/docs-audit/';
+
+/**
+ * The #11084 fence, pure so `--self-test` pins both directions offline. Given
+ * the PR's submitted path list, answer a fail-closed provenance verdict when
+ * the tree under test also modifies the trusted generator — or `null` when it
+ * does not, which is the ONLY branch that goes on to recompute.
+ *
+ * Direction matters: a `null` answer changes nothing (the recompute runs and
+ * rules exactly as before), and a non-null answer can only keep a path
+ * GOVERNED. There is no branch here that lifts anything, so no spelling this
+ * function fails to recognise can open the fence — recognising a co-edit is
+ * strictly a tightening, which is why the leading `./` spelling is folded in
+ * rather than left to `startsWith` alone.
+ */
+export function generatorCoEditProvenance(paths) {
+  const coEdited = (Array.isArray(paths) ? paths : []).filter(
+    (p) => typeof p === 'string' && (p.startsWith(TRUSTED_GENERATOR_PREFIX) || p.startsWith(`./${TRUSTED_GENERATOR_PREFIX}`)),
+  );
+  if (coEdited.length === 0) return null;
+  return {
+    pureRegeneration: false,
+    reason:
+      'the tree under test modifies the generator this exception trusts — the path stays governed ' +
+      `(co-edited here: ${coEdited.join(', ')}). The recompute would run this PR's own generator, so it ` +
+      'cannot certify this PR; land the generator change and the artifact regeneration as separate PRs.',
+  };
+}
 
 /**
  * The byte-exact provenance verdict, pure so `--self-test` pins all four
@@ -948,11 +996,20 @@ async function runTestMode(args) {
   // stays the zero-git, zero-cost read it always was.
   const hitExceptions = GENERATED_SURFACE_EXCEPTIONS.filter((e) => verdict.hitPaths.includes(e.path));
   if (hitExceptions.length > 0) {
-    const rootIdx = args.indexOf('--root');
-    const root = resolve(rootIdx > -1 && args[rootIdx + 1] ? args[rootIdx + 1] : resolve(scriptDir, '..', '..'));
     const provenance = new Map();
-    for (const exception of hitExceptions) {
-      provenance.set(exception.path, await recomputeDocsAuditProvenance(root, exception));
+    // #11084, BEFORE consulting provenance: the recompute runs the tree under
+    // test's own `scripts/docs-audit/**`, so a diff that edits the generator
+    // alongside the artifact would be certifying itself. Skip the recompute
+    // entirely and fail closed — no git, no generator exec, reason stated.
+    const coEdit = generatorCoEditProvenance(paths);
+    if (coEdit) {
+      for (const exception of hitExceptions) provenance.set(exception.path, coEdit);
+    } else {
+      const rootIdx = args.indexOf('--root');
+      const root = resolve(rootIdx > -1 && args[rootIdx + 1] ? args[rootIdx + 1] : resolve(scriptDir, '..', '..'));
+      for (const exception of hitExceptions) {
+        provenance.set(exception.path, await recomputeDocsAuditProvenance(root, exception));
+      }
     }
     verdict = applyGeneratedExceptions(verdict, provenance);
   }
@@ -1476,6 +1533,53 @@ async function selfTest() {
     siblingVerdict.governed === true && siblingVerdict.exceptions.length === 0, JSON.stringify(siblingVerdict.exceptions));
   assert('a-verdict-that-never-consulted-the-exception-carries-no-exceptions-field', testVerdict(['AGENTS.md']).exceptions === undefined);
 
+  // ── the generator co-edit fence (#11084), pinned in BOTH directions ──────
+  //
+  // The fence decides whether `--test` recomputes at all, so a bug in either
+  // direction is load-bearing: too loose re-opens the self-certification, too
+  // tight would break the ruled pure-regeneration lift. The register's own
+  // generator command must live under the fenced prefix — if the generator
+  // ever relocates, the fence must follow, and this goes red first.
+  assert('the-fence-covers-the-directory-the-registered-generator-actually-runs-from',
+    GENERATED_SURFACE_EXCEPTIONS[0].generator.includes(TRUSTED_GENERATOR_PREFIX), GENERATED_SURFACE_EXCEPTIONS[0].generator);
+  // Direction A — co-edit: the generator is touched, so no recompute happens
+  // and the artifact stays governed, with the stated reason.
+  const coEditPaths = [wfPath, 'scripts/docs-audit/affected-docs.mjs'];
+  const coEdit = generatorCoEditProvenance(coEditPaths);
+  assert('a-generator-co-edit-answers-fail-closed-before-any-recompute',
+    coEdit !== null && coEdit.pureRegeneration === false, JSON.stringify(coEdit));
+  assert('the-co-edit-reason-states-the-ruled-words-and-names-the-co-edited-file',
+    /modifies the generator this exception trusts — the path stays governed/.test(coEdit?.reason ?? '') &&
+      (coEdit?.reason ?? '').includes('scripts/docs-audit/affected-docs.mjs'), String(coEdit?.reason));
+  // A neutered fence must fail LOUD and READABLE here, not crash the run: the
+  // absent answer is itself the finding, so it is asserted, never dereferenced.
+  const coEditVerdict = applyGeneratedExceptions(testVerdict(coEditPaths), new Map(coEdit ? [[wfPath, coEdit]] : []));
+  assert('a-generator-co-edit-keeps-the-artifact-governed-the-exception-does-not-lift',
+    coEditVerdict.governed === true && coEditVerdict.hitPaths.join() === wfPath && coEditVerdict.exceptions[0].pureRegeneration === false,
+    JSON.stringify(coEditVerdict.hitPaths));
+  const coEditRender = renderTestVerdict(coEditVerdict);
+  assert('the-co-edit-render-stays-GOVERNED-and-tells-the-seat-why-it-did-not-lift',
+    coEditRender.includes('GOVERNED') && coEditRender.includes('did NOT lift') &&
+      coEditRender.includes('modifies the generator this exception trusts'), coEditRender);
+  assert('the-dot-slash-spelling-of-a-generator-path-is-fenced-too-recognising-more-only-tightens',
+    generatorCoEditProvenance([wfPath, './scripts/docs-audit/check-audit-scope.mjs']) !== null);
+  // Direction B — untouched generator: the fence abstains (`null`), the
+  // recompute runs exactly as before, and a verified pure regeneration still
+  // lifts. This is the narrowing's whole obligation: nothing else moves.
+  const regenOnlyPaths = [wfPath, 'content/docs/new-page.mdx'];
+  assert('an-untouched-generator-abstains-so-the-recompute-runs-exactly-as-before',
+    generatorCoEditProvenance(regenOnlyPaths) === null);
+  const regenOnlyVerdict = applyGeneratedExceptions(testVerdict(regenOnlyPaths), verified);
+  assert('a-pure-regen-with-an-untouched-generator-still-lifts-and-the-pr-is-not-governed',
+    regenOnlyVerdict.governed === false && regenOnlyVerdict.hitPaths.length === 0 && regenOnlyVerdict.exceptions[0].pureRegeneration === true,
+    JSON.stringify(regenOnlyVerdict));
+  assert('a-docs-only-pr-that-never-hits-the-register-is-untouched-by-the-fence',
+    generatorCoEditProvenance(['content/docs/a.mdx']) === null && testVerdict(['content/docs/a.mdx']).governed === false);
+  // A prefix on the real directory, not a substring: a sibling directory whose
+  // name merely starts the same way is not the trusted generator.
+  assert('a-near-miss-sibling-directory-is-not-mistaken-for-the-generator-tree',
+    generatorCoEditProvenance(['scripts/docs-auditing/other.mjs']) === null);
+
   // The words a seat reads.
   const liftedRender = renderTestVerdict(liftedVerdict);
   assert('a-lifted-render-names-the-exception-the-generator-and-the-recompute',
@@ -1491,7 +1595,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, and its render words — the exit table, and the report wording pins).`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the exit table, and the report wording pins).`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
