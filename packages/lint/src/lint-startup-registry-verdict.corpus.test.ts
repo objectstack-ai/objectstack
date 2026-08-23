@@ -30,6 +30,13 @@
 //     level up: a case reading a sweep that did not happen sees zero findings
 //     and prints as a clean audit. So the shared value starts `undefined`, not
 //     `[]`, and every reader goes through `corpusFindings()`, which throws.
+//  4. **A comparison that never runs.** `LEDGER` is empty on purpose, so
+//     `no ledger entry is stale` filters an EMPTY key list: it is green for
+//     every possible corpus and never consults the sweep's output at all
+//     (#10913) — (1)'s shape once more, a level down. The comparison therefore
+//     gets (2)'s treatment rather than a comment: it is a pure function, and
+//     `the staleness comparison can still fire` pushes a known pair through the
+//     SAME function the real case calls.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,8 +58,11 @@ const packagesDir = join(repoRoot, 'packages');
  * command", which is how a ratchet stops meaning anything.
  *
  * Empty on purpose: the three instances this vocabulary was written from
- * (#4769 / #4771 / #4772) were all fixed before it landed. The non-vacuity proof
- * is the `the sweep can still fire` case below, not the emptiness of this list.
+ * (#4769 / #4771 / #4772) were all fixed before it landed. Neither non-vacuity
+ * proof is the emptiness of this list, and neither is the same proof: `the
+ * sweep can still fire` covers the SWEEP, while `the staleness comparison can
+ * still fire` covers the comparison this list feeds — which, for as long as the
+ * list is empty, the real case cannot exercise even once (#10913).
  */
 const LEDGER: Readonly<Record<string, string>> = {};
 
@@ -85,6 +95,34 @@ function collectSourceFiles(dir: string, out: string[] = []): string[] {
 /** The sweep, as one function, so the corpus and the non-vacuity case share it. */
 function sweep(sources: Array<{ file: string; source: string }>): StartupRegistryVerdictFinding[] {
   return sources.flatMap(({ file, source }) => findStartupRegistryVerdicts(source, { file }));
+}
+
+/**
+ * A finding's LEDGER key. Both corpus cases spelled `${path}::${rule}` inline
+ * and had to keep agreeing about it; a ledger whose two readers spell the key
+ * differently suppresses nothing while reporting nothing stale, which is two
+ * silent failures rather than one loud one. Note what `path` carries — a
+ * `file:line`, not a file — so this is also the only place that format is read.
+ */
+function ledgerKey(finding: StartupRegistryVerdictFinding): string {
+  return `${finding.path}::${finding.rule}`;
+}
+
+/**
+ * The LEDGER entries no live finding backs.
+ *
+ * Pure, and shared for exactly the reason `sweep` is. With `LEDGER` empty the
+ * real case filters an empty list and never reaches the comparison at all, so
+ * the standing proof that the comparison still discriminates is `the staleness
+ * comparison can still fire`, which calls THIS function — a case that
+ * re-implemented the filter would only prove the re-implementation works.
+ */
+function staleLedgerEntries(
+  ledgerKeys: readonly string[],
+  findings: readonly StartupRegistryVerdictFinding[],
+): string[] {
+  const live = new Set(findings.map(ledgerKey));
+  return ledgerKeys.filter((key) => !live.has(key));
 }
 
 /**
@@ -124,6 +162,29 @@ function sweep(sources: Array<{ file: string; source: string }>): StartupRegistr
  * green run does NOT print hook durations, so do not go looking for one.
  */
 const CORPUS_SWEEP_BUDGET_MS = 60_000;
+
+/**
+ * #4771, reconstructed: the flow node-type verdict drawn in start(), 0.8s
+ * before the executor that answers it was registered. One known-bad source,
+ * read by both non-vacuity cases — one proves the sweep still matches it, the
+ * other proves the staleness comparison still discriminates over what it
+ * produces. If it ever stops matching, both say so.
+ */
+const FIRING_SOURCE_FILE = 'packages/services/service-automation/src/plugin.ts';
+const FIRING_SOURCE = `
+  export class AutomationServicePlugin {
+    name = 'com.objectstack.service-automation';
+    async init() {}
+    async start(ctx) {
+      const known = this.engine.getRegisteredNodeTypes();
+      for (const flow of this.flows) {
+        if (!known.includes(flow.type)) {
+          ctx.logger.warn(\`Flow '\${flow.name}' will fail at execution time.\`);
+        }
+      }
+    }
+  }
+`;
 
 describe('startup open-vocabulary verdicts across packages/ (#4776)', () => {
   const stat = statSync(packagesDir);
@@ -169,7 +230,7 @@ describe('startup open-vocabulary verdicts across packages/ (#4776)', () => {
 
   it('no package records a verdict the boot can still contradict', () => {
     const findings = corpusFindings();
-    const unledgered = findings.filter((f) => !(`${f.path}::${f.rule}` in LEDGER));
+    const unledgered = findings.filter((f) => !(ledgerKey(f) in LEDGER));
 
     expect(
       unledgered.map((f) => `[${f.rule}] ${f.path} — ${f.where}: ${f.message}`),
@@ -183,35 +244,38 @@ describe('startup open-vocabulary verdicts across packages/ (#4776)', () => {
 
   it('no ledger entry is stale', () => {
     // A ledger that outlives its site is a standing permission nobody reviewed.
-    const findings = corpusFindings();
-    const live = new Set(findings.map((f) => `${f.path}::${f.rule}`));
-    const stale = Object.keys(LEDGER).filter((key) => !live.has(key));
+    const stale = staleLedgerEntries(Object.keys(LEDGER), corpusFindings());
     expect(stale, `stale LEDGER entr(ies) — the site is fixed, delete the line: ${stale.join(', ')}`).toEqual([]);
   });
 
   it('the sweep can still fire (#4690 — a green ratchet must be told apart from a dead one)', () => {
-    // #4771, reconstructed: the flow node-type verdict drawn in start(), 0.8s
-    // before the executor that answers it was registered. Pushed through the
-    // SAME sweep the corpus goes through, so a change that broke matching would
-    // fail here instead of quietly turning the corpus green.
-    const reconstructed = `
-      export class AutomationServicePlugin {
-        name = 'com.objectstack.service-automation';
-        async init() {}
-        async start(ctx) {
-          const known = this.engine.getRegisteredNodeTypes();
-          for (const flow of this.flows) {
-            if (!known.includes(flow.type)) {
-              ctx.logger.warn(\`Flow '\${flow.name}' will fail at execution time.\`);
-            }
-          }
-        }
-      }
-    `;
-    const findings = sweep([{ file: 'packages/services/service-automation/src/plugin.ts', source: reconstructed }]);
+    // Pushed through the SAME sweep the corpus goes through, so a change that
+    // broke matching would fail here instead of quietly turning the corpus green.
+    const findings = sweep([{ file: FIRING_SOURCE_FILE, source: FIRING_SOURCE }]);
     expect(findings.map((f) => f.rule)).toEqual([
       'startup-open-vocabulary-verdict',
       'startup-verdict-assertive-wording',
     ]);
+  });
+
+  it('the staleness comparison can still fire (#10913 — an empty LEDGER cannot exercise it)', () => {
+    // `no ledger entry is stale` above is green by construction while LEDGER is
+    // empty. The comparison is exercised here instead, through the SAME
+    // function that case calls, over findings the real sweep produced — so the
+    // `file:line` key format is the one the corpus actually yields, not one
+    // this case asserted into existence.
+    const findings = sweep([{ file: FIRING_SOURCE_FILE, source: FIRING_SOURCE }]);
+    const backed = findings[0];
+    expect(backed, 'the known-bad source stopped producing findings — see the case above').toBeDefined();
+
+    // Both directions in ONE call, because each alone is satisfiable by a
+    // degenerate comparison: returning `[]` unconditionally passes the "live
+    // entry is not stale" half, and returning the ledger unchanged passes the
+    // "dead entry is stale" half. Only discrimination passes both.
+    const dead = 'packages/gone/src/plugin.ts:1::startup-open-vocabulary-verdict';
+    expect(
+      staleLedgerEntries([ledgerKey(backed), dead], findings),
+      'the comparison no longer separates a LEDGER entry a finding backs from one nothing backs',
+    ).toEqual([dead]);
   });
 });
