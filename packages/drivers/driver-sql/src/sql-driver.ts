@@ -81,6 +81,7 @@ import {
   expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
+  indexedKeyColumns,
   isIndexDriftOp,
   isUniqueScopeDeclared,
   legacyUniqueReplacements,
@@ -8035,6 +8036,14 @@ export class SqlDriver implements IDataDriver {
   protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     const exists = await this.knex.schema.hasTable(shardName);
+    // #11374: a shard carries the base table's declared indexes (below), so its
+    // columns need the same keyable-text decision the managed path makes.
+    const keyedColumns = indexedKeyColumns({
+      table: shardName,
+      fields: obj.fields ?? {},
+      tenantField: this.resolveTenantField(shardName),
+      declaredIndexes: (obj as any).indexes,
+    });
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
         table.string('id').primary();
@@ -8042,7 +8051,7 @@ export class SqlDriver implements IDataDriver {
         this.createAuditTimestampColumn(table, 'updated_at');
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (builtinColumns.has(name)) continue;
-          this.createColumn(table, name, field);
+          this.createColumn(table, name, field, keyedColumns.get(name));
         }
       });
     } else {
@@ -8051,7 +8060,7 @@ export class SqlDriver implements IDataDriver {
       await this.knex.schema.alterTable(shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
-            this.createColumn(table, name, field);
+            this.createColumn(table, name, field, keyedColumns.get(name));
           }
         }
       });
@@ -8476,6 +8485,18 @@ export class SqlDriver implements IDataDriver {
       // rejects CREATE TABLE with two columns of the same name).
       const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
 
+      // #11374: which columns this object's indexes will KEY ON, resolved before
+      // any DDL runs. `createColumn` needs it to decide whether a bounded text
+      // field takes `varchar(maxLength)` (keyable) or TEXT — a decision that is
+      // only makeable at CREATE time, since no dialect turns a TEXT column into
+      // a keyable one afterwards.
+      const keyedColumns = indexedKeyColumns({
+        table: tableName,
+        fields: obj.fields ?? {},
+        tenantField,
+        declaredIndexes: (obj as any).indexes,
+      });
+
       if (!exists) {
         await this.knex.schema.createTable(tableName, (table) => {
           table.string('id').primary();
@@ -8484,7 +8505,7 @@ export class SqlDriver implements IDataDriver {
           if (obj.fields) {
             for (const [name, field] of Object.entries(obj.fields)) {
               if (builtinColumns.has(name)) continue;
-              this.createColumn(table, name, field);
+              this.createColumn(table, name, field, keyedColumns.get(name));
             }
           }
         });
@@ -8501,7 +8522,7 @@ export class SqlDriver implements IDataDriver {
           if (obj.fields) {
             for (const [name, field] of Object.entries(obj.fields)) {
               if (!existingColumns.includes(name)) {
-                this.createColumn(table, name, field);
+                this.createColumn(table, name, field, keyedColumns.get(name));
               }
             }
           }
@@ -10240,6 +10261,19 @@ export class SqlDriver implements IDataDriver {
         // `code` / `errno` / `message` / `cause`; see
         // `@objectstack/types`' `unique-violation.ts` for why it is the one
         // name for this question.
+        // #11374: MySQL's refusal of a TEXT key part names a column in a table
+        // that was just created successfully, which reads as an index quirk
+        // rather than what it is — the object is now registered with its
+        // declared uniqueness absent. Re-throw the SAME failure carrying the
+        // field-level fix; the boot still fails loudly, it just says why.
+        const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
+        if (unkeyable) {
+          (this.logger.error ?? this.logger.warn)(unkeyable, msg);
+          throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
+            code: (e as { code?: string }).code,
+            cause: e,
+          });
+        }
         if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
@@ -12527,7 +12561,110 @@ export class SqlDriver implements IDataDriver {
     table.timestamp(name).defaultTo(this.knex.fn.now());
   }
 
-  protected createColumn(table: Knex.CreateTableBuilder, name: string, field: any) {
+  /**
+   * The widest `varchar(n)` one utf8mb4 key part can hold on InnoDB: 3072 bytes
+   * of index key ÷ 4 bytes per character (#11374).
+   *
+   * Measured on MySQL 8.0.46 (DYNAMIC row format, the 8.0 default) rather than
+   * read off a doc page: `varchar(768) UNIQUE` creates, `varchar(769) UNIQUE`
+   * is refused with `ER_TOO_LONG_KEY: Specified key was too long; max key
+   * length is 3072 bytes`.
+   *
+   * The bound is per KEY, not per column, so a wide composite can exceed it
+   * while every part is individually legal — this constant cannot prevent that,
+   * and does not try to. It is the single-part ceiling below which emitting a
+   * bounded column is known to help; {@link explainUnkeyableTextColumn} handles
+   * whatever the server still refuses.
+   */
+  protected static readonly MAX_KEYABLE_VARCHAR_CHARS = 768;
+
+  /**
+   * The `varchar(n)` a KEYED text-family field should take, or `null` to leave
+   * the column TEXT (#11374).
+   *
+   * `null` has exactly two causes, and both are deliberate non-events rather
+   * than failures here:
+   *
+   *   - the field declares no `maxLength` — there is no bound to emit, and
+   *     inventing one would impose a truncation boundary (or, under
+   *     `STRICT_TRANS_TABLES`, an outright write refusal — measured:
+   *     `ER_DATA_TOO_LONG`) that the author never declared;
+   *   - the declared bound is wider than a single key part can be, where a
+   *     `varchar(n)` column would simply trade `ER_BLOB_KEY_WITHOUT_LENGTH` for
+   *     `ER_TOO_LONG_KEY`.
+   *
+   * Either way the column stays TEXT and, on MySQL, the index over it is
+   * refused with the diagnostic {@link explainUnkeyableTextColumn} writes.
+   */
+  protected keyableTextLength(field: any): number | null {
+    const declared = (field as { maxLength?: unknown }).maxLength;
+    const n = typeof declared === 'string' ? Number(declared) : declared;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
+    if (n > SqlDriver.MAX_KEYABLE_VARCHAR_CHARS) return null;
+    return n;
+  }
+
+  /**
+   * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
+   * that names the columns at fault and the declaration that fixes them
+   * (#11374).
+   *
+   * Worth the extra `columnInfo()` read because it only happens on the failure
+   * path, and because the raw server error is actively misleading about where
+   * the defect is: it names a COLUMN in a table the driver just created
+   * successfully, so the natural reading is "the table is fine, the index is
+   * odd" — when in truth the object is now registered-but-broken, its declared
+   * uniqueness silently absent, and the fix lives in the field's metadata
+   * rather than anywhere near the index.
+   *
+   * ⛔ What this deliberately does NOT do is substitute a prefix index
+   * (`KEY (col(191))`) and carry on. For an ordinary index that would be a
+   * transparent access-path choice, but for a UNIQUE one it silently REPLACES
+   * the declared constraint with a different, stricter one: a prefix-unique
+   * index enforces uniqueness over the PREFIX, so two genuinely different
+   * values that happen to share it collide. Measured on MySQL 8.0.46 —
+   * `UNIQUE KEY (token(191))`, then two distinct 200+ character tokens sharing
+   * their first 191 characters: the second insert was rejected with
+   * `ER_DUP_ENTRY` even though the tokens differ. On `sys_session.token` that
+   * is a valid sign-in refused as a duplicate. A refusal the operator can read
+   * is strictly better than a constraint that quietly means something else.
+   */
+  protected async explainUnkeyableTextColumn(
+    tableName: string,
+    indexName: string,
+    columns: string[],
+    cause: unknown,
+  ): Promise<string | null> {
+    const code = (cause as { code?: string } | undefined)?.code;
+    if (code !== 'ER_BLOB_KEY_WITHOUT_LENGTH' && code !== 'ER_TOO_LONG_KEY') return null;
+    let offenders: string[] = [];
+    try {
+      const info: Record<string, { type?: string }> = await this.knex(tableName).columnInfo();
+      offenders = columns.filter((c) => /text|blob/i.test(String(info?.[c]?.type ?? '')));
+    } catch {
+      // Introspection is a nicety here; the advice below holds without it.
+    }
+    const named =
+      offenders.length > 0
+        ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
+        : 'One or more of its key columns is stored as TEXT';
+    return (
+      `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
+      `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
+      `wider than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters, the most a utf8mb4 key part can hold). ` +
+      `Declare \`maxLength\` on the field(s) so the column is emitted as varchar(n) and can be keyed ` +
+      `(#11374). The table exists but this index does NOT, so any uniqueness it declared is currently ` +
+      `unenforced. A prefix index is deliberately not substituted: on a UNIQUE index it constrains the ` +
+      `prefix rather than the value, and rejects two different values that share one.`
+    );
+  }
+
+  protected createColumn(
+    table: Knex.CreateTableBuilder,
+    name: string,
+    field: any,
+    keyed?: { unique: boolean },
+  ) {
     if (field.multiple) {
       table.json(name);
       return;
@@ -12546,9 +12683,51 @@ export class SqlDriver implements IDataDriver {
       case 'text':
       case 'textarea':
       case 'html':
-      case 'markdown':
-        col = table.text(name);
+      case 'markdown': {
+        // #11374: a text-family column that some declared index KEYS ON is
+        // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
+        // declared a bound this dialect can key on.
+        //
+        // MySQL refuses a TEXT/BLOB column in a key without a prefix length
+        // (`ER_BLOB_KEY_WITHOUT_LENGTH`), so an unbounded TEXT is not merely a
+        // slower key there — it is not a key at all: `CREATE TABLE` succeeds and
+        // the following `ALTER TABLE … ADD [UNIQUE] INDEX` fails, leaving the
+        // table on disk WITHOUT the constraint it declared. Measured on MySQL
+        // 8.0.46 before this branch existed: 36 of the 44 platform objects
+        // failed schema-sync that way, so an auth stack could not stand up its
+        // own schema on a driver `createDefaultDatasourceDriverFactory` maps
+        // `mysql`/`mysql2` onto.
+        //
+        // The bound is the field's OWN `maxLength` — nothing is invented here.
+        // `schema-drift.ts` already treats `varchar(field.maxLength)` as the
+        // expected physical shape of a bounded field (its `widen_varchar` /
+        // `narrow_varchar` ops say so in as many words); this is the emitter
+        // finally agreeing with the differ. `Field.string` has always taken
+        // knex's `varchar(255)`, so a bounded text field is now LESS arbitrary
+        // than its string sibling, not more.
+        //
+        // Applied on every dialect rather than under `isMysql`, deliberately:
+        // the alternative is one declaration with two enforcement answers, so
+        // the same app would refuse an over-length write on MySQL and accept it
+        // on Postgres. Dialect-divergent enforcement of one declared bound is
+        // the defect class this repo's conformance matrices exist to close, and
+        // a `varchar(n)` is exactly what the SQLite and Postgres columns would
+        // have been had the field been declared `Field.string`.
+        //
+        // ⚠️ Scope, both halves load-bearing:
+        //   - KEYED only. A non-indexed `Field.text({ maxLength: 65000 })` stays
+        //     TEXT: `varchar(65000)` on utf8mb4 is 260000 bytes and blows MySQL's
+        //     65535-byte ROW limit, which would turn a working table into an
+        //     un-creatable one. Off-page TEXT has no such cost, and a column no
+        //     index keys on has nothing to gain from a bound.
+        //   - BOUNDED only. `maxLength` absent, or wider than a key part can be
+        //     ({@link keyableTextLength}), leaves the column TEXT — see
+        //     {@link explainUnkeyableTextColumn} for what happens next, which is
+        //     a named refusal and never a silently weaker constraint.
+        const keyable = keyed ? this.keyableTextLength(field) : null;
+        col = keyable === null ? table.text(name) : table.string(name, keyable);
         break;
+      }
       case 'integer':
       case 'int':
         col = table.integer(name);

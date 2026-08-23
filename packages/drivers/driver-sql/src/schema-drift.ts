@@ -1051,6 +1051,49 @@ export function expectedIndexes(args: {
 }
 
 /**
+ * Every column any declared index on this object will use as a KEY PART, mapped
+ * to whether at least one of those indexes is UNIQUE.
+ *
+ * Computed from the same two normalizers {@link expectedIndexes} composes —
+ * field-level `unique` through {@link uniqueIndexesFromFields}, object-level
+ * `indexes[]` through {@link normalizeDeclaredIndex} — so "which columns end up
+ * in a key" has ONE answer, shared by the index sync that creates them and by
+ * the DDL that has to make them keyable in the first place (#11374).
+ *
+ * ⚠️ Deliberately NOT filtered by `physicalColumns`, unlike `expectedIndexes`:
+ * its caller runs BEFORE the columns exist — deciding a column's TYPE is the
+ * whole reason it asks — so a filter against the physical set would answer
+ * "nothing is indexed" on exactly the CREATE TABLE path that needs the answer.
+ *
+ * The UNIQUE flag is carried because the two dispositions genuinely differ on
+ * MySQL: a bounded key part is merely a storage choice for an ordinary index,
+ * but it is the CONSTRAINT itself for a unique one (see
+ * `mysqlKeyableTextLength` and the refusal it feeds).
+ */
+export function indexedKeyColumns(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+}): Map<string, { unique: boolean }> {
+  const { table, fields, tenantField, declaredIndexes } = args;
+  const out = new Map<string, { unique: boolean }>();
+  const record = (idx: ExpectedIndex) => {
+    for (const column of idx.columns) {
+      const prev = out.get(column);
+      if (prev) prev.unique ||= idx.unique;
+      else out.set(column, { unique: idx.unique });
+    }
+  };
+  for (const idx of uniqueIndexesFromFields(table, fields, tenantField)) record(idx);
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    const norm = normalizeDeclaredIndex(table, idx, tenantField);
+    if (norm) record(norm);
+  }
+  return out;
+}
+
+/**
  * The two names a tenant-scoped field's *legacy* single-column unique index
  * could have been materialized under before #3696:
  *
