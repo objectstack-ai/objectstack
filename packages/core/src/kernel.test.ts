@@ -1155,4 +1155,43 @@ describe('ObjectKernel', () => {
             await kernel.shutdown();
         });
     });
+
+    describe('Core fallback pre-injection (#10746)', () => {
+        // The suite-level kernel sets `skipSystemValidation: true`, which skips
+        // pre-injection entirely — this pin needs the real path, so it boots
+        // its own kernel with validation ON (the production default).
+        it('pre-injects the honest core fallbacks but NOT job — a fallback must not fake capability', async () => {
+            const k = new ObjectKernel({
+                logger: { level: 'error' },
+                gracefulShutdown: false,
+            });
+            // `data` is `required` criticality; provide it so bootstrap
+            // survives validateSystemRequirements().
+            const dataProvider: Plugin = {
+                name: 'test.data-provider',
+                version: '1.0.0',
+                init: async (ctx: PluginContext) => {
+                    ctx.registerService('data', { find: async () => [] });
+                },
+            };
+            await k.use(dataProvider);
+            await k.bootstrap();
+            try {
+                // The remaining core slots still pre-inject before Phase 2.
+                for (const slot of ['metadata', 'cache', 'queue', 'i18n']) {
+                    expect(k.getService(slot), `fallback for '${slot}'`).toBeDefined();
+                }
+                // `job` must NOT resolve: `createMemoryJob()`'s `schedule()`
+                // records a job and never fires it, so handing it out made
+                // every "prefer the platform job service" consumer schedule
+                // into the void while logging success (maintainer ruling
+                // 2026-08-22: declare only what you enforce). Absence is the
+                // honest answer — consumers' documented no-job-service paths
+                // (setInterval fallbacks, loud warns) take over.
+                expect(() => k.getService('job')).toThrow(/Service 'job' not found/);
+            } finally {
+                await k.shutdown();
+            }
+        });
+    });
 });

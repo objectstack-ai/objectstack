@@ -7,8 +7,14 @@ import { CORE_FALLBACK_FACTORIES } from './index';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 
 describe('CORE_FALLBACK_FACTORIES', () => {
-    it('should have exactly 5 entries: metadata, cache, queue, job, i18n', () => {
-        expect(Object.keys(CORE_FALLBACK_FACTORIES)).toEqual(['metadata', 'cache', 'queue', 'job', 'i18n']);
+    // [#10746] `job` is deliberately OFF this list — a fallback must not fake
+    // capability (maintainer ruling 2026-08-22). `createMemoryJob().schedule()`
+    // records a job and never fires it, so pre-injecting it made consumers
+    // treat "a `job` service resolves" as "a working scheduler" and silently
+    // never run. The factory stays exported for deliberate, explicit use; the
+    // kernel must not hand it out as if it honoured `schedule()`.
+    it('should have exactly 4 entries: metadata, cache, queue, i18n — job deliberately absent (#10746)', () => {
+        expect(Object.keys(CORE_FALLBACK_FACTORIES)).toEqual(['metadata', 'cache', 'queue', 'i18n']);
     });
 
     // [#4058] Every kernel fallback must be readable through the ONE standard
