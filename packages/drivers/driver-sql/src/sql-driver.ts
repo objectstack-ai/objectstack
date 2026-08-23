@@ -10141,6 +10141,13 @@ export class SqlDriver implements IDataDriver {
     }
 
     for (const tableName of tableNames) {
+      // All four reads take the #7332 default (`onFailure: 'throw'`): this
+      // caller cannot correct a short read, and `introspectColumns` has never
+      // swallowed — so a partially-readable database fails the whole-schema
+      // introspection loudly instead of emitting tables whose keys silently
+      // read as absent (#11161). Every in-tree caller of `introspectSchema`
+      // already handles a throw (the datasource health check reports
+      // `{ ok: false }`, the REST/CLI seams surface the error).
       const columns = await this.introspectColumns(tableName);
       const foreignKeys = await this.introspectForeignKeys(tableName);
       const primaryKeys = await this.introspectPrimaryKeys(tableName);
@@ -12843,11 +12850,80 @@ export class SqlDriver implements IDataDriver {
 
   // ── Introspection internals ─────────────────────────────────────────────────
 
+  /**
+   * The table's column names in DECLARED order, read from the catalog's own
+   * ordinal (#11163).
+   *
+   * knex's `columnInfo()` is an object KEYED BY COLUMN NAME, built from a
+   * catalog query that carries no `ORDER BY` — so its key-insertion order is
+   * whatever row order the server's plan yielded, which is unspecified on
+   * every dialect. Measured: SQLite and PostgreSQL 16.13 happened to return
+   * declared order; MySQL 8.0.46 returned ALPHABETICAL order, so a federated
+   * object drafted from a MySQL remote got its fields alphabetized. The
+   * ordinal is the fact and the row order is not, so every arm orders by the
+   * catalog's ordinal rather than trusting a plan.
+   *
+   * Each arm reads the same catalog `columnInfo()` populates, with the same
+   * scoping knex itself applies there (PG: `current_schema()`; MySQL:
+   * `DATABASE()`; SQLite: `PRAGMA table_info`, whose `cid` is the ordinal).
+   */
+  protected async introspectColumnOrder(tableName: string): Promise<string[]> {
+    if (this.isPostgres) {
+      const result = await this.knex.raw(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_name = ?
+            AND table_catalog = current_database()
+            AND table_schema = current_schema()
+          ORDER BY ordinal_position`,
+        [tableName],
+      );
+      return result.rows.map((row: any) => row.column_name);
+    }
+    if (this.isMysql) {
+      const result = await this.knex.raw(
+        `SELECT COLUMN_NAME as column_name
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+          ORDER BY ORDINAL_POSITION`,
+        [tableName],
+      );
+      return result[0].map((row: any) => row.column_name);
+    }
+    if (this.isSqlite) {
+      const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      const result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);
+      return (result as { name: string; cid: number }[])
+        .slice()
+        .sort((a, b) => a.cid - b.cid)
+        .map((row) => row.name);
+    }
+    return [];
+  }
+
   protected async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
-    const columnInfo = await this.knex(tableName).columnInfo();
+    const columnInfo = (await this.knex(tableName).columnInfo()) as Record<string, any>;
     const columns: IntrospectedColumn[] = [];
 
-    for (const [colName, info] of Object.entries<any>(columnInfo)) {
+    // #11163: emit in DECLARED order, not the `columnInfo()` object's
+    // key-insertion order (alphabetical on MySQL — see
+    // {@link introspectColumnOrder}). `columnInfo()` stays the source of the
+    // per-column FACTS because each dialect spells type / nullable /
+    // defaultValue / maxLength differently and knex already normalises them;
+    // only the ORDER comes from the ordinal read. A name one read has and the
+    // other lacks (the catalog moved between the two statements) is appended
+    // in `columnInfo()` order rather than dropped, so the merge can reorder
+    // but never lose a column.
+    const has = (name: string) => Object.prototype.hasOwnProperty.call(columnInfo, name);
+    const orderedNames = (await this.introspectColumnOrder(tableName)).filter(has);
+    const seen = new Set(orderedNames);
+    for (const name of Object.keys(columnInfo)) {
+      if (!seen.has(name)) orderedNames.push(name);
+    }
+
+    for (const colName of orderedNames) {
+      const info = columnInfo[colName];
       let type = 'string';
       let maxLength: number | undefined;
 
@@ -12877,7 +12953,26 @@ export class SqlDriver implements IDataDriver {
     return columns;
   }
 
-  protected async introspectForeignKeys(tableName: string): Promise<IntrospectedForeignKey[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without foreign keys (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]`, so a query a live server rejects degraded to "this table
+   * has no foreign keys" with no diagnostic — a positive assertion of absence
+   * that downstream consumers act on. See {@link introspectIndexes} for the
+   * full rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectForeignKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<IntrospectedForeignKey[]> {
     const foreignKeys: IntrospectedForeignKey[] = [];
 
     try {
@@ -12956,14 +13051,38 @@ export class SqlDriver implements IDataDriver {
           });
         }
       }
-    } catch {
-      // silently ignore introspection errors
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return foreignKeys;
   }
 
-  protected async introspectPrimaryKeys(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without a primary key (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]` — and `[]` does not read downstream as "the read failed":
+   * it reads as *this table has no primary key*, a legal and meaningful answer
+   * that federated-object codegen, the persisted `external_catalog`
+   * (ADR-0015) and schema-drift comparison all act on. Measured on a live
+   * PostgreSQL 16.13: a query against a non-existent relation raises
+   * `undefined_table`, which the old catch converted to a confident empty key.
+   * See {@link introspectIndexes} for the full rationale; the option shape and
+   * default are deliberately identical.
+   */
+  protected async introspectPrimaryKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const primaryKeys: string[] = [];
 
     try {
@@ -12983,6 +13102,18 @@ export class SqlDriver implements IDataDriver {
         // whenever a key is declared out of column sequence, and this list is
         // used as an addressing / upsert-conflict-target key, where the order is
         // load-bearing: a key in the wrong order is a DIFFERENT key.
+        //
+        // `k.ord <= i.indnkeyatts` bounds the join to the KEY columns (#11162).
+        // For a covering primary key — `CREATE UNIQUE INDEX … INCLUDE (payload)`
+        // promoted via `ADD CONSTRAINT … PRIMARY KEY USING INDEX` — `indkey`
+        // holds the key columns AND the INCLUDE'd payload columns, and
+        // `indnkeyatts` is the count of the leading entries that are actually
+        // key members. Measured on PostgreSQL 16.13: `indkey = '2 1 3'`,
+        // `indnkeyatts = 2`, and without the bound `payload` was reported as a
+        // key member — a key with an extra member is a DIFFERENT key, for the
+        // same addressing reasons as above. `indnkeyatts` exists on PG 11+;
+        // this driver already requires 9.4+ syntax (`WITH ORDINALITY`) and CI
+        // runs 16.
         const result = await this.knex.raw(
           `
           SELECT a.attname as column_name
@@ -12993,6 +13124,7 @@ export class SqlDriver implements IDataDriver {
             AND a.attnum = k.attnum
           WHERE i.indrelid = ?::regclass
             AND i.indisprimary
+            AND k.ord <= i.indnkeyatts
           ORDER BY k.ord
         `,
           [tableName],
@@ -13056,27 +13188,60 @@ export class SqlDriver implements IDataDriver {
           primaryKeys.push(row.name);
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return primaryKeys;
   }
 
-  protected async introspectUniqueConstraints(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without unique constraints
+   * (#7332 — the ruling {@link introspectIndexes} carries, extended to this
+   * sibling by #11161). This used to wrap the whole dialect dispatch in a bare
+   * `catch {}` and return `[]`, silently converting a failed read into a
+   * positive assertion of absence. See {@link introspectIndexes} for the full
+   * rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectUniqueConstraints(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const uniqueColumns: string[] = [];
 
     try {
       if (this.isPostgres) {
+        // ⚠️ This query was INVALID until #11161: it selected `c.column_name`
+        // while the only aliases in scope were `tc` and `ccu`, so every
+        // execution raised `missing FROM-clause entry for table "c"` — and the
+        // bare `catch {}` this method carried until #11161 converted that into
+        // `[]` on every call. Live Postgres therefore NEVER reported a unique
+        // constraint through this method; the defect surfaced (as nine loud
+        // test failures) the moment the catch stopped swallowing, which is the
+        // #7332 contract doing exactly its job. The schema pin follows
+        // `introspectSchema`'s own table listing (`current_schemas(false)`,
+        // #9350's pattern): `constraint_column_usage` spans every schema the
+        // user can read, so without it the newly-working query would report a
+        // same-named table's constraints from a schema the session never
+        // reaches.
         const result = await this.knex.raw(
           `
-          SELECT c.column_name
+          SELECT ccu.column_name
           FROM information_schema.table_constraints tc
           JOIN information_schema.constraint_column_usage AS ccu
             ON tc.constraint_schema = ccu.constraint_schema
             AND tc.constraint_name = ccu.constraint_name
           WHERE tc.constraint_type = 'UNIQUE'
             AND tc.table_name = ?
+            AND tc.table_schema = ANY (current_schemas(false))
         `,
           [tableName],
         );
@@ -13122,8 +13287,9 @@ export class SqlDriver implements IDataDriver {
           }
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return uniqueColumns;

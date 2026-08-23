@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { createMemoryMetadata, CORE_FALLBACK_FACTORIES } from '@objectstack/core';
+import { createMemoryMetadata, createMemoryJob, CORE_FALLBACK_FACTORIES } from '@objectstack/core';
 import { ObjectQL } from './engine.js';
 
 describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => {
@@ -232,7 +232,12 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   it('reports every CORE_FALLBACK_FACTORIES product as degraded, never available (#3898)', async () => {
     expect(Object.keys(CORE_FALLBACK_FACTORIES).length).toBeGreaterThan(0);
 
-    for (const [slot, factory] of Object.entries(CORE_FALLBACK_FACTORIES)) {
+    // [#10746] `job` came OFF the pre-injection list (a fallback must not
+    // fake capability), but `createMemoryJob` stays exported for deliberate
+    // registration — so its product stays in this gate's inventory: however
+    // it reaches a slot, discovery must never call it `available`.
+    const inventory = { ...CORE_FALLBACK_FACTORIES, job: createMemoryJob };
+    for (const [slot, factory] of Object.entries(inventory)) {
       const mockServices = new Map<string, any>();
       mockServices.set(slot, factory());
 
@@ -382,9 +387,13 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
   });
 
   it('never advertises a route for a cache/queue/job fallback either (#4318)', async () => {
+    // [#10746] `job` is off the pre-injection map but stays explicitly
+    // registrable, so the slot keeps its fallback-occupant coverage here.
+    const factoryFor = (slot: string) =>
+      slot === 'job' ? createMemoryJob : CORE_FALLBACK_FACTORIES[slot];
     for (const slot of ['cache', 'queue', 'job']) {
       const mockServices = new Map<string, any>();
-      mockServices.set(slot, CORE_FALLBACK_FACTORIES[slot]());
+      mockServices.set(slot, factoryFor(slot)());
 
       protocol = new ObjectStackProtocolImplementation(engine, () => mockServices);
       const reported = (await protocol.getDiscovery()).services[slot];

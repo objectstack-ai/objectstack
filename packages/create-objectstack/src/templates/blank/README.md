@@ -79,9 +79,11 @@ can call an external system from a flow as pure metadata — no host code:
 
 Add a `connectors:` entry that names one of these `provider`s and the
 `automation` capability materializes it into a live, dispatchable connector at
-boot (ADR-0097); a flow's `connector_action` node then calls it. To add a brand
-connector (e.g. Slack), install its package and add `new ConnectorSlackPlugin()`
-to `plugins:`; to drop a provider, remove its plugin.
+boot — see [Automation → Connectors](https://objectstack.ai/docs/automation/connectors)
+for how that materialization works; a flow's `connector_action` node then
+calls it. To add a brand connector (e.g. Slack), install its package and add
+`new ConnectorSlackPlugin()` to `plugins:`; to drop a provider, remove its
+plugin.
 
 > **Security — declarative MCP over stdio.** An `mcp` connector whose transport
 > spawns a local process (`stdio`) is denied by default, because the command
@@ -136,5 +138,5 @@ covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-
 - Add a flow or automation: see `objectstack-automation`.
 - Add an AI agent: see `objectstack-ai`.
 
-Skills live in `skills/` in the ObjectStack framework repo and in the in-IDE
-assistant catalog.
+Skills are installed with `npx skills add objectstack-ai/objectstack/skills`
+(see `AGENTS.md`) and also show up in the in-IDE assistant catalog.

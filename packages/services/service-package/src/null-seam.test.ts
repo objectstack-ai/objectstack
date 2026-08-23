@@ -39,14 +39,14 @@
  *
  * ## What is deliberately NOT asserted here
  *
- * This service's LOCAL `normalizeRows` implements TWO of the three dialect
- * shapes — a bare row array and `{ rows }`. It does not unwrap the mysql2
- * `[rows, fields]` tuple the way `metadata-protocol`'s copy does (that one
- * tests `Array.isArray(result[0])`). So no populated-tuple result is asserted
- * here: it would be a pin on behaviour this file does not have. What IS pinned
- * is that a tuple-shaped result is still treated as an ANSWER, so the guard
- * cannot misfire on a dialect it does not fully flatten. The gap itself is
- * filed separately rather than fixed as a rider.
+ * The ROWS a dialect yields are not this file's subject — only the
+ * answered/unanswered separation is. When these tests were written the local
+ * `normalizeRows` implemented two of the three dialect shapes and did not
+ * unwrap the mysql2 `[rows, fields]` tuple; that gap was filed rather than
+ * fixed as a rider, and closed in #11062. The populated-tuple assertions live
+ * with the rest of the dialect-shape contract in `mysql2-tuple.test.ts`. What
+ * stays pinned HERE is the part this card owns: a tuple-shaped result is an
+ * ANSWER, so the guard cannot misfire on it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -267,9 +267,9 @@ describe('#10965 the guard never turns a result set into a refusal', () => {
   });
 
   it('an `[rows, fields]`-shaped result is an ANSWER — the guard does not misfire', async () => {
-    // This local flattener does not UNWRAP the tuple (filed separately), so
-    // nothing is asserted about the rows it yields. What is asserted is the
-    // only thing this card owns: it is not mistaken for a seam that failed to
+    // Nothing is asserted here about the rows the tuple yields — that is
+    // `mysql2-tuple.test.ts`'s contract (#11062). What is asserted is the only
+    // thing this card owns: it is not mistaken for a seam that failed to
     // answer, so no dialect gets a false 503.
     const { svc } = await bootWith(seamReturning([[], []]));
     await expect(svc.list()).resolves.toEqual([]);

@@ -3120,10 +3120,16 @@ describe('HttpDispatcher', () => {
         // shape, was test-invisible.
 
         it('reports every CORE_FALLBACK_FACTORIES product as degraded, never available (#3898)', async () => {
-            const { CORE_FALLBACK_FACTORIES } = await import('@objectstack/core');
+            const { CORE_FALLBACK_FACTORIES, createMemoryJob } = await import('@objectstack/core');
             expect(Object.keys(CORE_FALLBACK_FACTORIES).length).toBeGreaterThan(0);
 
-            for (const [slot, factory] of Object.entries(CORE_FALLBACK_FACTORIES)) {
+            // [#10746] `job` came OFF the pre-injection list (a fallback must
+            // not fake capability), but `createMemoryJob` stays exported for
+            // deliberate registration — so its product stays in THIS gate's
+            // inventory: however it reaches a slot, discovery must never call
+            // it `available`.
+            const inventory = { ...CORE_FALLBACK_FACTORIES, job: createMemoryJob };
+            for (const [slot, factory] of Object.entries(inventory)) {
                 const fallback = factory();
                 (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === slot ? fallback : null));
                 (kernel as any).services = new Map([[slot, fallback]]);
@@ -3164,12 +3170,17 @@ describe('HttpDispatcher', () => {
 
         it('answers the cache/queue/job slots identically to the metadata-protocol builder (#4318)', async () => {
             const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
-            const { CORE_FALLBACK_FACTORIES } = await import('@objectstack/core');
+            const { CORE_FALLBACK_FACTORIES, createMemoryJob } = await import('@objectstack/core');
 
+            // [#10746] `job` is no longer ON the pre-injection map, but its
+            // factory stays exported and explicitly registrable, so the slot
+            // keeps both occupant shapes here.
+            const factoryFor = (slot: string) =>
+                slot === 'job' ? createMemoryJob : CORE_FALLBACK_FACTORIES[slot];
             for (const slot of ['cache', 'queue', 'job']) {
                 // Both shapes an occupant can take: a real (unmarked) service
-                // and the kernel's self-describing in-memory fallback.
-                for (const svc of [{}, CORE_FALLBACK_FACTORIES[slot]()]) {
+                // and the self-describing in-memory fallback.
+                for (const svc of [{}, factoryFor(slot)()]) {
                     (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === slot ? svc : null));
                     (kernel as any).services = new Map([[slot, svc]]);
 
