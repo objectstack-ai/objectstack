@@ -1724,9 +1724,10 @@ const ObjectSchemaBase = strictObject(
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
       // `ui/view.zod.ts` declares its own `userActions` with a completely
-      // disjoint vocabulary (sort/search/filter/refresh/rowHeight/
-      // addRecordForm/editInline/buttons), so an author who learned that block
-      // writes these here and gets a shape that has never heard of them.
+      // disjoint vocabulary (sort/search/filter/refresh/rowHeight/group/
+      // addRecordForm/editInline/hideFields/rowColor/buttons — the last three
+      // adopted at #11195), so an author who learned that block writes these
+      // here and gets a shape that has never heard of them.
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +

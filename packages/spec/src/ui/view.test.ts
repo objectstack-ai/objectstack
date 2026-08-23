@@ -2496,9 +2496,38 @@ describe('UserActionsConfigSchema', () => {
     expect(config.filter).toBe(true);
     expect(config.refresh).toBe(true);
     expect(config.rowHeight).toBe(true);
+    expect(config.group).toBe(true);
     expect(config.addRecordForm).toBe(false);
     expect(config.editInline).toBe(false);
+    expect(config.hideFields).toBe(false);
+    expect(config.rowColor).toBe(false);
     expect(config.buttons).toBeUndefined();
+  });
+
+  // The split is copied from the renderer's reads, not chosen by the spec
+  // (ruled A on objectui#5435): ListView.tsx computes `showGroup` as
+  // `ua?.group !== false` (absent ⇒ shown) but `showHideFields` / `showColor`
+  // as `ua?.hideFields === true` / `ua?.rowColor === true` (absent ⇒ hidden).
+  // Normalising the three to one default would silently flip a toolbar
+  // affordance on every view that never wrote the key.
+  it('pins the group-ON / hideFields-OFF / rowColor-OFF defaults asymmetry (objectui#5435)', () => {
+    const config = UserActionsConfigSchema.parse({});
+    expect(config.group).toBe(true);
+    expect(config.hideFields).toBe(false);
+    expect(config.rowColor).toBe(false);
+  });
+
+  // objectui's normalize-list-view fold maps legacy `showGroup` /
+  // `showHideFields` / `showColor` onto exactly these keys, so this document is
+  // the fold's own OUTPUT — before adoption the save gate rejected it by name.
+  it('accepts the legacy-fold output through ListViewSchema (acceptance criterion, objectstack#11195)', () => {
+    const result = ListViewSchema.safeParse({
+      name: 'my_view',
+      label: 'My View',
+      columns: [{ field: 'name' }],
+      userActions: { group: false, hideFields: true, rowColor: true },
+    });
+    expect(result.success).toBe(true);
   });
 
   it('should accept full configuration', () => {
@@ -2507,14 +2536,20 @@ describe('UserActionsConfigSchema', () => {
       search: true,
       filter: false,
       rowHeight: true,
+      group: false,
       addRecordForm: true,
       editInline: true,
+      hideFields: true,
+      rowColor: true,
       buttons: ['btn_export', 'btn_archive'],
     });
     expect(config.sort).toBe(false);
     expect(config.filter).toBe(false);
+    expect(config.group).toBe(false);
     expect(config.addRecordForm).toBe(true);
     expect(config.editInline).toBe(true);
+    expect(config.hideFields).toBe(true);
+    expect(config.rowColor).toBe(true);
     expect(config.buttons).toEqual(['btn_export', 'btn_archive']);
   });
 

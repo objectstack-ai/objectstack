@@ -848,6 +848,22 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  * Controls which interactive actions are available to users in the view toolbar.
  * Each boolean toggles the corresponding toolbar element on/off.
  *
+ * `group` / `hideFields` / `rowColor` adopted from objectui's legacy `show*`
+ * fold (`SHOW_FLAG_TO_USER_ACTION` in normalize-list-view.ts; ruled Option A on
+ * objectui#5435): the ListView toolbar already honoured all three, but no
+ * spec-valid document could declare them, so the fold's own output failed the
+ * save gate. The defaults asymmetry is LOAD-BEARING, copied from the renderer's
+ * reads, not chosen here: `group` defaults ON (`ua?.group !== false`) like the
+ * other core toolbar controls, while `hideFields` / `rowColor` default OFF
+ * (`=== true`) — column hiding and row colouring are opt-in affordances.
+ *
+ * Name-collision note (same key NAME, different shape, on OTHER surfaces —
+ * deliberate, each toggle is named after the config it gates): these three are
+ * booleans HERE, while `rowColor` on the list view itself is a
+ * {@link RowColorConfigSchema} (the colour rules this toggle exposes to users)
+ * and `hideFields` on the record-details component is a `string[]` of field
+ * names to omit. The describes below say which side of each pair this is.
+ *
  * @see Airtable Interface → "User actions" panel
  */
 export const UserActionsConfigSchema = lazySchema(() => strictObject({
@@ -859,8 +875,11 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   filter: z.boolean().default(true).describe('Allow users to filter records'),
   refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
+  group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
   editInline: z.boolean().default(false).describe('Allow users to edit records inline — click a cell to edit it with the field\'s type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in.'),
+  hideFields: z.boolean().default(false).describe('Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in.'),
+  rowColor: z.boolean().default(false).describe('Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in.'),
   buttons: z.array(z.string()).optional().describe('Custom action button IDs to show in the toolbar'),
 }).describe('User action toggles for the view toolbar'));
 
