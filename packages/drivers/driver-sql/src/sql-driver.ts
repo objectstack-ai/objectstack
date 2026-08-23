@@ -9794,7 +9794,16 @@ export class SqlDriver implements IDataDriver {
             const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
             if (!nullable && c.name !== 'id') col.notNullable();
             if (c.name === 'created_at' || c.name === 'updated_at') {
-              col.defaultTo(this.knex.fn.now());
+              // #11321: the SAME canonical default {@link createAuditTimestampColumn}
+              // emits, not `knex.fn.now()`. This method is SQLite-only (see the
+              // `isSqlite` branch in `applyMigrationEntries`), where
+              // `knex.fn.now()` is the zone-naive `CURRENT_TIMESTAMP` — so
+              // re-emitting it here would silently REVERT a table that was
+              // created with the canonical default the moment any unrelated
+              // drift (a relaxed NOT NULL, a dropped column) triggered a
+              // rebuild. A rebuild must hand back the column `initObjects`
+              // would have built.
+              col.defaultTo(this.nowColumnDefault('datetime'));
             } else if (!dropDefault.has(c.name)) {
               // Re-emit the METADATA-declared default. The rebuild dropped the
               // original table, so a column whose default is not restated here
@@ -12448,10 +12457,50 @@ export class SqlDriver implements IDataDriver {
    * `TIMESTAMP` problems on MySQL: no milliseconds, and a 2038 ceiling on the
    * column every list view sorts by (#3942). `CURRENT_TIMESTAMP` has to carry
    * matching precision for a `DATETIME(3)` default, hence `now(3)`.
+   *
+   * ## SQLite takes the SAME canonical default a declared field gets (#11321)
+   *
+   * "Must take the same physical type as a declared `Field.datetime`" is the
+   * paragraph above; the DEFAULT is the other half of that sentence, and on
+   * SQLite it used to diverge. `knex.fn.now()` compiles to an unqualified
+   * `CURRENT_TIMESTAMP`, which SQLite renders as a zone-NAIVE, space-separated,
+   * second-precision `'YYYY-MM-DD HH:MM:SS'` — the exact string
+   * {@link updatedAtStamp}'s docblock condemns, because `Date.parse` reads a
+   * zone-less string as LOCAL time and silently shifts the instant by the host
+   * offset. A declared `defaultValue: 'NOW()'` field in the SAME table already
+   * gets the canonical ISO-8601 form from {@link nowColumnDefault}, so one table
+   * carried two spellings of one conceptual value:
+   *
+   * ```
+   * created_at  "2026-08-23 14:54:17"          <- builtin audit (naive)
+   * when        "2026-08-23T14:54:17.796Z"     <- declared Field.datetime NOW()
+   * ```
+   *
+   * Routed through {@link nowColumnDefault} rather than restating the
+   * expression, so the two can never drift apart again — one source for "what
+   * does NOW() mean in DDL on this dialect".
+   *
+   * Postgres is deliberately untouched: `knex.fn.now()` there is a real
+   * zone-aware `TIMESTAMP` that never had the ambiguity. MySQL keeps `now(3)`
+   * (#11224) — a `DATETIME(3)` default must carry matching precision.
+   *
+   * ⚠️ Scope: a DDL default governs only NEWLY-created tables. A table already
+   * on disk keeps its legacy `CURRENT_TIMESTAMP` default; `formatOutput`'s read
+   * repair (`repairNaiveUtcAuditTimestamp`) folds those rows to canonical on
+   * read, which is why this needs no migration — the same disposition
+   * {@link nowColumnDefault} already documents for declared fields. Measured:
+   * schema-drift never compares this default, so an existing deployment does
+   * NOT start reporting drift on `created_at`/`updated_at` — the audit columns
+   * are skipped outright ({@link BUILTIN_COLUMNS}), and the only
+   * `default_mismatch` producer is the #4560 runtime-token check.
    */
   protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
     if (this.isMysql) {
       table.datetime(name, { precision: 3 }).defaultTo(this.knex.fn.now(3));
+      return;
+    }
+    if (this.isSqlite) {
+      table.timestamp(name).defaultTo(this.nowColumnDefault('datetime'));
       return;
     }
     table.timestamp(name).defaultTo(this.knex.fn.now());
