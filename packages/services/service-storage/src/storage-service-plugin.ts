@@ -21,7 +21,7 @@ import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict } from './storage-routes.js';
-import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
+import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder } from './attachment-lifecycle.js';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
@@ -413,6 +413,16 @@ export class StorageServicePlugin implements Plugin {
             sessionTtl: this.options.sessionTtl,
             resolveSession: buildAuthSessionResolver(ctx),
             authorizeFileRead: buildFileReadAuthorizer(ctx, engine),
+            // "Is anything still holding this tombstone?" on the READ side
+            // (#10246) — the reap guard's own `findFileHolder`, handed over
+            // rather than re-derived. One definition of "still held", asked by
+            // the sweep before it reaps and by the download path before it
+            // refuses, so the two cannot answer differently. No engine (bare
+            // kernel) leaves it undefined and tombstones stay refused.
+            resolveFileHolder:
+              engine && typeof (engine as any).find === 'function'
+                ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
+                : undefined,
             logger: ctx.logger,
           });
 

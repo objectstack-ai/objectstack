@@ -433,7 +433,7 @@
       "title": "sys_file status pipeline: pending → committed → deleted (tombstone) with un-tombstone on re-attach; shared files never tombstone early",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -445,11 +445,13 @@
       },
       "steps": [
         "presign an attachments-scope upload and read the sys_file row: status 'pending'",
-        "attempt GET /api/v1/storage/files/<fileId>/url while still pending and capture the refusal (downloads only serve committed files)",
+        "attempt GET /api/v1/storage/files/<fileId>/url while still pending and capture the refusal (a never-completed upload has no bytes to promise — this is the PENDING refusal, not a 'committed-only' rule)",
         "complete the upload; re-read: status 'committed'",
         "attach the file to 'Website Relaunch' AND 'Data Platform' (two sys_attachment join rows over ONE file — the Salesforce ContentDocumentLink share pattern)",
         "delete the 'Data Platform' join row and re-read sys_file: still 'committed' (a remaining reference blocks the tombstone)",
         "delete the LAST join row and re-read: status 'deleted' with deleted_at set (the tombstone)",
+        "while tombstoned AND holder-less, GET /api/v1/storage/files/<fileId>/url: 404 FILE_NOT_FOUND",
+        "attach a NEW join row onto the still-tombstoned file_id and immediately GET the download URL again, WITHOUT waiting for any sweep: 200 (#10246 — the download path asks the reap guard's own holder question, so a file the sweep would refuse to reap is a file the download path serves)",
         "re-attach the same file_id to 'Website Relaunch' within the grace window and re-read: status back to 'committed', deleted_at null",
         "verify a NON-attachments-scope file (e.g. an invoice-line receipt, scope from the field-upload path) is never tombstoned by these join-row hooks"
       ],
@@ -461,10 +463,16 @@
           "evidence": "the read sequence, one per transition"
         },
         {
-          "clause": "a pending (never-completed) file is not downloadable: the download routes answer 404 FILE_NOT_FOUND for status != committed",
+          "clause": "a pending (never-completed) file is not downloadable: the download routes answer 404 FILE_NOT_FOUND while status is 'pending'",
           "oracle": "api",
           "verify": "the /url GET during the pending window returns 404 with that code",
           "evidence": "the 404 body"
+        },
+        {
+          "clause": "the refusal is keyed to NO REMAINING HOLDER, not to the tombstone: a 'deleted' file that still has at least one live sys_attachment join row (or a live ref_* owner) downloads with 200 immediately, with no sweep in between; the tombstone row is NOT rewritten by the download (#10246)",
+          "oracle": "api",
+          "verify": "GET /url on the tombstoned file 404s while holder-less and 200s once a join row is attached, in the same grace window; a sys_file re-read after the 200 still shows status 'deleted' with deleted_at set",
+          "evidence": "the two /url responses plus the post-download sys_file read"
         },
         {
           "clause": "one file shared by two join rows survives losing one of them — deleting an attachment deletes only the join row; the tombstone fires only when the LAST reference goes",
@@ -499,7 +507,8 @@
         "docs/plans/release-15.1-test-plan.md §C4 (#2755)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the full status pipeline as a variants matrix over the sys_file.status enum, with the shared-file and re-attach transitions from the lifecycle-hook source", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the full status pipeline as a variants matrix over the sys_file.status enum, with the shared-file and re-attach transitions from the lifecycle-hook source", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-23", "change": "clause 2 was FALSIFIED by #10246 and is repaired here, not merely re-worded. It stated the download refusal as 'status != committed', which was true when written and is not any more: the download routes now ask the reap guard's own findFileHolder before refusing a tombstone, so a 'deleted' file with a live sys_attachment join row (or a live ref_* owner) serves 200 inside the grace window instead of 404ing for up to 30 days and then silently starting to work once a sweep ran. A runner scoring the old clause would have marked the FIXED behaviour as a failure. The clause is now keyed to 'pending', which is the limb that genuinely still refuses; a new clause pins the widened one AS A PAIR (404 while holder-less, 200 once a holder exists, tombstone row unrewritten) because proving only the 200 proves that something got wider and not that the boundary held. Two steps added for the new clause, and step 2's parenthetical stopped asserting a committed-only rule. Note for the next author: docs-drift could not have caught this — it is symbol-anchor precision-first (#9192) and cannot see a prose claim inside a clause string.", "ref": "#10246" }
       ]
     },
     {
