@@ -13033,6 +13033,18 @@ export class SqlDriver implements IDataDriver {
         // whenever a key is declared out of column sequence, and this list is
         // used as an addressing / upsert-conflict-target key, where the order is
         // load-bearing: a key in the wrong order is a DIFFERENT key.
+        //
+        // `k.ord <= i.indnkeyatts` bounds the join to the KEY columns (#11162).
+        // For a covering primary key — `CREATE UNIQUE INDEX … INCLUDE (payload)`
+        // promoted via `ADD CONSTRAINT … PRIMARY KEY USING INDEX` — `indkey`
+        // holds the key columns AND the INCLUDE'd payload columns, and
+        // `indnkeyatts` is the count of the leading entries that are actually
+        // key members. Measured on PostgreSQL 16.13: `indkey = '2 1 3'`,
+        // `indnkeyatts = 2`, and without the bound `payload` was reported as a
+        // key member — a key with an extra member is a DIFFERENT key, for the
+        // same addressing reasons as above. `indnkeyatts` exists on PG 11+;
+        // this driver already requires 9.4+ syntax (`WITH ORDINALITY`) and CI
+        // runs 16.
         const result = await this.knex.raw(
           `
           SELECT a.attname as column_name
@@ -13043,6 +13055,7 @@ export class SqlDriver implements IDataDriver {
             AND a.attnum = k.attnum
           WHERE i.indrelid = ?::regclass
             AND i.indisprimary
+            AND k.ord <= i.indnkeyatts
           ORDER BY k.ord
         `,
           [tableName],
