@@ -706,6 +706,28 @@ const EXEMPT = {
 // `@objectstack/cli` (146 raw across 65 files, after #8612 repaired the first
 // two of its 59 missing import extensions) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
+//
+// `@objectstack/trigger-record-change` GRADUATED from this ledger (entry: 9 raw
+// TS2353, re-measured 0). It is worth a line here because BOTH remedies the
+// graduation message above offers were wrong for it, and that message is what
+// the next taker will read:
+//   - "add a `typecheck` script" -- it already had one, and always had. The
+//     package was never in DEBT's hole ("src does not check"); it was in this
+//     ledger's ("src checks, tests are hidden"), which is why the message's
+//     first branch has nothing to do.
+//   - "drop the test exclusion" -- MEASURED as a red `main`. It resolves
+//     exactly the 10-file program this ledger's re-measure scored at 0 and
+//     leaves `dist/` byte-identical (tsup builds `src/index.ts` alone), but the
+//     7 tests it re-admits import four workspace packages the BUILD config's
+//     program never contained, and `check:type-source-resolution` goes 0 -> 1
+//     naming them, against a registry that is shrink-only and whose own message
+//     rules that widening the entry is not the fix.
+// So it took the #5286 sibling route (`tsconfig.test.json` named by the
+// `typecheck` script), which puts the same 10 files in front of tsc while
+// leaving `tsconfig.json` -- the only config that gate reads -- untouched. The
+// general lesson, which is this ledger's to carry: the two remedies are
+// interchangeable only where the excluded tests import nothing the src layer
+// does not, and that is a property to MEASURE per package, never to assume.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
     errors: 348,
@@ -952,7 +974,6 @@ const TEST_DEBT = {
   },
   '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
-  '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
