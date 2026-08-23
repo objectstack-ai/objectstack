@@ -1096,6 +1096,57 @@ jobs:
       - name: Runtime-services indexes enumerate the chapter's real pages
         run: pnpm check:runtime-services-index
 
+      # #10738 generalises the gate above to every section landing page. The same
+      # defect shape kept recurring one directory over: a section's meta.json is
+      # what fumadocs builds the sidebar and route order from, the landing page's
+      # "## What's in this module" block is the reader's map of the same set, and
+      # nothing read the two against each other — #9604 (runtime-services, sms),
+      # #10339 (permissions named 14 of 21), #10737 (ai omitted connect-mcp, its
+      # meta.json's FIRST content page, linked nowhere else on the page). Three
+      # instances, three humans noticing, three cards.
+      #
+      # The heading is the opt-in, NOT the rendering shape. #10738 had set the
+      # `Cards`-grid sections aside as "a different object" and then had to
+      # correct itself when api/index.mdx turned out to carry both shapes. Shape
+      # is simply the wrong discriminator: writing the heading is the author
+      # declaring "this block is the index of this module". Eight sections
+      # declare it — four bullet lists (ai, api, permissions, plugins), four
+      # `Card` grids (automation, data-modeling, kernel, ui) — and the gate reads
+      # both spellings identically. The other 26 landing pages under content/docs
+      # are untouched and cannot be caught by accident; they would have to write
+      # the heading first. That is what keeps the deliberately curated ones
+      # curated: protocol/objectui is a "For Implementers" reading list mixing in
+      # /docs/references/ links, and getting-started's "Next Steps" points OUT of
+      # its module on purpose.
+      #
+      # Hrefs and their order only. Link text, glosses, bolding and `Card`
+      # descriptions are the page's business — meta.json stores SLUGS ONLY, so a
+      # generated block would have to synthesize link text from frontmatter, and
+      # that regresses a row that exists today (permissions/access-recipes.mdx is
+      # titled "Who can see data / automation / interface" and would render as
+      # that instead of the curated "Access Recipes"). Check them, don't generate
+      # them — the #9604 precedent, re-measured.
+      #
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
+      # same as the other direct steps in this lane: that alias is a line in root
+      # package.json, inside the @changesets/cli v3 fence (#9465), and the direct
+      # form loses no discovery — dispatch-gates.mjs derives gate families from
+      # either spelling. Precedent: PR #10698.
+      #
+      # Runs its own --self-test first, and that leg is load-bearing: this gate
+      # computes its own population, so a block parser that stopped matching
+      # would print a confident green over a tree it never read (#4690's family).
+      # The self-test drives the real judge()/run() path and pins all seven
+      # refusals alongside the positive cases, so "refuses unconditionally"
+      # cannot satisfy it. It lives in this job with the other docs guards: the
+      # edit that breaks it is a docs edit, so a packages/** paths filter would
+      # blind it to its own failure mode. Reads ~34 meta.json + index.mdx pairs,
+      # no spawns, no build; ~0.1s.
+      - name: Section landing indexes enumerate their meta.json pages
+        run: |
+          node scripts/check-section-landing-index.mjs --self-test
+          node scripts/check-section-landing-index.mjs
+
       # #3723 ADR anchors: code an accepted ADR governs must keep naming it.
       # That incident reversed three accepted ADRs with a patch-level changeset,
       # and the mechanism was simply that the edited file never mentioned them —

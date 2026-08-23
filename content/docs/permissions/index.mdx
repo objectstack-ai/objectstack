@@ -62,7 +62,7 @@ alike — is [Declaring Capabilities](/docs/permissions/capabilities).
 
 {/* Source of truth for this module's page set AND its order is meta.json in this directory — routing and the sidebar are built from it, and the list below mirrors it exactly, minus this page. */}
 {/* The list is hand-kept on purpose: meta.json stores slugs only, so the link text and the glosses below exist nowhere else, and a generated list would lose them. */}
-{/* Drift note: nothing checks the two against each other in either direction, so a page added to or removed from meta.json leaves this list silently stale — edit both in the same change. */}
+{/* Checked since #10738: `node scripts/check-section-landing-index.mjs` holds this list's set AND order to meta.json in both directions, for every landing page carrying this heading. Link text and the glosses stay hand-written — the gate reads hrefs only. */}
 
 - [Administrator Guide](/docs/permissions/administrator-guide) — the task-first manual for customer system administrators
 - [Authentication](/docs/permissions/authentication)
