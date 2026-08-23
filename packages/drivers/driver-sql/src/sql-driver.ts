@@ -3966,6 +3966,48 @@ export class SqlDriver implements IDataDriver {
   /** External columnMap inverse: physical remote column -> logical field (for read output remap). */
   protected columnFieldByObject: Record<string, Record<string, string>> = {};
   protected tablesWithTimestamps: Set<string> = new Set();
+  /**
+   * [#11067] What is known about `updated_at` on a table this driver was told
+   * about WITHOUT running DDL against it.
+   *
+   * ## Why {@link tablesWithTimestamps} could not answer this
+   *
+   * That set means "OBSERVED to carry the audit columns", and every one of its
+   * four fill sites is downstream of DDL: `initObjects`' `createTable` branch
+   * (we built the table, so we know), its "the existing table already has an
+   * `updated_at` column" branch (decided from a physical `columnInfo()`), its
+   * rotation branch, and `aliasShardBookkeeping`'s rotation-shard copy. A
+   * deployment that manages DDL out-of-band — `skipSchemaSync` /
+   * `OS_SKIP_SCHEMA_SYNC=1`, the documented posture after running migrations
+   * manually — reaches none of them, so it served every UPDATE with the set
+   * empty and never stamped. `updated_at` then records the row's CREATION time
+   * forever: the column carries an INSERT-time `DEFAULT now()` and no dialect
+   * here gives it an `ON UPDATE` clause or a trigger. Nothing errors; list-view
+   * sorts, delta sync, cache invalidation and audit answers are just wrong.
+   *
+   * ## The three states, and what may move between them
+   *
+   *  - `presumed` — {@link registerManagedObjectMetadata} put it here from the
+   *    DECLARED shape alone, at zero round-trips: every table this driver's own
+   *    DDL creates gets `created_at`/`updated_at` unconditionally, so a managed
+   *    object registered with us is expected to have them. That is an inference,
+   *    not an observation, which is the whole reason this is a separate map
+   *    rather than more entries in `tablesWithTimestamps`.
+   *  - `present` — a stamped UPDATE SUCCEEDED. A column named in a SET list that
+   *    does not exist is a parse/plan error on every dialect here, independent
+   *    of how many rows matched, so the success IS the proof. From then on the
+   *    table is settled and costs nothing.
+   *  - `absent` — {@link resolveUpdatedAtColumnPresence} asked the database and
+   *    it is genuinely not there (a hand-migrated table that diverged). Never
+   *    stamped again, and never re-probed.
+   *
+   * ⛔ Deliberately NOT read by {@link stampInsertTimestamps}. That helper writes
+   * `created_at` too, and none of the evidence above says anything about
+   * `created_at` — promoting on an UPDATE's success would let it write a column
+   * this driver has no reason to believe exists. The insert path keeps reading
+   * `tablesWithTimestamps` exactly as before.
+   */
+  protected updatedAtColumnState: Map<string, 'presumed' | 'present' | 'absent'> = new Map();
   /** Tables this driver created since connect — see `getSchemaSyncStats`. */
   protected tablesCreatedHere: Set<string> = new Set();
   /** Tables that were already present when this driver first touched them. */
@@ -5812,27 +5854,218 @@ export class SqlDriver implements IDataDriver {
     return options?.preserveAudit === true && formatted.updated_at != null;
   }
 
+  /**
+   * The canonical instant an UPDATE stamps into `updated_at` on this dialect.
+   *
+   * On SQLite (no native timestamp type) full ISO-8601 WITH an explicit `Z` —
+   * matching the insert paths ({@link stampInsertTimestamps}) so create and
+   * update agree on one zone-explicit format. The previous
+   * `…replace('T',' ').replace('Z','')` wrote a zone-NAIVE, space-separated
+   * string that `Date.parse` reads as LOCAL time, silently shifting the instant
+   * by the host offset on a non-UTC runtime (the objectos freshness-probe
+   * miss). Postgres/MySQL keep native `now()` — a real zone-aware TIMESTAMP
+   * that never had the issue.
+   */
+  protected updatedAtStamp(): string | Knex.Raw {
+    return this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
+  }
+
+  /**
+   * [#11067] Should an UPDATE to `object` refresh `updated_at`?
+   *
+   * `true` on the DDL-observed tables exactly as before, and now also on a
+   * table whose declared shape says it has the column — see
+   * {@link updatedAtColumnState} for why the second answer is kept apart from
+   * the first. `absent` (the database was asked and said no) and "never heard
+   * of this object" both stay `false`.
+   */
+  protected stampsUpdatedAt(object: string): boolean {
+    if (this.tablesWithTimestamps.has(object)) return true;
+    const state = this.updatedAtColumnState.get(object);
+    return state === 'presumed' || state === 'present';
+  }
+
+  /**
+   * [#11067] Is that stamp still a PRESUMPTION — i.e. must this write carry the
+   * fallback?
+   *
+   * Only for a table in the `presumed` state and outside `tablesWithTimestamps`.
+   * Once a stamped UPDATE has succeeded the state is `present` and this is
+   * `false` forever after, which is what keeps the steady state free.
+   */
+  protected updatedAtStampIsPresumed(object: string): boolean {
+    return !this.tablesWithTimestamps.has(object) && this.updatedAtColumnState.get(object) === 'presumed';
+  }
+
+  /**
+   * [#11067] Ask the DATABASE whether `object`'s physical table carries
+   * `updated_at`. `null` when the question could not be answered.
+   *
+   * ⛔ This is deliberately not a read of the failure's message. Every dialect
+   * spells the missing column differently (`42703` on Postgres,
+   * `ER_BAD_FIELD_ERROR` on MySQL, `SQLITE_ERROR: no such column` on SQLite),
+   * those strings are localizable and version-dependent, and a fallback keyed
+   * to them would silently stop recovering on the next server upgrade while
+   * looking correct. `columnInfo()` answers the actual question, in the
+   * dialect's own terms, and is the same call `initObjects` already uses to
+   * decide the identical fact on the DDL path.
+   *
+   * An empty column set means the table is not visible to us at all (it does
+   * not exist, or we cannot see it) — NOT that `updated_at` is missing from a
+   * table that is otherwise fine. Answering `null` there sends the caller back
+   * to rethrowing the original error, which names the real problem.
+   *
+   * Runs on the caller's transaction when there is one, so it observes the same
+   * snapshot — and, on Postgres, so it runs on a transaction that is still
+   * usable (see {@link updateWithPresumedTimestamp}).
+   */
+  protected async resolveUpdatedAtColumnPresence(
+    object: string,
+    trx?: Knex.Transaction,
+  ): Promise<boolean | null> {
+    const physical = this.physicalTableByObject[object] ?? object;
+    const runner = trx ?? this.knex;
+    let builder = runner(physical);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) builder = builder.withSchema(remoteSchema);
+    let info: Record<string, unknown>;
+    try {
+      info = (await builder.columnInfo()) as Record<string, unknown>;
+    } catch {
+      // The probe itself failed — we learned nothing, so we may not claim the
+      // column is absent. The caller rethrows the write's own error.
+      return null;
+    }
+    const columns = Object.keys(info ?? {});
+    if (columns.length === 0) return null;
+    return columns.includes('updated_at');
+  }
+
+  /**
+   * [#11067] Issue an UPDATE whose `updated_at` stamp is a PRESUMPTION, and
+   * recover if the column turns out not to be there.
+   *
+   * ## Why this exists rather than option 1 on its own
+   *
+   * Inferring from the declared shape is free and right for every table this
+   * driver's DDL would have built. On a hand-migrated table that genuinely
+   * lacks `updated_at` it is wrong, and wrong LOUDLY: an `update()` that
+   * succeeds today (without stamping) would start failing, because the driver
+   * would name a column that does not exist. That is a NEW REJECTION for a call
+   * that works — not something a bug fix may ship. This method is what keeps
+   * the net observable change to "`updated_at` is now correctly stamped on any
+   * physical shape".
+   *
+   * ## Why the recovery is safe to retry
+   *
+   * A single UPDATE is atomic on all three dialects: one that fails to compile
+   * or plan has changed no rows, so re-issuing it without the stamp cannot
+   * double-apply anything. The recovery re-issues the caller's own payload
+   * minus `updated_at` — the exact statement `main` sends today.
+   *
+   * ## Why the speculative write is fenced when a caller transaction is open
+   *
+   * On Postgres ANY statement error aborts the WHOLE transaction: every
+   * subsequent statement returns `25P02 current transaction is aborted` until
+   * rollback. So a bare `try { … } catch { …recover… }` whose recovery issues
+   * SQL on the same transaction can never run there — the recovery statement is
+   * the one that raises the error you observe. {@link attemptWithoutPoisoning}
+   * wraps the attempt in a knex nested transaction (a `SAVEPOINT`, released on
+   * success and rolled back to on failure), which leaves the outer transaction
+   * usable on every dialect. This is #8269's mechanism applied to the second
+   * speculative write in this driver.
+   *
+   * Outside a caller transaction no fence is needed: knex runs the statement in
+   * its own implicit transaction, so a failure is already isolated — and paying
+   * for a savepoint on the ordinary write path would be a cost the flag exists
+   * to avoid.
+   *
+   * ## Why it happens at most once per table
+   *
+   * A successful stamped UPDATE proves the column exists — a column named in a
+   * SET list that is not there is a parse/plan error on every dialect here,
+   * whatever the row count — so success settles the table as `present`. A
+   * resolved absence settles it as `absent`. Either way the table leaves the
+   * speculative state and every later write goes straight down the plain path,
+   * with no probe and no fence.
+   *
+   * @param issue re-issues the UPDATE for a given payload and options — the
+   *   caller owns the WHERE and the tenant scope, so this method never rebuilds
+   *   them and cannot get them wrong.
+   */
+  protected async updateWithPresumedTimestamp(
+    object: string,
+    formatted: Record<string, any>,
+    options: DriverOptions | undefined,
+    issue: (payload: Record<string, any>, options?: DriverOptions) => Promise<number>,
+  ): Promise<number> {
+    const unstamped = (): Record<string, any> => {
+      const { updated_at: _dropped, ...rest } = formatted;
+      return rest;
+    };
+    const settleAbsent = (): void => {
+      this.updatedAtColumnState.set(object, 'absent');
+      this.logger.warn(
+        `[sql-driver] '${object}' has no physical 'updated_at' column, so this driver will not ` +
+          'stamp one on update (#11067). The object is registered as managed, whose schema this ' +
+          "driver's own DDL would give `created_at`/`updated_at` — a table migrated out-of-band " +
+          'without them will keep a stale "last modified" for every consumer that reads it ' +
+          '(list-view sorts, delta sync, cache invalidation, audit). Add the column, or accept ' +
+          'that it is not tracked here.',
+      );
+    };
+
+    const parentTrx = options?.transaction as Knex.Transaction | undefined;
+    if (parentTrx) {
+      const attempt = await this.attemptWithoutPoisoning(parentTrx, (scoped) =>
+        issue(formatted, { ...options, transaction: scoped }),
+      );
+      if (attempt.ok) {
+        this.updatedAtColumnState.set(object, 'present');
+        return attempt.value;
+      }
+      const present = await this.resolveUpdatedAtColumnPresence(object, parentTrx);
+      if (present !== false) throw attempt.error;
+      settleAbsent();
+      return issue(unstamped(), options);
+    }
+
+    try {
+      const affected = await issue(formatted, options);
+      this.updatedAtColumnState.set(object, 'present');
+      return affected;
+    } catch (error) {
+      const present = await this.resolveUpdatedAtColumnPresence(object);
+      if (present !== false) throw error;
+      settleAbsent();
+      return issue(unstamped(), options);
+    }
+  }
+
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
-    const builder = this.getBuilder(object, options).where('id', id);
-    this.applyTenantScope(builder, object, options);
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
 
-    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      // Canonical instant format. On SQLite (no native timestamp type) stamp
-      // full ISO-8601 WITH an explicit `Z` — matching the insert paths
-      // (`stampInsertTimestamps`) so create and update agree on one
-      // zone-explicit format. The previous `…replace('T',' ').replace('Z','')`
-      // wrote a zone-NAIVE, space-separated string that `Date.parse` reads as
-      // LOCAL time, silently shifting the instant by the host offset on a
-      // non-UTC runtime (the objectos freshness-probe miss). Postgres/MySQL keep
-      // native `now()` — a real zone-aware TIMESTAMP that never had the issue.
-      formatted.updated_at = this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
-    }
+    // One definition of the statement, so the speculative attempt, the fenced
+    // retry and the plain path cannot drift in WHERE or tenant scope.
+    const issue = (payload: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
+      const builder = this.getBuilder(object, issueOptions).where('id', id);
+      this.applyTenantScope(builder, object, issueOptions);
+      return builder.update(payload) as unknown as Promise<number>;
+    };
 
-    await builder.update(formatted);
+    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
+      formatted.updated_at = this.updatedAtStamp();
+      if (this.updatedAtStampIsPresumed(object)) {
+        await this.updateWithPresumedTimestamp(object, formatted, options, issue);
+      } else {
+        await issue(formatted, options);
+      }
+    } else {
+      await issue(formatted, options);
+    }
 
     const readback = this.getBuilder(object, options).where('id', id);
     this.applyTenantScope(readback, object, options);
@@ -6739,8 +6972,15 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Promise<any> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
-    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      formatted.updated_at = this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
+    // [#11067] One definition of the decision, shared with {@link update}. No
+    // fallback is threaded here, and that is a property of the path rather than
+    // an omission: `rotationShardsOf` returns shards only once `ensureRotation`
+    // has run, and `initObjects` records the stronger `tablesWithTimestamps`
+    // fact on the line immediately before that call — so on this path the
+    // answer can never come from the declared-shape presumption, and there is
+    // nothing speculative to recover from.
+    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
+      formatted.updated_at = this.updatedAtStamp();
     }
     for (const shard of shards) {
       const builder = this.getBuilder(shard, options).where('id', id);
@@ -7889,6 +8129,19 @@ export class SqlDriver implements IDataDriver {
     this.numericFields[tableName] = numericCols;
     this.autoNumberFields[tableName] = autoNumberCols;
     this.tenantFieldByTable[tableName] = tenantField;
+    // [#11067] The declared shape's answer to "does this table carry
+    // `updated_at`?", installed here because here is the one place a managed
+    // object reaches the driver on EVERY boot posture — `initObjects` calls
+    // this first, and a `skipSchemaSync` boot calls it and stops. Presumed
+    // rather than asserted (see {@link updatedAtColumnState}); DDL that
+    // OBSERVES the column still records the stronger fact in
+    // `tablesWithTimestamps`, so a table this driver built is never in the
+    // speculative state at all. Never downgrades an answer already resolved
+    // from the database — re-registration is idempotent metadata assignment
+    // and must not throw away a `columnInfo()` result.
+    if (!this.updatedAtColumnState.has(tableName)) {
+      this.updatedAtColumnState.set(tableName, 'presumed');
+    }
     return { tableName, tenantField };
   }
 
