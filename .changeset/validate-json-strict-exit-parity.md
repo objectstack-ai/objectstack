@@ -43,9 +43,32 @@ and what the docs already advertise, rather than contradicting a contract. Under
 this repo's launch-window convention (breaking changes ship as `minor` while the
 stack versions in lockstep) `minor` is the honest slot.
 
-If a pipeline wants the old exit status, the fix is to say so rather than to pass a
-flag that means the opposite: drop `--strict` and gate on the payload's `warnings`
-array, which has carried the full advisory set since #10953. If it goes red instead,
-the advisories were always there — the text face had been printing them all along.
+## What a pipeline gating on the payload has to read
+
+`--strict` gates on the text face's warning list, and that list is **not** the payload's
+`warnings` field. The two differ by the ADR-0087 load-time conversion notices: the text
+face folds them into its warning block, while the payload carries them separately under
+`conversions`. So a pipeline that wants to reproduce `--strict` from the document must
+read **both**:
+
+```
+warnings.length > 0 || conversions.length > 0
+```
+
+Gating on `warnings` alone is strictly weaker than `--strict` — a config whose only
+advisories are conversion notices passes that check and fails `--strict`. That is the
+same silent under-reporting this change exists to remove, so do not reach for the
+narrower spelling.
+
+The consequence is reachable and worth stating outright, because it is surprising: a
+conversions-only config now exits **1** with `"warnings": []` and a populated
+`conversions`. Predicting the exit code from `warnings.length` alone will be wrong for
+exactly that config. Nothing is missing from the document — both advisory streams are in
+it — but they sit in two fields and the exit code answers to both.
+
+If a pipeline genuinely wants the old exit status, the honest fix is to say so rather
+than to keep passing a flag that means the opposite: drop `--strict` and read the
+payload. If it goes red instead, the advisories were always there — the text face had
+been printing them all along.
 
 <!-- adr-0087: not-required (no-migration-prescription) An exit-code parity fix on a CLI flag. No authorable key, export, config field or stored `sys_metadata` shape changes, so there is nothing for `objectstack migrate meta` or the upgrade guide to carry — the remedy is a pipeline-side choice of flag, not a rewrite of anything an author wrote. -->
