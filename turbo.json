@@ -17,6 +17,11 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "@objectstack/docs#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
+    },
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
