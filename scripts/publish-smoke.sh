@@ -539,29 +539,33 @@ const names = Object.keys(JSON.parse(readFileSync(overridesPath, 'utf8')));
 const lock = readFileSync(lockPath, 'utf8').split(/\r?\n/);
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const leaked = [];
-let pinnedCount = 0;
+// Sets, not arrays: a name is keyed in BOTH the `packages:` and `snapshots:`
+// sections, so counting lines would report every package twice.
+const leaked = new Set();
+const pinned = new Set();
 for (const name of names) {
   // Lockfile key lines: optional quote, the exact package name, '@', spec.
   const key = new RegExp(`^\\s*'?${esc(name)}@([^']+?)'?:\\s*$`);
   for (const line of lock) {
     const m = key.exec(line);
     if (!m) continue;
-    if (m[1].startsWith('file:')) pinnedCount += 1;
-    else if (/^[0-9]/.test(m[1])) leaked.push(`${name}@${m[1]}`);
+    if (m[1].startsWith('file:')) pinned.add(name);
+    else if (/^[0-9]/.test(m[1])) leaked.add(`${name}@${m[1]}`);
   }
 }
 
-if (leaked.length > 0) {
+if (leaked.size > 0) {
   console.error('::error::these PINNED packages resolved from the npm registry:');
-  for (const l of leaked.sort()) console.error(`  ${l}`);
+  for (const l of [...leaked].sort()) console.error(`  ${l}`);
   console.error(
     'The publish-smoke-pack.mjs override map has a hole, so the smoke tested ' +
       'PUBLISHED code instead of the release candidate.',
   );
   process.exit(1);
 }
-console.log(`  ok — ${pinnedCount} tarball-resolved lockfile entries, 0 registry leaks (${names.length} names checked)`);
+console.log(
+  `  ok — ${pinned.size}/${names.length} pinned packages resolved from tarballs, 0 registry leaks`,
+);
 EOF
 else
   log "Scaffolding $APP_NAME with published create-objectstack@latest"
