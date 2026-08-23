@@ -70,7 +70,11 @@ let cachedPackageVersion: string | undefined | null = null;
  * repo (`packages/runtime/src/runtime-version.ts`,
  * `packages/cli/src/utils/spec-version.ts`) and needs no JSON-module-assertion
  * support from the build target. Its CJS half depends on `shims: true` in this
- * package's tsup config — see the comment there.
+ * package's tsup config, which is load-bearing rather than defensive: measured
+ * without it, `dist/index.cjs` carries `createRequire(import.meta.url)`
+ * verbatim and throws `SyntaxError: Cannot use 'import.meta' outside a module`
+ * at load, so `require('@objectstack/metadata-protocol')` fails outright — see
+ * the comment there.
  */
 function resolvePackageVersion(): string | undefined {
     if (cachedPackageVersion !== null) return cachedPackageVersion;
