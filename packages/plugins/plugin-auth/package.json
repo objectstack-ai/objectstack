@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json"
   },
   "dependencies": {
     "@better-auth/core": "^1.7.1",
@@ -40,6 +40,7 @@
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
     "@types/node": "^26.2.0",
     "hono": "^4.13.2",
     "typescript": "^6.0.3",

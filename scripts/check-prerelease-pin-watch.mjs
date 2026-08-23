@@ -114,6 +114,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// This gate's whole population is ONE repo-root file, and the derivation
+// already reaches it — through the trigger key, not through a hint. Read from
+// the source rather than assumed: `prerelease-pin-watch.yml` declares
+// pnpm-workspace.yaml in its `paths:` filter, so a card that edits the pins
+// gets this gate named with `CI trigger in prerelease-pin-watch.yml` as its
+// provenance. What it carries no hint for is a bare repo-root FILENAME, which
+// `hintCovers` refuses as too generic; the subtree-spelling escape would be a
+// second, weaker route to a lead the workflow already delivers, and a second
+// spelling of one population is what drifts. Nothing else in the tree moves
+// this gate: it reads the `overrides` block and npm, and nothing more.
+//
+// dispatch-gates: no-path-population -- population is pnpm-workspace.yaml alone, and prerelease-pin-watch.yml already names it in `paths:` — the CI-trigger key reaches it, so a hint would be a second spelling of one population
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_WORKSPACE = join(REPO_ROOT, 'pnpm-workspace.yaml');
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';

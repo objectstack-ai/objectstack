@@ -548,6 +548,16 @@ export class SettingsService {
    * otherwise repeat one operator-actionable line per attempt.
    */
   private readonly reportedCryptoRefusals = new Set<string>();
+  /**
+   * Namespaces whose pre-bind READ has already been reported (#10250). Deduped
+   * for the same reason the two sets above are, and keyed by NAMESPACE rather
+   * than by key: `getNamespace()` resolves every specifier in the namespace
+   * through `get()`, so one in-window `getNamespace('mail')` reaches
+   * {@link loadRows} once per declared key. One operator-actionable line per
+   * namespace per window is the report; a dozen identical ones is noise that
+   * gets filtered.
+   */
+  private readonly reportedPreBindReads = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
   /**
@@ -653,6 +663,63 @@ export class SettingsService {
   private assertEngineBound(namespace: string, keys: string[]): void {
     if (!this.engineBindPending || this.engine) return;
     throw new SettingsEngineNotBoundError(namespace, keys);
+  }
+
+  /**
+   * Report a READ issued inside the pre-bind window (#10250) — the read half of
+   * the same window {@link assertEngineBound} refuses writes in.
+   *
+   * ## Why this reports instead of refusing
+   *
+   * The write half could refuse because a write in the window has no correct
+   * outcome: nothing durable exists to write to. A READ does. An in-window read
+   * of a setting that genuinely has no persisted row must answer the manifest
+   * `default`, and that is an ordinary, common thing for a boot-time reader to
+   * do. Refusing it would turn a correct startup sequence into an error — which
+   * is why #10159's fix deliberately left reads open.
+   *
+   * What is wrong is not the answer, it is that the answer was produced WITHOUT
+   * CONSULTING the store. In the window {@link loadRows} takes its `this.memory`
+   * branch, which at boot holds nothing, so the caller receives the declared
+   * `default` with `source: 'default'` and `locked: false` — an assertion about
+   * persisted state made without reading persisted state — while a real
+   * `sys_setting` row with a different value sits unread. Nothing distinguishes
+   * that from "no row exists", at any level, which is what made this quieter
+   * than the write half it was found beside.
+   *
+   * So the residual is made AUDIBLE rather than fatal, and the line names the
+   * repair rather than the symptom: the reader declares
+   * `optionalDependencies: ['com.objectstack.service.settings']` and the kernel
+   * orders it after the bind (ADR-0116). The three shipped always-on readers
+   * (`plugin-email`, `service-sms`, `service-storage`) declare exactly that as
+   * of this change, so on a correct boot this reporter never fires — see
+   * `settings-prebind-read-warning.test.ts`, whose load-bearing half is the
+   * SILENCE on an ordinary boot.
+   *
+   * ## When it stays quiet, and why each case is not the window
+   *
+   *  - engine bound              — `loadRows` never reaches here.
+   *  - `settleWithoutEngine()`   — no engine is EVER coming; the in-memory
+   *                                fallback IS this deployment's store, so a
+   *                                read of it is correct, not premature.
+   *  - no declared pending bind  — a directly constructed `SettingsService`
+   *                                ("unit tests, bootstrap, control-plane
+   *                                mock"). Only `SettingsServicePlugin` sets
+   *                                `engineBindPending`.
+   */
+  private reportPreBindRead(namespace: string): void {
+    if (!this.engineBindPending || this.engine) return;
+    if (this.reportedPreBindReads.has(namespace)) return;
+    this.reportedPreBindReads.add(namespace);
+    const message =
+      `[SettingsService] Pre-bind READ of namespace '${namespace}': the data engine is ` +
+      'declared but not yet bound, so this read was answered from the in-memory fallback ' +
+      'and the manifest defaults — any persisted `sys_setting` row was NOT consulted. ' +
+      "Declare optionalDependencies: ['com.objectstack.service.settings'] on the reading " +
+      'plugin so it starts after the settings engine binds (earliest safe phase: ' +
+      'kernel:bootstrapped).';
+    if (this.logger?.warn) this.logger.warn(message);
+    else console.warn(message);
   }
 
   /**
@@ -1129,8 +1196,92 @@ export class SettingsService {
     // For 'user' scope we pre-filter by user_id; for 'tenant' and 'global'
     // we load everything for the namespace and pick the right row below.
     const rows = await this.loadRows(namespace, scope === 'user' ? ctx.userId ?? null : null);
+    return this.resolveKeyFromRows<T>(reg, key, scope, rows);
+  }
 
-    // 2. cascade walk — OS_* env (handled above) > global > tenant > user > default
+  /**
+   * [#10826] Resolve several keys of ONE namespace with at most TWO row loads
+   * instead of one per key.
+   *
+   * `resolveLocalizationContext` (and `getNamespace` below) called {@link get}
+   * once per key, and every call ran {@link loadRows} over the whole
+   * namespace — three identical `sys_setting` reads inside one request,
+   * measured as queries 16–18 of 24 on a live rig (PR #10824). The cascade
+   * itself is per-key and cheap; only the ROW LOAD repeats. So: resolve each
+   * key's env override first (an override answers without touching the store,
+   * exactly as {@link get} does), then group the remaining keys by which
+   * `loadRows` argument their scope requires — `user`-scoped keys read
+   * `(namespace, userId)`, everything else `(namespace, null)` — one load per
+   * group, and walk each key's cascade over its group's rows.
+   *
+   * Row-for-row equivalent to calling {@link get} per key BY CONSTRUCTION:
+   * the env-override branch, the scope→userId mapping, and the cascade are
+   * the same code ({@link resolveKeyFromRows} is extracted from `get`, not
+   * copied). Nothing is cached; nothing survives the call.
+   */
+  async getMany(
+    namespace: string,
+    keys: readonly string[],
+    ctx: SettingsContext = {},
+  ): Promise<Record<string, ResolvedSettingValue>> {
+    const reg = this.registry.get(namespace);
+    if (!reg) throw new UnknownNamespaceError(namespace);
+    for (const key of keys) {
+      if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
+    }
+    const out: Record<string, ResolvedSettingValue> = {};
+    const pending: Array<{ key: string; scope: SpecifierScope }> = [];
+    for (const key of keys) {
+      const envOverride = this.effectiveEnvOverride(reg, namespace, key);
+      if (envOverride) {
+        const { envName, value } = envOverride;
+        out[key] = {
+          value,
+          source: 'env',
+          locked: true,
+          lockedReason: `Set via env: ${envName}`,
+          cascadeChain: [
+            { scope: 'env', value, locked: true, lockedReason: `Set via env: ${envName}`, effective: true },
+          ],
+        };
+        continue;
+      }
+      pending.push({ key, scope: reg.scopes.get(key)! });
+    }
+    if (pending.length > 0) {
+      const userKeys = pending.filter((p) => p.scope === 'user');
+      const otherKeys = pending.filter((p) => p.scope !== 'user');
+      const [userRows, otherRows] = await Promise.all([
+        userKeys.length > 0
+          ? this.loadRows(namespace, ctx.userId ?? null)
+          : Promise.resolve([] as SettingsRow[]),
+        otherKeys.length > 0
+          ? this.loadRows(namespace, null)
+          : Promise.resolve([] as SettingsRow[]),
+      ]);
+      for (const { key, scope } of userKeys) {
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, userRows);
+      }
+      for (const { key, scope } of otherKeys) {
+        out[key] = await this.resolveKeyFromRows(reg, key, scope, otherRows);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The per-key cascade walk over already-loaded namespace rows — extracted
+   * verbatim from {@link get} for #10826 so `get`, `getMany` and
+   * `getNamespace` share ONE implementation of the resolution order
+   * (env is handled by the callers BEFORE the row load, exactly as before).
+   */
+  private async resolveKeyFromRows<T = unknown>(
+    reg: RegisteredManifest,
+    key: string,
+    scope: SpecifierScope,
+    rows: SettingsRow[],
+  ): Promise<ResolvedSettingValue<T>> {
+    // 2. cascade walk — OS_* env (handled by callers) > global > tenant > user > default
     //
     // Build the full chain in declared order so the UI can render
     // "Inherited from Global / Locked by Global / Overrides tenant"
@@ -1199,10 +1350,9 @@ export class SettingsService {
     // capability for an enforced (HTTP) caller.
     this.assertPermitted(reg.manifest, 'read', ctx);
 
-    const values: Record<string, ResolvedSettingValue> = {};
-    for (const [key] of reg.scopes) {
-      values[key] = await this.get(namespace, key, ctx);
-    }
+    // [#10826] One grouped row load instead of one per key — same resolution
+    // per key by construction (getMany shares get()'s extracted cascade).
+    const values = await this.getMany(namespace, Array.from(reg.scopes.keys()), ctx);
     return { manifest: reg.manifest, values };
   }
 
@@ -2020,6 +2170,15 @@ export class SettingsService {
         updated_by: r.updated_by ?? null,
       }));
     }
+    // The engine branch above was not taken. When a bind is DECLARED-but-pending
+    // that is the pre-bind window, and this read is about to be answered from a
+    // store the deployment does not actually keep its settings in — say so
+    // (#10250). Placed here rather than in `get()` because this is the exact
+    // point at which persisted state would have been consulted: an in-window
+    // read satisfied by an `OS_*` env override returns before ever reaching
+    // `loadRows`, and that answer IS correct (env outranks every persisted
+    // scope), so it must not be reported.
+    this.reportPreBindRead(namespace);
     return this.memory.filter(
       (r) =>
         r.namespace === namespace &&

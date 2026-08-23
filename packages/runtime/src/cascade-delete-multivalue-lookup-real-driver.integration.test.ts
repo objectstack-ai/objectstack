@@ -37,6 +37,10 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 
 const ACCOUNT = { name: 'zz_account', fields: { name: { type: 'text' } } };
 
@@ -84,14 +88,33 @@ const SINGLE = {
 
 const OWNER_PACKAGE = 'com.objectstack.test.9362';
 
+/**
+ * [#10629] This fixture provisions its own business objects and nothing else,
+ * so the engine's single-tenant probe (`ObjectQL.probeInstallOrganizations`,
+ * memoised once per engine) reads a `sys_organization` that was never created.
+ * The probe is fail-soft by construction — it catches `isMissingTableError` and
+ * only that — but the driver and the engine each log the fault on the way out.
+ * Withheld and asserted rather than muted; `expected-read-refusal-noise.ts`
+ * says why.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
+
 describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup — real driver', () => {
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
+    /** [#10629] The expected-noise capture belonging to the latest rig. */
+    let noise: ExpectedReadRefusalCapture | null = null;
 
     afterEach(async () => {
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+        // [#10629] The capture is a PIN, not a mute — asserted after teardown so
+        // a failure here can never leave the engine running. Every test in this
+        // file rigs and writes, so the probe fires for each of them: this holds
+        // for a single `-t` run as well as for the whole file.
+        expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+        noise = null;
     });
 
     async function rig(objects: unknown[]) {
@@ -101,8 +124,13 @@ describe('[#9362] REST DELETE on an object targeted by a multiple:true lookup �
             connection: { filename: join(dir, 'data.sqlite') },
             useNullAsDefault: true,
         });
+        // [#10629] Installed before the driver runs a statement and before the
+        // engine issues a read — the two sinks the expected refusal travels out on.
+        noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+        noise.captureDriver(real);
         await real.initObjects(objects as any);
         engine = new ObjectQL();
+        noise.captureEngine(engine);
         engine.registerDriver(real as any, true);
         await engine.init();
         for (const o of objects) engine.registry.registerObject(o as any, OWNER_PACKAGE);

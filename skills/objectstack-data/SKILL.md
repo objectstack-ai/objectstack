@@ -91,7 +91,7 @@ Toggle system behaviours per object:
 |:-----|:--------|:--------|
 | `trackHistory` | `false` | Field-level audit trail |
 | `searchable` | `true` | Index records for global search |
-| `apiEnabled` | `true` | Expose via automatic REST / GraphQL APIs |
+| `apiEnabled` | `true` | Expose via automatic REST + MCP APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get`, `list`, `create`, `update`, `delete`, `bulk`); derived verbs (search/export/upsert/…) follow automatically |
 | `files` | `false` | Attachments & document management |
 | `feeds` | `true` | Social feed, comments, mentions — **opt-out**: explicit `false` hides the feed UI and rejects new comments |
@@ -214,6 +214,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export default ObjectSchema.create({
   name: 'account',
   label: 'Account',
+  sharingModel: 'private',
 
   fieldGroups: [
     { key: 'contact_info', label: 'Contact Information', icon: 'user' },
@@ -253,6 +254,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Invoice = ObjectSchema.create({
   name: 'invoice',
+  sharingModel: 'private',
   fields: {
     status: Field.select({
       options: [
@@ -321,6 +323,7 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export default ObjectSchema.create({
   name: 'support_case',
   label: 'Support Case',
+  sharingModel: 'private',
   enable: {
     trackHistory: true,
     feeds: true,
@@ -892,7 +895,7 @@ export const SysUserObject = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Core identity object — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { /* ... */ },
 });
@@ -910,7 +913,7 @@ export const SysRoleObject = ObjectSchema.create({
   protection: {
     lock: 'no-overlay',
     reason: 'RBAC schema is platform-defined — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { /* ... */ },
 });
@@ -931,7 +934,7 @@ export const SetupApp = defineApp({
   protection: {
     lock: 'full',
     reason: 'Core admin UI shipped by @objectstack/platform-objects — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   // ...
 });

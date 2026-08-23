@@ -119,6 +119,65 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DRIVERS_DIR = join(ROOT, 'packages', 'drivers');
 const CASE_SETS_DIR = join(ROOT, 'packages', 'spec', 'src', 'data');
 
+/**
+ * The half of this gate's two scan roots that `scripts/pm/dispatch-gates.mjs`
+ * cannot see, written in the syntax that derivation CAN read. Provenance ONLY:
+ * nothing in this gate reads this array, and both walks behave exactly as they
+ * did without it.
+ *
+ * ## The defect this repairs (#10840's worklist, the #10114 / #10314 idiom)
+ *
+ * The dispatch derivation scans a gate's module body for the path literals it
+ * operates on, and "looks like a path" there means "carries a separator". Both
+ * roots above are assembled by `join()` from separate single-segment arguments,
+ * so the only literals this file offers the extractor are the bare words
+ * `packages`, `drivers`, `spec`, `src` and `data` — every one of which
+ * `extractWatchHints` drops BEFORE `hintCovers` is ever consulted. They are not
+ * dead hints; they are nothing at all, which is why no residue line ever named
+ * them. Measured on this tree, a derivation for
+ * `packages/drivers/postgres/src/index.ts` named six gates and this was not one
+ * of them — a driver card, and the driver-conformance matrix is invisible to it.
+ *
+ * ## Why `packages/drivers/**` and NOT `packages/**`
+ *
+ * `hintCovers` refuses a bare single-segment literal as too generic BY DESIGN,
+ * and the refusal is measured: accepting bare top-level directory words was
+ * priced at +139084 fabricated (gate, file) pairs, precisely because `packages`
+ * is a path COMPONENT in dozens of gates that never read that root — this gate
+ * among them. The literal `'packages'` here is such a component and nothing
+ * more. Declaring the top-level root would be the fabrication one level up:
+ *
+ *   packages/**            259 files this gate reads, of 4903 tracked — 5.3%,
+ *                          pasted into every packages/** prompt in the repo.
+ *   packages/drivers/**    259 of 291 — 89%, over a subtree 17x smaller.
+ *
+ * The remaining 32 files under `packages/drivers/` are the per-package
+ * manifests, licences and changelogs; adding or removing a driver package moves
+ * `discoverDrivers` through exactly those, so 89% is a floor rather than an
+ * estimate.
+ *
+ * ## Why CASE_SETS_DIR is deliberately NOT declared
+ *
+ * The instrument can only express a SUBTREE — `collapseHint` strips globs, so
+ * `packages/spec/src/data/*-conformance.ts` collapses to a path that names
+ * nothing, and the only spellable claim is the whole directory. That directory
+ * holds 143 tracked files of which this gate reads 7 (4.9%): a subtree
+ * declaration there would name this gate for every Zod schema and unit test
+ * beside the case sets. A missing lead costs one card one CI round; a
+ * fabricated one is pasted into every prompt whose surface brushes it. So the
+ * case-set side stays undeclared, and the refusal is pinned in the self-test
+ * rather than left in this paragraph.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * `assertRootsResolvable([DRIVERS_DIR, CASE_SETS_DIR])` stats both roots and
+ * throws DeadRootError when one is missing, so the glob form appearing in either
+ * constant would turn this gate red on a directory that never existed. The
+ * self-test pins that apart, and derives both halves of the coupling from
+ * DRIVERS_DIR rather than re-spelling it.
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/drivers/**'];
+
 // ── The case-sets ───────────────────────────────────────────────────────────
 //
 // `marker` is the export a suite cannot run the case-set without naming, so its
@@ -1074,6 +1133,39 @@ function selfTest() {
     }
   }
 
+  // -- The dispatch-gates declaration (#10840) --------------------------------
+  //
+  // Enforcement cannot hold any of these: the declaration is read by another
+  // tool entirely, so a wrong or stale one runs green here forever and pays
+  // itself out as a dev dispatched on a driver card with this gate missing from
+  // the brief. Both halves are DERIVED from DRIVERS_DIR rather than re-spelled,
+  // so moving the driver tree cannot leave the declaration describing the old
+  // location -- the failure mode a hand-kept copy has.
+  const driversRel = DRIVERS_DIR.slice(ROOT.length + 1);
+  expect('the declaration names the driver subtree this gate actually walks, derived from '
+    + 'DRIVERS_DIR rather than re-spelled beside it',
+    ROOT_DIR_WATCH_HINTS.includes(`${driversRel}/**`));
+  expect('and declares nothing else (a declaration that can drift from the scan is worse than '
+    + 'none -- it replaces a silent gate with a lying one)',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.replace(/\/\*+$/, '') === driversRel));
+  // The non-vacuity half, and the reason this file needs a declaration at all:
+  // every literal it offers the extractor is a bare `join()` argument, so the
+  // real population reaches the derivation as nothing whatever.
+  expect('the population really is unseeable as spelled -- DRIVERS_DIR is built from bare '
+    + 'single-segment join() arguments, none of which the extractor keeps',
+    driversRel.includes('/') && !ROOT_DIR_WATCH_HINTS.includes(driversRel));
+  // The REFUSALS, pinned. Neither is an oversight to be tidied up later.
+  expect('the bare top-level root is deliberately NOT declared -- `packages` is a path COMPONENT '
+    + 'here, and a subtree hint on it would name this gate for 4903 files to reach 259',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h.replace(/\/\*+$/, '') === 'packages'));
+  expect('CASE_SETS_DIR is deliberately NOT declared -- its population is a FILENAME pattern '
+    + '(*-conformance.ts, 7 of 143 files) and a subtree hint cannot express one',
+    !ROOT_DIR_WATCH_HINTS.some((h) => CASE_SETS_DIR.slice(ROOT.length + 1).startsWith(h.replace(/\/\*+$/, ''))));
+  // Provenance, never a lookup key: assertRootsResolvable stats both roots, so
+  // the glob form appearing in either constant is a hard red on a dead root.
+  expect('the declared form is NOT a scan-root value',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h === driversRel || h === DRIVERS_DIR));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-driver-conformance --self-test: ${failures.length} failure(s).\n`);
@@ -1083,7 +1175,8 @@ function selfTest() {
     'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, accounts for '
       + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), '
       + 'holds the dead-root hard error (red when a scan root is renamed, green when restored), and '
-      + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435).',
+      + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435). It also declares the driver '
+      + 'subtree dispatch-gates derives from, refusing the bare root and the case-set dir by name.',
   );
 }
 

@@ -71,6 +71,7 @@ import {
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
 import { summarizeTree, describeEntry } from './created-summary.js';
+import { renderVersionBanner } from './banner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -398,9 +399,7 @@ const program = new Command()
     options: { template: string; skipInstall?: boolean; skipSkills?: boolean },
   ) => {
     console.log('');
-    console.log(chalk.bold.cyan('  ╔═══════════════════════════════════╗'));
-    console.log(chalk.bold.cyan('  ║') + chalk.bold('   ◆ Create ObjectStack ') + chalk.dim('v6.x') + chalk.bold.cyan('       ║'));
-    console.log(chalk.bold.cyan('  ╚═══════════════════════════════════╝'));
+    for (const line of renderVersionBanner(readCliVersion())) console.log(line);
 
     printHeader('New Environment');
 
@@ -428,6 +427,17 @@ const program = new Command()
     const namespace = sanitizeNamespace(projectName);
     const targetDir = name ? path.resolve(cwd, name) : cwd;
     const isCurrentDir = targetDir === cwd;
+
+    // Detected once, up front, and reused for every command this run prints or
+    // runs — the install line, the failure remedy and the closing "Next
+    // steps" all name the SAME package manager. Detecting it here (rather than
+    // only inside the install branch) means `--skip-install` still gets an
+    // accurate "Next steps" instead of a guess: the probe is a read-only
+    // `<pm> --version` check, so running it costs nothing even when there is
+    // no install to drive. Previously "Next steps" hardcoded `npm` regardless
+    // of which package manager actually ran (#10322) — a newcomer who just
+    // watched `pnpm install` run was then told `npm run dev`.
+    const pm = detectPackageManager();
 
     printKV('Environment', projectName);
     printKV('Namespace', namespace);
@@ -469,12 +479,11 @@ const program = new Command()
         printStep('Installing dependencies...');
         let installed = false;
         try {
-          const pm = detectPackageManager();
           execSync(`${pm} install`, { stdio: 'inherit', cwd: targetDir });
           installed = true;
           console.log('');
         } catch {
-          printWarning('Dependency installation failed. Run `npm install` manually.');
+          printWarning(`Dependency installation failed. Run \`${pm} install\` manually.`);
           console.log('');
         }
 
@@ -539,11 +548,18 @@ const program = new Command()
         console.log(chalk.dim(`    cd ${name}`));
       }
       if (options.skipInstall) {
-        console.log(chalk.dim('    npm install'));
+        console.log(chalk.dim(`    ${pm} install`));
       }
-      console.log(chalk.dim('    npm run dev           # Start development server'));
-      console.log(chalk.dim('    npm run validate      # Verify metadata: schema + predicates + bindings'));
-      console.log(chalk.dim('                          # (run after every metadata edit — see AGENTS.md)'));
+      // Same `${pm} run …` shape for both commands, padded to the longer of
+      // the two labels so the trailing comments still line up — for either
+      // package manager name, not just the `npm`-length one the literal
+      // strings above were hand-kerned for.
+      const devLabel = `${pm} run dev`;
+      const validateLabel = `${pm} run validate`;
+      const labelWidth = Math.max(devLabel.length, validateLabel.length) + 3;
+      console.log(chalk.dim(`    ${devLabel.padEnd(labelWidth)}# Start development server`));
+      console.log(chalk.dim(`    ${validateLabel.padEnd(labelWidth)}# Verify metadata: schema + predicates + bindings`));
+      console.log(chalk.dim(`    ${' '.repeat(labelWidth)}# (run after every metadata edit — see AGENTS.md)`));
       if (options.skipInstall || options.skipSkills) {
         console.log('');
         console.log(chalk.bold('  AI Skills (recommended):'));

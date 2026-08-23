@@ -42,7 +42,13 @@
  *
  * The fix is to resolve from the host app's root and import the resolved
  * absolute path. The importing package's own resolution stays as the fallback,
- * for the framework-owned packages it depends on and the host does not declare.
+ * for the framework-owned packages it depends on and the host does not declare
+ * — and since #10943 that fallback is the base the CALLER hands in
+ * ({@link HostImporterOptions.fallbackImport}), because a fallback written here
+ * resolved from `@objectstack/types` and could only ever see
+ * `@objectstack/spec`. Same defect class as the paragraph above, one level up:
+ * a bare import resolves against the module that CONTAINS it, and this module
+ * is not the one doing the asking.
  *
  * Resolution failure is the ONLY thing that falls back. A package the host
  * resolves but that throws while it evaluates is a genuine crash and propagates
@@ -110,6 +116,35 @@ import { isModuleNotFoundError } from './module-not-found.js';
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HostImporter = (pkg: string) => Promise<any>;
+
+/**
+ * The importing package's OWN dynamic import — write it literally, in the
+ * calling module:
+ *
+ *     createHostImporter(hostRoot, { fallbackImport: (s) => import(s) })
+ *
+ * `any` for the same reason {@link HostImporter} uses it: the module namespace
+ * belongs to a package this repo does not compile against.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type FallbackImport = (specifier: string) => Promise<any>;
+
+/** Options for {@link createHostImporter}. */
+export interface HostImporterOptions {
+  /**
+   * The resolution base for everything the host app does NOT declare — supplied
+   * as the caller's own `import()` rather than as a URL string, because a
+   * string base was MEASURED to be unimplementable without a regression. See
+   * {@link createHostImporter}'s "why a function" note for both measurements.
+   *
+   * Omitted ⇒ the fallback resolves from `@objectstack/types`, which sees only
+   * `@objectstack/types`'s own dependencies. That default is retained so an
+   * out-of-tree caller cannot be broken by this parameter's arrival, and the
+   * `undeclared` failure text names it explicitly so the gap reports itself
+   * instead of being rediscovered.
+   */
+  fallbackImport?: FallbackImport;
+}
 
 /**
  * A `require` anchored at the **host app's** `package.json` — i.e. the project
@@ -292,9 +327,27 @@ function hostImportError(
   });
 }
 
-function undeclaredMessage(declaration: HostDeclaration, cause: unknown): string {
+/**
+ * @param callerBaseSupplied Did the caller state its own resolution base
+ * ({@link HostImporterOptions.fallbackImport})? When it did not, the fallback
+ * ran from `@objectstack/types`, which sees only `@objectstack/spec` — so the
+ * absence being reported may be an artefact of the missing base rather than a
+ * real one. #10943 kept that default for out-of-tree callers; saying so here is
+ * what stops it being silent, because the alternative is a reader re-deriving
+ * the whole measurement from a `MODULE_NOT_FOUND` that names nothing.
+ */
+function undeclaredMessage(
+  declaration: HostDeclaration,
+  cause: unknown,
+  callerBaseSupplied: boolean,
+): string {
   const { packageName, hostRoot, manifestMissing } = declaration;
   const detail = cause instanceof Error ? cause.message : String(cause);
+  const baseNote = callerBaseSupplied
+    ? ''
+    : '\n  (the caller did not pass `fallbackImport`, so that fallback resolved from\n' +
+      "  @objectstack/types, which can see only its own dependencies — a caller that\n" +
+      '  needs its own resolution passes `{ fallbackImport: (s) => import(s) }`, #10943)';
   return (
     `Cannot find package '${packageName}': the host app does not declare it.\n` +
     `  host app: ${hostRoot}\n` +
@@ -308,7 +361,7 @@ function undeclaredMessage(declaration: HostDeclaration, cause: unknown): string
     "  at in every pnpm bin shim — used to resolve here regardless of the app's\n" +
     '  package.json, so the same app booted or refused depending on how the\n' +
     '  process was launched. The declaration is the contract.\n' +
-    `  (fallback resolution also failed: ${detail})`
+    `  (fallback resolution also failed: ${detail})${baseNote}`
   );
 }
 
@@ -342,25 +395,86 @@ function unresolvableMessage(declaration: HostDeclaration, cause: unknown): stri
  *    the install is broken. It is not retried bare: falling back there would
  *    reintroduce exactly the "some other package happens to supply it" accident
  *    this gate closes, and would report an install problem as an absence.
- * 3. Undeclared falls back to the importing package's own resolution, which is
- *    what keeps every framework-owned load working (`serve`'s plugin-auth /
- *    service-i18n path, `bootStack`'s service plugins). Bare `import()` is ESM,
- *    and ESM does not honour `NODE_PATH`, so the fallback cannot re-open the
- *    hole either. Only when that fails as module-not-found does the undeclared
- *    error surface; a package that RESOLVES and then throws while evaluating is
- *    a genuine crash and propagates untouched, as before.
+ * 3. Undeclared falls back to the CALLER's own resolution, which is what keeps
+ *    every framework-owned load working (`serve`'s plugin-auth / service-i18n
+ *    path, `bootStack`'s service plugins). Bare `import()` is ESM, and ESM does
+ *    not honour `NODE_PATH`, so the fallback cannot re-open the hole either.
+ *    Only when that fails as module-not-found does the undeclared error
+ *    surface; a package that RESOLVES and then throws while evaluating is a
+ *    genuine crash and propagates untouched, as before.
+ *
+ * ── The caller supplies that base, and why it is a FUNCTION (#10943) ─────────
+ *
+ * Step 3 said "the importing package's own resolution" long before anything
+ * made it true. The fallback was a bare `import()` written HERE, and ESM
+ * resolves a bare specifier against the module containing the call — so it
+ * resolved from `@objectstack/types`, which under a pnpm-isolated layout can
+ * see only `@objectstack/types`'s own dependencies. Measured on `main` from an
+ * app declaring nothing, `@objectstack/plugin-auth`, `@objectstack/plugin-audit`
+ * and `chalk` all resolve from `packages/cli` and all failed through this
+ * helper; `@objectstack/spec` — the one dependency this package declares — was
+ * the only name that came back OK, which is the whole pattern. Under a hoisted
+ * npm/yarn layout the same fallback usually DOES find the caller's
+ * dependencies, so the claim was green in some installs and absent in others:
+ * the layout-dependence class cloud#1013 and #10645 exist to close, one level
+ * up. A declared contract the implementation does not keep is the thing this
+ * repo fixes at the producer (Prime Directive #12), so the mechanism moved
+ * rather than the sentence.
+ *
+ * The base arrives as the caller's own `import()` and NOT as a `parentURL` /
+ * `import.meta.url` string. Both string spellings were measured on Node
+ * v22.22.2 and both are wrong:
+ *
+ *   - `import.meta.resolve(specifier, parentURL)` — the parent argument is
+ *     SILENTLY IGNORED without `--experimental-import-meta-resolve`. Measured:
+ *     resolving `@objectstack/plugin-auth` against a `packages/types` parent
+ *     returned `packages/cli/node_modules/...`, i.e. the caller's own answer,
+ *     byte-identical to passing no parent at all. It would have compiled, run,
+ *     and pinned green while ignoring the base — a phantom fix of exactly the
+ *     kind this card is about.
+ *   - `createRequire(parentURL).resolve(specifier)` — CJS resolution, which
+ *     honours `NODE_PATH`. Measured against a store reachable only through
+ *     `NODE_PATH`: the CJS resolve found it (with and without the `paths`
+ *     option, since GLOBAL_FOLDERS are always appended) while the ESM bare
+ *     `import()` did not. That is #4719's hole re-opened on the fallback path,
+ *     and it would have falsified the "ESM does not honour NODE_PATH" sentence
+ *     three lines above.
+ *
+ * A function written in the calling module is the only spelling that uses
+ * Node's real ESM resolver anchored where the caller actually lives: no flag,
+ * no `NODE_PATH`, no second resolution algorithm to drift from the first.
  *
  * @param hostRoot Directory holding the host app's `package.json` (default: the
  * process CWD, which is where the CLI reads `objectstack.config.ts` from too).
  * Note this used to take a pre-built `NodeRequire`; it needs the ROOT now,
  * because a `NodeRequire` cannot be asked where it was anchored and the manifest
  * has to be read from there.
+ * @param options {@link HostImporterOptions.fallbackImport} carries the caller's
+ * resolution base. Omitting it keeps the pre-#10943 behaviour (this package's
+ * own resolution) so no out-of-tree caller changes under its feet.
  */
-export function createHostImporter(hostRoot: string = process.cwd()): HostImporter {
+export function createHostImporter(
+  hostRoot: string = process.cwd(),
+  options: HostImporterOptions = {},
+): HostImporter {
   const hostRequire = createHostRequire(hostRoot);
+  const { fallbackImport } = options;
+  const importAsCaller: FallbackImport =
+    fallbackImport ?? ((specifier) => import(/* webpackIgnore: true */ specifier));
   return async (pkg: string): Promise<any> => {
     // Not a bare package name (a path, a URL, a `node:` builtin) — nothing a
     // manifest could declare. Hand it to the normal resolver untouched.
+    //
+    // ⚠️ Deliberately NOT re-based onto `fallbackImport` (#10943). Every
+    // base-INDEPENDENT spelling here — `file://`, `node:`, `data:`, an absolute
+    // path — means the same module whoever imports it, so the base is not a
+    // question they can even ask. The one spelling it WOULD move is a RELATIVE
+    // one, and where that should resolve from is an open policy question owned
+    // by #10944 (`serve` refuses a relative `plugins: [...]` entry rather than
+    // silently re-basing it) — with a measured consumer count of zero here:
+    // `serve` handles non-package specifiers before this helper is reached, and
+    // `bootStack` / the dogfood probe pass package names only. Answering half
+    // of another card's undecided question, for nobody, is not a repair.
     if (packageNameFromSpecifier(pkg) === undefined) {
       return import(/* webpackIgnore: true */ pkg);
     }
@@ -382,11 +496,15 @@ export function createHostImporter(hostRoot: string = process.cwd()): HostImport
     }
 
     try {
-      return await import(/* webpackIgnore: true */ pkg);
+      return await importAsCaller(pkg);
     } catch (cause) {
       // A package that resolved and then exploded is a crash, not an absence.
       if (!isModuleNotFoundError(cause)) throw cause;
-      throw hostImportError('undeclared', undeclaredMessage(declaration, cause), cause);
+      throw hostImportError(
+        'undeclared',
+        undeclaredMessage(declaration, cause, fallbackImport !== undefined),
+        cause,
+      );
     }
   };
 }

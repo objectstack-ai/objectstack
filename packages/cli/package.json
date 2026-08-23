@@ -95,6 +95,7 @@
     "bundle-require": "^5.1.0",
     "chalk": "^6.0.0",
     "chokidar": "^5.0.0",
+    "create-objectstack": "workspace:*",
     "dotenv-flow": "^4.1.0",
     "esbuild": "^0.28.2",
     "ts-morph": "^28.0.0",

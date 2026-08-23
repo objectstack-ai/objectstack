@@ -1,11 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * In-memory job scheduler fallback.
+ * In-memory job registry — schedule/cancel/trigger bookkeeping with NO timer.
  *
- * Implements the IJobService contract with basic schedule/cancel/trigger
- * operations.  Used by ObjectKernel as an automatic fallback when no real
- * job plugin (e.g. Agenda / BullMQ) is registered.
+ * [#10746] NOT pre-injected by ObjectKernel any more (it used to be, via
+ * `CORE_FALLBACK_FACTORIES`): a fallback must not fake capability (maintainer
+ * ruling 2026-08-22). Advertising a `schedule()` that records and never fires
+ * made every "prefer the platform job service, else own a timer" consumer
+ * take the job-service branch and then silently never run. The export remains
+ * for embedders who deliberately want a manual-trigger job registry — e.g. in
+ * tests that drive handlers via `trigger()` — and have read this docblock.
  *
  * [#4058] `degraded` (ADR-0076 D12), with the missing half named in the
  * message rather than left for a deployer to discover: `trigger()` really runs

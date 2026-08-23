@@ -121,6 +121,7 @@ export type {
     HttpAckFailure,
     UndeliverableHttpInput,
     RedeliverGuard,
+    RedeliverOptions,
 } from './http-outbox.js';
 export {
     HttpRedeliverError,

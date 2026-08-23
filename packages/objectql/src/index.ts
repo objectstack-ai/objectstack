@@ -123,6 +123,9 @@ export {
   scalarUpdateId,
   ENGINE_UPDATE_REJECT_MESSAGE,
   ENGINE_UPDATE_DISPATCH_CASES,
+  // [#11009] Shared by both write dispatches — see the shim's note.
+  engineByIdUnhonouredPredicateMessage,
+  unhonouredByIdPredicateKeys,
 } from './engine-update-dispatch.js';
 export type {
   EngineUpdateDispatch,

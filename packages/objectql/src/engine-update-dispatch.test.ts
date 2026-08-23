@@ -24,6 +24,8 @@ import {
   resolveEngineUpdateDispatch,
   assertEngineUpdateDispatch,
   scalarUpdateId,
+  engineByIdUnhonouredPredicateMessage,
+  unhonouredByIdPredicateKeys,
 } from './engine-update-dispatch.js';
 
 /** Records which driver entry point the engine chose, if any. */
@@ -85,12 +87,28 @@ async function makeEngine() {
 async function observeEngine(
   data: unknown,
   options: unknown,
-): Promise<{ kind: 'by-id' | 'multi' | 'reject'; boundId?: unknown }> {
+): Promise<{ kind: 'by-id' | 'multi' | 'reject'; boundId?: unknown; message?: string }> {
   const { engine, calls } = await makeEngine();
+  // [#11009] `reject` no longer has ONE spelling: the unhonoured-predicate
+  // refusal composes its message from the dropped keys. A throw counts as the
+  // engine's `reject` verdict only when it is byte-identical to what the
+  // PREDICATE says this exact call refuses with — anything else (validation,
+  // not-found, a driver error) still rethrows, so no unrelated failure can
+  // impersonate a dispatch refusal.
+  const predicted = resolveEngineUpdateDispatch(
+    data as Parameters<typeof resolveEngineUpdateDispatch>[0],
+    options as Parameters<typeof resolveEngineUpdateDispatch>[1],
+  );
   try {
     await engine.update('task', data as any, options as any);
   } catch (e) {
-    if ((e as Error).message === ENGINE_UPDATE_REJECT_MESSAGE) return { kind: 'reject' };
+    const message = (e as Error).message;
+    if (
+      message === ENGINE_UPDATE_REJECT_MESSAGE ||
+      (predicted.kind === 'reject' && message === predicted.message)
+    ) {
+      return { kind: 'reject', message };
+    }
     throw e;
   }
   if (calls.length !== 1) {
@@ -121,6 +139,13 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
       expect(predicted.kind, 'predicate').toBe(c.expect);
       const observed = await observeEngine(c.data, c.options);
       expect(observed.kind, 'real ObjectQL.update').toBe(c.expect);
+      if (c.expect === 'reject') {
+        // Both halves must refuse with the SAME words — the refusal text is
+        // part of the contract a pinned double reproduces (#11009).
+        expect(observed.message, 'real engine reject message').toBe(
+          (predicted as { message?: string }).message,
+        );
+      }
       if ('expectId' in c) {
         // Both halves must bind the SAME id, and it must be the declared one —
         // see `EngineUpdateDispatchCase.expectId` for why the verdict alone is
@@ -233,13 +258,57 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
     // The asymmetry #5748 removed, stated as the property that replaced it.
     // `where` carries a second key so the `where`-side call is never the
     // "empty where" reject for an unrelated reason.
+    //
+    // [#11009] The property survives with ONE carve-out, pinned separately
+    // below: a truthy scalar id beside a `multi: true` and an extra `where`
+    // key. There the two doors legitimately diverge — the `where`-sourced id
+    // yields to the declared bulk intent (predicate path), while the payload
+    // id outranks `multi` (#5748's own ruling) and the unhonourable predicate
+    // is refused. Every OTHER (value × rest) pair still verdicts alike, and
+    // the shared refusal message is deliberately source-blind so even the
+    // rejects agree word for word.
     for (const value of [{ $in: ['a', 'b'] }, { $ne: 'a' }, ['a', 'b'], null, 'rec_1', 42, 0, '']) {
-      for (const rest of [{}, { multi: true }]) {
+      for (const rest of [{}, { multi: true }] as Array<Record<string, unknown>>) {
+        const isDivergentPair =
+          rest.multi === true && (typeof value === 'string' || typeof value === 'number') && Boolean(value);
+        if (isDivergentPair) continue;
         const viaPayload = resolveEngineUpdateDispatch({ id: value, title: 'x' }, { where: { tenant: 't1' }, ...rest });
         const viaWhere = resolveEngineUpdateDispatch({ title: 'x' }, { where: { tenant: 't1', id: value }, ...rest });
         expect(viaPayload, `${JSON.stringify({ value, rest })}`).toEqual(viaWhere);
       }
     }
+  });
+
+  // ── [#11009] The carve-out from the symmetry loop above, stated positively.
+  it('truthy scalar id + extra where key + multi:true — where.id takes the predicate path, data.id refuses', () => {
+    // The `where` door: the caller declared a bulk/predicate intent and the id
+    // is PART of the predicate — every key (id included) rides the AST.
+    expect(resolveEngineUpdateDispatch({ title: 'x' }, { where: { tenant: 't1', id: 'rec_1' }, multi: true }))
+      .toEqual({ kind: 'multi' });
+    // The payload door: `data.id` outranks `multi` (#5748), so the call is a
+    // single-row write whose extra predicate CANNOT be honoured — refused
+    // loudly, never silently dropped (pre-#11009) or silently bulk-promoted.
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { tenant: 't1' }, multi: true }))
+      .toEqual({ kind: 'reject', message: engineByIdUnhonouredPredicateMessage('Update', ['tenant']) });
+  });
+
+  // ── [#11009] The refusal itself, quoted and bounded.
+  it('a by-id update carrying where keys beyond id is refused with the shared message', async () => {
+    const message = engineByIdUnhonouredPredicateMessage('Update', ['status']);
+    expect(resolveEngineUpdateDispatch({ title: 'x' }, { where: { id: 'p1', status: { $in: ['done'] } } }))
+      .toEqual({ kind: 'reject', message });
+    expect(() => assertEngineUpdateDispatch({ title: 'x' }, { where: { id: 'p1', status: { $in: ['done'] } } }))
+      .toThrow(message);
+    // …and nothing reached the driver: a refused compare-and-set writes NOTHING,
+    // which is the entire point — the old behaviour wrote unconditionally.
+    expect(await observeDriverCalls({ title: 'x' }, { where: { id: 'p1', status: { $in: ['done'] } } })).toEqual([]);
+    // A `null`-valued extra key is a REAL predicate (`IS NULL`), not a
+    // withdrawal — it refuses too.
+    expect(resolveEngineUpdateDispatch({ title: 'x' }, { where: { id: 'p1', error: null } }).kind).toBe('reject');
+    // The keys helper reports exactly the droppable keys, `id` excluded.
+    expect(unhonouredByIdPredicateKeys({ id: 'p1', status: 'done', error: null })).toEqual(['status', 'error']);
+    expect(unhonouredByIdPredicateKeys({ id: 'p1' })).toEqual([]);
+    expect(unhonouredByIdPredicateKeys(undefined)).toEqual([]);
   });
 
   it('branches on TRUTHINESS, so a falsy scalar id does not identify a row', () => {

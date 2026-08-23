@@ -21,19 +21,17 @@
     "           metadata-protocol, plugin-approvals/lifecycle-hooks, both plugin-audit sinks,",
     "           both plugin-auth sinks, plugin-email/attachment-reclaim, plugin-reports,",
     "           plugin-sharing, plugin-webhooks and service-knowledge.",
-    "  = 3    — what is left, and NONE of the three is left for lack of effort:",
-    "           one is a serialisation leftover whose reason has expired (approval-service.ts),",
-    "           and two are DESIGN calls escalated to the maintainer rather than answered by a",
-    "           dev to make this checker green (security-plugin.ts, settings-service.types.ts)."
+    "  = 3    — what was left after #10556's first PR, and NONE of the three was left for lack",
+    "           of effort: one was a serialisation leftover whose reason had expired",
+    "           (approval-service.ts), and two are DESIGN calls escalated to the maintainer",
+    "           rather than answered by a dev to make this checker green (security-plugin.ts,",
+    "           settings-service.types.ts).",
+    "  -1     — #10556's follow-up dispatch repaired the serialisation leftover once its",
+    "           fence (PR #10547/#10739) cleared: `logger@ApprovalServiceOptions` dropped the",
+    "           `?` from `warn`, mechanically identical to the twelve already paid down.",
+    "  = 2    — both remaining rows are the escalated DESIGN calls; neither is a `?` deletion."
   ],
   "entries": [
-    {
-      "file": "packages/plugins/plugin-approvals/src/approval-service.ts",
-      "sink": "logger@ApprovalServiceOptions",
-      "verdict": "optional-fallback",
-      "members": "{ info? warn? error? debug? }",
-      "note": "Approval-service options bag. Mechanically identical to the twelve repaired in #10556 — drop the `?` from `warn`. Held out of that PR to serialize against PR #10546, which owned this file while it was open. #10546 has since MERGED (2026-08-21), so the reason this row is still here has expired: it is a one-line repair awaiting a dispatch, not a design call and not an exemption."
-    },
     {
       "file": "packages/plugins/plugin-security/src/security-plugin.ts",
       "sink": "logger@SecurityPlugin",

@@ -112,11 +112,24 @@
  *       the remainder) never landed (#8683). Delivery is read from merged PR
  *       bodies with H7's code-stripped extractors (`Part of #N`, or a closing
  *       keyword bound to `#N` — either way an OPEN dispatched card named by a
- *       merged PR is a half-state, whichever mechanism failed). Live mode
+ *       merged PR is a half-state, whichever mechanism failed), and — for the
+ *       bodies that declare NO delivery at all — from the PR's own branch name
+ *       (#11036: a merged PR whose body said only `Refs #10757` left its card
+ *       dispatched and unreported for ~22h in a sweep that got six other H8
+ *       rows right). The precedence is deliberate and the widening's whole
+ *       safety margin; `prDeliversCard` carries the argument. Live mode
  *       feeds H8 a bounded window of recently merged PRs, so it is a patrol
  *       accelerator, never an exhaustive audit: a delivery older than the
  *       window is invisible, and the finding clears when the paired write
  *       lands, not when the PR ages out.
+ *       H8 is ALSO handed the open-PR list the sweep already holds (#10468):
+ *       a card delivered in halves keeps `pm:dispatched` legitimately while
+ *       its last half is open, and the row used to fire on every sweep until
+ *       that half landed — prescribing a DESTRUCTIVE de-labelling against the
+ *       most active card on the board. That case now emits a distinct quieter
+ *       sentence that names both sides and says the label is correct, rather
+ *       than falling silent: silence would lose the genuine #8683 case where
+ *       the last half is later ABANDONED. See the predicate.
  *   H9  `pm:on-hold` without a machine-fireable `Restart-when:` line in
  *       EITHER channel — the state model (post 2026-08-16 ruling) makes the
  *       hold state legal
@@ -355,6 +368,72 @@
  *       readings rather than diagnosing one. Report-only like everything here:
  *       the remedy is a dispatch or a withdrawn claim, never a label written
  *       from this script.
+ *   H21 an OPEN PULL REQUEST whose body binds a closing keyword to a `#N` the
+ *       body never declared itself `Part of`, inside a SENTENCE that reads as
+ *       not closing it ("Filed, not fixed: #10240", "out of scope: closes
+ *       #N"). H7's own rationale covers this whole class while H7's predicate
+ *       covers one spelling of it — H7 is bound to a `Part of #N` declaration
+ *       and a body that declares `Part of` for nothing is silent by
+ *       construction, however plainly it says the card stays open. Measured
+ *       specimen (#10392): PR #10241 carried no `Part of` and the sentence
+ *       "Filed, not fixed: #10240"; #10240 closed `completed` two seconds
+ *       after that merge and read as finished until a human reopened it a day
+ *       later. ⛔ The trigger is the NEGATION WINDOW and never keyword
+ *       presence: 277 of the 300 most recently merged bodies carry a closing
+ *       keyword bound to a number (301 matches), so a presence rule would
+ *       report every correct PR in the corpus. The negation is the author's
+ *       own statement of intent contradicting the instruction beside it, which
+ *       is what makes accident separable from intent at all. The window is a
+ *       SENTENCE, measured: widening it to the whole body turns 0 false
+ *       positives into 13, all of them one legitimate fourteen-card close
+ *       (#10714). Disjoint from H7 by construction — a number already declared
+ *       `Part of` is H7's row and is skipped here. Report-only, and
+ *       deliberately not imported by the blocking gate that reuses H7's
+ *       predicate: widening the class must not silently widen a check that
+ *       fails builds.
+ *   H22 a CLOSED card still carrying a `pm:*` STATE label — the one item here
+ *       that reads closed issues, and the reason it has to (#10688). H8's
+ *       subject is a write that has not happened yet, but the card is usually
+ *       closed by the same merge that discharges the PR, so whether H8 ever
+ *       fired was decided by a race it normally loses: once the card closes,
+ *       no run looks at it again and the duty is discharged by disappearance.
+ *       Measured at filing: 129 of the 500 most recently updated closed cards
+ *       carried a live `pm:` label, 118 of them `pm:dispatched`. Direction A of
+ *       that card — ONE bounded closed reader, every other collector still
+ *       open-only, so the race closes without widening the sweep. The window is
+ *       the stated boundary and it is load-bearing here: a 2026-08-22 re-measure
+ *       paged past 500 closed `pm:dispatched` carriers repo-wide, so an
+ *       unbounded read would bury every other item under one-time historical
+ *       residue. Recent residue is a live duty; the deep tail is a backfill
+ *       question. Report-only like the rest — the remedy is a label write a
+ *       seat performs, never one this script performs.
+ *   H23 a SQUASH COMMIT MESSAGE on the default branch carrying `Part of #N`
+ *       and a closing keyword bound to that same `#N` — H7's contradiction on
+ *       the SECOND surface GitHub closes cards from, and the only item here
+ *       that reads commits (#10942). Every closing-keyword reader this repo
+ *       owns takes a PR body: H7 and H21 above, and the blocking gate
+ *       `scripts/check-partof-closing-keyword.mjs`. GitHub's parser also acts
+ *       on commit messages that land on the default branch, and this repo
+ *       squash-merges, so every merged PR writes exactly one such message that
+ *       nothing read. ⭐ The message is COMPOSED AT MERGE TIME from the
+ *       branch's own commit messages, not from the PR body — so the
+ *       contradiction can exist on `main` while every body was clean, and a
+ *       body-side guard is not merely looking in the wrong place, it is
+ *       looking at a text that never contained it (measured on PR #9478: body
+ *       clean under H7 and under the gate, squash message carrying both).
+ *       Measured 2026-08-22 over all 1,546 first-parent messages in the pinned
+ *       window 2026-08-11T00:00Z…08-22T18:00Z: 270 bindings across 234
+ *       messages, 6 carrying the contradiction, all 6 multi-commit branches
+ *       whose squash concatenated a `Part of` trailer and a closing trailer.
+ *       ⛔ The extractors run at `markdown: false` here and MUST: a commit
+ *       message is not markdown, so backticks do not neutralise a keyword, and
+ *       the finding sentence therefore prescribes REWORDING and never H7's
+ *       backtick remedy — an author who has internalised the body remedy is
+ *       exactly who will misapply it here. H21's negation window is
+ *       deliberately NOT ported: it flags 0 of the 270 on this surface, because commit messages carry no
+ *       `## Out of scope` register. Report-only and measure-first by ruling
+ *       (2026-08-22); a blocking posture for this surface is a later card on
+ *       its own baseline.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -1068,15 +1147,42 @@ export function stripMarkdownCode(body, { inline = true } = {}) {
   return out.join('\n');
 }
 
+/**
+ * ## The `{ markdown: false }` half — the SURFACE the text came from (H23)
+ *
+ * Both extractors below take one option, and it selects a *surface* rather than
+ * a strictness. `markdown: true` (the default, and every pre-existing caller)
+ * means the text is a PR or issue BODY, where GitHub renders markdown before its
+ * reference parser runs and a keyword inside a code span or fence therefore does
+ * NOT fire — measured, twice, in `stripMarkdownCode`'s docblock.
+ *
+ * `markdown: false` means the text is a COMMIT MESSAGE. GitHub's closing-keyword
+ * parser reads commit messages on the default branch too, and a commit message
+ * is not markdown: there is no renderer in front of it, so backticks and fences
+ * are ordinary characters and a keyword sitting inside them binds exactly like
+ * one in plain prose. Stripping there would delete real bindings and hand the
+ * author a remedy that does not work — H23's whole point, argued at length in
+ * its section.
+ *
+ * ⛔ The asymmetry is not a tuning knob and must not be "unified" later: the two
+ * surfaces genuinely differ in GitHub's own behavior, so a single reading is
+ * wrong for one of them whichever way it is set. One extractor read two ways,
+ * the same shape `stripMarkdownCode`'s own `{ inline }` option takes, so the two
+ * surfaces can never drift onto two different grammars. The default is
+ * unchanged, so every existing caller keeps byte-identical output.
+ */
+
 /** The `#N` a body declares itself only PART of. */
-export function partOfTargets(body) {
-  return new Set([...stripMarkdownCode(body).matchAll(partOfRe())].map((m) => m[1]));
+export function partOfTargets(body, { markdown = true } = {}) {
+  const text = markdown ? stripMarkdownCode(body) : String(body ?? '');
+  return new Set([...text.matchAll(partOfRe())].map((m) => m[1]));
 }
 
 /** `#N` -> the closing keyword bound to it (first occurrence wins, for the message). */
-export function closingKeywordTargets(body) {
+export function closingKeywordTargets(body, { markdown = true } = {}) {
   const found = new Map();
-  for (const m of stripMarkdownCode(body).matchAll(closingKeywordRe())) {
+  const text = markdown ? stripMarkdownCode(body) : String(body ?? '');
+  for (const m of text.matchAll(closingKeywordRe())) {
     if (!found.has(m[2])) found.set(m[2], m[1]);
   }
   return found;
@@ -1117,29 +1223,130 @@ export function h7PartOfWithClosingKeyword(pr) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The card number a protocol dev-branch NAMES — `claude/issue-<n>-<slug>` — as
+ * a string, or null when the ref is not that shape.
+ *
+ * Anchored end to end, and deliberately a second READER of one shape rather
+ * than a second shape: `CLAIM_BRANCH_SHAPE` is the same pattern spelled for
+ * `matchAll` over prose, and the self-test pins the two against each other so a
+ * future change to the branch convention cannot move one reader and leave the
+ * other answering the old way. (It is not literally that constant because a
+ * shared `g` regex carries `lastIndex` between callers — the warning on it.)
+ */
+export function branchNameTarget(ref) {
+  const m = /^claude\/issue-(\d+)-[A-Za-z0-9][A-Za-z0-9._-]*$/.exec(String(ref ?? '').trim());
+  return m ? m[1] : null;
+}
+
+/**
+ * Does this PR deliver card `n`? The one delivery relation H8 reads, shared by
+ * its merged side and its open side so the two can never drift apart.
+ *
+ * Two channels, in a deliberate PRECEDENCE rather than a disjunction:
+ *
+ *  1. **The body** — `Part of #N`, or a closing keyword bound to `#N`, read
+ *     through `stripMarkdownCode` (a body QUOTING either spelling in backticks
+ *     does not deliver). Bound per issue number exactly like H7.
+ *  2. **The branch name**, and ONLY when the body declares no delivery at all.
+ *
+ * ## Why the branch name is a FALLBACK and not a third `||` term
+ *
+ * Every dev branch here is `claude/issue-<n>-<slug>` by protocol, and every PR
+ * row already carries `head.ref` — so a delivery whose body spells the relation
+ * some third way (the measured specimen: a merged PR whose body said only
+ * `Refs #10757`, leaving its card dispatched and invisible for ~22h while the
+ * same sweep reported six other H8 rows correctly) is recoverable at no API
+ * cost. That is the widening this channel exists for.
+ *
+ * But widening the delivery relation has a cost the fix must pay, and reading
+ * the branch as merely one more disjunct does not pay it: a branch cut for card
+ * N and then RE-SCOPED — the body now delivering a different card — would be
+ * counted as delivering N forever, on the authority of a name nobody updated.
+ * The body is the channel an author actually maintains; the branch name is
+ * fixed at `git worktree add` time and is evidence only when nothing better
+ * exists. So a body that declares ANY delivery is authoritative, and the branch
+ * name is consulted only for the bodies that declare none — which is exactly
+ * the population the specimen came from, and no other.
+ */
+export function prDeliversCard(pr, n) {
+  const target = String(n);
+  const body = pr?.body ?? '';
+  const partOf = partOfTargets(body);
+  const closing = closingKeywordTargets(body);
+  if (partOf.has(target) || closing.has(target)) return true;
+  // The body spoke — about some OTHER card. A stale branch name does not
+  // overrule it (the re-scope case above).
+  if (partOf.size > 0 || closing.size > 0) return false;
+  return branchNameTarget(pr?.head?.ref) === target;
+}
+
+/**
  * H8 — null when clean, else the finding sentence.
  *
- * A PR "delivers" card N when its body declares `Part of #N` or binds a
- * closing keyword to `#N`, read through `stripMarkdownCode` (a body QUOTING
- * either spelling in backticks does not deliver). Only `merged_at`-set PRs
- * count — closed-unmerged is an abandoned attempt, not a delivery. Bound per
- * issue number exactly like H7.
+ * Delivery is `prDeliversCard` (body first, branch name as the fallback its
+ * docblock justifies). Only `merged_at`-set PRs count on the merged side —
+ * closed-unmerged is an abandoned attempt, not a delivery.
+ *
+ * ## The open side, and why this row DOWNGRADES rather than falls silent
+ *
+ * `openPrs` is the open-PR list the sweep already holds (its summary line
+ * reports it), so consulting it costs no request. Without it H8 could not ask
+ * the question that decides the answer — *is there ALSO an unmerged PR
+ * delivering this card?* — and on a card delivered in halves it fired on every
+ * sweep from the first half's merge until the last half landed, pointing at the
+ * card whose remaining work was most active and prescribing a DESTRUCTIVE write
+ * against it: "drop `pm:dispatched`". A reader who followed that row de-labelled
+ * a card with an open PR, which then read as un-dispatched and was liable to be
+ * re-dispatched — two agents on one card, the exact outcome the claim protocol
+ * exists to prevent (#10468, measured on #9834 + open PR #10226).
+ *
+ * Silence would fix the harm and buy a new one, and the card's caveat says so:
+ * it loses the genuine #8683 case where the last half is later ABANDONED — the
+ * merged half really is delivered, the card really is stale, and nothing would
+ * ever say so again. So the half-delivered case gets its own quieter sentence
+ * instead: it names both sides, states the counts, and — the whole point —
+ * says `pm:dispatched` is CORRECT here and must not be dropped. The destructive
+ * prescription fires only when every delivering PR has merged.
+ *
+ * Drafts are deliberately NOT filtered out of the open side: the measured
+ * specimen (#10226) was `draft: true`, and a draft delivering half is exactly
+ * the live work this row must not step on.
  */
-export function h8MergedPrStillDispatched(issue, mergedPrs) {
+export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   if (!labelNames(issue).includes('pm:dispatched')) return null;
   const n = String(issue.number);
   const delivering = [];
   for (const pr of mergedPrs ?? []) {
     if (!pr?.merged_at) continue;
-    const body = pr.body ?? '';
-    if (partOfTargets(body).has(n) || closingKeywordTargets(body).has(n)) {
-      delivering.push(pr);
-    }
+    if (prDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
   const list = delivering
     .map((p) => `#${p.number} (merged ${String(p.merged_at).slice(0, 10)})`)
     .join(', ');
+
+  const stillOpen = [];
+  for (const pr of openPrs ?? []) {
+    // A merged row appearing in the open list is not an outstanding half; the
+    // merged side above already judged it.
+    if (pr?.merged_at) continue;
+    if (prDeliversCard(pr, n)) stillOpen.push(pr);
+  }
+  if (stillOpen.length > 0) {
+    const openList = stillOpen
+      .map((p) => `#${p.number}${p.draft ? ' (draft)' : ''}`)
+      .join(', ');
+    const total = delivering.length + stillOpen.length;
+    return (
+      `delivered IN PART — ${delivering.length} of ${total} delivering PR(s) merged ` +
+      `(${list}), while ${openList} is still OPEN against this card. ` +
+      `\`pm:dispatched\` is CORRECT here and must NOT be dropped: the card is not ` +
+      `finished, and de-labelling it would read as un-dispatched work and invite a ` +
+      `second seat onto it. No action — this row exists so an abandoned last half is ` +
+      `still visible, not to prescribe one.`
+    );
+  }
+
   return (
     `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
     `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
@@ -2920,6 +3127,437 @@ export function h20DispatchedNoBranchRef(issue, claim, refStates, nowMs = Date.n
 }
 
 // ---------------------------------------------------------------------------
+// H21 — a closing keyword bound to `#N` inside a sentence that NEGATES it
+// (#10392). H7's rationale, minus H7's `Part of` precondition.
+//
+// ## The gap, and the card it cost
+//
+// H7's header states the rule in fully general terms — GitHub's parser "matches
+// the keyword plus the number and ignores the surrounding prose entirely,
+// negations and modals included, so the sentence an author writes to PREVENT an
+// auto-close is exactly what performs it on merge". The PREDICATE behind that
+// sentence is narrower than the sentence: it is bound to a `Part of #N`
+// declaration and fires only when the same `#N` carries both. A body that
+// declares `Part of` for nothing is silent by construction, however plainly it
+// says it is not closing the card.
+//
+// Measured specimen — PR #10241, merged 2026-08-20T15:10:06Z. Its body carries
+// no `Part of` anywhere and this sentence under `## Out of scope`:
+//
+//     Filed, not fixed: #10240 — the same leak through the **delete** verb.
+//
+// Issue #10240 closed `completed` at 15:10:08Z — two seconds later — with a
+// closing-link summary naming #10241 and nothing else. #10240 is a genuine
+// unfixed defect (attachment tombstoning no-ops on a predicate delete); it read
+// as finished until a human reopened it a day later. The author wrote the
+// sentence to record that the card was deliberately LEFT OPEN, and the sentence
+// closed it. H7 was silent, exactly as designed.
+//
+// ## Why this is a window and not "flag every closing keyword"
+//
+// The naive widening is not available and the corpus says so quantitatively: a
+// PR cannot declare which cards it intends to close except BY using the keyword,
+// so a rule over keyword-presence alone cannot separate intent from accident.
+// Over the 300 most recently merged PR bodies (below), 277 carry a closing
+// keyword bound to a number and there are 301 such matches — flagging keyword
+// presence would produce 301 findings, every one of them a correct PR.
+//
+// The negation is what makes the two separable, because it is the AUTHOR'S OWN
+// statement of intent sitting in the same sentence as the instruction that
+// contradicts it. That is a contradiction internal to one sentence, which is
+// the same shape H7 already reports across `Part of` and a keyword.
+//
+// ## The window bound is load-bearing — measured, not assumed
+//
+// Corpus (2026-08-21, this change's own stage-1 measurement): the 300 most
+// recently merged PRs into `main`, bodies as the API returns them,
+// 2026-08-19T15:13:23Z … 2026-08-21T19:11:30Z, 2,564,259 body characters, no
+// empty bodies. Read through `stripMarkdownCode`, exactly as H7 reads.
+//
+//   window scope             flagged / 301 keyword matches
+//   sentence (this rule)       1   — PR #10241, the specimen. 0 false positives.
+//   paragraph                  1   — same single hit
+//   whole body before match   14   — 13 false positives
+//   anywhere in body         301   — the naive shape; useless
+//
+// All 13 whole-body false positives are ONE PR (#10714) which legitimately
+// closes fourteen cards with a wall of `Fixes #N` lines and merely contains a
+// negation word somewhere earlier in a long body. A body-scoped negation check
+// would red-flag the most correct multi-close PR in the corpus thirteen times.
+// That is why the window is a sentence and why it is stated in code rather than
+// left to a reviewer's judgement.
+//
+// The result is not clean for lack of opportunity, which is the failure mode a
+// 0-of-301 number invites: the same corpus carries 116 sentences in exactly the
+// deliberate-non-closure register this rule reads — `## Out of scope`,
+// "filed, not fixed here", "#N is not addressed here", "#N remains open". The
+// register is everywhere; only one author put a closing keyword next to the
+// number. Two near-misses are worth naming because they are the specimen's
+// wording almost exactly and are correctly clean: #10876's "## Out of scope —
+// filed, not repaired here" and #10851's "filed, not fixed here" — neither
+// binds a keyword to a number.
+//
+// Second corpus, a different surface and the same answer: all 1,418 squash
+// commit messages on `main` (2026-08-11 … 2026-08-21) — a surface GitHub's
+// closing-keyword parser also reads — carry 228 keyword+`#N` matches across 197
+// commits and produce 0 flags. That arm contributes no true positive either:
+// commit messages here do not carry the `## Out of scope` register at all.
+//
+// ## Report-only, and deliberately NOT wired to the blocking gate
+//
+// `scripts/check-partof-closing-keyword.mjs` imports `h7PartOfWithClosingKeyword`
+// and FAILS a PR on it. This predicate is deliberately a separate function that
+// that gate does not import, so widening the class cannot silently widen a
+// blocking check. Report-only first is the commissioned order (#10392 triage,
+// 2026-08-21): measure, ship the row, and let a promotion to blocking be its own
+// decision with these numbers in hand. Nothing about this file's report-only
+// contract changes, and the existing patrol workflow already calls the sweep, so
+// no workflow edit is part of this.
+//
+// ## Disjoint from H7 by construction
+//
+// A number already declared `Part of #N` is H7's row and is skipped here, so the
+// two never double-report one number. H7 keeps that class whether or not the
+// sentence is negated (its own self-test pins a negated `Part of` body as an H7
+// finding); this rule takes the class H7 cannot see — a keyword bound to a
+// number the body never declared itself part of.
+// ---------------------------------------------------------------------------
+
+/**
+ * The negation / filing markers, EXACTLY as measured above.
+ *
+ * The set is pinned to the measured one on purpose: a marker added later
+ * without re-running the corpus would inherit a "0 false positives" number it
+ * was never measured under. Each was also measured ALONE against both corpora
+ * and each is independently clean; `not` and `filed` are the two that fire on
+ * the specimen.
+ *
+ * The bare noun `file`/`files` is deliberately NOT a marker although it too
+ * measured clean. It carries no negation or filing sense — "this file fixes
+ * #123" is a normal, correct close — and it is one of the most common nouns in
+ * this repo's prose, so it is the marker most likely to turn into a false
+ * positive on a corpus this one did not sample.
+ */
+const NEGATED_CLOSE_MARKER_RE =
+  /\b(?:not|cannot|never|no longer|filed|filing|out of scope|rather than|instead of|without|remains open)\b|\bn't\b/i;
+
+/**
+ * The start offset of the sentence containing `idx`.
+ *
+ * Boundaries are sentence-ending punctuation, a blank line (paragraph break),
+ * and a markdown structural line start (heading, list item, table row, block
+ * quote). A PLAIN single newline is deliberately NOT a boundary: PR bodies are
+ * soft-wrapped but commit messages in this repo are hard-wrapped at ~72
+ * columns, so prose sentences routinely span lines there, and treating every
+ * newline as a break would blind the window on exactly the second corpus.
+ *
+ * Exported for the self-test: the window is the whole design, so it is pinned
+ * directly rather than only through the predicate's verdict.
+ */
+export function sentenceStartOffset(text, idx) {
+  const head = String(text ?? '').slice(0, idx);
+  let best = 0;
+  for (const re of [
+    /[.!?][)\]"'`]*[ \t\n]/g,
+    /\n[ \t]*\n/g,
+    /\n[ \t]*(?:#{1,6}\s|[-*+]\s|\d+\.\s|\||>)/g,
+  ]) {
+    let m;
+    while ((m = re.exec(head)) !== null) {
+      const end = m.index + m[0].length;
+      if (end > best) best = end;
+    }
+  }
+  return best;
+}
+
+/**
+ * H21 — null when clean, else the finding sentence.
+ *
+ * Reads the same code-stripped text H7 reads, so a keyword quoted in backticks
+ * or parked in a fence is not a finding here either — the measured reason is in
+ * `stripMarkdownCode`.
+ */
+export function h21NegatedClosingKeyword(pr) {
+  const body = pr?.body ?? '';
+  const text = stripMarkdownCode(body);
+  const declared = partOfTargets(body);
+  const hits = [];
+  for (const m of text.matchAll(closingKeywordRe())) {
+    const [full, keyword, number] = m;
+    if (declared.has(number)) continue; // H7 owns that number
+    const start = sentenceStartOffset(text, m.index);
+    if (!NEGATED_CLOSE_MARKER_RE.test(text.slice(start, m.index))) continue;
+    hits.push({
+      keyword,
+      number,
+      sentence: text.slice(start, m.index + full.length).replace(/\s+/g, ' ').trim(),
+    });
+  }
+  if (hits.length === 0) return null;
+  return hits
+    .map(
+      (h) =>
+        `body carries \`${h.keyword} #${h.number}\` in a sentence that reads as NOT closing it — ` +
+        `"${h.sentence}". GitHub's closing-keyword parser matches the keyword plus the number and ` +
+        `ignores the surrounding prose entirely, negations included, so merging this closes ` +
+        `#${h.number} and the sentence written to prevent that is what performs it. The measured ` +
+        `specimen (PR #10241, "Filed, not fixed: #10240") closed a genuine unfixed card two seconds ` +
+        `after merge, and a closed card reads as finished. Reword so no closing keyword sits next ` +
+        `to that number — "#${h.number} is not addressed here" / "out of scope: #${h.number}" / ` +
+        `"#${h.number} remains open" — or put the keyword in backticks.`,
+    )
+    .join('; ');
+}
+
+// ---------------------------------------------------------------------------
+// H22 — a CLOSED card still carrying a `pm:*` STATE label (#10688).
+//
+// Every other item here is scoped to open issues by construction, and for most
+// of them that is right. It is a gap for H8 specifically, because H8's whole
+// subject is a write that has not happened yet — and the card is usually closed
+// by the same merge that discharges the PR, often by a `Closes #N` in the same
+// instant. So whether H8 ever got to fire was decided by a RACE: if the patrol
+// happened to run between "PR merged" and "card closed" the finding was raised;
+// if the card closed first — the normal path — the duty was silently discharged
+// by disappearance, because no run would ever look at that card again.
+//
+// Measured at filing (2026-08-21, the 500 most recently updated closed issues):
+// 129 closed cards still carried a live `pm:` label, 118 of them
+// `pm:dispatched` — the signature of exactly the write H8 was built to catch,
+// unmet at scale because the card closed first.
+//
+// This is direction A of that card: keep the open-only default for every other
+// collector and add ONE bounded closed reader, so the race closes without
+// widening the sweep. It is the direction matching what H8 already claims to be
+// for. The counterargument — that labels on a closed card are historical
+// metadata — does not dispose of it: `pm:dispatched` is not descriptive, it is
+// a claim of in-flight-ness, and this file's own H8 treats leaving it set as a
+// defect worth a named rule. If that is a defect at 09:00 while the card is
+// open and not a defect at 09:01 once it closes, the rule is about the board's
+// tidiness rather than about the duty, and H8's text says otherwise.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `pm:*` labels that are STATE CLAIMS, and therefore residue on a closed
+ * card. Exactly the five the #10688 census measured.
+ *
+ * ⚠️ This is deliberately NOT `PM_STATE_LABELS` (H13's), and the two must not
+ * be unified on the strength of the similar name. H13 asks "does any label make
+ * this card visible to a named reader?", so its list carries `finding`,
+ * `needs-user-decision`, `pm:epic` and `pm:seat` and deliberately OMITS
+ * `pm:blocking`. H22 asks a different question — "does this label CLAIM work is
+ * in flight?" — and the answers diverge in both directions: `pm:blocking` is
+ * such a claim (it is what the lane selection order ranks on) while `finding`
+ * and `needs-user-decision` are perfectly good states for a closed card to have
+ * ended in. Sharing one list would make H22 report every closed finding card on
+ * the board and miss the blocking-cache residue entirely.
+ *
+ * Three `pm:*` labels are excluded here because they are not claims that work
+ * is in flight:
+ *
+ *   `pm:seat`     a seat-registry post's TYPE sticker — the protocol carrier
+ *                 itself, whose label is what makes the seat list page a board.
+ *                 A closed seat card keeps it as identity, not as state.
+ *   `pm:epic`     a delegation marker on a parent, the same kind of identity.
+ *   `pm:retriage` a request for re-judgement. Plausibly residue too, and it did
+ *                 not appear in the census — so it stays out until something
+ *                 measures it, rather than being widened in on a hunch. The
+ *                 set is one edit away when that measurement exists.
+ */
+export const PM_RESIDUE_LABELS = ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:on-hold', 'pm:blocking'];
+
+/**
+ * H22 — null when the closed card is clean, else the finding sentence.
+ *
+ * Gated on the card being CLOSED: handed an open issue it returns null, so the
+ * predicate cannot double-report the population every other item already reads.
+ * That gate is the predicate's own, not the caller's, because it is the one
+ * thing separating this row from a restatement of H3.
+ */
+export function h22ClosedCardPmResidue(issue) {
+  if (issue?.state !== 'closed') return null;
+  const residue = labelNames(issue ?? {}).filter((l) => PM_RESIDUE_LABELS.includes(l));
+  if (residue.length === 0) return null;
+  const list = residue.map((l) => `\`${l}\``).join(', ');
+  const reason = issue.state_reason ? ` (closed \`${issue.state_reason}\`)` : '';
+  return (
+    `card is CLOSED${reason} but still carries ${list} — a state label is a claim that work ` +
+    `is in flight, and the card left the board without the paired write that clears it. ` +
+    `H8 would have flagged this while the card was open; it closed first, which is the ` +
+    `normal path rather than the rare one. Strip the \`pm:*\` state label(s); no other ` +
+    `write is owed, the card is already closed.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H23 — the SECOND SURFACE: a squash commit message on the default branch that
+// carries `Part of #N` and a closing keyword bound to that same `#N` (#10942).
+//
+// ## The gap
+//
+// Every closing-keyword reader this repo owns is handed a PULL REQUEST BODY.
+// H7 and H21 above take a `pr` and read `pr.body`;
+// `scripts/check-partof-closing-keyword.mjs` — the blocking gate — is handed
+// `PR_BODY` by `.github/workflows/partof-closing-keyword-guard.yml`. GitHub's
+// closing-keyword parser acts on TWO surfaces: the PR body, and the COMMIT
+// MESSAGES of commits that land on the default branch. This repo squash-merges,
+// so every merged PR contributes exactly one commit message to `main`, and that
+// message was never read by anything here.
+//
+// ## The mechanism, and why a body-side guard could not have caught it
+//
+// The squash message is COMPOSED AT MERGE TIME from the branch's own commit
+// messages — not from the PR body. All six specimens below are multi-commit
+// branches where one commit's trailer said `Fixes #N` and another's said
+// `Part of #N`; the squash concatenated them, and the contradiction was
+// manufactured by the assembly. Measured on the clearest one, PR #9478: its
+// BODY carries a closing keyword bound to #9320 and no `Part of` anywhere, so
+// the body is clean under H7 and under the blocking gate, and correctly so —
+// the contradictory text existed in no body at all. This is why the row cannot
+// be "H7 with a wider input": there is a text on `main` that no body ever held.
+//
+// ## Measured (2026-08-22, this change's own stage-1 pass)
+//
+// Corpus: all 1,546 first-parent commit messages on `main` in the window
+// 2026-08-11T00:00:00Z … 2026-08-22T18:00:00Z (first and last message
+// 2026-08-11T01:21:16Z … 2026-08-22T17:59:02Z), read with the extractors above at
+// `markdown: false`. `main` is LINEAR — 1,975 commits reachable, 1,975 on the
+// first-parent walk, 0 merge commits — so the commit list and the squash-message
+// list are the same list, and the REST reader below needs no first-parent filter.
+//
+// ⚠️ The window bounds are spelled as full ISO instants on purpose. `git log
+// --since=2026-08-11` is an APPROXIDATE: git fills the unspecified time-of-day
+// from *now*, so a bare date silently slides the corpus forward as the clock
+// moves — two runs of this measurement twelve minutes apart returned 1,443 and
+// 1,441 messages for what read as one window. Anyone re-deriving these numbers
+// must pin both instants or they are measuring a different corpus.
+//
+//   270 closing-keyword bindings across 234 messages
+//     6 messages carry `Part of #N` AND a keyword bound to that same `#N`
+//         sha          card      keyword    (columns kept apart on purpose — see
+//         0c24898c0    10377     Fixes       the remedy note below; this file
+//         d7283250d    10219     Fixes       must not itself put a keyword next
+//         af2a989be     9320     Fixes       to a live card number)
+//         3db37957c     8355     Fixes
+//         7e06f51ee     8060     Fixes
+//         30536e37c     7828     Fixes
+//   1,545 of 1,546 subjects end with the squash marker `(#PR)`
+//       0 of those 1,545 trailing markers are bound as a card by the extractor
+//
+// That last number is the PR-correlation guarantee, and it is measured rather
+// than argued: the separator in `closingKeywordRe` is horizontal whitespace and
+// an optional colon, so the `(` in `… (#11085)` stands between any preceding
+// keyword and the number and no subject's own PR marker can ever be read as a
+// card binding. `commitSubjectPrNumber` reads it as what it is instead.
+//
+// ⚠️ Six rows are evidence that the shape REACHES `main` unguarded, not six
+// adjudicated wrong closes. In every one the lead commit's `Fixes #N` looks
+// deliberate, so the finding sentence reports the contradiction and explicitly
+// declines to adjudicate it — the reader checks the card. Deciding whether this
+// class ever earns a BLOCKING posture is a later card on its own baseline
+// (grading ruling, 2026-08-22): this row exists to measure the surface first,
+// exactly the posture #10392 was required to take for the body surface.
+//
+// ## The remedy text differs from H7's and H21's, and that is the point
+//
+// H7 and H21 both end with "or put the keyword in backticks", which is CORRECT
+// for a body and FALSE here: a commit message is not markdown, nothing renders
+// it, and backticks are ordinary characters to the parser. An author who has
+// internalised the body remedy is precisely the author who will reach for it on
+// this surface, so the sentence says out loud that it does not work here and
+// gives the only remedy that does — reword, so no closing keyword sits next to
+// the number. The self-test pins the difference in BOTH directions (H7's
+// sentence carries the backtick clause; this one must never carry it), because
+// the realistic regression is someone copying H7's tail across.
+//
+// ## Why H21's negation window is NOT ported to this surface
+//
+// Measured, on the same 1,546-message corpus: H21's window and marker set flag
+// 0 of the 270 bindings. Commit messages here do not carry the deliberate-
+// non-closure register at all — no `## Out of scope`, no "filed, not fixed
+// here" — because that register belongs to a PR body's prose sections. Porting
+// it would add a second predicate over this surface with zero measured yield
+// and its own false-positive risk, so it stays out until something measures a
+// reason for it. (`sentenceStartOffset` was already written with this surface in
+// mind — its docblock declines to treat a plain newline as a boundary precisely
+// because commit messages hard-wrap at ~72 columns — so the port is available to
+// a later card at no design cost.)
+//
+// ## And why stripping is not merely "harmless to skip"
+//
+// On this corpus the two readings agree exactly — 270 bindings either way, and
+// the same 6 findings — so the asymmetry buys no finding today, and saying
+// otherwise would be a claim the measurement does not support. It is not clean
+// for lack of opportunity, which is the failure mode a 0-difference number
+// invites: 1,064 of the 1,546 messages DO carry markdown-looking code (a squash
+// body routinely quotes the PR body whole), 487 of those carry a `#N` inside the
+// code region and 361 carry a closing-keyword word inside it. But not one
+// carries a keyword and a number ADJACENT inside code — which is why the two
+// readings agree. The population is everywhere; no author has
+// yet landed the two adjacent inside a fence. The first who does — most likely
+// the author following the body-surface remedy — is the case the surface-correct
+// reading catches and a stripped reading would silently drop.
+// ---------------------------------------------------------------------------
+
+/**
+ * The squash marker a commit SUBJECT ends with — `(#PR)` — or null.
+ *
+ * Read off the first line only, and anchored to its end: that is where the
+ * merge writes it, and a `(#123)` in the message BODY is quoted prose from
+ * somewhere else, not this commit's delivery. Measured at 1,545 of 1,546
+ * subjects in the corpus above, which is why the correlation is worth having
+ * for free rather than through a per-commit `/pulls` request.
+ */
+export function commitSubjectPrNumber(message) {
+  const subject = String(message ?? '').split('\n', 1)[0];
+  const m = /\(#(\d+)\)\s*$/.exec(subject.trim());
+  return m ? m[1] : null;
+}
+
+/**
+ * H23 — null when the commit message is clean, else the finding sentence.
+ *
+ * Pure over the REST commit row (`{ sha, html_url, commit: { message } }`), like
+ * every predicate here, so the self-test drives it with the real specimens.
+ *
+ * The extractors are H7's, at `markdown: false` — same functions, different
+ * surface. Bound PER CARD NUMBER exactly as H7 binds: a message that is
+ * `Part of #A` and separately closes #B is the normal correct shape and stays
+ * clean.
+ */
+export function h23CommitMessageContradiction(commit) {
+  const message = commit?.commit?.message ?? '';
+  const declared = partOfTargets(message, { markdown: false });
+  if (declared.size === 0) return null;
+  const closing = closingKeywordTargets(message, { markdown: false });
+  const clashes = [...declared].filter((n) => closing.has(n));
+  if (clashes.length === 0) return null;
+
+  const sha = String(commit?.sha ?? '').slice(0, 9) || '(unknown sha)';
+  const pr = commitSubjectPrNumber(message);
+  const via = pr ? ` (landed by PR #${pr})` : '';
+  const cards = clashes.map((n) => `#${n}`).join(', ');
+  const pairs = clashes.map((n) => `\`Part of #${n}\` and \`${closing.get(n)}\` bound to #${n}`).join('; ');
+
+  return (
+    `squash commit \`${sha}\`${via} carries BOTH instructions in one message — ${pairs}. ` +
+    `GitHub's closing-keyword parser reads commit messages on the default branch exactly as it ` +
+    `reads a PR body, and ignores the surrounding prose, so this message already told GitHub to ` +
+    `close ${cards} when it landed. No body-side guard could have seen it: the squash message is ` +
+    `composed at merge time from the branch's own commit messages, so the contradiction need never ` +
+    `have existed in any body (measured on PR #9478, whose body is clean under H7 and under the ` +
+    `blocking gate). Re-read ${cards} and judge its state deliberately — this row reports the ` +
+    `contradiction and does NOT adjudicate whether the close was intended. ` +
+    `⚠️ For the next message: a commit message is NOT markdown — nothing renders it, so backticks ` +
+    `and fences are ordinary characters here and quoting the keyword does not neutralise it. That ` +
+    `is the PR-BODY remedy (H7's and H21's sentences end with it, correctly, for bodies) and it is ` +
+    `false on this surface. The only fix here is to REWORD, so that no closing keyword sits next to ` +
+    `a card number.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -2968,11 +3606,12 @@ export function isLoudFinding(message) {
  * without them still renders a sentence, never the string `undefined`.
  *
  * @param {{ repo: string, issues: number, unscoped: number, prs: number,
- *   merged: number, conflictProbed?: number, conflictCandidates?: number,
+ *   merged: number, closed?: number, conflictProbed?: number, conflictCandidates?: number,
  *   holdProbed?: number, holdCandidates?: number, fallbackProbed?: number,
  *   fallbackCandidates?: number, restartProbed?: number,
  *   restartCandidates?: number, blockerResolved?: number,
- *   blockerTargets?: number }} counts
+ *   blockerTargets?: number, commits?: number, commitBindings?: number,
+ *   commitBindingMessages?: number }} counts
  * @param {number} findingCount
  */
 export function summaryLine(counts, findingCount) {
@@ -3008,11 +3647,26 @@ export function summaryLine(counts, findingCount) {
   // all must not read the same as a board where every dispatch is live (#4690).
   const refRead = counts.dispatchRefRead ?? 0;
   const refTargets = counts.dispatchRefTargets ?? 0;
+  // H23's coverage numbers. Not a `read X of Y` pair — nothing here can fail per
+  // row — but the same duty in the measure-first register the row was
+  // commissioned in (#10942): the row's yield is ~6 in 1,546, so a quiet H23 is
+  // the normal reading and the ONLY thing separating "this surface was read and
+  // is clean" from "no commit message was read at all" is these counts. The
+  // binding totals ride along because they are what a later blocking-promotion
+  // decision needs and they cost nothing to carry.
+  const commits = counts.commits ?? 0;
+  const commitBindings = counts.commitBindings ?? 0;
+  const commitBindingMessages = counts.commitBindingMessages ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
     `(merge state read on ${probed} of ${candidates} H16 candidate(s)) ` +
     `and ${counts.merged} recently-merged PR(s) in ${counts.repo} — ${findingCount} half-state(s) found. ` +
+    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
+    `older closed carriers are outside it by design). ` +
+    `H23 read ${commits} squash commit message(s) from the default branch's recent window, carrying ` +
+    `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s) ` +
+    `(bounded window; a message that landed before it is invisible by design). ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
@@ -3792,6 +4446,8 @@ async function sweep(options = {}) {
   const seenPrs = new Map();
   const seenMerged = new Map();
   const seenUnscoped = new Map();
+  // H22's bounded closed-card window (#10688) — the one closed-issue read here.
+  const seenClosed = new Map();
   // H16's per-row fetch is the one input that can fail partially, so its
   // tally rides out of the sweep and into the summary line (see `summaryLine`).
   const stats = {
@@ -3807,15 +4463,22 @@ async function sweep(options = {}) {
     // got a definite open/closed answer.
     blockerTargets: 0,
     blockerResolved: 0,
+    // H23's coverage numbers (#10942) — how many commit messages this pass read
+    // and how much closing-keyword traffic they carry. Initialised to 0 here
+    // rather than left absent so a sweep that throws before the commit pass
+    // still renders numbers instead of the string `undefined`.
+    commits: 0,
+    commitBindings: 0,
+    commitBindingMessages: 0,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
   // summary line the same `read X of Y`.
   const hold = { entries: [], candidates: 0, probed: 0 };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats, hold);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold);
   } catch (err) {
-    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size;
+    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
   }
 
@@ -3826,6 +4489,7 @@ async function sweep(options = {}) {
     unscoped: seenUnscoped.size,
     prs: seenPrs.size,
     merged: seenMerged.size,
+    closed: seenClosed.size,
     conflictCandidates: stats.conflictCandidates,
     conflictProbed: stats.conflictProbed,
     holdCandidates: hold.candidates,
@@ -3836,6 +4500,9 @@ async function sweep(options = {}) {
     restartProbed: stats.restartProbed,
     blockerTargets: stats.blockerTargets,
     blockerResolved: stats.blockerResolved,
+    commits: stats.commits,
+    commitBindings: stats.commitBindings,
+    commitBindingMessages: stats.commitBindingMessages,
   };
   // The oracle is read ONCE per sweep, after gathering: it is a local
   // `git ls-files`, not a request, and every candidate token is checked
@@ -3885,6 +4552,84 @@ async function listRecentlyMergedPullRequests() {
 }
 
 /**
+ * The bounded closed-card window H22 reads (#10688) — most recently UPDATED
+ * closed issues, capped at two pages, the same `sort=updated` convention and
+ * the same quota decision as the merged-PR window above.
+ *
+ * The cap is the item's stated boundary, and here it carries more weight than
+ * usual: the label-scoped population of closed carriers is very large (a
+ * 2026-08-22 re-measure paged past 500 closed `pm:dispatched` carriers alone
+ * and was still going, because the label has been applied since the protocol
+ * began and dropped only sporadically). Reporting all of them would drown every
+ * other item in one-time historical residue. So this window deliberately
+ * reports the RECENT residue — the population where the paired write is still
+ * a live duty someone remembers — and the deep tail is a backfill question,
+ * not a patrol question. `state=closed` is the ONLY closed-issue read in this
+ * file; every other collector stays open-only by construction.
+ */
+async function listRecentlyClosedIssues() {
+  const out = [];
+  for (let page = 1; page <= 2; page++) {
+    const batch = await rest(
+      `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
+    );
+    out.push(...batch.filter((i) => !i.pull_request));
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+/**
+ * H23's bounded commit window (#10942) — the most recent commits on the
+ * repository's DEFAULT BRANCH, capped at three pages, the same "bounded window,
+ * stated boundary" discipline as the two windows above.
+ *
+ * ## Why REST and not `git log`, in a file that already shells out to git
+ *
+ * `readTrackedFiles` proves a git channel exists here, and a `git log` read
+ * would cost no API quota at all — so the choice needs a reason. It is the
+ * runner: `.github/workflows/half-state-patrol.yml` checks out with
+ * `actions/checkout@v7` and no `fetch-depth`, whose default is **1**. `git log`
+ * there would read exactly ONE commit message and report a clean surface, which
+ * is #4690 in its purest form — an unread input rendering as a clean one, four
+ * times a day, forever. This is not a hypothetical about someone else's
+ * container: the checkout this change was authored in arrived shallow at 375
+ * commits, and the 11-day corpus in H23's section only became readable after an
+ * explicit `git fetch --deepen`. A channel that is dark in the one place the
+ * sweep actually runs is not a cheaper channel.
+ *
+ * ## The page cap, in the units that decide it
+ *
+ * Measured over the corpus above: 1,546 commits in 11.7 days ≈ 132/day. Three
+ * pages ≈ 300 commits ≈ 2.3 days, against a patrol that fires every 6 hours —
+ * roughly a 9× overlap, so a message has to survive nine consecutive sweeps to
+ * age out unseen. (The `~18 merges/day` figure in `listRecentlyMergedPullRequests`
+ * predates that acceleration; nothing here depends on it, but a future reader
+ * re-deriving a window from it should re-measure first.)
+ *
+ * No `sha=` parameter: the endpoint defaults to the repository's own default
+ * branch, which keeps this reader repo-agnostic exactly like every other listing
+ * here — `PM_SWEEP_REPO` can name a repo whose default branch is not `main`.
+ * Ordering is the endpoint's own reverse-chronological walk of that branch and
+ * needs no first-parent filter here: `main` is linear (measured — 1,975 commits
+ * reachable, 1,975 on the first-parent walk, 0 merge commits), so the commit list
+ * and the squash-message list are the same list. A repo that DOES carry merge
+ * commits would simply feed this row a few branch-side messages, which are a
+ * surface GitHub's parser reads too — wider, never wrong.
+ */
+const COMMIT_WINDOW_PAGES = 3;
+
+async function listRecentDefaultBranchCommits() {
+  const out = [];
+  for (let page = 1; page <= COMMIT_WINDOW_PAGES; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/commits?per_page=100&page=${page}`);
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+/**
  * The unscoped listing H13 needs: the domain-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
@@ -3903,7 +4648,7 @@ async function listAllOpenIssues() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stats = {}, hold = null) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -4054,15 +4799,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
     throw lastHoldError;
   }
 
-  // H7 + H12 — the PR side. Listed straight from `/pulls` rather than filtered
-  // out of the label pages above: PRs carry no `pm:*` label, so the issue sweep
-  // cannot see them (it discards them explicitly). Drafts are INCLUDED for H7 —
-  // a draft is exactly where that is still cheap to fix — and excluded by
-  // H12's own predicate (drafts are parked deliberately).
+  // H7 + H12 + H21 — the PR side. Listed straight from `/pulls` rather than
+  // filtered out of the label pages above: PRs carry no `pm:*` label, so the
+  // issue sweep cannot see them (it discards them explicitly). Drafts are
+  // INCLUDED for H7 and H21 — a draft is exactly where that is still cheap to
+  // fix, and both rows are only fixable while the PR is open, because the
+  // damage is done by the merge — and excluded by H12's own predicate (drafts
+  // are parked deliberately).
   for (const pr of await listOpenPullRequests()) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
+    const negated = h21NegatedClosingKeyword(pr);
+    if (negated) findings.push([pr, 'H21', negated]);
     const orphan = h12OrphanLanding(pr);
     if (orphan) findings.push([pr, 'H12', orphan]);
   }
@@ -4105,11 +4854,58 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, stat
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
   // against the already-collected open `pm:dispatched` cards; no per-card fetch.
+  //
+  // The open-PR list is handed in alongside it (#10468). It is already in hand
+  // from the H7/H12/H21 pass above, so the half-delivered question costs no
+  // request — and without it this row prescribed a destructive label drop
+  // against cards whose remaining half was still open.
   for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
   const mergedWindow = [...seenMerged.values()];
+  const openWindow = [...seenPrs.values()];
   for (const issue of seen.values()) {
-    const stale = h8MergedPrStillDispatched(issue, mergedWindow);
+    const stale = h8MergedPrStillDispatched(issue, mergedWindow, openWindow);
     if (stale) findings.push([issue, 'H8', stale]);
+  }
+
+  // H22 — the one closed-issue read in this file (#10688). Kept in its own
+  // collection for the same reason H13's unscoped listing is: the open-only
+  // default of every other collector stays exactly as it was, and the summary
+  // line can say what this pass covered on its own terms.
+  for (const issue of await listRecentlyClosedIssues()) {
+    seenClosed.set(issue.number, issue);
+    const residue = h22ClosedCardPmResidue(issue);
+    if (residue) findings.push([issue, 'H22', residue]);
+  }
+
+  // H23 — the commit-message surface (#10942). The counting is not incidental:
+  // this row's measured yield is ~6 in 1,546, so a silent H23 is the normal
+  // reading, and the summary line's coverage numbers are the only thing that
+  // separates "read and clean" from "no message was read". They are gathered in
+  // the same walk as the verdicts so the two can never disagree.
+  //
+  // The finding row is keyed to the PR the squash marker names, because that is
+  // the artifact a reader searches for and it keeps this row shaped like the
+  // other PR-scoped rows (H7, H12, H16, H21). The LINK is the commit, which is
+  // the evidence. When a subject carries no marker (1 of 1,546 measured) the
+  // first contradicted card number stands in, so a row is never dropped for
+  // want of a number to sort by.
+  for (const commit of await listRecentDefaultBranchCommits()) {
+    const message = commit?.commit?.message ?? '';
+    stats.commits = (stats.commits ?? 0) + 1;
+    const bindings = closingKeywordTargets(message, { markdown: false });
+    if (bindings.size > 0) {
+      stats.commitBindings = (stats.commitBindings ?? 0) + bindings.size;
+      stats.commitBindingMessages = (stats.commitBindingMessages ?? 0) + 1;
+    }
+    const contradiction = h23CommitMessageContradiction(commit);
+    if (!contradiction) continue;
+    const pr = commitSubjectPrNumber(message);
+    const fallback = [...partOfTargets(message, { markdown: false })].find((n) => bindings.has(n));
+    findings.push([
+      { number: Number(pr ?? fallback ?? 0), html_url: commit?.html_url ?? '' },
+      'H23',
+      contradiction,
+    ]);
   }
 
   // H13 — the one item whose population no label page can list (note at
@@ -4642,6 +5438,113 @@ function selfTest() {
   );
   t('H7: a fenced-only keyword is not a finding', h7PartOfWithClosingKeyword(pr('Part of #5\n\n```\nFixes #5\n```')), null);
 
+  // -- H21: a closing keyword inside a sentence that negates it (#10392) -----
+  // The positive fixture is the REAL specimen sentence, byte-for-byte from PR
+  // #10241's body, and the negative fixtures are real sentences from the same
+  // 300-body corpus the stage-1 measurement read — including the two that are
+  // the specimen's wording almost exactly and must stay clean.
+
+  // ★ Specimen — PR #10241 (merged 2026-08-20T15:10:06Z). No `Part of`
+  // anywhere in the body; #10240 closed `completed` two seconds later.
+  const pr10241 = pr(
+    '## Out of scope\n\n' +
+      'Filed, not fixed: #10240 — the same leak through the **delete** verb. ' +
+      '`beforeDelete`→`afterDelete` hands ids over on the context stash, which the ' +
+      'measurement above shows is lost on the predicate path.',
+  );
+  const fired21 = h21NegatedClosingKeyword(pr10241);
+  t('H21: the #10241 specimen FIRES', typeof fired21, 'string');
+  t('H21: …and names the card it will close', fired21.includes('`fixed #10240`'), true);
+  t('H21: …and quotes the offending sentence back', fired21.includes('Filed, not fixed: #10240'), true);
+  t('H21: …and says the parser ignores the negation', fired21.includes('negations included'), true);
+  t('H21: …and offers the safe rewordings', fired21.includes('#10240 is not addressed here'), true);
+  // H7 is silent on this body — the gap that made the row necessary. If this
+  // ever inverts, H21 is redundant rather than merely quiet.
+  t('H21: …and H7 is silent on it (the gap this row exists for)', h7PartOfWithClosingKeyword(pr10241), null);
+
+  // The window. `not` and `filed` both fire on the specimen; each marker was
+  // measured alone against both corpora.
+  t('H21: a bare negated close fires', typeof h21NegatedClosingKeyword(pr('This does not fix #77.')), 'string');
+  t('H21: "out of scope" fires', typeof h21NegatedClosingKeyword(pr('Out of scope: closes #77.')), 'string');
+  t('H21: "no longer" fires', typeof h21NegatedClosingKeyword(pr('#77 is no longer in scope, so this closes #77 only on paper.')), 'string');
+
+  // ⛔ The rule is the negation window, never keyword presence. 277 of 300
+  // measured bodies carry a plain closing keyword and every one is correct.
+  t('H21: a plain `Fixes #N` is clean', h21NegatedClosingKeyword(pr('Fixes #10171')), null);
+  t(
+    'H21: a fourteen-card close list is clean (the #10714 shape)',
+    h21NegatedClosingKeyword(pr('Fixes #10581\nFixes #10582\nFixes #10583')),
+    null,
+  );
+  // …and it stays clean even when the body says "not" somewhere ELSE. This is
+  // the measured 13-false-positive case a body-scoped window produces.
+  t(
+    'H21: a negation elsewhere in the body does not reach the keyword',
+    h21NegatedClosingKeyword(pr('This does not touch the loader.\n\n### Closing lines\n\nFixes #10581')),
+    null,
+  );
+
+  // Real corpus near-misses — the specimen's register, no keyword bound to a
+  // number. These are the 116-sentence population the row must not report.
+  t(
+    'H21: "#N is not addressed here" is clean (the advised spelling)',
+    h21NegatedClosingKeyword(pr('#10526 is not addressed here — spec-side, another lane.')),
+    null,
+  );
+  t(
+    'H21: "#N remains open" is clean',
+    h21NegatedClosingKeyword(pr('out of scope for it — #10368 remains open and untouched.')),
+    null,
+  );
+  t(
+    'H21: the #10876 near-miss ("filed, not repaired here") is clean',
+    h21NegatedClosingKeyword(pr('## Out of scope — filed, not repaired here\n\nThe loader half stays open.')),
+    null,
+  );
+  t(
+    'H21: the #10851 near-miss ("filed, not fixed here") is clean',
+    h21NegatedClosingKeyword(pr('## The divergence the suite found — filed, not fixed here')),
+    null,
+  );
+
+  // Disjoint from H7: a number already declared `Part of` is H7's row.
+  t(
+    'H21: a `Part of #N` body is H7\'s row, not this one',
+    h21NegatedClosingKeyword(pr('Part of #77\n\nThis does not fix #77.')),
+    null,
+  );
+  t(
+    'H21: …while a DIFFERENT number in the same body is still this row\'s',
+    typeof h21NegatedClosingKeyword(pr('Part of #77\n\nFiled, not fixed: #88.')),
+    'string',
+  );
+
+  // Code stripping — inherited from H7, so a quoted keyword is not a finding.
+  t('H21: a keyword in backticks is clean', h21NegatedClosingKeyword(pr('Filed, not `fixed #10240`.')), null);
+  t('H21: a fenced keyword is clean', h21NegatedClosingKeyword(pr('not fixed:\n\n```\nFixes #10240\n```')), null);
+  t('H21: gerunds are not closing keywords', h21NegatedClosingKeyword(pr('This is not fixing #77.')), null);
+  t('H21: empty / missing body', h21NegatedClosingKeyword(pr(undefined)), null);
+
+  // The window itself, pinned directly — it is the whole design. Asserted as
+  // the TEXT the marker scan actually sees, not as an offset: the offset is an
+  // implementation detail, while "the previous sentence is not in the window"
+  // is the property the 13-false-positive measurement turns on.
+  const win = (text, idx) => text.slice(sentenceStartOffset(text, idx), idx);
+  t('H21 window: a sentence break bounds it', win('No. Fixes #1', 4), '');
+  t('H21 window: a blank line bounds it', win('not here\n\nFixes #1', 10), '');
+  // The structural boundary lands after the markdown marker, so the window is
+  // the heading's / item's own text — and the sentence BEFORE it is excluded.
+  t('H21 window: a heading line bounds it', win('not here\n## H\nFixes #1', 14), 'H\n');
+  t('H21 window: a list item bounds it', win('not here\n- item\nFixes #1', 16), 'item\n');
+  // ⛔ A plain newline is NOT a boundary: commit messages here are hard-wrapped
+  // at ~72 columns, so a sentence routinely spans lines on that corpus.
+  t('H21 window: a soft-wrapped newline does NOT bound it', sentenceStartOffset('not\nhere', 8), 0);
+  t(
+    'H21: …so a hard-wrapped negated close still fires',
+    typeof h21NegatedClosingKeyword(pr('Filed, not\nfixed: #10240')),
+    'string',
+  );
+
   // -- H8: delivering PR merged, card still `pm:dispatched` (#8683) ----------
   // Fixtures reuse H7's extractor pins, so the stripping and per-number-
   // binding measurements carry over rather than being re-proved.
@@ -4709,6 +5612,330 @@ function selfTest() {
   );
   t('H8: empty merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), []), null);
   t('H8: missing merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), undefined), null);
+
+  // -- H8: the branch-name fallback (#11036) ---------------------------------
+  // The card's ⚠️ is the load-bearing clause: this WIDENS the delivery
+  // relation, so BOTH directions are pinned — the hit must report, and a
+  // re-scoped branch must not.
+  const onBranch = (number, body, ref, merged_at = '2026-08-21T14:00:28Z') => ({
+    number,
+    body,
+    merged_at,
+    head: { ref },
+  });
+
+  // Direction 1 — the measured specimen's shape: merged, body carries NEITHER
+  // recognised spelling (`Refs #N` is not one), branch named for the card.
+  t(
+    'H8 branch: a `Refs #N`-only body delivers via its branch name',
+    typeof h8MergedPrStillDispatched(
+      dispatched(10757),
+      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
+    ),
+    'string',
+  );
+  t(
+    'H8 branch: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(
+      dispatched(10757),
+      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
+    ).includes('#10824'),
+    true,
+  );
+  // An empty body is the same population — nothing declared, so the branch is
+  // the only evidence there is.
+  t(
+    'H8 branch: an empty body delivers via its branch name',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]),
+    'string',
+  );
+
+  // Direction 2 — the RE-SCOPED branch, the false-fire this widening could
+  // otherwise buy. Branch still named for 4321; body now delivers 9999. The
+  // body is the channel an author maintains, so it wins and 4321 stays clean.
+  t(
+    'H8 branch: a re-scoped branch does NOT deliver the card it is NAMED for',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Part of #9999', 'claude/issue-4321-x')]),
+    null,
+  );
+  t(
+    'H8 branch: …and the card the re-scoped body DOES name still reports',
+    typeof h8MergedPrStillDispatched(dispatched(9999), [onBranch(4400, 'Part of #9999', 'claude/issue-4321-x')]),
+    'string',
+  );
+  t(
+    'H8 branch: a closing keyword for another card also suppresses the fallback',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Fixes #9999', 'claude/issue-4321-x')]),
+    null,
+  );
+  // …and the widening does not reach past the merged/unmerged line, nor past
+  // the label gate, nor onto a non-protocol branch name.
+  t(
+    'H8 branch: a closed-UNMERGED PR on the card branch is still not a delivery',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x', null)]),
+    null,
+  );
+  t(
+    'H8 branch: a non-protocol branch name delivers nothing',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'feat/some-hand-cut-branch')]),
+    null,
+  );
+  t(
+    'H8 branch: a branch named for a DIFFERENT card is clean',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-9999-x')]),
+    null,
+  );
+  t('H8 branch: a PR row with no head at all does not crash', h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, '')]), null);
+
+  // The extractor itself, and its agreement with the prose-scanning constant —
+  // one branch SHAPE, two readers, pinned together so a convention change
+  // cannot move only one of them.
+  t('H8 branch: the target is the issue number as a string', branchNameTarget('claude/issue-10757-dedupe'), '10757');
+  t('H8 branch: surrounding whitespace is tolerated', branchNameTarget('  claude/issue-1-a  '), '1');
+  t('H8 branch: a slug with dots and underscores survives', branchNameTarget('claude/issue-1-a.b_c-d'), '1');
+  t('H8 branch: a slugless branch is not the protocol shape', branchNameTarget('claude/issue-1'), null);
+  t('H8 branch: a trailing path segment is not the protocol shape', branchNameTarget('claude/issue-1-a/b'), null);
+  t('H8 branch: a prefixed ref is not the protocol shape', branchNameTarget('refs/heads/claude/issue-1-a'), null);
+  t('H8 branch: `main` yields nothing', branchNameTarget('main'), null);
+  t('H8 branch: a missing ref yields nothing', branchNameTarget(undefined), null);
+  t(
+    'H8 branch: the anchored reader agrees with CLAIM_BRANCH_SHAPE on the protocol shape',
+    [...'claude/issue-10757-dedupe-per-request-queries'.matchAll(CLAIM_BRANCH_SHAPE)][0][0],
+    'claude/issue-10757-dedupe-per-request-queries',
+  );
+
+  // -- H8: the open-PR side — a card delivered in HALVES (#10468) ------------
+  // The measured specimen: #9834's duration half merged as #10004 while its
+  // error-counter half sat OPEN as draft #10226. The old row fired every sweep
+  // and prescribed dropping `pm:dispatched` off a card with live work.
+  const openHalf = (number, body, draft = false) => ({ number, body, draft, merged_at: null });
+  const halves = (openPrs) =>
+    h8MergedPrStillDispatched(dispatched(9834), [mergedPr(10004, 'Part of #9834')], openPrs);
+
+  t('H8 open: a half-delivered card still reports', typeof halves([openHalf(10226, 'Part of #9834', true)]), 'string');
+  // The whole point of the downgrade: the destructive prescription must not
+  // fire on a card whose remaining half is open.
+  t(
+    'H8 open: …and does NOT prescribe dropping the label',
+    halves([openHalf(10226, 'Part of #9834', true)]).includes('Drop `pm:dispatched`'),
+    false,
+  );
+  t(
+    'H8 open: …and says the label is CORRECT here',
+    halves([openHalf(10226, 'Part of #9834', true)]).includes('must NOT be dropped'),
+    true,
+  );
+  t('H8 open: …and names the open half', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10226'), true);
+  t('H8 open: …and the merged half too', halves([openHalf(10226, 'Part of #9834', true)]).includes('#10004'), true);
+  t('H8 open: …and counts them, N of M', halves([openHalf(10226, 'Part of #9834', true)]).includes('1 of 2'), true);
+  // A draft open half is the specimen's own shape — never filtered out.
+  t('H8 open: …and marks the open half as a draft', halves([openHalf(10226, 'Part of #9834', true)]).includes('(draft)'), true);
+  t('H8 open: a NON-draft open half counts identically', typeof halves([openHalf(10226, 'Part of #9834', false)]), 'string');
+
+  // …and the row it replaces is unchanged whenever every deliverer HAS merged —
+  // the genuine #8683 case, which must keep its prescription.
+  t(
+    'H8 open: no open deliverer -> the destructive prescription still fires',
+    halves([]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  t('H8 open: a missing open list is the pre-#10468 reading', halves(undefined).includes('Drop `pm:dispatched`'), true);
+  t(
+    'H8 open: an open PR delivering a DIFFERENT card does not downgrade the row',
+    halves([openHalf(10226, 'Part of #9999')]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  // No merged deliverer at all is still clean — the open side never MANUFACTURES
+  // a row, it only softens one the merged side already raised.
+  t(
+    'H8 open: an open deliverer with no merged half is clean',
+    h8MergedPrStillDispatched(dispatched(9834), [], [openHalf(10226, 'Part of #9834')]),
+    null,
+  );
+  // The open side reads delivery through the SAME relation, branch fallback
+  // included — a `Refs #N` open half is as live as a `Part of #N` one.
+  t(
+    'H8 open: the branch-name fallback applies to the open side too',
+    halves([{ number: 10226, body: 'Refs #9834', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-error-counter' } }]).includes('must NOT be dropped'),
+    true,
+  );
+  // …and its re-scope guard travels with it.
+  t(
+    'H8 open: a re-scoped open branch does not soften the row',
+    halves([{ number: 10226, body: 'Part of #9999', draft: false, merged_at: null, head: { ref: 'claude/issue-9834-x' } }]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+  // A merged row appearing in the open list is not an outstanding half.
+  t(
+    'H8 open: a merged row in the open list is not an open half',
+    halves([{ number: 10226, body: 'Part of #9834', merged_at: '2026-08-20T00:00:00Z' }]).includes('Drop `pm:dispatched`'),
+    true,
+  );
+
+  // -- H22: a CLOSED card still carrying a `pm:*` state label (#10688) -------
+  const closedCard = (labels, state_reason = 'completed') => ({
+    ...issue(labels),
+    number: 8531,
+    state: 'closed',
+    state_reason,
+  });
+
+  t('H22: closed + pm:dispatched -> finding', typeof h22ClosedCardPmResidue(closedCard(['pm:dispatched'])), 'string');
+  t('H22: …and names the residue label', h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('`pm:dispatched`'), true);
+  t('H22: …and names the close reason', h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('closed `completed`'), true);
+  t(
+    'H22: …and prescribes only the label strip, no other write',
+    h22ClosedCardPmResidue(closedCard(['pm:dispatched'])).includes('already closed'),
+    true,
+  );
+  t('H22: a not_planned close is residue too', typeof h22ClosedCardPmResidue(closedCard(['pm:queue'], 'not_planned')), 'string');
+  t('H22: a missing state_reason still renders a sentence', typeof h22ClosedCardPmResidue({ ...closedCard(['pm:queue']), state_reason: null }), 'string');
+  t(
+    'H22: …and never prints the string undefined',
+    h22ClosedCardPmResidue({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'),
+    false,
+  );
+  t('H22: several residue labels are all named', h22ClosedCardPmResidue(closedCard(['pm:blocked', 'pm:blocking'])).includes('`pm:blocking`'), true);
+
+  // The gate that keeps this from restating H3: an OPEN card is never this
+  // row's, whatever it carries — every other item here already reads it.
+  t('H22: an OPEN card carrying pm:dispatched is out of scope', h22ClosedCardPmResidue({ ...issue(['pm:dispatched']), number: 1, state: 'open' }), null);
+  t('H22: a card with no state field is out of scope', h22ClosedCardPmResidue(issue(['pm:dispatched'])), null);
+  t('H22: a closed card with no pm label is clean', h22ClosedCardPmResidue(closedCard(['domain:cli', 'bug'])), null);
+  t('H22: a closed card with no labels at all is clean', h22ClosedCardPmResidue(closedCard([])), null);
+  t('H22: a missing issue does not crash', h22ClosedCardPmResidue(undefined), null);
+
+  // The identity stickers, pinned OUT — a closed seat card keeps `pm:seat` as
+  // what it IS, not as a claim that work is in flight (see PM_RESIDUE_LABELS).
+  t('H22: `pm:seat` on a closed card is identity, not residue', h22ClosedCardPmResidue(closedCard(['pm:seat'])), null);
+  t('H22: `pm:epic` likewise', h22ClosedCardPmResidue(closedCard(['pm:epic'])), null);
+  t('H22: `pm:retriage` is deliberately out of the measured set', h22ClosedCardPmResidue(closedCard(['pm:retriage'])), null);
+  // …but a seat card ALSO carrying a state label is still residue.
+  t('H22: `pm:seat` + a state label is residue for the state label', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:dispatched`'), true);
+  t('H22: …and does not name the identity sticker', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:seat`'), false);
+
+  // The census's five, each pinned — the set is the item's scope, so a silent
+  // edit to it should break a test rather than quietly change what patrols.
+  t('H22: the measured residue set is the five from the census', PM_RESIDUE_LABELS.join(','), 'pm:dispatched,pm:queue,pm:blocked,pm:on-hold,pm:blocking');
+  // …and the two similarly-named sets stay APART: H13's carries `finding`, this
+  // one carries `pm:blocking`, and unifying them would break both items.
+  t('H22: the residue set is NOT H13\'s visibility set', PM_RESIDUE_LABELS.join(',') === PM_STATE_LABELS.join(','), false);
+  t('H22: …H13\'s set carries `finding`, which is a fine state to close in', PM_STATE_LABELS.includes('finding'), true);
+  t('H22: …and this one does not', PM_RESIDUE_LABELS.includes('finding'), false);
+  t('H22: …while `pm:blocking` is residue here and absent from H13\'s', PM_RESIDUE_LABELS.includes('pm:blocking') && !PM_STATE_LABELS.includes('pm:blocking'), true);
+  for (const label of PM_RESIDUE_LABELS) {
+    t(`H22: \`${label}\` on a closed card is residue`, typeof h22ClosedCardPmResidue(closedCard([label])), 'string');
+  }
+
+  // The summary line's H22 clause — a pass that read nothing must not read the
+  // same as a board with no residue (#4690), so the count is always stated.
+  t('summary: the H22 clause states what the closed pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0).includes('H22 read 200 recently-closed issue(s)'), true);
+  t('summary: an absent closed count degrades to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H22 read 0 recently-closed'), true);
+
+  // -- H23: the COMMIT-MESSAGE surface (#10942) -------------------------------
+  //
+  // Every case here drives the REST commit shape the sweep passes in, and the
+  // asymmetry cases are run against H7 in the same breath: the claim is not
+  // "this predicate fires", it is "these two surfaces answer DIFFERENTLY on one
+  // text", and only the paired assertion can say that.
+  const commitRow = (message, sha = 'abc123def0') => ({
+    sha,
+    html_url: `https://github.com/o/r/commit/${sha}`,
+    commit: { message },
+  });
+  /**
+   * The shape the squash actually produced in all six measured specimens: a
+   * lead commit whose trailer CLOSES the card, and a later commit on the same
+   * branch whose trailer says it is only `Part of` it — concatenated by the
+   * merge into one message. Reconstructed rather than quoted: the self-test is
+   * offline and pure, so it pins the SHAPE the corpus measured, not the bytes.
+   */
+  const squashOf = (card, pr, keyword = 'Fixes') =>
+    commitRow(
+      `fix(scope): the lead half (#${pr})\n\n` +
+        `* fix(scope): the lead half\n\nProse about the fix.\n\n${keyword} #${card}\n\n` +
+        `* test(scope): the second half\n\nMore prose.\n\nPart of #${card}\n\n---------\n\n` +
+        `Co-authored-by: Claude <noreply@anthropic.com>\n`,
+      `sha${pr}xx`,
+    );
+
+  // The six specimens the card measured, by (sha, card, PR). Columns kept apart
+  // deliberately, here and in the section docblock: this file must not put a
+  // closing keyword next to a live card number in any text a merge could read.
+  for (const [sha, card, pr] of [
+    ['0c24898c0', '10377', '10389'],
+    ['d7283250d', '10219', '10291'],
+    ['af2a989be', '9320', '9478'],
+    ['3db37957c', '8355', '8419'],
+    ['7e06f51ee', '8060', '8167'],
+    ['30536e37c', '7828', '8128'],
+  ]) {
+    t(`H23: the measured specimen shape (${sha}, card ${card}) fires`, typeof h23CommitMessageContradiction(squashOf(card, pr)), 'string');
+  }
+
+  // ⛔ THE ASYMMETRY — the card's point 2, pinned in both directions on ONE text.
+  // A commit message is not markdown, so a quoted keyword binds here; the same
+  // bytes in a PR body do not, and H7 must keep saying so.
+  const backticked = 'Part of #77\n\nThe blocking gate wanted `Fixes #77` here.\n';
+  t('H23: a backticked keyword in a COMMIT MESSAGE is a binding', typeof h23CommitMessageContradiction(commitRow(backticked)), 'string');
+  t('H23: …while the same bytes in a PR BODY are not (H7 stays clean)', h7PartOfWithClosingKeyword({ body: backticked }), null);
+  const fencedCommit = 'Part of #77\n\n```\nFixes #77\n```\n';
+  t('H23: a FENCED keyword in a commit message is a binding too', typeof h23CommitMessageContradiction(commitRow(fencedCommit)), 'string');
+  t('H23: …and the same bytes in a PR body are still not (H7 stays clean)', h7PartOfWithClosingKeyword({ body: fencedCommit }), null);
+  // The extractors themselves, at the two surfaces — the option is the whole
+  // mechanism, so it is pinned directly and not only through the verdicts.
+  t('extractor: a quoted keyword is invisible on the BODY surface (default)', closingKeywordTargets('a `Fixes #1` b').size, 0);
+  t('extractor: …and visible on the COMMIT surface', closingKeywordTargets('a `Fixes #1` b', { markdown: false }).size, 1);
+  t('extractor: `Part of` in a fence is invisible on the body surface', partOfTargets('```\nPart of #1\n```').size, 0);
+  t('extractor: …and visible on the commit surface', partOfTargets('```\nPart of #1\n```', { markdown: false }).size, 1);
+  t('extractor: the default is byte-identical to the pre-option reading', closingKeywordTargets('Fixes #1').get('1'), 'Fixes');
+
+  // The REMEDY TEXT. The realistic regression is someone copying H7's tail
+  // across, so H7's own sentence is asserted to CARRY the clause this one must
+  // never carry — a one-sided assertion would pass against a sentence that lost
+  // both.
+  const fired23 = h23CommitMessageContradiction(squashOf('9320', '9478'));
+  const fired7 = h7PartOfWithClosingKeyword({ body: 'Part of #77\n\nFixes #77' });
+  t('H23: the sentence prescribes REWORDING', fired23.includes('REWORD'), true);
+  t('H23: …and never the body-surface backtick remedy', fired23.includes('put the keyword in backticks'), false);
+  t('H23: …nor any "in backticks" advice at all', fired23.includes('in backticks'), false);
+  t('H23: …and says out loud that this surface is not markdown', fired23.includes('NOT markdown'), true);
+  t('H7: …while H7 KEEPS that remedy, which is correct for a body', fired7.includes('put the keyword in backticks'), true);
+  t('H23: the sentence names the commit sha', fired23.includes('sha9478xx'), true);
+  t('H23: …the bound card', fired23.includes('#9320'), true);
+  t('H23: …and the PR the squash marker names', fired23.includes('PR #9478'), true);
+  t('H23: …and it declines to adjudicate the close', fired23.includes('does NOT adjudicate'), true);
+
+  // Clean directions. H7's per-number binding carries over unchanged: a message
+  // that is part of one card and closes another is the normal correct shape.
+  t('H23: `Part of #A` + a keyword bound to #B -> clean', h23CommitMessageContradiction(commitRow('Part of #77\n\nFixes #88')), null);
+  t('H23: a plain closing trailer with no `Part of` -> clean', h23CommitMessageContradiction(commitRow('fix(x): a fix (#99)\n\nFixes #77')), null);
+  t('H23: `Part of` alone -> clean', h23CommitMessageContradiction(commitRow('Part of #77')), null);
+  t('H23: gerunds are not closing keywords here either', h23CommitMessageContradiction(commitRow('Part of #77\n\nStill fixing #77.')), null);
+  t('H23: empty / missing message', h23CommitMessageContradiction(commitRow(undefined)), null);
+  t('H23: a missing commit object', h23CommitMessageContradiction(undefined), null);
+  // H21's negation window is deliberately NOT ported to this surface: it flags 0
+  // of the 270 measured bindings, so this row is the `Part of` contradiction and
+  // nothing else. A future port is a card with its own numbers.
+  t('H23: a negated bare close is NOT this row (H21 not ported)', h23CommitMessageContradiction(commitRow('This does not fix #77.')), null);
+
+  // The PR correlation, and the measured property that makes it safe: the `(`
+  // of the squash marker stands between any preceding keyword and the number,
+  // so no subject's own marker can be read as a card binding (0 of 1,545).
+  t('commitSubjectPrNumber: reads the squash marker', commitSubjectPrNumber('fix(x): a subject (#11085)\n\nbody'), '11085');
+  t('commitSubjectPrNumber: absent marker -> null', commitSubjectPrNumber('fix(x): a subject\n\nbody'), null);
+  t('commitSubjectPrNumber: a marker in the BODY is not the subject\'s', commitSubjectPrNumber('fix(x): a subject\n\nquoted from another commit (#123)'), null);
+  t('commitSubjectPrNumber: empty message', commitSubjectPrNumber(''), null);
+  t('the squash marker is never bound as a card (the paren stands between)', closingKeywordTargets('fix(x): a subject that fixed (#11085)', { markdown: false }).size, 0);
+  t('…including the substring case the corpus is full of', closingKeywordTargets('fix(rest): optional KernelResolver.resolveEnvironment (#11085)', { markdown: false }).size, 0);
+
+  // The summary line's H23 clause — with a yield of ~6 in 1,546 a quiet row is
+  // the NORMAL reading, so the coverage numbers are the only thing separating a
+  // read surface from an unread one (#4690).
+  t('summary: the H23 clause states what the commit pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('H23 read 300 squash commit message(s)'), true);
+  t('summary: …and the binding totals a promotion decision would need', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
+  t('summary: …and states the window boundary', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300 }, 0).includes('invisible by design'), true);
+  t('summary: absent H23 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H23 read 0 squash commit message(s)'), true);
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
   const hold = (body) => issue(['pm:on-hold'], [], body);

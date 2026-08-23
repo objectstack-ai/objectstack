@@ -11,7 +11,17 @@
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
+ *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## This tool answers about the tree it RUNS IN, and says so on every run
+ *
+ * It lives in one repo and derives from that repo's workflows and check
+ * scripts. Handed another repo's paths it used to answer anyway — confidently,
+ * well-formed, exit 0, about the wrong tree. Every derivation now opens with a
+ * banner naming the repo and commit it came from, and `--repo` turns a caller's
+ * expectation into a checked assertion that refuses on mismatch. See the
+ * cross-repo guard section for what can be detected honestly and what cannot.
  *
  * ## Two input modes, because there are two questions (#9320)
  *
@@ -465,6 +475,64 @@ const NO_CHECK_FAMILIES_MARKER = /^[ \t]*#[ \t]*dispatch-gates:[ \t]*no-check-fa
 
 export function declaredNoCheckFamiliesReason(workflowText) {
   const m = NO_CHECK_FAMILIES_MARKER.exec(workflowText);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * A GATE SCRIPT's own declaration that it deliberately has no path population —
+ * a whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: no-path-population -- <reason>
+ *   #  dispatch-gates: no-path-population -- <reason>      (shell gates)
+ *
+ * ## What it is for (#10542)
+ *
+ * `undetermined` is this derivation's honest bucket — "source names no path at
+ * all, NOT known irrelevant" — and it is honest precisely because it does not
+ * claim to know why. That is the right verdict and the wrong report: measured
+ * over this tree, the bucket holds gates whose emptiness has three completely
+ * different causes, and a reader cannot tell them apart:
+ *
+ *   the derivation CANNOT place it   a gate whose population is a registry,
+ *                                    not a path (the spec-liveness job)
+ *   the derivation NEED NOT place it a gate whose CI invocation is its own
+ *                                    `--self-test`, so no card's file surface
+ *                                    should ever schedule it
+ *   the derivation ALREADY places it a gate whose population is one repo-root
+ *                                    file its own workflow names in `paths:`,
+ *                                    reached through the trigger key (#9171)
+ *                                    rather than through a hint
+ *
+ * The last two are FINISHED work that reads exactly like the unexamined pile.
+ * #10542 was filed against a count of that pile, and the count could not have
+ * distinguished them — which is the failure this marker retires: a family whose
+ * emptiness has been read and explained says so, in its own source, and the
+ * residue reports it apart from the families nobody has looked at.
+ *
+ * ## Why a marker IN the gate, never a list in this script
+ *
+ * Same reason as `declaredNoCheckFamiliesReason` above, one level down: a
+ * hardcoded roster here is a second copy of a fact that belongs on the thing it
+ * describes, and it drifts silently — the gate grows a real population, or gets
+ * renamed, and the roster keeps vouching for it. A marker the gate carries is
+ * read fresh on every run.
+ *
+ * The reason is REQUIRED, not just the marker. An opt-out with no reason reads
+ * identically to a placeholder nobody will revisit, and is exactly the shape a
+ * reviewer cannot tell apart from a gate whose population was never examined.
+ *
+ * ⚠️ This marker is NOT an escape from declaring a real population. A gate that
+ * walks a subtree declares it (the `ROOT_DIR_WATCH_HINTS` idiom); a gate whose
+ * population is a repo-root file declares the subtree spelling. The marker is
+ * for the families where BOTH of those are false, and the self-test holds that
+ * line by asserting the live tree's markers are only ever on families this
+ * derivation leaves unplaced.
+ */
+const NO_PATH_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*no-path-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredNoPathPopulation(scriptSource) {
+  const m = NO_PATH_POPULATION_MARKER.exec(String(scriptSource));
   return m ? m[1].trim() : null;
 }
 
@@ -2165,6 +2233,10 @@ export const CHANGE_KIND_GATES = [
         why: 'it walks every *.test.* file for fake engine doubles and fails when one declares delete()/update() without routing through assertEngineDeleteDispatch/assertEngineUpdateDispatch, against a shrink-only per-file baseline. A new double, or a new test file carrying one, moves it — and so does a delegating pass-through seam wrapping a real engine, which is the reading that missed it twice. Repair by fixing the double, never by raising the baseline. Cheap and whole-tree: one run answers for the whole repo and names the file and line',
       },
       {
+        name: 'check:cross-package-test-inputs',
+        why: "it walks packages/, apps/ and examples/ for tests that read or import OUTSIDE their own package, and fails when turbo.json's `inputs` for that package does not declare what the test really reads — so a new test, or a new cross-package read in an existing one, moves it. Listed as a KIND rather than by path (#10542): its walk covers 5263 tracked files to judge the 2611 test files among them, so a subtree declaration would name it at 49.6% precision, while the kind names it at the granularity it actually judges. Repair by declaring the input in turbo.json, never by moving the fixture",
+      },
+      {
         name: 'check:where-matcher',
         why: 'it walks every *.test.ts file for hand-written WHERE matchers and fails on a NEW silently-wrong one (a combinator read as a field name), against a shrink-only baseline. It rides the same test code as the double gate — one new fake engine tripped both, one round apart, because these steps run sequentially inside the ESLint job and the first failure aborts the rest. Conforming by REFUSING the unsupported shape is the convention most of the discovered matchers already follow; the suite cannot notice this class, which is why the gate exists',
       },
@@ -2495,7 +2567,10 @@ export function unreachableLines(unreachable, swept) {
 }
 
 export function residueLines(
-  { discovered, matched, undetermined, silent, unfiltered, unreachable, swept, artifactRosters, invertedRosters },
+  {
+    discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
+    artifactRosters, invertedRosters, documentedNoPopulation,
+  },
   kinds = CHANGE_KIND_GATES,
 ) {
   const placed = matched + undetermined + silent;
@@ -2539,11 +2614,30 @@ export function residueLines(
         "(the rosters whose common directory contains one of the caller's paths — a subset, never omitted)",
     );
   }
+  // Held to the same standard as the counts above, and for the same reason
+  // (#10542): this one sizes the part of `undetermined` that has been READ and
+  // explained, and a count that could go missing quietly would render the one
+  // line separating examined from unexamined as a line with `undefined` in it.
+  if (
+    !Number.isInteger(documentedNoPopulation)
+    || documentedNoPopulation < 0
+    || documentedNoPopulation > undetermined
+  ) {
+    throw new Error(
+      `documented-no-population count is not derivable: got ${String(documentedNoPopulation)} of ${undetermined} undetermined ` +
+        '(it is a subset of the undetermined families, read from each gate\'s own marker — never omitted)',
+    );
+  }
   const unplaced = undetermined + silent;
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
+    `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
+      ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
+      ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
+      ' (the ROOT_DIR_WATCH_HINTS idiom) and a gate whose population is a repo-root FILE declares the subtree spelling — the marker is only for the' +
+      ' families where both of those are false.',
     '  A `silent` verdict is this derivation\'s weakest claim, not a clearance, and there are two ways to earn it that have' +
       ' nothing to do with your paths: a gate that computes its own population and names only its baseline artifact scores' +
       ' silent for every card in the tree, and so does one whose population is a repo-root FILE it spells as a bare' +
@@ -2895,8 +2989,15 @@ export function discoverFamilies() {
     entry.files = files;
     for (const f of files) {
       const abs = join(ROOT, f);
-      if (existsSync(abs)) entry.hints.push(...extractWatchHints(readFileSync(abs, 'utf8')));
+      if (!existsSync(abs)) continue;
+      // ONE read, two answers — the hints and the gate's own no-population
+      // declaration — so the pair can never describe different revisions of a
+      // file, the same discipline the trigger paths take above.
+      const source = readFileSync(abs, 'utf8');
+      entry.hints.push(...extractWatchHints(source));
+      entry.noPopulationReason ??= declaredNoPathPopulation(source);
     }
+    entry.noPopulationReason ??= null;
   }
   return { byCheck, workflows };
 }
@@ -2976,6 +3077,13 @@ function derive(paths, { showResidue = false } = {}) {
           ? `   names: ${[...new Set(entry.hints)].slice(0, 3).join(', ')}${entry.hints.length > 3 ? ', …' : ''}`
           : '';
         console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]${names}`);
+        // The gate's own account of why it names nothing (#10542), printed
+        // against the family rather than only counted in the residue: a reader
+        // looking at this listing is deciding whether to go READ the gate, and
+        // that is exactly the decision this declaration answers.
+        if (entry.noPopulationReason) {
+          console.log(`      ↳ declared no path population — ${entry.noPopulationReason}`);
+        }
         // The silence split (#10784): a family that declared only ARTIFACTS
         // said the same words in this listing as one that really does not read
         // your file. The note says which, and raises its voice only where the
@@ -3006,6 +3114,7 @@ function derive(paths, { showResidue = false } = {}) {
     swept: swept.length,
     artifactRosters: rosters.length,
     invertedRosters: rosters.filter((r) => r.coversYourPath).length,
+    documentedNoPopulation: undetermined.filter(([, e]) => e.noPopulationReason).length,
   })) {
     console.log(line);
   }
@@ -3138,6 +3247,258 @@ function derivationProvenance({ paths, base, mergeBase, counts }) {
     `  (committed ${counts.committed}, working tree ${counts.worktree}, untracked ${counts.untracked}; three-dot semantics, never '${base}..HEAD')`,
     ...paths.map((p) => `  · ${p}`),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// WHOSE repo is this answer about? — the cross-repo guard
+// ---------------------------------------------------------------------------
+
+/**
+ * This tool exists in ONE repo and answers about the tree it is run in.
+ *
+ * ## The measured failure
+ *
+ * The gate inventory is derived from the workflows and check scripts of
+ * whatever checkout the process happens to sit in. That is the whole design and
+ * it is right — but the answer never said so. A seat dispatching a card that
+ * lands in a SISTER repo (which has no copy of this script at all: no
+ * `scripts/pm` directory, nothing to run) ran it from this checkout with that
+ * card's paths and got back a confident, well-formed, entirely wrong answer:
+ * 121 families across 26 workflow files, three matched, a residue breakdown —
+ * every number real, and every number about the WRONG repo. Exit 0. The only
+ * tell was incidental: a family name and a package name the other repo does not
+ * have, noticed by accident rather than by the tooling.
+ *
+ * The correct list for that card had to be hand-derived, and it differed
+ * substantially — the load-bearing family in it was one this checkout's run
+ * never mentions. So the failure is not "slightly off": it is the exact shape
+ * the derive-don't-recall contract exists to remove, one level up. A dev is
+ * handed families that do not exist in its repo and is missing the ones that
+ * do; it runs what it was told, reports those green, and the real gates are
+ * first exercised in CI.
+ *
+ * ## What can be detected honestly, and what cannot
+ *
+ * The paths a caller passes are REPO-RELATIVE, and the explicit-path mode is
+ * documented as a hypothesis about files that may not exist yet. So a path's
+ * home repo is not recoverable from its shape, and existence in this checkout
+ * is a WEAK signal in both directions — the measured failure used `package.json`
+ * and the lockfile, which every repo in the family has. Guessing a repo from a
+ * path would fabricate the same kind of confident wrong answer one layer down.
+ *
+ * What is honestly available is two things, and this guard is exactly those:
+ *
+ *   BANNER      Every derivation says, as its FIRST line, which repo's tree
+ *               produced it, at which commit. Unconditional, so the seat cannot
+ *               be reading an answer without reading whose answer it is. It
+ *               costs nothing and it closes "no tell" — which was the defect.
+ *   ASSERTION   `--repo <owner>/<name>` states which repo the answer must be
+ *               about. It is checked against this checkout's own `origin`
+ *               remote and a mismatch REFUSES, naming both repos. A caller that
+ *               knows the answer it needs can now demand the tool prove it.
+ *
+ * Refusal, not a warning, for the assertion half: a warning is the failure mode
+ * already measured one level up — output that reads as an answer while being
+ * about the wrong tree. A caller that spelled `--repo` has stated a
+ * requirement, and a requirement the tool cannot meet is an error. The banner
+ * half is unconditional precisely because it cannot refuse: with no assertion
+ * there is nothing to contradict, and refusing every explicit-path run would
+ * break the mode the PM uses on every dispatch.
+ *
+ * ## Why the banner goes to STDERR
+ *
+ * Not to hide it — it is printed first and it is a full sentence. Stdout is
+ * contractually the ANSWER and nothing else, because both modes' stdout gets
+ * pasted verbatim (the tier verdict into a claim comment, the gate list into a
+ * dispatch prompt). A provenance line on stdout would travel into those
+ * artifacts as though it were part of the answer, and the derived-change-set
+ * provenance next door already made this call for the same reason.
+ *
+ * ## What this guard deliberately does NOT do
+ *
+ * It does not point the derivation at another checkout. `--repo` asserts, it
+ * never retargets — and it refuses a value shaped like a filesystem path so
+ * that the misreading fails loudly instead of being taken as a repo name.
+ * Deriving another repo's gates would be new cross-repo capability, and no
+ * second-repo consumer for it exists yet: the sister repos hold no copy of this
+ * script and their seats hand-derive. When one does exist it gets its own flag,
+ * whose value is a checkout, and the two meanings stay apart.
+ */
+
+/** The assertion flag. Leading dashes keep it out of this file's own hint set. */
+const REPO_FLAG = '--repo';
+
+/**
+ * `<owner>/<name>` out of a git remote URL, or null when it is not recoverable.
+ *
+ * Both spellings git writes end in the same two segments — the URL form and the
+ * SCP-like form differ only in the separator before the owner, so splitting on
+ * both separators and taking the last two is one rule for both. A value that
+ * does not end in two plain name segments returns null rather than a guess: an
+ * unrecognised remote must read as "unknown", never as a repo identity, because
+ * the assertion below treats unknown as unverifiable and refuses.
+ */
+export function parseRepoSlug(remoteUrl) {
+  const raw = String(remoteUrl ?? '').trim();
+  if (!raw) return null;
+  const segments = raw
+    .replace(/\?.*$/, '')
+    .replace(/[/\\]+$/, '')
+    .replace(/\.git$/i, '')
+    .split(/[:/\\]+/)
+    .filter(Boolean);
+  if (segments.length < 2) return null;
+  const [owner, name] = segments.slice(-2);
+  if (!isPlainRepoSegment(owner) || !isPlainRepoSegment(name)) return null;
+  return `${owner}/${name}`;
+}
+
+/** A repo/owner name segment: word characters, dots and dashes — never all dots. */
+function isPlainRepoSegment(segment) {
+  return /^[\w.-]+$/.test(segment) && /[^.]/.test(segment);
+}
+
+/**
+ * Who this checkout is, measured — never assumed and never hardcoded.
+ *
+ * Every field is independently optional. A tree with no readable `origin`
+ * remote is a real state (a fresh clone-less checkout, a mirror with a
+ * differently-named remote), and it must degrade to "unverified" rather than
+ * throw: the banner still has a directory and a commit to name, and only the
+ * assertion — which needs an identity to compare against — refuses.
+ */
+export function repoIdentity({ cwd = ROOT } = {}) {
+  const read = (args) => {
+    try {
+      const r = runGit(args, cwd);
+      return r.status === 0 ? r.stdout.trim() : null;
+    } catch {
+      return null; // git itself unavailable — the banner degrades, it never throws
+    }
+  };
+  const root = read(['rev-parse', '--show-toplevel']);
+  const head = read(['rev-parse', '--short', 'HEAD']);
+  const remote = read(['remote', 'get-url', DEFAULT_BASE_REMOTE]);
+  return { root: root ?? cwd, head, remote, slug: remote ? parseRepoSlug(remote) : null };
+}
+
+/**
+ * Split argv into paths, flags and the repo assertion.
+ *
+ * The assertion's VALUE must not fall through into the path list. The previous
+ * parse took every non-`--` argument as a path, so a two-token flag added
+ * without touching it would have quietly derived gates for a repo NAME read as
+ * a file — a new silent wrong answer inside the fix for a silent wrong answer.
+ * Both spellings are accepted because both get typed.
+ */
+export function splitArgv(argv) {
+  const paths = [];
+  const flags = [];
+  let assertion = null;
+  let malformed = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === REPO_FLAG) {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        malformed = `${REPO_FLAG} needs a value`;
+      } else {
+        assertion = value;
+        i++;
+      }
+      continue;
+    }
+    if (arg.startsWith(`${REPO_FLAG}=`)) {
+      const value = arg.slice(REPO_FLAG.length + 1);
+      if (!value) malformed = `${REPO_FLAG} needs a value`;
+      else assertion = value;
+      continue;
+    }
+    if (arg.startsWith('-')) flags.push(arg);
+    else paths.push(arg);
+  }
+  return { paths, flags, assertion, malformed };
+}
+
+/**
+ * Check an assertion against this checkout. `{ ok }` plus the lines to print.
+ *
+ * Every refusal names BOTH repos — the one asserted and the one this tree
+ * actually is — because the whole defect was an answer that named neither.
+ */
+export function repoAssertionVerdict({ asserted, identity }) {
+  const wanted = String(asserted ?? '').trim();
+  const here = identity?.slug ?? null;
+  // Normalised for COMPARISON only; every message quotes the value as typed.
+  const normalized = /^[~.]|^\/|\\/.test(wanted) || wanted.split('/').filter(Boolean).length !== 2
+    ? null
+    : parseRepoSlug(wanted);
+
+  if (!normalized) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: ${REPO_FLAG} expects an owner and a repository name separated by a slash — got '${wanted}'.`,
+        `  This flag ASSERTS which repo the answer must be about; it does not point the derivation at another checkout.`,
+        `  Gate families are read from the tree this process runs in${here ? ` (${here})` : ''} and from no other.`,
+      ],
+    };
+  }
+
+  if (!here) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: cannot verify ${REPO_FLAG} '${wanted}' — this checkout's '${DEFAULT_BASE_REMOTE}' remote is unreadable, so its repo identity is UNKNOWN.`,
+        `  Refusing rather than assuming the assertion holds: an unverifiable assertion that passes is worth less than no assertion at all.`,
+        `  Tree: ${identity?.root ?? 'unknown'}`,
+      ],
+    };
+  }
+
+  if (here.toLowerCase() !== normalized.toLowerCase()) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: REFUSING — asked for '${wanted}', but this checkout is '${here}'.`,
+        `  Gate families are derived from the workflows and check scripts of the tree this process runs in, so an answer from here is about '${here}' whatever paths you pass.`,
+        `  Repo-relative paths cannot tell the two apart: the same manifest and lockfile names exist in both, which is why a run like this used to return a confident wrong answer instead of this message.`,
+        `  Derive '${wanted}' from a checkout OF '${wanted}' — this script exists only in '${here}', so a sister repo's list is hand-derived from its own package manifest and its own workflow files.`,
+        `  Tree: ${identity.root}`,
+      ],
+    };
+  }
+
+  return { ok: true, lines: [] };
+}
+
+/**
+ * The provenance banner — the first thing every derivation prints.
+ *
+ * The unplaceable-path count is reported in ONE direction only. Paths missing
+ * from this tree are expected for a card whose surface is not written yet, and
+ * they are also what a wrong-repo run looks like, so the line says both and
+ * claims neither. There is deliberately no "all paths present" line: that would
+ * read as a clearance, and it is precisely the reading the measured failure
+ * would have passed — its two paths exist in every repo in the family.
+ */
+export function bannerLines({ identity, paths = [] }) {
+  const at = identity?.head ? ` at commit ${identity.head}` : '';
+  const who = identity?.slug
+    ? `'${identity.slug}'${at} (${identity.root})`
+    : `${identity?.root ?? 'this directory'}${at} — repo identity UNVERIFIED, its '${DEFAULT_BASE_REMOTE}' remote could not be read`;
+  const lines = [
+    `dispatch-gates: gate list derived from the tree of ${who}.`,
+    `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
+  ];
+  const missing = paths.filter((p) => !p.includes('*') && !existsSync(join(identity?.root ?? ROOT, p)));
+  if (missing.length > 0) {
+    lines.push(
+      `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
+      `  Expected for a surface not written yet — and also what a run against another repo's paths looks like. Not evidence either way.`,
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -3985,7 +4346,10 @@ function selfTest() {
 
   const resolved = (name) => `pnpm ${name}`;
   const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
-  t('a test path emits the convention section', kindHit.length === 6 && kindHit[0].includes('adds or edits a test file'));
+  // Seven: the kind's own heading plus its six gates (#10542 added
+  // check:cross-package-test-inputs, whose judged population is exactly this
+  // kind rather than a subtree any path hint can name).
+  t('a test path emits the convention section', kindHit.length === 7 && kindHit[0].includes('adds or edits a test file'));
   // All three halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
   // reason the i18n entry's pins below state at length: a bare `includes` is
   // satisfied by every name that merely STARTS WITH the expected one, so a
@@ -4504,12 +4868,13 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  // Six, not five, since the root-program entry joined the table: `a.test.ts`
-  // is a root-level TypeScript file, so it is BOTH a test file and inside the
-  // root tsc program and legitimately hits two kinds. The ratchet therefore
-  // renders twice, under a different `why` each time — pinned just below,
-  // because a bare count cannot tell that apart from one kind rotting away.
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 6);
+  // Seven, not six, since #10542 added check:cross-package-test-inputs to the
+  // test-file kind. `a.test.ts` is a root-level TypeScript file, so it is BOTH
+  // a test file and inside the root tsc program and legitimately hits two
+  // kinds. The ratchet therefore renders twice, under a different `why` each
+  // time — pinned just below, because a bare count cannot tell that apart from
+  // one kind rotting away.
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 7);
   t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
@@ -4517,6 +4882,10 @@ function selfTest() {
   // leading substring stays green through a `-v2` rename — the two ways this
   // table has actually rotted.
   t('the coverage half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-coverage: STALE')));
+  t(
+    'and so does the cross-package-inputs entry, anchored on both sides of its own name',
+    stale.some((l) => l.includes('⚠ check:cross-package-test-inputs: STALE')),
+  );
   t('the ratchet half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-debt: STALE')));
   t('the engine-double ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:engine-double-contract: STALE')));
   t('the where-matcher ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:where-matcher: STALE')));
@@ -4547,6 +4916,10 @@ function selfTest() {
   // — a count alone stays green if one is dropped and another added.
   t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
   t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
+  t(
+    'check:cross-package-test-inputs is a live family (#10542 moved it here from a path derivation that could name it at 49.6% precision at best)',
+    liveFamilies.has('check:cross-package-test-inputs'),
+  );
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
@@ -4612,6 +4985,119 @@ function selfTest() {
     "a paths-filtered, zero-family workflow carrying the marker is NOT a gap — the declared opt-out this card's route requires",
     checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
   );
+
+  // ── The gate-level no-population declaration (#10542) ─────────────────────
+  //
+  // The workflow-level marker above says "this workflow names no gate"; this
+  // one says "this gate names no path, and here is why". Both directions are
+  // pinned, and so is the live tree, because the whole value of the second is
+  // that it separates families that have been READ from families nobody has
+  // looked at — and a marker that quietly stopped parsing would merge them back
+  // together while every count still printed.
+  t(
+    'a gate-level no-population declaration reads its reason back',
+    declaredNoPathPopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n')
+      === 'CI runs the self-test only',
+  );
+  t(
+    'the shell comment spelling is read too (shell gates carry # comments, and the derivation discovers them)',
+    declaredNoPathPopulation('#!/usr/bin/env bash\n# dispatch-gates: no-path-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared no-population', declaredNoPathPopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared (an opt-out with no reason reads exactly like a placeholder nobody will revisit)',
+    declaredNoPathPopulation('// dispatch-gates: no-path-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — a mention inside prose is a discussion of the convention, not a declaration under it',
+    declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
+  );
+  // The residue count that carries it refuses a missing or impossible value in
+  // the same shape as every other count in that line: a subset that could go
+  // absent quietly renders as `undefined` in the one line a reader needs.
+  const residueArgs = {
+    discovered: 3, matched: 1, undetermined: 1, silent: 1, unfiltered: 0,
+    unreachable: 0, swept: 10, artifactRosters: 0, invertedRosters: 0,
+  };
+  t(
+    'the residue REFUSES an omitted documented-no-population count',
+    (() => {
+      try {
+        residueLines({ ...residueArgs });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+  );
+  t(
+    'and refuses one larger than the undetermined bucket it is a subset of',
+    (() => {
+      try {
+        residueLines({ ...residueArgs, documentedNoPopulation: 2 });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+  );
+  t(
+    'and renders the count when it is derivable',
+    residueLines({ ...residueArgs, documentedNoPopulation: 1 })
+      .some((l) => /1 of those 1 undetermined famil\(ies\) DECLARE/.test(l)),
+  );
+
+  // The live half. A marker is a claim about a gate, so it is held against the
+  // real derivation: a family that DOES name paths must not be carrying one.
+  // Without this the marker rots in the direction that costs — a gate grows a
+  // real population, keeps its old declaration, and the residue keeps vouching
+  // that its emptiness was examined.
+  const liveDiscovery = discoverFamilies();
+  const declaredEmpty = [...liveDiscovery.byCheck].filter(([, e]) => e.noPopulationReason);
+  t(
+    `the live tree carries at least one no-population declaration (the guard is not vacuous; found ${declaredEmpty.length})`,
+    declaredEmpty.length > 0,
+  );
+  const contradicted = declaredEmpty.filter(([, e]) => (e.hints ?? []).length > 0).map(([c]) => c);
+  t(
+    `no family both DECLARES no path population and names paths anyway (contradicted: ${contradicted.join(', ') || 'none'})`,
+    contradicted.length === 0,
+  );
+  t(
+    'every live declaration carries a non-empty reason',
+    declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
+  );
+
+  // ── Hints come from the COMMAND's named scripts, never from their imports ──
+  //
+  // Load-bearing, and pinned here because a decision rests on it (#10542). The
+  // card proposed consolidating the dozen private pnpm-workspace.yaml parsers
+  // into one shared enumerator, on the reasoning that it would make the
+  // population declarable in ONE place. Under this derivation it would do the
+  // opposite: `resolveCheckToFiles` reads the script paths out of the npm
+  // script's COMMAND STRING, and `discoverFamilies` scans exactly those files.
+  // A module a gate imports is never opened, so moving a population declaration
+  // into a shared enumerator DELETES it from every gate that imports it — which
+  // would silently undo the very declarations #10540 and this card added.
+  //
+  // So the consolidation is blocked on teaching this derivation to follow
+  // first-party imports, not on the gates. Stated as an assertion rather than
+  // as that paragraph, so a later author measures it instead of trusting it.
+  const importingFamily = [...liveDiscovery.byCheck].find(
+    ([, e]) => (e.files ?? []).length === 1
+      && existsSync(join(ROOT, e.files[0]))
+      && /^\s*import\s[^\n]*\sfrom\s+'\.\//m.test(readFileSync(join(ROOT, e.files[0]), 'utf8')),
+  );
+  t('the live tree has a single-file family that imports a sibling module (the pin is not vacuous)', Boolean(importingFamily));
+  if (importingFamily) {
+    const [, entry] = importingFamily;
+    const ownHints = new Set(extractWatchHints(readFileSync(join(ROOT, entry.files[0]), 'utf8')));
+    t(
+      'a family\'s hints are exactly those of the scripts its COMMAND names — an imported module contributes none, so a shared enumerator cannot carry a population declaration for its callers',
+      [...new Set(entry.hints)].every((h) => ownHints.has(h)),
+    );
+  }
 
   // The live guard: every REAL paths-filtered workflow either discovers a
   // family or declares why not. This is what actually fails CI the day a new
@@ -4774,7 +5260,7 @@ function selfTest() {
   // every discovered family, and it names no gate. The second is the one that
   // rots — a hand-written list of gate names in this paragraph is exactly what
   // was wrong with it — so it is asserted directly rather than by inspection.
-  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+  const residue = residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
@@ -4785,7 +5271,7 @@ function selfTest() {
   // constant sentence would be a line the reader learns to skip.
   t('the residue summary sizes the artifact rosters inside silent', residue.some((l) => l.includes('4 of those 55')));
   t('and calls out the ones whose roster sits where the card is', residue.some((l) => l.includes('For 1 of them') && l.includes('EITHER direction')));
-  const noInverted = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 0 });
+  const noInverted = residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 0 });
   t('with none of them there it says THAT instead, rather than printing the warning at zero', noInverted.some((l) => l.includes('None of their rosters')) && !noInverted.join('\n').includes('EITHER direction'));
   // The same rot, one noun over (#10012). The top-level-FILE clause used to
   // illustrate the unreachable class with `README.md`, which was honest until
@@ -4810,7 +5296,7 @@ function selfTest() {
   // which is the failure class this whole card is about.
   let refused = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+    residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refused = true;
   }
@@ -4820,7 +5306,7 @@ function selfTest() {
   // a derivation rather than as the absent measurement it is.
   let refusedUnfiltered = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+    residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refusedUnfiltered = true;
   }
@@ -4840,34 +5326,34 @@ function selfTest() {
   };
   t(
     'an omitted unreachable count is REFUSED, never printed as undefined',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'an unreachable count with NO corpus size is REFUSED — the number is unreadable without it',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'a sweep that swept zero files is REFUSED at the summary too, not printed as a clean repo',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'zero unreachable over a real corpus is a legitimate answer, not a refusal',
-    !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
+    !refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
   );
   // The silence split is held to the same standard as the counts above: it is
   // a SUBSET count, so both directions of the subsetting are refused rather
   // than trusted, and an omitted one must not print as `undefined`.
   t(
     'an omitted artifact-roster count is REFUSED, never printed as undefined',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, invertedRosters: 0 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, invertedRosters: 0 }),
   );
   t(
     'a roster count larger than the silent bucket it subsets is REFUSED',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 56, invertedRosters: 0 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 56, invertedRosters: 0 }),
   );
   t(
     'and an inverted count larger than the rosters it subsets is REFUSED',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 5 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 5 }),
   );
 
   // ── The families a changeset will add (#10309) ────────────────────────────
@@ -5185,6 +5671,91 @@ function selfTest() {
     rmSync(gitTmp, { recursive: true, force: true });
   }
 
+  // ── Whose repo the answer is about — the cross-repo guard ─────────────────
+  //
+  // The defect this pins is an answer that was RIGHT about the wrong tree, so
+  // both directions have to be measured on the real CLI, not reasoned about:
+  // a matching assertion must leave the answer byte-identical (otherwise the
+  // guard taxes every correct dispatch), and a mismatching one must end the run
+  // (otherwise it is the warning that was already measured as ignorable).
+  t('a remote in URL form yields its owner and name', parseRepoSlug('https://github.com/an-owner/a-repo.git') === 'an-owner/a-repo');
+  t('and in the SCP-like form git also writes', parseRepoSlug('git@github.com:an-owner/a-repo.git') === 'an-owner/a-repo');
+  t('a suffixless URL with a trailing slash reads the same', parseRepoSlug('https://github.com/an-owner/a-repo/') === 'an-owner/a-repo');
+  t('a remote that does not end in two name segments is UNKNOWN, never a guess', parseRepoSlug('some-bare-word') === null && parseRepoSlug('') === null);
+
+  const splitWithValue = splitArgv([REPO_FLAG, 'an-owner/a-repo', 'packages/spec/src/index.ts', '--residue']);
+  t('the assertion value never falls through into the path list', splitWithValue.paths.length === 1 && splitWithValue.paths[0] === 'packages/spec/src/index.ts');
+  t('and the assertion and the other flags both survive the split', splitWithValue.assertion === 'an-owner/a-repo' && splitWithValue.flags.includes('--residue'));
+  t('the joined spelling parses to the same thing', splitArgv([`${REPO_FLAG}=an-owner/a-repo`]).assertion === 'an-owner/a-repo');
+  t('a valueless assertion is malformed, not silently dropped', !!splitArgv([REPO_FLAG]).malformed && !!splitArgv([REPO_FLAG, '--tier']).malformed);
+  t('no assertion passed stays null, so the unasserted run is untouched', splitArgv(['packages/spec/src/index.ts']).assertion === null);
+
+  const hereIdentity = { root: '/tmp/x', head: 'abc1234', remote: 'r', slug: 'an-owner/a-repo' };
+  t('an assertion this checkout satisfies passes', repoAssertionVerdict({ asserted: 'an-owner/a-repo', identity: hereIdentity }).ok);
+  t('and it passes case-insensitively, as repo slugs compare', repoAssertionVerdict({ asserted: 'An-Owner/A-Repo', identity: hereIdentity }).ok);
+  const mismatch = repoAssertionVerdict({ asserted: 'other-owner/other-repo', identity: hereIdentity });
+  t('an assertion this checkout contradicts is REFUSED', !mismatch.ok);
+  const mismatchText = mismatch.lines.join('\n');
+  t('and the refusal names BOTH repos — the defect was an answer that named neither', mismatchText.includes('other-owner/other-repo') && mismatchText.includes('an-owner/a-repo'));
+  t('the refusal says repo-relative paths cannot tell the two apart', mismatchText.includes('Repo-relative paths cannot tell the two apart'));
+  t('and it sends the reader to a checkout of the repo they asked about', mismatchText.includes('hand-derived'));
+  const unverifiable = repoAssertionVerdict({ asserted: 'an-owner/a-repo', identity: { root: '/tmp/x', head: null, remote: null, slug: null } });
+  t('an assertion that cannot be VERIFIED refuses too — an unverifiable pass is worth less than none', !unverifiable.ok && unverifiable.lines.join('\n').includes('UNKNOWN'));
+  const retargetAttempt = repoAssertionVerdict({ asserted: '../a-sister-checkout', identity: hereIdentity });
+  t('a value shaped like a checkout PATH is refused, so the retarget misreading fails loudly', !retargetAttempt.ok && retargetAttempt.lines.join('\n').includes('does not point the derivation at another checkout'));
+  t('and so is a three-segment value', !repoAssertionVerdict({ asserted: 'a/b/c', identity: hereIdentity }).ok);
+
+  const bannerHit = bannerLines({ identity: hereIdentity, paths: [] });
+  t('the banner names the repo and the commit the answer came from', bannerHit[0].includes('an-owner/a-repo') && bannerHit[0].includes('abc1234'));
+  t('and it points at the assertion flag, so the tell is actionable', bannerHit.join('\n').includes(REPO_FLAG));
+  t('an unreadable remote reads as UNVERIFIED in the banner, never as a repo name', bannerLines({ identity: { root: '/tmp/x', head: null, remote: null, slug: null }, paths: [] }).join('\n').includes('UNVERIFIED'));
+  const bannerAbsent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts', 'packages/this-repo-has-no-such-package/src/index.ts'] });
+  t('paths absent from this tree are counted and named', bannerAbsent.join('\n').includes('1 of 2 path(s) are absent'));
+  t('and the count claims nothing in either direction', bannerAbsent.join('\n').includes('Not evidence either way'));
+  const bannerPresent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts'] });
+  t('all paths present prints NO clearance line — absence and clearance must not share a spelling', !bannerPresent.join('\n').includes('absent from this tree') && bannerPresent.length === 2);
+
+  const idTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-id-'));
+  try {
+    const gi = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+    gi(['init', '-q', '-b', 'main', 'named'], idTmp);
+    const named = join(idTmp, 'named');
+    gi(['remote', 'add', DEFAULT_BASE_REMOTE, 'https://github.com/an-owner/a-repo.git'], named);
+    const namedIdentity = repoIdentity({ cwd: named });
+    t('a checkout with a readable remote identifies itself from git, never from a constant', namedIdentity.slug === 'an-owner/a-repo');
+    gi(['init', '-q', '-b', 'main', 'anonymous'], idTmp);
+    const anonymous = repoIdentity({ cwd: join(idTmp, 'anonymous') });
+    t('a checkout with no such remote degrades to unverified and still names its tree', anonymous.slug === null && !!anonymous.root);
+  } finally {
+    rmSync(idTmp, { recursive: true, force: true });
+  }
+
+  // End to end, on the real CLI. The one card path is arbitrary; what is under
+  // test is the guard around the answer, not the answer.
+  const CLI = fileURLToPath(import.meta.url);
+  const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', cwd: ROOT });
+  const plainRun = runCli(['--tier', 'packages/spec/src/index.ts']);
+  t('an unasserted explicit-path run still answers', plainRun.status === 0 && (plainRun.stdout ?? '').trim().length > 0);
+  t('and it opens with the banner, on the FIRST line of stderr', (plainRun.stderr ?? '').split('\n')[0].includes('gate list derived from the tree of'));
+  t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
+  const liveSlug = repoIdentity().slug;
+  const assertedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
+  t(
+    liveSlug
+      ? 'asserting the repo this checkout really is leaves the run green'
+      : 'with no readable remote, ANY assertion refuses rather than passing unverified',
+    liveSlug ? assertedRun.status === 0 : assertedRun.status === 2,
+  );
+  t('a satisfied assertion changes the answer not at all', !liveSlug || (assertedRun.stdout ?? '') === (plainRun.stdout ?? ''));
+  const refusedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, 'not-an-owner/not-a-repo']);
+  t('asserting a repo this checkout is not ENDS the run', refusedRun.status === 2);
+  t('and it prints no answer at all — a refusal must not also be pasteable', (refusedRun.stdout ?? '').trim() === '');
+  t('and the refusal names the repo that was asked for', (refusedRun.stderr ?? '').includes('not-an-owner/not-a-repo'));
+  const wrongShapeRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, '../a-sister-checkout']);
+  t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
+  const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
+  t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //
   // Both directions are measured by really spawning node, because the guard's
@@ -5368,10 +5939,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * branch: a branch added inside it later cannot forget to carry it.
  */
 if (invokedDirectly) {
-  const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const argv = splitArgv(process.argv.slice(2));
+  const argvPaths = argv.paths;
   const wantsChanged = process.argv.includes('--changed');
   if (process.argv.includes('--self-test')) {
     selfTest();
+  } else if (argv.malformed) {
+    console.error(`dispatch-gates: ${argv.malformed} — the repo this answer must be about, as an owner and a name.`);
+    process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:
     // silently preferring one would make the other's arguments vanish without a
@@ -5379,9 +5954,27 @@ if (invokedDirectly) {
     console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
     process.exit(2);
   } else {
+    // Whose tree is about to answer? Printed BEFORE the answer and before the
+    // change-set provenance, so no run of this tool can be read without reading
+    // which repo it is about — the one thing the silent wrong answer never said.
+    const identity = repoIdentity();
+    const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    for (const line of bannerLines({ identity, paths: declaredPaths })) console.error(line);
+    if (argv.assertion !== null) {
+      // An assertion the tree contradicts is the measured failure, caught. It
+      // ends the run: a caller that named the repo it needs has stated a
+      // requirement, and this checkout cannot meet it by printing anyway.
+      const verdict = repoAssertionVerdict({ asserted: argv.assertion, identity });
+      if (!verdict.ok) {
+        for (const line of verdict.lines) console.error(line);
+        process.exit(2);
+      }
+      console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
+    }
+    console.error('');
     let paths;
     if (argvPaths.length > 0) {
-      paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+      paths = declaredPaths;
     } else {
       // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
       // diff implicates" — and it is the default because the caller-supplied
@@ -5392,7 +5985,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {

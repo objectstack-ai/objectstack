@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, SCAFFOLD_ALLOWED_PEER_VERSIONS, renderPnpmWorkspaceYaml } from '../src/commands/init';
+import { TEMPLATES, getCliVersion, detectPackageManager, sanitizeNamespace, SCAFFOLD_BUILT_DEPENDENCIES, SCAFFOLD_ALLOWED_PEER_VERSIONS, renderPnpmWorkspaceYaml, renderScaffoldPackageJson, SCAFFOLD_PNPM_RANGE } from '../src/commands/init';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -95,26 +95,150 @@ describe('native build allowlist (pnpm-workspace.yaml)', () => {
   });
 
   it('does NOT put the allowlist in package.json (current pnpm ignores it)', () => {
-    const t = TEMPLATES.app;
-    // Mirror init.ts's package.json construction.
-    const pkgJson: Record<string, unknown> = {
-      name: 'my-app',
-      version: '0.1.0',
-      private: true,
-      type: 'module',
-      scripts: t.scripts,
-      dependencies: t.dependencies,
-      devDependencies: t.devDependencies,
-    };
+    // Read the real renderer rather than a hand-copied mirror of it: the
+    // previous version of this test re-declared the object literal inline, so
+    // it asserted against its own copy and would have kept passing however far
+    // init.ts drifted from it.
+    const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES.app);
     expect(pkgJson.pnpm).toBeUndefined();
+    expect((pkgJson.engines as Record<string, string>).pnpm).toBeDefined();
   });
 
   it('renders a pnpm-workspace.yaml that allowlists better-sqlite3', () => {
     const yaml = renderPnpmWorkspaceYaml();
     expect(yaml).toMatch(/^onlyBuiltDependencies:/m);
     expect(yaml).toMatch(/^ {2}- better-sqlite3$/m);
-    // No `packages:` key — this is a settings file, not a workspace declaration.
-    expect(yaml).not.toMatch(/^packages:/m);
+  });
+});
+
+// A scaffolded project is a workspace root with NO member packages, and the
+// rendered file says so in one line rather than leaving it to be inferred from
+// the absence of a key. That is not cosmetic: pnpm 9.x and 10.0–10.4 parse
+// `pnpm-workspace.yaml` BEFORE they read `engines`, and a file without the key
+// is refused outright — `pnpm install` exits 1 with "ERROR packages field
+// missing or empty" before it resolves a single dependency, naming a file the
+// user never wrote. Measured on the rendered shape, one clean install per pnpm
+// version, each with its own store:
+//
+//   9.15.9 / 10.0.0 / 10.4.0   raw workspace error BEFORE → the floor's own
+//                              ERR_PNPM_UNSUPPORTED_ENGINE AFTER.
+//   10.15.0 / 10.34.5 / 11.22.0  install succeeds either way, and the two
+//                              renders are equivalent: byte-identical
+//                              `pnpm-lock.yaml`, `.modules.yaml` identical once
+//                              run-local `prunedAt`/`storeDir` are dropped, and
+//                              `pnpm ls -r --depth -1` reporting one project.
+//
+// ⛔ NOT `packages: ['.']`, which satisfies the same parsers but declares the
+// project root a workspace MEMBER — a monorepo root. The scaffold's output is
+// the start of every AI-written app on this platform, so a line that reads as
+// "add member packages here" is the expensive half of that choice.
+describe('explicit empty workspace declaration in the rendered file', () => {
+  // Comments are stripped first: the prose above the key names it, and must
+  // not be what satisfies an assertion about the declaration itself.
+  const settings = renderPnpmWorkspaceYaml().replace(/^\s*#.*$/gm, '');
+
+  it('declares `packages:` — the key early pnpm refuses the file without', () => {
+    expect(
+      /^packages:/m.test(settings),
+      'the rendered pnpm-workspace.yaml must declare `packages:` — without it pnpm 9.x ' +
+        'and 10.0–10.4 exit 1 with "packages field missing or empty" before reading engines',
+    ).toBe(true);
+  });
+
+  it('declares it EMPTY — a workspace root with no member packages', () => {
+    const inline = /^packages:[ \t]*(.*)$/m.exec(settings);
+    expect(inline, '`packages:` must be declared inline').not.toBeNull();
+    expect(
+      inline![1].trim(),
+      "`packages:` must be an empty list; `['.']` would declare the project root a " +
+        'workspace MEMBER (a monorepo root), which a single-package scaffold is not',
+    ).toBe('[]');
+  });
+
+  it('declares no member in any spelling', () => {
+    // Covers the inline form (`['.']`, `["packages/*"]`) and the block form
+    // (`packages:` followed by `  - …`), so neither can arrive unnoticed.
+    expect(settings).not.toMatch(/^packages:[ \t]*\[[ \t]*[^\]\s]/m);
+    expect(settings).not.toMatch(/^packages:[ \t]*\n[ \t]*-/m);
+  });
+
+  it('adds no other top-level setting to the rendered file', () => {
+    // The rest of the file is what it was: the same four keys, same order. A
+    // "restore the packages key" edit that also drags a setting in fails here.
+    const keys = [...settings.matchAll(/^([A-Za-z][\w-]*):/gm)].map((m) => m[1]);
+    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds', 'peerDependencyRules']);
+  });
+});
+
+// The explicit `packages:` key above is what makes this floor reachable at all.
+// While the key was omitted, pnpm 9.x and 10.0–10.4 never got as far as
+// `engines` — they parse the workspace file first and refused it outright — so
+// no floor value could reach them. With the key present the entire band below
+// the floor reports the same actionable cause instead. Measured on the rendered
+// shape, one clean install per pnpm version, each with its own store:
+//
+//   9.15.9, 10.0.0, 10.4.0,   ERR_PNPM_UNSUPPORTED_ENGINE naming ">=10.15".
+//   10.5.0–10.14.0            (9.x and 10.0–10.4 printed the raw workspace
+//                             error here before the key existed.)
+//   >=10.15.0                 install succeeds, byte-identical lockfile.
+//
+// ⚠️ So the floor, not the workspace file, is now what stops 10.0–10.4: with the
+// floor lowered they install (exit 0, measured) — but they read neither the
+// build allowlist nor the peer rules out of `pnpm-workspace.yaml`, so a scaffold
+// there is quietly missing its native builds. Admitting that band is a support
+// decision (#11048), not a value this suite should drift. These assertions pin
+// the declared range, not pnpm's wording.
+describe('pnpm floor in the rendered package.json', () => {
+  /**
+   * Lowest pnpm measured to install the rendered shape AND honour the workspace
+   * file's settings — its build allowlist actually runs there (`node-gyp
+   * rebuild` for better-sqlite3). 10.0.0 and 10.4.0 install too, now that
+   * `packages:` is explicit, but skip those builds with only a warning.
+   */
+  const FIRST_GOOD: [number, number, number] = [10, 15, 0];
+
+  function parseFloor(range: string): [number, number, number] {
+    const m = /^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$/.exec(range.trim());
+    if (!m) throw new Error(`expected a plain ">=" floor, got "${range}"`);
+    return [Number(m[1]), Number(m[2]), Number(m[3] ?? '0')];
+  }
+
+  const rank = ([maj, min, pat]: [number, number, number]) => maj * 1e6 + min * 1e3 + pat;
+
+  it('declares engines.pnpm in every template', () => {
+    for (const key of Object.keys(TEMPLATES)) {
+      const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES[key]);
+      const engines = pkgJson.engines as Record<string, string> | undefined;
+      expect(engines?.pnpm, `template "${key}"`).toBe(SCAFFOLD_PNPM_RANGE);
+    }
+  });
+
+  it('sets the floor at or above the first pnpm measured to honour the rendered workspace file', () => {
+    expect(rank(parseFloor(SCAFFOLD_PNPM_RANGE))).toBeGreaterThanOrEqual(rank(FIRST_GOOD));
+  });
+
+  it('excludes every pnpm version this scaffold is not supported on', () => {
+    const declared = rank(parseFloor(SCAFFOLD_PNPM_RANGE));
+    // 10.0.0 and 10.4.0 were measured to install and then IGNORE the workspace
+    // file's build allowlist ("The following dependencies have build scripts
+    // that were ignored: better-sqlite3, esbuild"). 10.5.0 and 10.14.0 are
+    // refused by the floor itself and were never measured past it — they stay
+    // listed because nothing has shown them to honour the file, and dropping
+    // them would silently widen what the scaffold claims to support.
+    const unsupported: [number, number, number][] = [[10, 0, 0], [10, 4, 0], [10, 5, 0], [10, 14, 0]];
+    for (const v of unsupported) {
+      expect(rank(v), `pnpm ${v.join('.')} must fall below the declared floor`).toBeLessThan(declared);
+    }
+  });
+
+  it('does NOT pin a packageManager — the scaffold also supports npm, yarn and bun', () => {
+    // `packageManager: "pnpm@x.y.z"` would declare the project pnpm-only
+    // (corepack-driven yarn refuses to run in such a project) and pin one exact
+    // version that goes stale on every pnpm release. `detectPackageManager`
+    // hands off to whichever of the four invoked the CLI, and all three others
+    // ignore `engines.pnpm` — so the floor costs them nothing.
+    const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES.app);
+    expect(pkgJson.packageManager).toBeUndefined();
   });
 });
 
@@ -216,6 +340,59 @@ describe('benign peer-skew declarations (#10326)', () => {
     // the correct tree. Retires with the scim rc pin.
     expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
     expect(settings).toMatch(/^ {4}'@better-auth\/scim>better-call': '1\.4\.0'$/m);
+  });
+
+  it.each([
+    ['@better-auth/core'],
+    ['@better-auth/oauth-provider'],
+    ['@better-auth/scim'],
+    ['@better-auth/sso'],
+  ])('widens %s\'s exact @better-auth/utils peer to the version the tree resolves', (declaring) => {
+    // Each of the four peers an EXACT `@better-auth/utils@0.4.2`, while the
+    // tree hands them 0.5.0 — better-call (better-auth's own HTTP layer)
+    // depends on `^0.5.0`, and that is the copy plugin-auth's direct
+    // dependencies resolve their peer against. Measured on the surface the
+    // range governs: the four import three symbols in total (base64/base64Url,
+    // createHash, and createRandomStringGenerator in core), 0.5.0 declares all
+    // three unchanged, and both versions return identical values on the inputs
+    // those call sites pass — confirmed end to end through better-auth with the
+    // sso, oauth-provider and scim plugins. Pinning utils back instead would
+    // drag better-call off its own `^0.5.0`, trading four reported skews for a
+    // real one.
+    const key = `${declaring}>@better-auth/utils`;
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS[key]).toBe('0.5.0');
+    expect(settings).toMatch(
+      new RegExp(`^ {4}'${key.replace(/[/*+?^${}()|[\]\\]/g, '\\$&')}': '0\\.5\\.0'$`, 'm'),
+    );
+  });
+
+  it('covers every declaring package that peers @better-auth/utils, not some of them', () => {
+    // The defect this replaces was PARTIAL coverage: two skews were declared
+    // and four more were not, so the first screen was clean for a third of the
+    // report. A set assertion is what fails when a fifth declaration appears
+    // and nobody measures it, or when one of these four is dropped while the
+    // others stay.
+    const declaring = Object.keys(SCAFFOLD_ALLOWED_PEER_VERSIONS)
+      .filter((k) => k.endsWith('>@better-auth/utils'))
+      .map((k) => k.slice(0, -'>@better-auth/utils'.length))
+      .sort();
+    expect(declaring).toEqual([
+      '@better-auth/core',
+      '@better-auth/oauth-provider',
+      '@better-auth/scim',
+      '@better-auth/sso',
+    ]);
+  });
+
+  it('keeps the @better-auth/utils widening separate from the retiring better-call pin', () => {
+    // @better-auth/scim appears in TWO entries for two unrelated reasons, and
+    // they retire on different days: the better-call one goes when scim leaves
+    // the rc (stable 1.7.1 peers better-call 1.4.0), while the utils one
+    // outlives it (stable 1.7.1 still peers @better-auth/utils 0.4.2). Deleting
+    // both together — the obvious move when the rc pin lifts — would silently
+    // put the utils report back on a newcomer's first screen.
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBe('1.4.0');
+    expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>@better-auth/utils']).toBe('0.5.0');
   });
 
   it('renders the rules under peerDependencyRules.allowedVersions', () => {

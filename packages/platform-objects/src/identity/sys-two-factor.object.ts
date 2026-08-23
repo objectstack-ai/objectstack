@@ -23,7 +23,7 @@ export const SysTwoFactor = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Two-factor authentication credentials',
   titleFormat: 'Two-factor for {user_id}',
@@ -160,7 +160,15 @@ export const SysTwoFactor = ObjectSchema.create({
     backup_codes: Field.textarea({
       label: 'Backup Codes',
       required: false,
-      description: 'JSON-serialized backup recovery codes',
+      // NOT JSON at rest, despite what this said until #10681. better-auth's
+      // `twoFactor()` defaults to `storeBackupCodes: 'encrypted'` and we pass
+      // no `backupCodeOptions`, so `encodeBackupCodes` JSON-stringifies the
+      // codes and then `symmetricEncrypt`s that string with the auth secret:
+      // the column holds ONE opaque ciphertext, not a readable array. Reading
+      // the row back therefore reveals nothing — which is why the codes have
+      // to be shown at generation time (#10681) and why no re-reveal route
+      // exists to add.
+      description: 'Backup recovery codes, encrypted at rest (a single opaque ciphertext, not readable JSON)',
     }),
 
     verified: Field.boolean({

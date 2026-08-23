@@ -114,7 +114,18 @@
  * It is handled the way ADR-0120 D4 requires: the PREVIOUS index stays in
  * place (never a table with no unique index at all), the report names the key
  * that is not enforced, ships the exact query that lists the offending rows,
- * points at `os migrate plan`, and the boot continues.
+ * points at `os migrate duplicates`, and the boot continues.
+ *
+ * ⚠️ The referral used to name `os migrate plan`, and it was FALSE (#8725):
+ * `plan` reports drift, and this index is invisible to the differ by
+ * construction — excluded by `isRuntimeManagedIndex` once the partial form is
+ * built, and indistinguishable from its own declaration before that, because
+ * the migration reuses the declared NAME on purpose (see above). Measured with
+ * a matched control: one database carrying the same duplicate damage under a
+ * declared index and under this one, `plan` named the declared one in full and
+ * said nothing about this one. Maintainer ruling 2026-08-22 routes this class
+ * to `os migrate duplicates`, which boots read-only and owns the "inventory,
+ * never repair" contract, and leaves `plan`'s drift contract untouched.
  */
 
 import {
@@ -223,7 +234,11 @@ export function buildActiveIndexSql(indexName: string): string {
 /**
  * The query that lists the rows blocking the tightening — ADR-0120 D4's
  * "name the offending rows", shipped inside the conflict report so an operator
- * has it without waiting for `os migrate plan`.
+ * has it without waiting for `os migrate duplicates`.
+ *
+ * The same statement is what `os migrate duplicates` issues for this index
+ * (#8725): the command reads this builder rather than restating the key, so the
+ * pre-flight and the boot report can never describe different duplicates.
  *
  * It GROUPs by exactly the index's own key parts, so what it reports and what
  * the index rejects cannot diverge — the projection and the `GROUP BY` are
@@ -378,14 +393,16 @@ function reportDegradation(
         // — now block the build. ADR-0120 D4's disposition, in full: keep the
         // previous index (never an unconstrained table), name the key that is
         // not enforced, hand over the exact query that lists the offending
-        // rows, point at `os migrate plan`, and let the boot continue.
+        // rows, point at `os migrate duplicates`, and let the boot continue.
+        // The referral is repointed rather than dropped (#8725): the rows ARE
+        // reportable before a restart, just not by the drift differ.
         logProblem(
             logger,
             `[metadata-protocol] cannot tighten '${VIEW_ACTIVE_INDEX_NAME}' on "${VIEW_DEFINITION_TABLE}" — ` +
             `existing rows violate (${keyParts}) among state='active'. The previous index is left in ` +
             `place, so (${columns}) is enforced only as far as it was before; the NULL-safe key is NOT ` +
             `enforced until the duplicates are resolved. List them with: ${buildDuplicateProbeSql()} — or ` +
-            `run "os migrate plan" — then restart (ADR-0120 D4, #6417).`,
+            `run "os migrate duplicates" — then restart (ADR-0120 D4, #6417, #8725).`,
             detail,
         );
         return;

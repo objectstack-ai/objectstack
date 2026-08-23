@@ -481,6 +481,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export default ObjectSchema.create({
   name: 'salesforce_account',
+  sharingModel: 'private',
   label: 'Salesforce Account',
   fields: {
     salesforce_id: Field.text({ required: true, unique: 'global' }),

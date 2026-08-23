@@ -130,11 +130,12 @@
  *
  * ## The known list
  *
- * `KNOWN_TEARDOWN_UNREACHED` baselines the instances that existed when this
- * gate landed. Their repair is #10371's, in the services lane; repairing them
- * here would have made this PR unreviewable against its own card. The list is
- * a ratchet that only shrinks -- an entry is deleted when its plugin is
- * repaired, and a stale entry is itself a failure.
+ * `KNOWN_TEARDOWN_UNREACHED` baselined the instances that existed when this
+ * gate landed. It is a ratchet that only shrinks -- an entry is deleted when
+ * its plugin is repaired, and a stale entry is itself a failure. As of #10772
+ * it is EMPTY: every baselined instance has been repaired (six under #10371,
+ * the remaining five under #10772), so the gate now judges the whole
+ * population with no exemptions at all.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -219,26 +220,30 @@ const POSITIVE_CONTROL = {
 
 /**
  * Every `Plugin` implementation that declared a teardown alias and no
- * `destroy()` when this gate landed. Their repair is #10371's card, in the
- * services lane.
+ * `destroy()` when this gate landed -- and, since #10772, NONE OF THEM.
  *
  * ⛔ SHRINK-ONLY. The list only ever shrinks: an entry is DELETED when its
  * plugin grows a real `destroy()`, and a stale entry fails this gate. It is
  * closed to new entries -- see the failure text.
  *
- * Six of these are the instances #10371 enumerates. Five are not, and were
- * derived here rather than adopted from that card: `MetadataPlugin`,
- * `AppPlugin` and `ExternalValidationPlugin` spell the alias as an arrow
- * PROPERTY (which a method-only reading of the class misses), and
- * `EmailServicePlugin` / `WebhookOutboxPlugin` spell it `dispose`.
+ * The burn-down, so the empty array is a MEASURED state and not an abandoned
+ * one. Eleven entries landed with the gate. Six were the instances #10371
+ * enumerates, and #10371 repaired them. The other five were derived here
+ * rather than adopted from that card, filed as #10772 and repaired there:
+ * `MetadataPlugin`, `AppPlugin` and `ExternalValidationPlugin` spelled the
+ * alias as an arrow PROPERTY (which a method-only reading of the class
+ * misses -- that is precisely why #10371's own enumeration was short by
+ * five), and `EmailServicePlugin` / `WebhookOutboxPlugin` spelled it
+ * `dispose` -- the "seventh spelling" this gate's roster was widened for
+ * before any instance of it existed, already present when the roster was
+ * measured.
+ *
+ * An empty ratchet is the state this gate exists to reach, not a reason to
+ * delete it: the roster, the population and the refusals are what keep the
+ * class closed for the NEXT instance, and the self-test's live-tree case
+ * ("neither short nor stale") is what keeps this array honest either way.
  */
-const KNOWN_TEARDOWN_UNREACHED = [
-  { file: 'packages/metadata/src/plugin.ts', cls: 'MetadataPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/plugins/plugin-email/src/email-plugin.ts', cls: 'EmailServicePlugin', alias: 'dispose', repair: '#10371' },
-  { file: 'packages/plugins/plugin-webhooks/src/webhook-outbox-plugin.ts', cls: 'WebhookOutboxPlugin', alias: 'dispose', repair: '#10371' },
-  { file: 'packages/runtime/src/app-plugin.ts', cls: 'AppPlugin', alias: 'stop', repair: '#10371' },
-  { file: 'packages/runtime/src/external-validation-plugin.ts', cls: 'ExternalValidationPlugin', alias: 'stop', repair: '#10371' },
-];
+const KNOWN_TEARDOWN_UNREACHED = [];
 
 // ---------------------------------------------------------------------------
 // The scan
@@ -458,9 +463,10 @@ function main() {
       + `\n      async ${TEARDOWN_ALIASES[0]}(): Promise<void> { await this.${KERNEL_HOOK}(); }`
       + '\n'
       + '\n    ⛔ Do not add an entry to KNOWN_TEARDOWN_UNREACHED to get past this. That'
-      + '\n    list is shrink-only and closed to new entries: it baselines the instances'
-      + '\n    that predate this gate, whose repair belongs to #10371, and widening it'
-      + '\n    is not a fix -- it would reopen the class this gate exists to close.',
+      + '\n    list is shrink-only and closed to new entries: it baselined the instances'
+      + '\n    that predate this gate, and since #10772 it is EMPTY -- every one of them'
+      + '\n    has been repaired. Widening it is not a fix; it would reopen the class'
+      + '\n    this gate exists to close, and it would be the first entry back.',
     );
     return 1;
   }
@@ -479,10 +485,12 @@ function main() {
     return 1;
   }
 
+  const repairCards = [...new Set(KNOWN_TEARDOWN_UNREACHED.map((k) => k.repair))].sort();
   console.log(
     `✓ check:plugin-teardown-shape: ${classes} Plugin implementation(s) across ${files} source(s) under ${POPULATION}; `
     + `every teardown-shaped method (${TEARDOWN_ALIASES.join(' / ')}) sits beside a real ${KERNEL_HOOK}() `
-    + `(${held} known-unreached, ⛔ SHRINK-ONLY, repair tracked on #10371).`,
+    + `(${held} known-unreached, ⛔ SHRINK-ONLY`
+    + `${repairCards.length ? `, repair tracked on ${repairCards.join(' / ')}` : ', baseline fully burned down'}).`,
   );
   return 0;
 }

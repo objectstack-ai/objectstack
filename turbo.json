@@ -40,7 +40,8 @@
         "$TURBO_ROOT$/packages/metadata-protocol/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**",
         "$TURBO_ROOT$/content/docs/api/error-catalog.mdx",
-        "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md"
+        "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md",
+        "$TURBO_ROOT$/.claude/skills/spec-property-retirement/SKILL.md"
       ]
     },
     "@objectstack/core#test": {
@@ -75,7 +76,9 @@
         "$TURBO_ROOT$/scripts/check-nul-bytes.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/packages/spec/src/system/translation.zod.ts"
+        "$TURBO_ROOT$/packages/spec/src/system/translation.zod.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml"
       ]
     },
     "@objectstack/client#test": {
@@ -231,7 +234,8 @@
         "$TURBO_ROOT$/.github/workflows/scaffold-e2e.yml",
         "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
         "$TURBO_ROOT$/scripts/gen-sdui-manifest.sh",
-        "$TURBO_ROOT$/scripts/publish-smoke.sh"
+        "$TURBO_ROOT$/scripts/publish-smoke.sh",
+        "$TURBO_ROOT$/packages/cli/src/commands/init.ts"
       ]
     },
     "test:e2e": {

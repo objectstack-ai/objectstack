@@ -147,7 +147,13 @@ ratchet(#2978)会先开火,
 2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`。
 3. 一个破折号从句讲**它为何惰性或错误** —— "it never had an effect"、"no renderer ever read it"。
 4. 祈使句修复:改名写 "use `<replacement>`" + "Rename the key; the value (…) is unchanged.";删除写 "Delete the key." + **真正生效的机制是什么**。
-5. ``Run `os migrate meta --from <N-1>` to rewrite it automatically.`` —— **仅当**有 conversion 重写 sources。消息不点名 conversion id;conversion 由 CLI 命令引用。
+5. ``Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.``
+   —— 命令重放链、打印机械修改清单,从不写 source 文件(#9591 的 in-place codemod 落地前恒真)。
+   消息不点名 conversion id;conversion 由 CLI 命令引用。唯一允许的变体(按形状、不按站点):
+   conversion 只覆盖值的一部分时,两从句形点名覆盖的部分 —— ``Run `os migrate meta --from <N-1>`
+   to list the mechanical edits for the <X> case; <what the tool does with the rest>.``
+   (样板:`ui/dashboard.zod.ts` `compareTo.offset`)。守这两个形状的 pin 人群含本文件:
+   `packages/spec/src/shared/retired-key-migrate-sentence.test.ts`。
 
 这个字符串*就是*撞上它的人的迁移文档 —— 包括一次跳好几个 major、load-path
 conversion 已不再覆盖的那位。

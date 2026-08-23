@@ -7,7 +7,7 @@
 #     my-app
 #
 # Or run the full app + Postgres stack: see docker-compose.yml.
-# Docs: https://docs.objectstack.ai/docs/deployment/self-hosting
+# Docs: https://objectstack.ai/docs/deployment/self-hosting
 
 # ── Build stage: compile TypeScript metadata to the artifact ─────────
 FROM node:22-slim AS build
@@ -20,7 +20,7 @@ RUN npx os build              # → dist/objectstack.json
 # ── Runtime: the official ObjectStack runtime image ──────────────────
 # Ships Node + @objectstack/cli with `os start`, a non-root user, the
 # /api/v1/health HEALTHCHECK, and OS_ARTIFACT_PATH/OS_PORT preset (port 8080)
-# — see docker/README.md in the framework repo.
+# — see the self-hosting guide linked above.
 #
 # Dependencies were not installed while scaffolding, so the tag below could
 # not be resolved for you. `latest` floats to whatever release is newest,

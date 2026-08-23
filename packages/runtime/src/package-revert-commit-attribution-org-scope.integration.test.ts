@@ -11,6 +11,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
   SysMetadataObject,
@@ -83,10 +87,31 @@ const PLATFORM_PKG = '@objectstack/platform-objects';
 const ACTIVE_ORG = 'org_active';
 const OTHER_ORG = 'org_other';
 
+/**
+ * [#10629] Every publish this fixture makes runs the metadata-protocol build
+ * probes (`metadata-protocol/src/build-probes.ts`), and the views it publishes
+ * are bound to the placeholder object `anything` — the #7741 inline arm
+ * requires an object binding pair, and nothing here creates that table. The
+ * probe reads it, catches, and files a `view_read_failed` publish issue this
+ * suite does not read (it asserts `res.success`), but the driver and the engine
+ * each log the read on the way out. Withheld and asserted rather than muted;
+ * `expected-read-refusal-noise.ts` says why.
+ */
+const UNBOUND_PROBE_OBJECT = 'anything';
+
 let cleanup: Array<() => void> = [];
+
+/** [#10629] The expected-noise capture belonging to the latest `boot()`. */
+let noise: ExpectedReadRefusalCapture | null = null;
 afterEach(() => {
   for (const c of cleanup) c();
   cleanup = [];
+  // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+  // failure here can never leave an engine running. Every test in this file publishes at
+  // least once, so the probe fires for each of them: this holds for a single
+  // `-t` run as well as for the whole file.
+  expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+  noise = null;
 });
 
 /** REAL ObjectQL wired to a REAL SqlDriver over on-disk better-sqlite3. */
@@ -105,9 +130,14 @@ async function boot() {
     SysMetadataAuditObject,
     SysMetadataCommitObject,
   ] as any[];
+  // [#10629] Installed before the driver runs a statement and before the
+  // engine issues a read — the two sinks the expected refusal travels out on.
+  noise = captureExpectedReadRefusals([UNBOUND_PROBE_OBJECT]);
+  noise.captureDriver(driver);
   await driver.initObjects(objects);
 
   const engine = new ObjectQL();
+  noise.captureEngine(engine);
   engine.registerDriver(driver as any, true);
   await engine.init();
   for (const o of objects) engine.registry.registerObject(o, PLATFORM_PKG);

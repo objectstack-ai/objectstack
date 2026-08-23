@@ -99,6 +99,51 @@ export class ExternalDatasourceServicePlugin implements Plugin {
             },
           }
         : {}),
+      /**
+       * Where a generated object's `${namespace}_` prefix comes from (ADR-0028).
+       *
+       * The datasource's OWN owning package — not an ambient "current package",
+       * which does not exist at this seam. A federated object is bound to one
+       * datasource (`definition.datasource`), so the package that declared that
+       * datasource is the package the object belongs in, and its
+       * `manifest.namespace` is the prefix `defineStack()` will demand.
+       *
+       * Both links are read, not assumed:
+       *  - `_packageId` is stamped onto every registered metadata item that has
+       *    package coords (`applyProtection`, `@objectstack/spec/shared`), by
+       *    both load paths — the artifact loader and `registry.registerItem`.
+       *    `'sys_metadata'` is the rehydration sentinel, not a real package, so
+       *    it is excluded exactly as the registry's own `isCodeArtifactBody`
+       *    excludes it.
+       *  - the package record is what `installPackage` stored under
+       *    `manifest.id`, i.e. the same `{ manifest }` shape the runtime publish
+       *    gate reads for this identical check.
+       *
+       * Every step is allowed to come up empty (a DB-only datasource, a
+       * GitOps deployment with no package registry, a legacy package that
+       * declares no namespace). Empty resolves to `undefined`, and the service
+       * then emits a bare name with a loud TODO rather than inventing a prefix.
+       */
+      getNamespace: async (datasource: string) => {
+        try {
+          const ds = (await metadata?.get('datasource', datasource)) as
+            | { _packageId?: unknown }
+            | undefined;
+          const pkgId = typeof ds?._packageId === 'string' ? ds._packageId : undefined;
+          if (!pkgId || pkgId === 'sys_metadata') return undefined;
+          const pkg = (await metadata?.get('package', pkgId)) as
+            | { manifest?: { namespace?: unknown } }
+            | undefined;
+          const ns = pkg?.manifest?.namespace;
+          return typeof ns === 'string' ? ns : undefined;
+        } catch {
+          // Namespace resolution is best-effort provenance, never a reason to
+          // fail a draft: an unresolvable namespace has a defined, documented
+          // outcome (bare name + TODO), so a throwing metadata store must land
+          // there too rather than taking the whole introspection down.
+          return undefined;
+        }
+      },
       logger: this.options.logger,
     };
 

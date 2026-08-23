@@ -112,7 +112,10 @@ export const CEILINGS = new Map([
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 45],
-  ['.claude/agents/os-dev.md', 399],
+  // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
+  // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
+  // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
+  ['.claude/agents/os-dev.md', 405],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
@@ -120,7 +123,10 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-test/SKILL.md', 232],
   ['.claude/skills/checklist-author/SKILL.md', 61],
   ['.claude/skills/dogfood-verification/SKILL.md', 155],
-  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  // 328 → 334 (#10848): maintainer-ruled (2026-08-22, Option A) — convention 5
+  // replaced with the pin's house sentence AND the pin docblock's one allowed
+  // variant shape carried into the skill, +6 lines within the card's budget.
+  ['.claude/skills/spec-property-retirement/SKILL.md', 334],
   // #9792: root AGENTS.md is the largest, most-read, most binding instruction
   // file in the repo and had no ceiling — the hole the oversized 39-line
   // read-layer clause (compacted by #9715) entered through. Set at its line

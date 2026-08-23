@@ -42,6 +42,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Runtime } from './runtime.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { AppPlugin } from './app-plugin.js';
+import type { Plugin, PluginContext } from '@objectstack/core';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -120,7 +125,44 @@ function orphanArtifact() {
   };
 }
 
-async function boot(bundle: Record<string, unknown>) {
+/**
+ * [#10629] The `OS_SKIP_SCHEMA_SYNC` case's expected read failures: WITHHELD,
+ *          and ASSERTED.
+ *
+ * With boot schema sync skipped, nothing creates `sys_metadata` — that IS what
+ * the flag means (DDL managed out of band, and this fixture manages none). The
+ * boot metadata load reads it anyway and survives the miss by design, but the
+ * driver and the engine each log the fault on the way out: 5 `refused a read
+ * on 'sys_metadata'` lines and 5 matching `ERROR Find operation failed` frames,
+ * out of a test that PASSES. ⛔ Scoped to this one flag-set case on purpose —
+ * the ordinary boot beside it creates the table and must stay loud if it ever
+ * stops.
+ *
+ * Unlike every other fixture in this class the noisy read happens DURING
+ * `kernel.bootstrap()`, so the engine cannot be reached with `getService` after
+ * the fact. The capture rides in on a plugin that declares
+ * `requiresServices: ['objectql']` — ADR-0116's own ordering contract, which
+ * makes the kernel hoist `ObjectQLPlugin` ahead of it rather than leaving the
+ * order to `kernel.use()` position (this file is a boot-ORDER pin; assuming
+ * list order here would be exactly the mistake it exists to catch). It
+ * registers no service and has no `start`, so it cannot reorder the two plugins
+ * whose relative order this file measures.
+ */
+function noiseCapturePlugin(capture: ExpectedReadRefusalCapture): Plugin {
+  return {
+    name: 'com.objectstack.test.10629-noise-capture',
+    version: '1.0.0',
+    requiresServices: ['objectql'],
+    init: async (ctx: PluginContext) => {
+      capture.captureEngine(ctx.getService('objectql'));
+    },
+  };
+}
+
+/** The table `OS_SKIP_SCHEMA_SYNC` leaves uncreated in this composition. */
+const ABSENT_METADATA_TABLE = 'sys_metadata';
+
+async function boot(bundle: Record<string, unknown>, capture?: ExpectedReadRefusalCapture) {
   const { ObjectQLPlugin } = await import('@objectstack/objectql');
   const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
     '@objectstack/service-datasource'
@@ -128,8 +170,13 @@ async function boot(bundle: Record<string, unknown>) {
 
   const runtime = new Runtime({ cluster: false });
   const kernel = runtime.getKernel();
-  await kernel.use(new DriverPlugin(await makeDefaultDriver()));
+  // [#10629] Scoped before the driver runs a statement when the caller asked
+  // for a capture; the default boot passes none and stays fully loud.
+  const driver = await makeDefaultDriver();
+  capture?.captureDriver(driver);
+  await kernel.use(new DriverPlugin(driver));
   await kernel.use(new ObjectQLPlugin());
+  if (capture) await kernel.use(noiseCapturePlugin(capture));
   await kernel.use(new AppPlugin(bundle as never));
   await kernel.use(
     new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }),
@@ -185,8 +232,9 @@ describe('#7737 federated boot binding — declared external objects are bound w
   it('binds federated objects even when boot schema sync is skipped (OS_SKIP_SCHEMA_SYNC)', async () => {
     const previous = process.env.OS_SKIP_SCHEMA_SYNC;
     process.env.OS_SKIP_SCHEMA_SYNC = '1';
+    const noise = captureExpectedReadRefusals([ABSENT_METADATA_TABLE]);
     try {
-      kernel = await boot(artifact());
+      kernel = await boot(artifact(), noise);
       const engine = kernel.getService<Engine>('data');
       const driver = engine.getDriverByName('fed_ext');
       await driver.execute('CREATE TABLE remote_customers (id text primary key, name text)');
@@ -195,6 +243,10 @@ describe('#7737 federated boot binding — declared external objects are bound w
       await driver.execute("INSERT INTO remote_invoices (id, amount) VALUES ('i1', 100)");
       expect((await engine.find('fed_customer')).map((r) => r.name)).toEqual(['Ada']);
       expect((await engine.find('fed_invoice')).map((r) => r.id)).toEqual(['i1']);
+      // [#10629] The capture is a PIN, not a mute: if boot stops reading
+      // `sys_metadata`, or the table starts existing under this flag, the log
+      // goes quiet AND this goes red.
+      expect(noise.silentChannels()).toEqual([]);
     } finally {
       if (previous === undefined) delete process.env.OS_SKIP_SCHEMA_SYNC;
       else process.env.OS_SKIP_SCHEMA_SYNC = previous;

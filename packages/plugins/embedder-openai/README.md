@@ -14,7 +14,7 @@ OpenAI-compatible embedder for ObjectStack. Works against any endpoint that spea
 | Ollama (local) | `http://localhost:11434/v1` | `bge-m3`, `nomic-embed-text` |
 | LiteLLM / vLLM / 自建网关 | (your endpoint) | (your model) |
 
-Implements `IEmbedder` from `@objectstack/spec/contracts` — drop directly into any knowledge adapter (e.g. `@objectstack/knowledge-turso`).
+Implements `IEmbedder` from `@objectstack/spec/contracts`, so it drops into any knowledge adapter that computes vectors. ⚠️ No adapter in this repository does yet — see [Using the embedder](#using-the-embedder).
 
 ## Install
 
@@ -77,20 +77,27 @@ const embedder = createOpenAIEmbedder({
 });
 ```
 
-## Plug into a knowledge adapter
+## Using the embedder
+
+`OpenAIEmbedder` is a plain `IEmbedder`: construct it and hand it to whatever needs
+vectors.
 
 ```ts
 import { OpenAIEmbedder } from '@objectstack/embedder-openai';
-import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
 const embedder = new OpenAIEmbedder({ apiKey: process.env.OPENAI_API_KEY! });
 
-kernel.use(new KnowledgeTursoPlugin({
-  url: 'libsql://your-tenant.turso.io',
-  authToken: env.TURSO_TOKEN,
-  embedding: embedder,
-}));
+const [vector] = await embedder.embed(['ObjectStack turns an app into typed metadata']);
+console.log(embedder.id, embedder.dimensions, vector.length);
 ```
+
+⚠️ **No knowledge adapter in this repository consumes an `IEmbedder` yet.** The two this
+repo builds — `@objectstack/knowledge-memory` and `@objectstack/knowledge-ragflow` — take
+no embedder option. The vector-computing adapters the contract is written for
+(`@objectstack/knowledge-turso`, `@objectstack/knowledge-sqlite-vec`, named in
+[`embedder.ts`](../../spec/src/contracts/embedder.ts)) are in no directory of this repo,
+so an earlier revision of this page showed a `new KnowledgeTursoPlugin({ embedding })`
+example that no reader could install or run.
 
 ## Options
 

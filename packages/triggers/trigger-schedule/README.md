@@ -1,4 +1,4 @@
-# @objectstack/plugin-trigger-schedule
+# @objectstack/trigger-schedule
 
 Auto-launch ObjectStack flows on a schedule (cron / interval / once).
 
@@ -9,7 +9,7 @@ platform `IJobService` (the `'job'` service), so it stays adapter-agnostic: the
 job service selects a cron-capable adapter (e.g. the durable `DbJobAdapter` or
 `CronJobAdapter`) for cron schedules and the interval adapter for the rest.
 
-This is the sibling of `@objectstack/plugin-trigger-record-change` — same
+This is the sibling of `@objectstack/trigger-record-change` — same
 engine baseline, a different event source.
 
 ## What it does
@@ -48,7 +48,7 @@ in its context.
 ```ts
 import { AutomationServicePlugin } from '@objectstack/service-automation';
 import { JobServicePlugin } from '@objectstack/service-job';
-import { ScheduleTriggerPlugin } from '@objectstack/plugin-trigger-schedule';
+import { ScheduleTriggerPlugin } from '@objectstack/trigger-schedule';
 
 kernel
   .use(new AutomationServicePlugin())  // engine + flows
@@ -110,7 +110,7 @@ It needs both the job service (sweep cadence) **and** the ObjectQL engine (the
 date-window query); register it alongside the schedule trigger:
 
 ```ts
-import { ScheduleTriggerPlugin, TimeRelativeTriggerPlugin } from '@objectstack/plugin-trigger-schedule';
+import { ScheduleTriggerPlugin, TimeRelativeTriggerPlugin } from '@objectstack/trigger-schedule';
 
 kernel
   .use(new ScheduleTriggerPlugin())      // plain schedule flows

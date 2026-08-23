@@ -1058,17 +1058,28 @@ const PHANTOM_PIN_DEBT = {};
 // `rootDir` neutralised (it emits nothing) against a built dependency closure on
 // main @ 5886ee6d22. Those counts are prose, deliberately: nothing here compares
 // them, and a number this gate does not read must not look like one it does.
+//
+// GRADUATED SINCE, so the seed count above is a starting line and not a census
+// of what is left: `packages/plugins/plugin-auth/examples` (#10869). Its entry
+// recorded 1 x TS2307 for `@objectstack/plugin-hono-server`, a package
+// plugin-auth declared in none of its dependency blocks -- and the file was the
+// census's only instance of source in NO tsc program at all, which is precisely
+// why the missing dependency could sit in a PUBLISHED example
+// (`content/docs/permissions/authentication.mdx` links it as "Basic Auth
+// Example") without any gate reading it. Repaired on the terms this header
+// names rather than by rewriting the entry: the dependency is declared
+// (`devDependencies`, `workspace:*`) AND `packages/plugins/plugin-auth/
+// tsconfig.examples.json` puts the directory in a program named in that
+// package's `typecheck` script, so the compile that reproduced the TS2307 now
+// runs on every typecheck. It type-checks clean, so it graduated with zero debt
+// recorded anywhere -- and RECONCILED forced the entry out, as this header said
+// it would.
 const UNCHECKED_SOURCE_DEBT = {
   'packages/cli/test': 'One non-test module, `test/helpers/serve-process.ts`, the spawn harness the '
     + '`os serve` e2e tests share. It measures 0 errors on its own, and it is not separate debt: it '
     + 'sits inside the hidden test tree already measured by TEST_DEBT[\'@objectstack/cli\'] (56 of '
     + 'that package\'s 110 test files are outside `include`). Repairing it means repairing that '
     + 'layer, so this entry graduates with the TEST_DEBT one rather than before it.',
-  'packages/plugins/plugin-auth/examples': 'One file, `basic-usage.ts`, and it does not compile: '
-    + '1 x TS2307 for `@objectstack/plugin-hono-server`, which this package declares in NO dependency '
-    + 'block. The census\'s only instance of source in no tsc program AT ALL rather than merely '
-    + 'outside its own package\'s -- nothing imports it, tsup builds only `src`. Repair is a manifest '
-    + 'change or a rewrite, tracked in #10869.',
   'packages/platform-objects/scripts': '`i18n-extract.config.ts`, 1 x TS2883: the inferred type of '
     + 'its `default` export names a hash-suffixed internal chunk of `@objectstack/spec`\'s dist '
     + '(`state-machine.zod-<hash>`), so it is non-portable by construction. One of 8 identical '

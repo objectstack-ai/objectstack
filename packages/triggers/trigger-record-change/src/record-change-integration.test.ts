@@ -227,7 +227,7 @@ const beforeHookObjectDef = (name: string) => ({
  */
 describe('a system write must not fire a record-change flow UNSCOPED (#3760)', () => {
   it("refuses the flow's data op when the triggering write carried isSystem and no user", async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
@@ -272,7 +272,7 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
   }, 15000);
 
   it('the same flow still works normally when a real user made the write', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
@@ -300,7 +300,7 @@ describe('a system write must not fire a record-change flow UNSCOPED (#3760)', (
 
 describe('record-change trigger — end-to-end (#1491)', () => {
   it('fires a record-after-create flow registered AFTER the trigger (engine.registerFlow path)', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
@@ -351,7 +351,7 @@ describe('record-change trigger — end-to-end (#1491)', () => {
       },
     };
 
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(seeder as any);
     await kernel.use(new AutomationServicePlugin());
@@ -376,7 +376,7 @@ describe('record-change trigger — end-to-end (#1491)', () => {
   }, 15000);
 
   it('a single record-after-write flow fires on BOTH create and update (#3427)', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
@@ -410,7 +410,7 @@ describe('record-change trigger — end-to-end (#1491)', () => {
   }, 15000);
 
   it('record-after-write start condition uses `previous == null` to discriminate create vs update (#3427)', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
@@ -455,14 +455,15 @@ describe('record-change trigger — end-to-end (#1491)', () => {
    * total, with no assist from the after-row merge #1872 fixed.
    */
   it('a record-before-write start condition sees an UNTOUCHED declared field\'s real value, and a NEVER-SET one as null — not a fault (#4953)', async () => {
-    // `{ logger: { level: 'silent' } }`, not this file's OTHER `{ logLevel:
-    // 'silent' }` — `ObjectKernelConfig` declares only `logger`
-    // (`packages/core/src/kernel.ts`); the sibling spelling is an untyped
-    // excess property `tsc` never catches on this test-hiding package (a
-    // pre-existing `check:type-check-debt` TEST_DEBT site, not this PR's to
-    // sweep) and, measurably, does NOTHING — `createLogger(config.logger)`
-    // never reads it, so every sibling `it` below actually logs at its
-    // default level despite the option.
+    // `{ logger: { level: 'silent' } }` — the only spelling
+    // `ObjectKernelConfig` declares (`packages/core/src/kernel.ts`), and now
+    // the uniform spelling in this file. This note used to contrast against a
+    // sibling `{ logLevel: 'silent' }`; that spelling is gone from the repo.
+    // It was an untyped excess property `tsc` never caught on this
+    // test-excluded package (a frozen `check:type-check-debt` TEST_DEBT site)
+    // and, measurably, did NOTHING — `createLogger(config.logger)` never read
+    // it, so every `it` that carried it logged at the default level despite
+    // the option.
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
@@ -614,10 +615,10 @@ describe('hydration schema gate — real ObjectQL engine findOne count (#8482)',
   }
 
   it('does NOT re-read via findOne on update for an object with no formula field', async () => {
-    // `{ logger: { level: 'silent' } }`, NOT this file's other `{ logLevel:
-    // 'silent' }` — see the doc comment on the #4953 test above for why (a
-    // pre-existing TS2353 in the frozen TEST_DEBT ledger this new test must
-    // not add to).
+    // `{ logger: { level: 'silent' } }` — the spelling `ObjectKernelConfig`
+    // actually reads; see the doc comment on the #4953 test above. The
+    // sibling `{ logLevel: 'silent' }` this note used to contrast against no
+    // longer exists in this file.
     const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());

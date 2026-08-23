@@ -21,6 +21,8 @@ import {
   type ApprovalMessagingSurface,
 } from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
+import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 
 export interface ApprovalsPluginOptions {
@@ -199,6 +201,30 @@ export class ApprovalsServicePlugin implements Plugin {
       },
     });
 
+    // [#10749] Field-visibility authority for payload-snapshot redaction.
+    // Resolved LAZILY on every read, for the same reason `tenancyPosture` is:
+    // the security plugin may register after this one, and a resolver captured
+    // at start would pin `undefined` for the life of the process — which here
+    // means "never redact", i.e. the leak this seam closes, silently reopened
+    // by load order. `getService` THROWS on an empty slot, so an absent
+    // security plugin degrades to serving snapshots exactly as before.
+    const fieldVisibility = (): FieldVisibilitySource | undefined => {
+      try {
+        const sec = ctx.getService<FieldVisibilitySource>('security');
+        return sec && typeof sec.getReadableFields === 'function' ? sec : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    this.service.attachFieldVisibility({
+      getReadableFields: (object: string, context?: unknown) => {
+        const sec = fieldVisibility();
+        return sec
+          ? sec.getReadableFields(object, context)
+          : Promise.resolve(undefined);
+      },
+    });
+
     // Record lock: block edits to a record while it has a pending request.
     // Delegation write-guard: a self-service OOO delegation may only name the
     // acting user as delegator (#1322 follow-up). Both bind under the same
@@ -208,6 +234,11 @@ export class ApprovalsServicePlugin implements Plugin {
         unbindAllHooks(engine);
         bindApprovalLockHook(engine, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
+        // [#10749] Generic-door snapshot redaction. Registered here so the
+        // service door and the generic data door narrow together — see
+        // `payload-redaction-middleware.ts` on why one door covered alone is
+        // worse than none.
+        bindSnapshotRedactionMiddleware(engine as any, fieldVisibility, ctx.logger);
       } catch (err: any) {
         ctx.logger.warn?.('[approvals] failed to bind approval hooks', { error: err?.message });
       }

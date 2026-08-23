@@ -16,7 +16,7 @@ metadata:
   author: objectstack-ai
   version: "1.4"
   domain: api
-  tags: rest, graphql, endpoint, auth, realtime, server
+  tags: rest, endpoint, auth, realtime, server
 ---
 
 # API Design — ObjectStack API Protocol

@@ -92,6 +92,37 @@
  * not adopted. If a future entry ever ships as something a static scan cannot
  * follow — a wildcard subpath, a conditional export tree — that is the point to
  * revisit it, and the reconciliation above is what will force the conversation.
+ * (#11072 added the first conditional tree — the `browser` condition — and the
+ * scan follows it: `browserTargetsOf` reads that condition's targets and they
+ * are walked like any other bundle, so nothing here went blind.)
+ *
+ * ## SECOND RULE (#11072): the browser-resolvable surface links nothing Node-only
+ *
+ * The first rule above is about zod (bundle WEIGHT, judged only for entries
+ * declared browser-reachable). This rule is about bundle FEASIBILITY, and it is
+ * judged for EVERY module entry, because a browser bundler resolves every one
+ * of them: `@objectstack/spec@17.1.0` shipped `pg-connection-string` — whose
+ * `parse` statically resolves `require('fs')` — at the top of six entry
+ * bundles, and objectui's docs site went red on `Can't resolve 'fs'` (#11072).
+ * The maintainer's 2026-08-22 ruling (Option A) declares the boundary in the
+ * exports map: the affected entries carry a `browser` condition pointing at a
+ * build with the pg-grammar arm swapped out (`tsup.config.ts`,
+ * `swapServerOnlyGrammarArm`). What this rule holds, per subpath:
+ *
+ *   - a subpath WITH a `browser` condition: the browser-conditioned bundles
+ *     must link no Node builtin and no declared server-only package
+ *     (`SERVER_ONLY_EXTERNALS`) — the swap really happened, in both format
+ *     halves;
+ *   - a subpath WITHOUT one: its ordinary bundles are exactly what a browser
+ *     bundler loads, so THEY must link no Node builtin and no server-only
+ *     package. This is the half that refuses the NEXT server-only dependency
+ *     at the producer — an author adding a Node-only import to a `*.zod.ts`
+ *     today reds this gate instead of a downstream repo's bundler hours later;
+ *   - positive control: across the NODE-side bundles of the browser-conditioned
+ *     subpaths the scan must still find at least one server-only link. Zero
+ *     means either the instrument went blind or the dependency left the Node
+ *     graph — in which case the `browser` conditions are moot and should be
+ *     withdrawn, a decision, not a silent green.
  *
  * ## It reads BUILT output, so an unbuilt tree is NOT MEASURED
  *
@@ -116,6 +147,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -131,6 +163,38 @@ const SELF_TEST = process.argv.includes('--self-test');
 /** A specifier naming zod itself, or any of its subpaths. */
 function isZodSpecifier(spec: string): boolean {
   return spec === 'zod' || spec.startsWith('zod/');
+}
+
+/**
+ * npm dependencies of this package that are Node-only by construction —
+ * linking one from any browser-resolvable bundle is the #11072 defect.
+ * `pg-connection-string`'s `parse` reaches `require('fs')` (runtime-guarded,
+ * bundler-static), it has no `browser` field and no `browser` condition, so a
+ * browser bundler that reaches it must resolve `fs` and fails. Add a package
+ * here the day it enters `dependencies` with the same shape.
+ */
+const SERVER_ONLY_EXTERNALS = new Set(['pg-connection-string']);
+
+const NODE_BUILTINS = new Set(builtinModules);
+
+/** The package half of a bare specifier: `fs/promises` → `fs`, `@s/p/x` → `@s/p`. */
+function packageOf(spec: string): string {
+  return spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]!;
+}
+
+/** A specifier naming a declared server-only dependency, subpaths included. */
+export function isServerOnlyExternal(spec: string): boolean {
+  return SERVER_ONLY_EXTERNALS.has(packageOf(spec));
+}
+
+/**
+ * A specifier no browser bundler can resolve without a shim: a Node builtin
+ * (bare or `node:`-prefixed, subpaths included — `fs/promises` is `fs`) or a
+ * declared server-only dependency (subpaths included, for the same reason).
+ */
+export function isNodeOnlySpecifier(spec: string): boolean {
+  if (spec.startsWith('node:')) return true;
+  return NODE_BUILTINS.has(packageOf(spec)) || isServerOnlyExternal(spec);
 }
 
 function isRelative(spec: string): boolean {
@@ -360,6 +424,52 @@ function targetsOf(entry: unknown): string[] {
   return out;
 }
 
+/**
+ * The files a BROWSER bundler loads for one subpath, when the subpath declares
+ * a `browser` condition (#11072); `[]` when it declares none.
+ *
+ * Both format halves are read, exactly as `targetsOf` reads them and for the
+ * same reason: the browser condition's `import` and `require` branches are
+ * separate bundles from separate tsup passes, and a swap that held for the ESM
+ * half while the CJS half still linked the parser is not a boundary. A flat
+ * string / `default` browser condition is accepted too, so a future
+ * simplification of the map degrades into a SCANNED shape rather than out of
+ * coverage.
+ */
+export function browserTargetsOf(entry: unknown): string[] {
+  if (!entry || typeof entry !== 'object') return [];
+  const browser = (entry as Record<string, unknown>).browser;
+  if (typeof browser === 'string') return [browser];
+  if (!browser || typeof browser !== 'object') return [];
+  const record = browser as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of ['import', 'require']) {
+    const branch = record[key];
+    if (!branch) continue;
+    if (typeof branch === 'string') {
+      out.push(branch);
+      continue;
+    }
+    if (typeof branch !== 'object') continue;
+    const target = (branch as Record<string, unknown>).default;
+    if (typeof target === 'string') out.push(target);
+  }
+  const fallback = record.default;
+  if (typeof fallback === 'string') out.push(fallback);
+  return out;
+}
+
+/**
+ * The #11072 verdict for one walked bundle that a browser bundler would load:
+ * every linked Node builtin / server-only external, with its linkers. Exported
+ * so the self-test can drive both verdicts over fixtures — this tree's own
+ * bundles are clean, and a rule only ever observed green is indistinguishable
+ * from one that matches nothing (#4690).
+ */
+export function nodeOnlyLinksOf(graph: BundleGraph): [string, string[]][] {
+  return [...graph.externals.entries()].filter(([spec]) => isNodeOnlySpecifier(spec));
+}
+
 function reconcile(exportsMap: ExportsMap, ledger: Ledger, problems: string[]): void {
   const declared = new Map<string, string>();
   const claim = (subpath: string, section: string): void => {
@@ -425,20 +535,30 @@ function audit(): never {
   const notAModule = new Set(ledger.notAModule);
   let zodLinksFound = 0;
   let bundlesScanned = 0;
+  // #11072 positive control: server-only links seen on the NODE side of the
+  // subpaths that declare a `browser` condition (see the header's second rule).
+  let browserConditionedSubpaths = 0;
+  let serverOnlyLinksOnNodeSide = 0;
   const judged = ledger.browserReachable;
 
   for (const subpath of Object.keys(exportsMap)) {
     if (notAModule.has(subpath)) continue;
     const contract = judged[subpath];
+    const entryValue = exportsMap[subpath];
+    const nodeTargets = targetsOf(entryValue);
+    const browserTargets = browserTargetsOf(entryValue);
+    const hasBrowserCondition = browserTargets.length > 0;
+    if (hasBrowserCondition) browserConditionedSubpaths++;
 
-    for (const target of targetsOf(exportsMap[subpath])) {
+    /** Resolve, walk and instrument one target; null when there is no graph to judge. */
+    const walkTarget = (target: string): BundleGraph | null => {
       const file = join(PKG_DIR, target);
       if (!existsSync(file)) {
         problems.push(
           `'${subpath}' resolves to ${target}, which does not exist. The exports map points at a\n` +
             `      file this build did not emit.`,
         );
-        continue;
+        return null;
       }
 
       const graph = walkBundle(PKG_DIR, file);
@@ -451,10 +571,47 @@ function audit(): never {
         );
       }
 
-      const zodLinkers = [...graph.externals.entries()].filter(([spec]) => isZodSpecifier(spec));
-      zodLinksFound += zodLinkers.length;
+      zodLinksFound += [...graph.externals.keys()].filter(isZodSpecifier).length;
+      return graph;
+    };
+
+    /** The #11072 refusal for one bundle a browser bundler would load. */
+    const refuseNodeOnlyLinks = (target: string, graph: BundleGraph): void => {
+      for (const [spec, linkers] of nodeOnlyLinksOf(graph)) {
+        const why = hasBrowserCondition
+          ? `      This is a browser-conditioned bundle, so the grammar-arm swap did not cover this\n` +
+            `      link (tsup.config.ts, swapServerOnlyGrammarArm — keyed to the one audited seam on\n` +
+            `      purpose). Route the Node-only work through a module the browser pass swaps out, or\n` +
+            `      drop the import.`
+          : `      This subpath declares NO browser condition, so ${target} is exactly the file a\n` +
+            `      browser bundler loads — this link is #11072's defect: the consumer's build fails\n` +
+            `      on \`Can't resolve 'fs'\` hours later, attributed to nothing. Either keep the\n` +
+            `      entry's graph free of Node-only imports, or give the entry a browser-conditioned\n` +
+            `      build that excludes them (the #11072 pattern: seam module + tsup swap + a\n` +
+            `      \`browser\` condition in the exports map).`;
+        problems.push(
+          `'${subpath}': ${target} links the Node-only specifier '${spec}'\n` +
+            `      (via ${linkers.join(', ')}).\n${why}`,
+        );
+      }
+    };
+
+    for (const target of nodeTargets) {
+      const graph = walkTarget(target);
+      if (!graph) continue;
+
+      if (hasBrowserCondition) {
+        // The node side of a browser-conditioned subpath MAY link server-only
+        // packages — that is the point of the condition. Count the links as
+        // the positive control instead of judging them.
+        serverOnlyLinksOnNodeSide += [...graph.externals.keys()].filter(isServerOnlyExternal).length;
+      } else {
+        refuseNodeOnlyLinks(target, graph);
+      }
+
       if (!contract) continue;
 
+      const zodLinkers = [...graph.externals.entries()].filter(([spec]) => isZodSpecifier(spec));
       for (const [spec, linkers] of zodLinkers) {
         problems.push(
           `'${subpath}' is DECLARED browser-reachable but its built graph links '${spec}'\n` +
@@ -479,6 +636,34 @@ function audit(): never {
         );
       }
     }
+
+    for (const target of browserTargets) {
+      const graph = walkTarget(target);
+      if (!graph) continue;
+      refuseNodeOnlyLinks(target, graph);
+    }
+  }
+
+  // #11072's positive control. The node-only refusals above are green when the
+  // scan finds nothing — which is also what a blind scan reports, and what a
+  // tree whose Node graph dropped the dependency reports. Neither may pass as
+  // a silent green: the first is an instrument failure, the second means the
+  // `browser` conditions no longer buy anything and should be withdrawn — a
+  // maintainer decision, like every other exports-map move.
+  if (browserConditionedSubpaths > 0 && serverOnlyLinksOnNodeSide === 0) {
+    console.error(
+      `\n❌  check:browser-reachable-entries — POSITIVE CONTROL FAILED (#11072).\n\n` +
+        `   ${browserConditionedSubpaths} subpath(s) declare a \`browser\` condition, but the scan found ZERO\n` +
+        `   server-only links (${[...SERVER_ONLY_EXTERNALS].join(', ')}) in their NODE-side bundles. So this run\n` +
+        `   cannot tell "the browser bundles are clean" apart from "this scan can no longer see a\n` +
+        `   server-only link at all".\n\n` +
+        `   The two causes, both real:\n` +
+        `     • the Node graph no longer links the server-only package — then the browser conditions\n` +
+        `       are moot: withdraw them (exports map + tsup.config.ts + this gate's list) instead of\n` +
+        `       keeping a boundary that guards nothing;\n` +
+        `     • the emitted import shape moved out from under the scanner (see SPECIFIER_KEYWORDS).\n`,
+    );
+    process.exit(1);
   }
 
   // The calibration. A specifier scan cannot see a zod that got INLINED into the
@@ -517,7 +702,10 @@ function audit(): never {
     `✅  check:browser-reachable-entries — ${declaredCount} declared browser-reachable ` +
       `entr${declaredCount === 1 ? 'y links' : 'ies link'} no zod; ` +
       `${bundlesScanned} bundle(s) scanned, ${zodLinksFound} zod link(s) seen elsewhere ` +
-      `(instrument calibrated); exports map fully classified.`,
+      `(instrument calibrated); the browser-resolvable surface links no Node builtin and no ` +
+      `server-only package (#11072: ${browserConditionedSubpaths} browser-conditioned subpath(s), ` +
+      `${serverOnlyLinksOnNodeSide} server-only link(s) on their Node side — positive control ` +
+      `held); exports map fully classified.`,
   );
   process.exit(0);
 }
@@ -788,6 +976,94 @@ function selfTest(): never {
     JSON.stringify(targets) === JSON.stringify(['./dist/x/index.mjs', './dist/x/index.js']),
     JSON.stringify(targets),
   );
+
+  // ── #11072: the browser condition's targets, and only when declared ──────
+  const conditioned = {
+    browser: {
+      import: { types: './dist/x/index.d.mts', default: './dist/browser/x/index.mjs' },
+      require: { types: './dist/x/index.d.ts', default: './dist/browser/x/index.js' },
+    },
+    import: { types: './dist/x/index.d.mts', default: './dist/x/index.mjs' },
+    require: { types: './dist/x/index.d.ts', default: './dist/x/index.js' },
+  };
+  const browserTargets = browserTargetsOf(conditioned);
+  check(
+    'reads the browser condition — BOTH format halves',
+    JSON.stringify(browserTargets) ===
+      JSON.stringify(['./dist/browser/x/index.mjs', './dist/browser/x/index.js']),
+    JSON.stringify(browserTargets),
+  );
+  check(
+    'the browser condition does not leak into the node-side targets',
+    JSON.stringify(targetsOf(conditioned)) ===
+      JSON.stringify(['./dist/x/index.mjs', './dist/x/index.js']),
+    JSON.stringify(targetsOf(conditioned)),
+  );
+  const flatBrowser = browserTargetsOf({ browser: './b.mjs', import: { default: './x.mjs' } });
+  check(
+    'a flat string browser condition degrades into a SCANNED shape',
+    JSON.stringify(flatBrowser) === JSON.stringify(['./b.mjs']),
+    JSON.stringify(flatBrowser),
+  );
+  check(
+    'no browser condition → no browser targets',
+    browserTargetsOf({ import: { default: './x.mjs' } }).length === 0,
+  );
+
+  // ── #11072: what counts as Node-only ─────────────────────────────────────
+  const nodeOnly = ['fs', 'node:fs', 'fs/promises', 'node:path', 'pg-connection-string',
+    'pg-connection-string/index.js'];
+  const browserSafe = ['zod', 'zod/v4', './chunk.mjs', 'ai'];
+  check(
+    'recognises builtins (bare, node:-prefixed, subpaths) and server-only packages',
+    nodeOnly.every(isNodeOnlySpecifier),
+    JSON.stringify(nodeOnly.filter((s) => !isNodeOnlySpecifier(s))),
+  );
+  check(
+    'does not flag zod, relative hops or the optional ai peer',
+    browserSafe.every((s) => !isNodeOnlySpecifier(s)),
+    JSON.stringify(browserSafe.filter(isNodeOnlySpecifier)),
+  );
+
+  // ── #11072: the node-only verdict over a walked graph, BOTH directions ───
+  const nodeOnlyTmp = mkdtempSync(join(tmpdir(), 'os-browser-reachable-nodeonly-'));
+  try {
+    const dist = join(nodeOnlyTmp, 'dist');
+    mkdirSync(join(dist, 'poisoned'), { recursive: true });
+    mkdirSync(join(dist, 'swapped'), { recursive: true });
+
+    // The #11072 defect two relative hops down: invisible to a one-file scan,
+    // and spelled through BOTH statement forms the scanner knows.
+    writeFileSync(
+      join(dist, 'poisoned', 'index.mjs'),
+      `export { p } from '../chunk-parser.mjs';\n`,
+    );
+    writeFileSync(
+      join(dist, 'chunk-parser.mjs'),
+      `import { parse } from 'pg-connection-string';\nconst fs = require('node:fs');\nexport const p = [parse, fs];\n`,
+    );
+    const poisoned = walkBundle(nodeOnlyTmp, join(dist, 'poisoned', 'index.mjs'));
+    const poisonedLinks = nodeOnlyLinksOf(poisoned).map(([spec]) => spec).sort();
+    check(
+      'finds a server-only package AND a node: builtin reached through a relative hop',
+      JSON.stringify(poisonedLinks) === JSON.stringify(['node:fs', 'pg-connection-string']),
+      JSON.stringify(poisonedLinks),
+    );
+
+    // A correctly swapped browser bundle: zod stays, nothing Node-only.
+    writeFileSync(
+      join(dist, 'swapped', 'index.mjs'),
+      `import { z } from 'zod';\nexport const s = z;\n`,
+    );
+    const swapped = walkBundle(nodeOnlyTmp, join(dist, 'swapped', 'index.mjs'));
+    check(
+      'reports a swapped (zod-only) browser bundle clean on the node-only axis',
+      nodeOnlyLinksOf(swapped).length === 0,
+      JSON.stringify(nodeOnlyLinksOf(swapped).map(([spec]) => spec)),
+    );
+  } finally {
+    rmSync(nodeOnlyTmp, { recursive: true, force: true });
+  }
 
   if (failures.length) {
     console.error(`\n✗ self-test: ${failures.length} case(s) failed.`);

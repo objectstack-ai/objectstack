@@ -175,11 +175,39 @@ describe('auth route ledger hygiene', () => {
     // the enumeration, which reads `.path`, never sees it either). Pinned so
     // the `source` split stays honest rather than becoming a place to park a
     // row that failed the upstream check.
+    //
+    // [#10534] Grew from 3 to 11. A census of `auth-plugin.ts` found 17 such
+    // mounts, of which nine were in NEITHER half of the ledger; eight are
+    // ledgered now. This pin is the thing that makes the enlarged set
+    // reviewable: an ObjectStack mount added or removed without a matching
+    // row fails HERE, naming the route. It is not a substitute for the
+    // mount-vs-ledger gate, because this list is still hand-written: it
+    // catches a row that disappears, not a mount that never got one.
+    //
+    // That other half now EXISTS — `scripts/check-auth-mount-ledger.mjs`
+    // (`pnpm check:auth-mount-ledger`, #10534 follow-up 4). It enumerates the
+    // `rawApp` mounts from `auth-plugin.ts` SOURCE and diffs them against both
+    // halves of the ledger, so a mount added with no row fails THERE. The two
+    // are complements rather than duplicates, and both are worth keeping: this
+    // pin is a reviewed, hand-written statement of what the objectstack-sourced
+    // set IS, and the gate is a reading of what the plugin actually serves.
+    // The ninth mount,
+    // `POST /api/v1/auth/set-initial-password`, is deliberately absent: its
+    // disposition is escalated on #10534 rather than guessed (see the ledger
+    // comment above these rows).
     const own = AUTH_ROUTE_LEDGER.filter((e) => e.source === 'objectstack').map((e) => e.route).sort();
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
       'GET /api/v1/auth/config',
+      'POST /api/v1/auth/admin/import-users',
+      'POST /api/v1/auth/admin/oauth2/toggle-disabled',
+      'POST /api/v1/auth/admin/sso/register',
+      'POST /api/v1/auth/admin/sso/register-saml',
+      'POST /api/v1/auth/admin/sso/request-domain-verification',
+      'POST /api/v1/auth/admin/sso/verify-domain',
+      'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/organization/add-member',
+      'POST /api/v1/auth/sys-oauth-application/register',
     ]);
     for (const route of own) {
       expect(live.has(route), `${route} should NOT come from better-auth`).toBe(false);

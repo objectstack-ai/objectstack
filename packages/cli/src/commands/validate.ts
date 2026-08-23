@@ -223,6 +223,30 @@ export default class Validate extends Command {
       // is a newer major than the app declares, point at the migration guide.
       const specGap = checkSpecVersionGap(config.manifest);
 
+      // 4b. Structural advisories (non-blocking) — computed HERE, above the
+      //     `if (flags.json)` branch, for exactly the reason `unknownKeyWarnings`
+      //     is computed up beside `normalized`: everything below that branch only
+      //     ever feeds the text path. These four were in that state — printed for
+      //     a human, structurally unreachable for `--json`, which is the one
+      //     audience the flag exists for. A CI script gating on
+      //     `os validate --json` advisories saw `warnings: []` however true the
+      //     conditions were. Computed once and consumed by BOTH faces below, so
+      //     the two cannot disagree by construction — the same "a single list
+      //     cannot drift from itself" move this file already had to make twice.
+      const structuralWarnings: string[] = [];
+      if (stats.objects === 0) {
+        structuralWarnings.push('No objects defined — this stack has no data model');
+      }
+      if (stats.apps === 0 && stats.plugins === 0) {
+        structuralWarnings.push('No apps or plugins defined — this stack may not do much');
+      }
+      if (!config.manifest?.id) {
+        structuralWarnings.push('Missing manifest.id — required for deployment');
+      }
+      if (!config.manifest?.namespace) {
+        structuralWarnings.push('Missing manifest.namespace — required for multi-app hosting');
+      }
+
       if (flags.json) {
         await emitJson({
           valid: true,
@@ -232,7 +256,7 @@ export default class Validate extends Command {
           // hand-maintained concatenation of per-gate arrays, and it leaked
           // twice: warnings computed and then dropped from `--json` while the
           // console printed them. A single list cannot drift from itself.
-          warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings],
+          warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings],
           conversions: conversionNotices,
           specVersionGap: specGap,
           duration: timer.elapsed(),
@@ -271,18 +295,11 @@ export default class Validate extends Command {
         warnings.push(`${w.path}: ${w.message}`);
       }
 
-      if (stats.objects === 0) {
-        warnings.push('No objects defined — this stack has no data model');
-      }
-      if (stats.apps === 0 && stats.plugins === 0) {
-        warnings.push('No apps or plugins defined — this stack may not do much');
-      }
-      if (!config.manifest?.id) {
-        warnings.push('Missing manifest.id — required for deployment');
-      }
-      if (!config.manifest?.namespace) {
-        warnings.push('Missing manifest.namespace — required for multi-app hosting');
-      }
+      // The four structural advisories, computed above the `if (flags.json)`
+      // branch so `--json` carries them too. Appended HERE, in the position the
+      // four inline `if` blocks used to occupy, so the text face's warning ORDER
+      // is byte-for-byte what it was.
+      warnings.push(...structuralWarnings);
 
       // 6. Display results
       console.log('');

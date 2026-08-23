@@ -200,7 +200,11 @@ describe('dropped webhook subscription leaves a durable, unsendable record (#806
         await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
         expect(calls).toHaveLength(0);
 
-        await expect(messaging.redeliverHttp(row.id)).rejects.toMatchObject({
+        // [#10740] `redeliverHttp` now requires the requesting caller's tenant.
+        // This fixture has no organization and no tenancy posture, so
+        // `undefined` is the honest value — required rather than optional
+        // precisely so that answer is written down instead of defaulted into.
+        await expect(messaging.redeliverHttp(row.id, { tenantId: undefined })).rejects.toMatchObject({
             code: 'DELIVERY_NEVER_SENT',
         });
         // The refusal did not mutate the row on its way out.

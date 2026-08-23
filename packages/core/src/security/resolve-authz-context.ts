@@ -118,10 +118,25 @@ function safeJsonParse<T>(s: string, fallback: T): T {
   try { return JSON.parse(s) as T; } catch { return fallback; }
 }
 
-async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+async function tryFind(
+  ql: any,
+  object: string,
+  where: any,
+  limit = 100,
+  /**
+   * Resolve inside ONE organization. Threaded into the execution context, so
+   * the read routes through `SqlDriver.applyTenantScope` — the governed
+   * chokepoint — rather than being re-implemented here as a bare equality.
+   * Omitted keeps the pre-existing installation-wide read, which is what the
+   * user-keyed reads above want (they are already narrowed by `user_id`) and
+   * what a `single`-posture deployment wants everywhere.
+   */
+  organizationId?: string,
+): Promise<any[]> {
   if (!ql || typeof ql.find !== 'function') return [];
   try {
-    let rows = await ql.find(object, { where, limit, context: { isSystem: true } } as any);
+    const context = organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
+    let rows = await ql.find(object, { where, limit, context } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -332,6 +347,30 @@ export async function resolveUserAuthzGrants(
     return userRow;
   };
 
+  // ── [#10825] Leg 1: every read that depends only on (userId, tenantId) is
+  // issued CONCURRENTLY — sys_user, both sys_member reads, sys_user_position
+  // and sys_user_permission_set used to run as five sequential round trips
+  // (legs 6–9 + 13 of an authenticated request; cloud#1539 measured that LEGS,
+  // not queries, are the latency multiplier). Same queries, same filters, same
+  // limits, same tenancy scoping — only the waiting overlaps, so the rows each
+  // downstream block sees are byte-identical to the sequential version
+  // (equivalence pinned in resolve-authz-context.batch-equivalence.test.ts).
+  // `getUserRow` stays memoized; issuing it here is not a new read on any
+  // path that reads it at all — the email fallback below and §7's ai_seat
+  // synthesis consume the same memo. The CONDITION mirrors the sequential
+  // implementation exactly: `sys_user` was read iff the caller seeded no
+  // email OR did not seed `ai_seat` — a fully-seeded API-key principal never
+  // touched the table, and the batch must not start (equivalence suite pins
+  // the query multiset per fixture).
+  const needsUserRow = !grants.email || !grants.permissions.includes('ai_seat');
+  const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
+    needsUserRow ? getUserRow() : Promise.resolve(undefined),
+    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000) : Promise.resolve([] as any[]),
+    tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100),
+  ]);
+
   // Resolve the caller's unique email for `current_user.email` RLS owner
   // policies when the caller didn't supply it (e.g. API-key auth).
   if (!grants.email) {
@@ -364,7 +403,7 @@ export async function resolveUserAuthzGrants(
   //        columns are absent on `sys_member` today, and `isGrantActive` treats
   //        an absent bound as unbounded, so this is a no-op until they exist and
   //        correct the moment they do.
-  const members = await tryFind(ql, 'sys_member', { user_id: userId }, 200);
+  // (read in Leg 1 above)
   const accessibleOrgIds = new Set<string>();
   for (const m of members) {
     if (!isGrantActive(m, nowMs)) continue;
@@ -373,13 +412,26 @@ export async function resolveUserAuthzGrants(
   }
   grants.accessible_org_ids = Array.from(accessibleOrgIds);
 
-  // Positions come from the ACTIVE org's membership only (unchanged): a role
-  // held in one organization must not grant its capabilities while the caller
-  // operates in another. With no active org, every membership contributes —
-  // exactly the pre-D2 behavior of the org-less read.
-  const activeMembers = tenantId
-    ? members.filter((m) => (m.organization_id ?? m.organizationId) === tenantId)
-    : members;
+  // Positions come from the ACTIVE org's membership only: a role held in one
+  // organization must not grant its capabilities while the caller operates in
+  // another. With no active org, every membership contributes — exactly the
+  // pre-D2 behavior of the org-less read.
+  //
+  // [ADR-0091 D2] Rows outside their validity window are dropped BEFORE the
+  // role derivation — the same discipline §6 gives `sys_user_permission_set`,
+  // so a lapsed membership can no more yield `org_owner` than an expired
+  // `admin_full_access` can yield `platform_admin`. Maintainer ruling
+  // 2026-08-22 (live session, item 2): a lapsed membership is NO MEMBERSHIP,
+  // not merely no org access — so this half now answers the same question as
+  // `accessible_org_ids` above, off the same rows, and (a)'s "correct the
+  // moment they do" promise covers BOTH derivations rather than one. Fail
+  // closed (D2). `sys_member` declares neither bound today and `isGrantActive`
+  // reads an absent bound as unbounded, so no shipped row changes answer.
+  const activeMembers = members.filter(
+    (m) =>
+      isGrantActive(m, nowMs)
+      && (!tenantId || (m.organization_id ?? m.organizationId) === tenantId),
+  );
   for (const m of activeMembers) {
     if (m.role && typeof m.role === 'string') {
       for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
@@ -392,7 +444,7 @@ export async function resolveUserAuthzGrants(
   // 4. [ADR-0057 D4] Platform-owned RBAC role assignments (sys_user_position) — the
   //    source of truth for custom roles, decoupled from sys_member.role.
   //    `organization_id = null` = global (cross-tenant); else match active org.
-  const userPositionRows = await tryFind(ql, 'sys_user_position', { user_id: userId }, 200);
+  // (read in Leg 1 above)
   for (const ur of userPositionRows) {
     const org = ur.organization_id ?? null;
     if (org && tenantId && org !== tenantId) continue;
@@ -403,7 +455,7 @@ export async function resolveUserAuthzGrants(
 
   // 5. Fellow-org user IDs so RLS can scope identity tables to collaborators.
   if (tenantId) {
-    const orgMembers = await tryFind(ql, 'sys_member', { organization_id: tenantId }, 1000);
+    const orgMembers = orgMembersLeg; // (read in Leg 1 above)
     const ids = new Set<string>(
       orgMembers
         .map((m) => m.user_id ?? m.userId)
@@ -416,7 +468,7 @@ export async function resolveUserAuthzGrants(
   // 6. Permission sets — user-scoped grants (null org = global, else active org).
   //    Rows outside their validity window are dropped BEFORE any derivation, so
   //    an expired admin_full_access grant cannot yield platform_admin either.
-  const upsRowsAll = await tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100);
+  // (read in Leg 1 above)
   const upsRows = upsRowsAll.filter((r) => isGrantActive(r, nowMs));
   const psIds = new Set<string>(
     upsRows
@@ -462,7 +514,31 @@ export async function resolveUserAuthzGrants(
   //     with no `sys_position` row at all (`org_owner`, a membership-derived
   //     role) has no flag to read and is untouched.
   if (grants.positions.length > 0) {
-    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 100);
+    //     [#10103] Scoped to the CALLER's organization. `sys_position` spells
+    //     its name index `unique: 'organization'` and its rows are materialized
+    //     per organization, so several organizations hold a row named
+    //     `everyone` (and one named after every declared position). Swept by
+    //     name alone, this read returned EVERY organization's rows, and the
+    //     junction read below then collected another organization's bindings —
+    //     a cross-organization grant bleed, measured reachable from one tenant's
+    //     resolution to another tenant's `everyone` binding. It also made the
+    //     sweep O(organizations) on a table that is read on every request.
+    //
+    //     Scoped by threading the organization into the context rather than by
+    //     adding an `organization_id` predicate here: the driver's
+    //     `applyTenantScope` is the one governed spelling of this wall, and a
+    //     bare equality written at this call site would be a second, ungoverned
+    //     implementation of it — the exact shape that produced the defect this
+    //     card repairs. Per-request cost stays O(the caller's own organization's
+    //     catalog).
+    //
+    //     Limit raised with it: the cap has to admit this organization's rows
+    //     alongside any organization-less ones the driver's compatibility arm
+    //     still returns, or a caller silently loses positions. Those
+    //     organization-less rows stay REACHABLE on purpose — they are not
+    //     reaped, and grants point at them by row id, so dropping them here
+    //     would revoke standing access silently.
+    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId);
     const deactivatedNames = new Set<string>(
       positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
     );
@@ -672,20 +748,41 @@ async function resolveLocalizationContextUncached(
   try {
     if (settings && typeof settings.get === 'function') {
       const sctx = { tenantId, userId } as any;
-      const [tzRes, localeRes, currencyRes] = await Promise.all([
-        settings.get('localization', 'timezone', sctx).catch(() => {
+      // [#10826] ONE grouped namespace read instead of three: `getMany`
+      // resolves all three keys over at most two `loadRows` calls (queries
+      // 16–18 of 24 on the measured rig collapse to one). Same per-key
+      // answers by the service's own equivalence contract. Feature-detected:
+      // an older service without `getMany` keeps the three parallel `get`s
+      // (still 1 leg — this is a query-count fix, per the card's calibration).
+      // A thrown `getMany` lands in the same place a thrown `get` did —
+      // `failed = true` and the direct `$in` fallback below, which reads the
+      // exact same three keys.
+      let tzRes: any; let localeRes: any; let currencyRes: any;
+      if (typeof settings.getMany === 'function') {
+        try {
+          const many = await settings.getMany('localization', ['timezone', 'locale', 'currency'], sctx);
+          tzRes = many.timezone;
+          localeRes = many.locale;
+          currencyRes = many.currency;
+        } catch {
           failed = true;
-          return undefined;
-        }),
-        settings.get('localization', 'locale', sctx).catch(() => {
-          failed = true;
-          return undefined;
-        }),
-        settings.get('localization', 'currency', sctx).catch(() => {
-          failed = true;
-          return undefined;
-        }),
-      ]);
+        }
+      } else {
+        [tzRes, localeRes, currencyRes] = await Promise.all([
+          settings.get('localization', 'timezone', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+          settings.get('localization', 'locale', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+          settings.get('localization', 'currency', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+        ]);
+      }
       const tz = coerceTimeZone(tzRes?.value);
       const locale = coerceLocale(localeRes?.value);
       const currency = coerceCurrency(currencyRes?.value);

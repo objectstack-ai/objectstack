@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { readFile } from 'node:fs/promises';
-import { defineConfig } from 'tsup';
+import { dirname, join } from 'node:path';
+import { defineConfig, type Options } from 'tsup';
 import type { Plugin } from 'esbuild';
 
 /**
@@ -91,10 +92,56 @@ const entries = [
   'src/meta-spelling/index.ts'
 ];
 
+/**
+ * [#11072] The entries whose module graph reaches the driver-config
+ * validators, i.e. the entries whose Node bundles statically import
+ * `pg-connection-string` (measured per bundle head; `./shared` left the set
+ * when its graph stopped reaching the driver schemas). Each gets a SECOND,
+ * `browser`-conditioned output under `dist/browser/` in which the postgres
+ * URL refinement's pg-grammar arm is swapped for its dependency-free browser
+ * twin — `pg-connection-string`'s `parse` statically resolves `require('fs')`
+ * and breaks every browser bundler that reaches it (maintainer ruling
+ * 2026-08-22, Option A: declare the boundary in the exports map; Node-side
+ * behaviour and the Node outputs are untouched).
+ *
+ * Keep this list equal to the poisoned set: `check:browser-reachable-entries`
+ * refuses a `browser`-conditioned bundle that still links the parser or any
+ * Node builtin, refuses a NON-conditioned bundle that links either (a browser
+ * bundler resolves those very files), and carries a positive control on the
+ * Node side — so both drift directions go red at this producer.
+ */
+const browserConditionedEntries = [
+  'src/index.ts',
+  'src/data/index.ts',
+  'src/system/index.ts',
+  'src/kernel/index.ts',
+  'src/cloud/index.ts',
+];
+
+/**
+ * [#11072] Resolve the pg-grammar arm to its browser twin — the whole
+ * mechanism by which the `browser`-conditioned bundles exclude the
+ * driver-config validators' Node-only dependency.
+ *
+ * Keyed to the seam module's specifier, NOT to `pg-connection-string`
+ * itself, on purpose: a blanket alias of the package would silently degrade
+ * any FUTURE import site nobody audited, whereas this swap covers exactly
+ * the one audited seam and a new direct import lands in the browser bundles
+ * where `check:browser-reachable-entries` refuses it at this producer.
+ */
+const swapServerOnlyGrammarArm: Plugin = {
+  name: 'swap-server-only-grammar-arm',
+  setup(build) {
+    build.onResolve({ filter: /[\\/]pg-url-grammar\.server$/ }, (args) => ({
+      path: join(dirname(args.importer), 'pg-url-grammar.browser.ts'),
+    }));
+  },
+};
+
 // Generate DTS separately to avoid memory issues
 const isDts = process.env.BUILD_DTS === 'true';
 
-export default defineConfig({
+const mainConfig: Options = {
   entry: entries,
   splitting: false,
   sourcemap: true,
@@ -104,4 +151,29 @@ export default defineConfig({
   target: 'es2020',
   treeshake: true,
   esbuildPlugins: [pureSchemaConstruction],
-});
+};
+
+/**
+ * The `browser`-conditioned outputs (#11072) — same entry shapes, same
+ * formats, same target as the main pass, differing ONLY in the grammar-arm
+ * swap and the `dist/browser/` outDir. No DTS pass of its own: the browser
+ * build's public API is identical by construction (the swapped module keeps
+ * the contract), so the exports map points its `browser.types` at the main
+ * build's declarations.
+ */
+const browserConfig: Options = {
+  entry: browserConditionedEntries,
+  outDir: 'dist/browser',
+  splitting: false,
+  sourcemap: true,
+  clean: false, // dist was cleaned (or preserved) by the main pass
+  dts: false,
+  format: ['esm', 'cjs'],
+  target: 'es2020',
+  treeshake: true,
+  esbuildPlugins: [pureSchemaConstruction, swapServerOnlyGrammarArm],
+};
+
+// The DTS pass re-runs only the main config (declarations once, per entry);
+// the JS pass emits the Node outputs and then the browser-conditioned ones.
+export default defineConfig(isDts ? mainConfig : [mainConfig, browserConfig]);

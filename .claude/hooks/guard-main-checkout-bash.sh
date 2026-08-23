@@ -61,6 +61,15 @@
 #      in that tail put a REAL ASCII `>` in operator position, so the guard named the
 #      following JS fragment as a write "target" and blocked a pure-read command (#10247).
 #      Single quotes take no escapes: inside '…' a backslash is literal, as in a real shell.
+#   4. shell COMMENTS are text, not commands — both quote-aware passes stop at an unquoted
+#      `#` that starts a WORD and resume at the next newline (#10570). A comment cannot
+#      write anything, so reading one as a command is a false BLOCK: prose arrows (`->`,
+#      `=>`) put a real `>` in operator position and the word after it was named as a write
+#      target, while a `;` in the same comment first split it into its own "segment".
+#      The word-start condition is the whole rule — `foo#bar`, `${x#y}`, `curl 'url/#frag'`,
+#      `sed 's/#//'` and `grep '#'` are NOT comments and are left exactly as they were. A
+#      comment never begins inside '…' or "…" (layer 1 owns those) nor inside a heredoc body
+#      (layer 2 has already dropped those lines before this pass runs).
 #
 # Redirection is recognised on ASCII operators ONLY — `>` `>>` `<` `<<` and their fd-prefixed
 # forms. No non-ASCII codepoint is ever an operator or an operator boundary, and this is
@@ -138,10 +147,19 @@ strip_heredocs() {
 
 # --- split the command into shell segments, honouring quotes ---------------------------
 # A separator inside '…' or "…" does NOT split, so writing *about* the ban is never caught
-# by the ban.
+# by the ban. The same goes for a separator inside a COMMENT: `word` tracks whether the
+# next character would open a new WORD, which is the only position where an unquoted `#`
+# begins a comment — the comment then runs to the next newline and never splits, tokenises
+# or contributes a target (#10570).
+#
+# What resets `word` is exactly what delimits a word in the shell: start of input, blank,
+# and the metacharacters `; | & ( ) newline > <`. `{` and `}` do NOT — they are reserved
+# words rather than metacharacters, so `#` right after one continues the word. That is not
+# cosmetic: this pass splits on `{`/`}` anyway, and treating the `#` of `${#arr[@]}` as a
+# comment would swallow the rest of the line — including a real redirect behind it.
 segments=()
 split_segments() {
-  local s="$1" seg="" q="" ch i n=${#1}
+  local s="$1" seg="" q="" ch i n=${#1} word=0
   for ((i = 0; i < n; i++)); do
     ch="${s:i:1}"
     if [ -n "$q" ]; then
@@ -156,9 +174,20 @@ split_segments() {
       continue
     fi
     case "$ch" in
-      "'" | '"') q="$ch" ; seg+="$ch" ;;
-      ';' | '|' | '&' | '(' | ')' | '{' | '}' | $'\n') segments+=("$seg") ; seg="" ;;
-      *) seg+="$ch" ;;
+      '#')
+        if [ "$word" = 0 ]; then
+          # comment: skip to (not past) the newline, which still separates as usual
+          while [ $((i + 1)) -lt "$n" ] && [ "${s:i+1:1}" != $'\n' ]; do i=$((i + 1)); done
+          continue
+        fi
+        seg+="$ch"                                   # foo#bar, ${x#y}, url/#frag
+        ;;
+      "'" | '"') q="$ch" ; seg+="$ch" ; word=1 ;;
+      ';' | '|' | '&' | '(' | ')' | $'\n') segments+=("$seg") ; seg="" ; word=0 ;;
+      '{' | '}') segments+=("$seg") ; seg="" ; word=1 ;;
+      ' ' | $'\t') seg+="$ch" ; word=0 ;;
+      '>' | '<') seg+="$ch" ; word=0 ;;
+      *) seg+="$ch" ; word=1 ;;
     esac
   done
   segments+=("$seg")
@@ -168,6 +197,9 @@ split_segments() {
 # The whole argument list matters here, and `read -r -a` would promote a QUOTED ">" or
 # "sed -i" to a real operator/command — exactly the false positive that makes a guard get
 # disabled. So: quotes are stripped and their contents are inert.
+# A comment is inert here too: `have` is already the "a word is open" flag, so an unquoted
+# `#` with have=0 is at word start and begins a comment (#10570). `foo#bar` and `${x#y}`
+# reach this point with have=1 and stay part of the token.
 # TOK[] = token values (unquoted); TOP[] = "op" for an unquoted redirection operator.
 TOK=(); TOP=()
 tokenize() {
@@ -187,6 +219,14 @@ tokenize() {
       continue
     fi
     case "$ch" in
+      '#')
+        if [ "$have" = 0 ]; then
+          # word-start `#`: comment, inert to the next newline
+          while [ $((i + 1)) -lt "$n" ] && [ "${s:i+1:1}" != $'\n' ]; do i=$((i + 1)); done
+          continue
+        fi
+        tok+="$ch"
+        ;;
       "'" | '"') q="$ch" ; have=1 ;;
       '\')
         i=$((i + 1))

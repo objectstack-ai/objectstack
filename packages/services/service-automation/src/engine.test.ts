@@ -9,6 +9,13 @@ import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import type { NodeExecutor } from './engine.js';
 import type { IAutomationService } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
+// The shared ref'd-timer instrument (#10783). A private, test-only workspace
+// package rather than a subpath on `@objectstack/core`: a test helper does not
+// belong on a runtime package's published npm surface, and a relative import
+// into `packages/core/src` would put a foreign file into this package's tsc
+// program, where `rootDir` rejects it. That module's header carries the full
+// argument and the measurements behind it.
+import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
 
 /**
  * A pausing fixture's `resumeAuthority: 'any'` declaration (#5561).
@@ -2005,24 +2012,46 @@ describe('AutomationEngine - Node Timeout', () => {
         };
 
         /**
-         * Ref'd `Timeout` handles — `getActiveResourcesInfo()` reports only
-         * resources currently keeping the event loop alive, which is exactly
-         * the property that made `os migrate` idle ~120s in #4813.
+         * ⚠️ This pin used to score an ABSOLUTE `process.getActiveResourcesInfo()`
+         * `'Timeout'` count either side of `await engine.execute(...)` (#10783).
+         * That reading is PROCESS-global, so it belongs to every co-tenant test
+         * file in the worker and to the runner itself — never to this test — and
+         * comparing two of them with `toBe` is sound only while the window
+         * crosses no event-loop turn. It was green only because
+         * `registerInstantScript` resolves on a microtask, which is a property
+         * of code this test does not own and was written down nowhere. The day
+         * anything in `engine.execute()`'s path awaits a real timer (a node
+         * retry, a queue drain, a rate limiter) a FOREIGN expiry inside the
+         * window pulls the count DOWN and the message points at a timer count
+         * rather than at the change that caused it. The sibling sites went red
+         * exactly that way under ambient noise: `expected 2037 to be 2047`.
+         *
+         * So: name the guards this flow arms — told apart from every other timer
+         * on the shared loop by the `GUARD_MS` they are configured with — and
+         * ask how many of THOSE are still holding the loop open, across a window
+         * that is synchronous by construction. `@objectstack/refd-timer-testkit`
+         * carries the full argument, including why `stillPinningTheLoop` is
+         * deliberately synchronous. `pnpm check:refd-timer-probe` now keeps the
+         * raw probe out of every package (#10785).
          */
-        const refdTimers = () =>
-            process.getActiveResourcesInfo().filter(r => r === 'Timeout').length;
-
         it("leaves no ref'd timer behind when the nodes win the race", async () => {
             const calls = { count: 0 };
             registerInstantScript(engine, calls);
             registerGuardedFlow(engine, 'guarded_flow', 3);
 
-            const before = refdTimers();
-            const result = await engine.execute('guarded_flow');
+            let result!: Awaited<ReturnType<typeof engine.execute>>;
+            const guards = await recordGuards(GUARD_MS, async () => {
+                result = await engine.execute('guarded_flow');
+            });
 
             expect(result.success).toBe(true);
             expect(calls.count).toBe(3);
-            expect(refdTimers()).toBe(before);
+            // One guard per guarded node, so the instrument demonstrably saw
+            // this flow's own timers — a zero below cannot stand for "nothing
+            // was ever armed" (`stillPinningTheLoop` throws on an empty set for
+            // the same reason).
+            expect(guards).toHaveLength(3);
+            expect(stillPinningTheLoop(guards)).toBe(0);
         });
 
         it('still reports the timeout when a node never answers', async () => {

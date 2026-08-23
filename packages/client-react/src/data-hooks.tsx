@@ -79,7 +79,7 @@ export interface UseQueryResult<T = any> {
  * 
  *   return (
  *     <div>
- *       {data?.value.map(task => (
+ *       {data?.records.map(task => (
  *         <div key={task.id}>{task.subject}</div>
  *       ))}
  *     </div>
@@ -402,7 +402,7 @@ export interface UsePaginationResult<T = any> extends UseQueryResult<T> {
  * 
  *   return (
  *     <div>
- *       {data?.value.map(task => <div key={task.id}>{task.subject}</div>)}
+ *       {data?.records.map(task => <div key={task.id}>{task.subject}</div>)}
  *       <button onClick={previousPage} disabled={!hasPreviousPage}>Previous</button>
  *       <span>Page {page} of {totalPages}</span>
  *       <button onClick={nextPage} disabled={!hasNextPage}>Next</button>

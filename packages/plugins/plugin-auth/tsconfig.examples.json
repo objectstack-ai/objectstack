@@ -1,0 +1,36 @@
+// The EXAMPLES-layer type-check program for @objectstack/plugin-auth (#10869).
+//
+// `packages/plugins/plugin-auth/examples/` held `basic-usage.ts` -- the file
+// `content/docs/permissions/authentication.mdx` publishes as "Basic Auth
+// Example" -- and no tsc program had ever read a line of it. `tsconfig.json`
+// selects `src/**/*`, tsup builds only `src`, and nothing imports it, so it was
+// the source census's single instance of a file in NO tsc program at all. What
+// that hid: line 12 imports `@objectstack/plugin-hono-server`, which this
+// package declared in none of its dependency blocks, so the published example
+// could not resolve, compile or run for anyone who copied it.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, the distinction
+// #5475 drew for `packages/spec` and #10756 for `packages/objectql/scripts`,
+// and it holds here for the same reason: that config EMITS (`rootDir: "src"`,
+// `outDir: "dist"`), so widening it to reach `examples/` would put the
+// directory in front of the emit and `rootDir` would reject it -- and `tsup`
+// would start shipping the example. This program emits nothing, so it can
+// neutralise `rootDir` without touching what ships.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest come
+// from the root config through `tsconfig.json`. The directory type-checks clean
+// under them -- it enters with ZERO recorded debt, and there is no ledger here
+// to record any in. A published example that does not compile is the finding,
+// not a line to write down.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the file this program checks
+    // is the one outside `src`. Safe precisely because nothing is emitted from
+    // here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["examples/**/*"]
+}

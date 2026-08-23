@@ -13,7 +13,6 @@
  * block, which the factory now honours for every SQL driver.
  */
 
-import { parse as parsePostgresUrl } from 'pg-connection-string';
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
@@ -31,54 +30,14 @@ import {
   SqlAutoMigrateSchema,
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
 } from './common.zod';
-
-/**
- * Refusal prescription for a `url` that `pg` itself cannot parse (#9091).
- *
- * The gap this closes: the describe text below documents a grammar
- * (`postgresql://[user@][host][:port][/dbname][?params]`) that nothing
- * enforced. The shared `credentialFreeUrl` / `placeholderFree` checks are
- * string-boundary scans by design — their refusal to parse is load-bearing
- * for mongo's multi-host and `+srv` forms (#8696), so the parse question is
- * asked HERE, per-driver, of the postgres client's own grammar: `parse` from
- * `pg-connection-string@2.14.0`, the parser `pg@8.22.0` itself runs a
- * connection string through (`ConnectionParameters`). What that parser
- * throws on (measured: libpq's multi-host `h1:5432,h2:5433` form —
- * `ERR_INVALID_URL`; a non-numeric port; a malformed percent-escape) used to
- * parse green at publish and then fail at connect with a bare `Invalid URL`
- * whose own `input` field `pg` redacts — an error naming neither the value
- * nor the datasource. Same posture as #8873's runtime arm: ask `pg`'s
- * grammar, never re-model it.
- */
-const PG_UNPARSEABLE_URL_REFUSED = (key: string, detail: string): string =>
-  `this \`${key}\` is not a connection URL \`pg\` can open — \`pg-connection-string\` (the `
-  + `parser \`pg\` itself uses) refuses it: ${detail}. The datasource would publish green and `
-  + 'then fail at connect time with an error that names neither the value nor the datasource. '
-  + 'Expected format: `postgresql://[user@][host][:port][/dbname][?params]`. Note that `pg` '
-  + "does not implement libpq's multi-host form (`host1:port1,host2:port2`) — a multi-host "
-  + 'DSN fails exactly this way; point the URL at a single host (or a proxy in front of the '
-  + 'cluster) instead. Runtime-environment DSNs (`OS_DATABASE_URL` and friends) do not pass '
-  + 'through this publish door and are unaffected.';
-
-/**
- * Refusal for a value `pg` "parses" only by resolving it against its
- * placeholder base URL (#9091 — the structurally-unusable half).
- *
- * `pg-connection-string` parses via `new URL(str, 'postgres://base')`, so a
- * value that is not an absolute URL at all (`not a url`, a libpq
- * keyword/value string like `host=x dbname=y`) does not throw — it resolves
- * RELATIVE to the base, and the client then connects to the literal host
- * `base` with the whole authored value as the database name. That is a
- * "successful" parse of a configuration the author never wrote, so it is
- * refused as unusable rather than accepted as what `pg` happens to do.
- */
-const PG_RELATIVE_URL_REFUSED = (key: string): string =>
-  `this \`${key}\` is not a URL: it has no scheme, so \`pg\` would parse it only by resolving `
-  + 'it against an internal placeholder base and then connect to the literal host `base` — a '
-  + 'host that was never named — with the authored text as the database name. Write a real '
-  + 'connection URL: `postgresql://[user@][host][:port][/dbname][?params]` (a unix-socket '
-  + 'path starting with `/` is also accepted). Runtime-environment DSNs (`OS_DATABASE_URL` '
-  + 'and friends) do not pass through this publish door and are unaffected.';
+// The #9091 pg-grammar arm — the one import site of `pg-connection-string`
+// (via the `.server` module; ⛔ never import that package anywhere else in
+// `src/`). The browser tsup pass swaps this specifier for
+// `./pg-url-grammar.browser`, whose findings are always empty, so the
+// `browser`-conditioned bundles carry neither the parser nor its static
+// `require('fs')` (#11072 — the module docs carry the ruling and the
+// boundary; `check:browser-reachable-entries` enforces it on the bundles).
+import { pgUrlGrammarFindings } from './pg-url-grammar.server';
 
 /**
  * Refusal for the query parameters that make `pg`'s parser READ THE LOCAL
@@ -131,37 +90,17 @@ function pgFileReadingQueryParams(value: string): string[] {
   return found;
 }
 
-/** Can WHATWG `URL` parse this string as an ABSOLUTE URL (no base)? */
-function isAbsoluteUrl(value: string): boolean {
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Did `parse` succeed only by resolving the value against its placeholder
- * base? Mirrors the parser's own preprocessing (space/percent re-encoding,
- * then the `@/` → `@___DUMMY___/` empty-host retry — the retry form,
- * `postgresql://user@/db`, is libpq's real empty-host-with-userinfo spelling
- * and stays accepted) so the two cannot disagree about which branch ran.
- */
-function pgParsedRelativeToBase(value: string): boolean {
-  const str = / |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(value)
-    ? encodeURI(value).replace(/%25(\d\d)/g, '%$1')
-    : value;
-  return !isAbsoluteUrl(str) && !isAbsoluteUrl(str.replace('@/', '@___DUMMY___/'));
-}
-
 /**
  * Attach the #9091 pg-grammar refusal to the postgres `url` key — per-driver
- * by design (see {@link PG_UNPARSEABLE_URL_REFUSED}; the shared helpers must
+ * by design (see `pg-url-grammar.server.ts`; the shared helpers must
  * keep refusing to parse for mongo's sake, #8696). Composes with
  * `credentialFreeUrl` (#8082/#8337) and `placeholderFree` (#8336) the same
  * way those compose with each other: independent `superRefine`s judging one
  * value, each reporting its own finding.
+ *
+ * The checks BEFORE the grammar arm are shape-only and run in every build;
+ * the grammar arm itself (`pgUrlGrammarFindings`) is swapped out of the
+ * `browser`-conditioned bundles (#11072 — see the import above).
  */
 function pgParseableUrl<S extends z.ZodString>(schema: S, key: string) {
   return schema.superRefine((value, ctx) => {
@@ -177,15 +116,8 @@ function pgParseableUrl<S extends z.ZodString>(schema: S, key: string) {
       }
       return;
     }
-    try {
-      parsePostgresUrl(value);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      ctx.addIssue({ code: 'custom', message: PG_UNPARSEABLE_URL_REFUSED(key, detail) });
-      return;
-    }
-    if (pgParsedRelativeToBase(value)) {
-      ctx.addIssue({ code: 'custom', message: PG_RELATIVE_URL_REFUSED(key) });
+    for (const message of pgUrlGrammarFindings(value, key)) {
+      ctx.addIssue({ code: 'custom', message });
     }
   });
 }

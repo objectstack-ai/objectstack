@@ -9,6 +9,11 @@ pnpm install
 pnpm dev
 ```
 
+After editing any metadata (an object, view, flow, …), run `pnpm validate` —
+see [Verify your changes](#verify-your-changes) below. It is the one command
+this project's `AGENTS.md` calls unskippable: it catches mistakes that
+otherwise fail silently at runtime.
+
 The REST API is served at `http://localhost:3000/api/v1`. Data endpoints
 require a session — the dev server seeds a login-ready admin
 (`admin@objectos.ai` / `admin123`) on an empty database:
@@ -53,7 +58,7 @@ claude mcp add --transport http my-app http://localhost:3000/api/v1/mcp
 
 Set `OS_MCP_SERVER_ENABLED=false` to turn it off. This is the *serve* side — the
 reverse of the `mcp` connector below (which lets your app *call* other MCP
-servers). See [Connect an MCP Client](https://docs.objectstack.ai/docs/ai/connect-mcp)
+servers). See [Connect an MCP Client](https://objectstack.ai/docs/ai/connect-mcp)
 for OAuth, API keys, and which objects/actions become tools.
 
 ## Layout
@@ -74,9 +79,11 @@ can call an external system from a flow as pure metadata — no host code:
 
 Add a `connectors:` entry that names one of these `provider`s and the
 `automation` capability materializes it into a live, dispatchable connector at
-boot (ADR-0097); a flow's `connector_action` node then calls it. To add a brand
-connector (e.g. Slack), install its package and add `new ConnectorSlackPlugin()`
-to `plugins:`; to drop a provider, remove its plugin.
+boot — see [Automation → Connectors](https://objectstack.ai/docs/automation/connectors)
+for how that materialization works; a flow's `connector_action` node then
+calls it. To add a brand connector (e.g. Slack), install its package and add
+`new ConnectorSlackPlugin()` to `plugins:`; to drop a provider, remove its
+plugin.
 
 > **Security — declarative MCP over stdio.** An `mcp` connector whose transport
 > spawns a local process (`stdio`) is denied by default, because the command
@@ -84,7 +91,7 @@ to `plugins:`; to drop a provider, remove its plugin.
 > `new ConnectorMcpPlugin({ declarativeStdio: ['node'] })`; `http` transports
 > need no opt-in.
 
-See [Automation → Flows](https://docs.objectstack.ai/docs/automation/flows) for
+See [Automation → Flows](https://objectstack.ai/docs/automation/flows) for
 the full connector and `connector_action` guide.
 
 ## Verify your changes
@@ -122,7 +129,7 @@ curl -fsS http://localhost:8080/api/v1/health
 ```
 
 Bare Node, Kubernetes, reverse-proxy wiring, and the required secrets are
-covered in [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/self-hosting).
+covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting).
 
 ## Next steps
 
@@ -131,5 +138,5 @@ covered in [Self-Hosted Deployment](https://docs.objectstack.ai/docs/deployment/
 - Add a flow or automation: see `objectstack-automation`.
 - Add an AI agent: see `objectstack-ai`.
 
-Skills live in `skills/` in the ObjectStack framework repo and in the in-IDE
-assistant catalog.
+Skills are installed with `npx skills add objectstack-ai/objectstack/skills`
+(see `AGENTS.md`) and also show up in the in-IDE assistant catalog.

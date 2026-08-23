@@ -113,7 +113,7 @@ function makeDriver(): any {
 }
 
 async function bootStack() {
-  const kernel = new ObjectKernel({ logLevel: 'silent' });
+  const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new AutomationServicePlugin());
   await kernel.use(new RecordChangeTriggerPlugin());

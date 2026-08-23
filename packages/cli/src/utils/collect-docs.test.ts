@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { resolveBookTree } from '@objectstack/spec/system';
 import { collectDocsFromSrc, lintDocs, collectAndLintDocs, lintMetadataEmbeds, type DocItem } from './collect-docs.js';
 
 // ── ADR-0051: ```metadata embed lint (body shape + reference liveness) ──────
@@ -134,6 +135,68 @@ describe('collectDocsFromSrc (ADR-0046 §3.2)', () => {
     expect(bare.group).toBeUndefined();
   });
 
+  it('reads frontmatter `tags:` in the inline list form', () => {
+    write('crm_inline.md', '---\ntitle: Inline\ntags: [tutorial, beginner]\n---\n\n# Inline');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(0);
+    const doc = docs.find((d) => d.name === 'crm_inline')!;
+    expect(doc.tags).toEqual(['tutorial', 'beginner']);
+    expect(doc.content).not.toContain('tags:'); // frontmatter stripped
+  });
+
+  it('reads frontmatter `tags:` in the block list form without swallowing the next key', () => {
+    write('crm_block.md', '---\ntitle: Block\ntags:\n  - tutorial\n  - advanced\ngroup: crm_admin\n---\n\n# Block');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(0);
+    const doc = docs.find((d) => d.name === 'crm_block')!;
+    expect(doc.tags).toEqual(['tutorial', 'advanced']);
+    expect(doc.group).toBe('crm_admin'); // the sequence ends at the next key
+  });
+
+  it('unquotes list items; an authored empty list is no tags and no complaint', () => {
+    write('crm_quoted.md', '---\ntags: [\'tutorial\', "deep-dive"]\n---\n\n# Q');
+    write('crm_none.md', '---\ntags: []\n---\n\n# N');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(0); // `[]` parses — nothing was dropped
+    expect(docs.find((d) => d.name === 'crm_quoted')!.tags).toEqual(['tutorial', 'deep-dive']);
+    expect(docs.find((d) => d.name === 'crm_none')!.tags).toBeUndefined();
+  });
+
+  // The loud half. A `tags:` spelling this deliberately minimal reader cannot
+  // parse must be REPORTED, never dropped — a silent drop is the defect the
+  // key exists to fix, and a warning nothing asserts is a warning that can
+  // quietly stop firing.
+  it.each([
+    ['a bare scalar', 'crm_scalar.md', '---\ntags: tutorial\n---\n\n# S', 'tags: tutorial'],
+    ['an unterminated inline list', 'crm_open.md', '---\ntags: [tutorial, beginner\n---\n\n# O', 'tags: [tutorial, beginner'],
+    ['a key with nothing under it', 'crm_naked.md', '---\ntags:\ndescription: d\n---\n\n# B', 'no list items follow'],
+  ])('warns when `tags:` is present but unreadable — %s', (_label, file, content, found) => {
+    write(file, content);
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].rule).toBe('docs/frontmatter-tags');
+    expect(issues[0].path).toBe(`src/docs/${file}`);
+    expect(issues[0].message).toContain('include: { tag }'); // names the consequence
+    expect(issues[0].message).toContain(found); // quotes what it actually found
+    expect(docs).toHaveLength(1); // the doc is still collected; only its tags are missing
+    expect(docs[0].tags).toBeUndefined();
+  });
+
+  it('warns when a locale variant declares `tags:` — tags are doc-level, not per translation', () => {
+    write('crm_guide.md', '---\ntags: [tutorial]\n---\n\n# Guide');
+    write('crm_guide.zh.md', '---\ntags: [tutorial]\n---\n\n# Zh');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].rule).toBe('docs/frontmatter-tags');
+    expect(issues[0].path).toBe('src/docs/crm_guide.zh.md');
+    expect(issues[0].message).toContain('crm_guide.md'); // points at the base file
+    const base = docs.find((d) => d.name === 'crm_guide')!;
+    expect(base.tags).toEqual(['tutorial']); // the base doc still carries them
+    expect(Object.keys(base.translations ?? {})).toEqual(['zh']); // folding unaffected
+  });
+
   it('errors on subdirectories — flatness is the contract', () => {
     fs.mkdirSync(path.join(docsDir, 'user'));
     write('crm_index.md', '# x');
@@ -154,6 +217,31 @@ describe('collectDocsFromSrc (ADR-0046 §3.2)', () => {
     expect(collectDocsFromSrc(configPath).docs).toHaveLength(0);
     fs.rmSync(docsDir, { recursive: true });
     expect(collectDocsFromSrc(configPath).docs).toHaveLength(0);
+  });
+});
+
+// The reason the key exists (ADR-0046 §5/§6, #4509): a book group's
+// `include: { tag }` must be able to match docs authored on the flat
+// `src/docs/*.md` path. Before the reader had a list case, every such group
+// resolved to zero entries and the docs fell into *Uncategorized* — with no
+// diagnostic on either side saying so.
+describe('frontmatter tags reach the book resolver', () => {
+  it("lets a group's include: { tag } match docs authored in either list form", () => {
+    write('crm_inline.md', '---\ntitle: Inline\ntags: [tutorial, beginner]\n---\n\n# Inline');
+    write('crm_block.md', '---\ntitle: Block\ntags:\n  - tutorial\n---\n\n# Block');
+    write('crm_reference.md', '---\ntitle: Reference\ntags: [reference]\n---\n\n# Reference');
+    const { docs, issues } = collectDocsFromSrc(configPath);
+    expect(issues).toHaveLength(0);
+
+    const tree = resolveBookTree(
+      { name: 'crm_book', groups: [{ key: 'tutorials', label: 'Tutorials', include: { tag: 'tutorial' } }] },
+      docs,
+    );
+    const tutorials = tree.groups.find((g) => g.key === 'tutorials')!;
+    expect(tutorials.entries.map((e) => e.doc).sort()).toEqual(['crm_block', 'crm_inline']);
+    // The untagged-by-this-rule doc is not dropped — it lands in Uncategorized.
+    const uncategorized = tree.groups.find((g) => g.key === 'uncategorized')!;
+    expect(uncategorized.entries.map((e) => e.doc)).toEqual(['crm_reference']);
   });
 });
 

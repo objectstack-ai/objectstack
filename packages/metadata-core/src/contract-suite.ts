@@ -14,7 +14,8 @@
  *   3. Optimistic locking (ConflictError)
  *   4. Canonical hashing (hash === hashSpec(body))
  *   5. Event ordering (monotonic seq, no gaps)
- *   6. Resumability (watch with `since` replays)
+ *   6. Resumability (a numeric `since` replays; a bare `watch(filter)` is
+ *      owed live events only)
  *   7. Tombstones (delete event emitted, get returns null)
  *
  * Two knobs, both narrow on purpose. `primaryType` / `secondaryType` move the
@@ -75,13 +76,22 @@ export interface ContractSuiteOptions {
 /** @see ContractSuiteOptions.declaredDivergences */
 export interface DeclaredDivergences {
   /**
-   * **Invariant 6 (resumability).** The implementation's `watch()` delivers
-   * live events only; it never replays from its durable log, so neither
-   * `watch(filter, since)` nor a `watch(filter)` opened after a write can
-   * surface an event that already committed.
+   * **Invariant 6, first half (a numeric `since` replays).** The
+   * implementation's `watch(filter, since)` never replays from its durable
+   * log, so an event that committed before the subscription cannot be
+   * surfaced however high `since` is set.
    *
-   * Value is the tracking issue, e.g. `'#10842'` — `SysMetadataRepository`,
-   * the only declaration today.
+   * ⚠️ Scoped to the NUMERIC-`since` half on purpose. A `watch(filter)` with
+   * no `since` that surfaces nothing already committed is not a divergence at
+   * all — invariant 6 owes such a subscriber live events only, and replaying
+   * for it is a MAY. That sentence used to be unwritten, and this member's
+   * own doc used to name the no-`since` case as part of the divergence.
+   *
+   * Value is the tracking issue, e.g. `'#10842'`. **No declaration today:**
+   * `SysMetadataRepository`, the only one there has ever been, was fixed and
+   * deleted its line — the pin below is what told it to. An empty ledger is
+   * the mechanism at rest, not dead code; the shrink-only direction is the
+   * only one it travels without a new tracking issue.
    */
   resumableWatch?: string;
 }
@@ -147,25 +157,16 @@ const SERIALISATION_SHAPES: ReadonlyArray<{
 ];
 
 /** Drain at most `n` events from an async iterable with a timeout. */
-async function take<T>(iter: AsyncIterable<T>, n: number, timeoutMs = 1000): Promise<T[]> {
-  const out: T[] = [];
-  const it = iter[Symbol.asyncIterator]();
+/**
+ * Poll `cond` until it holds or `timeoutMs` elapses. Returns either way — the
+ * caller's `expect` is what fails, so a timeout produces the real assertion
+ * message instead of "timed out".
+ */
+async function until(cond: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (out.length < n) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
-    const result = await Promise.race([
-      it.next(),
-      new Promise<{ value: undefined; done: true }>((resolve) =>
-        setTimeout(() => resolve({ value: undefined, done: true }), remaining),
-      ),
-    ]);
-    if (result.done) break;
-    out.push(result.value as T);
+  while (!cond() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  // Close the iterator so the repo subscriber is freed.
-  await it.return?.(undefined);
-  return out;
 }
 
 export function runRepositoryContractTests(
@@ -441,6 +442,55 @@ export function runRepositoryContractTests(
         expect(evts.every((e, i) => i === 0 || e.seq > evts[i - 1]!.seq)).toBe(true);
       });
 
+      // ── Invariant 6, second half — the FILTER clause, live-stream shaped ──
+      //
+      // Unconditional, and deliberately NOT written as "put twice, then open a
+      // watch and expect the match back". That older shape asserted a replay
+      // the contract does not owe: invariant 6 states that a `watch()` with no
+      // `since` is owed LIVE events only, and that events which had already
+      // committed MAY be delivered but MUST NOT be relied on. The clause passed
+      // for two implementations because they happen to replay the whole
+      // matching log, and failed for the third for conforming — a suite defect,
+      // not a repository defect, and the reason the sentence it leaned on is now
+      // written down in `repository.ts` instead of inherited from whichever
+      // implementation was read first.
+      //
+      // So the subscription is established FIRST and the writes follow it. What
+      // is asserted is the floor every implementation owes: the post-subscribe
+      // event that matches the filter arrives, and the one that does not is
+      // never delivered. An implementation that additionally replays is not
+      // failed here — that is the MAY, and pinning its absence is an
+      // implementation-local question, kept out of this table on purpose (the
+      // table's whole value is having no per-implementation columns).
+      it('watch filters by type and name — over the live stream', async () => {
+        const repo = await factory();
+        const iter = repo
+          .watch({ org: 'system', type: primaryType, name: 'a' })
+          [Symbol.asyncIterator]();
+        const collected: MetadataEvent[] = [];
+        const pump = (async () => {
+          for (;;) {
+            const r = await iter.next();
+            if (r.done) return;
+            collected.push(r.value as MetadataEvent);
+          }
+        })();
+
+        await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
+        await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
+        // Wait for the match to actually land rather than for a fixed sleep to
+        // elapse — a filesystem-backed implementation routes it through a real
+        // watcher and a bare `setTimeout` turns that into a flake.
+        await until(() => collected.length >= 1, 2000);
+        // …then let a wrongly-delivered non-match have its chance to show up.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await iter.return?.(undefined);
+        await pump;
+
+        expect(collected.map((e) => e.ref.name)).toEqual(['a']);
+        expect(collected.every((e, i) => i === 0 || e.seq > collected[i - 1]!.seq)).toBe(true);
+      });
+
       if (resumableWatchDivergence === undefined) {
         it('watch(sinceSeq) replays subsequent events then goes live', async () => {
           const repo = await factory();
@@ -469,29 +519,14 @@ export function runRepositoryContractTests(
 
           await it.return?.(undefined);
         });
-
-        it('watch filters by type and name', async () => {
-          const repo = await factory();
-          await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
-          await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
-          const events = await take(
-            repo.watch({ org: 'system', type: primaryType, name: 'a' }),
-            5,
-            200,
-          );
-          expect(events.length).toBe(1);
-          expect(events[0]!.ref.name).toBe('a');
-        });
       } else {
-        // ── DECLARED DIVERGENCE — invariant 6 is not satisfied here ──────
+        // ── DECLARED DIVERGENCE — invariant 6's first half is unmet here ──
         //
-        // Both clauses above lean on the implementation replaying from its
-        // durable log. This implementation does not, and the two replacements
-        // below are NOT relaxations of the pair: the first PINS the absence of
-        // replay (so it reds the day replay lands and this whole branch has to
-        // go), and the second re-asks the filter question the second clause is
-        // named for, sourced from the live stream instead of the replay buffer,
-        // so filter coverage is not silently traded away for the exception.
+        // Only the numeric-`since` clause above is swapped out; the filter
+        // clause is shared, because it now asserts the live-stream floor every
+        // implementation owes rather than a replay only some perform. The
+        // replacement below is NOT a relaxation: it PINS the absence of replay,
+        // so it reds the day replay lands and this whole branch has to go.
 
         it(`watch(sinceSeq) does NOT replay, then goes live — DECLARED DIVERGENCE ${resumableWatchDivergence}`, async () => {
           const repo = await factory();
@@ -522,28 +557,6 @@ export function runRepositoryContractTests(
           await it.return?.(undefined);
         });
 
-        it(`watch filters by type and name — over the live stream — DECLARED DIVERGENCE ${resumableWatchDivergence}`, async () => {
-          const repo = await factory();
-          const it = repo
-            .watch({ org: 'system', type: primaryType, name: 'a' })
-            [Symbol.asyncIterator]();
-          const collected: MetadataEvent[] = [];
-          const pump = (async () => {
-            for (;;) {
-              const r = await it.next();
-              if (r.done) return;
-              collected.push(r.value as MetadataEvent);
-            }
-          })();
-
-          await repo.put(refOf({ name: 'a' }), spec('a'), { parentVersion: null, actor: 't' });
-          await repo.put(refOf({ name: 'b' }), spec('b'), { parentVersion: null, actor: 't' });
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          await it.return?.(undefined);
-          await pump;
-
-          expect(collected.map((e) => e.ref.name)).toEqual(['a']);
-        });
       }
     });
 

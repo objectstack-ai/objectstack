@@ -35,7 +35,7 @@ export const SysCapability = ObjectSchema.create({
   protection: {
     lock: 'no-overlay',
     reason: 'Capability registry schema is platform-defined — see ADR-0066 / ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Authorization capability definitions (ADR-0066 D1). Referenced by name from permission-set systemPermissions and resource requiredPermissions.',
   displayNameField: 'label',

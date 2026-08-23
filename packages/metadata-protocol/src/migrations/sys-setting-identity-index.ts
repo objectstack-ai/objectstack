@@ -125,7 +125,17 @@
  * ADR-0120 D4's full disposition in one `error` line: the key that is not
  * enforced, the consequence, and the exact query that lists the offending rows
  * ({@link buildSysSettingDuplicateProbeSql}) so the list does not depend on
- * reaching for `os migrate plan` first.
+ * reaching for `os migrate duplicates` first.
+ *
+ * ⚠️ That referral named `os migrate plan` until #8725, and it was FALSE. As
+ * the section above records, this index is invisible to the drift differ by
+ * construction — `isSyncReproducibleIndex` rejects its non-tenant `COALESCE`
+ * key part, so `isRuntimeManagedIndex` is true and the differ skips it — which
+ * is exactly why `detectManagedDrift()` returning `[]` is the measured, correct
+ * behaviour. A command that reports drift can therefore never report these
+ * rows. Maintainer ruling 2026-08-22 routes the class to `os migrate
+ * duplicates`, which boots read-only and owns the "inventory, never repair"
+ * contract, and leaves `os migrate plan`'s drift contract untouched.
  *
  * ## Why it probes for the TABLE first
  *
@@ -294,7 +304,12 @@ export function buildSysSettingPresenceSql(): string {
 /**
  * The query that lists the rows blocking the tightening — ADR-0120 D4's "name
  * the offending rows", shipped inside the conflict report so an operator has the
- * list from the boot log, without waiting for `os migrate plan`.
+ * list from the boot log, without waiting for `os migrate duplicates`.
+ *
+ * The same statement is what `os migrate duplicates` issues for this index
+ * (#8725) — the command reads this builder rather than restating the key, so
+ * the pre-flight and the boot report cannot describe different duplicates. The
+ * MySQL variant below travels with it for the same reason.
  *
  * It GROUPs by exactly the index's own key parts, so what it reports and what
  * the index rejects cannot diverge — the projection and the `GROUP BY` are built
@@ -538,7 +553,7 @@ function reportDegradation(
             `place, so (${columns}) is enforced only as far as it was before, and the NULL-safe key is NOT ` +
             `enforced until the duplicates are resolved: settings rows are admin-authored configuration, so ` +
             `no row is discarded automatically and this migration will keep refusing until an operator ` +
-            `decides which row survives. List them with: ${duplicateQuery} — or run "os migrate plan" — ` +
+            `decides which row survives. List them with: ${duplicateQuery} — or run "os migrate duplicates" — ` +
             `then restart (ADR-0120 D4, #8629).`,
             detail,
         );

@@ -59,7 +59,20 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Create a new package/plugin/example from template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `agent`, `dashboard`, `app`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`
+
+`agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
+`src/agents/*.ts` validated, published and was then filtered out of the runtime
+catalog without a word. `os g agent` now says so and points at skills — the
+third-party extension primitive — which are authored as `src/skills/<name>.skill.ts`
+with `defineSkill`, and which `os g skill <name>` scaffolds for you.
+
+`skill` is the one type written as `NAME.skill.ts` rather than the harness's usual
+`NAME.ts`: the metadata type registry declares that type's file convention as
+`*.skill.ts` / `*.skill.yml`, and a discoverable-metadata file matching no pattern
+type-checks, validates and publishes with nothing reporting that it was skipped.
+Aligning the other six generators with the registry's `NAME.TYPE.ts` convention is
+a separate decision and is deliberately not made here.
 
 ### Cloud — publish & install
 
@@ -72,7 +85,7 @@ come from `os cloud login` (stored in `~/.objectstack/cloud.json`) or the
 |---------|-------------|
 | `os cloud login` | Authenticate to ObjectStack Cloud (browser or `--email/--password`); writes `~/.objectstack/cloud.json` |
 | `os cloud whoami` / `os cloud logout` | Inspect / clear the stored cloud session |
-| `os environments create --org <id> --name <n>` | Provision a new environment (alias: `os projects create`) |
+| `os environments create --org <id> --name <n>` | Provision a new environment (was `os projects create` before the v5.0 project → environment rename; ADR-0006, no aliases) |
 | `os environments list` / `show <id>` | List / inspect your environments |
 | `os package publish [artifact]` | Publish `dist/objectstack.json` as a versioned package in your org |
 
@@ -95,7 +108,7 @@ review) or `--auto-approve` (platform admins only). Set `OS_CLOUD_URL` (or
 
 ### Plugin Management
 
-Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the legacy `os projects bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
+Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded automatically by `os serve` / `os dev`. There is no `os plugin` command group in v1; runtime plugins are bundled into the build artifact. To distribute a build, publish it as a package with `os package publish` (see [Cloud — publish & install](#cloud--publish--install)); the `os environments bind <id> --artifact dist/objectstack.json` path still binds an artifact directly into an environment without going through the package registry.
 
 ### Quality
 
@@ -111,12 +124,6 @@ Runtime plugins (declared in `objectstack.config.ts` `plugins`) are loaded autom
 | Command | Description |
 |---------|-------------|
 | `os explain [schema]` | Display human-readable explanation of an ObjectStack schema |
-
-### Code Transforms
-
-| Command | Description |
-|---------|-------------|
-| `os codemod v2-to-v3` | Migrate ObjectStack v2 config to v3 format |
 
 ## Configuration
 
@@ -281,7 +288,7 @@ os generate view customer        # 4. Add a list view
 os validate                      # 5. Validate everything
 os dev                           # 6. Start dev server
 os compile                       # 7. Build for production
-os projects bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud Project
+os environments bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud environment
 ```
 
 ## Architecture
@@ -296,14 +303,12 @@ os projects bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud Pro
 │   ├── compile.ts              # os compile
 │   ├── validate.ts             # os validate
 │   ├── generate.ts             # os generate (alias: g)
-│   ├── projects/               # os projects <subcommand>
+│   ├── environments/           # os environments <subcommand>
 │   │   ├── list.ts
 │   │   ├── show.ts
 │   │   ├── create.ts
 │   │   ├── switch.ts
 │   │   └── bind.ts
-│   ├── codemod/                # os codemod <subcommand>
-│   │   └── v2-to-v3.ts
 │   └── ...
 ├── src/utils/                  # Shared utilities
 └── package.json                # oclif config under "oclif" key

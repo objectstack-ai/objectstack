@@ -7,7 +7,7 @@
 
 ## Overview
 
-`service-package` persists ObjectStack packages — the unit of metadata distribution consisting of a `manifest` plus its `objects`, `views`, `apps`, `flows`, `agents`, `tools`, and `translations` — into the `sys_packages` system table so they can be published, listed, and delivered to runtime kernels that load them through `@objectstack/service-marketplace`.
+`service-package` persists ObjectStack packages — the unit of metadata distribution consisting of a `manifest` plus its `objects`, `views`, `apps`, `flows`, `agents`, `tools`, and `translations` — into the `sys_packages` system table so they can be published, listed, and delivered to runtime kernels that load them. In this repo the loading half is `@objectstack/cloud-connection`, whose `MarketplaceInstallLocalPlugin` installs a marketplace package into the local kernel through the `manifest` service.
 
 Typical consumers:
 
@@ -105,7 +105,8 @@ CREATE INDEX IF NOT EXISTS idx_packages_latest
 ## When not to use
 
 - ❌ Not a package manager for npm/TypeScript source packages — use npm.
-- ❌ Not a runtime plugin loader — pair with `@objectstack/service-marketplace` or a custom loader for that.
+- ❌ Not a runtime plugin loader — pair with `@objectstack/cloud-connection`'s
+  `MarketplaceInstallLocalPlugin`, or a custom loader, for that.
 
 ## Related Packages
 

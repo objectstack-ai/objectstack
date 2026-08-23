@@ -18,6 +18,14 @@ export interface CreateWatchIteratorArgs {
   /** Returns true if `evt.ref` matches `filter`. */
   matches: (evt: MetadataEvent, filter: WatchFilter) => boolean;
   branchKeyOf: (evt: MetadataEvent) => string;
+  /**
+   * Checked ONCE, immediately after this subscription is registered. True
+   * means the repository shut down while `watch()`'s deferred log replay was
+   * still in flight, so this subscription arrived after `close()` had already
+   * swept the broker. It is terminated on arrival rather than left parked on a
+   * broker nobody will publish to or drain again (#11127).
+   */
+  arrivesClosed?: () => boolean;
 }
 
 export function createWatchIterable(
@@ -32,6 +40,10 @@ export function createWatchIterable(
   const subscriber: BrokerSubscriber = {
     filter: args.filter,
     closed: false,
+    // Assigned below, once `close` exists. Termination and the consumer's own
+    // `return()` are ONE routine, deliberately: invariant 8 requires shutdown
+    // to be indistinguishable from `iterator.return()`.
+    terminate: () => undefined,
     push: (evt) => {
       if (subscriber.closed) return;
       const k = evtKey(evt);
@@ -83,6 +95,13 @@ export function createWatchIterable(
     }
     return { value: undefined, done: true };
   };
+
+  // The terminator `repo.close()` runs. Same routine as `return()` below.
+  subscriber.terminate = close;
+
+  // Shutdown that landed while the deferred log replay was in flight — this
+  // subscription missed the sweep, so it terminates on arrival (#11127).
+  if (args.arrivesClosed?.()) close();
 
   const iterator: AsyncIterator<MetadataEvent> = {
     next: () => {

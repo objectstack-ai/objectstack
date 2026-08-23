@@ -142,6 +142,58 @@ const CODE_POSITION_PATTERNS = [
     name: 'fallback',
     re: /(?:\bcode\s*\??\s*:|\.code\s*=(?!=))\s*(?![`'"])[\w$.?!()[\]|&\s]{0,80}?(?:\|\||\?\?)\s*'([a-z][a-z0-9_]*)'/g,
   },
+  // [#10897] The SAME our-default slot, one indirection EARLIER — in the
+  // initializer of a `code`-named local, rather than at the stamp site:
+  //
+  //   const code = parsed?.code || 'lower_thing';   err.code = code;
+  //   const code: string = e?.code ?? 'lower_thing';
+  //
+  // The pattern above anchors on the POSITION token (`code:` / `code?:` /
+  // `.code =`), so it reaches a fallback chain only where the chain sits AT
+  // the stamp site. `const code =` is neither spelling, and a TYPE ANNOTATION
+  // does not rescue it: `const code: string = …` does match `code:`, but then
+  // the gap has to cross an `=`, which that character class refuses on purpose
+  // (refusing `=` is part of what stops a match leaping out of one property's
+  // value into a neighbour's). So both spellings matched nothing.
+  //
+  // And nothing else saw them either — this was a hole between two gates, not
+  // a hand-off. `check:dispatcher-error-vocabulary` does reach the local:
+  // `err.code = code` is its `codehelper`/`assignconst` shape, and its
+  // `resolveConstant` reduces a local whose initializer is a ternary or a
+  // chain OF LITERALS (#9568). But that reduction is ALL-OR-NOTHING by design:
+  // one runtime limb (`parsed?.code`) reduces the whole chain to nothing,
+  // because half an expression's values is a finding wrong in both directions
+  // at once. That bound is deliberate, correct, and unchanged by this pattern.
+  //
+  // Which leaves the literal half to this gate, on exactly the reasoning
+  // #10760 published for the stamp site: the capture is still only ever a
+  // STRING LITERAL, and a literal in our source is by construction ours — the
+  // default WE author, which is the operand ADR-0112 D1 governs. A vendor code
+  // passing through is a RUNTIME value with no literal to capture. WHERE we
+  // write the chain does not change whose default it is; the asymmetry between
+  // the two positions was an artifact of where the recognizer anchored, not a
+  // decision anyone took.
+  //
+  // The delegation runs the OTHER way for a local this gate must NOT touch: an
+  // all-literal initializer (`const code = 'lower_thing'`, a ternary of
+  // literals, a chain of literals) IS reducible, so the dispatcher gate emits
+  // a site for it under `assignconst` — measured, all three cases, lowercase
+  // included. The lookahead `(?!['"`])` and the gap class (which admits no
+  // quote at all) together keep this pattern off the head of such a chain, so
+  // the two gates never both report one literal.
+  //
+  // The annotation gap is `[^=;\n]`, the spelling `check-dispatcher-error-
+  // vocabulary`'s own `classfield` uses for this same job, so it cannot
+  // swallow the `=` it is meant to stop before. Everything after the `=` is
+  // the pattern above's gap class and tail verbatim: same operand alphabet,
+  // same 80-char runaway bound, same lowercase value space — an uppercase
+  // default stays out of it, and every filter in `findViolations` (D6
+  // field-addressed, NOT_CODES, `adr0112-ok:`) still applies. All pinned in
+  // --self-test, in both directions.
+  {
+    name: 'local-fallback',
+    re: /\b(?:const|let|var)\s+code\s*(?::[^=;\n]+)?=\s*(?![`'"])[\w$.?!()[\]|&\s]{0,80}?(?:\|\||\?\?)\s*'([a-z][a-z0-9_]*)'/g,
+  },
 ];
 
 /**
@@ -162,27 +214,28 @@ const CODE_POSITION_PATTERNS = [
  * an allowlist nobody re-reads. A NEW lowercase code never joins it: the gate
  * refuses that, and the remedy for a fresh finding is a registered SCREAMING
  * code, never a line here.
+ *
+ * [#10716] It is now EMPTY, and that is this list reaching its designed end
+ * rather than a list that never had a use: both entries it was created for
+ * (`request_domain_verification_failed`, `verify_domain_failed`) were renamed
+ * onto the registered ledger code `DOMAIN_VERIFICATION_FAILED` by the services
+ * lane, and the owning PR deleted them here — the coordination #10658 asked
+ * for, so the gate ends up green with zero exceptions. Emptiness costs no
+ * coverage: --self-test drives the shrink-only semantics against a FIXTURE
+ * registry, and pins the live one AT zero so a future exception cannot be
+ * added quietly.
  */
-const KNOWN_LOWERCASE_CODES = new Map([
-  [
-    'packages/plugins/plugin-auth/src/register-sso-provider.ts::request_domain_verification_failed',
-    'wire-visible; rename owned by #10716 (services lane)',
-  ],
-  [
-    'packages/plugins/plugin-auth/src/register-sso-provider.ts::verify_domain_failed',
-    'wire-visible; rename owned by #10716 (services lane); pinned by name in the dogfood suite',
-  ],
-]);
+const KNOWN_LOWERCASE_CODES = new Map([]);
 
 /** Split findings into the two the wire already carries and everything else. */
-export function partitionKnown(violations) {
+export function partitionKnown(violations, registry = KNOWN_LOWERCASE_CODES) {
   const known = [];
   const fresh = [];
   for (const v of violations) {
-    (KNOWN_LOWERCASE_CODES.has(`${v.file}::${v.literal}`) ? known : fresh).push(v);
+    (registry.has(`${v.file}::${v.literal}`) ? known : fresh).push(v);
   }
   const reached = new Set(known.map((v) => `${v.file}::${v.literal}`));
-  const stale = [...KNOWN_LOWERCASE_CODES.keys()].filter((k) => !reached.has(k)).sort();
+  const stale = [...registry.keys()].filter((k) => !reached.has(k)).sort();
   return { known, fresh, stale };
 }
 
@@ -290,6 +343,37 @@ function selfTest() {
       0,
       'the gap is bounded: a runaway expression is a declared miss, not a leap',
     ],
+
+    // [#10897] The same our-default slot in a LOCAL'S INITIALIZER. Pinned as a
+    // pair with the stamp-site spellings for the same reason those were pinned
+    // as a pair with the direct one: a recognizer that reached the new position
+    // by breaking an older one would pass a self-test that only pinned the new
+    // position. Every case below carries the error-shaped neighbour the filters
+    // require, positive AND negative — a zero that comes from a MISSING
+    // neighbour would be a broken probe testing nothing about the recognizer.
+    [`const code = parsed?.code || 'local_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'our default in an untyped local initializer'],
+    [`const code: string = parsed?.code ?? 'typed_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'our default in a TYPED local initializer (the annotation is what puts an = in the gap)'],
+    [`let code = e?.code || 'let_lower_failed'; const err = new Error(msg); err.code = code;`, 1, 'let, not only const'],
+    [`const code = a?.code || b?.code || 'local_chained_failed'; const err = new Error(msg); err.code = code;`, 1, 'local initializer, fallback at the end of a chain'],
+    [`error: { code: parsed?.code || 'stamp_still_seen_failed', message }`, 1, 'stamp-site objlit still matches (the pair half that must not regress)'],
+    [`const err = new Error(msg); (err as any).code = e?.code || 'assign_still_seen_failed';`, 1, 'stamp-site assignment still matches (the pair half that must not regress)'],
+
+    // Reject side for the local position.
+    [`const code = parsed?.code || 'LOCAL_UPPER_FAILED'; const err = new Error(msg); err.code = code;`, 0, 'a SCREAMING default in a local is compliant'],
+    [`const code = parsed?.code; const err = new Error(msg); err.code = code;`, 0, 'a vendor code through a local has no literal to capture, before or after this widening'],
+    [`const codeName = parsed?.code || 'not_the_code_local'; throw new Error(codeName);`, 0, 'a local whose name merely STARTS with code is not the code position'],
+    [`const message = parsed?.message || 'lower_thing'; throw new Error(message);`, 0, "a NEIGHBOUR's local fallback is not the code's value"],
+    [`const code = 'local_direct_failed'; const err = new Error(msg); err.code = code;`, 0, 'an all-literal local REDUCES (#9568), so its site is the dispatcher gate\'s, not ours'],
+    [`const code = 'chain_lower_a' || 'chain_lower_b'; const err = new Error(msg); err.code = code;`, 0, 'an all-literal chain reduces too, and stays the dispatcher gate\'s'],
+    [`const code: Foo = fallbackFor(e); const other = x || 'leapt_failed'; throw new Error(msg);`, 0, 'the annotation gap refuses ; and =, so a match cannot leap into the NEXT statement'],
+    [`const code = row.code || 'ok'; const err = new Error(msg); err.code = code;`, 0, 'NOT_CODES still applies through the local shape'],
+    [`issues.push({ field: 'email' }); const code = e?.code || 'invalid_email'; throw new Error(msg);`, 0, 'D6 still wins through the local shape'],
+    [`const code = e?.code || 'local_optout_failed'; throw new Error(msg); // adr0112-ok: D6b persisted audit column`, 0, 'opt-out still applies through the local shape'],
+    [
+      `const code = a.b.c.${'d'.repeat(90)} || 'local_far_away_failed'; const err = new Error(msg); err.code = code;`,
+      0,
+      'the local gap is bounded too: a runaway expression is a declared miss, not a leap',
+    ],
   ];
   let failed = 0;
   for (const [src, want, label] of cases) {
@@ -302,8 +386,19 @@ function selfTest() {
   // [#10658] The shrink-only registry, in both directions. The second one is
   // the load-bearing half: when the owning card's rename lands, a stale line
   // must FAIL rather than sit there as a quiet allowlist entry.
+  //
+  // [#10716] These drive a FIXTURE registry rather than the live one, which is
+  // now empty. The semantics being pinned belong to the MECHANISM (an entry
+  // that stops matching is stale and fails; a new code is never absorbed), and
+  // they have to survive the live list reaching zero — otherwise emptying it
+  // would have silently taken the coverage with it. The live list gets its own
+  // assertion below.
   const SSO = 'packages/plugins/plugin-auth/src/register-sso-provider.ts';
   const row = (literal) => ({ file: SSO, line: 1, literal, form: 'fallback' });
+  const fixtureRegistry = new Map([
+    [`${SSO}::request_domain_verification_failed`, 'fixture — the shape the live list had before #10716'],
+    [`${SSO}::verify_domain_failed`, 'fixture — the shape the live list had before #10716'],
+  ]);
   const partitionCases = [
     [[row('request_domain_verification_failed'), row('verify_domain_failed')], { known: 2, fresh: 0, stale: 0 }, 'both known rows still present'],
     [
@@ -315,7 +410,7 @@ function selfTest() {
     [[], { known: 0, fresh: 0, stale: 2 }, 'an empty tree makes every entry stale'],
   ];
   for (const [input, want, label] of partitionCases) {
-    const got = partitionKnown(input);
+    const got = partitionKnown(input, fixtureRegistry);
     const shape = { known: got.known.length, fresh: got.fresh.length, stale: got.stale.length };
     if (shape.known !== want.known || shape.fresh !== want.fresh || shape.stale !== want.stale) {
       console.error(`  ✗ self-test "${label}": expected ${JSON.stringify(want)}, got ${JSON.stringify(shape)}`);
@@ -323,12 +418,24 @@ function selfTest() {
     }
   }
 
+  // [#10716] The live registry, at zero. It is closed to new entries by the rule
+  // above, so "closed" is checked rather than merely written down: a wire-visible
+  // code that genuinely needs deferring is a call for the ADR-0112 owner to make
+  // in the open, not a line someone adds back here on the way past.
+  if (KNOWN_LOWERCASE_CODES.size !== 0) {
+    console.error(
+      `  ✗ self-test "the live registry stays empty": KNOWN_LOWERCASE_CODES holds ${KNOWN_LOWERCASE_CODES.size} entry/entries — ` +
+        `this list is closed (#10658/#10716); a new deferral is an ADR-0112 decision, not a line here.`,
+    );
+    failed++;
+  }
+
   if (failed) {
     console.error(`\n✗ check-error-code-casing self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
   console.log(
-    `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length} registry case(s) pass.`,
+    `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length + 1} registry case(s) pass.`,
   );
 }
 

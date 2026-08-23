@@ -36,6 +36,7 @@ function fakeEngine(seed: {
   const engine: AttachmentLifecycleEngine & {
     tables: typeof tables;
     updates: typeof updates;
+    rowsMatching(where: Record<string, unknown>): Array<Record<string, unknown>>;
     trigger(event: string, ctx: any): Promise<void>;
     deleteRows(where: Record<string, unknown>): void;
   } = {
@@ -60,6 +61,13 @@ function fakeEngine(seed: {
     },
     tables,
     updates,
+    /** Row lookup for the DRIVE HELPERS only. Deliberately not routed through
+     * `engine.find`: a best-effort case sabotages that seam to prove a handler
+     * survives a driver failure, and a harness that read through it would
+     * explode before the handler ever ran. */
+    rowsMatching(where) {
+      return tables.sys_attachment.filter((r) => matches(r, where));
+    },
     async trigger(event, ctx) {
       for (const h of hooks.get(event) ?? []) await h(ctx);
     },
@@ -70,14 +78,61 @@ function fakeEngine(seed: {
   return engine;
 }
 
-/** Drive a full engine-shaped delete: beforeDelete → row removal → afterDelete
- * with ONE shared ctx object (mirrors engine.ts delete()). */
-async function driveDelete(engine: ReturnType<typeof fakeEngine>, input: any, where: Record<string, unknown>) {
-  const ctx: any = { object: 'sys_attachment', event: 'beforeDelete', input };
-  await engine.trigger('beforeDelete', ctx);
+/**
+ * Drive an engine-shaped DELETE. Both dispatch shapes `engine.ts delete()`
+ * produces are covered, because the difference between them is the whole
+ * subject of #10240:
+ *
+ *  - by-id (`dispatch.mode === 'record'`): ONE HookContext across both phases,
+ *    `previous` bound to the doomed row's pre-image — read UNCONDITIONALLY
+ *    since #7867 (it is the read that also produces the 404, so it is never
+ *    skipped).
+ *  - predicate (`dispatch.mode === 'per-row'`, #5574 / ADR-0058 Addendum II
+ *    D1/D2): one FRESH context per matched row in EACH phase, `previous` =
+ *    that row, served from the single doomed-row read (#5038 D7).
+ *
+ * The freshness is modelled deliberately and is what a stash-based handler
+ * dies on: nothing a `before*` handler writes onto its own row context can
+ * reach the `after*` phase.
+ */
+async function driveDelete(
+  engine: ReturnType<typeof fakeEngine>,
+  where: Record<string, unknown>,
+  mode: 'record' | 'per-row' = 'record',
+) {
+  const doomed = engine.rowsMatching(where).map((r) => ({ ...r }));
+  const options = mode === 'record' ? { where } : { multi: true, where };
+
+  if (mode === 'record') {
+    const ctx: any = {
+      object: 'sys_attachment', event: 'beforeDelete',
+      input: { id: where.id, options },
+      previous: doomed[0],
+      dispatch: { mode, index: 0, scope: {} },
+    };
+    await engine.trigger('beforeDelete', ctx);
+    engine.deleteRows(where);
+    ctx.event = 'afterDelete';
+    await engine.trigger('afterDelete', ctx);
+    return;
+  }
+
+  for (let i = 0; i < doomed.length; i++) {
+    await engine.trigger('beforeDelete', {
+      object: 'sys_attachment', event: 'beforeDelete',
+      input: { id: doomed[i].id, options }, previous: doomed[i],
+      dispatch: { mode, index: i, scope: {} },
+    });
+  }
   engine.deleteRows(where);
-  ctx.event = 'afterDelete';
-  await engine.trigger('afterDelete', ctx);
+  for (let i = 0; i < doomed.length; i++) {
+    // A per-row after-context is a FRESH object, never the before one.
+    await engine.trigger('afterDelete', {
+      object: 'sys_attachment', event: 'afterDelete',
+      input: { id: doomed[i].id, options }, previous: { ...doomed[i] },
+      dispatch: { mode, index: i, scope: {} }, result: undefined,
+    });
+  }
 }
 
 /**
@@ -152,7 +207,7 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     });
     installAttachmentLifecycleHooks(engine, silentLogger());
 
-    await driveDelete(engine, { id: 'a1', options: {} }, { id: 'a1' });
+    await driveDelete(engine, { id: 'a1' });
 
     expect(engine.updates).toHaveLength(1);
     expect(engine.updates[0].data).toMatchObject({ id: 'f1', status: 'deleted' });
@@ -169,13 +224,19 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     });
     installAttachmentLifecycleHooks(engine, silentLogger());
 
-    await driveDelete(engine, { id: 'a1', options: {} }, { id: 'a1' });
+    await driveDelete(engine, { id: 'a1' });
 
     expect(engine.updates).toHaveLength(0);
     expect(engine.tables.sys_file[0].status).toBe('committed');
   });
 
-  it('resolves every affected file on a multi-delete (options.where)', async () => {
+  // [#10240] The case the module was silently blind to. The handler used to
+  // hand ids from `beforeDelete` to `afterDelete` on the context itself; a
+  // predicate delete gives each row a FRESH context per phase, so that stash
+  // never arrived and NO tombstone was written — a permanent strand, because
+  // an untombstoned orphan matches neither declared sweep policy on `sys_file`.
+  // Pinned on the fake here and on the wired engine at the bottom of the file.
+  it('[#10240] tombstones on the PREDICATE path — where a beforeDelete stash was lost', async () => {
     const engine = fakeEngine({
       attachments: [
         { id: 'a1', file_id: 'f1', parent_id: 'p1' },
@@ -186,13 +247,68 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     });
     installAttachmentLifecycleHooks(engine, silentLogger());
 
-    await driveDelete(
-      engine,
-      { id: undefined, options: { where: { parent_id: 'p1' }, multi: true } },
-      { parent_id: 'p1' },
-    );
+    await driveDelete(engine, { parent_id: 'p1' }, 'per-row');
+
+    // Every affected file is still resolved — and only the one that lost its
+    // LAST reference is tombstoned.
+    expect(engine.updates.map((u) => u.data.id)).toEqual(['f1']);
+    expect(engine.tables.sys_file.find((f) => f.id === 'f1')).toMatchObject({ status: 'deleted' });
+    expect(engine.tables.sys_file.find((f) => f.id === 'f2')).toMatchObject({ status: 'committed' });
+  });
+
+  // [#10240] The other direction of the same pin. An implementation that only
+  // handled the multi path would pass the case above and fail this one, so
+  // both are kept — the by-id verb is the one that already worked.
+  it('[#10240] a by-id delete still tombstones (the path that already worked)', async () => {
+    const engine = fakeEngine({
+      attachments: [{ id: 'a1', file_id: 'f1', parent_id: 'p1' }],
+      files: [committedFile('f1')],
+    });
+    installAttachmentLifecycleHooks(engine, silentLogger());
+
+    await driveDelete(engine, { id: 'a1' });
 
     expect(engine.updates.map((u) => u.data.id)).toEqual(['f1']);
+  });
+
+  // [#10240] The fail-safe direction, chosen to match the `afterUpdate` leg:
+  // no pre-image means the departed id is unknowable, so tombstone NOTHING and
+  // keep the file. A missed tombstone leaves an orphan lingering; a tombstone
+  // written off a guess puts real bytes on the reap path.
+  it('[#10240] no pre-image → tombstones nothing (fail toward retention)', async () => {
+    const engine = fakeEngine({
+      attachments: [{ id: 'a1', file_id: 'f1' }],
+      files: [committedFile('f1')],
+    });
+    installAttachmentLifecycleHooks(engine, silentLogger());
+
+    engine.deleteRows({ id: 'a1' });
+    await engine.trigger('afterDelete', {
+      object: 'sys_attachment', event: 'afterDelete',
+      input: { id: 'a1', options: { where: { id: 'a1' } } },
+      dispatch: { mode: 'record', index: 0, scope: {} },
+      // no `previous`
+    });
+
+    expect(engine.updates).toHaveLength(0);
+    expect(engine.tables.sys_file[0].status).toBe('committed');
+  });
+
+  // [#10240] `beforeDelete` no longer carries any lifecycle work, so the
+  // module must not register one — a registration that stashes nothing is the
+  // second mechanism this card collapsed.
+  it('[#10240] registers no beforeDelete hook at all', async () => {
+    const events: string[] = [];
+    const engine = fakeEngine({ attachments: [], files: [] });
+    const realRegister = engine.registerHook.bind(engine);
+    engine.registerHook = (event, handler, opts) => {
+      events.push(event);
+      return realRegister(event, handler, opts);
+    };
+    installAttachmentLifecycleHooks(engine, silentLogger());
+
+    expect(events).not.toContain('beforeDelete');
+    expect(events).toContain('afterDelete');
   });
 
   it('never tombstones non-attachments scopes (Field.file/avatar protection)', async () => {
@@ -202,7 +318,7 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
     });
     installAttachmentLifecycleHooks(engine, silentLogger());
 
-    await driveDelete(engine, { id: 'a1', options: {} }, { id: 'a1' });
+    await driveDelete(engine, { id: 'a1' });
 
     expect(engine.updates).toHaveLength(0);
   });
@@ -275,14 +391,16 @@ describe('installAttachmentLifecycleHooks — tombstoning', () => {
   });
 
   it('a failing lookup never blocks the delete (best-effort)', async () => {
-    const engine = fakeEngine({ attachments: [], files: [] });
-    engine.findOne = async () => {
+    const engine = fakeEngine({ attachments: [{ id: 'a1', file_id: 'f1' }], files: [committedFile('f1')] });
+    // The reference count is what the handler asks for first now that the
+    // departed id arrives on `ctx.previous` instead of a beforeDelete lookup.
+    engine.find = async () => {
       throw new Error('driver exploded');
     };
     const logger = silentLogger();
     installAttachmentLifecycleHooks(engine, logger);
 
-    await expect(driveDelete(engine, { id: 'a1', options: {} }, { id: 'a1' })).resolves.toBeUndefined();
+    await expect(driveDelete(engine, { id: 'a1' })).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalled();
   });
 });
@@ -881,5 +999,124 @@ describe('[#10171] the update leg through the wired engine', () => {
     await ql.delete('sys_attachment', { where: { id: 'a1' }, ...SYS_WRITE });
 
     expect(file('f1')).toMatchObject({ id: 'f1', status: 'deleted' });
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * #10240 — the DELETE verb through the WIRED engine
+ *
+ * The card's own measurement, kept executable. Before this change the tree
+ * produced, in ONE run:
+ *
+ *   DELETE by-id      (dispatch record) : f1    -> status "deleted"   ✅
+ *   DELETE predicate  (dispatch per-row): f1    -> status "committed" ❌
+ *   UPDATE by-id      (dispatch record) : f_old -> status "deleted"   ✅
+ *   UPDATE predicate  (dispatch per-row): f_old -> status "deleted"   ✅
+ *
+ * — one verb fixed by #10171, the other still leaking through per-row
+ * dispatch. The fakes above model that dispatch shape; these cases check the
+ * model against real `ObjectQL`, which is where a stash-vs-`previous` claim
+ * can actually be falsified.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#10240] the delete leg through the wired engine', () => {
+  it('a PREDICATE delete tombstones the file (`dispatch.mode === "per-row"`)', async () => {
+    // THE case this card exists for. A `beforeDelete` stash reaches
+    // `afterDelete` on the by-id path and is LOST here, because each matched
+    // row gets a fresh context per phase (#5574 / ADR-0058 Addendum II D1/D2).
+    const { ql, file } = await bootWiredLifecycle({
+      attachments: [{ id: 'a1', file_id: 'f1', parent_id: 'r1' }],
+      files: [committedFile('f1')],
+    });
+
+    await ql.delete('sys_attachment', { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+
+    expect(file('f1')).toMatchObject({ id: 'f1', status: 'deleted' });
+    expect(typeof file('f1')!.deleted_at).toBe('string');
+  });
+
+  it('a PREDICATE delete over several rows tombstones only the files that lost their LAST reference', async () => {
+    const { ql, file } = await bootWiredLifecycle({
+      attachments: [
+        { id: 'a1', file_id: 'f1', parent_id: 'r1' },
+        { id: 'a2', file_id: 'f2', parent_id: 'r1' },
+        { id: 'a3', file_id: 'f2', parent_id: 'r2' }, // f2 keeps a reference
+      ],
+      files: [committedFile('f1'), committedFile('f2')],
+    });
+
+    await ql.delete('sys_attachment', { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+
+    expect(file('f1')).toMatchObject({ status: 'deleted' });
+    expect(file('f2')).toMatchObject({ status: 'committed' });
+  });
+
+  it('both verbs now behave alike on BOTH dispatch paths — the four cases the card measured', async () => {
+    const seen: Record<string, unknown> = {};
+
+    {
+      const { ql, file } = await bootWiredLifecycle({
+        attachments: [{ id: 'a1', file_id: 'f1', parent_id: 'r1' }],
+        files: [committedFile('f1')],
+      });
+      await ql.delete('sys_attachment', { where: { id: 'a1' }, ...SYS_WRITE });
+      seen['delete/by-id'] = file('f1')!.status;
+    }
+    {
+      const { ql, file } = await bootWiredLifecycle({
+        attachments: [{ id: 'a1', file_id: 'f1', parent_id: 'r1' }],
+        files: [committedFile('f1')],
+      });
+      await ql.delete('sys_attachment', { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+      seen['delete/predicate'] = file('f1')!.status;
+    }
+    {
+      const { ql, file } = await bootWiredLifecycle({
+        attachments: [{ id: 'a1', file_id: 'f_old', parent_id: 'r1' }],
+        files: [committedFile('f_old'), committedFile('f_new')],
+      });
+      await ql.update('sys_attachment', { file_id: 'f_new' }, { where: { id: 'a1' }, ...SYS_WRITE });
+      seen['update/by-id'] = file('f_old')!.status;
+    }
+    {
+      const { ql, file } = await bootWiredLifecycle({
+        attachments: [{ id: 'a1', file_id: 'f_old', parent_id: 'r1' }],
+        files: [committedFile('f_old'), committedFile('f_new')],
+      });
+      await ql.update('sys_attachment', { file_id: 'f_new' }, { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+      seen['update/predicate'] = file('f_old')!.status;
+    }
+
+    expect(seen).toEqual({
+      'delete/by-id': 'deleted',
+      'delete/predicate': 'deleted',
+      'update/by-id': 'deleted',
+      'update/predicate': 'deleted',
+    });
+  });
+
+  it('a predicate delete that leaves the file still referenced tombstones nothing', async () => {
+    const { ql, file } = await bootWiredLifecycle({
+      attachments: [
+        { id: 'a1', file_id: 'f1', parent_id: 'r1' },
+        { id: 'a2', file_id: 'f1', parent_id: 'r2' },
+      ],
+      files: [committedFile('f1')],
+    });
+
+    await ql.delete('sys_attachment', { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+
+    expect(file('f1')).toMatchObject({ status: 'committed' });
+  });
+
+  it('never tombstones a non-attachments scope on the predicate path either', async () => {
+    const { ql, file } = await bootWiredLifecycle({
+      attachments: [{ id: 'a1', file_id: 'f1', parent_id: 'r1' }],
+      files: [committedFile('f1', 'user')],
+    });
+
+    await ql.delete('sys_attachment', { multi: true, where: { parent_id: 'r1' }, ...SYS_WRITE });
+
+    expect(file('f1')).toMatchObject({ status: 'committed' });
   });
 });

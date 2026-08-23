@@ -1,5 +1,24 @@
 #!/usr/bin/env node
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// Note on gate derivation (#10542), because this file looks like it needs a
+// population declaration and does not. It enumerates the workspace at runtime
+// out of pnpm-workspace.yaml, which is the shape that card is about — but two
+// facts make a declaration the wrong move here, and both were read off the
+// source rather than assumed:
+//
+//   - lint.yml runs `--self-test` ONLY, and says so in the step name. The
+//     EXISTENCE and FRESHNESS scans below are for `pnpm dev`, a local preflight
+//     no pull request schedules. A workspace-wide declaration would name this
+//     gate for every packages/ card in the tree for a scan CI never runs.
+//   - the one hint this file does contribute is honest and load-bearing: the
+//     FRESHNESS half really does read the spec package's dist, so a card there
+//     names this gate for a read it genuinely performs. It scores `silent` for
+//     cards elsewhere, and that is the correct verdict rather than a blind spot.
+//
+// So there is nothing to declare and no marker to carry: a `no-path-population`
+// declaration would contradict the hint above, and dispatch-gates' self-test
+// asserts exactly that pair cannot coexist.
 
 /**
  * check:dev-prereqs — confirm the workspace is BUILT, and that the one artifact

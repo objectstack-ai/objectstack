@@ -62,7 +62,7 @@ export const SysSsoProvider = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth (@better-auth/sso) — see ADR-0024.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'External SSO identity providers (OIDC / SAML) this environment federates login to',
   displayNameField: 'provider_id',

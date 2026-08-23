@@ -425,7 +425,6 @@ to the envelope.
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |
-| `GraphQL.ComputedField` | `expression` | cel |
 | `Dataset.records[*]` | any value | cel (via `cel\`\``) |
 | `audit` / `metrics` / `tracing` | `condition` / `successCriteria` | structured \| cel |
 
@@ -476,7 +475,6 @@ tmpl`Deal {{ record.name }} — {{ record.amount | currency }} closes {{ record.
 | `system/notification` | email subject + body, SMS message, push body + message (5 fields) |
 | `ai/model-registry` | `promptTemplate.system`, `promptTemplate.user` |
 | `integration/connector/github` | titleTemplate, bodyTemplate (PR + release) |
-| `api/graphql` | cache key |
 
 There is no JS expression surface: procedural JS is the L2
 `ScriptBody { language: 'js' }` surface (hook bodies), not an expression

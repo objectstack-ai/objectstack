@@ -520,6 +520,277 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
       + 'to govern, so there is no other entry to bind instead. It runs unconditionally in the dogfood '
       + 'suite.',
   },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 2026-08-21 round — the next eleven dogfood proofs the gate reported as
+  // unregistered `@proof:` tags. Same discipline as the block above: each file
+  // was re-read to ask "is there an authorable property whose `live` status
+  // this proof actually gates?", and NONE is bound here. Three have a fitting
+  // ledger entry and are PROPOSED for binding in the PR that registered them;
+  // adoption is a ledger edit and therefore a review decision, not a
+  // registration side effect — binding a proof unilaterally is how a `live`
+  // status acquires a citation nobody weighed. The other eight have no
+  // authorable surface to bind at all, and say which instead of faking one.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'admin-credential-lifecycle',
+    label: 'Admin credential lifecycle',
+    summary:
+      'the two admin credential operations a platform admin can actually drive end to end: '
+      + '`/admin/create-user` mints a LOGIN-CAPABLE account (an explicit password winning over '
+      + '`generatePassword: true`), and `/admin/set-user-password` ROTATES the credential so the new '
+      + 'password signs in and the old one is refused. Every refusal is paired with the positive on the '
+      + 'SAME account — a credential suite proving only "the old password stopped working" stays green '
+      + 'when NOTHING signs in (account locked, credential row dropped, sign-in path broken).',
+    proofId: 'admin-credential-lifecycle',
+    proofRef:
+      'packages/qa/dogfood/test/admin-credential-lifecycle.dogfood.test.ts#admin-credential-lifecycle',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the two routes are ObjectStack service mounts gated by the ADR-0068 platform-admin resolution '
+      + '(`isPlatformAdmin` / `positions[]`), not an authorable per-type property — there is no '
+      + 'metadata key whose `live` status the credential lifecycle gates. It runs unconditionally in '
+      + 'the dogfood suite.',
+  },
+  {
+    id: 'admin-route-gate-sweep',
+    label: 'Admin-route non-admin refusal sweep',
+    summary:
+      'every `/admin/` route refuses a non-admin, over a route population DERIVED from the running '
+      + 'stack (the Hono raw mounts UNION the better-auth endpoint table) rather than hardcoded — a '
+      + 'listed set passes forever while route N+1 ships unguarded. Payloads are load-bearing: an '
+      + 'empty body draws a 400 VALIDATION_ERROR byte-identical for member and admin, so a route walk '
+      + 'built on empty bodies asserts nothing about authorization while looking exactly like a '
+      + 'passing security sweep.',
+    proofId: 'admin-route-nonadmin-refusal',
+    proofRef:
+      'packages/qa/dogfood/test/admin-route-nonadmin-refusal.dogfood.test.ts#admin-route-nonadmin-refusal',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'a BREADTH guard over a derived route surface, not a single-property gate — same shape as '
+      + '`permission-model-zoo`. Binding it to any one entry would misrepresent both what it covers '
+      + 'and what that entry is proven by.',
+  },
+  {
+    id: 'attachments-parent-rls-count',
+    label: 'Attachment read inherits parent RLS — the COUNT',
+    summary:
+      "a restricted member's `sys_attachment` list excludes invisible parents in its `total` as well "
+      + 'as its rows. `total` comes from `engine.count()`, not from the find path, which is why the '
+      + 'visibility rule is a data MIDDLEWARE (find/findOne/count/aggregate) and not a find hook — a '
+      + 'suite reading only `records` stays green with `count()` unfiltered, leaking the true row '
+      + 'count of records the caller may not read. Every assertion passes a `$top` (without a page '
+      + 'limit `total` is set to `records.length` and the count path never runs).',
+    proofId: 'attachments-parent-rls-count-parity',
+    proofRef:
+      'packages/qa/dogfood/test/attachments-parent-rls-count-parity.dogfood.test.ts#attachments-parent-rls-count-parity',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'parent-RLS inheritance is an invariant of the attachments read middleware, not an authorable '
+      + 'property; the two nearest entries are already spoken for — `object.enable.files` binds '
+      + '`attachments-permission-matrix` and `permission.rowLevelSecurity.using` binds '
+      + '`rls-by-id-write`, and a ledger entry carries one `proof` ref.',
+  },
+  {
+    id: 'attachments-parent-rls-scan-cap',
+    label: 'Attachment parent-RLS pre-scan cap',
+    summary:
+      'past READ_SCAN_LIMIT = 2000 candidate (parent_object, parent_id) pairs the visibility filter is '
+      + 'built from a TRUNCATED candidate set, and the truncation must fall CLOSED — rows outside the '
+      + 'scan window are excluded (the caller may lose rows they could see) rather than admitted '
+      + 'unfiltered. The cap also logs, because a silent truncation is indistinguishable from a leak.',
+    proofId: 'attachments-parent-rls-scan-cap',
+    proofRef:
+      'packages/qa/dogfood/test/attachments-parent-rls-scan-cap.dogfood.test.ts#attachments-parent-rls-scan-cap',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'same family as `attachments-parent-rls-count` — the bound itself is a service constant in the '
+      + 'read middleware, with no authorable metadata key declaring it.',
+  },
+  {
+    id: 'attachments-public-read-acl',
+    label: 'Attachment `public_read` ACL — the OPEN side',
+    summary:
+      "`acl: 'public_read'` opts a gated file back out to the stable anonymous capability URL — the "
+      + 'explicit declaration that exists because `<img src>` cannot carry a bearer token. The open '
+      + 'side is the half that matters: a download-authz suite made only of denials stays green when '
+      + 'the surface denies EVERYTHING, which is exactly what a `public_read` regression produces. '
+      + 'Asserted on ONE file — closed, opened, closed again — with the TTL branch read back out of '
+      + 'the minted URL so "it opened" cannot be satisfied by some other grant path answering 200.',
+    proofId: 'attachments-public-read-acl',
+    proofRef:
+      'packages/qa/dogfood/test/attachments-public-read-acl.dogfood.test.ts#attachments-public-read-acl',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      '`acl` is a column on the `sys_attachment` RECORD, not an authorable spec property — no ledger '
+      + 'file declares it. `object.publicSharing` is the share-link policy, a different mechanism this '
+      + 'proof never authors, so binding there would cite a proof for a property it does not exercise.',
+  },
+  {
+    id: 'attachments-unscoped-delete-gate',
+    label: 'Attachment delete gate under an unscoped AST',
+    summary:
+      'an unscoped (predicate-less) multi-delete is not a way around the per-row attachment delete '
+      + 'gate, and the refusal is authoritative rather than cosmetic — nothing is deleted. Both sides '
+      + 'are asserted, because a delete suite showing only denials stays green on a surface that has '
+      + 'stopped deleting anything at all.',
+    proofId: 'attachments-unscoped-delete-gate',
+    proofRef:
+      'packages/qa/dogfood/test/attachments-unscoped-delete-gate.dogfood.test.ts#attachments-unscoped-delete-gate',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the gate lives in `attachment-access-hooks.ts`, with no authorable property declaring it — and '
+      + 'the file deliberately does NOT pin the C3 outright-refusal behaviour (the engine dispatches '
+      + '`beforeDelete` per row, so the `where === undefined` branch is never reached: a recorded '
+      + 'PRODUCT gap). There is no settled verdict for a ledger entry to anchor even if one fitted.',
+  },
+  {
+    id: 'no-active-organization-write',
+    label: 'ADR-0123 D2 — no active organization, no tenant-scoped write',
+    summary:
+      'an authenticated caller whose resolved context carries no organization cannot land a '
+      + 'tenant-scoped row over real HTTP. Before the D2 refusal the write answered 2xx, stored '
+      + '`organization_id: null`, and the read wall then hid the row from every reader including its '
+      + 'own author. Three anti-vacuity pins: the wall posture in force is asserted, the caller is '
+      + 're-measured to carry no `tenantId`, and the refusal is separated from a look-alike CRUD 403 '
+      + 'by its message plus the decisive leg — the SAME caller on the SAME route SUCCEEDS once a '
+      + '`sys_member` row exists, so exactly one fact differs between refusal and success.',
+    proofId: 'no-active-organization-write-refusal',
+    proofRef:
+      'packages/qa/dogfood/test/no-active-organization-write-refusal.dogfood.test.ts#no-active-organization-write-refusal',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the refusal is a posture invariant of the `tenancy` SERVICE (the proof reads the service\'s own '
+      + '`posture` / `isolationActive`), not an authorable per-type property. `object.tenancy.enabled` '
+      + 'is never authored or varied by this file, so binding it there would be the '
+      + 'owner-anchor/allowTransfer mistake — a proof cited for a property it does not exercise.',
+  },
+  {
+    id: 'sharing-rule-org-scoped-listing',
+    label: 'Sharing-rule admin listing under an org-scoped caller',
+    summary:
+      'the admin sharing-rule read path admits the platform-global (org-less) seeded rows an org-bound '
+      + 'admin must see. Rules seeded under SYSTEM_CTX carry `organization_id = null`, and a strict '
+      + '`organization_id = <request org>` equality answered `{data: []}` over four active rules on a '
+      + 'stock boot — rules that grant access but cannot be listed, inspected or deactivated. The file '
+      + 'boots with `orgContext: true` and asserts the flag TOOK EFFECT first: an org-less admin here '
+      + 'silently restores the #4700 constant-false vacuum the original version was deleted for.',
+    proofId: 'org-scoped-sharing-rule-listing',
+    proofRef:
+      'packages/qa/dogfood/test/org-scoped-sharing-rule-listing.dogfood.test.ts#org-scoped-sharing-rule-listing',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'same shape as `showcase-bu-hierarchy-sharing` and `sharing-rule-criteria-required`: the rules '
+      + 'are authored at STACK level (`sharingRules`), which is not a governed metadata type, and what '
+      + 'this file pins is a read-scope filter inside SharingRuleService. No ledger entry to ratchet.',
+  },
+  {
+    id: 'sharing-rule-org-less-caller',
+    label: 'Sharing-rule read scope for an org-less capability holder',
+    summary:
+      'a `manage_sharing` holder whose session carries no ACTIVE organization does not receive the '
+      + 'SYSTEM read scope. `adminOrgScope` decided on the ABSENCE of an org id (`if (!orgId) return '
+      + 'where`) — a branch meant for SYSTEM_CTX but reached on CAPABILITY, so an authenticated '
+      + "non-system caller got every organization's rules, resolvable by id and by name and evaluable "
+      + '— which reconciles `sys_record_share`, so a cross-tenant WRITE. Taken through the real login '
+      + 'path (sign-up → sign-in → `session.create.before` declining to stamp an org → '
+      + '`resolveAuthzContext` → the REST route the Setup pages call), with TWO organizations: a '
+      + 'single-tenant fixture would pass on the BROKEN build because there is nothing to leak.',
+    proofId: 'sharing-rule-org-less-caller',
+    proofRef:
+      'packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts#sharing-rule-org-less-caller',
+    bound: true,
+    // Bound 2026-08-23 (#10959) on the spec seat's adjudication of PR #10934,
+    // whose item ③ was conditional: bind only if the entry's note turned out
+    // stale. The re-verification says stale on BOTH halves, so the note was
+    // corrected in the same PR and the binding follows.
+    //   • The old evidence pointer (`plugin-hono-server/src/hono-plugin.ts:1222`)
+    //     does not exist — that file is 717 lines and never mentions
+    //     `systemPermissions`; the app-entry consumer moved to
+    //     `current-user-endpoints.ts` (`/auth/me/apps`).
+    //   • The old note's scoping claim ("app-entry/nav visibility only, not a
+    //     general capability gate") is falsified by ADR-0111 D6:
+    //     `SharingRuleService.assertCanManageRules` reads
+    //     `context.systemPermissions` and refuses every sharing-rule verb
+    //     unless the caller holds `manage_sharing` or the legacy
+    //     `manage_platform_settings` admin override (system contexts bypass)
+    //     — a data-layer gate, not nav visibility. The admit set is wider than
+    //     one capability, but every member of it is read from
+    //     `systemPermissions`, which is what the bound entry classifies.
+    // The proof authors the key and proves the gate was CLEARED by it: the
+    // refusal it asserts is the org-scope one and explicitly NOT
+    // /requires the manage_sharing capability/, with the org-bound holder of
+    // the same grant reading its own tenant as the entitled contrast.
+    ledgerBindings: [{ type: 'permission', path: 'systemPermissions' }],
+  },
+  {
+    id: 'crud-persona-matrix',
+    label: 'Persona × CRUD-cell permission matrix',
+    summary:
+      "for every `showcase_*` row of the showcase's `access-matrix.json`, one fresh member holding "
+      + 'exactly that permission set runs all four verbs over real HTTP and each cell is judged '
+      + 'against the table — as a UNION with the everyone-baseline set, because capability is additive '
+      + '(ADR-0090 D5) and judging a cell against the raw row turns 9 correctly ALLOWED cells into '
+      + 'fabricated violations. The allow half is not decoration: the exact allow/deny split is '
+      + 'asserted, so narrowing the sweep (or a persona silently failing to provision) breaks the '
+      + 'build instead of quietly shrinking what is proven, and every denial is preceded by an admin '
+      + 'control issued FROM THE SAME PAYLOAD BUILDER so a 403 cannot be a bad payload.',
+    proofId: 'showcase-crud-persona-matrix',
+    proofRef:
+      'packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix',
+    bound: true,
+    // Bound 2026-08-23 (#10959) — ADOPT ALL FOUR, on the spec seat's
+    // adjudication of PR #10934. The scope worry the registration raised (one
+    // breadth proof anchoring four properties) is answered by the file's own
+    // shape: the EXACT allow/deny split is asserted (54 allow / 54 deny, one
+    // verdict per set × object × verb), so a narrowing sweep — or a persona
+    // silently failing to provision — breaks the build instead of quietly
+    // shrinking what these four entries cite. Each verb is exercised in both
+    // directions per cell and on post-state, not just on status codes.
+    // Multi-entry binding has precedent in `semantic-roles`, which binds three.
+    ledgerBindings: [
+      { type: 'permission', path: 'objects.allowCreate' },
+      { type: 'permission', path: 'objects.allowRead' },
+      { type: 'permission', path: 'objects.allowEdit' },
+      { type: 'permission', path: 'objects.allowDelete' },
+    ],
+  },
+  {
+    id: 'fls-read-strip',
+    label: 'FLS read side — an unreadable field is STRIPPED',
+    summary:
+      'a field a permission set marks `readable: false` is ABSENT from the wire, not null, not empty, '
+      + 'not a placeholder. The platform has TWO ways a field can fail to reach a caller — STRIPPED '
+      + '(the key is deleted) and MASKED (a `maskingRule` replaces the value) — and a test asserting '
+      + 'only "I did not get the real value" passes for both and pins neither, so the assertions are '
+      + "about the KEY (`'budget' in record` must be false), which a `toBeUndefined()` check cannot "
+      + 'distinguish. Every deny is paired with the entitled contrast on the SAME field, row and '
+      + 'request: an absence-only suite stays green if the field vanished for everyone.',
+    proofId: 'showcase-fls-read-mask-strip',
+    proofRef:
+      'packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts#showcase-fls-read-mask-strip',
+    bound: true,
+    // Bound 2026-08-23 (#10959) — the strongest of the three, on the spec
+    // seat's adjudication of PR #10934. The file AUTHORS a scratch permission
+    // set carrying `readable: false` and asserts the runtime outcome both ways
+    // on the SAME field, row and request, so `permission.fields.readable`'s
+    // `live` status is exactly what it gates.
+    // NOT `fields.editable` alongside it: the file authors that key but
+    // asserts its refusal as a CONSEQUENCE of unreadability rather than as the
+    // write-deny axis, which `showcase-permission-zoo` already pins. Binding it
+    // would repeat the owner-anchor / `allowTransfer` mistake — a proof cited
+    // for a property it does not exercise.
+    ledgerBindings: [{ type: 'permission', path: 'fields.readable' }],
+  },
 ];
 
 /** Bound ledger paths → the class that binds them. Key: `<type>/<path>`. */

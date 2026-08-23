@@ -266,6 +266,33 @@ export class EmailServicePlugin implements Plugin {
   version = '1.0.0';
   type = 'standard';
   dependencies = ['com.objectstack.engine.objectql'];
+  /**
+   * Order-if-present on the settings service (ADR-0116, #10250).
+   *
+   * `start()` registers a `kernel:ready` hook that reads the `mail` namespace
+   * (SMTP host/port, provider, from-address). `SettingsServicePlugin` binds its
+   * data engine from ITS `kernel:ready` hook, registered in ITS `start()` — so
+   * whichever of the two plugins starts first registers the earlier hook, and
+   * the earlier hook runs first. Start order is the topological order over this
+   * declaration (`resolvePluginOrder`, used for BOTH phases in
+   * `ObjectKernel.bootstrap`), so declaring the edge is what puts the bind
+   * ahead of the read.
+   *
+   * Without it the ordering was incidental: `serve` happens to append the
+   * always-on slate with `settings` ahead of `email`, but an app that declares
+   * `requires: ['email']` gets email FIRST (declared tokens are prepended, the
+   * slate only appended), and cloud's objectos-runtime mounts from its own
+   * wiring. In that window `getNamespace('mail')` reads the in-memory fallback
+   * and answers with the manifest DEFAULTS while the operator's saved SMTP row
+   * sits unread in `sys_setting` — silently, on a transport that then delivers
+   * nowhere.
+   *
+   * SOFT, not hard: a kernel with no settings service must still boot this
+   * plugin (the transport is buildable from env/options alone). ADR-0049 —
+   * declared is enforced: `serve-settings-ordering.pin.test.ts` boots a kernel
+   * with the readers registered BEFORE settings and proves the order moves.
+   */
+  optionalDependencies = ['com.objectstack.service.settings'];
 
   private readonly options: EmailServicePluginOptions;
   private service?: EmailService;
@@ -1252,7 +1279,23 @@ export class EmailServicePlugin implements Plugin {
     return stripReadDecorations(item);
   }
 
-  async dispose(): Promise<void> {
+  /**
+   * Teardown — the kernel's ONLY teardown hook.
+   *
+   * [#10772] This body used to be spelled `dispose()`. `Plugin`
+   * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+   * `destroy?()` and no `dispose()`, and `ObjectKernel.performShutdown()` /
+   * `LiteKernel.destroy()` walk the plugins in reverse calling
+   * `plugin.destroy()` — so after `await kernel.shutdown()` had RESOLVED, the
+   * two metadata subscriptions were still live, the SMTP transport was still
+   * open and the provenance hook was still bound to the engine. `dispose()`
+   * had exactly ONE caller in the whole repo, a test in this package; the
+   * kernel was never one of them.
+   *
+   * Idempotent: every handle is cleared as it is released, so a second
+   * teardown is a no-op rather than a second close.
+   */
+  async destroy(): Promise<void> {
     this.templateBridgeArmed = false;
     try { this.unsubscribeTemplates?.(); } catch { /* best effort */ }
     this.unsubscribeTemplates = undefined;
@@ -1266,6 +1309,16 @@ export class EmailServicePlugin implements Plugin {
       try { unbindEmailTemplateProvenanceStamp(this.boundEngine as any); } catch { /* best effort */ }
       this.boundEngine = undefined;
     }
+  }
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class: an embedder may have learned to call it directly precisely
+   * BECAUSE the kernel never did, and deleting it would break them. Same
+   * signature, same return type — a direct caller sees no change.
+   */
+  async dispose(): Promise<void> {
+    await this.destroy();
   }
 
   /**

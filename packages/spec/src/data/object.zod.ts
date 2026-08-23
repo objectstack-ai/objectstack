@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { FieldSchema, UniqueScopeSchema } from './field.zod';
+import { FieldSchema } from './field.zod';
 import { ValidationRuleSchema } from './validation.zod';
 import { ActionSchema } from '../ui/action.zod';
 import { ObjectListViewSchema } from '../ui/view.zod';
@@ -374,6 +374,66 @@ export const ObjectCapabilities = strictObject({
  * rename onto the retired `partial` tombstone would be the campaign's
  * finding 7 (a suggestion pointing into a second rejection).
  */
+/**
+ * Prescriptive rejection for a mis-spelled `unique` scope **on a DECLARED
+ * INDEX** — the sibling of `field.zod.ts`'s `uniqueScopeError`, and the reason
+ * the two are not one map.
+ *
+ * Same vocabulary (`boolean | 'global' | 'organization'`), same near-miss
+ * table, same `invalid_union` channel. The difference is the one clause an
+ * author acts on: **what bare `true` positionally means here.** At field level
+ * `true` resolves per-organization, so naming `'organization'` "the explicit
+ * spelling of true" is a true and useful hint. On this surface `true` sets
+ * neither driver flag (`isGlobalUnique` / `isOrganizationUnique` are both
+ * false) and the index materializes over exactly `fields` — i.e. `'global'` is
+ * what `true` spells. The shared text therefore told an author who had just
+ * been refused on this key to write `'organization'` for what they already had,
+ * which asks the driver to prepend the NULL-safe organization key part at
+ * registration — a materialization change, silently, on an index that may
+ * already exist on deployed databases. That is precisely the unannounced index
+ * reinterpretation the #8323 ruling (maintainer, 2026-08-13) rejects and the
+ * #5082 protocol-18 sequencing is there to stage.
+ *
+ * ⛔ Message text only. The accepted and rejected sets are byte-identical to
+ * `UniqueScopeSchema`'s and must stay so — `unique-scope-message.test.ts` pins
+ * both surfaces against the same value table, so a member added or dropped on
+ * either side fails there rather than diverging quietly.
+ *
+ * Declared before `IndexSchema` because `OS_EAGER_SCHEMAS=1` evaluates the
+ * factory at module load (TDZ) — same constraint as the field-surface map.
+ */
+const declaredIndexUniqueScopeError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'invalid_union') return undefined;
+  const input = (issue as { input?: unknown }).input;
+  const spelled = typeof input === 'string' ? `'${input}'` : String(input);
+  const nearMiss =
+    input === 'tenant' || input === 'org'
+      ? ` ${spelled} is not accepted and is not an alias — the per-organization scope is spelled 'organization' (ADR-0120: "tenant" is overloaded across deployment topologies, and the platform spells the word out).`
+      : '';
+  return (
+    `Invalid unique scope ${spelled}. Allowed: true/false, 'organization' ` +
+    `(one holder per organization — the driver prepends the NULL-safe ` +
+    `organization key part to \`fields\` at registration), or 'global' ` +
+    `(one holder across the whole installation — materialized over exactly ` +
+    `\`fields\`, and the positional meaning of bare true on a declared index: ` +
+    `bare true is warned by lint unique/unscoped-declared-index in 17.x and ` +
+    `rejected at protocol 18, #5082).${nearMiss}`
+  );
+};
+
+/**
+ * `UniqueScopeSchema`'s declared-index twin: the same union, refused in the
+ * index surface's own words. See `declaredIndexUniqueScopeError` above for why
+ * the message cannot be shared, and `field.zod.ts`'s `UniqueScopeSchema` for
+ * the scope vocabulary itself (ADR-0120 D1) — the member list is duplicated
+ * deliberately and pinned equivalent, never re-derived.
+ */
+const DeclaredIndexUniqueScopeSchema = lazySchema(() =>
+  z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
+    error: declaredIndexUniqueScopeError,
+  }),
+);
+
 export const IndexSchema = lazySchema(() => strictObject({
   surface: 'this index',
   history:
@@ -420,7 +480,7 @@ export const IndexSchema = lazySchema(() => strictObject({
   // `fields: ['organization_id', 'code']`" survives as valid legacy input,
   // but new code says `unique: 'organization'` — the hand-written composite
   // is NOT NULL-safe (#5030).
-  unique: UniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
+  unique: DeclaredIndexUniqueScopeSchema.optional().default(false).describe("Whether the index enforces uniqueness, and at which scope (ADR-0120). 'global' = materialized over exactly `fields`, no organization column injected — one holder across the whole installation; 'organization' = the driver prepends the NULL-safe organization key part (COALESCE(organization_id, '__global__')) at registration — one holder per organization; bare true = deprecated positional spelling of 'global' (warned in 17.x by lint unique/unscoped-declared-index, rejected at protocol 18, #5082) — state the scope. 'tenant'/'org' are rejected — the word is 'organization'"),
 
   // ── Tombstones (ADR-0049 / ADR-0087) ─────────────────────────────────
   // Kept LAST in the shape on purpose — see the #5606 note in the block

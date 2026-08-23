@@ -68,6 +68,7 @@
  */
 
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { seedCtx } from './per-organization-catalog.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -77,17 +78,27 @@ export function genId(prefix: string): string {
   return `${prefix}_${ts}${rand}`;
 }
 
-export async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+/**
+ * The three write helpers take an optional `organizationId`, threaded into the
+ * execution context so reads route through `SqlDriver.applyTenantScope` and
+ * writes are stamped with that organization. Omitting it reproduces the
+ * pre-existing organization-less behaviour EXACTLY, which is what the ADR-0094
+ * environment door still wants (its residue is deliberately outside the
+ * per-organization catalog work) and what a `single`-posture deployment wants.
+ * The PACKAGE door passes an organization under a walled posture — see
+ * `per-organization-catalog.ts`.
+ */
+export async function tryFind(ql: any, object: string, where: any, limit = 100, organizationId?: string): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+    const rows = await ql.find(object, { where, limit }, { context: seedCtx(organizationId) });
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-export async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: SYSTEM_CTX }); } catch { return null; }
+export async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
+  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
 }
-export async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
-  try { await ql.update(object, data, { context: SYSTEM_CTX }); return true; } catch { return false; }
+export async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
+  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
 }
 
 export interface ProjectionLogger {
@@ -132,6 +143,27 @@ export interface ProjectionLogger {
 export interface PermissionSeedOutcome {
   seeded: number;
   updated: number;
+  /**
+   * Rows this seeder OWNS whose stored columns already equalled what it would
+   * have written, so no `UPDATE` was issued (#10946).
+   *
+   * ⚠️ Read this together with {@link updated}, never instead of it. "The row
+   * now matches the declaration" is `seeded + updated + unchanged`; `updated`
+   * alone means "a write was needed AND landed". A consumer that asks the
+   * first question while reading only the second reports a converged row as a
+   * failure — which is exactly what the ADR-0086 P2 publish materializer did
+   * before this counter existed, because an unconditional re-write made the
+   * two questions accidentally identical. They are not, and the boot loops
+   * that stopped re-writing unchanged rows are why.
+   */
+  unchanged: number;
+  /**
+   * Names this pass DECLINED to touch because their record could not be read
+   * (#10946). Distinct from `unchanged` in every way that matters: nothing was
+   * compared, nothing was reconciled, and the declaration may or may not be
+   * materialized. Never fold it into a success count.
+   */
+  unreadable: number;
   skippedEnvAuthored: number;
   skippedForeign: number;
   /** Records retired because their definition was deleted from metadata. */
@@ -405,7 +437,7 @@ export async function upsertEnvPermissionSet(
   _logger?: ProjectionLogger,
   opts?: { customized?: boolean },
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || !ps?.name) return out;
 
   // [ADR-0094] `customized` marks a PACKAGE-owned row that an env overlay is
@@ -517,7 +549,7 @@ async function retirePermissionSetRecord(
   name: string,
   logger?: ProjectionLogger,
 ): Promise<PermissionSeedOutcome> {
-  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, skippedEnvAuthored: 0, skippedForeign: 0, deleted: 0 };
+  const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0, deleted: 0 };
   const existing = (await tryFind(ql, 'sys_permission_set', { name }, 1))[0];
   if (!existing?.id) return out;
   if (existing.managed_by === 'package') {

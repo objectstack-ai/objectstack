@@ -33,7 +33,7 @@ export const SysOauthAccessToken = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Opaque OAuth access tokens issued to client applications',
   highlightFields: ['client_id', 'user_id', 'expires_at'],

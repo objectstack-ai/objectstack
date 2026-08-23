@@ -3,14 +3,14 @@
 // This package had NO vitest config until #9832, and that is the fact this
 // header exists to keep visible: adding one changes how every test file in
 // `packages/cli` is configured, not just the file that needed it. So the
-// config is deliberately minimal — a single anchored `resolve.alias` entry and
-// no `test` block at all, because the 135 test files here run on vitest's
-// defaults (`globals: false`, `environment: 'node'`) and a `test` block would
-// silently re-specify them. Sibling configs in this repo do carry
+// config is deliberately minimal — anchored `resolve.alias` entries and no
+// `test` block at all, because the test files here run on vitest's defaults
+// (`globals: false`, `environment: 'node'`) and a `test` block would silently
+// re-specify them. Sibling configs in this repo do carry
 // `test: { globals: true, … }`; copying that shape here would have flipped
 // `globals` for every existing file in the package.
 //
-// ## Why the one entry
+// ## Why the service-cache entry
 //
 // `serve-observability-registration.test.ts` (#9832) boots the REAL
 // `CacheServicePlugin` to prove that a consumer registered after
@@ -33,6 +33,22 @@
 // absent from the ledger in the first place), so this entry re-resolves
 // exactly one file — the new test — and cannot move any existing suite.
 // Measured again after: 135 files / 1470 tests, unchanged.
+//
+// ## Why the create-objectstack entry (#10557)
+//
+// `init.ts` prints its "Created files" summary from a walk of the finished
+// project directory rather than a list accumulated while writing the
+// template (see the command's own header) — reusing `create-objectstack`'s
+// `created-summary.ts`, published as the `create-objectstack/created-summary`
+// subpath so both scaffold paths share one renderer instead of drifting
+// (#10499). Without an alias that bare specifier resolves through
+// `create-objectstack`'s `exports` to its **dist**, for the same reason and
+// the same danger as the entry above: a stale `dist/created-summary.js`
+// would make every test that reaches `init.ts` a verdict about build state.
+// `init.ts` is imported (relatively, inside this package) by three existing
+// test files — `commands.test.ts`, `init.test.ts`,
+// `init-scaffold-authoring-rules.test.ts` — so all three are reachable from
+// this entry, none of them new; this alias just keeps them pointed at source.
 //
 // Crossing into `service-cache/src` also makes ITS value imports reachable to
 // the gate's walk. That is one package, `@objectstack/observability`, which is
@@ -129,6 +145,10 @@ export default defineConfig({
       {
         find: /^@objectstack\/service-cache$/,
         replacement: path.resolve(__dirname, '../services/service-cache/src/index.ts'),
+      },
+      {
+        find: /^create-objectstack\/created-summary$/,
+        replacement: path.resolve(__dirname, '../create-objectstack/src/created-summary.ts'),
       },
     ],
   },

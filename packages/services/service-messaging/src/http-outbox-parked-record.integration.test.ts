@@ -55,6 +55,15 @@ import { HttpRedeliverError, type IHttpOutbox } from './http-outbox.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import type { FetchImpl } from './http-sender.js';
 
+/**
+ * [#10740] `IHttpOutbox.redeliver` now requires its caller to state the
+ * requesting tenant. These fixtures boot an engine with no tenancy posture and
+ * no organization, so `undefined` is the honest answer — the property is
+ * required, not optional, precisely so that answer has to be written down.
+ */
+const NO_TENANT = { tenantId: undefined } as const;
+
+
 const SECRET = 'whsec_8069_signing_key';
 
 const DROP_REASON =
@@ -131,7 +140,7 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
             updated_at: now,
         });
 
-        await expect(outbox.redeliver('parked_1')).rejects.toMatchObject({
+        await expect(outbox.redeliver('parked_1', NO_TENANT)).rejects.toMatchObject({
             name: 'HttpRedeliverError',
             code: 'DELIVERY_NEVER_SENT',
         });
@@ -178,7 +187,7 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
         await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
         expect(calls).toHaveLength(0);
         // …and an operator cannot conjure a first delivery out of it.
-        await expect(outbox.redeliver(id)).rejects.toMatchObject({ code: 'DELIVERY_NEVER_SENT' });
+        await expect(outbox.redeliver(id, NO_TENANT)).rejects.toMatchObject({ code: 'DELIVERY_NEVER_SENT' });
     });
 
     it('converges duplicates like enqueue does — one discarded event, one record', async () => {
@@ -221,9 +230,12 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
 
         const seen: string[] = [];
         await expect(
-            outbox.redeliver(id, (row) => {
-                seen.push(row.refId);
-                return 'the sys_webhook subscription no longer exists';
+            outbox.redeliver(id, {
+                ...NO_TENANT,
+                guard: (row) => {
+                    seen.push(row.refId);
+                    return 'the sys_webhook subscription no longer exists';
+                },
             }),
         ).rejects.toMatchObject({ code: 'DELIVERY_NOT_ELIGIBLE' });
 
@@ -244,7 +256,7 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
         await outbox.ack(id, { success: false, dead: true, error: 'boom', durationMs: 1 });
 
         await expect(
-            outbox.redeliver(id, () => { throw new Error('sys_webhook read failed'); }),
+            outbox.redeliver(id, { ...NO_TENANT, guard: () => { throw new Error('sys_webhook read failed'); } }),
         ).rejects.toMatchObject({ code: 'DELIVERY_NOT_ELIGIBLE' });
         const [row] = await outbox.list();
         expect(row.status).toBe('dead');
@@ -271,7 +283,7 @@ describe('sys_http_delivery — parked drop records are not redeliverable (#8069
         });
         await outbox.ack(id, { success: false, dead: true, error: 'receiver down', durationMs: 1 });
 
-        const replayed = await outbox.redeliver(id);
+        const replayed = await outbox.redeliver(id, NO_TENANT);
         expect(replayed.status).toBe('pending');
 
         const { impl, calls } = makeFetch();
@@ -307,8 +319,8 @@ describe.each<[string, () => IHttpOutbox]>([
         // Never claimed…
         expect(await outbox.claim({ nodeId: 'n1', limit: 10, claimTtlMs: 1000 })).toHaveLength(0);
         // …and never redeliverable.
-        await expect(outbox.redeliver(id)).rejects.toBeInstanceOf(HttpRedeliverError);
-        await expect(outbox.redeliver(id)).rejects.toMatchObject({ code: 'DELIVERY_NEVER_SENT' });
+        await expect(outbox.redeliver(id, NO_TENANT)).rejects.toBeInstanceOf(HttpRedeliverError);
+        await expect(outbox.redeliver(id, NO_TENANT)).rejects.toMatchObject({ code: 'DELIVERY_NEVER_SENT' });
     });
 
     it('refuses the parked discriminator at the delivery door', async () => {

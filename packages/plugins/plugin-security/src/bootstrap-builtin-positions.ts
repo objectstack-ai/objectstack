@@ -12,13 +12,35 @@
  * `sys_member.role` for the org_* roles and the unscoped `admin_full_access`
  * grant for platform_admin — are NEVER changed by this seed.
  *
- * Idempotent upsert-by-name, no prune. Rows are stamped `managed_by = 'platform'`
- * (A4 #2920 unified vocab; formerly 'system') so tenants can see (but not
- * repurpose) them. Runs on `kernel:ready` alongside the platform-admin and
- * declared-role bootstraps.
+ * Idempotent upsert by `(name, organization_id)`, no prune. Rows are stamped
+ * `managed_by = 'platform'` (A4 #2920 unified vocab; formerly 'system') so
+ * tenants can see (but not repurpose) them. Runs on `kernel:ready` alongside the
+ * platform-admin and declared-role bootstraps, and again for each organization
+ * as it is created.
+ *
+ * ## Per organization under a walled posture
+ *
+ * The built-in names are seeded PER ORGANIZATION, copies and all. That is the
+ * ruled reading of what these rows are: `sys_position` spells its name index
+ * `unique: 'organization'`, `sys_user_position` assignments are already
+ * per-organization, and a walled tenant that cannot SEE `everyone` cannot bind
+ * anything to it. What is not copied is the SOURCE OF TRUTH behind the names —
+ * `sys_member.role` for the org_* roles and the unscoped `admin_full_access`
+ * grant for `platform_admin` — exactly as before: this seed remains a catalog
+ * projection, so per-organization copies of the catalog change no derivation.
+ *
+ * A `single`-posture deployment keeps exactly one organization-less pass. See
+ * `per-organization-catalog.ts` for the doctrine and for the loud guard that
+ * stands in place of a reap.
  */
 
 import { BUILTIN_IDENTITY_NAMES, BUILTIN_IDENTITY_METADATA, EVERYONE_POSITION, GUEST_POSITION } from '@objectstack/spec';
+import {
+  resolveOwnOrganizationRow,
+  rowMatchesDeclaration,
+  seedCtx,
+  warnPreFixOrganizationLessRows,
+} from './per-organization-catalog.js';
 
 /**
  * [ADR-0090 D5/D9] Audience anchors seeded alongside the identity names.
@@ -39,29 +61,32 @@ const AUDIENCE_ANCHOR_METADATA: Record<string, { label: string; description: str
   },
 };
 
-const SYSTEM_CTX = { isSystem: true };
-
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
   const ts = Date.now().toString(36);
   return `${prefix}_${ts}${rand}`;
 }
 
-async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+async function tryFind(ql: any, object: string, where: any, limit = 100, organizationId?: string): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+    const rows = await ql.find(object, { where, limit }, { context: seedCtx(organizationId) });
     return Array.isArray(rows) ? rows : [];
   } catch { return []; }
 }
-async function tryInsert(ql: any, object: string, data: any): Promise<any | null> {
-  try { return await ql.insert(object, data, { context: SYSTEM_CTX }); } catch { return null; }
+async function tryInsert(ql: any, object: string, data: any, organizationId?: string): Promise<any | null> {
+  try { return await ql.insert(object, data, { context: seedCtx(organizationId) }); } catch { return null; }
 }
-async function tryUpdate(ql: any, object: string, data: any): Promise<boolean> {
-  try { await ql.update(object, data, { context: SYSTEM_CTX }); return true; } catch { return false; }
+async function tryUpdate(ql: any, object: string, data: any, organizationId?: string): Promise<boolean> {
+  try { await ql.update(object, data, { context: seedCtx(organizationId) }); return true; } catch { return false; }
 }
 
 interface SeedOptions {
   logger?: { info: (m: string, meta?: Record<string, any>) => void; warn: (m: string, meta?: Record<string, any>) => void };
+  /**
+   * Seed THIS organization's copies. Omitted = the `single`-posture pass, the
+   * one place an organization-less catalog row is the correct shape.
+   */
+  organizationId?: string;
 }
 
 export async function bootstrapBuiltinRoles(
@@ -71,8 +96,11 @@ export async function bootstrapBuiltinRoles(
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
     return { seeded: 0, updated: 0 };
   }
+  const organizationId = options.organizationId;
   let seeded = 0;
   let updated = 0;
+  let unchanged = 0;
+  const residue: string[] = [];
   const rows: Array<[string, { label: string; description: string }]> = [
     ...BUILTIN_IDENTITY_NAMES.map((n) => [n, BUILTIN_IDENTITY_METADATA[n]] as [string, { label: string; description: string }]),
     ...Object.entries(AUDIENCE_ANCHOR_METADATA),
@@ -82,16 +110,32 @@ export async function bootstrapBuiltinRoles(
     // PLATFORM-shipped (formerly stamped 'system'). Re-upserted every boot, so
     // legacy 'system' rows self-heal to 'platform' on the next kernel:ready.
     const fields = { label: meta.label, description: meta.description, managed_by: 'platform' };
-    const existing = await tryFind(ql, 'sys_position', { name }, 1);
-    if (existing[0]?.id) {
-      if (await tryUpdate(ql, 'sys_position', { id: existing[0].id, ...fields })) updated += 1;
+    // Limit 5, not 1: a tenant-scoped read passes through `applyTenantScope`,
+    // whose compatibility arm returns organization-less rows alongside this
+    // organization's own. Asking for one row would hand back whichever the
+    // driver ordered first — and taking a pre-fix organization-less row as
+    // "already seeded" is exactly the silent no-op this pass must not perform.
+    const existing = await tryFind(ql, 'sys_position', { name }, 5, organizationId);
+    const { own, organizationLessResidue } = resolveOwnOrganizationRow(existing, organizationId);
+    if (organizationLessResidue) residue.push(name);
+    if (own?.id) {
+      // O(changed declarations): an unchanged row costs no write at all.
+      if (rowMatchesDeclaration(own, fields)) { unchanged += 1; continue; }
+      if (await tryUpdate(ql, 'sys_position', { id: own.id, ...fields }, organizationId)) updated += 1;
     } else {
       const created = await tryInsert(ql, 'sys_position', {
         id: genId('position'), name, ...fields, active: true, is_default: false,
-      });
+      }, organizationId);
       if (created) seeded += 1;
     }
   }
-  options.logger?.info?.('[security] built-in identity names + audience anchors seeded into sys_position', { seeded, updated, total: rows.length });
+  if (organizationId) {
+    warnPreFixOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
+  }
+  if (seeded + updated > 0) {
+    options.logger?.info?.('[security] built-in identity names + audience anchors seeded into sys_position', {
+      seeded, updated, unchanged, total: rows.length, ...(organizationId ? { organization: organizationId } : {}),
+    });
+  }
   return { seeded, updated };
 }

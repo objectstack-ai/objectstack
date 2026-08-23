@@ -67,7 +67,7 @@ function makeDriver(): any {
 
 describe('record-change context hydrates read-time formula fields (#3426)', () => {
   it('resolves a formula field ({record.full_name}) in a seeded flow record', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());

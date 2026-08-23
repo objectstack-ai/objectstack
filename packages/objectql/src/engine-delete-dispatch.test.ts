@@ -25,6 +25,7 @@ import {
   assertEngineDeleteDispatch,
   scalarDeleteId,
 } from './engine-delete-dispatch.js';
+import { engineByIdUnhonouredPredicateMessage } from './engine-update-dispatch.js';
 
 /** Records which driver entry point the engine chose, if any. */
 function makeRecordingDriver() {
@@ -71,10 +72,21 @@ async function makeEngine() {
 /** What the real engine actually did with this options bag. */
 async function observeEngine(options: unknown): Promise<'by-id' | 'multi' | 'reject'> {
   const { engine, calls } = await makeEngine();
+  // [#11009] `reject` no longer has one spelling — the unhonoured-predicate
+  // refusal composes its message from the dropped keys, so a throw counts as
+  // the dispatch's verdict only when byte-identical to what the predicate
+  // says THIS call refuses with. Anything else still rethrows.
+  const predicted = resolveEngineDeleteDispatch(options as Parameters<typeof resolveEngineDeleteDispatch>[0]);
   try {
     await engine.delete('task', options as any);
   } catch (e) {
-    if ((e as Error).message === ENGINE_DELETE_REJECT_MESSAGE) return 'reject';
+    const message = (e as Error).message;
+    if (
+      message === ENGINE_DELETE_REJECT_MESSAGE ||
+      (predicted.kind === 'reject' && message === predicted.message)
+    ) {
+      return 'reject';
+    }
     throw e;
   }
   if (calls.length !== 1) {
@@ -137,6 +149,38 @@ describe('engine delete dispatch — the shared predicate IS the engine (#4550)'
     expect(() => assertEngineDeleteDispatch({ where: { id: 0 } })).toThrow(ENGINE_DELETE_REJECT_MESSAGE);
     expect(() => assertEngineDeleteDispatch({ where: { id: '' } })).toThrow(ENGINE_DELETE_REJECT_MESSAGE);
     expect(assertEngineDeleteDispatch({ where: { id: 0 }, multi: true })).toEqual({ kind: 'multi' });
+  });
+
+  // ── [#11009] The unhonoured-predicate refusal — the delete twin of the
+  //    update-side pins, and deliberately the SAME shared message composer, so
+  //    a reader can see the two verbs refuse symmetrically.
+  it('a by-id delete carrying where keys beyond id is refused with the shared message', async () => {
+    const message = engineByIdUnhonouredPredicateMessage('Delete', ['status']);
+    expect(resolveEngineDeleteDispatch({ where: { id: 'p1', status: { $in: ['done'] } } }))
+      .toEqual({ kind: 'reject', message });
+    expect(() => assertEngineDeleteDispatch({ where: { id: 'p1', status: { $in: ['done'] } } }))
+      .toThrow(message);
+    // With a DECLARED multi the same call is a predicate delete — every where
+    // key (the scalar id included) rides the AST to `driver.deleteMany`.
+    const { engine, calls } = await makeEngine();
+    await engine.delete('task', { where: { id: 'p1', status: 'stale' }, multi: true } as any);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].fn).toBe('deleteMany');
+    expect(calls[0].arg).toMatchObject({ object: 'task', where: { id: 'p1', status: 'stale' } });
+  });
+
+  it('a PURE-id where stays by-id even under multi:true — the LifecycleService reap idiom (#11009)', async () => {
+    // No predicate exists for the by-id path to drop, and the guarded reap
+    // depends on this shape taking the per-record path (cascade handling,
+    // per-record events — pinned from the event side in
+    // `engine-data-events.test.ts`).
+    expect(resolveEngineDeleteDispatch({ where: { id: 'rec_1' }, multi: true }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+    const { engine, calls } = await makeEngine();
+    await engine.delete('task', { where: { id: 'rec_1' }, multi: true } as any);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].fn).toBe('delete');
+    expect(calls[0].arg).toBe('rec_1');
   });
 
   it('a falsy-id `multi` delete is still SCOPED by the caller where, not a whole-table purge', () => {

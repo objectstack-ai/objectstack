@@ -1242,9 +1242,42 @@ export class InMemoryDriver implements IDataDriver {
               if (!field || field === '*') return records.length;
               return values.filter(v => v !== null && v !== undefined).length;
               
+          // [#11065] A BOOLEAN is an aggregand worth 1 or 0 — not a value to
+          // drop. `typeof v === 'number'` dropped every one of them, so a
+          // whole boolean column aggregated to `nums.length === 0` and `avg`
+          // returned `null` while `sum` returned `0`. That is one query with
+          // two answers: `AVG(col)`/`SUM(col)` over the same rows on SQLite
+          // answer `0.4` and `2`, and objectql's in-memory fallback
+          // (`in-memory-aggregation.ts`) answers the same numbers because its
+          // `toNumber` is `Number(v)` and `Number(true) === 1`. driver-memory
+          // was the lone outlier of the three, and the divergence is silent on
+          // both faces: a dashboard tile renders a rate under SQL and a blank
+          // here, indistinguishable from "no matching rows", while an
+          // in-memory suite pinning such a measure asserts `null` and cannot
+          // fail in the direction that matters.
+          //
+          // `sum` is coerced with `avg` deliberately rather than left one arm
+          // over: `SUM(bool)` is "how many true" on every SQL face and in the
+          // objectql fallback, and fixing only the arm the report named would
+          // have kept the same defect alive under a different function name.
+          //
+          // The coercion is BOOLEAN-ONLY, and that narrowness is the point.
+          // `toNumber` also maps a non-numeric STRING to `0`, which averages
+          // garbage as zero rather than excluding it; whether that is right is
+          // a separate question, so everything that is not a boolean reaches
+          // the same `typeof === 'number'` gate it always did.
+          //
+          // The analytics face carries this rule as a mingo expression
+          // (`memory-analytics.ts`, `buildAggregator`) — same numbers, other
+          // language. Both are driven by `memory-boolean-aggregand.test.ts`,
+          // because "the faces disagree" is this package's recurring defect
+          // class (#5374, #6814) and one face aligned alone leaves the other
+          // free to keep its own answer.
           case 'sum':
           case 'avg': {
-              const nums = values.filter(v => typeof v === 'number');
+              const nums = values
+                  .map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v))
+                  .filter(v => typeof v === 'number');
               const sum = nums.reduce((a, b) => a + b, 0);
               if (func === 'sum') return sum;
               return nums.length > 0 ? sum / nums.length : null;

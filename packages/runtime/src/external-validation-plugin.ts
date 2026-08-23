@@ -7,14 +7,41 @@ import {
 } from '@objectstack/spec/shared';
 
 /**
+ * Structural subset of `SchemaValidationReport` — the shape both the sweep and
+ * its scoped twin answer with.
+ */
+interface SchemaValidationReportLike {
+  ok: boolean;
+  results: Array<{ ok: boolean; datasource: string; object: string; diffs: SchemaDiffEntry[] }>;
+}
+
+/**
  * Structural subset of `IExternalDatasourceService` used here, to avoid a hard
  * dependency on the service package from runtime.
  */
 interface ExternalDatasourceServiceLike {
-  validateAll(): Promise<{
-    ok: boolean;
-    results: Array<{ ok: boolean; datasource: string; object: string; diffs: SchemaDiffEntry[] }>;
-  }>;
+  /**
+   * The whole-farm sweep. Used by the BOOT gate ({@link
+   * ExternalValidationPlugin.runValidation}), whose subject genuinely is every
+   * federated object in the environment — see `announceAllClear` for the one
+   * claim that scope entitles it to make.
+   */
+  validateAll(): Promise<SchemaValidationReportLike>;
+  /**
+   * [#10961] The scoped twin: validate the federated objects bound to ONE
+   * datasource, driving live introspection against THAT datasource only.
+   *
+   * OPTIONAL, and probed rather than assumed, because it is deliberately not on
+   * `IExternalDatasourceService` — #10537's triage authorized the service-side
+   * composition, not a contract-surface expansion, and #10961's triage carried
+   * that ruling forward unchanged. What is asserted here rather than
+   * contract-checked is the method's NAME; nothing about the shape it returns,
+   * which is the report type both spellings already share.
+   *
+   * See {@link ExternalValidationPlugin.runDriftCheck} for what its absence
+   * does — and, more importantly, for what it deliberately does not do.
+   */
+  validateDatasource?(datasource: string): Promise<SchemaValidationReportLike>;
 }
 
 interface MetadataServiceLike {
@@ -178,10 +205,45 @@ export class ExternalValidationPlugin implements Plugin {
     });
   };
 
-  /** Tear down background drift-check timers (idempotent). */
-  stop = (): void => {
+  /**
+   * Tear down background drift-check timers (idempotent) — the kernel's ONLY
+   * teardown hook.
+   *
+   * [#10772] This body used to be spelled `stop()`. `Plugin`
+   * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+   * `destroy?()` and no `stop()`, and `ObjectKernel.performShutdown()` /
+   * `LiteKernel.destroy()` walk the plugins in reverse calling
+   * `plugin.destroy()`. Nothing in the tree ever called `stop()` on a plugin,
+   * and this class's own only caller was `scheduleDriftChecks()` re-arming
+   * itself — so every armed `setInterval` below was STILL ARMED after
+   * `await kernel.shutdown()` had RESOLVED. That is #9371's mechanism
+   * verbatim, and this plugin is one of only two `Plugin` implementations in
+   * the tree that own `setInterval` at all (`ReportsServicePlugin` is the
+   * other, repaired under #10371).
+   *
+   * The timers are `unref`'d, so a long-lived host process still exits and
+   * nothing complains in production — the bill lands in a vitest worker, which
+   * is alive throughout teardown.
+   *
+   * Stays SYNCHRONOUS on purpose: `stop()` was `(): void`, and widening a
+   * public alias to `Promise<void>` would change what an embedder's
+   * non-awaiting call site does.
+   */
+  destroy = (): void => {
     for (const timer of this.driftTimers.values()) clearInterval(timer);
     this.driftTimers.clear();
+  };
+
+  /**
+   * Retained alias for {@link destroy}. Kept because it is public API of an
+   * exported class: an embedder may have learned to call it directly precisely
+   * BECAUSE the kernel never did, and deleting it would break them. Still an
+   * arrow property returning `void`, so both a detached
+   * `const { stop } = plugin` call and a non-awaiting call site keep working
+   * unchanged.
+   */
+  stop = (): void => {
+    this.destroy();
   };
 
   /** Exposed for testing; invoked from the kernel:ready handler. */
@@ -237,7 +299,9 @@ export class ExternalValidationPlugin implements Plugin {
    * don't accumulate.
    */
   async scheduleDriftChecks(ctx: PluginContext): Promise<void> {
-    this.stop();
+    // [#10772] The canonical hook, not the retained alias: `destroy()` is now
+    // where the body lives, and the alias exists only for embedders.
+    this.destroy();
     const metadata = safeGet<MetadataServiceLike>(ctx, 'metadata');
     if (!metadata?.list) return;
 
@@ -273,24 +337,99 @@ export class ExternalValidationPlugin implements Plugin {
    * `external.schema.drift` event per mismatch. Exposed for testing; invoked
    * from the interval armed by {@link scheduleDriftChecks}. Never throws.
    *
+   * ## [#10961] The work is scoped by the CALL, not by a filter over a sweep
+   *
+   * This body used to ask for `validateAll()` — every federated object on every
+   * federated datasource, each validation driving a live remote-schema
+   * `introspect(datasource)` — and then keep the rows whose `datasource`
+   * matched the one this timer was armed for. The events were right; the WORK
+   * was the whole farm, and `scheduleDriftChecks` arms one of these PER
+   * DATASOURCE. Measured on a three-datasource fixture
+   * (`external-validation-drift-scope.test.ts`, run against the pre-fix body):
+   * two armed timers introspected six remotes per cycle where two were asked
+   * for, and each additional tick repeated it.
+   *
+   * That makes this the periodic twin of the request-gate defect #10537 named,
+   * and worse in the one way that matters: a request gate has a caller waiting
+   * on the answer and paying attention to the latency, while this is
+   * **unattended** — the fan-out repeats on every interval, forever, with
+   * nobody reading the result it discards.
+   *
+   * `validateDatasource(datasource)` is the scoped twin, composed service-side
+   * from the same primitives (`listObjects` → filter → `validateObject`) with
+   * the same federation predicate, so it returns row-for-row what the
+   * post-filter kept. The rows are therefore taken as they arrive: the
+   * selection is keyed on `o.datasource ?? 'default'`, which is exactly the
+   * value `validateObject` reports back as `result.datasource`, so re-filtering
+   * on `r.datasource` here would re-assert a property the call already
+   * guarantees — and would leave a reader unsure whether the fan-out is still
+   * somewhere in this path.
+   *
+   * ## Absence DEGRADES — it does not fall back, and it does not get loud
+   *
+   * A wired service with no scoped spelling could be served by sweeping and
+   * post-filtering, which is precisely the behaviour above. A silent fallback
+   * would leave the fan-out armed, unattended, on a path no test drives, for
+   * exactly the deployments nobody is looking at. So it is refused.
+   *
+   * But refused QUIETLY, and this is deliberately NOT the `503` the REST
+   * registrar answers for the same absence: **the kind of gate decides the
+   * shape of honesty.** A request gate has a caller who asked a question and is
+   * entitled to be told the answer cannot be produced. A background timer has
+   * no caller — "loud" there means spraying errors at nobody, or manufacturing
+   * 5xx noise from a check nothing requested. The honest degradation for an
+   * unattended checker is to **not do the thing, and record why it was not
+   * done**: no events, no throw, one `warn` naming the consequence (drift is
+   * not being watched) and the fix.
+   *
+   * `warn` and not `error` per AGENTS.md's degradation table: this is a
+   * FUNCTIONAL degradation — a check is not armed, visibly smaller than it
+   * should be — not a durability one. Nothing claims to have been persisted.
+   *
+   * The probe is re-run on EVERY tick and its verdict is recorded nowhere: a
+   * service registered after this plugin armed its timers starts being checked
+   * on the next interval, with no cached "absent" to undo.
+   *
    * @returns the number of drift events emitted.
    */
   async runDriftCheck(ctx: PluginContext, datasource: string): Promise<number> {
     const svc = safeGet<ExternalDatasourceServiceLike>(ctx, 'external-datasource');
-    if (!svc?.validateAll) return 0;
+    if (!svc) {
+      // Federation simply is not wired into this host. Nothing is degraded and
+      // nobody needs telling — the same quiet skip the boot gate takes.
+      ctx.logger?.debug?.('[external-validation] service not registered; skipping drift check', {
+        datasource,
+      });
+      return 0;
+    }
 
-    let report: Awaited<ReturnType<ExternalDatasourceServiceLike['validateAll']>>;
+    if (typeof svc.validateDatasource !== 'function') {
+      ctx.logger?.warn?.(
+        '[external-validation] background drift check SKIPPED — the registered external-datasource '
+          + 'service has no scoped `validateDatasource(datasource)`, and this checker will NOT sweep '
+          + 'the whole farm instead: a timer armed for one datasource must not introspect every other '
+          + 'federated remote on every tick. Consequence: schema drift on this datasource is not being '
+          + 'watched, and no `external.schema.drift` event will be emitted for it. Fix: register an '
+          + '`external-datasource` service that can validate a single datasource (ObjectStack\'s own '
+          + '`ExternalDatasourceService` does), or drop `external.validation.checkIntervalMs` from the '
+          + 'datasource so nothing is armed.',
+        { datasource },
+      );
+      return 0;
+    }
+
+    let report: SchemaValidationReportLike;
     try {
-      report = await svc.validateAll();
+      report = await svc.validateDatasource(datasource);
     } catch (err) {
-      ctx.logger?.warn?.('[external-validation] drift check validateAll failed', {
+      ctx.logger?.warn?.('[external-validation] drift check could not be performed', {
         datasource,
         err,
       });
       return 0;
     }
 
-    const drifted = report.results.filter((r) => !r.ok && r.datasource === datasource);
+    const drifted = report.results.filter((r) => !r.ok);
     for (const r of drifted) {
       const event: ExternalSchemaDriftEvent = {
         datasource: r.datasource,

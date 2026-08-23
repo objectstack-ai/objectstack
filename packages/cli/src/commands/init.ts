@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { printHeader, printSuccess, printError, printStep, printKV, printInfo, formatZodErrors } from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
+import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -81,10 +82,10 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
  * spelling, so each entry widens exactly one declaration and nothing else.
  *
- * Both are reported by `pnpm install` on a brand-new scaffold, and neither is a
- * real incompatibility. They are declared here because that report is the first
- * thing a newcomer sees, on the one screen where they are deciding whether this
- * project is solid, and there is nothing they did to cause it.
+ * Every one of them is reported by `pnpm install` on a brand-new scaffold, and
+ * none is a real incompatibility. They are declared here because that report is
+ * the first thing a newcomer sees, on the one screen where they are deciding
+ * whether this project is solid, and there is nothing they did to cause it.
  *
  *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
  *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
@@ -104,19 +105,146 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    HOST's better-call instance, so the single 1.4.0 copy every install
  *    already resolves is the correct tree, not a skew to repair.
  *    ⚠️ This entry retires together with the SCIM rc pin — delete both at once.
+ *    Stable `@better-auth/scim@1.7.1` peers `better-call@1.4.0`, so the skew
+ *    this line covers is genuinely gone the moment the pin moves.
  *
- * `allowedVersions` suppresses the report ONLY; it moves no resolution.
+ *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
+ *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
+ *    scaffolded tree hands them 0.5.0. The 0.5.0 comes from `better-call@1.4.0`
+ *    (better-auth's own HTTP layer), which DEPENDS on `^0.5.0`;
+ *    `@objectstack/plugin-auth` names the four packages as direct dependencies
+ *    without naming utils, so pnpm satisfies their peer from better-call's copy
+ *    rather than from better-auth's own exact 0.4.2 dependency.
+ *
+ *    Measured compatible rather than assumed. Those four import exactly three
+ *    symbols across two subpaths — `base64`/`base64Url` (`/base64`),
+ *    `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
+ *    (`/random`). 0.5.0 exports all three with identical signatures; `/random`
+ *    is unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)`
+ *    for a helper that IS `new Uint8Array(data)` on non-strings, and `/hash`
+ *    only widens its input coercion for views not backed by a plain
+ *    ArrayBuffer. Run against the input shapes those call sites actually pass,
+ *    0.4.2 and 0.5.0 agree on every value; run end to end (better-auth with the
+ *    sso, oauth-provider and scim plugins), a tree where the four resolve 0.5.0
+ *    and one where they resolve 0.4.2 produce the same transcript — sign-up,
+ *    sign-in, session, both OAuth metadata documents, the RFC 7636 PKCE
+ *    challenge, and the SCIM and SSO endpoint outcomes.
+ *
+ *    ⛔ A resolution change is the WRONG remedy here, and was measured too:
+ *    pinning utils back to 0.4.2 clears the four lines only by dragging
+ *    `better-call@1.4.0` off its own declared `^0.5.0` — manufacturing one real
+ *    range violation to silence four benign ones.
+ *
+ *    Spelled `0.5.0` exactly, not `0.5`: 0.5.0 is the version that was
+ *    measured, and a future 0.6.0 SHOULD report again rather than inherit this
+ *    finding.
+ *
+ *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
+ *    names scim. Stable `@better-auth/scim@1.7.1` still peers
+ *    `@better-auth/utils@0.4.2`, so this skew outlives that pin. They retire
+ *    when the four packages accept 0.5.0 upstream, or when
+ *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
+ *    resolution so that all four land on 0.4.2 by themselves. Measured on the
+ *    rendered scaffold, one clean resolve per pnpm version:
+ *
+ *      pnpm 10.15.0 – 10.30.0   all four reported as unmet peers.
+ *      pnpm >= 10.31.0          resolved to 0.4.2; nothing to report.
+ *
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution — the
+ * lockfile a scaffold resolves is byte-identical with and without this block
+ * (verified by digest on pnpm 10.15.0 and 10.30.0).
  */
 export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
   'better-auth>better-sqlite3': '13',
   '@better-auth/scim>better-call': '1.4.0',
+  '@better-auth/core>@better-auth/utils': '0.5.0',
+  '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
+  '@better-auth/scim>@better-auth/utils': '0.5.0',
+  '@better-auth/sso>@better-auth/utils': '0.5.0',
 };
 
 /**
+ * Lowest pnpm that can actually install this scaffold, declared as
+ * `engines.pnpm` in the generated `package.json`.
+ *
+ * The rendered `pnpm-workspace.yaml` declares an explicit empty `packages: []`
+ * (see `renderPnpmWorkspaceYaml` below). It did not always, and that history is
+ * why this floor is reachable at all: while the key was omitted, pnpm 10.0–10.4
+ * refused the file outright — `pnpm install` exited 1 with "ERROR packages
+ * field missing or empty" before resolving a single dependency — and those
+ * versions parse `pnpm-workspace.yaml` BEFORE they read `engines`, so no floor
+ * value could ever be consulted on that band.
+ *
+ * Declaring the floor does not repair the versions below it — it makes them
+ * report a cause the user can act on instead of a workspace error about a file
+ * they did not write. Measured on the rendered shape, one clean install per
+ * pnpm version, each with its own store:
+ *
+ *   pnpm 9.15.9, 10.0.0,    refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
+ *   10.4.0, 10.5.0–10.14.0  pnpm version is incompatible with PROJECT.
+ *                           Expected version: >=10.15". With the key omitted,
+ *                           9.x and 10.0–10.4 printed the raw workspace error
+ *                           here instead, naming a file the user never wrote.
+ *   pnpm >= 10.15.0         installs; unchanged by this declaration.
+ *
+ * ⚠️ So this floor, not the workspace file, is now what stops pnpm 10.0–10.4:
+ * with the floor lowered they install (measured, exit 0). Admitting them is a
+ * support decision rather than an edit — measured on 10.0.0 and 10.4.0, they
+ * read neither the build allowlist nor the peer rules out of
+ * `pnpm-workspace.yaml` ("The following dependencies have build scripts that
+ * were ignored: better-sqlite3, esbuild"), so a scaffold installed there is
+ * quietly missing its native builds. Do not move this floor as a side effect;
+ * whether to admit that band at all is #11048.
+ *
+ * `engines.pnpm` rather than a `packageManager` stamp, on purpose. npm, yarn
+ * and bun ignore `engines.pnpm` entirely, so the scaffold keeps working for all
+ * four package managers `objectstack init` can hand off to (see
+ * `detectPackageManager`). `packageManager: "pnpm@x.y.z"` would instead declare
+ * the project pnpm-only — corepack-driven yarn refuses to run in such a project
+ * — and pin one exact version that goes stale on every pnpm release. Those two
+ * reasons carry the choice on their own: the third one recorded when the stamp
+ * was rejected ("it buys nothing on 10.0–10.4") was measured against the
+ * keyless file, and the explicit `packages:` key retires it.
+ */
+export const SCAFFOLD_PNPM_RANGE = '>=10.15';
+
+/**
+ * Render the `package.json` written into a freshly scaffolded project.
+ *
+ * Exported so the shape is asserted directly rather than re-declared by a test
+ * that only claims to mirror it — a hand-copied mirror silently stops tracking
+ * this function the moment a field is added here.
+ */
+export function renderScaffoldPackageJson(
+  projectName: string,
+  template: { scripts: Record<string, string>; dependencies: Record<string, string>; devDependencies: Record<string, string> },
+): Record<string, unknown> {
+  return {
+    name: projectName,
+    version: '0.1.0',
+    private: true,
+    type: 'module',
+    // Not a build-script allowlist (that lives in pnpm-workspace.yaml, which
+    // current pnpm reads instead of the package.json `pnpm` field) — this is
+    // the minimum pnpm that accepts that file at all.
+    engines: { pnpm: SCAFFOLD_PNPM_RANGE },
+    scripts: template.scripts,
+    dependencies: template.dependencies,
+    devDependencies: template.devDependencies,
+  };
+}
+
+/**
  * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
- * declares the two known-benign peer skews.
- * Kept minimal (no `packages:` key) so it acts purely as a settings file for
- * the single-package scaffold rather than declaring a workspace.
+ * declares the known-benign peer skews.
+ * Declares an explicit empty `packages: []`: a workspace root with no member
+ * packages, which is what a single-package scaffold is — the file stays purely
+ * a settings file. Spelling the key out is what lets pnpm 10.0–10.4 (and 9.x)
+ * parse the file at all; they read it before `engines` and refuse a file
+ * without the key outright. ⛔ Never `packages: ['.']`: that declares the
+ * project root a workspace MEMBER, i.e. a monorepo root, which this is not —
+ * and it is the shape an AI reader would take as licence to add member packages
+ * to a scaffolded app.
  *
  * The allowlist is emitted TWICE, under two keys that no single pnpm version
  * range reads both of. Measured against a scaffold of this exact shape, one
@@ -146,6 +274,15 @@ export function renderPnpmWorkspaceYaml(
   const peerEntries = Object.entries(allowedPeerVersions);
 
   return [
+    '# An explicit EMPTY workspace: this project has no member packages, so',
+    '# this file is settings-only. The key is not decoration — pnpm 9.x and',
+    '# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file',
+    '# without a `packages:` key outright ("ERROR packages field missing or',
+    '# empty") before resolving a single dependency.',
+    '# Not `packages: [\'.\']`: that would declare this project a workspace',
+    '# MEMBER — a monorepo root, which it is not.',
+    'packages: []',
+    '',
     '# pnpm does not run dependency build scripts unless they are approved',
     '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
     '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
@@ -170,9 +307,9 @@ export function renderPnpmWorkspaceYaml(
     // declaration that is not there.
     ...(peerEntries.length === 0 ? [] : [
       '',
-      '# Two third-party peer ranges resolve outside what their declaring package',
-      '# states, and pnpm reports both on a first install. Neither is a real',
-      '# incompatibility:',
+      '# Third-party peer ranges that resolve outside what their declaring',
+      '# package states, and that pnpm reports on a first install. None is a',
+      '# real incompatibility:',
       '#',
       '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
       '#   That peer is optional and covers handing better-auth a raw',
@@ -185,7 +322,18 @@ export function renderPnpmWorkspaceYaml(
       '#   better-auth plugin has to share the host\'s better-call instance, so',
       '#   the single 1.4.0 copy is the correct resolution.',
       '#',
-      '# These suppress the report only — no resolution moves.',
+      '#   @better-auth/core, /oauth-provider, /scim and /sso each peer an exact',
+      '#   @better-auth/utils 0.4.2, while better-call (better-auth\'s own HTTP',
+      '#   layer) depends on ^0.5.0 and is what the tree resolves them against.',
+      '#   0.5.0 keeps every symbol those four import — base64/base64Url,',
+      '#   createHash, createRandomStringGenerator — with the same signatures',
+      '#   and the same values on the inputs they pass, so the report is the',
+      '#   only difference. Pinning utils back instead would drag better-call',
+      '#   off its own declared range, which is a real violation rather than a',
+      '#   reported one.',
+      '#',
+      '# These suppress the report only — no resolution moves, and the lockfile',
+      '# is byte-identical with and without this block.',
       'peerDependencyRules:',
       '  allowedVersions:',
       ...peerEntries.map(([k, v]) => `    '${k}': '${v}'`),
@@ -246,7 +394,13 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '${toTitleCase(name)} application built with ObjectStack',
-    // Protocol major this app is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the
+    // exact migration command instead of crashing later. Scaffolding stamped
+    // it to match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
@@ -282,11 +436,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       defaultValue: 'draft',
     },
   },
-  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
-  // requires this to be an authored decision rather than an accident — the
-  // \`security-owd-unset\` author-time rule refuses an object without it, so a
-  // scaffold that omitted it could not compile. 'private' is the rule's own
-  // recommended default: owner + explicit shares.
+  // Org-wide default (OWD): who can see records they don't own. 'private' is
+  // owner-only until access is widened by a permission grant or a sharing
+  // rule. Declaring it is required, deliberately: \`objectstack build\`
+  // refuses an object that declares no OWD, so the baseline is always an
+  // authored decision rather than an accident. The other values, and how to
+  // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
 };
 
@@ -326,7 +481,14 @@ export default defineStack({
     type: 'plugin',
     name: '${toTitleCase(name)} Plugin',
     description: 'ObjectStack Plugin: ${toTitleCase(name)}',
-    // Protocol major this plugin is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this plugin
+    // is authored against. The runtime checks it before it loads anything, so
+    // a runtime outside the range refuses this plugin at the boundary with
+    // the exact migration command instead of crashing later. Scaffolding
+    // stamped it to match the ObjectStack version you installed — change it
+    // when you deliberately move to a new protocol major, not to silence a
+    // mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
@@ -348,11 +510,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       required: true,
     },
   },
-  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
-  // requires this to be an authored decision rather than an accident — the
-  // \`security-owd-unset\` author-time rule refuses an object without it, so a
-  // scaffold that omitted it could not compile. 'private' is the rule's own
-  // recommended default: owner + explicit shares.
+  // Org-wide default (OWD): who can see records they don't own. 'private' is
+  // owner-only until access is widened by a permission grant or a sharing
+  // rule. Declaring it is required, deliberately: \`objectstack build\`
+  // refuses an object that declares no OWD, so the baseline is always an
+  // authored decision rather than an accident. The other values, and how to
+  // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
 };
 
@@ -389,7 +552,13 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '',
-    // Protocol major this app is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the
+    // exact migration command instead of crashing later. Scaffolding stamped
+    // it to match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 });
@@ -408,6 +577,43 @@ function toTitleCase(str: string): string {
 
 function printWarning(msg: string) {
   console.log(chalk.yellow(`  ⚠ ${msg}`));
+}
+
+/**
+ * Print the closing "Created files" summary from a walk of the FINISHED
+ * project directory, not from a list accumulated while writing the
+ * template. A list built during the copy phase is printed before `<pm>
+ * install` runs and so can never name `pnpm-lock.yaml`, `package-lock.json`,
+ * `node_modules/`, or anything else the package manager writes — the exact
+ * gap this replaces (measured: a fresh `init` omitted a 138 KB
+ * `pnpm-lock.yaml` and a 575 MB `node_modules/` from its own "Created
+ * files" list). Reuses `create-objectstack`'s `created-summary.ts` (see its
+ * header for the reachability measurement that made a hand-accumulated
+ * list untenable for that scaffolder) instead of a second copy of the same
+ * renderer — the two scaffold paths already drifted once (#10499) from
+ * carrying separate implementations of the same list.
+ *
+ * Called once, after the install attempt (success OR failure) has run its
+ * course, so it always reports the real state of disk at that point rather
+ * than a promise: on a failed install it shows whatever partial state the
+ * failure left behind instead of silently disappearing.
+ */
+function printCreatedFilesSummary(targetDir: string, wasEmpty: boolean) {
+  const entries = summarizeTree(targetDir);
+  if (entries.length === 0) return;
+
+  console.log(chalk.bold(wasEmpty ? '  Created files:' : '  Project contents:'));
+  if (!wasEmpty) {
+    console.log(chalk.dim('    (the directory already had contents; this lists all of it)'));
+  }
+
+  const width = Math.min(44, Math.max(...entries.map((e) => e.path.length)) + 2);
+  for (const entry of entries) {
+    const note = describeEntry(entry);
+    const pad = note ? entry.path.padEnd(width) : entry.path;
+    console.log(chalk.green(`    + ${pad}${note ? chalk.dim(note) : ''}`));
+  }
+  console.log('');
 }
 
 /**
@@ -572,7 +778,18 @@ export default class Init extends Command {
     printKV('Directory', targetDir);
     console.log('');
 
-    const createdFiles: string[] = [];
+    // Read BEFORE the first write. The named-arg branch above refuses a
+    // non-empty target, but the no-name branch scaffolds into whatever the
+    // current directory already is — the closing summary is a walk of that
+    // directory, so it must know whether it is entitled to call what it
+    // finds "Created files" (mirrors create-objectstack's own `targetWasEmpty`).
+    let targetWasEmpty = true;
+    try {
+      targetWasEmpty = fs.readdirSync(targetDir).filter((e) => e !== '.git').length === 0;
+    } catch {
+      // targetDir does not exist — treated as empty (defensive; both
+      // branches above already create or verify it before this point).
+    }
 
     let installSucceeded = false;
     let installAttempted = false;
@@ -582,17 +799,8 @@ export default class Init extends Command {
       // 1. Create package.json if missing
       const pkgPath = path.join(targetDir, 'package.json');
       if (!fs.existsSync(pkgPath)) {
-        const pkg = {
-          name: projectName,
-          version: '0.1.0',
-          private: true,
-          type: 'module',
-          scripts: template.scripts,
-          dependencies: template.dependencies,
-          devDependencies: template.devDependencies,
-        };
+        const pkg = renderScaffoldPackageJson(projectName, template);
         fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-        createdFiles.push('package.json');
       } else {
         printInfo('package.json already exists, skipping');
       }
@@ -605,7 +813,6 @@ export default class Init extends Command {
       const pnpmWorkspacePath = path.join(targetDir, 'pnpm-workspace.yaml');
       try {
         fs.writeFileSync(pnpmWorkspacePath, renderPnpmWorkspaceYaml(), { flag: 'wx' });
-        createdFiles.push('pnpm-workspace.yaml');
       } catch (err: any) {
         if (err?.code !== 'EEXIST') throw err;
       }
@@ -613,7 +820,6 @@ export default class Init extends Command {
       // 2. Create objectstack.config.ts
       const configContent = template.configContent(projectName, namespace);
       fs.writeFileSync(path.join(targetDir, 'objectstack.config.ts'), configContent);
-      createdFiles.push('objectstack.config.ts');
 
       // 3. Create tsconfig.json if missing
       const tsconfigPath = path.join(targetDir, 'tsconfig.json');
@@ -634,26 +840,17 @@ export default class Init extends Command {
           exclude: ['dist', 'node_modules'],
         };
         fs.writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n');
-        createdFiles.push('tsconfig.json');
       }
 
       // 4. Create src files (see `writeTemplateSrcFiles` for the `__name__`
       //    placeholder rule and why the loop is exported).
-      createdFiles.push(...writeTemplateSrcFiles(template.srcFiles, targetDir, projectName, namespace));
+      writeTemplateSrcFiles(template.srcFiles, targetDir, projectName, namespace);
 
       // 5. Create .gitignore if missing
       const gitignorePath = path.join(targetDir, '.gitignore');
       if (!fs.existsSync(gitignorePath)) {
         fs.writeFileSync(gitignorePath, `node_modules/\ndist/\n*.tsbuildinfo\n`);
-        createdFiles.push('.gitignore');
       }
-
-      // Summary
-      console.log(chalk.bold('  Created files:'));
-      for (const f of createdFiles) {
-        console.log(chalk.green(`    + ${f}`));
-      }
-      console.log('');
 
       // Install dependencies
       if (flags.install) {
@@ -668,6 +865,11 @@ export default class Init extends Command {
           printWarning(`Dependency installation with ${chosenPm} failed. Run \`${chosenPm} install\` manually in ${targetDir}.`);
         }
       }
+
+      // Created-files summary — printed HERE, after the install attempt has
+      // run its course (whether it succeeded or failed), so it can name what
+      // `<pm> install` wrote. See `printCreatedFilesSummary` for why.
+      printCreatedFilesSummary(targetDir, targetWasEmpty);
 
       // Self-test the scaffold so we catch template regressions before the
       // user discovers them by running `objectstack dev`. Only runs when deps

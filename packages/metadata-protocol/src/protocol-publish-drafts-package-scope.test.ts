@@ -1,12 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, hashSpec } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /**
@@ -301,5 +301,374 @@ describe('publishPackageDrafts — two packages holding drafts for one (type, na
         expect(active).toHaveLength(1);
         expect(active[0].package_id).toBe('app.demo');
         expect(labelOf(active[0])).toBe('SOLO');
+    });
+});
+
+/**
+ * [#10350] The PER-ITEM door's half of the same key.
+ *
+ * `POST /meta/:type/:name/publish?package=PKG_ID` (#10063) made
+ * `publishMetaItem` a package-naming caller too, so the narrowing the cases
+ * above pin for `publishPackageDrafts` now has a SECOND entry point. The
+ * runtime path already carried the value — `publishMetaItem` forwards its
+ * whole request object and the one transform in between
+ * (`canonicalizeMetaRequestType`) is a spread that drops no key — but nothing
+ * pinned it, and the DECLARED request type did not carry `packageId` at all.
+ *
+ * ⚠️ What these cases ARE, stated so nobody reads more into a green run than
+ * it holds: they are REGRESSION PINS on a path that is already correct, NOT a
+ * defect control. There is no pre-fix red to show at runtime, and
+ * manufacturing one would misrepresent the card. The defect was on the TYPE
+ * surface, and its control is the compiler — before the declared shape carried
+ * `packageId`, the literal in the first case below did not typecheck
+ * (`TS2353`, `'packageId' does not exist in type ...`), which is exactly why
+ * the only caller that states one is a REST door reaching it through a cast.
+ *
+ * What makes these pins able to FAIL is the fixture they inherit: with the
+ * package dimension absent from the promote's lookup the first-scanned row
+ * (`app.other`) wins, which is the wrong one. A pin that only asserted
+ * `success: true` would pass either way — and the failure mode this card names
+ * is precisely a future refactor that DESTRUCTURES the request instead of
+ * forwarding it wholesale, dropping the key while every existing assertion
+ * stays green.
+ */
+describe('publishMetaItem — the per-item door names a package too (#10350)', () => {
+    it('promotes the STATED package draft, not the first row that shares the name', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+        });
+
+        expect(res).toMatchObject({ success: true });
+        // Drop `packageId` on the way through `publishMetaItem` and the
+        // promote's lookup goes package-agnostic, landing on `app.other` —
+        // the same inversion the batch door carried before #8907.
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].package_id).toBe('app.demo');
+        expect(labelOf(active[0])).toBe('FROM_DEMO');
+    });
+
+    it('drains the stated package own draft and leaves the other package draft pending', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+        await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+        });
+
+        const drafts = draftRowsOf(rows);
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0].package_id).toBe('app.other');
+        expect(labelOf(drafts[0])).toBe('FROM_OTHER');
+    });
+
+    it('keeps the historical match-any resolution when the caller states NO package', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedTwoPackageDrafts(protocol);
+
+        await protocol.publishMetaItem({ type: 'object', name: 'shared_ticket' });
+
+        // The contract `promoteDraftForPublish` spells as
+        // `...('packageId' in request ? ... : {})`: an ABSENT key means "match
+        // any package" (this fixture's first-scanned row), while a
+        // present-and-`undefined` key would coerce to `null` downstream and pin
+        // the lookup to UNBOUND rows — finding neither draft and answering
+        // `no_draft`. Declaring `packageId` optional must not turn the first
+        // spelling into the second, so the untouched path is pinned here.
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].package_id).toBe('app.other');
+        expect(labelOf(active[0])).toBe('FROM_OTHER');
+    });
+});
+
+/**
+ * [#11003] The ORG-SCOPE probes' half of the same ADR-0048 key — maintainer
+ * ruling 2026-08-22, option A (recorded on the issue): the scope probes ask
+ * the promote's question, i.e. `resolveDraftOrgScopeForPublish` threads the
+ * stated `packageId` into BOTH of its `sys_metadata` probes.
+ *
+ * ## The defect these cases reproduce
+ *
+ * With two packages holding drafts for ONE `(type, name)` in DIFFERENT org
+ * scopes, a package-stating publish resolved the wrong scope: probe 1 was
+ * package-agnostic, matched the OTHER package's row in the caller's org,
+ * named that org as the scope — and the promote (whose `whereFor` IS
+ * package-exact since #8907/#10350) then found nothing there and answered
+ * `404 [no_draft]` over a draft sitting env-wide, publishable, and named by
+ * the caller.
+ *
+ * Unlike the #8907 cases above, NO insertion-order rigging is needed for the
+ * wrong row to win: the two drafts live in different org partitions, so probe
+ * 1's `organization_id` filter alone selects the foreign package's row — the
+ * pre-fix failure is deterministic, not a driver-order coin toss.
+ *
+ * ## Why type `object` and the `OS_METADATA_WRITABLE` hatch
+ *
+ * The card's scenario is `(object, shared_ticket)`. `object` is
+ * `allowOrgOverride: false` in the static registry, so an org-scoped object
+ * draft exists only where the operator hatch (`OS_METADATA_WRITABLE=object`
+ * — the Studio-side editing escape, #6190 R7) is open; with the hatch closed
+ * the promote's own #6190 gate would answer `403 [not_overridable]` before
+ * the probes' answer mattered, and the card's measured `404 [no_draft]`
+ * could not be reproduced as filed. The hatch is scoped to this describe
+ * (`beforeAll`/`afterAll` + cache reset), the same pattern
+ * `protocol.org-scoped-write-refused.test.ts` R7 uses.
+ *
+ * ## Accepted cost, pinned on purpose
+ *
+ * The ruling's own words: a caller stating a package no longer discovers a
+ * no-package draft of the same `(type, name)` — it 404s and the caller
+ * retries without `?package=`; that narrowing is the ruling, not a side
+ * effect. The last case pins BOTH halves of that sentence. The package-less
+ * draft row is seeded by DIRECT `engine.insert`, not through
+ * `saveMetaItem(mode:'draft')` — PR #11139 is changing how a package-less
+ * draft save resolves its binding (inheriting the overlaid active row's
+ * `package_id`), so a fixture seeded through that save path would stop
+ * meaning "a package-less draft exists" the day it lands.
+ */
+describe('publishMetaItem — the scope probes ask the promote\'s question (#11003)', () => {
+    beforeAll(() => {
+        process.env.OS_METADATA_WRITABLE = 'object';
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+    });
+    afterAll(() => {
+        delete process.env.OS_METADATA_WRITABLE;
+        ObjectStackProtocolImplementation.resetEnvWritableCache();
+    });
+
+    /**
+     * The card's coexistence arrangement: `app.other` holds the caller's-org
+     * (`org1`) draft, `app.demo` holds the env-wide one. Distinct ADR-0048
+     * rows — different `(org, package)` pairings, one `(type, name)`.
+     */
+    async function seedCrossScopeDrafts(protocol: ObjectStackProtocolImplementation) {
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            item: objectBody('shared_ticket', 'FROM_OTHER_ORG1'),
+            packageId: 'app.other',
+            organizationId: 'org1',
+            mode: 'draft',
+        });
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            item: objectBody('shared_ticket', 'FROM_DEMO_ENV'),
+            packageId: 'app.demo',
+            mode: 'draft',
+        });
+    }
+
+    it('finds the draft the caller NAMED: publishing app.demo succeeds over app.other\'s same-org row', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedCrossScopeDrafts(protocol);
+
+        // The ADR-0048 coexistence precondition, asserted so a future change
+        // to the seeding cannot silently drain these cases' discriminating
+        // power: two draft rows, the foreign package's in the CALLER'S org,
+        // the named package's env-wide.
+        const drafts = draftRowsOf(rows);
+        expect(drafts.map((r) => [r.package_id, r.organization_id])).toEqual([
+            ['app.other', 'org1'],
+            ['app.demo', null],
+        ]);
+
+        // Pre-fix this REJECTED with `404 [no_draft]`: probe 1, package-
+        // agnostic, matched app.other's org1 row and answered `org1`; the
+        // package-exact promote then looked in org1 WITH
+        // `package_id = 'app.demo'` and found nothing — while app.demo's
+        // draft sat env-wide, publishable, and was the row the caller named.
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+            organizationId: 'org1',
+        });
+
+        expect(res).toMatchObject({ success: true });
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(labelOf(active[0])).toBe('FROM_DEMO_ENV');
+    });
+
+    it('lands env-wide: the caller\'s org row belongs to another package, and the promotion never touches that partition', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedCrossScopeDrafts(protocol);
+        await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+            organizationId: 'org1',
+        });
+
+        // The resolution's landing, pinned row-by-row: the probe fell through
+        // to env-wide BECAUSE the caller's own org row belongs to another
+        // package, so the active row is ENV-WIDE under the named package —
+        // not an org1 row minted from a partition holding nothing of
+        // app.demo's.
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].organization_id).toBeNull();
+        expect(active[0].package_id).toBe('app.demo');
+        // …and app.other's org1 draft is untouched — pending, undrained, in
+        // its own partition. Pre-fix there was nothing to assert here: the
+        // door had already refused.
+        const drafts = draftRowsOf(rows);
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0].package_id).toBe('app.other');
+        expect(drafts[0].organization_id).toBe('org1');
+        expect(labelOf(drafts[0])).toBe('FROM_OTHER_ORG1');
+    });
+
+    it('still resolves the caller\'s own org when THAT is where the named package\'s draft lives (no overshoot)', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        // Mirrored arrangement: app.other env-wide (seeded FIRST, so any
+        // regression back toward package-agnostic env probing has a wrong row
+        // to find), app.demo in the caller's org.
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            item: objectBody('shared_ticket', 'FROM_OTHER_ENV'),
+            packageId: 'app.other',
+            mode: 'draft',
+        });
+        await protocol.saveMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            item: objectBody('shared_ticket', 'FROM_DEMO_ORG1'),
+            packageId: 'app.demo',
+            organizationId: 'org1',
+            mode: 'draft',
+        });
+
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            packageId: 'app.demo',
+            organizationId: 'org1',
+        });
+
+        // GREEN BEFORE THE FIX TOO, and stated so nobody reads a repro into
+        // it: pre-fix probe 1 happened to answer `org1` because the only org1
+        // row WAS app.demo's. What this case bounds is the fix itself — the
+        // ADR-0005 precedence (own org shadows env-wide) must survive the
+        // package narrowing, so a "package-exact means env-first/env-only"
+        // mis-fix fails here loudly.
+        expect(res).toMatchObject({ success: true });
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].organization_id).toBe('org1');
+        expect(active[0].package_id).toBe('app.demo');
+        expect(labelOf(active[0])).toBe('FROM_DEMO_ORG1');
+        // app.other's env-wide draft: pending, undrained.
+        const drafts = draftRowsOf(rows);
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0].package_id).toBe('app.other');
+        expect(drafts[0].organization_id).toBeNull();
+    });
+
+    it('keeps the historical match-any probes when the caller states NO package (cross-scope fixture)', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await seedCrossScopeDrafts(protocol);
+
+        // No `packageId` key at all: the probes stay package-agnostic, the
+        // promote matches any package, and the ADR-0005 precedence picks the
+        // caller's own org row — app.other's, whatever package it belongs to.
+        // This is the same absent-key contract the #10350 case above pins
+        // env-wide, exercised HERE because these probes only run for an
+        // org-scoped caller (`requestOrgId === null` returns early).
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            organizationId: 'org1',
+        });
+
+        expect(res).toMatchObject({ success: true });
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].organization_id).toBe('org1');
+        expect(active[0].package_id).toBe('app.other');
+        expect(labelOf(active[0])).toBe('FROM_OTHER_ORG1');
+    });
+
+    it('accepted cost (the ruling, not a side effect): a package-stating caller 404s over a package-less draft, and retrying without ?package= publishes it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        // Seeded by DIRECT insert — see the describe header for why this row
+        // must not come from `saveMetaItem(mode:'draft')` while PR #11139 is
+        // changing that path's binding resolution. The shape mirrors what the
+        // repository's `put` writes for a package-less org draft — `checksum`
+        // included: the post-promotion drain is an optimistic-lock delete
+        // keyed on it, and a checksum-less row makes the drain read as the
+        // benign "newer draft saved" race and survive (measured on this
+        // fixture's first run).
+        const noPackageBody = objectBody('shared_ticket', 'NO_PACKAGE');
+        await engine.insert('sys_metadata', {
+            type: 'object',
+            name: 'shared_ticket',
+            organization_id: 'org1',
+            package_id: null,
+            state: 'draft',
+            metadata: JSON.stringify(noPackageBody),
+            checksum: hashSpec(noPackageBody),
+            version: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+        });
+
+        // Half 1 — the narrowing: the caller stated `app.demo`, so neither
+        // probe nor promote may discover the unbound row. ADR-0112 envelope,
+        // not a bare `toThrow`. (No pre-fix red here, stated plainly: the
+        // package-exact PROMOTE already answered `no_draft` for this
+        // arrangement; what this pins is that the ruling's cost sentence
+        // holds end-to-end and stays held.)
+        await expect(
+            protocol.publishMetaItem({
+                type: 'object',
+                name: 'shared_ticket',
+                packageId: 'app.demo',
+                organizationId: 'org1',
+            }),
+        ).rejects.toMatchObject({ code: 'NO_DRAFT', status: 404 });
+        // …and the refusal touched nothing: the package-less draft is intact.
+        expect(draftRowsOf(rows)).toHaveLength(1);
+
+        // Half 2 — the documented remedy: retry WITHOUT `?package=`. The
+        // absent key restores the match-any resolution and the unbound draft
+        // publishes.
+        const res = await protocol.publishMetaItem({
+            type: 'object',
+            name: 'shared_ticket',
+            organizationId: 'org1',
+        });
+        expect(res).toMatchObject({ success: true });
+        const active = activeRowsOf(rows);
+        expect(active).toHaveLength(1);
+        expect(active[0].package_id).toBeNull();
+        expect(active[0].organization_id).toBe('org1');
+        expect(labelOf(active[0])).toBe('NO_PACKAGE');
+        expect(draftRowsOf(rows)).toHaveLength(0);
     });
 });

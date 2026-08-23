@@ -37,6 +37,8 @@ import {
   rotateCallerBearerOnImpersonation,
   withBearerAdminSessionRecovery,
 } from './impersonation-bearer-rotation.js';
+import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
+import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
@@ -1641,22 +1643,49 @@ export class AuthManager {
             // the mount is conditional on the admin plugin, and because the
             // guard itself now lives in ONE module both call sites share —
             // `last-local-credential.ts`, whose header records this trap.
+            // ── [#10776] AUTHENTICATE FIRST ────────────────────────────
+            // A `hooks.before` runs AHEAD of the endpoint's own
+            // `use: [adminMiddleware]`, and that middleware is the only layer
+            // establishing identity on this lane. So this guard used to read an
+            // unauthenticated request's body, ask the database a question about
+            // the named user, and answer it — a per-record answer to a caller
+            // nobody had authenticated, where every sibling `/admin/` route
+            // answers 401. Resolving the actor first makes the guard's decision
+            // (and its distinctive refusal) reachable only once the caller has
+            // an identity; an anonymous caller falls through to the vendor's own
+            // `sessionMiddleware`/`adminMiddleware` and hears the ordinary 401.
+            //
+            // Maintainer ruling 2026-08-22 (decision-inbox digest, accepted
+            // verbatim 「接受所有」): option A, authentication before the guard.
+            //
+            // ⚠️ This changes WHEN the guard decides, never WHAT it decides:
+            // an authenticated caller reaches exactly the same lookup and the
+            // same `CONFLICT`. `break-glass-guard-authentication-order.test.ts`
+            // pins both halves — the disclosure closing AND the invariant
+            // surviving — because closing the first by deleting the guard would
+            // satisfy a disclosure-only suite.
+            //
+            // Same shape as the `/oauth2/authorize` gate above: unauthenticated
+            // → fall through, never a refusal invented here.
+            const breakGlassActor = await this.resolveActor(ctx);
+
             let isLastLocalCredential = false;
-            try {
-              let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
-              if (!targetId && ctx.path === '/delete-user') {
-                const { getSessionFromCtx } = await import('better-auth/api');
-                const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
-                targetId = s?.user?.id ?? s?.session?.userId;
+            if (breakGlassActor?.userId) {
+              try {
+                // `/delete-user` names no target in the vendor's own contract:
+                // the subject IS the authenticated caller, which is now already
+                // resolved rather than looked up a second time.
+                let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
+                if (!targetId && ctx.path === '/delete-user') targetId = breakGlassActor.userId;
+                if (targetId) {
+                  isLastLocalCredential = await isLastLocalCredentialHolder(
+                    ctx.context.adapter,
+                    targetId,
+                  );
+                }
+              } catch {
+                // Fail-open — never block a legitimate op on a lookup error.
               }
-              if (targetId) {
-                isLastLocalCredential = await isLastLocalCredentialHolder(
-                  ctx.context.adapter,
-                  targetId,
-                );
-              }
-            } catch {
-              // Fail-open — never block a legitimate op on a lookup error.
             }
             if (isLastLocalCredential) {
               const { APIError } = await import('better-auth/api');
@@ -1703,6 +1732,29 @@ export class AuthManager {
           // the ADMIN's session cookie on every later request, so without
           // rotating that token, `/admin/impersonate-user` is a 200 no-op.
           await rotateCallerBearerOnImpersonation(ctx);
+
+          // ── #10701: a 2FA verification must echo the session it INSTALLED ─
+          // On the enrolment lane `/two-factor/verify-totp` rotates the
+          // caller's session and then echoes the PRE-rotation token — the row
+          // it just deleted. A client that stores it (the console's
+          // `auth-session-token` pattern) is holding a revoked credential, and
+          // because `bearer()` overwrites the request cookie with whatever the
+          // Authorization header carries, presenting it destroys the valid
+          // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
+          // corrects the echoed VALUE only; resolver precedence is untouched.
+          await echoInstalledSessionToken(ctx);
+
+          // ── #10700: `verified` must describe the secret stored beside it ──
+          // A second `/two-factor/enable` on an already-confirmed account
+          // rewrites the TOTP secret on the one `sys_two_factor` row the
+          // account has and INHERITS `verified` from the enrollment before it,
+          // so a secret nobody confirmed is honoured at the sign-in challenge.
+          // better-auth already gates that challenge on the flag — a first
+          // enrollment is inert until the session-lane verify flips it — so
+          // restoring the flag restores the gate rather than adding a second
+          // one. See `two-factor-reenrollment-verified-reset.ts`, whose header
+          // also states what this deliberately does NOT do.
+          await resetVerifiedOnTwoFactorReenrollment(ctx);
 
           // ── ADR-0069 D2: account lockout (counter) ──────────────────
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
@@ -1853,7 +1905,28 @@ export class AuthManager {
         // `*.localhost` subdomains so per-project tenant subdomains (the dev
         // default root domain — see project-provisioning.ts) pass CSRF checks
         // without operators having to configure trustedOrigins manually.
-        if (!origins.length && (!corsOrigin || corsOrigin === '*')) {
+        //
+        // NON-PRODUCTION ONLY (#10366). This substitution is a development
+        // convenience and is now gated on the same `NODE_ENV` dev signal used
+        // by the fallback auth secret and the dev Origin synthesis below, so
+        // the boundary this comment claims is the boundary that is enforced.
+        // Previously the condition tested only emptiness, so a production
+        // deployment whose trusted-origin list resolved empty silently
+        // CSRF-trusted every `localhost` / `*.localhost` origin.
+        //
+        // What production gets instead: `trustedOrigins` is omitted from the
+        // better-auth config entirely (see the tail of this block). That is
+        // NOT an absent policy — better-auth seeds its trusted set from the
+        // resolved `baseURL` origin and treats `trustedOrigins` as purely
+        // ADDITIVE, so an empty list and an omitted key are equivalent and
+        // both leave exactly the deployment's own origin trusted; every other
+        // origin is refused with `403 INVALID_ORIGIN`. Measured against
+        // better-auth 1.7.1 (`getTrustedOrigins` in `dist/context/helpers.mjs`,
+        // `validateOrigin` in `dist/api/middlewares/origin-check.mjs`).
+        if (
+          process.env.NODE_ENV !== 'production' &&
+          !origins.length && (!corsOrigin || corsOrigin === '*')
+        ) {
           origins.push('http://localhost:*');
           origins.push('http://*.localhost:*');
           origins.push('https://*.localhost:*');

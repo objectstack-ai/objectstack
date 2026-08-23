@@ -13,7 +13,7 @@ import {
     type HttpDelivery,
     type HttpDeliveryStatus,
     type IHttpOutbox,
-    type RedeliverGuard,
+    type RedeliverOptions,
     type UndeliverableHttpInput,
 } from './http-outbox.js';
 
@@ -156,14 +156,40 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         return all;
     }
 
-    async redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery> {
+    /**
+     * [#10740] `options.tenantId` is accepted and deliberately not applied:
+     * this outbox is a `Map` of in-process rows with no tenant column and no
+     * driver behind it, so there is nothing to scope and nothing that could
+     * emit a tenant-audit finding. It is a test/dev double, never the
+     * request-reachable production store — `SqlHttpOutbox.redeliver` is the
+     * site that owes the isolation, and it applies the field.
+     *
+     * ⚠️ Stated rather than left implicit, because "the parameter is ignored"
+     * and "the isolation is missing" look identical from a call site. A future
+     * memory implementation that DOES store a tenant owes the predicate here.
+     */
+    async redeliver(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
         const row = this.rows.get(id);
         if (!row) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         // [#8069] Refuse BEFORE any mutation — a refused redelivery must leave
         // the row byte-identical, including its `dead` status and its reason.
-        await assertRedeliverAllowed({ ...row }, guard);
+        await assertRedeliverAllowed({ ...row }, options.guard);
+        // [#11009] The compare-and-set half of the check-then-act, mirroring
+        // `SqlHttpOutbox.redeliver`'s predicate-path write: the guard above is
+        // awaited, so a dispatcher tick can claim this row `in_flight` between
+        // the read and this mutation. A row no longer terminal is NOT reset —
+        // the same refusal (and the same code) the SQL store reports when its
+        // predicate write matches zero rows. Without this, the two
+        // implementations of one `IHttpOutbox.redeliver` contract would
+        // disagree on exactly the race the contract exists to close.
+        if (row.status !== 'success' && row.status !== 'failed' && row.status !== 'dead') {
+            throw new HttpRedeliverError(
+                `Delivery row '${id}' state changed during redeliver`,
+                'DELIVERY_NOT_ELIGIBLE',
+            );
+        }
         const now = Date.now();
         row.status = 'pending';
         row.attempts = 0;

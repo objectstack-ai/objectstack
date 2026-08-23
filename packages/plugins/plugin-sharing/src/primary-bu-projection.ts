@@ -23,6 +23,8 @@
  * membership is usable single-tenant too).
  */
 
+import type { OptionalSharingLogger } from './logger-shapes.js';
+
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 export const PRIMARY_BU_HOOK_PACKAGE = 'plugin-sharing:primary-bu';
@@ -42,14 +44,9 @@ interface MinimalEngine {
   update(object: string, data: any, options?: any): Promise<any>;
 }
 
-interface MinimalLogger {
-  info?: (msg: any, ...rest: any[]) => void;
-  warn?: (msg: any, ...rest: any[]) => void;
-}
-
 /** Recompute one user's primary_business_unit_id from their `is_primary` member
  * row (null when they have none). Idempotent. */
-async function recompute(engine: MinimalEngine, userId: string, logger?: MinimalLogger): Promise<void> {
+async function recompute(engine: MinimalEngine, userId: string, logger?: OptionalSharingLogger): Promise<void> {
   if (!userId) return;
   let buId: string | null = null;
   try {
@@ -94,7 +91,7 @@ function collectUserIds(ctx: any): string[] {
  * projection must stay correct regardless of who mutates membership (seeds,
  * HRIS sync, admin UI).
  */
-export function bindPrimaryBuHooks(engine: MinimalEngine, logger?: MinimalLogger): void {
+export function bindPrimaryBuHooks(engine: MinimalEngine, logger?: OptionalSharingLogger): void {
   if (typeof engine.registerHook !== 'function') return;
   if (typeof engine.unregisterHooksByPackage === 'function') {
     engine.unregisterHooksByPackage(PRIMARY_BU_HOOK_PACKAGE);
@@ -131,7 +128,7 @@ export function bindPrimaryBuHooks(engine: MinimalEngine, logger?: MinimalLogger
  * `is_primary` member row, so pre-existing memberships (seeds, prior data)
  * project even though their inserts pre-dated the hooks. Idempotent.
  */
-export async function backfillPrimaryBu(engine: MinimalEngine, logger?: MinimalLogger): Promise<{ updated: number }> {
+export async function backfillPrimaryBu(engine: MinimalEngine, logger?: OptionalSharingLogger): Promise<{ updated: number }> {
   let rows: any[] = [];
   try {
     rows = await engine.find('sys_business_unit_member', {

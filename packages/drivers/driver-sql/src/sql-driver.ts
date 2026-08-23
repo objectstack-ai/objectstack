@@ -8,6 +8,14 @@
  */
 
 import type { DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
+// The ONE introspection contract (ADR-0015 / `ISchemaDiffService`). This
+// driver's introspection types are DERIVED from these rather than
+// re-declared next to them — see the `Introspection Types` region below.
+import type {
+  IntrospectedColumn as SpecIntrospectedColumn,
+  IntrospectedSchema as SpecIntrospectedSchema,
+  IntrospectedTable as SpecIntrospectedTable,
+} from '@objectstack/spec/contracts';
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, type AutonumberToken } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
@@ -3645,16 +3653,47 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
 
 // ── Introspection Types ──────────────────────────────────────────────────────
 
-export interface IntrospectedColumn {
-  name: string;
-  type: string;
-  nullable: boolean;
+/**
+ * These are DERIVED from `packages/spec/src/contracts/schema-diff-service.ts`,
+ * never re-declared beside it.
+ *
+ * They used to be a second, independent declaration that happened to describe
+ * the same idea in a different vocabulary: this file spelled a column's key
+ * membership `isPrimary?`, the spec spells it `primaryKey`; the spec also
+ * declares `dialect` and a REQUIRED `introspectedAt` that this file's schema
+ * type did not mention and `introspectSchema` therefore never emitted. `plugin.ts` hands
+ * this driver's result straight to `ExternalDatasourceService`, which is typed
+ * against the spec — so the consumer read a key no driver ever set and every
+ * federated object drafted from a remote table silently lost its primary key.
+ * Nothing was type-unsound; the two contracts simply never met a compiler.
+ *
+ * Maintainer ruling, 2026-08-22 (live session, 「同意所有」 item 9 =
+ * 驱动侧对齐 spec 契约): `packages/spec` is the one contract and the DRIVER
+ * aligns to it. Deriving rather than copying is what makes that mechanical —
+ * a key added to the spec contract now fails this file's `tsc` until the
+ * driver emits it, which is exactly the failure that was missing.
+ *
+ * Two divergences remain, deliberately, and neither is a second spelling of
+ * something the spec declares:
+ *
+ *  - the SQL layer carries EXTRA per-column facts (`isUnique`, `maxLength`)
+ *    and extra per-table facts (`foreignKeys`, `primaryKeys`) that the spec's
+ *    diff-facing contract does not declare;
+ *  - `defaultValue` is `unknown` here rather than the spec's `string`, because
+ *    that is what Knex's `columnInfo()` actually returns (measured on live
+ *    SQLite: `null`). Narrowing the declaration without normalising the value
+ *    would move the lie rather than remove it.
+ */
+export interface IntrospectedColumn extends Omit<SpecIntrospectedColumn, 'defaultValue'> {
+  /** Raw driver-reported default. See the note above on why this is not `string`. */
   defaultValue?: unknown;
-  isPrimary?: boolean;
+  /** SQL-introspection extra: the column carries a UNIQUE constraint. */
   isUnique?: boolean;
+  /** SQL-introspection extra: declared maximum length for string types. */
   maxLength?: number;
 }
 
+/** No spec counterpart — foreign keys are a SQL-introspection extra. */
 export interface IntrospectedForeignKey {
   columnName: string;
   referencedTable: string;
@@ -3662,14 +3701,28 @@ export interface IntrospectedForeignKey {
   constraintName?: string;
 }
 
-export interface IntrospectedTable {
-  name: string;
+/**
+ * `indexes` is `Omit`ted from the spec table rather than emitted empty: this
+ * driver does not introspect indexes, and `indexes: []` would tell a schema
+ * differ that a table HAS none when it merely was not asked — a worse answer
+ * than an absent key. Emitting them for real is per-dialect work over arms
+ * this container cannot execute, so it is filed rather than guessed.
+ */
+export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns' | 'indexes'> {
   columns: IntrospectedColumn[];
+  /** SQL-introspection extra: outbound foreign keys. */
   foreignKeys: IntrospectedForeignKey[];
+  /** SQL-introspection extra: the table's primary-key columns, in key order. */
   primaryKeys: string[];
 }
 
-export interface IntrospectedSchema {
+/**
+ * `dialect` and `introspectedAt` are inherited from the spec contract, where
+ * `introspectedAt` is REQUIRED — so `tsc` now refuses an `introspectSchema`
+ * that omits them, which is the check that was missing while this type
+ * declared `{ tables }` alone.
+ */
+export interface IntrospectedSchema extends Omit<SpecIntrospectedSchema, 'tables'> {
   tables: Record<string, IntrospectedTable>;
 }
 
@@ -3913,6 +3966,48 @@ export class SqlDriver implements IDataDriver {
   /** External columnMap inverse: physical remote column -> logical field (for read output remap). */
   protected columnFieldByObject: Record<string, Record<string, string>> = {};
   protected tablesWithTimestamps: Set<string> = new Set();
+  /**
+   * [#11067] What is known about `updated_at` on a table this driver was told
+   * about WITHOUT running DDL against it.
+   *
+   * ## Why {@link tablesWithTimestamps} could not answer this
+   *
+   * That set means "OBSERVED to carry the audit columns", and every one of its
+   * four fill sites is downstream of DDL: `initObjects`' `createTable` branch
+   * (we built the table, so we know), its "the existing table already has an
+   * `updated_at` column" branch (decided from a physical `columnInfo()`), its
+   * rotation branch, and `aliasShardBookkeeping`'s rotation-shard copy. A
+   * deployment that manages DDL out-of-band — `skipSchemaSync` /
+   * `OS_SKIP_SCHEMA_SYNC=1`, the documented posture after running migrations
+   * manually — reaches none of them, so it served every UPDATE with the set
+   * empty and never stamped. `updated_at` then records the row's CREATION time
+   * forever: the column carries an INSERT-time `DEFAULT now()` and no dialect
+   * here gives it an `ON UPDATE` clause or a trigger. Nothing errors; list-view
+   * sorts, delta sync, cache invalidation and audit answers are just wrong.
+   *
+   * ## The three states, and what may move between them
+   *
+   *  - `presumed` — {@link registerManagedObjectMetadata} put it here from the
+   *    DECLARED shape alone, at zero round-trips: every table this driver's own
+   *    DDL creates gets `created_at`/`updated_at` unconditionally, so a managed
+   *    object registered with us is expected to have them. That is an inference,
+   *    not an observation, which is the whole reason this is a separate map
+   *    rather than more entries in `tablesWithTimestamps`.
+   *  - `present` — a stamped UPDATE SUCCEEDED. A column named in a SET list that
+   *    does not exist is a parse/plan error on every dialect here, independent
+   *    of how many rows matched, so the success IS the proof. From then on the
+   *    table is settled and costs nothing.
+   *  - `absent` — {@link resolveUpdatedAtColumnPresence} asked the database and
+   *    it is genuinely not there (a hand-migrated table that diverged). Never
+   *    stamped again, and never re-probed.
+   *
+   * ⛔ Deliberately NOT read by {@link stampInsertTimestamps}. That helper writes
+   * `created_at` too, and none of the evidence above says anything about
+   * `created_at` — promoting on an UPDATE's success would let it write a column
+   * this driver has no reason to believe exists. The insert path keeps reading
+   * `tablesWithTimestamps` exactly as before.
+   */
+  protected updatedAtColumnState: Map<string, 'presumed' | 'present' | 'absent'> = new Map();
   /** Tables this driver created since connect — see `getSchemaSyncStats`. */
   protected tablesCreatedHere: Set<string> = new Set();
   /** Tables that were already present when this driver first touched them. */
@@ -5759,27 +5854,218 @@ export class SqlDriver implements IDataDriver {
     return options?.preserveAudit === true && formatted.updated_at != null;
   }
 
+  /**
+   * The canonical instant an UPDATE stamps into `updated_at` on this dialect.
+   *
+   * On SQLite (no native timestamp type) full ISO-8601 WITH an explicit `Z` —
+   * matching the insert paths ({@link stampInsertTimestamps}) so create and
+   * update agree on one zone-explicit format. The previous
+   * `…replace('T',' ').replace('Z','')` wrote a zone-NAIVE, space-separated
+   * string that `Date.parse` reads as LOCAL time, silently shifting the instant
+   * by the host offset on a non-UTC runtime (the objectos freshness-probe
+   * miss). Postgres/MySQL keep native `now()` — a real zone-aware TIMESTAMP
+   * that never had the issue.
+   */
+  protected updatedAtStamp(): string | Knex.Raw {
+    return this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
+  }
+
+  /**
+   * [#11067] Should an UPDATE to `object` refresh `updated_at`?
+   *
+   * `true` on the DDL-observed tables exactly as before, and now also on a
+   * table whose declared shape says it has the column — see
+   * {@link updatedAtColumnState} for why the second answer is kept apart from
+   * the first. `absent` (the database was asked and said no) and "never heard
+   * of this object" both stay `false`.
+   */
+  protected stampsUpdatedAt(object: string): boolean {
+    if (this.tablesWithTimestamps.has(object)) return true;
+    const state = this.updatedAtColumnState.get(object);
+    return state === 'presumed' || state === 'present';
+  }
+
+  /**
+   * [#11067] Is that stamp still a PRESUMPTION — i.e. must this write carry the
+   * fallback?
+   *
+   * Only for a table in the `presumed` state and outside `tablesWithTimestamps`.
+   * Once a stamped UPDATE has succeeded the state is `present` and this is
+   * `false` forever after, which is what keeps the steady state free.
+   */
+  protected updatedAtStampIsPresumed(object: string): boolean {
+    return !this.tablesWithTimestamps.has(object) && this.updatedAtColumnState.get(object) === 'presumed';
+  }
+
+  /**
+   * [#11067] Ask the DATABASE whether `object`'s physical table carries
+   * `updated_at`. `null` when the question could not be answered.
+   *
+   * ⛔ This is deliberately not a read of the failure's message. Every dialect
+   * spells the missing column differently (`42703` on Postgres,
+   * `ER_BAD_FIELD_ERROR` on MySQL, `SQLITE_ERROR: no such column` on SQLite),
+   * those strings are localizable and version-dependent, and a fallback keyed
+   * to them would silently stop recovering on the next server upgrade while
+   * looking correct. `columnInfo()` answers the actual question, in the
+   * dialect's own terms, and is the same call `initObjects` already uses to
+   * decide the identical fact on the DDL path.
+   *
+   * An empty column set means the table is not visible to us at all (it does
+   * not exist, or we cannot see it) — NOT that `updated_at` is missing from a
+   * table that is otherwise fine. Answering `null` there sends the caller back
+   * to rethrowing the original error, which names the real problem.
+   *
+   * Runs on the caller's transaction when there is one, so it observes the same
+   * snapshot — and, on Postgres, so it runs on a transaction that is still
+   * usable (see {@link updateWithPresumedTimestamp}).
+   */
+  protected async resolveUpdatedAtColumnPresence(
+    object: string,
+    trx?: Knex.Transaction,
+  ): Promise<boolean | null> {
+    const physical = this.physicalTableByObject[object] ?? object;
+    const runner = trx ?? this.knex;
+    let builder = runner(physical);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) builder = builder.withSchema(remoteSchema);
+    let info: Record<string, unknown>;
+    try {
+      info = (await builder.columnInfo()) as Record<string, unknown>;
+    } catch {
+      // The probe itself failed — we learned nothing, so we may not claim the
+      // column is absent. The caller rethrows the write's own error.
+      return null;
+    }
+    const columns = Object.keys(info ?? {});
+    if (columns.length === 0) return null;
+    return columns.includes('updated_at');
+  }
+
+  /**
+   * [#11067] Issue an UPDATE whose `updated_at` stamp is a PRESUMPTION, and
+   * recover if the column turns out not to be there.
+   *
+   * ## Why this exists rather than option 1 on its own
+   *
+   * Inferring from the declared shape is free and right for every table this
+   * driver's DDL would have built. On a hand-migrated table that genuinely
+   * lacks `updated_at` it is wrong, and wrong LOUDLY: an `update()` that
+   * succeeds today (without stamping) would start failing, because the driver
+   * would name a column that does not exist. That is a NEW REJECTION for a call
+   * that works — not something a bug fix may ship. This method is what keeps
+   * the net observable change to "`updated_at` is now correctly stamped on any
+   * physical shape".
+   *
+   * ## Why the recovery is safe to retry
+   *
+   * A single UPDATE is atomic on all three dialects: one that fails to compile
+   * or plan has changed no rows, so re-issuing it without the stamp cannot
+   * double-apply anything. The recovery re-issues the caller's own payload
+   * minus `updated_at` — the exact statement `main` sends today.
+   *
+   * ## Why the speculative write is fenced when a caller transaction is open
+   *
+   * On Postgres ANY statement error aborts the WHOLE transaction: every
+   * subsequent statement returns `25P02 current transaction is aborted` until
+   * rollback. So a bare `try { … } catch { …recover… }` whose recovery issues
+   * SQL on the same transaction can never run there — the recovery statement is
+   * the one that raises the error you observe. {@link attemptWithoutPoisoning}
+   * wraps the attempt in a knex nested transaction (a `SAVEPOINT`, released on
+   * success and rolled back to on failure), which leaves the outer transaction
+   * usable on every dialect. This is #8269's mechanism applied to the second
+   * speculative write in this driver.
+   *
+   * Outside a caller transaction no fence is needed: knex runs the statement in
+   * its own implicit transaction, so a failure is already isolated — and paying
+   * for a savepoint on the ordinary write path would be a cost the flag exists
+   * to avoid.
+   *
+   * ## Why it happens at most once per table
+   *
+   * A successful stamped UPDATE proves the column exists — a column named in a
+   * SET list that is not there is a parse/plan error on every dialect here,
+   * whatever the row count — so success settles the table as `present`. A
+   * resolved absence settles it as `absent`. Either way the table leaves the
+   * speculative state and every later write goes straight down the plain path,
+   * with no probe and no fence.
+   *
+   * @param issue re-issues the UPDATE for a given payload and options — the
+   *   caller owns the WHERE and the tenant scope, so this method never rebuilds
+   *   them and cannot get them wrong.
+   */
+  protected async updateWithPresumedTimestamp(
+    object: string,
+    formatted: Record<string, any>,
+    options: DriverOptions | undefined,
+    issue: (payload: Record<string, any>, options?: DriverOptions) => Promise<number>,
+  ): Promise<number> {
+    const unstamped = (): Record<string, any> => {
+      const { updated_at: _dropped, ...rest } = formatted;
+      return rest;
+    };
+    const settleAbsent = (): void => {
+      this.updatedAtColumnState.set(object, 'absent');
+      this.logger.warn(
+        `[sql-driver] '${object}' has no physical 'updated_at' column, so this driver will not ` +
+          'stamp one on update (#11067). The object is registered as managed, whose schema this ' +
+          "driver's own DDL would give `created_at`/`updated_at` — a table migrated out-of-band " +
+          'without them will keep a stale "last modified" for every consumer that reads it ' +
+          '(list-view sorts, delta sync, cache invalidation, audit). Add the column, or accept ' +
+          'that it is not tracked here.',
+      );
+    };
+
+    const parentTrx = options?.transaction as Knex.Transaction | undefined;
+    if (parentTrx) {
+      const attempt = await this.attemptWithoutPoisoning(parentTrx, (scoped) =>
+        issue(formatted, { ...options, transaction: scoped }),
+      );
+      if (attempt.ok) {
+        this.updatedAtColumnState.set(object, 'present');
+        return attempt.value;
+      }
+      const present = await this.resolveUpdatedAtColumnPresence(object, parentTrx);
+      if (present !== false) throw attempt.error;
+      settleAbsent();
+      return issue(unstamped(), options);
+    }
+
+    try {
+      const affected = await issue(formatted, options);
+      this.updatedAtColumnState.set(object, 'present');
+      return affected;
+    } catch (error) {
+      const present = await this.resolveUpdatedAtColumnPresence(object);
+      if (present !== false) throw error;
+      settleAbsent();
+      return issue(unstamped(), options);
+    }
+  }
+
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<any> {
     this.auditMissingTenant(object, 'update', options);
     const rotationShards = this.rotationShardsOf(object);
     if (rotationShards) return this.rotatedUpdateById(object, rotationShards, id, data, options);
-    const builder = this.getBuilder(object, options).where('id', id);
-    this.applyTenantScope(builder, object, options);
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
 
-    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      // Canonical instant format. On SQLite (no native timestamp type) stamp
-      // full ISO-8601 WITH an explicit `Z` — matching the insert paths
-      // (`stampInsertTimestamps`) so create and update agree on one
-      // zone-explicit format. The previous `…replace('T',' ').replace('Z','')`
-      // wrote a zone-NAIVE, space-separated string that `Date.parse` reads as
-      // LOCAL time, silently shifting the instant by the host offset on a
-      // non-UTC runtime (the objectos freshness-probe miss). Postgres/MySQL keep
-      // native `now()` — a real zone-aware TIMESTAMP that never had the issue.
-      formatted.updated_at = this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
-    }
+    // One definition of the statement, so the speculative attempt, the fenced
+    // retry and the plain path cannot drift in WHERE or tenant scope.
+    const issue = (payload: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
+      const builder = this.getBuilder(object, issueOptions).where('id', id);
+      this.applyTenantScope(builder, object, issueOptions);
+      return builder.update(payload) as unknown as Promise<number>;
+    };
 
-    await builder.update(formatted);
+    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
+      formatted.updated_at = this.updatedAtStamp();
+      if (this.updatedAtStampIsPresumed(object)) {
+        await this.updateWithPresumedTimestamp(object, formatted, options, issue);
+      } else {
+        await issue(formatted, options);
+      }
+    } else {
+      await issue(formatted, options);
+    }
 
     const readback = this.getBuilder(object, options).where('id', id);
     this.applyTenantScope(readback, object, options);
@@ -6686,8 +6972,15 @@ export class SqlDriver implements IDataDriver {
     options?: DriverOptions,
   ): Promise<any> {
     const formatted = this.applyWriteColumnMap(object, this.formatInput(object, data));
-    if (this.tablesWithTimestamps.has(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
-      formatted.updated_at = this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
+    // [#11067] One definition of the decision, shared with {@link update}. No
+    // fallback is threaded here, and that is a property of the path rather than
+    // an omission: `rotationShardsOf` returns shards only once `ensureRotation`
+    // has run, and `initObjects` records the stronger `tablesWithTimestamps`
+    // fact on the line immediately before that call — so on this path the
+    // answer can never come from the declared-shape presumption, and there is
+    // nothing speculative to recover from.
+    if (this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(formatted, options)) {
+      formatted.updated_at = this.updatedAtStamp();
     }
     for (const shard of shards) {
       const builder = this.getBuilder(shard, options).where('id', id);
@@ -7750,6 +8043,157 @@ export class SqlDriver implements IDataDriver {
     if (timeCols.length) this.timeFields[key] = new Set(timeCols);
   }
 
+  /**
+   * Register one MANAGED object's in-memory metadata — and run no DDL.
+   *
+   * Everything the write and read paths need to encode a value correctly is
+   * installed here: the JSON / boolean / numeric / date / datetime / time
+   * coercion registries, the auto_number descriptors, the tenant-isolation
+   * column, and the `managedObjectFields` / `managedObjectIndexes` entries
+   * drift detection diffs against. {@link SqlDriver.initObjects} calls it as
+   * its first step and then issues DDL; {@link registerObjectMetadata} calls
+   * it and stops.
+   *
+   * @returns the physical table name registered, and the tenant column
+   *          {@link computeAndRecordTenantField} resolved for it — both of
+   *          which `initObjects` goes on to use for its DDL.
+   */
+  protected registerManagedObjectMetadata(
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any },
+  ): { tableName: string; tenantField: string | null } {
+    const tableName = StorageNameMapping.resolveTableName(obj);
+    // #2186: remember the authoritative metadata field set for this table so
+    // drift detection / `os migrate` can diff the physical schema against it.
+    this.managedObjectFields.set(tableName, obj.fields ?? {});
+    // Always overwrite — a metadata change that REMOVES `indexes` must clear
+    // the previous entry, or drift detection keeps expecting an index nobody
+    // declares any more (and never reports it as orphaned).
+    if (Array.isArray((obj as any).indexes)) {
+      this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+    } else {
+      this.managedObjectIndexes.delete(tableName);
+    }
+    // [#8621] This call may create the table, or add a unique index to one
+    // that already exists, so whatever the upsert pre-flight introspected
+    // before it is stale. Dropping the entry is enough — the entry is
+    // re-read lazily, and a refusal re-reads unconditionally.
+    this.physicalKeyIndexes.delete(tableName);
+
+    const jsonCols: string[] = [];
+    const booleanCols: string[] = [];
+    const numericCols: string[] = [];
+    const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
+    // Tenant-isolation column: explicit tenancy opt-out → declared field →
+    // implicit `organization_id`. See {@link computeAndRecordTenantField}
+    // (shared with registerExternalObject so the two paths can't drift).
+    const tenantField = this.computeAndRecordTenantField(tableName, obj);
+    if (obj.fields) {
+      for (const [name, field] of Object.entries<any>(obj.fields)) {
+        const type = field.type || 'string';
+        if (this.isJsonField(type, field)) {
+          jsonCols.push(name);
+        }
+        // `toggle` shares boolean storage/affinity, so it needs the same
+        // read coercion (stored 1/0 → JS true/false) or it leaks back as a
+        // number/string instead of a boolean (#field-zoo).
+        if (type === 'boolean' || type === 'toggle') {
+          booleanCols.push(name);
+        }
+        // Numeric scalars are coerced back to JS numbers on read so legacy
+        // TEXT-affinity columns (created before they were mapped to a numeric
+        // column) still return numbers, not strings — see NUMERIC_SCALAR_TYPES.
+        if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
+          numericCols.push(name);
+        }
+        if (type === 'date') {
+          (this.dateFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'datetime') {
+          (this.datetimeFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'time') {
+          (this.timeFields[tableName] ??= new Set()).add(name);
+        }
+        if (type === 'auto_number' || type === 'autonumber') {
+          const fmt = resolveAutonumberFormat(field);
+          // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
+          // field interpolation (`{island_zone}`) and the sequence slot at
+          // fill time. The counter scopes to whatever renders before the slot.
+          const tokens = parseAutonumberFormat(fmt);
+          autoNumberCols.push({ name, format: fmt, tokens, tenantField });
+        }
+      }
+    }
+    this.jsonFields[tableName] = jsonCols;
+    this.booleanFields[tableName] = booleanCols;
+    this.numericFields[tableName] = numericCols;
+    this.autoNumberFields[tableName] = autoNumberCols;
+    this.tenantFieldByTable[tableName] = tenantField;
+    // [#11067] The declared shape's answer to "does this table carry
+    // `updated_at`?", installed here because here is the one place a managed
+    // object reaches the driver on EVERY boot posture — `initObjects` calls
+    // this first, and a `skipSchemaSync` boot calls it and stops. Presumed
+    // rather than asserted (see {@link updatedAtColumnState}); DDL that
+    // OBSERVES the column still records the stronger fact in
+    // `tablesWithTimestamps`, so a table this driver built is never in the
+    // speculative state at all. Never downgrades an answer already resolved
+    // from the database — re-registration is idempotent metadata assignment
+    // and must not throw away a `columnInfo()` result.
+    if (!this.updatedAtColumnState.has(tableName)) {
+      this.updatedAtColumnState.set(tableName, 'presumed');
+    }
+    return { tableName, tenantField };
+  }
+
+  /**
+   * Install the read/write metadata for MANAGED objects WITHOUT running DDL —
+   * the managed sibling of {@link SqlDriver.registerExternalObject}.
+   *
+   * ## Why this exists as its own entry point
+   *
+   * Until this method, the ONLY way to tell this driver a managed object's
+   * field types was {@link initObjects} / `syncSchema()` — which also runs
+   * CREATE TABLE / ALTER TABLE. A deployment that manages DDL out-of-band
+   * (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`, the documented posture after
+   * running migrations manually) therefore booted with EVERY coercion
+   * registry empty, and value encoding silently degraded to whatever the
+   * underlying client does with a bare JS value.
+   *
+   * On Postgres that is not a cosmetic difference. `formatInput` stringifies a
+   * JSON field ONLY when the field is in `jsonFields`; with the registry empty
+   * the value reaches node-postgres, whose per-type defaults are:
+   *
+   *  - object -> JSON text (accidentally correct);
+   *  - array  -> a Postgres ARRAY LITERAL (`{…}`) -> `22P02 invalid input
+   *    syntax for type json` -> 500, **except `[]`, whose literal `{}` is
+   *    valid JSON**, so an empty array is accepted and silently stored as an
+   *    empty OBJECT — data corruption, not an error;
+   *  - bare string -> passed raw -> not valid JSON text -> 500 (a number
+   *    survives because `42` already is valid JSON).
+   *
+   * SQLite never showed it: `formatInput` ends with a bind-safety net that
+   * stringifies any leftover object/array on that dialect, so the same empty
+   * registry is invisible there — which is why the SQLite/Turso suites are
+   * blind to this and every Postgres deployment inherited it.
+   *
+   * Registration is the DDL-free half, so it is safe on any datasource and on
+   * any boot: no `assertSchemaMutable` gate (nothing here mutates a schema),
+   * no `ensureDatabaseExists` probe, no round-trip at all. That is what makes
+   * it affordable on exactly the cold-start-sensitive boots `skipSchemaSync`
+   * exists to protect: it costs one pass over the object list, in memory.
+   *
+   * It is the same ruling #7737/#10629 already made for FEDERATED objects —
+   * `OS_SKIP_SCHEMA_SYNC` is about DDL, and a binding that is DDL-free must
+   * not ride on it — extended to the managed ones.
+   *
+   * Idempotent: pure metadata assignment, safe to re-drive on every reload.
+   */
+  registerObjectMetadata(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+  ): void {
+    for (const obj of objects) this.registerManagedObjectMetadata(obj);
+  }
+
   // `tenancy` is part of what this method READS — each object flows into
   // `computeAndRecordTenantField`, which consumes `obj.tenancy` to pick the
   // tenant column and to set or clear the sticky explicit-opt-out. It went
@@ -7757,82 +8201,30 @@ export class SqlDriver implements IDataDriver {
   // `computeAndRecordTenantField` both had it), so a caller spelling the key
   // correctly was rejected by the type while the driver read it regardless.
   async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
+    // In-memory registration FIRST, and deliberately ahead of the DDL gate
+    // below: being refused permission to alter a schema is not a reason to stay
+    // ignorant of the objects we were just told about. On a datasource we are a
+    // guest in (`schemaMode !== 'managed'`) the gate throws — and before this
+    // line ran here, it threw with every coercion registry still empty, so the
+    // very next write to a JSON field on that datasource was bound by the
+    // client's per-type defaults (see {@link registerObjectMetadata} for what
+    // node-postgres does with an array and with `[]`). Nothing in this call
+    // touches the database; the refusal it precedes is unchanged.
+    this.registerObjectMetadata(objects);
+
     // DDL gate (ADR-0015 §5.1): createTable/alterTable below mutate schema.
     // Also covers `syncSchema`, which delegates here.
     this.assertSchemaMutable('initObjects');
     await this.ensureDatabaseExists();
 
     for (const obj of objects) {
+      // Re-read what the registration above recorded, rather than recomputing:
+      // `computeAndRecordTenantField` carries a sticky explicit-opt-out, so the
+      // recorded answer IS the answer.
       const tableName = StorageNameMapping.resolveTableName(obj);
-      // #2186: remember the authoritative metadata field set for this table so
-      // drift detection / `os migrate` can diff the physical schema against it.
-      this.managedObjectFields.set(tableName, obj.fields ?? {});
-      // Always overwrite — a metadata change that REMOVES `indexes` must clear
-      // the previous entry, or drift detection keeps expecting an index nobody
-      // declares any more (and never reports it as orphaned).
-      if (Array.isArray((obj as any).indexes)) {
-        this.managedObjectIndexes.set(tableName, (obj as any).indexes);
-      } else {
-        this.managedObjectIndexes.delete(tableName);
-      }
-      // [#8621] This call may create the table, or add a unique index to one
-      // that already exists, so whatever the upsert pre-flight introspected
-      // before it is stale. Dropping the entry is enough — the entry is
-      // re-read lazily, and a refusal re-reads unconditionally.
-      this.physicalKeyIndexes.delete(tableName);
+      const tenantField = this.tenantFieldByTable[tableName] ?? null;
 
-      const jsonCols: string[] = [];
-      const booleanCols: string[] = [];
-      const numericCols: string[] = [];
-      const autoNumberCols: Array<{ name: string; format: string; tokens: AutonumberToken[]; tenantField: string | null }> = [];
-      // Tenant-isolation column: explicit tenancy opt-out → declared field →
-      // implicit `organization_id`. See {@link computeAndRecordTenantField}
-      // (shared with registerExternalObject so the two paths can't drift).
-      const tenantField = this.computeAndRecordTenantField(tableName, obj);
-      if (obj.fields) {
-        for (const [name, field] of Object.entries<any>(obj.fields)) {
-          const type = field.type || 'string';
-          if (this.isJsonField(type, field)) {
-            jsonCols.push(name);
-          }
-          // `toggle` shares boolean storage/affinity, so it needs the same
-          // read coercion (stored 1/0 → JS true/false) or it leaks back as a
-          // number/string instead of a boolean (#field-zoo).
-          if (type === 'boolean' || type === 'toggle') {
-            booleanCols.push(name);
-          }
-          // Numeric scalars are coerced back to JS numbers on read so legacy
-          // TEXT-affinity columns (created before they were mapped to a numeric
-          // column) still return numbers, not strings — see NUMERIC_SCALAR_TYPES.
-          if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
-            numericCols.push(name);
-          }
-          if (type === 'date') {
-            (this.dateFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'datetime') {
-            (this.datetimeFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'time') {
-            (this.timeFields[tableName] ??= new Set()).add(name);
-          }
-          if (type === 'auto_number' || type === 'autonumber') {
-            const fmt = resolveAutonumberFormat(field);
-            // Tokenize once: the renderer resolves date tokens (`{YYYYMMDD}`),
-            // field interpolation (`{island_zone}`) and the sequence slot at
-            // fill time. The counter scopes to whatever renders before the slot.
-            const tokens = parseAutonumberFormat(fmt);
-            autoNumberCols.push({ name, format: fmt, tokens, tenantField });
-          }
-        }
-      }
-      this.jsonFields[tableName] = jsonCols;
-      this.booleanFields[tableName] = booleanCols;
-      this.numericFields[tableName] = numericCols;
-      this.autoNumberFields[tableName] = autoNumberCols;
-      this.tenantFieldByTable[tableName] = tenantField;
-
-      // Deferred-DDL mode (#3917): everything above is in-memory metadata
+      // Deferred-DDL mode (#3917): the call above is in-memory metadata
       // registration — coercion maps, tenancy, and the `managedObjectFields`
       // entry `detectManagedDrift()` diffs against. Everything below issues
       // DDL. `os migrate plan` / `apply` boot with the deferral armed so the
@@ -9712,6 +10104,10 @@ export class SqlDriver implements IDataDriver {
 
   async introspectSchema(): Promise<IntrospectedSchema> {
     const tables: Record<string, IntrospectedTable> = {};
+    // Stamped BEFORE the reads, not after: a consumer asking "has the remote
+    // changed since this snapshot?" must not be told the snapshot covers a
+    // moment later than the first table it actually read.
+    const introspectedAt = new Date().toISOString();
     let tableNames: string[] = [];
 
     if (this.isPostgres) {
@@ -9745,20 +10141,35 @@ export class SqlDriver implements IDataDriver {
     }
 
     for (const tableName of tableNames) {
+      // All four reads take the #7332 default (`onFailure: 'throw'`): this
+      // caller cannot correct a short read, and `introspectColumns` has never
+      // swallowed — so a partially-readable database fails the whole-schema
+      // introspection loudly instead of emitting tables whose keys silently
+      // read as absent (#11161). Every in-tree caller of `introspectSchema`
+      // already handles a throw (the datasource health check reports
+      // `{ ok: false }`, the REST/CLI seams surface the error).
       const columns = await this.introspectColumns(tableName);
       const foreignKeys = await this.introspectForeignKeys(tableName);
       const primaryKeys = await this.introspectPrimaryKeys(tableName);
       const uniqueConstraints = await this.introspectUniqueConstraints(tableName);
 
       for (const col of columns) {
-        if (primaryKeys.includes(col.name)) col.isPrimary = true;
+        if (primaryKeys.includes(col.name)) col.primaryKey = true;
         if (uniqueConstraints.includes(col.name)) col.isUnique = true;
       }
 
       tables[tableName] = { name: tableName, columns, foreignKeys, primaryKeys };
     }
 
-    return { tables };
+    // `dialectName` — not the raw Knex client, and not the spec's
+    // `SQLDialectSchema` enum. The only in-tree consumer of this key is
+    // `suggestFieldTypeForSqlType(col.type, schema.dialect as SqlDialect)`,
+    // whose `SqlDialect` vocabulary (`packages/spec/src/data/type-compat.ts`)
+    // spells PostgreSQL `postgres`, exactly as `dialectName` does. Emitting
+    // the enum's `postgresql` instead would put the key in `Object.keys()`
+    // while leaving every per-dialect type alias unreachable — the omission
+    // this repairs, wearing a fix's clothes.
+    return { tables, dialect: this.dialectName, introspectedAt };
   }
 
   // ===================================
@@ -12439,11 +12850,80 @@ export class SqlDriver implements IDataDriver {
 
   // ── Introspection internals ─────────────────────────────────────────────────
 
+  /**
+   * The table's column names in DECLARED order, read from the catalog's own
+   * ordinal (#11163).
+   *
+   * knex's `columnInfo()` is an object KEYED BY COLUMN NAME, built from a
+   * catalog query that carries no `ORDER BY` — so its key-insertion order is
+   * whatever row order the server's plan yielded, which is unspecified on
+   * every dialect. Measured: SQLite and PostgreSQL 16.13 happened to return
+   * declared order; MySQL 8.0.46 returned ALPHABETICAL order, so a federated
+   * object drafted from a MySQL remote got its fields alphabetized. The
+   * ordinal is the fact and the row order is not, so every arm orders by the
+   * catalog's ordinal rather than trusting a plan.
+   *
+   * Each arm reads the same catalog `columnInfo()` populates, with the same
+   * scoping knex itself applies there (PG: `current_schema()`; MySQL:
+   * `DATABASE()`; SQLite: `PRAGMA table_info`, whose `cid` is the ordinal).
+   */
+  protected async introspectColumnOrder(tableName: string): Promise<string[]> {
+    if (this.isPostgres) {
+      const result = await this.knex.raw(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_name = ?
+            AND table_catalog = current_database()
+            AND table_schema = current_schema()
+          ORDER BY ordinal_position`,
+        [tableName],
+      );
+      return result.rows.map((row: any) => row.column_name);
+    }
+    if (this.isMysql) {
+      const result = await this.knex.raw(
+        `SELECT COLUMN_NAME as column_name
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+          ORDER BY ORDINAL_POSITION`,
+        [tableName],
+      );
+      return result[0].map((row: any) => row.column_name);
+    }
+    if (this.isSqlite) {
+      const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      const result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);
+      return (result as { name: string; cid: number }[])
+        .slice()
+        .sort((a, b) => a.cid - b.cid)
+        .map((row) => row.name);
+    }
+    return [];
+  }
+
   protected async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
-    const columnInfo = await this.knex(tableName).columnInfo();
+    const columnInfo = (await this.knex(tableName).columnInfo()) as Record<string, any>;
     const columns: IntrospectedColumn[] = [];
 
-    for (const [colName, info] of Object.entries<any>(columnInfo)) {
+    // #11163: emit in DECLARED order, not the `columnInfo()` object's
+    // key-insertion order (alphabetical on MySQL — see
+    // {@link introspectColumnOrder}). `columnInfo()` stays the source of the
+    // per-column FACTS because each dialect spells type / nullable /
+    // defaultValue / maxLength differently and knex already normalises them;
+    // only the ORDER comes from the ordinal read. A name one read has and the
+    // other lacks (the catalog moved between the two statements) is appended
+    // in `columnInfo()` order rather than dropped, so the merge can reorder
+    // but never lose a column.
+    const has = (name: string) => Object.prototype.hasOwnProperty.call(columnInfo, name);
+    const orderedNames = (await this.introspectColumnOrder(tableName)).filter(has);
+    const seen = new Set(orderedNames);
+    for (const name of Object.keys(columnInfo)) {
+      if (!seen.has(name)) orderedNames.push(name);
+    }
+
+    for (const colName of orderedNames) {
+      const info = columnInfo[colName];
       let type = 'string';
       let maxLength: number | undefined;
 
@@ -12462,7 +12942,9 @@ export class SqlDriver implements IDataDriver {
         type,
         nullable: info.nullable !== false,
         defaultValue: info.defaultValue,
-        isPrimary: false,
+        // The spec contract's spelling, and the only one this driver emits.
+        // `introspectSchema` flips it from the table's key list below.
+        primaryKey: false,
         isUnique: false,
         maxLength,
       });
@@ -12471,7 +12953,26 @@ export class SqlDriver implements IDataDriver {
     return columns;
   }
 
-  protected async introspectForeignKeys(tableName: string): Promise<IntrospectedForeignKey[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without foreign keys (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]`, so a query a live server rejects degraded to "this table
+   * has no foreign keys" with no diagnostic — a positive assertion of absence
+   * that downstream consumers act on. See {@link introspectIndexes} for the
+   * full rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectForeignKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<IntrospectedForeignKey[]> {
     const foreignKeys: IntrospectedForeignKey[] = [];
 
     try {
@@ -12550,26 +13051,81 @@ export class SqlDriver implements IDataDriver {
           });
         }
       }
-    } catch {
-      // silently ignore introspection errors
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return foreignKeys;
   }
 
-  protected async introspectPrimaryKeys(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without a primary key (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]` — and `[]` does not read downstream as "the read failed":
+   * it reads as *this table has no primary key*, a legal and meaningful answer
+   * that federated-object codegen, the persisted `external_catalog`
+   * (ADR-0015) and schema-drift comparison all act on. Measured on a live
+   * PostgreSQL 16.13: a query against a non-existent relation raises
+   * `undefined_table`, which the old catch converted to a confident empty key.
+   * See {@link introspectIndexes} for the full rationale; the option shape and
+   * default are deliberately identical.
+   */
+  protected async introspectPrimaryKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const primaryKeys: string[] = [];
 
     try {
       if (this.isPostgres) {
+        // `i.indkey` is an `int2vector` holding the key's attnums IN KEY ORDER,
+        // but `a.attnum = ANY(i.indkey)` is a MEMBERSHIP test: it reads the
+        // vector as a set and discards the position. With no `ORDER BY`, the row
+        // order was whatever the plan yielded — measured on PostgreSQL 16.13,
+        // `pg_attribute` scan order, i.e. COLUMN order. For a table declared
+        // `(carrier_code, shipment_id, leg_seq)` with `PRIMARY KEY (shipment_id,
+        // carrier_code)` that is the key REVERSED.
+        //
+        // Joining the ORDINALITY of `indkey` keeps the position that the
+        // membership test threw away, and `ORDER BY k.ord` makes the result the
+        // declared key order — the same guarantee the SQLite arm below gets from
+        // sorting on the `PRAGMA table_info` ordinal. The two orders differ
+        // whenever a key is declared out of column sequence, and this list is
+        // used as an addressing / upsert-conflict-target key, where the order is
+        // load-bearing: a key in the wrong order is a DIFFERENT key.
+        //
+        // `k.ord <= i.indnkeyatts` bounds the join to the KEY columns (#11162).
+        // For a covering primary key — `CREATE UNIQUE INDEX … INCLUDE (payload)`
+        // promoted via `ADD CONSTRAINT … PRIMARY KEY USING INDEX` — `indkey`
+        // holds the key columns AND the INCLUDE'd payload columns, and
+        // `indnkeyatts` is the count of the leading entries that are actually
+        // key members. Measured on PostgreSQL 16.13: `indkey = '2 1 3'`,
+        // `indnkeyatts = 2`, and without the bound `payload` was reported as a
+        // key member — a key with an extra member is a DIFFERENT key, for the
+        // same addressing reasons as above. `indnkeyatts` exists on PG 11+;
+        // this driver already requires 9.4+ syntax (`WITH ORDINALITY`) and CI
+        // runs 16.
         const result = await this.knex.raw(
           `
           SELECT a.attname as column_name
           FROM pg_index i
-          JOIN pg_attribute a ON a.attrelid = i.indrelid
-            AND a.attnum = ANY(i.indkey)
+          CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+          JOIN pg_attribute a
+            ON a.attrelid = i.indrelid
+            AND a.attnum = k.attnum
           WHERE i.indrelid = ?::regclass
             AND i.indisprimary
+            AND k.ord <= i.indnkeyatts
+          ORDER BY k.ord
         `,
           [tableName],
         );
@@ -12578,6 +13134,13 @@ export class SqlDriver implements IDataDriver {
           primaryKeys.push(row.column_name);
         }
       } else if (this.isMysql) {
+        // `KEY_COLUMN_USAGE.ORDINAL_POSITION` IS the key ordinal, and it was
+        // selected by neither the projection nor an order clause. Without
+        // `ORDER BY` the row order is unspecified — and measured on MySQL
+        // 8.0.46 it is COLUMN order, not ordinal order, so an out-of-sequence
+        // key came back reversed. (The InnoDB folklore that it "tends to"
+        // return ordinal order does not hold on this shape.) Same reason as the
+        // Postgres arm above: the order is load-bearing.
         const result = await this.knex.raw(
           `
           SELECT COLUMN_NAME as column_name
@@ -12585,6 +13148,7 @@ export class SqlDriver implements IDataDriver {
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME = ?
             AND CONSTRAINT_NAME = 'PRIMARY'
+          ORDER BY ORDINAL_POSITION
         `,
           [tableName],
         );
@@ -12604,33 +13168,80 @@ export class SqlDriver implements IDataDriver {
 
         const result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);
 
-        for (const row of result) {
-          if (row.pk === 1) {
-            primaryKeys.push(row.name);
-          }
+        // `PRAGMA table_info` does not report `pk` as a boolean. It reports the
+        // column's 1-based position WITHIN the primary key — `0` for "not part
+        // of the key", `1` for the first key column, `2` for the second, and so
+        // on. Filtering on `pk === 1` therefore kept only the first member of a
+        // composite key and silently dropped the rest, and because
+        // `introspectSchema` derives `col.primaryKey` FROM this list, both output
+        // signals were wrong together.
+        //
+        // Ordering by the ordinal (rather than taking `table_info`'s row order,
+        // which is COLUMN order) makes `primaryKeys` the declared key order. The
+        // two differ whenever a key is declared out of column sequence, and this
+        // list is used as an addressing / upsert-conflict-target key, where the
+        // order is load-bearing.
+        const keyedRows = (result as { name: string; pk: number }[]).filter((row) => row.pk > 0);
+        keyedRows.sort((a, b) => a.pk - b.pk);
+
+        for (const row of keyedRows) {
+          primaryKeys.push(row.name);
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return primaryKeys;
   }
 
-  protected async introspectUniqueConstraints(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without unique constraints
+   * (#7332 — the ruling {@link introspectIndexes} carries, extended to this
+   * sibling by #11161). This used to wrap the whole dialect dispatch in a bare
+   * `catch {}` and return `[]`, silently converting a failed read into a
+   * positive assertion of absence. See {@link introspectIndexes} for the full
+   * rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectUniqueConstraints(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const uniqueColumns: string[] = [];
 
     try {
       if (this.isPostgres) {
+        // ⚠️ This query was INVALID until #11161: it selected `c.column_name`
+        // while the only aliases in scope were `tc` and `ccu`, so every
+        // execution raised `missing FROM-clause entry for table "c"` — and the
+        // bare `catch {}` this method carried until #11161 converted that into
+        // `[]` on every call. Live Postgres therefore NEVER reported a unique
+        // constraint through this method; the defect surfaced (as nine loud
+        // test failures) the moment the catch stopped swallowing, which is the
+        // #7332 contract doing exactly its job. The schema pin follows
+        // `introspectSchema`'s own table listing (`current_schemas(false)`,
+        // #9350's pattern): `constraint_column_usage` spans every schema the
+        // user can read, so without it the newly-working query would report a
+        // same-named table's constraints from a schema the session never
+        // reaches.
         const result = await this.knex.raw(
           `
-          SELECT c.column_name
+          SELECT ccu.column_name
           FROM information_schema.table_constraints tc
           JOIN information_schema.constraint_column_usage AS ccu
             ON tc.constraint_schema = ccu.constraint_schema
             AND tc.constraint_name = ccu.constraint_name
           WHERE tc.constraint_type = 'UNIQUE'
             AND tc.table_name = ?
+            AND tc.table_schema = ANY (current_schemas(false))
         `,
           [tableName],
         );
@@ -12676,8 +13287,9 @@ export class SqlDriver implements IDataDriver {
           }
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return uniqueColumns;

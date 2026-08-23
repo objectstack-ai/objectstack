@@ -39,6 +39,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import {
+  captureExpectedReadRefusals,
+  type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 
 const ACCOUNT = {
   name: 'showcase_account',
@@ -73,14 +77,32 @@ const TASK = {
   },
 };
 
+/**
+ * [#10629] This fixture provisions the four business objects it queries and nothing else, so the engine's
+ * own single-tenant probe (`ObjectQL.probeInstallOrganizations`, memoised once
+ * per engine) reads a `sys_organization` that was never created. The probe is
+ * fail-soft by construction — it catches `isMissingTableError` and only that —
+ * but the driver and the engine each log the fault on the way out. Withheld and
+ * asserted rather than muted; `expected-read-refusal-noise.ts` says why.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
+
 describe('#7537 expand with a nested `fields` that omits the join key (REAL SqlDriver)', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
+  /** [#10629] The expected-noise capture belonging to the latest boot. */
+  let noise: ExpectedReadRefusalCapture | null = null;
 
   afterEach(async () => {
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+    // [#10629] The capture is a PIN, not a mute — asserted after teardown so a
+    // failure here can never leave the engine running. Every test in this file
+    // boots and writes, so the probe fires for each of them: this holds for a
+    // single `-t` run as well as for the whole file.
+    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    noise = null;
   });
 
   async function boot() {
@@ -90,8 +112,13 @@ describe('#7537 expand with a nested `fields` that omits the join key (REAL SqlD
       connection: { filename: join(dir, 'data.sqlite') },
       useNullAsDefault: true,
     });
+    // [#10629] Installed before the driver runs a statement and before the
+    // engine issues a read — the two sinks the expected refusal travels out on.
+    noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+    noise.captureDriver(driver);
     await driver.initObjects([ACCOUNT, INVOICE, PROJECT, TASK]);
     engine = new ObjectQL();
+    noise.captureEngine(engine);
     engine.registerDriver(driver, true);
     await engine.init();
     for (const obj of [ACCOUNT, INVOICE, PROJECT, TASK]) {

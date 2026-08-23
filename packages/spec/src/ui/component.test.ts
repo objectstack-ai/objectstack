@@ -278,7 +278,9 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:898` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `9a3daf8d3`.
+// builds against — `.objectui-sha` = `190fbd01d`. Re-derived at that pin
+// 2026-08-22: `containers.tsx` changed across the move from `9a3daf8d3`, and
+// both anchors above landed on the same lines when re-counted.
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -361,7 +363,9 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:721` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `9a3daf8d3`.
+// the pin this repo builds against — `.objectui-sha` = `190fbd01d`. Re-derived
+// at that pin 2026-08-22: `containers.tsx` changed across the move from
+// `9a3daf8d3`, and both anchors above landed on the same lines when re-counted.
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -2026,10 +2030,13 @@ describe('#7751 — object-* block props schemas', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // Both re-measured at the pin this repo builds against —
-// `.objectui-sha` = `9a3daf8d3`. These two were the first records written at
-// that pin: #10137 moved it while the #9881/#9972 records above still cited
-// `82a94170c`, and #10274 re-measured those four at this same pin, so all of
-// them now agree. (The button anchors were unchanged across the move.)
+// `.objectui-sha` = `190fbd01d`, re-derived there 2026-08-22 when the pin moved
+// off `9a3daf8d3`. All four records (these two plus #9881/#9972 above) were
+// re-counted at the new pin in the same pass and agree on it, as they did at
+// the previous two moves: #10137 moved the pin while #9881/#9972 still cited
+// `82a94170c`, and #10274 re-measured those four onto `9a3daf8d3`. The button
+// anchors have been unchanged across every one of those moves — `button.tsx`
+// is byte-identical at `9a3daf8d3` and `190fbd01d`.
 describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   const button = ComponentPropsMap['element:button'];
 

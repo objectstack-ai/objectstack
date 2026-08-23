@@ -27,18 +27,20 @@ describe('toTitleCase', () => {
 
 describe('convertIntrospectedSchemaToObjects', () => {
   const sampleSchema: IntrospectedSchema = {
+    dialect: 'sqlite',
+    introspectedAt: '2026-08-22T00:00:00.000Z',
     tables: {
       users: {
         name: 'users',
         columns: [
-          { name: 'id', type: 'integer', nullable: false, isPrimary: true },
-          { name: 'name', type: 'varchar', nullable: false, maxLength: 255 },
-          { name: 'email', type: 'varchar', nullable: false, isUnique: true, maxLength: 320 },
-          { name: 'bio', type: 'text', nullable: true },
-          { name: 'age', type: 'integer', nullable: true },
-          { name: 'is_active', type: 'boolean', nullable: false, defaultValue: true },
-          { name: 'created_at', type: 'timestamp', nullable: false },
-          { name: 'updated_at', type: 'timestamp', nullable: true },
+          { name: 'id', type: 'integer', nullable: false, primaryKey: true },
+          { name: 'name', type: 'varchar', nullable: false, primaryKey: false, maxLength: 255 },
+          { name: 'email', type: 'varchar', nullable: false, primaryKey: false, isUnique: true, maxLength: 320 },
+          { name: 'bio', type: 'text', nullable: true, primaryKey: false },
+          { name: 'age', type: 'integer', nullable: true, primaryKey: false },
+          { name: 'is_active', type: 'boolean', nullable: false, primaryKey: false, defaultValue: true },
+          { name: 'created_at', type: 'timestamp', nullable: false, primaryKey: false },
+          { name: 'updated_at', type: 'timestamp', nullable: true, primaryKey: false },
         ],
         foreignKeys: [],
         primaryKeys: ['id'],
@@ -46,14 +48,14 @@ describe('convertIntrospectedSchemaToObjects', () => {
       posts: {
         name: 'posts',
         columns: [
-          { name: 'id', type: 'integer', nullable: false, isPrimary: true },
-          { name: 'title', type: 'varchar', nullable: false, maxLength: 500 },
-          { name: 'body', type: 'text', nullable: true },
-          { name: 'author_id', type: 'integer', nullable: false },
-          { name: 'metadata', type: 'jsonb', nullable: true },
-          { name: 'published_at', type: 'date', nullable: true },
-          { name: 'created_at', type: 'timestamp', nullable: false },
-          { name: 'updated_at', type: 'timestamp', nullable: true },
+          { name: 'id', type: 'integer', nullable: false, primaryKey: true },
+          { name: 'title', type: 'varchar', nullable: false, primaryKey: false, maxLength: 500 },
+          { name: 'body', type: 'text', nullable: true, primaryKey: false },
+          { name: 'author_id', type: 'integer', nullable: false, primaryKey: false },
+          { name: 'metadata', type: 'jsonb', nullable: true, primaryKey: false },
+          { name: 'published_at', type: 'date', nullable: true, primaryKey: false },
+          { name: 'created_at', type: 'timestamp', nullable: false, primaryKey: false },
+          { name: 'updated_at', type: 'timestamp', nullable: true, primaryKey: false },
         ],
         foreignKeys: [
           {
@@ -179,20 +181,26 @@ describe('convertIntrospectedSchemaToObjects', () => {
   });
 
   it('should handle empty schema', () => {
-    const objects = convertIntrospectedSchemaToObjects({ tables: {} });
+    const objects = convertIntrospectedSchemaToObjects({
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
+      tables: {},
+    });
     expect(objects).toHaveLength(0);
   });
 
   it('should handle numeric types (float, decimal, real)', () => {
     const schema: IntrospectedSchema = {
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
       tables: {
         metrics: {
           name: 'metrics',
           columns: [
-            { name: 'price', type: 'decimal', nullable: false },
-            { name: 'weight', type: 'float', nullable: true },
-            { name: 'score', type: 'real', nullable: true },
-            { name: 'quantity', type: 'bigint', nullable: false },
+            { name: 'price', type: 'decimal', nullable: false, primaryKey: false },
+            { name: 'weight', type: 'float', nullable: true, primaryKey: false },
+            { name: 'score', type: 'real', nullable: true, primaryKey: false },
+            { name: 'quantity', type: 'bigint', nullable: false, primaryKey: false },
           ],
           foreignKeys: [],
           primaryKeys: [],
@@ -209,11 +217,13 @@ describe('convertIntrospectedSchemaToObjects', () => {
 
   it('should handle time type', () => {
     const schema: IntrospectedSchema = {
+      dialect: 'sqlite',
+      introspectedAt: '2026-08-22T00:00:00.000Z',
       tables: {
         schedule: {
           name: 'schedule',
           columns: [
-            { name: 'start_time', type: 'time', nullable: false },
+            { name: 'start_time', type: 'time', nullable: false, primaryKey: false },
           ],
           foreignKeys: [],
           primaryKeys: [],

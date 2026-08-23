@@ -61,9 +61,51 @@
  * instead: that would make a pin's validity a property of the runner config
  * rather than of its own assertion.
  *
- * `.testkit.ts`, not `.test.ts`: it holds no assertions and must not be
- * collected as a suite. It is imported only by tests, so tsup (entries
- * `src/index.ts` and `src/logger.ts`) never bundles it into `dist`.
+ * ## This module is the ONLY place the raw probe may be read (#10785)
+ *
+ * `pnpm check:refd-timer-probe` enforces that repo-wide, by identifier and with
+ * comments masked, and its allowlist is this one file. The rule is deliberately
+ * the cheap one — ban the raw probe outside one approved module — rather than
+ * the precise-sounding "no `await` between two readings", which is an AST
+ * question that a text scan answers approximately and therefore SILENTLY; the
+ * gate's own header carries that argument and the five-instance table behind it.
+ *
+ * ⛔ Do not fork a copy of this file into another package. A second copy leaves
+ * two instruments with one argument between them, which is how the argument
+ * gets lost.
+ *
+ * ## Why it lives in a private package of its own (#10783)
+ *
+ * It sat in `packages/core/src/` until a FIFTH site turned up in
+ * `@objectstack/service-automation` and could not reach it — `@objectstack/core`
+ * exports exactly `.` and `./logger`. The three ways out were MEASURED rather
+ * than argued:
+ *
+ *   - A test-only RELATIVE import into `packages/core/src` puts a foreign file
+ *     into the consumer's tsc program, and that consumer's `rootDir` rejects it:
+ *     `TS6059`, counted against `@objectstack/service-automation`'s frozen
+ *     type-check debt (measured 3 → 4), a ledger that is shrink-only with no
+ *     tolerance band and whose only other remedy is ⛔ MAINTAINER-ONLY. Most
+ *     packages here set `rootDir: src`, so this was a trap for the next adopter
+ *     too, not a quirk of one manifest.
+ *   - Publishing it on `@objectstack/core`'s `exports` map would put a test
+ *     helper on a runtime package's PUBLIC npm surface, under semver, for every
+ *     consumer of the kernel — capability expansion with no external pull.
+ *   - A bare specifier resolved through `node_modules` is exempt from `rootDir`
+ *     (measured, with `--noEmit` and with emit), so a private workspace package
+ *     is reachable from any consumer whatever its own build config says.
+ *
+ * Hence: `private: true`, no build step, `exports` straight at `src` — there is
+ * no `dist` for a consumer to go stale against, which is the exposure
+ * `check:test-source-alias` exists for. Every consumer takes it as a
+ * `devDependency`, and turbo hashes it through that edge rather than through a
+ * hand-written input glob: measured on `turbo run test --dry=json`, editing this
+ * file moves `@objectstack/service-automation#test`'s hash
+ * (`ee8253e9cb374faa` → `77680cb1d4bdd2d4`), so the cache cannot replay a green
+ * over a changed instrument.
+ *
+ * `src/index.ts` holding no assertions is load-bearing: it must never be
+ * collected as a suite, and this package declares no `test` script at all.
  *
  * ⚠️ Real timers only. Under `vi.useFakeTimers()` the handles are fakes and
  * `getActiveResourcesInfo()` cannot see them — use `vi.getTimerCount()` there,

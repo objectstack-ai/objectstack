@@ -11,6 +11,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import { Runtime } from './runtime.js';
 import { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 import { AppPlugin } from './app-plugin.js';
+import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at MODULE
 // LOAD. Each is reached below through a dynamic `import()` inside an `it()` body or a
@@ -23,6 +24,17 @@ import '@objectstack/service-datasource';
 
 const BOOT_TIMEOUT = 60_000;
 const ENV = 'OS_ALLOW_DRIVER_CONNECT_FAILURE';
+
+/**
+ * [#10629] Exactly one case in this file writes through the booted engine, and
+ * that write runs the engine's single-tenant probe
+ * (`ObjectQL.probeInstallOrganizations`) against a `sys_organization` this
+ * composition never creates. The probe is fail-soft by construction — it
+ * catches `isMissingTableError` and only that — but the driver and the engine
+ * each log the fault on the way out. Withheld and asserted in that one case
+ * rather than muted; `expected-read-refusal-noise.ts` says why.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 async function assemble(opts: {
   driver?: string;
@@ -158,6 +170,11 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     const { createPrebuiltDriverFactory } = await import('@objectstack/service-datasource');
     const { SqliteWasmDriver } = await import('@objectstack/driver-sqlite-wasm');
     const hostBuilt = new SqliteWasmDriver({ filename: ':memory:' });
+    // [#10629] Installed before the driver runs a statement; the engine half
+    // is scoped after bootstrap, because the read it covers is the `insert`
+    // below rather than anything the boot itself does.
+    const noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+    noise.captureDriver(hostBuilt);
     const kernel = await assemble({
       driver: 'turso', // a kind the SHARED factory does not support — proves dispatch
       factory: createPrebuiltDriverFactory(hostBuilt, { driverId: 'turso' }),
@@ -168,6 +185,7 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
     });
     try {
       await kernel.bootstrap();
+      noise.captureEngine(kernel.getService<unknown>('objectql'));
       const engine = kernel.getService<IDataEngine>('data');
       const defaultName = engine.getDefaultDriverName?.();
       expect(defaultName).toBeDefined();
@@ -176,6 +194,10 @@ describe('DefaultDatasourcePlugin — the default datasource as a declaration (#
       await engine.insert('note', { title: 'through-the-adopted-default' });
       const rows = await engine.find('note');
       expect(rows.map((r: any) => r.title)).toContain('through-the-adopted-default');
+      // [#10629] The capture is a PIN, not a mute: the probe's two log lines
+      // are withheld from the shared shard log and asserted here instead, so
+      // a probe that stopped running goes red rather than merely quiet.
+      expect(noise.silentChannels()).toEqual([]);
     } finally {
       try { await (kernel as any)?.stop?.(); } catch { /* noop */ }
     }

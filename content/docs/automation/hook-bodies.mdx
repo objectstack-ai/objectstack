@@ -253,9 +253,11 @@ If you have a body that genuinely cannot be expressed in L1+L2 (typically: it ne
 2. For each inline handler, take its source via `String(fn)` (the callable is already loaded by tsx/esbuild).
 3. Run a regex allow-list over the stringified body (see "What the sandbox forbids" above).
 4. **Pass:** emit `body: { language: 'js', source: <body>, capabilities: <inferred> }`.
-5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook/action bodies — declare a Connector recipe instead.`
+5. **Forbidden token (default):** extraction fails, a `bodyExtractionWarning` is recorded, and the callable still ships via the back-compat handler-ref bundle — the build does **not** abort. The warning is **printed** (and carried in `--json` under `bodyExtractionWarnings`), so a forbidden pattern is a visible warn-and-bundle rather than a silent success; before #10678 it was recorded and shown to nobody. Pass `objectstack compile --strict-body` to turn extraction warnings into a hard build failure (exit 1) with a per-callable diagnostic, e.g. `hook 'normalize_account': fetch() is not allowed in hook/action bodies — declare a Connector recipe instead.`
 
-Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. You can override with a directive comment when the inference is wrong.
+   Note that a CommonJS `require('node:os')` in a TypeScript config reaches the extractor as esbuild's `__require("node:os")`. Both spellings are refused under the same `require()` reason.
+
+Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. When the inference is wrong, supply `body` yourself with an [explicit `capabilities` array](#capability-inference) — that path is data rather than a comment, so it survives the build.
 
 ## Migration
 
@@ -317,14 +319,47 @@ The extractor scans each body for known patterns and adds the matching capabilit
 | `ctx.crypto.randomUUID` | `crypto.uuid` |
 | `ctx.log.info / warn / error / debug` | `log` |
 
-To override the inference, add a directive comment as the first line of your handler body:
+When inference does not derive what a body needs, declare the tokens yourself by
+supplying `body` on the hook or action instead of a `handler`:
 
 ```ts
-handler: async (ctx) => {
-  // @capabilities api.read api.write log
-  …
-}
+hooks: [
+  {
+    name: 'notify_owner',
+    object: 'account',
+    events: ['afterInsert'],
+    body: {
+      language: 'js',
+      source: "await ctx.api.object('task').insert({ subject: 'follow up' });",
+      capabilities: ['api.write', 'log'],
+    },
+  },
+]
 ```
+
+That path is **data, not a comment**, so nothing in the build pipeline can strip it
+on the way through — which is what makes it the supported way to say what a body
+needs.
+
+<Callout type="warn" title="The `@capabilities` directive comment was removed in 17.1">
+  A directive comment on the first line of a handler body was once documented as a
+  way to override inference. It was **retired** (#10917) and the extractor no longer
+  reads it.
+
+  It had never worked from any ordinary authoring path. The override was read off
+  the handler's stringified source (`String(fn)`), and `loadConfig` runs your config
+  through `bundle-require` → esbuild, which strips `//` line comments before the
+  handler is ever a runtime function. Measured on all four shapes —
+  `objectstack.config.ts`, `.js`, `.mjs`, and a handler imported from a local module
+  — the build exited 0, printed nothing, and emitted the **inferred** capabilities
+  alone. A handler asking for more than inference derived was then refused by the
+  sandbox at runtime, far from the cause.
+
+  **If a config of yours still carries one:** removing it changes nothing, because it
+  was already inert. If you meant the tokens it named, declare them in
+  `body.capabilities` as above. Inference is unaffected either way — it matches the
+  *code*, which esbuild keeps.
+</Callout>
 
 ### Build pipeline at a glance
 

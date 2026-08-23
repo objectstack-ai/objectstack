@@ -13,14 +13,52 @@
  *
  * For v1 we apply a deliberately simple **regex allow-list** over the
  * extracted body — full TypeScript AST analysis is deferred to v2. Anything
- * the regex rejects (top-level `import`, `require(`, `fetch(`, `process.*`,
- * `globalThis.*`, `eval`, `new Function`) makes the build **fail**. There is
- * no silent fallback to the L3 .mjs path because that path is being closed.
+ * the regex rejects (top-level `import`, `require(` / esbuild's `__require(`,
+ * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`) makes
+ * extraction **throw**.
+ *
+ * ⚠️ What that throw costs the BUILD depends on the flag, and the two outcomes
+ * are not the same one. This header used to claim only the second (#10678):
+ *
+ *   default `os build`  {@link lowerCallables} catches the throw, records it in
+ *                       `bodyExtractionWarnings`, and ships the callable through
+ *                       the back-compat `.mjs` bundle instead. No forbidden body
+ *                       is ever emitted as `body.source` — but the build exits
+ *                       **0**. `compile.ts` prints the recorded warnings, so
+ *                       warn-and-bundle is at least not silent; it was silent
+ *                       until #10678, which is the whole defect that card names.
+ *   `--strict-body`     the same recorded warnings become a hard failure (exit 1)
+ *                       with a per-callable diagnostic, and nothing is bundled.
+ *
+ * So the allow-list gates what may become `body.source`; it does not (yet) gate
+ * what may build. Closing the L3 `.mjs` path is `--strict-body`'s job today and
+ * Phase 3's later — not this list's. Docs `hook-bodies.mdx` describe the same
+ * two outcomes; when this header and that page disagree, they are both wrong
+ * until one of them is measured over a real `os build`.
  *
  * Capability inference: we scan the body for known `ctx.api.*`, `ctx.log.*`,
  * `ctx.crypto.*` access patterns and add the matching capability tokens to
- * `body.capabilities` automatically. Authors can still override by setting
- * `// @capabilities api.read api.write` as the first line of the function.
+ * `body.capabilities` automatically.
+ *
+ * ⛔ RETIRED — the `// @capabilities api.read api.write` hook-body directive was
+ * removed in @objectstack/cli 17.1 (#10917, ADR-0049 enforce-or-remove). It was
+ * read off `String(fn)`, and `loadConfig` runs every config through
+ * `bundle-require` -> esbuild, which strips `//` line comments before the
+ * handler is ever a runtime function. Measured on all four ordinary authoring
+ * shapes (#10678) — `objectstack.config.ts`, `.js`, `.mjs`, and a handler
+ * imported from a local module — the directive reached this code from NONE of
+ * them: the build shipped the inferred capabilities alone, at exit 0, with no
+ * error and no warning, and the mismatch surfaced far from its cause as a
+ * sandbox refusal at runtime. Declare the tokens as DATA instead —
+ * `body: { language: 'js', source, capabilities: [...] }` on the hook or action
+ * — which is measured to survive the build.
+ *
+ * ⛔ Do not re-add a comment-borne override. A directive every ordinary
+ * authoring path strips cannot be typed wrongly-but-visibly, so it can only
+ * teach a wrong convention silently; that is why it was retired rather than
+ * re-documented. `test/hook-body-build-reach.e2e.test.ts` pins both halves —
+ * the directive contributing nothing, and `body.capabilities` surviving — over
+ * a real spawned `os build`.
  *
  * Self-containment (#1876): a handler that references a module-scope identifier
  * (helper, import, top-level const) cannot be shipped body-only — the reference
@@ -32,7 +70,16 @@ import { detectFreeIdentifiers } from './detect-free-identifiers.js';
 
 const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bimport\s*[\(\*\{]/, reason: 'dynamic `import()` and ES imports are not allowed in hook/action bodies — declare a Connector recipe instead' },
-  { rx: /\brequire\s*\(/, reason: '`require()` is not allowed in hook/action bodies' },
+  // Both spellings, one reason (#10678). A TypeScript config is loaded through
+  // `bundle-require` -> esbuild, whose ESM interop shim rewrites a CommonJS
+  // `require('node:os')` into `__require("node:os")` BEFORE `String(fn)` ever
+  // runs. Matching only the source spelling made this reason UNREACHABLE from
+  // the real authoring path: the refusal still fired, but through the #1876
+  // free-identifier gate, naming `__require` — an identifier the author never
+  // typed and cannot act on. Accept behaviour is unchanged either way (the body
+  // was already refused); what changes is that the reason now names what was
+  // written. `\b(?:__)?` cannot widen to `myrequire(` — no word boundary there.
+  { rx: /\b(?:__)?require\s*\(/, reason: '`require()` is not allowed in hook/action bodies (esbuild rewrites it to `__require()` when the config is TypeScript; both spellings are refused)' },
   { rx: /\bfetch\s*\(/, reason: '`fetch()` is not allowed in hook/action bodies — declare a Connector recipe instead' },
   { rx: /\bprocess\s*\./, reason: '`process` access is not allowed in hook/action bodies' },
   { rx: /\bglobalThis\s*\./, reason: '`globalThis` access is not allowed in hook/action bodies' },
@@ -59,7 +106,12 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
 export interface ExtractedBody {
   /** Pure function-body source (without the surrounding `(ctx) => {...}`). */
   source: string;
-  /** Inferred capability tokens — may be merged with explicit `// @capabilities` line. */
+  /**
+   * Capability tokens INFERRED from the body source (see CAPABILITY_PATTERNS).
+   * Inference is the only thing that fills this in: the comment-borne override
+   * is retired (see this file's header). An author whose needs differ from what
+   * inference derives writes `body.capabilities` on the hook instead.
+   */
   capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>;
   /** True when source is a single expression (arrow with implicit return). */
   isExpression: boolean;
@@ -112,22 +164,6 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   const inferred = new Set<ExtractedBody['capabilities'][number]>();
   for (const { rx, cap } of CAPABILITY_PATTERNS) {
     if (rx.test(block.source)) inferred.add(cap);
-  }
-
-  // Honour an explicit override: `// @capabilities api.read api.write`.
-  const overrideMatch = block.source.match(/^[\s\n]*\/\/\s*@capabilities\s+([a-z.\s]+)/m);
-  if (overrideMatch) {
-    const tokens = overrideMatch[1].split(/\s+/).filter(Boolean);
-    for (const t of tokens) {
-      if (
-        t === 'api.read' ||
-        t === 'api.write' ||
-        t === 'crypto.uuid' ||
-        t === 'log'
-      ) {
-        inferred.add(t);
-      }
-    }
   }
 
   return {

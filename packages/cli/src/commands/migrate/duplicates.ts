@@ -12,7 +12,7 @@ import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 // `import()`s every command module on every CLI invocation, so a heavy static
 // import here is charged to whatever command the operator actually ran (#5726
 // makes the same point about driver packages).
-import type { SeedTenancyExec } from '@objectstack/metadata-protocol';
+import type { RuntimeIndexPreflight, SeedTenancyExec } from '@objectstack/metadata-protocol';
 
 /**
  * `os migrate duplicates` — the operator-facing inventory of business
@@ -77,6 +77,29 @@ import type { SeedTenancyExec } from '@objectstack/metadata-protocol';
  * wrong for a report, which must not silently omit a real duplicate. Anything
  * that could not be probed is listed in `skipped` with the reason — a target
  * this command could not read is never reported as a target with no findings.
+ *
+ * ## The second population: the `kernel:ready` index pre-flight (#8725)
+ *
+ * `runtimeIndexPreflight` is a SEPARATE section, and the separation is the
+ * point. `duplicates` above answers the #8928 ruling's narrow question — one
+ * business identifier held across more than one organization partition — and
+ * folding a second definition of "duplicate" into that array would quietly
+ * widen a list the ruling deliberately narrowed.
+ *
+ * The second question is: do rows already in this database block one of the
+ * three `kernel:ready` NULL-safe index tightenings? Those migrations refuse
+ * when they do (ADR-0120 D4 — the previous index stays, no row is touched) and
+ * report on the boot channel only, because the drift differ cannot see the
+ * class at all: after the tightening `isRuntimeManagedIndex` excludes the
+ * index, and before it there is nothing to see either, since each migration
+ * reuses the DECLARED index's name so the name-matched slot reads as filled in
+ * both states. Maintainer ruling, 2026-08-22: that report lands here, on the
+ * command that already boots read-only and owns the "inventory, never repair"
+ * contract, and `os migrate plan`'s drift contract stays untouched.
+ *
+ * Fitting: this command's boot disarms the platform migrations, so the
+ * pre-flight describes what the next SERVING boot will find — before the
+ * operator restarts, which is the moment the information is worth anything.
  */
 
 /** One `(object, field)` this run probed. */
@@ -145,7 +168,13 @@ export interface DuplicateLiveCondition {
  */
 export interface DuplicateIdentifierReport {
   report: 'duplicate-identifiers';
-  reportVersion: 1;
+  /**
+   * `2` since #8725 added the `runtimeIndexPreflight` section and its two
+   * summary counters. Additive — every `1` field is unchanged in name, shape and
+   * meaning — but a consumer that validates the document strictly would reject
+   * the new key, so the version says plainly that there is more here now.
+   */
+  reportVersion: 2;
   /** ISO-8601, so archived reports sort and diff. */
   generatedAt: string;
   /** The database this describes, in the same words the migrate family prints. */
@@ -160,12 +189,30 @@ export interface DuplicateIdentifierReport {
   skipped: DuplicateSkippedTarget[];
   duplicates: DuplicateIdentifier[];
   liveConditions: DuplicateLiveCondition[];
+  /**
+   * The `kernel:ready` index tightenings and what currently blocks each — the
+   * second population described in the module header. Always present, one entry
+   * per index probed, whatever the outcome: an index reported as `clear` is a
+   * measurement, and leaving it out would make "nothing blocks it" and "it was
+   * never probed" the same absence.
+   *
+   * ⚠️ `--object` does NOT narrow this section, and `filter` above describes the
+   * object scan only. This population is four fixed platform indexes rather than
+   * a slice of the registry, and narrowing it would replace a complete four-row
+   * measurement with an empty array on exactly the runs where an operator is
+   * looking at one object — an absence that reads as "nothing blocks anything".
+   */
+  runtimeIndexPreflight: RuntimeIndexPreflight[];
   summary: {
     objectsScanned: number;
     fieldsScanned: number;
     duplicateValues: number;
     duplicateRows: number;
     liveConditions: number;
+    /** Indexes whose tightening is blocked by rows already stored. */
+    runtimeIndexesBlocked: number;
+    /** Rows holding a blocking key, summed across those indexes. */
+    runtimeIndexBlockingRows: number;
   };
 }
 
@@ -539,6 +586,19 @@ export interface CollectDuplicateReportOptions {
   objectFilter?: string;
   /** Injected so the contract test can pin a stable document. */
   now?: () => Date;
+  /**
+   * The `kernel:ready` index pre-flight, already collected — from
+   * `collectRuntimeIndexPreflight` in `@objectstack/metadata-protocol`, which
+   * owns the probes because it owns the migrations that build those indexes.
+   *
+   * ⚠️ REQUIRED rather than optional, deliberately. An optional section defaults
+   * to `[]`, and `[]` is also what a database with nothing blocking produces —
+   * so a caller that simply forgot to wire it would ship a clean bill of health
+   * from a probe that never ran, which is the exact failure `#10677` closed on
+   * the seam a few lines below. Making it required moves that mistake from
+   * runtime silence to a compile error.
+   */
+  runtimeIndexPreflight: RuntimeIndexPreflight[];
 }
 
 /**
@@ -701,9 +761,10 @@ export async function collectDuplicateIdentifierReport(
   }
 
   const objectsScanned = new Set(targets.map((t) => t.object)).size;
+  const blocked = opts.runtimeIndexPreflight.filter((p) => p.status === 'blocked');
   return {
     report: 'duplicate-identifiers',
-    reportVersion: 1,
+    reportVersion: 2,
     generatedAt: (opts.now?.() ?? new Date()).toISOString(),
     database: opts.database,
     globalPartition: globalTenant,
@@ -713,19 +774,26 @@ export async function collectDuplicateIdentifierReport(
     skipped,
     duplicates,
     liveConditions,
+    runtimeIndexPreflight: opts.runtimeIndexPreflight,
     summary: {
       objectsScanned,
       fieldsScanned: targets.length,
       duplicateValues: duplicates.length,
       duplicateRows: duplicates.reduce((total, d) => total + d.holderCount, 0),
       liveConditions: liveConditions.length,
+      runtimeIndexesBlocked: blocked.length,
+      runtimeIndexBlockingRows: blocked.reduce(
+        (total, p) => total + p.groups.reduce((rows, g) => rows + g.rowCount, 0),
+        0,
+      ),
     },
   };
 }
 
 export default class MigrateDuplicates extends Command {
   static override description =
-    'Report business identifiers already minted twice across the organization partitions (#8928). ' +
+    'Report business identifiers already minted twice across the organization partitions (#8928), ' +
+    'and the rows blocking the kernel:ready NULL-safe index tightenings (#8725). ' +
     'Read-only inventory as JSON on stdout — never renumbers, deduplicates or rewrites anything. ' +
     'Run it BEFORE the #8686 tenancy backfill: the repair overwrites the evidence.';
 
@@ -777,6 +845,7 @@ export default class MigrateDuplicates extends Command {
       const {
         resolveSeedTenancyExec,
         normalizeRows,
+        collectRuntimeIndexPreflight,
         GLOBAL_TENANT,
         ORGANIZATION_FIELD,
         SEQUENCES_TABLE,
@@ -811,21 +880,29 @@ export default class MigrateDuplicates extends Command {
         return;
       }
 
+      const client = (stack.driver?.config as { client?: unknown } | undefined)?.client;
+      const clientName = client ? String(client) : undefined;
+      // Wrapped, not bare: the preflight cleared the seam as a whole, and this
+      // keeps every individual probe held to the same standard — one that
+      // returns no result set becomes a `skipped` entry (or an `unreadable`
+      // index) rather than zero findings.
+      const answering = answeringSeam(exec);
+
       const report = await collectDuplicateIdentifierReport({
-        // Wrapped, not bare: the preflight cleared the seam as a whole, and
-        // this keeps every individual probe held to the same standard — one
-        // that returns no result set becomes a `skipped` entry rather than
-        // zero findings.
-        exec: answeringSeam(exec),
+        exec: answering,
+        // The `kernel:ready` pre-flight (#8725), through the same wrapped seam
+        // and the same dialect: a probe that answers nothing lands as
+        // `unreadable` rather than as an index with nothing blocking it.
+        runtimeIndexPreflight: await collectRuntimeIndexPreflight(answering, {
+          ...(clientName ? { client: clientName } : {}),
+        }),
         normalize: normalizeRows,
         objects: stack.allObjects(),
         database: stack.dbLabel,
         globalTenant: GLOBAL_TENANT,
         organizationField: ORGANIZATION_FIELD,
         sequencesTable: SEQUENCES_TABLE,
-        ...(((stack.driver?.config as { client?: unknown } | undefined)?.client)
-          ? { client: String((stack.driver?.config as { client?: unknown }).client) }
-          : {}),
+        ...(clientName ? { client: clientName } : {}),
         ...(flags.object ? { objectFilter: flags.object } : {}),
       });
 

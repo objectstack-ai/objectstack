@@ -54,7 +54,9 @@
  * `objectql -> metadata-core` and `metadata-protocol -> metadata-core` both
  * pre-date this change, and this package's own dependencies are
  * `{ @objectstack/spec, zod }` — no `objectql`, so no new edge and no new cycle.
- * This module importing nothing at all is what makes that free.
+ * This module importing nothing from outside its own package is what makes
+ * that free (its one sibling import, the #11009 refusal shared with the
+ * update twin, adds no package edge).
  *
  * `@objectstack/objectql` re-exports every symbol below from its original path,
  * so the 24+ call sites already pinned to it, and the public API, are unchanged.
@@ -71,6 +73,16 @@
  *    `driver.deleteMany` with the middleware-composed AST.
  *  - otherwise → **`reject`**. The call names neither one row nor a bulk
  *    intent, and the engine throws rather than guessing.
+ *
+ * **[#11009] One overriding clause on the by-id arm** (byte-for-byte the
+ * update twin's, minus the payload door `delete` does not have): the by-id
+ * route binds ONLY the primary key, so a `where` carrying any key besides
+ * `id` is a predicate the by-id path would silently discard. Such a call is
+ * never dispatched `by-id` — with `multi` truthy it is `multi` (the full
+ * `where`, scalar id included, rides the AST to `driver.deleteMany` — the
+ * compare-and-set spelling), otherwise it is `reject`, naming the dropped
+ * keys. A PURE-id `where` (`{ where: { id } }`) is untouched: it stays
+ * `by-id` even beside `multi: true` (LifecycleService's guarded-reap idiom).
  *
  * Two halves of that first line are load-bearing, and a hand-written double
  * drops one or the other — which is the whole argument for importing this
@@ -111,6 +123,11 @@
  *      needs `ObjectQL`, which this package must never depend on.
  * @see scripts/check-engine-double-contract.mjs — the gate that keeps doubles on it.
  */
+
+import {
+  engineByIdUnhonouredPredicateMessage,
+  unhonouredByIdPredicateKeys,
+} from './engine-dispatch-unhonoured-predicate.js';
 
 /** The message `delete()` throws when a call identifies neither one row nor a bulk intent. */
 export const ENGINE_DELETE_REJECT_MESSAGE = 'Delete requires an ID or options.multi=true';
@@ -177,7 +194,32 @@ export function resolveEngineDeleteDispatch(
   // `!== undefined`, so a falsy scalar id (`0`, `''`) is not an identifying
   // call and falls down the same ladder as a non-scalar one. See header
   // point 2, and the twin's point 3 (objectstack#5747 / objectstack#5748).
-  if (id) return { kind: 'by-id', id };
+  if (id) {
+    // [#11009] The by-id route binds ONLY the primary key, so a `where`
+    // carrying any key besides `id` is a predicate the by-id path would
+    // silently discard (the guard evaluated to nothing — the shape the update
+    // twin measured on `SqlHttpOutbox.redeliver`). Byte-for-byte the twin's
+    // rule, minus the payload arm `delete` does not have:
+    //
+    //  - `multi` truthy → `multi`: a declared predicate call; the full
+    //    `where` (scalar id included, as an equality term) rides the AST to
+    //    `driver.deleteMany`. The compare-and-set spelling. ⚠️ A PURE-id
+    //    `where` never reaches this branch and stays by-id even under
+    //    `multi: true` — LifecycleService's guarded reap depends on that for
+    //    per-record cascade handling, and the predicate path deliberately
+    //    trades cascade for an honoured predicate.
+    //  - otherwise → `reject`, loudly naming the keys that would have been
+    //    dropped.
+    const unhonoured = unhonouredByIdPredicateKeys(options?.where);
+    if (unhonoured.length > 0) {
+      if (options?.multi) return { kind: 'multi' };
+      return {
+        kind: 'reject',
+        message: engineByIdUnhonouredPredicateMessage('Delete', unhonoured),
+      };
+    }
+    return { kind: 'by-id', id };
+  }
   if (options?.multi) return { kind: 'multi' };
   return { kind: 'reject', message: ENGINE_DELETE_REJECT_MESSAGE };
 }
@@ -225,10 +267,18 @@ export interface EngineDeleteDispatchCase {
 export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] = [
   { what: 'scalar string id', options: { where: { id: 'rec_1' } }, expect: 'by-id' },
   { what: 'scalar number id', options: { where: { id: 42 } }, expect: 'by-id' },
-  { what: 'scalar id alongside other predicates', options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'by-id' },
+  // [#11009] A PURE-id `where` stays by-id even under a declared `multi` —
+  // there is no predicate the by-id path could drop, and LifecycleService's
+  // guarded reap relies on this shape for per-record cascade handling
+  // (`engine-data-events.test.ts` pins the event contract of the same shape).
+  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id delete (#11009)', options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id' },
   { what: 'multi with a predicate', options: { where: { rule_id: 'r1' }, multi: true }, expect: 'multi' },
   { what: 'multi with no predicate at all', options: { multi: true }, expect: 'multi' },
   { what: 'multi alongside an $in id set', options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'multi' },
+  // [#11009] The compare-and-set spelling: a scalar `where.id` beside real
+  // predicate keys WITH a declared `multi` is a predicate call — every key
+  // rides the AST to `driver.deleteMany`, so the condition is honoured.
+  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it (#11009)', options: { where: { id: 'rec_1', status: 'stale' }, multi: true }, expect: 'multi' },
   // ── The FALSY scalars (objectstack#5747). `0` and `''` are scalars, so
   //    `scalarDeleteId` returns them — but the engine's `if (input.id)` is a
   //    truthiness test, so neither identifies a row. With a declared bulk
@@ -253,4 +303,10 @@ export const ENGINE_DELETE_DISPATCH_CASES: readonly EngineDeleteDispatchCase[] =
   { what: 'empty where, no multi', options: { where: {} }, expect: 'reject' },
   { what: 'no options at all', options: undefined, expect: 'reject' },
   { what: 'multi explicitly false with a predicate', options: { where: { rule_id: 'r1' }, multi: false }, expect: 'reject' },
+  // ── [#11009] The unhonoured-predicate refusals — the delete twin of the
+  //    update-side cases. Each used to dispatch `by-id` and silently DISCARD
+  //    every `where` key other than `id`; now the refusal names the dropped
+  //    keys and prescribes the predicate path (`multi: true`).
+  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped (#11009)', options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
+  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false (#11009)', options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
 ];

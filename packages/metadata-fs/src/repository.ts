@@ -19,6 +19,9 @@
  *   - The root directory is created **on the first write, not on attach**
  *     (#7000). Attaching and reading a repository whose root does not exist
  *     is legal and answers "empty"; see `start()` / `ensureRoot()`.
+ *   - `close()` ENDS every live `watch()` iterator — the same observation the
+ *     consumer's own `iterator.return()` produces, never a synthetic event
+ *     standing in for shutdown (#11127; invariant 8 in `metadata-core`).
  */
 
 import fs from 'node:fs/promises';
@@ -132,6 +135,15 @@ export class FileSystemRepository implements MetadataRepository {
    * the first degradation). An entry is cleared when that path reads again.
    */
   private readonly resyncFaults = new Set<string>();
+  /**
+   * Bumped by every `close()`. `watch()` reads it before its deferred log
+   * replay starts and hands the comparison to `createWatchIterable`, so a
+   * subscription that registers AFTER the shutdown sweep terminates on
+   * arrival instead of parking forever (#11127). A counter rather than a
+   * boolean because `start()` may follow `close()`: a repository restart must
+   * not poison the watchers opened after it.
+   */
+  private closeGeneration = 0;
 
   constructor(opts: FileSystemRepositoryOptions) {
     this.org = opts.org;
@@ -195,10 +207,42 @@ export class FileSystemRepository implements MetadataRepository {
     if (this.started && !this.disableWatch && !this.watcher) this.startWatcher();
   }
 
+  /**
+   * Shut the repository down, ending every live `watch()` iterator.
+   *
+   * **Shutdown terminates; it does not emit** — invariant 8 in
+   * `@objectstack/metadata-core`'s `repository.ts`, and the reason this method
+   * reaches the broker at all. It used to retire the chokidar watcher and the
+   * resync sweep and stop there. The broker has no teardown of its own
+   * (`subscribe`/`unsubscribe` add to and delete from a plain `Set`), and each
+   * iterator parks its pending `next()` on a `waiter` that only a broker
+   * `push` or the iterator's own terminator can settle. After `close()` the
+   * chokidar source was gone, so no `push` could arrive; the subscriber was
+   * still registered, and nothing ran its terminator. A consumer holding a
+   * `for await` at shutdown — `MetadataManager.startRepositoryWatch()` is
+   * exactly that shape — therefore never saw its loop end, for EVERY
+   * subscription shape including `watch({})`.
+   *
+   * Termination is expressed as termination: each subscription's
+   * `terminate()`, which is the same routine the consumer's own
+   * `iterator.return()` runs, so no consumer has to tell "the repository shut
+   * down under me" apart from "I broke my own loop". A synthetic drain event
+   * would be the wrong shape and was measured to be so (#11021): the
+   * subscriptions most in need of draining are exactly the ones whose filter
+   * or numeric `since` drops it, and delivering an event has never ended an
+   * iterator.
+   */
   async close(): Promise<void> {
     // Retire the sweep BEFORE awaiting the watcher, so a sweep that lands
     // during `watcher.close()` cannot reschedule itself behind our back.
     this.stopResync();
+    // Terminate BEFORE the await for the same reason: a `watcher.close()` that
+    // rejects must not leave a consumer's `for await` parked forever, and a
+    // straggler event from the dying watcher has no one left to reach. Events
+    // still queued or unreplayed at this moment MAY be dropped (invariant 8),
+    // on this path and on `return()` alike.
+    this.closeGeneration++;
+    this.broker.terminateAll();
     if (this.watcher) {
       await this.watcher.close();
       this.watcher = null;
@@ -284,6 +328,11 @@ export class FileSystemRepository implements MetadataRepository {
         if (matchEvent(evt, filter)) replay.push(evt);
       }
     })();
+    // Read BEFORE the read above can complete: the subscriber below is
+    // registered only when it does, which is a window `close()`'s sweep cannot
+    // see (#11127). Compared on arrival, a shutdown inside that window ends
+    // this iterator instead of parking it.
+    const generation = this.closeGeneration;
     // We must await replay before returning, but the public API is
     // sync-returning AsyncIterable. Wrap in a deferred iterable.
     return deferredIterable(promise.then(() =>
@@ -294,6 +343,7 @@ export class FileSystemRepository implements MetadataRepository {
         broker: this.broker,
         matches: matchEvent,
         branchKeyOf: (e) => e.ref.org,
+        arrivesClosed: () => this.closeGeneration !== generation,
       }),
     ));
   }

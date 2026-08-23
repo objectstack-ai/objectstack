@@ -10,6 +10,7 @@ import { MessagingServicePlugin, MessagingService } from '@objectstack/service-m
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
+import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
 /**
@@ -62,19 +63,63 @@ function fakeAuthPlugin(): Plugin {
   };
 }
 
+/**
+ * [#10629] The authz resolver's expected read failures: WITHHELD, and ASSERTED.
+ *
+ * This file is the direct sibling `notification-schema-conformance.integration.test.ts`
+ * names in its own header, and it carries the same never-provisioned `sys_*`
+ * authz reads through `resolveUserAuthzGrants`
+ * (`core/src/security/resolve-authz-context.ts`): the fixture provisions the
+ * messaging objects and nothing else, so every authenticated request reads six
+ * `sys_*` tables that were never created. `tryFind` swallows each one by design
+ * — the resolver is fail-closed and must always resolve — but on the way out
+ * the driver and the engine each log it. Measured on `origin/main`: 52
+ * `refused a read on` lines and 52 matching `ERROR Find operation failed`
+ * frames, out of a suite whose five tests all PASS.
+ *
+ * PR #10630 ruled the shape for this class and applied it to the sibling; this
+ * is the same shape through the shared `expected-read-refusal-noise.ts`, whose
+ * header carries the full rationale (⛔ it withholds ONLY a line that names one
+ * of these tables AND carries that same table's `no such table` reason, and it
+ * COUNTS what it withheld so the assertions below can be a PIN rather than a
+ * mute).
+ */
+const ABSENT_AUTHZ_TABLES = [
+  'sys_user',
+  'sys_member',
+  'sys_user_position',
+  'sys_user_permission_set',
+  'sys_position',
+  'sys_setting',
+] as const;
+
+/**
+ * The five read on EVERY grant resolution, i.e. on every authenticated request
+ * this file makes. `sys_setting` is deliberately NOT here: it is read on only
+ * some routes, so requiring it would turn a single-test `-t` run red without
+ * meaning anything — it is still withheld when it does fire.
+ */
+const ALWAYS_READ_AUTHZ_TABLES = ABSENT_AUTHZ_TABLES.filter((t) => t !== 'sys_setting');
+
 describe('in-app notifications over a real hono server (integration, #3362)', () => {
   let kernel: ObjectKernel;
   let baseUrl: string;
   let messaging: MessagingService;
+  /** [#10629] The expected-noise capture, asserted by every authed test below. */
+  const noise = captureExpectedReadRefusals([...ABSENT_AUTHZ_TABLES]);
 
   beforeAll(async () => {
-    kernel = new ObjectKernel({ logLevel: 'silent' });
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
     // In-memory SQLite backs persistence; ObjectQL (registered after the
     // driver so it discovers it) provides `objectql` + `data` + `manifest`;
     // MessagingServicePlugin registers the `notification` service the dispatcher
     // resolves and owns the inbox tables. Inline delivery (reliableDelivery:false)
     // writes the inbox row synchronously so `emit()` is observable immediately.
-    await kernel.use(new DriverPlugin(new SqliteWasmDriver({ filename: ':memory:' })));
+    // [#10629] The driver is named rather than inlined so its logger can be
+    // scoped before it ever runs a statement.
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    noise.captureDriver(driver);
+    await kernel.use(new DriverPlugin(driver));
     await kernel.use(new ObjectQLPlugin());
     // No app plugin registers `sys_notification` here: MessagingServicePlugin
     // contributes the L2 event it writes, so this lean kernel needs nothing
@@ -89,6 +134,10 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     await kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
 
     await kernel.bootstrap();
+
+    // [#10629] The engine only exists once the kernel has bootstrapped; the
+    // reads this scopes all happen later, per request.
+    noise.captureEngine(kernel.getService<unknown>('objectql'));
 
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
@@ -162,6 +211,17 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     const served = await authed('/api/v1/notifications?limit=5&read=false');
     expect(served.status).toBe(200);
     expect((await served.json() as { success: boolean }).success).toBe(true);
+
+    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
+    // the shared `Test Core` log out of a PASSING test and were read there as a
+    // real failure; they are withheld now and asserted here. Asserted per authed
+    // test rather than in `afterAll` because two tests in this file resolve no
+    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
+    // make a single-test `-t` run of either of them red for no reason.
+    // ⛔ If one of these goes silent the repair is to re-derive the list above,
+    // NOT to relax this: a resolver read that stopped happening is a finding,
+    // and a table that started resolving means this fixture now provisions it.
+    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
   });
 
   it('lists, marks specific read, then marks all read — flipping receipts and clearing the unread count', async () => {
@@ -207,6 +267,17 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     });
     expect(receipts.length).toBe(2);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
+
+    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
+    // the shared `Test Core` log out of a PASSING test and were read there as a
+    // real failure; they are withheld now and asserted here. Asserted per authed
+    // test rather than in `afterAll` because two tests in this file resolve no
+    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
+    // make a single-test `-t` run of either of them red for no reason.
+    // ⛔ If one of these goes silent the repair is to re-derive the list above,
+    // NOT to relax this: a resolver read that stopped happening is a finding,
+    // and a table that started resolving means this fixture now provisions it.
+    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
   });
 
   it('[#6436] mark-all-read clears an inbox LARGER than the list window — no readCount/unreadCount contradiction', async () => {
@@ -257,5 +328,16 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     });
     expect(receipts.length).toBe(TOTAL);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
+
+    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
+    // the shared `Test Core` log out of a PASSING test and were read there as a
+    // real failure; they are withheld now and asserted here. Asserted per authed
+    // test rather than in `afterAll` because two tests in this file resolve no
+    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
+    // make a single-test `-t` run of either of them red for no reason.
+    // ⛔ If one of these goes silent the repair is to re-derive the list above,
+    // NOT to relax this: a resolver read that stopped happening is a finding,
+    // and a table that started resolving means this fixture now provisions it.
+    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
   }, 120_000);
 });

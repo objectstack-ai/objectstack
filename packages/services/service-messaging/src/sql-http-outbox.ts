@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
@@ -16,7 +16,7 @@ import {
     type HttpDelivery,
     type HttpDeliveryStatus,
     type IHttpOutbox,
-    type RedeliverGuard,
+    type RedeliverOptions,
     type UndeliverableHttpInput,
 } from './http-outbox.js';
 import { SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
@@ -329,7 +329,10 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 next_retry_at: nextRetryAt,
                 error,
             },
-            { where: { id }, multi: false },
+            // Single-record dispatcher write, audited under the `update` op.
+            // Declared a global-sweep site — no request context exists on the
+            // tick that reaches here. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherAckOptions(id),
         );
     }
 
@@ -341,14 +344,52 @@ export class SqlHttpOutbox implements IHttpOutbox {
         return rows.map((r) => this.toDelivery(r));
     }
 
-    async redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery> {
-        const current = (await this.engine.findOne(this.objectName, { where: { id } })) as DeliveryRow | null;
+    /**
+     * [#10740] The one request-reachable write on `sys_http_delivery`, and the
+     * only site in this class that is tenant-SCOPED rather than declared
+     * global.
+     *
+     * `POST /api/v1/webhooks/redeliver` serves any authenticated user, so on a
+     * walled deployment the caller's organization is exactly the predicate
+     * this write is missing — and `options.tenantId` supplies it, to the reads
+     * as well as the write. ⛔ `bypassTenantAudit` is NOT an option here: the
+     * two produce the same silence in the log, and the audit line is the only
+     * thing that would ever report this hole. See {@link RedeliverOptions}.
+     *
+     * Scoping the READS is what makes the refusal fail-closed and quiet: a row
+     * belonging to another organization is not found (`RESOURCE_NOT_FOUND`),
+     * so the endpoint neither replays it nor confirms it exists. It is also
+     * what keeps the guard honest — the producer veto never sees a row the
+     * caller may not read.
+     */
+    async redeliver(id: string, options: RedeliverOptions): Promise<HttpDelivery> {
+        // One options bag for every engine call below, so the read that decides
+        // the refusal and the write that acts on it can never disagree about
+        // which tenant is asking.
+        const scope = { tenantId: options.tenantId };
+        const current = (await this.engine.findOne(this.objectName, {
+            where: { id },
+            ...scope,
+        })) as DeliveryRow | null;
         if (!current) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
         // [#8069] Every refusal runs BEFORE the reset UPDATE — a refused
         // redelivery leaves the row exactly as it was, `dead` reason included.
-        await assertRedeliverAllowed(this.toDelivery(current), guard);
+        await assertRedeliverAllowed(this.toDelivery(current), options.guard);
+        // [#11009] `multi: true`, deliberately, and it is the compare-and-set
+        // half of this method's check-then-act: the status predicate re-states
+        // the terminal requirement AT THE WRITE so a row that changed under us
+        // (the dispatcher's tick claims `pending` rows into `in_flight`
+        // continuously) is NOT reset. On the by-id path (`multi: false`) this
+        // exact predicate was silently discarded — `driver.update` binds only
+        // the id — so the guard evaluated to nothing and a mid-flight claim
+        // was overwritten while redeliver reported success; the engine now
+        // REFUSES that spelling outright. The predicate path
+        // (`driver.updateMany`) compiles every `where` key, `id` equality
+        // included, so the reset lands only if the row is still terminal.
+        // A miss writes 0 rows and the read-back below reports the refusal
+        // (`DELIVERY_NOT_ELIGIBLE`) instead of a false success.
         await this.engine.update(
             this.objectName,
             {
@@ -362,9 +403,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 response_body: null,
                 error: null,
             },
-            { where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: false },
+            { where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: true, ...scope },
         );
-        const after = (await this.engine.findOne(this.objectName, { where: { id } })) as DeliveryRow | null;
+        const after = (await this.engine.findOne(this.objectName, {
+            where: { id },
+            ...scope,
+        })) as DeliveryRow | null;
         if (!after || after.status !== 'pending') {
             throw new HttpRedeliverError(`Delivery row '${id}' state changed during redeliver`, 'DELIVERY_NOT_ELIGIBLE');
         }

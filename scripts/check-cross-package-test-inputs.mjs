@@ -264,6 +264,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     schema files it inventories, so the ledger IS an input to the ratchet.
       'content/docs/api/error-catalog.mdx',
       'docs/audits/2026-07-unknown-key-strictness-ledger.md',
+      // src/shared/retired-key-migrate-sentence.test.ts judges the ONE
+      // governed markdown file its population was widened by (#10848,
+      // maintainer-ruled): the retirement playbook that teaches authors the
+      // prescription sentence the pin holds. One file, not `.claude/**`.
+      '.claude/skills/spec-property-retirement/SKILL.md',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
@@ -384,6 +389,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'content/docs/deployment/index.mdx',
       'content/docs/permissions/authentication.mdx',
       'scripts/check-nul-bytes.mjs',
+      // This gate's OWN script, the third entry of the mention shape on this
+      // package: test/scaffold-workspace-consistency.test.ts quotes it while
+      // explaining where its cross-package read is declared. Settled the way
+      // check-nul-bytes.mjs above is — the literal collector takes quoted paths
+      // without parsing, so a mention forces a declaration, and declaring one
+      // rarely-touched file is cheaper than rewording prose to dodge a scanner.
+      'scripts/check-cross-package-test-inputs.mjs',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
       // `translation.zod.ts` is the second entry no test READS -- named in a
@@ -398,6 +410,22 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `@objectstack/spec` is a real dependency of this package, so the graph
       // already re-runs these tests on any spec change.
       'packages/spec/src/system/translation.zod.ts',
+      // The blank template's rendered `pnpm-workspace.yaml`, READ by
+      // test/scaffold-workspace-consistency.test.ts (#10499). Two scaffold
+      // paths write that file into a new user's project — this package's
+      // `renderPnpmWorkspaceYaml()` and create-objectstack's literal
+      // template — and each package's own ratchets are package-local, so
+      // neither could ever fail for the other's regression. The consistency
+      // test compares the two RENDERED outputs, which makes the template file
+      // a real input to this package's verdict: a template-only diff changes
+      // what that test measures. Without this declaration such a diff reaches
+      // neither layer — `turbo ls --affected` would still pick cli up (it
+      // depends on create-objectstack for the shared `created-summary`
+      // renderer), but `@objectstack/cli#test` would hash the same and replay
+      // a cached green over the divergence, which is #7802's Layer B exactly.
+      // One file, not `packages/create-objectstack/**`: the test reads that
+      // template and nothing else across the boundary.
+      'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
     ],
   },
   '@objectstack/client': {
@@ -643,16 +671,24 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // (its `paths:` filter is `packages/create-objectstack/**`), which is why
     // the test lives here rather than beside a shell script in spec (#9779).
     //
-    // The last three are NAMED in that test's header rather than read, the same
-    // shape as `check-nul-bytes.mjs` above and settled the same way: the literal
-    // collector takes quoted paths without parsing, so a mention forces a
-    // declaration, and declaring three rarely-touched files is cheaper than
-    // rewording prose to dodge a scanner. `serve.ts` earns it on the merits too
-    // — its `flags.dev || NODE_ENV === 'development'` port-shift gate is the
-    // single fact that decides which fix those workflow blocks need, so a change
-    // to that branch is exactly the change the test's premise would need
-    // re-measuring against. The two sibling scripts are cited for the contrast
-    // that keeps the fixes from being copied between them.
+    // Three of the remaining four are NAMED in a test's header rather than
+    // read, the same shape as `check-nul-bytes.mjs` above and settled the
+    // same way: the literal collector takes quoted paths without parsing, so
+    // a mention forces a declaration, and declaring a rarely-touched file is
+    // cheaper than rewording prose to dodge a scanner. `serve.ts` earns it on
+    // the merits too — its `flags.dev || NODE_ENV === 'development'`
+    // port-shift gate is the single fact that decides which fix those
+    // workflow blocks need, so a change to that branch is exactly the change
+    // the test's premise would need re-measuring against. The two sibling
+    // scripts are cited for the contrast that keeps the fixes from being
+    // copied between them.
+    //
+    // `packages/cli/src/commands/init.ts` is the fourth of that shape (#10322):
+    // scaffold-next-steps-pm.test.ts's header quotes it in backticks while
+    // explaining that `init.ts`'s own "Next steps" output already threads its
+    // detected `chosenPm` the same way this package's scaffolder now does —
+    // it is cited for the contrast, never read. The test execs
+    // `create-objectstack`'s own CLI via `tsx`, not `init.ts`.
     globs: [
       'content/**',
       'scripts/sync-template-versions.mjs',
@@ -670,6 +706,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/serve.ts',
       'scripts/gen-sdui-manifest.sh',
       'scripts/publish-smoke.sh',
+      'packages/cli/src/commands/init.ts',
     ],
     heldBy: {
       // Read through `git grep -- content/docs` and `git ls-files`, so the

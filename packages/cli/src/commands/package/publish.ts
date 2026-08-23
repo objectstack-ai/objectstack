@@ -23,6 +23,7 @@ import { resolve as resolvePath, basename, dirname, isAbsolute } from 'node:path
 import { Args, Command, Flags } from '@oclif/core';
 import { printHeader, printKV, printSuccess, printError, printStep } from '../../utils/format.js';
 import { DEFAULT_CLOUD_URL, tryReadCloudConfig } from '../../utils/cloud-config.js';
+import { readErrorMessage } from '../../utils/response-envelope.js';
 
 const MANIFEST_ID_RE = /^[a-z0-9][a-z0-9._-]{0,254}$/i;
 
@@ -643,8 +644,7 @@ export default class PackagePublish extends Command {
       let parsed: any = null;
       try { parsed = await response.json(); } catch { /* empty/non-json */ }
       if (!response.ok) {
-        const errMsg = parsed?.error ?? response.statusText ?? `HTTP ${response.status}`;
-        return { ok: false, status: response.status, body: parsed, error: String(errMsg) };
+        return { ok: false, status: response.status, body: parsed, error: readErrorMessage(parsed, response) };
       }
       return { ok: true, status: response.status, body: parsed };
     } catch (err: any) {
@@ -688,8 +688,7 @@ export default class PackagePublish extends Command {
       let parsed: any = null;
       try { parsed = await response.json(); } catch { /* empty/non-json */ }
       if (!response.ok) {
-        const errMsg = parsed?.error ?? response.statusText ?? `HTTP ${response.status}`;
-        return { ok: false, status: response.status, body: parsed, error: String(errMsg) };
+        return { ok: false, status: response.status, body: parsed, error: readErrorMessage(parsed, response) };
       }
       return { ok: true, status: response.status, body: parsed };
     } catch (err: any) {

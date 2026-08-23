@@ -7,7 +7,7 @@ import {
   recordGuards,
   refdTimeouts,
   stillPinningTheLoop,
-} from './refd-timer-probe.testkit.js';
+} from '@objectstack/refd-timer-testkit';
 
 describe('PluginHealthMonitor', () => {
   let monitor: PluginHealthMonitor;
@@ -123,7 +123,7 @@ describe('PluginHealthMonitor', () => {
 
     /**
      * The instrument these pins measure with lives in
-     * `refd-timer-probe.testkit.ts`, together with the argument for its shape:
+     * `@objectstack/refd-timer-testkit`, together with the argument for its shape:
      * `getActiveResourcesInfo()` is PROCESS-global, so two readings are only
      * comparable across a window that crosses no event-loop turn — the very
      * property this suite states below and the one three sibling pins were

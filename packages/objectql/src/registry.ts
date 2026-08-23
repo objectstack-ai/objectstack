@@ -1328,6 +1328,85 @@ export class SchemaRegistry {
   /** FQN → Contributor[] (all packages that own/extend this object) */
   private objectContributors = new Map<string, ObjectContributor[]>();
 
+  /**
+   * [#10945] Short name → the `objectContributors` KEYS registered under it, in
+   * that map's own insertion order.
+   *
+   * The reverse of `objectContributors`, which is keyed by FQN. Without it
+   * {@link resolveObjectKey} answered the short-name direction by scanning
+   * EVERY key and calling {@link parseFQN} on each — a full registry walk per
+   * lookup, from seven call sites including {@link getObject}. A boot that
+   * registers N objects and resolves O(N) names therefore did O(N²) string
+   * work, measured at exponent ≈1.89 with `parseFQN` the largest non-database
+   * entry in the CPU profile: 80ms of registry-scan self time at 1,000 stored
+   * metadata rows, 2,325ms at 8,000. That is the mechanism behind a hosted
+   * environment whose bootstrap outgrew its request waiter and became
+   * permanently unservable with no error anywhere — boot got slower purely by
+   * the environment being used.
+   *
+   * Two properties this index must not quietly change, both pinned in
+   * `registry-shortname-index.test.ts`:
+   *
+   * 1. **A lookup does not depend on registration order.** It resolves to the
+   *    same FQN whichever order the contributors arrived in — and where a short
+   *    name is genuinely ambiguous, to the FIRST key registered under it,
+   *    exactly as the scan's `matches[0]` did. That is why the value is an
+   *    ORDERED ARRAY appended to by {@link openObjectEntry} in lockstep with
+   *    `objectContributors.set`, and not a bare last-writer-wins entry.
+   * 2. **The two maps move together.** They are mutated only through
+   *    {@link openObjectEntry} / {@link closeObjectEntry}, so the read path and
+   *    the name-addressed removal path cannot come to disagree about which
+   *    contributor a bare name addresses — the #6808 contract restated at
+   *    {@link resolveObjectKey}, and a second index is exactly where it could
+   *    drift.
+   */
+  private objectKeysByShortName = new Map<string, string[]>();
+
+  /**
+   * [#10945] The ONLY writer of a new `objectContributors` key. Returns the
+   * contributor list for `fqn`, creating an empty one — and indexing it under
+   * its short name — on first use.
+   *
+   * A choke point rather than a discipline: the short-name index is maintained
+   * inside the same statement that adds the key, so no future caller can add a
+   * contributor list and forget the index half.
+   */
+  private openObjectEntry(fqn: string): ObjectContributor[] {
+    const existing = this.objectContributors.get(fqn);
+    if (existing) return existing;
+
+    const contributors: ObjectContributor[] = [];
+    this.objectContributors.set(fqn, contributors);
+    const { shortName } = parseFQN(fqn);
+    const keys = this.objectKeysByShortName.get(shortName);
+    // Append, never replace: `matches[0]` is first-registered-wins, and both
+    // containers are appended to here in the same order, so the index array is
+    // `objectContributors`' key order narrowed to this short name.
+    if (keys) keys.push(fqn);
+    else this.objectKeysByShortName.set(shortName, [fqn]);
+    return contributors;
+  }
+
+  /**
+   * [#10945] The ONLY remover of an `objectContributors` key — the mirror of
+   * {@link openObjectEntry}. A no-op when the key is not registered, so removal
+   * stays idempotent.
+   *
+   * Empty short-name buckets are deleted rather than left behind: a retained
+   * empty array would make {@link resolveObjectKey}'s index hit and its FQN
+   * fallback disagree for a name that is both (a legacy `<ns>__<name>` key
+   * removed while a plain key of the same short name is still registered).
+   */
+  private closeObjectEntry(fqn: string): void {
+    if (!this.objectContributors.delete(fqn)) return;
+    const { shortName } = parseFQN(fqn);
+    const keys = this.objectKeysByShortName.get(shortName);
+    if (!keys) return;
+    const idx = keys.indexOf(fqn);
+    if (idx !== -1) keys.splice(idx, 1);
+    if (keys.length === 0) this.objectKeysByShortName.delete(shortName);
+  }
+
   /** FQN → Merged ServiceObject (cached, invalidated on changes) */
   private mergedObjectCache = new Map<string, ServiceObject>();
 
@@ -1528,12 +1607,9 @@ export class SchemaRegistry {
       this.registerNamespace(namespace, packageId);
     }
 
-    // Get or create contributor list
-    let contributors = this.objectContributors.get(fqn);
-    if (!contributors) {
-      contributors = [];
-      this.objectContributors.set(fqn, contributors);
-    }
+    // Get or create contributor list (#10945: the one creation choke point —
+    // it keeps `objectKeysByShortName` in step with `objectContributors`)
+    const contributors = this.openObjectEntry(fqn);
 
     // Validate ownership rules
     if (ownership === 'own') {
@@ -2362,17 +2438,21 @@ export class SchemaRegistry {
    * Returns `undefined` when nothing is registered under the name, so
    * `getObject` keeps its exact previous behaviour: `resolveObject` on an
    * unknown FQN also answered `undefined`.
+   *
+   * [#10945] The short-name half is answered from {@link objectKeysByShortName}
+   * rather than by scanning every contributor key. That keeps the extraction
+   * above intact where it matters most — BOTH paths still resolve through this
+   * one method, so they read one index and cannot diverge — while removing the
+   * full-registry walk that made kernel boot quadratic in stored metadata.
    */
   private resolveObjectKey(name: string): string | undefined {
-    // Canonical: short name lookup
-    const matches: string[] = [];
-    for (const fqn of this.objectContributors.keys()) {
-      const { shortName } = parseFQN(fqn);
-      if (shortName === name) {
-        matches.push(fqn);
-      }
-    }
-    if (matches.length > 0) {
+    // Canonical: short name lookup. O(1) via {@link objectKeysByShortName},
+    // whose array IS the list the pre-#10945 full-registry scan built — same
+    // members, same order — so `matches[0]` still names the first key
+    // registered under an ambiguous short name and the warning still names
+    // every one of them.
+    const matches = this.objectKeysByShortName.get(name);
+    if (matches !== undefined && matches.length > 0) {
       if (matches.length > 1) {
         console.warn(
           `[SchemaRegistry] Ambiguous short name "${name}" matches: ${matches.join(', ')}. ` +
@@ -2631,7 +2711,7 @@ export class SchemaRegistry {
 
       // Clean up empty contributor lists
       if (contributors.length === 0) {
-        this.objectContributors.delete(fqn);
+        this.closeObjectEntry(fqn);
       }
 
       // Invalidate cache
@@ -2720,7 +2800,7 @@ export class SchemaRegistry {
     // The whole entry goes: the object no longer exists, so no contribution to
     // it does either. Leaving the extenders behind would be the owner-less
     // state the guard above exists to prevent.
-    this.objectContributors.delete(fqn);
+    this.closeObjectEntry(fqn);
     // The same two invalidations every other contributor mutation performs —
     // the merged-object cache would otherwise keep answering `resolveObject`
     // for a name with no contributors, and registry-derived caches (the
@@ -3715,6 +3795,10 @@ export class SchemaRegistry {
    */
   reset(): void {
     this.objectContributors.clear();
+    // [#10945] The short-name index is derived from `objectContributors`; a
+    // reset that cleared only one of them would resolve names to keys that no
+    // longer exist.
+    this.objectKeysByShortName.clear();
     this.mergedObjectCache.clear();
     this.namespaceRegistry.clear();
     this.metadata.clear();

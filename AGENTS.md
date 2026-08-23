@@ -31,10 +31,8 @@ the script's own header is the authority on detail.
   就是改写裁决。上面那段引用即是一例:它是维护者的原话,一个字未动。
 - 代码、标识符、提交信息(commit messages)、ADR/文档正文等仓库产物保持现有语言惯例(以英文为主),不要因本节而改写。
 
-The rules are split per channel because a merged rule was measured to fail: an agent
-holding one instruction that claimed explanatory PR text for Chinese and another
-demanding English produced half-Chinese, half-English PR bodies on the same day. One
-rule per channel, no overlap.
+The rules are split per channel because a merged rule was measured to fail (it produced
+half-Chinese, half-English PR bodies in one day). One rule per channel, no overlap.
 
 ---
 
@@ -66,9 +64,8 @@ Three principles the ratchet's invariants encode, worth knowing before you fight
   it in the `typecheck` script (the `packages/spec` pattern); the sibling may carry its
   own *module* semantics to match vitest, never its own *strictness*.
 - **A `@ts-expect-error` in a file no tsc program compiles is a phantom check** — it
-  evaluates never, and deleting it leaves every gate just as green (a repo-wide sweep
-  once found seventeen retirement pins in that state in one package alone). Before
-  writing one, check the file is compiled. Test-layer residue lives in the per-file,
+  evaluates never, and deleting it leaves every gate just as green. Before writing
+  one, check the file is compiled. Test-layer residue lives in the per-file,
   shrink-only `<package>/test-typecheck-debt.json` (regenerate with
   `pnpm --filter <package> gen:test-typecheck-debt`); the shared gate is
   `scripts/check-test-typecheck.mts --package <dir>` — onboard by wiring, never by
@@ -216,9 +213,8 @@ every linked worktree pushes onto and pops off **one shared LIFO stack**. Two ag
 stashing at the same time swap entries — your `pop` restores the other agent's changes,
 your own work stays on the stack for them to take, and **`pop` reports success**; the
 only symptom is another agent's files in your `git status`, after which a `git add -A`
-commits their half-finished work into your PR. It has really happened to two parallel
-agents mid reverse-verification, both changesets recoverable only as unreachable
-commits. A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`; details and the
+commits their half-finished work into your PR. It has really happened, mid reverse-
+verification. A PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`; details and the
 `OS_ALLOW_STASH=1` escape in its header, self-test alongside) blocks the mutating forms
 — including `stash@{N}`, a *position* in a stack you don't own — and allows
 `list`/`show`/`create` and `apply`/`store` pinned to a literal hex object id. It fails
@@ -259,6 +255,12 @@ real PR had 157 such deletions staged, caught only by the `MM`). Restore with
 stage it at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree
 only — porcelain shows a lone unstaged `M`, not `MM` — so prefer it when standing
 another ref's version up for a counterfactual.
+
+**A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
+`scripts/pm/git-history.mjs` — answer, or REFUSE.** A shallow clone answers windowed
+`git log`/`rev-list` questions from truncated history at exit 0 with no warning; the tool
+proves the window is covered first. `historyHorizon()` is the read-only predicate for
+tools that answer their own question.
 
 **Claim the issue BEFORE you write any code.** Assign it to yourself
 (`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
@@ -320,8 +322,7 @@ Even inside your own worktree, operate defensively:
    `claude/issue-<n>-<slug>`. The issue number in the name is what makes in-flight work
    *discoverable* — `git ls-remote --heads origin | grep issue-<n>` is a one-command
    pre-check, and the Duplicate Fix Guard workflow warns on fix PRs whose branch names
-   no declared issue. A duplicated implementation once stayed invisible partly because
-   one branch carried the issue number and the other didn't.
+   no declared issue (how one implementation once got duplicated).
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
    force-push can clobber a parallel agent's work; `main` is shared — land everything
    via PR.
@@ -658,8 +659,7 @@ their output is current; the wrapper reports that each run rather than staying s
 
 Two roots; **the filesystem is the catalog**. Consult the matching `SKILL.md` when
 working in its domain — browse the directory, never a hand-written list here (two
-such lists drifted stale as skills landed; a reader who trusts a list cannot see
-what it is missing):
+such lists drifted stale as skills landed):
 
 - `skills/` — the **published** catalog (it ships to customer projects).
 - `.claude/skills/` — repo-internal agent playbooks; every entry must carry
@@ -897,14 +897,13 @@ legal**: `AutomationEngine.getUnknownNodeTypeAudit()` reads the executor registr
 every call, records nothing, and is correct.
 
 **Why this is a rule and not a preference.** One showcase cold start produced three
-instances in three unrelated subsystems, written by three people at three times: an
-auth plugin froze an `undefined` cache handle into its config for the life of the
-process (the printed warning sent operators to provision Redis for a problem they did
-not have); the automation service asserted eight flows "will fail at execution time"
-0.8s before their executor registered — indistinguishable from a deployment that
-genuinely lacked the plugin; and the query engine persisted a schema attestation the
-same boot was still contradicting, so the next restart rejected its predecessor's
-data.
+instances in three unrelated subsystems: an auth plugin froze an `undefined` cache
+handle into its config for the life of the process (the printed warning sent operators
+to provision Redis for a problem they did not have); the automation service asserted
+eight flows "will fail at execution time" 0.8s before their executor registered —
+indistinguishable from a deployment that genuinely lacked the plugin; and the query
+engine persisted a schema attestation the same boot was still contradicting, so the
+next restart rejected its predecessor's data.
 
 **The three cures, in preference order:**
 
@@ -950,9 +949,10 @@ new open registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fi
    <!-- adr-0087: not-required (no-migration-prescription) why -->
    ```
    Why it is asked of you at all: the ADR-0087 gates pin ledger ↔ **artifact synchrony**, and the artifacts are a pure projection of the registry — a retirement whose entry was **never written** leaves everything perfectly consistent and every gate green (a removal has shipped that way, caught only by a human comparing by eye). Ledger entries are the sole channel that reaches an upgrader (`objectstack migrate meta`, `spec-changes.json`, the upgrade guide) — for a surface with no spec schema there is no tombstone or schema rejection either. Roughly 1 declared-breaking change in 7 needs an entry, so `not-required` is the ordinary answer and costs one line; the markers are re-verified mechanically, and `no-migration-prescription` is refused when the changeset's own body carries a FROM → TO prescription.
-4. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
-5. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
-6. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
+4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`, so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it merges — "retire the surface" and "leave the sibling untouched" cannot both hold. A ruling that authorizes such a removal therefore implicitly authorizes the objectui-side fix and the pin bump as part of the same landing (the bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the pinned SHA before merging.
+5. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per entry point); a new export makes the snapshot stale and turns the job red. It reads the **built `dist` declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and so do reproduce locally.
+6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
+7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc scripts. Repo must look identical to before, minus intended changes.
 
 ---
 

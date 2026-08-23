@@ -46,7 +46,7 @@ export const ACCOUNT_APP: App = {
   protection: {
     lock: 'full',
     reason: 'Core self-service security UI shipped by @objectstack/platform-objects — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   branding: {
     primaryColor: '#0ea5e9', // sky-500 — distinct from Setup's slate

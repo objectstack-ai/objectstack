@@ -85,7 +85,7 @@ export const OpenDocsAction = defineAction({
   icon: 'book-open',
   objectName: task,
   type: 'url',
-  target: 'https://docs.objectstack.ai',
+  target: 'https://objectstack.ai',
   locations: ['record_more'],
   refreshAfter: false,
 });

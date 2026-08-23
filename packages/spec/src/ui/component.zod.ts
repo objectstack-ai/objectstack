@@ -635,7 +635,9 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `9a3daf8d3`): `containers.tsx:662-668` renders
+     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
+     * `containers.tsx` changed across the move from `9a3daf8d3` but both
+     * anchors below landed on the same lines): `containers.tsx:662-668` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
@@ -1526,7 +1528,9 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `9a3daf8d3`): `containers.tsx:851-857` renders
+     * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
+     * `containers.tsx` changed across the move from `9a3daf8d3` but both
+     * anchors below landed on the same lines): `containers.tsx:851-857` renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
@@ -1700,7 +1704,9 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `9a3daf8d3`): `components/src/renderers/form/
+   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 —
+   * `button.tsx` is byte-identical to the one at `9a3daf8d3`, so every anchor
+   * below is unmoved): `components/src/renderers/form/
    * button.tsx:44-47` resolves `schema.icon`, and `:69` / `:71` render it on
    * either side of the label per `iconPosition` (`mr-2 h-4 w-4` left,
    * `ml-2 h-4 w-4` right), both suppressed while `loading`.
@@ -2214,7 +2220,10 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `9a3daf8d3`), and the chain runs three files:
+   * (`.objectui-sha` = `190fbd01d`; re-derived at that pin 2026-08-22 — all
+   * four files in the chain below, plus `lazy-icon.tsx`, are byte-identical to
+   * the ones at `9a3daf8d3`, so every anchor is unmoved), and the chain runs
+   * three files:
    * `plugin-dashboard/src/index.tsx:161` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to

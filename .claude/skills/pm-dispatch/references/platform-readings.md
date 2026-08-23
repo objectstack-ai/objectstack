@@ -1,8 +1,7 @@
 # 平台读数事实表(references —— 按需加载)
 
-出处:主文件「平台读数纪律」。本表是 GitHub API / 工具行为的**实测事实**,在做对应
-操作的那一刻查阅;原则住在主文件。⛔ 本表不引用 issue 编号 —— 每条自含失效模式与边
-界。
+出处:主文件「平台读数纪律」。本表 = GitHub API / 工具行为的**实测事实**,做对应操作的那一刻查阅;
+原则住主文件。⛔ 不引用 issue 编号 —— 每条自含失效模式与边界。
 
 ## 队列成员资格与 auto-merge
 
@@ -12,9 +11,8 @@
   405 `Changes must be made through the merge queue`)或 rulesets API;姊妹仓不一致(objectos 2026-08-18 起有队列,hotcrm 只有 ruleset)⇒ 新仓落地约定靠实测确立,⛔ 不由缺席推断(2026-08-20 实测)。
 - 判「在不在合并队列」看 timeline 事件 `added_to_merge_queue`(REST
   `GET /repos/{owner}/{repo}/issues/{pr}/timeline`),⛔ 不看 `auto_merge` 字段 ——
-  入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支读法
-  (`git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`)正命中是「已
-  入队」的充分证据,反向推断作废 —— 队列满载时 PR 已入队而分支尚未建出。
+  入队后它回落为 off,零信息量(维护者 2026-08-11 裁定)。队列分支(ls-remote 拼写见
+  「零成本等价物」)正命中即已入队,缺席不作反证 —— 队列满载时分支尚未建出。
 - **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged`
   是落地不是被踢;真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查
@@ -31,21 +29,21 @@
 - **`enable_pr_auto_merge` 一律显式传 `mergeMethod: "SQUASH"`**(不传时静默退回被
   禁的 merge-commit 方式 = 无操作);**回显两向不可靠**(实测:队列路径回显空而入
   队照发;显式传 SQUASH 回显 `MERGE`,落地仍每 PR 一提交)⇒ 权威信号只有 timeline 入队事件与最终 MERGED,⛔ 不拿回显当任何方向的证据。
-- enable 后的验证序列:① 先验队列分支(给条目 ~20–30s 建出);② 分支在 ⇒ 结束,
-  ⛔ 不翻转;③ 等待后仍缺席**且队列已见 churn**(更新的条目建出了分支而你的没有 ——
-  截断下单纯缺席不充分;首挂静默不入队实测存在,churn 后翻转即愈)⇒ 翻转一次
-  (`disable` → `enable`),翻转后仍以 timeline 事件验证;④ ⛔ enable 与它的队列验
-  证之间永不插 `disable` ——「入队」webhook 可能乱序迟到,armed 窗口里补的 disable 会把已发生的真实入队撤掉。
+- **配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生**(实测:12:01Z 一次「成功」后 2.5 小时零动静 —— 同期别的 PR 正常合入,合并通路是好的;~14:33Z 配额恢复后同一调用 ~1 分钟内落地)⇒ **验效果,不验回应**:挂载后按下条序列以队列分支 / timeline 入队事件确认,⛔ 不拿成功报文收工。⚠️ 「回读 `auto_merge` 非空」这条自然写法**本接口给不了**:`pull_request_read` 无该字段、`fields` 枚举也无此成员(armed 与未 armed 读回逐字节相同:`open` / `draft:false` / `mergeable_state: clean`),入队后它又回落为 off ⇒ 可用效果读数只有队列分支、timeline 入队事件、最终落地三种。已死假说记此免得重犯:auto-merge **不会**在已绿 PR 上静默空转(恢复窗口里两个全绿 PR 挂上即合)。
+- enable 后的验证序列:① 先验队列分支(给条目 ~20–30s 建出);② 分支在 ⇒ 结束,⛔ 不翻转;
+  ③ 等待后仍缺席**且队列已见 churn**(更新的条目建出了分支而你的没有 —— 截断下单纯缺席不充分;
+  首挂静默不入队实测存在,churn 后翻转即愈)⇒ 翻转一次(`disable` → `enable`),仍以 timeline 事件验证;
+  ④ ⛔ enable 与它的队列验证之间永不插 `disable` ——「入队」webhook 可能乱序迟到,armed 窗口里补的 disable 会撤掉已发生的真实入队。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;止血修
   复合入后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,⛔ 禁止条件反
   射式重投;第三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run
   全部 `success` = 队列重建的连带取消不是红 —— 带签名读数收据重投一次(收据留在
   PR 上),⛔ 无收据不重投;同一 PR 第二次被踢 ⇒ 停止重投,按签名四分支重判。
-- **实测吞吐参数两则**:合并队列落地延迟 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没
-  落」提前判异常);单容器重验证(build+test)并发甜点 ≈3,排批按它定并发上限。
+- **实测吞吐两则**:合并队列落地 ≈ 每 PR 15–30 分钟且串行(⛔ 不据「还没落」提前判异常);单容器重验证(build+test)并发甜点 ≈3,排批按它定上限。
 
 ## API 配额
 
+- **配额按账户计,不跨席共享;按查询复杂度计费,不按调用次数**:各席位跑在**不同 GitHub 账户**下,「所有 agent 共用一个身份」只在**席位内部**成立(一个席位派出的每个 dev 都以该席身份发言 —— 这正是认领必须在评论里写 session ID 的理由)⇒ ⛔ 不据限流报文里的 user ID 推「池子跨席共用、优化自己没用」(实测推翻),本席额度**完全由本席做法决定**,优化有效且是唯一有效手段;计费按复杂度/节点数 ⇒ 优化方向是**每次少拿**,不是少调用。实测(`/rate_limit` 前后差量,该端点自身不计费):上限 5000/时;单个 dev 子代理 ~15 分钟烧 ~5658 点;一次 `list_issues`(34 张卡、perPage=100)= 107 点;耗尽时刻 GraphQL used 10461(超上限一倍)而 REST core used 7 ⇒ **最大消耗方是派出去的 dev 子代理,PM 巡检相比之下是噪声**(2026-08-22 实测)。
 - GraphQL 配额(5000/时)极易打满,**MCP list/search 家族整个走 GraphQL 池** ——
   反复撞上的限流墙就是它;「读与评论走 REST(core 15000/时,独立计)」预设会话真有
   REST 通道:MCP 读工具无 REST 替身,直连 REST 受会话级授权门(会话起点快照,403
@@ -53,13 +51,13 @@
   路径,`/search/*` 被拒、`/rate_limit` 例外)钳制 —— **纯 MCP 会话撞上枯竭池 =
   重置前没有任何 list 通道**,降级读法 = 下文 git 先行与 WebFetch 两行;只有无
   REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额红时认领类动作排队,评论(REST 池)先行把结论发出去。
-- **`fields` 瘦身省载荷不省池**:MCP list/search 服务器端无条件抓 Project
-  field_values —— 池枯竭时**最小字段请求同样全体失败**,报错串 `failed to fetch issue field values: API rate limit already exceeded`。
-- **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查
-  照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);开轮先读配额
-  (免装 gh CLI:`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`),graphql
-  remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写。打满时:待执行写**排成有序
-  清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
+- **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓 Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串 `failed to fetch issue field values: API rate limit already exceeded`);
+  ⛔ **`minimal_output: true` 不裁 `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`,首条 3258 字符、整体 122,685 字符仍超单次工具输出上限被落盘)—— 工具描述的反向暗示是假的,**永不当省额度手段写进任何 skill**;只要 number/labels/title 时也没有任何参数能关掉 body:要么接受整表 107 点,要么换更窄接口(`search_issues` 点数未实测)。⚠️ 前后体积对比不作证据(两次调用相隔数小时、population 已变),站得住的是直接观察 `body` 在。
+- **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);
+  **零成本等价物四条**(API 两次挂掉期间实测全程可用):合并队列 `git ls-remote origin 'refs/heads/gh-readonly-queue/*'`;是否落地 `git log --format='%H %s' -40 origin/main` 按 PR 号 grep;squash 验证 `git rev-list --parents -n1`(父提交数);分支存在性 `git ls-remote origin 'refs/heads/*<key>*'`。
+  开轮先读配额(`curl` 带 Bearer `$GH_TOKEN` 打 `/rate_limit`,该端点免费;容器内**没有** `gh`,见「读数陷阱」),graphql remaining < 1000 ⇒ 本轮降级为 git 先行 + 只做必要写;
+  **派 dev 之前同样先读一次**:额度不足先等重置再派 —— 中途撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档;限流窗口里「必须查重才能归档」的动作等待,⛔ 不盲目开卡。
+  打满时:待执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询;
   search 与 core 独立计,一侧打满另一侧可作退路;REST core 共享身份下同样会打满;文档载明、未实测:条件请求答 `304` 不计 core 池(仅当直连 REST 获准才相关)。
 - **公开仓降级读法:WebFetch github.com 网页零 API 配额**(带 label 过滤的 issue
   列表、issue 全文含评论、PR 页含 checks,实测撑得起整轮盘点);边界:~15 分钟缓存、列表行不含 assignee、内容是渲染层。
@@ -89,11 +87,12 @@
 
 ## 读数陷阱
 
-- **读数四坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读
-  数)—— 跨仓一律 `git -C <path>`;`git grep -c <pat> | wc -l` 数文件数不是命中数;
-  裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,更硬判据是查声明式
-  (`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
-  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`。
+- **读数五坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读数)—— 跨仓一律 `git -C <path>`;
+  `git grep -c <pat> | wc -l` 数文件数不是命中数;裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,
+  更硬判据是查声明式(`^(export )?(const|type|interface) <Name>\b`)而非查提及;浅检出上的历史读数不可信
+  (`merge-base --is-ancestor` 假「非祖先」、`rev-list --count` 截断、`branch -r --contains` 零输出)—— 先 `--deepen` 再判,或走 REST `compare`;
+  **容器里没有 `gh`**(实测:`command -v gh` 退出 1、`/usr/bin/gh` 与 `/usr/local/bin/gh` 都不存在),于是 `gh … || echo "none"` 是个**不可证伪的否定** —— 127「命令不存在」与「grep 没命中」在输出上同值,实测五张 PR 上跑五次「无重叠文件」全部打印安心结论、一次都没检查,险些作为已核验声明进 PR 正文(与隔管道读退出码同类:仪器对两种结局回同一个值,重跑多少次都不自相矛盾)。安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态;⛔ 一般规则:**任何可能不存在的命令上挂 `|| 回退` 都是不可证伪的否定**,PR / 查重类核验改走 MCP GitHub 工具或 git。
+- **`refs/remotes/origin/main` 全 worktree 共享,别的 agent 一次 fetch 就推进它**(worktree 只隔离工作树与 HEAD,`.git/` 下 refs、stash 栈、config、hooks 皆共享):`git reset --soft origin/main` 把你分支点之后**他人已合并的文件**整批 stage 成你的改动 —— 报成功、唯一症状是 `git status` 里的他人文件(实测一次 stage 进四个 agent 的合并文件,commit 前才逮住);「我从哪开始」的 reset/diff/log/rebase 一律锚建分支时记录的 base sha(`BASE=$(git rev-parse HEAD)`),⛔ 永不锚 `origin/main`。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算 —— 红因是基上
   缺一个已合修复时重跑无效,只能推提交(`git merge origin/main`);判别:修复的合并时间晚于 run 创建时间即是。
 - **同一 head 上轻量兄弟 workflow `success` + 重量级载体 `cancelled` 是普通取代的
@@ -105,16 +104,17 @@
 - **判「正文被截断」必须双读取**:`.body` 原文 + `Accept:
   application/vnd.github.full+json` 的 `.body_html`,两者同一处断掉才算 issue 端截断。读侧实测有确定性触发:正文含字面 script 开标记形状的 token(less-than 紧跟 script 字样;doctype 开标记、object 标签形状同触发)时,API/MCP 读回在该 token 处静默截断而网页全文完好 —— 存储体无损,⛔ 不「修复」只在 API 读短的卡:先 WebFetch 渲染页核对全文,重写会毁掉本来正确的正文。
 - **落库删字节,网页同显、围栏不防护**:「less-than + 感叹号 + 左方括号」序列(markup-declaration 开标记,恰是负向后行断言接字符类的形状)里的感叹号在存储层被删,幸存文本仍像代码但意义已变;裸「less-than + 感叹号」存活;作者规则并入下一条。
-- 写侧另一半:sanitizer 在**写入时按 tag 形状删,不按尖括号**(2026-08-18 issue body 实测):行内反引号里的 tag 形状 token(读作未知 HTML 标签者 —— 注释标记、`<n>` 类占位符、泛型)整个被删;孤立 less-than / greater-than 在行内代码**存活**;⛔ **围栏不防护 tag 形状 token**(2026-08-20 issue body 三写实测,推翻旧「围栏块整体存活」读数):HTML 注释形状标记裸写被整删留空行,入围栏照删留空围栏;非 tag 形状的带尖括号正则在围栏中实测存活(2026-08-18,上一条删感叹号仍另计);同日实测同类标记在**评论**里存活 —— 损耗是 body 独有的不对称;裸标识符(无尖括号)存活 ⇒ SKILL 提取契约(字面文本 grep + 裸标识符回退)仍有效;写返回 200,损耗只在回读可见。
-  作者规则一条管三坑:必须字面携带 tag/script/markup-declaration 形状的文本进围栏并把危险字符用词拼出,或改花括号占位符(`{n}`)/整句用词描述;要字面尖括号写实体 `&lt;` / `&gt;`;含尖括号的任何写后回读逐个确认(失效完全静默;评论名义上是不受影响通道,2026-08-18/19 实测 4 次评论写入 1 次标记缺席、未归因 —— 回读不豁免评论)。
+- 写侧另一半:sanitizer 在**写入时按 tag 形状删,不按尖括号**(2026-08-18 issue body 实测):行内反引号里的 tag 形状 token(读作未知 HTML 标签者 —— 注释标记、`<n>` 类占位符、泛型)整个被删;孤立 less-than / greater-than 在行内代码**存活**;⛔ **围栏不防护 tag 形状 token**(2026-08-20 issue body 三写实测,推翻旧「围栏块整体存活」读数):HTML 注释形状标记裸写被整删留空行,入围栏照删留空围栏;非 tag 形状的带尖括号正则在围栏中实测存活(2026-08-18,上一条删感叹号仍另计);同日实测同类标记在**评论**里存活,但 ⛔ 不据此推「评论豁免」(下条:评论体照样被整段截断);裸标识符(无尖括号)存活 ⇒ SKILL 提取契约(字面文本 grep + 裸标识符回退)仍有效;写返回 200,损耗只在回读可见。
+  作者规则一条管三坑:必须字面携带 tag/script/markup-declaration 形状的文本进围栏并把危险字符用词拼出,或改花括号占位符(`{n}`)/整句用词描述;要字面尖括号写实体 `&lt;` / `&gt;`;含尖括号的任何写后回读逐个确认(失效完全静默;⛔ 回读不豁免评论 —— 2026-08-18/19 四次评论写入里那次未归因的标记缺席,归因在下条)。
+- **评论体也会被毁,形状是「截断」不是「删片段」**:sanitizer 从**首个命名 HTML 元素的尖括号片段**起,把评论体一路吃到结尾(2026-08-21 实测:一份用**字面文本**标记发出的 dev 报告评论,正文在 `this.error(` 处断掉、JSON 不可解析;同机制把记录此事的卡自己的正文也截在同一处)⇒ ⛔ **字面文本标记只保住标记、保不住正文** —— 标记扫描照报成功,人看着像正常收尾,只有真去解析才发现;引信是普通 TS 形状(`Promise<object>`、`Array<link>` 一类),不是奇异语法。安全过程:标识符一律进反引号,尖括号写实体或用词拼出,写后**回读尾部**确认正文结束在它该结束的地方,⛔ 只回读标记不算验证。⚠️ 边界:姊妹仓一次五形受控探针测到的是**选择性删除**(所有位置的 tag/注释被移除,不能开标签的尖括号实体化存活)而非截断到尾 —— 两种形状都实测过,写侧一律按最坏的截断防护。
 - **并行 spec PR 同动 pin 计数断言**(被踢不是事故,按 os-regen 序再解一轮):解冲
   突两侧收据都保留、按合并顺序堆叠,新计数**从合并后源码重数**(操作数是文件本身不是历史),⛔ 不从两侧收据做算术;双方占同一编号是常态(各取当时 max+1),重编号后进侧。
-- **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重
-  跑 + 复核,不动代码);② 死在 regen 中途(未提交全是生成物、merge commit 已在)
-  ⇒ PM 直接续作 —— build → 整链 regen → 生成物门禁全绿 → 提交推送,恢复 commit 带
-  `Recovery commit:` 前缀留审计;⚠️ 有的现场 regen 一件没跑,推送前先跑生成物门禁
-  别赌;③ 死在源码编辑中途 ⇒ 先读 diff 判完整性 —— docblock 写全动机/失效模式/判
-  据的,PM 可代跑终验后提交,写一半意图不明的 ⛔ 不代提交、记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清掉,⛔ 不进 feature PR。
+- **容器重启杀死在飞 dev,现场三态判读**:① 分支已推 + PR 已开 ⇒ 只欠验收(CI 重跑 + 复核,不动代码);
+  ② 死在 regen 中途(未提交全是生成物、merge commit 已在)⇒ PM 直接续作 —— build → 整链 regen → 生成物门禁全绿 → 提交推送,
+  恢复 commit 带 `Recovery commit:` 前缀留审计;⚠️ 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌;
+  ③ 死在源码编辑中途 ⇒ 先读 diff 判完整性 —— docblock 写全动机/失效模式/判据的,PM 可代跑终验后提交,
+  写一半意图不明的 ⛔ 不代提交、记进交接;dev 临时目录(`.os-scratch/` 一类)是工作物不是交付物,清掉,⛔ 不进 feature PR。
+- **零提交的探针分支不是在飞工作**:容器发不出分支删除 refspec(实测 `git push origin --delete <b>` 回 `send-pack: unexpected disconnect while reading sideband packet`,三次退避全败;**同会话普通 push 正常** ⇒ 不是连通性问题),于是测量型派发留下的探针分支永久堆在 origin 上。读法规则:`claude/issue-*` 分支**零提交领先 `origin/main` 且没有开着的 PR** = 不承载任何工作,⛔ 不据 `ls-remote | grep issue-` 的正命中回避该卡 —— 失效方向是**活卡被永久读成已被认领**(无红信号、只增不减,认领前的在飞预检恰恰依赖它)。判据两读:`git rev-list --count origin/main..origin/<b>` 为 0,且该分支名下无 open PR。边界:一容器一会话三次,成因未诊断(代理 / 服务端钩子 / 分支保护未分辨),origin 上此类孤儿分支存量未普查。
 - **会话从上下文检测不到自己的静默降档**(2026-08-20 实测:一次分诊 fire 两级静默降档 Fable→Opus 5→Opus 4.8,降档横幅只在 UI 侧渲染、会话上下文零信号,子轮开场仍自述「跑在契约复审档」)——服役模型的权威读数是 `get_session`(claude-code-remote MCP,无参)的 `external_metadata.last_served_model`(记录最近一轮实际服役者,降档链中途照真);`session_context.model` 是**配置**档不是服役档,⛔ 不作保险丝输入。
 
 ## 闭合关键词解析(PR 正文写侧)

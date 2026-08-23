@@ -28,7 +28,17 @@ import {
 interface MessagingHttpSurface {
     isHttpDeliveryReady(): boolean;
     enqueueHttp(input: EnqueueHttpInput): Promise<string>;
-    redeliverHttp(id: string): Promise<{ id: string; status: string }>;
+    /**
+     * [#10740] Takes the REQUESTING caller's organization. Declared with the
+     * required-but-nullable `tenantId` the service declares, so this plugin
+     * cannot call the endpoint's backing method without deciding what tenant
+     * the request carries — the omission this structural view would otherwise
+     * type-check happily.
+     */
+    redeliverHttp(
+        id: string,
+        options: { tenantId: string | undefined },
+    ): Promise<{ id: string; status: string }>;
     /**
      * [#8069] Where this plugin's veto over redelivering `source: 'webhook'`
      * rows is installed. Declared REQUIRED on this structural view even though
@@ -169,13 +179,38 @@ export class WebhookOutboxPlugin implements Plugin {
         });
     }
 
-    async dispose(): Promise<void> {
+    /**
+     * Teardown — the kernel's ONLY teardown hook.
+     *
+     * [#10772] This body used to be spelled `dispose()`. `Plugin`
+     * (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+     * `destroy?()` and no `dispose()`, and `ObjectKernel.performShutdown()` /
+     * `LiteKernel.destroy()` walk the plugins in reverse calling
+     * `plugin.destroy()` — so after `await kernel.shutdown()` had RESOLVED the
+     * auto-enqueuer was still running and both engine hooks were still bound.
+     * Measured on the same revision: `dispose()` had ZERO callers anywhere in
+     * the repo, so this teardown had never run in any process at all.
+     *
+     * Idempotent: `boundEngine` is cleared as it is unbound, so a second
+     * teardown is a no-op rather than a second unbind.
+     */
+    async destroy(): Promise<void> {
         await this.autoEnqueuer?.stop();
         if (this.boundEngine) {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
             try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
+    }
+
+    /**
+     * Retained alias for {@link destroy}. Kept because it is public API of an
+     * exported class: an embedder may have learned to call it directly
+     * precisely BECAUSE the kernel never did, and deleting it would break them.
+     * Same signature, same return type — a direct caller sees no change.
+     */
+    async dispose(): Promise<void> {
+        await this.destroy();
     }
 
     private getMessaging(ctx: PluginContext): MessagingHttpSurface | undefined {
@@ -322,8 +357,21 @@ export class WebhookOutboxPlugin implements Plugin {
 
     /**
      * Mount POST /api/v1/webhooks/redeliver on the host Hono app, if one is
-     * available. Delegates to `messaging.redeliverHttp(deliveryId)`. Auth is the
-     * better-auth session cookie — every authenticated user counts.
+     * available. Delegates to `messaging.redeliverHttp(deliveryId, …)`. Auth is
+     * the better-auth session cookie — every authenticated user counts.
+     *
+     * [#10740] Which is precisely why the caller's ACTIVE ORGANIZATION is
+     * resolved here and threaded into the call. `sys_http_delivery` is
+     * tenant-scoped, and this is the one door on it a request can reach: an
+     * unscoped replay from here is an authenticated user reaching another
+     * organization's delivery row on a walled deployment. With the tenant
+     * threaded, a row outside the caller's organization is simply not found.
+     *
+     * ⚠️ A session with no active organization threads `undefined`, and the
+     * driver's tenant-audit line then fires for that write. That is deliberate:
+     * the deployment could not tell us who is asking, and reporting the gap is
+     * the correct outcome. ⛔ It is never repaired with `bypassTenantAudit`,
+     * which would silence the report without closing anything.
      */
     private registerAdminRoutes(ctx: PluginContext): void {
         const http = this.tryGetService<any>(ctx, ['http-server']);
@@ -336,8 +384,9 @@ export class WebhookOutboxPlugin implements Plugin {
         if (!rawApp || !messaging) return;
 
         rawApp.post('/api/v1/webhooks/redeliver', async (c: any) => {
-            const userId = await this.resolveSessionUserId(ctx, c);
-            if (!userId) {
+            const session = await this.resolveSession(ctx, c);
+            const userId = session?.user?.id;
+            if (typeof userId !== 'string' || userId.length === 0) {
                 return c.json(
                     { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to redeliver webhook deliveries.' } },
                     401,
@@ -357,8 +406,20 @@ export class WebhookOutboxPlugin implements Plugin {
                 );
             }
             try {
-                const row = await messaging.redeliverHttp(deliveryId);
-                ctx.logger.info?.('[webhook-outbox] redelivered', { deliveryId, requestedBy: userId });
+                // [#10740] `session.session.activeOrganizationId` is the
+                // canonical spelling of the caller's active organization
+                // (better-auth's organization plugin; see
+                // `plugin-auth/auth-schema-config.ts`). Read from the one
+                // place it lives — a `??` chain over alternative spellings
+                // would make a MISSING organization indistinguishable from a
+                // differently-shaped one, and the missing case is the one that
+                // must stay visible.
+                const activeOrg = session?.session?.activeOrganizationId;
+                const tenantId = typeof activeOrg === 'string' && activeOrg.length > 0
+                    ? activeOrg
+                    : undefined;
+                const row = await messaging.redeliverHttp(deliveryId, { tenantId });
+                ctx.logger.info?.('[webhook-outbox] redelivered', { deliveryId, requestedBy: userId, tenantId });
                 return c.json({ success: true, data: { id: row.id, status: row.status } });
             } catch (err: any) {
                 const code = err?.code;
@@ -387,7 +448,18 @@ export class WebhookOutboxPlugin implements Plugin {
         ctx.logger.info?.('[webhook-outbox] redeliver endpoint mounted at POST /api/v1/webhooks/redeliver');
     }
 
-    private async resolveSessionUserId(ctx: PluginContext, c: any): Promise<string | undefined> {
+    /**
+     * [#10740] The better-auth session envelope (`{ user, session }`) for this
+     * request, or `undefined`.
+     *
+     * Widened from the previous `resolveSessionUserId` because the route now
+     * needs two facts from ONE lookup: who is asking (`user.id`, the
+     * authentication gate) and which organization they are asking as
+     * (`session.activeOrganizationId`, the tenant threaded into the write).
+     * Resolving them separately would mean two `getSession` calls that can
+     * disagree.
+     */
+    private async resolveSession(ctx: PluginContext, c: any): Promise<any | undefined> {
         try {
             const authService: any = this.tryGetService<any>(ctx, ['auth']);
             if (!authService) return undefined;
@@ -396,9 +468,7 @@ export class WebhookOutboxPlugin implements Plugin {
                 api = await authService.getApi();
             }
             if (!api?.getSession) return undefined;
-            const session = await api.getSession({ headers: c.req.raw.headers });
-            const uid = session?.user?.id;
-            return typeof uid === 'string' && uid.length > 0 ? uid : undefined;
+            return await api.getSession({ headers: c.req.raw.headers });
         } catch {
             return undefined;
         }

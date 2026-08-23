@@ -14,7 +14,10 @@
  *     project/branch concepts removed — see ADR-0008 §0 amendment)
  *   - hash stamping with `hashSpec` (PR-10a guarantees stability)
  *   - watch() implemented via an in-memory event broadcaster fed by
- *     every successful put/delete on THIS instance
+ *     every successful put/delete on THIS instance; a NUMERIC `since`
+ *     additionally replays `sys_metadata_history` before going live
+ *     (invariant 6). With no `since` the subscriber is owed live events
+ *     only — see `watch()` for why that is not an oversight.
  *   - whitelist enforcement: refuses to persist types whose registry
  *     entry has `allowOrgOverride: false` (Prime Directive #8)
  *   - **M1**: every successful put/delete appends a durable row to
@@ -261,6 +264,26 @@ export function resetEnvWritableMetadataTypes(): void {
   _envWritableMetadataTypes = null;
 }
 
+/**
+ * One live `watch()` subscription, as a record rather than a bare listener.
+ *
+ * Both halves live together because SHUTDOWN NEEDS THE SECOND ONE. A registry
+ * of event sinks can only express shutdown as "send an event", and an event is
+ * precisely what a filtered or numeric-`since` subscriber is entitled to drop
+ * (#11021).
+ */
+interface WatchSubscription {
+  /** Receives every broadcast event; applies this subscriber's own filters. */
+  dispatch(evt: MetadataEvent): void;
+  /**
+   * Ends the iterator: settles any parked `next()` with `{ done: true }` and
+   * unregisters. The SAME routine `iterator.return()` runs, so a consumer that
+   * breaks its loop and a consumer whose repository shut down under it observe
+   * the same thing.
+   */
+  terminate(): void;
+}
+
 export class SysMetadataRepository implements MetadataRepository {
   private readonly engine: SysMetadataEngine;
   private readonly organizationId: string | null;
@@ -273,7 +296,11 @@ export class SysMetadataRepository implements MetadataRepository {
    * so we never broadcast events that got rolled back.
    */
   private seqCounter = 0;
-  private readonly watchers = new Set<(evt: MetadataEvent) => void>();
+  /**
+   * Every live `watch()` subscription. See {@link WatchSubscription} for why
+   * the terminator is held here next to the event sink.
+   */
+  private readonly watchers = new Set<WatchSubscription>();
   private closed = false;
 
   /** Table name for the durable event log. */
@@ -423,7 +450,44 @@ export class SysMetadataRepository implements MetadataRepository {
     // overlay. Callers state their scope; this line no longer decides it
     // anywhere but for the documented `PutOptions.packageId` default
     // (omitted/undefined = the env-local, unbound row).
-    const targetPackageId: string | null = opts.packageId ?? null;
+    let targetPackageId: string | null = opts.packageId ?? null;
+    // [#11087] Draft-save package inheritance. A `state='draft'` save is a
+    // pending change OVER the published row, and every package-scoped consumer
+    // — `listDrafts({ packageId })`, the console's pending-changes surfaces,
+    // `publishPackageDrafts` — keys drafts by `package_id`. A caller that names
+    // no base (the console's plain `?mode=draft` save) used to stamp NULL even
+    // when the row it overlays is package-bound, producing an "orphan draft"
+    // that no package view counts and no per-package publish can ever promote
+    // (measured live: `_drafts` lists it, `_drafts?packageId=` does not).
+    // Inherit the overlaid ACTIVE row's binding instead. Explicit
+    // `opts.packageId` is untouched (a caller that states its base keeps it,
+    // ADR-0048), and with no active row — a brand-new item drafted first —
+    // there is nothing to inherit and the package-less semantics stand.
+    if (state === 'draft' && opts.packageId == null) {
+      // The overlaid base is resolved with the SAME two-scope reach the draft
+      // list applies (`listDrafts`' $or contract): an org-scoped caller's
+      // active row usually lives ENV-WIDE (`organization_id IS NULL`) — the
+      // ADR-0005 overlay order — so a same-org-only lookup here found nothing
+      // for exactly the console-session saves this inheritance exists for
+      // (measured live: an org-scoped view draft stayed `package_id NULL`
+      // over an env-wide active row bound to `app.k9qk`).
+      const activeWhere: Record<string, unknown> = {
+        type: ref.type,
+        name: ref.name,
+        state: 'active',
+      };
+      if (this.organizationId != null) {
+        activeWhere.$or = [
+          { organization_id: this.organizationId },
+          { organization_id: null },
+        ];
+      } else {
+        activeWhere.organization_id = null;
+      }
+      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere });
+      const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
+      if (activePkg) targetPackageId = activePkg;
+    }
 
     // Run all reads + writes inside one transaction so the optimistic
     // lock, the parent-row mutation, and the history append are atomic.
@@ -431,10 +495,22 @@ export class SysMetadataRepository implements MetadataRepository {
       // ADR-0048 — scope the existing-row lookup to the requested package so a
       // save for package B does not find (and overwrite) package A's same-name
       // overlay. A package-less save (packageId null) targets the global row.
-      const existing = await this.engine.findOne('sys_metadata', {
+      let existing = await this.engine.findOne('sys_metadata', {
         where: this.whereFor(ref, state, targetPackageId),
         context: ctx,
       });
+      // [#11087] Orphan-draft adoption: when the package binding above was
+      // INHERITED (caller named none), a pre-fix draft for the same
+      // (org, type, name) sits at `package_id NULL` and the scoped lookup
+      // misses it — creating a second draft row would fork the pending change.
+      // Re-read the package-less row and update THAT one; the stamp below
+      // (`existingPkg ?? targetPackageId`) then adopts it into the package.
+      if (!existing && state === 'draft' && opts.packageId == null && targetPackageId !== null) {
+        existing = await this.engine.findOne('sys_metadata', {
+          where: this.whereFor(ref, state, null),
+          context: ctx,
+        });
+      }
       const existingHash: string | null = existing?.checksum ?? null;
       if (opts.parentVersion !== existingHash) {
         throw new ConflictError(this.fullRef(ref), opts.parentVersion, existingHash);
@@ -1009,22 +1085,74 @@ export class SysMetadataRepository implements MetadataRepository {
       if (opts?.sinceSeq !== undefined && (row.event_seq ?? 0) <= opts.sinceSeq) continue;
       if (opts?.limit !== undefined && yielded >= opts.limit) break;
       yielded++;
-      yield {
-        seq: (row.event_seq as number) ?? 0,
-        op: (row.operation_type as MetadataEvent['op']) ?? 'update',
-        ref: full,
-        hash: (row.checksum as string | null) ?? null,
-        parentHash: (row.previous_checksum as string | null) ?? null,
-        version: typeof row.version === 'number' ? row.version : undefined,
-        // #4556 — surface the absence, do not paper it over with a label.
-        // An audit timeline that must show "who changed this" needs to know
-        // the answer is "the platform", not a user literally named 'unknown'.
-        actor: (row.recorded_by as string | null | undefined) ?? null,
-        message: (row.change_note as string | undefined) ?? undefined,
-        ts: (row.recorded_at as string) ?? new Date(0).toISOString(),
-        source: (row.source as string | undefined) ?? 'sys-metadata-repo',
-      };
+      yield this.rowToEvent(row, full);
     }
+  }
+
+  /**
+   * One `sys_metadata_history` row → one `MetadataEvent`.
+   *
+   * Extracted from {@link history} so {@link watch}'s replay reads the log
+   * through the SAME mapping rather than a second hand-written copy. Two
+   * copies of this would be two answers to "what is `actor` when
+   * `recorded_by` is null" — and the #4556 answer below (absent, not a user
+   * called 'unknown') is the kind that drifts silently when duplicated.
+   *
+   * `ref` is passed in because the two callers derive it differently:
+   * `history()` already resolved one `(type, name)` and stamps it on every
+   * row, while the org-wide replay carries a different `(type, name)` per row.
+   */
+  private rowToEvent(row: any, ref: MetaRef): MetadataEvent {
+    return {
+      seq: (row.event_seq as number) ?? 0,
+      op: (row.operation_type as MetadataEvent['op']) ?? 'update',
+      ref,
+      hash: (row.checksum as string | null) ?? null,
+      parentHash: (row.previous_checksum as string | null) ?? null,
+      version: typeof row.version === 'number' ? row.version : undefined,
+      // #4556 — surface the absence, do not paper it over with a label.
+      // An audit timeline that must show "who changed this" needs to know
+      // the answer is "the platform", not a user literally named 'unknown'.
+      actor: (row.recorded_by as string | null | undefined) ?? null,
+      message: (row.change_note as string | undefined) ?? undefined,
+      ts: (row.recorded_at as string) ?? new Date(0).toISOString(),
+      source: (row.source as string | undefined) ?? 'sys-metadata-repo',
+    };
+  }
+
+  /**
+   * The durable half of invariant 6 — every logged event with
+   * `seq > since` that matches `filter`, in `seq` order.
+   *
+   * Reads `sys_metadata_history` org-wide, which is the same query
+   * {@link nextEventSeq} already issues; the per-row `(type, name)` is what
+   * makes the resulting refs differ from `history()`'s single-ref stream.
+   *
+   * ⚠️ Called ONLY when `since` is a number. A `watch(filter)` with no `since`
+   * is owed live events only (invariant 6's second half), and replaying for it
+   * would flood every `MetadataManager.setRepository()` and
+   * `MetadataCache.start()` — both subscribe with no `since` — with the org's
+   * whole history at attach time, as "this just changed".
+   */
+  private async replayFromHistory(
+    filter: WatchFilter,
+    since: number,
+  ): Promise<MetadataEvent[]> {
+    const rows = await this.engine.find(this.historyTable, {
+      where: { organization_id: this.organizationId },
+    });
+    const out: MetadataEvent[] = [];
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const type = row.type as MetadataEvent['ref']['type'] | undefined;
+      const name = row.name as string | undefined;
+      if (!type || !name) continue;
+      const evt = this.rowToEvent(row, this.fullRef({ type, name }));
+      if (evt.seq <= since) continue;
+      if (!this.matchesFilter(evt, filter)) continue;
+      out.push(evt);
+    }
+    out.sort((a, b) => a.seq - b.seq);
+    return out;
   }
 
   /**
@@ -1032,6 +1160,48 @@ export class SysMetadataRepository implements MetadataRepository {
    * instance — cross-replica fan-out is M1. Manual AsyncIterator (not
    * an async generator) so we can deterministically tear down via
    * `iter.return()`, matching the pattern used by InMemoryRepository.
+   *
+   * ## `since` — invariant 6, both halves
+   *
+   * **Numeric `since`** (#10842): every logged event with `seq > since` is
+   * replayed out of `sys_metadata_history` before any live event is yielded.
+   * `since` used to be nothing but a DROP filter on live events, so an event
+   * that had already committed was unreachable through `watch()` however low
+   * `since` was set — the repository held a durable per-org `event_seq` log
+   * and never read it here. It does now, through the same
+   * `find(sys_metadata_history, { organization_id })` query `nextEventSeq()`
+   * issues and the same row→event mapping `history()` uses.
+   *
+   * **No `since`**: live events only. Deliberate, and now written into the
+   * contract (`repository.ts` invariant 6) rather than left to be inherited
+   * from `InMemoryRepository`, which replays its whole matching log. Both
+   * production subscribers here — `MetadataManager.startRepositoryWatch()`
+   * (`repo.watch({})`) and `MetadataCache.start()`
+   * (`repo.watch(this.watchFilter)`) — attach with no `since`, so replaying
+   * for them would push the org's entire history through HMR and cache
+   * invalidation as "this just changed" on every `setRepository()`. A
+   * consumer that wants the already-committed prefix asks for it by number.
+   *
+   * ## Ordering and the replay→live handoff
+   *
+   * The live listener is registered SYNCHRONOUSLY, before the durable read is
+   * issued, so an event committing during the read is buffered rather than
+   * dropped. It then appears in both the replay batch and the live queue, and
+   * `delivered` (a set of `seq`) collapses the pair — invariant 5's "no gaps,
+   * no duplicates" across the seam. Replay is always drained first, so seq
+   * order holds across it. `seqCounter` mirrors the durable `event_seq`
+   * (see `put()`), which is what lets one set of numbers dedup both sides.
+   *
+   * ## How the stream ENDS
+   *
+   * Two ways, and they are the same way: the consumer calls `return()` (what
+   * `break`ing out of a `for await` does), or the repository shuts down under
+   * it and {@link close} runs the identical routine. Either settles a parked
+   * `next()` with `{ done: true }` and no value. A consumer therefore never
+   * has to recognise a shutdown *event* — there is not one to recognise, which
+   * is the #11021 repair; see `close()` for what modelling it as an event cost.
+   * Anything still queued or unreplayed at that point is dropped, on both
+   * paths alike.
    */
   watch(filter: WatchFilter, since?: number): AsyncIterable<MetadataEvent> {
     const self = this;
@@ -1040,38 +1210,98 @@ export class SysMetadataRepository implements MetadataRepository {
         const queue: MetadataEvent[] = [];
         let pendingResolve: ((r: IteratorResult<MetadataEvent>) => void) | null = null;
         let stopped = false;
+        /** `seq`s already handed to the consumer — the replay/live dedup. */
+        const delivered = new Set<number>();
+        let replay: MetadataEvent[] = [];
+        let replayIdx = 0;
+        /**
+         * A read failure is REPORTED, never swallowed into "live only": a
+         * consumer that asked to resume from `since` and silently got a live
+         * tail would believe it had the events it does not have. Held rather
+         * than left as a rejected promise so an iterator nobody pulls on
+         * cannot raise an unhandled rejection.
+         */
+        let replayError: unknown = null;
 
         const dispatch = (evt: MetadataEvent) => {
           if (stopped) return;
           if (!self.matchesFilter(evt, filter)) return;
           if (since !== undefined && evt.seq <= since) return;
+          if (delivered.has(evt.seq)) return;
           if (pendingResolve) {
             const r = pendingResolve;
             pendingResolve = null;
+            delivered.add(evt.seq);
             r({ value: evt, done: false });
           } else {
             queue.push(evt);
           }
         };
-        self.watchers.add(dispatch);
+        /**
+         * End this iterator. Runs on the consumer's own `return()` AND on
+         * `repo.close()` — ONE routine, so shutdown is never a shape the
+         * consumer has to recognise. Idempotent: a second call finds nothing
+         * registered and no promise parked.
+         */
+        const terminate = (): void => {
+          stopped = true;
+          self.watchers.delete(subscription);
+          if (pendingResolve) {
+            const r = pendingResolve;
+            pendingResolve = null;
+            r({ value: undefined as any, done: true });
+          }
+        };
+        const subscription: WatchSubscription = { dispatch, terminate };
+        // Registered BEFORE the durable read starts — see the handoff note.
+        self.watchers.add(subscription);
+
+        const replayReady: Promise<void> =
+          since === undefined
+            ? Promise.resolve()
+            : self.replayFromHistory(filter, since).then(
+                (evts) => {
+                  replay = evts;
+                },
+                (err) => {
+                  replayError = err;
+                },
+              );
+
+        const drain = (): IteratorResult<MetadataEvent> | null => {
+          while (replayIdx < replay.length) {
+            const evt = replay[replayIdx++]!;
+            if (delivered.has(evt.seq)) continue;
+            delivered.add(evt.seq);
+            return { value: evt, done: false };
+          }
+          while (queue.length > 0) {
+            const evt = queue.shift()!;
+            if (delivered.has(evt.seq)) continue;
+            delivered.add(evt.seq);
+            return { value: evt, done: false };
+          }
+          return null;
+        };
 
         return {
-          next(): Promise<IteratorResult<MetadataEvent>> {
-            if (stopped) return Promise.resolve({ value: undefined as any, done: true });
-            const buffered = queue.shift();
-            if (buffered) return Promise.resolve({ value: buffered, done: false });
+          async next(): Promise<IteratorResult<MetadataEvent>> {
+            if (stopped) return { value: undefined as any, done: true };
+            await replayReady;
+            if (replayError !== null) {
+              const err = replayError;
+              replayError = null;
+              throw err;
+            }
+            if (stopped) return { value: undefined as any, done: true };
+            const ready = drain();
+            if (ready) return ready;
             return new Promise((resolve) => {
               pendingResolve = resolve;
             });
           },
           return(): Promise<IteratorResult<MetadataEvent>> {
-            stopped = true;
-            self.watchers.delete(dispatch);
-            if (pendingResolve) {
-              const r = pendingResolve;
-              pendingResolve = null;
-              r({ value: undefined as any, done: true });
-            }
+            terminate();
             return Promise.resolve({ value: undefined as any, done: true });
           },
         };
@@ -1079,27 +1309,49 @@ export class SysMetadataRepository implements MetadataRepository {
     };
   }
 
-  /** Shut down all watch iterators. */
+  /**
+   * Shut down every live `watch()` iterator.
+   *
+   * **Shutdown is not a metadata event** — #11021, and the reason this method
+   * no longer broadcasts anything. It used to push a synthetic
+   * `{ seq: -1, ref: { org: '', type: 'view', name: '_close' } }` through the
+   * same `dispatch` closure real events pass, then clear the registry. Both of
+   * that closure's guards reject it:
+   *
+   *   - `matchesFilter` — the synthetic ref's org is the EMPTY STRING and its
+   *     type is always `view`, so any subscription naming an `org`, a `type`
+   *     other than `view`, or a `name` drops it. `MetadataCache.start()` with
+   *     any non-empty `watchFilter` is exactly that shape;
+   *   - the `since` drop — `-1 <= since` holds against every real seq, so
+   *     every numeric-`since` subscription drops it too.
+   *
+   * Dropped, and then unsubscribed by the clear: nothing could settle the
+   * parked promise, and the consumer's `for await` never returned.
+   *
+   * The subscriptions that DID pass both guards were no better off in the way
+   * that counts. They received the synthetic event as a REAL one — a `view`
+   * named `_close`, deleted, at seq -1 — which `MetadataManager.applyRepoEvent`
+   * duly turned into a cache invalidation and re-emitted to Studio's HMR
+   * stream; and then they hung on the next pull anyway, because delivering an
+   * event has never ended an iterator.
+   *
+   * So termination is expressed as termination: each subscription's
+   * {@link WatchSubscription.terminate}, which is the same routine the
+   * consumer's own `iterator.return()` runs. Idempotent, and a no-op when
+   * nothing is watching.
+   */
   close(): void {
     this.closed = true;
-    // Drain watchers — each one's `return()` removes itself.
+    // Snapshot and clear BEFORE terminating: `terminate()` unregisters itself,
+    // and mutating a set under its own iteration is how the second watcher
+    // gets skipped.
     const snapshot = Array.from(this.watchers);
+    this.watchers.clear();
     for (const w of snapshot) {
       try {
-        w({
-          seq: -1,
-          op: 'delete',
-          ref: { org: '', type: 'view', name: '_close' } as MetaRef,
-          hash: null,
-          parentHash: null,
-          // #4556 — a synthetic drain event has no actor at all.
-          actor: null,
-          ts: new Date().toISOString(),
-          source: 'sys-metadata-repo-close',
-        });
-      } catch { /* noop */ }
+        w.terminate();
+      } catch { /* one wedged consumer must not strand the rest */ }
     }
-    this.watchers.clear();
   }
 
   // ── helpers ─────────────────────────────────────────────────────────
@@ -1505,7 +1757,7 @@ export class SysMetadataRepository implements MetadataRepository {
 
   private broadcast(evt: MetadataEvent): void {
     for (const w of Array.from(this.watchers)) {
-      try { w(evt); } catch { /* listener errors don't break the repo */ }
+      try { w.dispatch(evt); } catch { /* listener errors don't break the repo */ }
     }
   }
 

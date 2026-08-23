@@ -244,16 +244,30 @@ async function callRoute(rest: any, method: string, path: string, req: Record<st
  * The metadata save validator's 422 — the NON-FILTER 4xx the issue asked to be
  * sampled, confirming the bound bites well outside driver-sql's filter family.
  *
- * Built the way `metadata-protocol`'s `saveMetaItem` builds it: the first THREE
- * issues are summarised as `<path>: <message>` joined by `; `, behind an
- * `[invalid_metadata] <type>/<name> failed spec validation: ` prefix, with a
- * `(+N more)` suffix for the remainder.
+ * Built the way `metadata-protocol`'s `saveMetaItem` builds it ON A
+ * MESSAGE-ONLY FACE: the first THREE issues summarised as `<path>: <message>`
+ * joined by `; `, behind an `[invalid_metadata] <type>/<name> failed spec
+ * validation: ` prefix, with a `(+N more)` suffix for the remainder.
+ *
+ * ⚠️ [#10888] That is no longer the form THIS route receives in production, and
+ * the distinction is worth stating because the docblock used to imply otherwise.
+ * `saveMetaItem` renders its findings clause per face: the `/meta` write doors
+ * declare `writeFace: 'meta-envelope'` and get a short headline (count plus
+ * `path [zod code]` locators), because `sendError` already carries the per-key
+ * prose structurally in `issues[]` beside the message. The long form above still
+ * exists, on the faces where the sentence is the SOLE carrier —
+ * `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
+ * `rows[].reason` — but those are 200-response DATA and never reach `sendError`.
+ *
+ * So the error is CONSTRUCTED here rather than provoked, and that is the point:
+ * the subject under test is `sendError`'s bound, not the metadata door's
+ * wording. The bound must truncate any over-long 4xx that reaches it, whatever
+ * produced it, and it must keep the structured half intact while doing so. A
+ * realistic long 4xx is the right input for that even when the metadata face
+ * has stopped being one of its producers.
  *
  * Worth recording how close this family runs to the line: the same fixture with
  * three issues and no suffix measured 492 characters — under the bound by 8.
- * A metadata save is not an exotic path and a five-issue rejection is not an
- * exotic mistake, so this family straddles the cliff exactly as #5423 suspected
- * the near-miss filter refusals (#5240 at ~469, #5327 at ~454) do.
  */
 function invalidMetadataError() {
     const issues = [

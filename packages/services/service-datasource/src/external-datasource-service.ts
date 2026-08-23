@@ -22,6 +22,7 @@ import type {
   SchemaValidationReport,
   IntrospectedSchema,
   IntrospectedTable,
+  IntrospectedColumn,
 } from '@objectstack/spec/contracts';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 import {
@@ -32,6 +33,12 @@ import {
   type SqlDialect,
   type FieldType,
 } from '@objectstack/spec/data';
+// The SINGLE source of the ADR-0028 object-name prefix rule, shared verbatim
+// with `defineStack()` (compile time) and `MetadataManager.publishPackage`
+// (runtime). Imported rather than re-implemented: a generator that hand-rolled
+// its own `startsWith` would be free to drift from the check that refuses its
+// output, which is the shape of this whole defect.
+import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 
 /** Minimal datasource shape the service reads (subset of `Datasource`). */
 export interface DatasourceLike {
@@ -87,11 +94,112 @@ export interface ExternalDatasourceServiceConfig {
    * throws (the deployment is GitOps-only / has no writable metadata store).
    */
   persistObject?: (name: string, definition: Record<string, unknown>) => Promise<void>;
+  /**
+   * Resolve the package namespace that generated object names must be
+   * prefixed with — `${namespace}_${shortName}`, ADR-0028. Injected for the
+   * same reason every other read here is: the service stays kernel-free, and
+   * the plugin decides where a namespace comes from (it reads the
+   * datasource's own owning package — see `plugin.ts`).
+   *
+   * Optional, and allowed to resolve nothing. A deployment whose datasource
+   * carries no package provenance, or whose package declares no `namespace`,
+   * gets a draft with the BARE remote-table name plus a loud TODO in the
+   * rendered source. That is deliberate and mirrors `defineStack`, which
+   * skips the prefix check entirely when `manifest.namespace` is absent
+   * rather than inventing a prefix on the author's behalf. Emitting
+   * `_customers` on a blank namespace would trade one invalid draft for
+   * another, so a blank/whitespace value is treated as absent.
+   */
+  getNamespace?: (datasource: string) => Promise<string | undefined> | string | undefined;
   logger?: Logger;
 }
 
 /** Columns ObjectStack manages itself — never validated against the remote. */
 const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
+
+/**
+ * Read "is this column part of the remote primary key" across the
+ * introspection spellings that can arrive at this service.
+ *
+ * `plugin.ts` hands the driver's `introspectSchema()` result to this service
+ * unmodified. There is now ONE declared contract on both sides of that
+ * handoff — `packages/spec`'s `IntrospectedColumn` — and the in-tree driver
+ * speaks it:
+ *
+ * | producer                                                              | per-column   | table-level   |
+ * | --------------------------------------------------------------------- | ------------ | ------------- |
+ * | `SqlDriver` (+ `SqliteWasmDriver` / `TursoDriver`, which extend it)    | `primaryKey` | `primaryKeys` |
+ * | `packages/spec` `IntrospectedColumn` (what this file's types say)      | `primaryKey` | —             |
+ *
+ * That agreement is NEW, and this reader predates it. Measured against a live
+ * SQLite database at `368e7a06f`, the driver's column for a `primary key (id)`
+ * table carried `isPrimary: true` and no `primaryKey` key at all, so reading
+ * only `col.primaryKey` lost the remote key — the defect this reader was
+ * written for. `95437e7d2d` (#10676 / #10998) retired that spelling at the
+ * producer: `introspectSchema` now derives `col.primaryKey` FROM `primaryKeys`
+ * and emits no `isPrimary`.
+ *
+ * This still reads the UNION of three signals rather than picking one, and
+ * each arm is here for its own reason:
+ *
+ *  - `col.primaryKey` — the spec spelling, what every in-tree producer writes.
+ *  - `table.primaryKeys` — LIVE and INDEPENDENT, not a legacy arm. A
+ *    per-column boolean cannot express key ORDER, and since #10997 (PR #11104)
+ *    this list reports every member of a COMPOSITE key in declared key order.
+ *    It is the only signal here that carries one. ⛔ Collapsing it away drops
+ *    composite-key handling at this seam.
+ *  - `col.isPrimary` — a RETIRED spelling, kept as a compatibility belt. See
+ *    the note below before touching it.
+ *
+ * No producer uses `primaryKey: false` / `isPrimary: false` to NEGATE a key
+ * another signal asserts — the falses are just "not a key", written by
+ * producers that fill one signal and leave the others blank. A precedence
+ * chain would therefore drop a real key whenever the winning signal is the one
+ * its producer left blank, which is the defect being repaired here. When the
+ * per-column flag and the table-level list DISAGREE the union takes both: for
+ * a federated table, under-reporting the key costs the caller its addressing
+ * key, and no in-tree consumer treats a column's PK-ness as an exclusive
+ * claim. (The SQLite composite-key truncation this note used to disclaim is
+ * gone — #10997 repaired `introspectPrimaryKeys` upstream, so the driver's two
+ * signals now agree on the WHOLE key rather than agreeing on a truncated one.)
+ *
+ * WHY THE `isPrimary` ARM STAYS, with no producer left in this tree — measured
+ * for #11123 on `52a41b72ee`, so the next reader need not re-derive it:
+ *
+ *  - Nothing in-tree writes it. Every surviving whole-identifier hit is prose,
+ *    and `objectql`'s `isPrimaryKeyField` merely CONTAINS the substring.
+ *  - It is still not dead code, because the producer population here is open
+ *    by design. `contracts/datasource-driver-factory.ts` says the framework
+ *    "ships no universal driver-by-id registry" — concrete drivers are built
+ *    by the HOST — and types the handle as `introspectSchema?(): Promise<unknown>`.
+ *    The retirement shipped as a BREAKING change whose stated migration
+ *    channel is the compiler, "precisely and at every site"; against an
+ *    `unknown` result that channel never fires, so a host-built driver still
+ *    emitting the old spelling is reached by nothing and would silently lose
+ *    its key here.
+ *  - The belt's clock has not run either: the union (#11001) and the
+ *    retirement (#11124) are BOTH still unconsumed changesets at `17.1.0`, so
+ *    no released version has ever emitted `primaryKey` from this driver.
+ *
+ * Dropping the arm is therefore a NARROWING OF ACCEPTED INPUT rather than a
+ * dead-code deletion, and wants the contract-review gate. Its only exercise is
+ * the staged-disagreement pair in
+ * `__tests__/external-introspection-seam.test.ts`; those cases go with it.
+ *
+ * Deliberately structural: the retired spelling is read off the value without
+ * widening any declared contract — no declared type carries it any more, so
+ * there is nothing left to read it through.
+ */
+function primaryKeyReader(table: IntrospectedTable): (col: IntrospectedColumn) => boolean {
+  const declared = (table as unknown as { primaryKeys?: unknown }).primaryKeys;
+  const listed = new Set(
+    Array.isArray(declared) ? declared.filter((n): n is string => typeof n === 'string') : [],
+  );
+  return (col) =>
+    col.primaryKey === true ||
+    (col as { isPrimary?: unknown }).isPrimary === true ||
+    listed.has(col.name);
+}
 
 /** Split a possibly schema-qualified name (`mart.fact_orders`). */
 function parseQualified(raw: string): { schema?: string; name: string } {
@@ -107,6 +215,87 @@ function toObjectName(remoteName: string): string {
     .replace(/[^a-zA-Z0-9_]/g, '_')
     .replace(/^[^a-z_]/, (c) => `_${c.toLowerCase()}`)
     .toLowerCase();
+}
+
+/**
+ * The org-wide default every generated federated object declares.
+ *
+ * NOT a judgement call made here — it is the shape #9666 settled for the
+ * CLI's own `os init` scaffolds (`packages/cli/src/commands/init.ts`), which
+ * hit this same rule family: declare the value explicitly, and pick the one
+ * `security-owd-unset`'s own hint calls the recommended default. It is also
+ * what ADR-0090 D1 already resolves an unset OWD to at runtime, so a draft
+ * carrying it describes the posture the platform would apply anyway — the
+ * change is that the baseline becomes an AUTHORED decision instead of an
+ * accident, which is the entire point of the rule.
+ *
+ * It is the most restrictive of the four canonical values, so a generated
+ * federated object can never be published wider than its author intended by
+ * this default alone; widening it is a one-line edit the review-before-commit
+ * flow exists to invite.
+ */
+const GENERATED_SHARING_MODEL = 'private';
+
+/**
+ * The lead-in of the comment that carries the introspected remote primary key
+ * into the generated source — and the one place the reason is written down.
+ *
+ * `fields.<f>.primaryKey` is **not a key of the spec field schema**. Emitting
+ * it produced a `*.object.ts` the platform's own toolchain refused on both
+ * instruments it is annotated for: `tsc --noEmit` against `ServiceObject`
+ * (`TS2353 … 'primaryKey' does not exist in type`) and
+ * `ObjectSchema.safeParse` (`unrecognized_keys` at `["fields","<f>"]`). So the
+ * generator had a pinned path that produced a draft neither the compiler nor
+ * the validator would take (#11000).
+ *
+ * Maintainer ruling, 2026-08-22 live session (「同意所有」, item 8) — **D**:
+ *
+ * > `generateObjectDraft`/`renderObjectSource` stop emitting
+ * > `fields.<f>.primaryKey`; the introspected key survives **as a comment** in
+ * > the generated source (information preserved for the reader, zero contract
+ * > face); the existing pin tests that assert the invalid emission are updated
+ * > as part of the fix.
+ *
+ * Both halves are load-bearing, and the second is the one an implementation
+ * can silently skip: simply dropping `opts.primaryKey` on the floor would make
+ * every parse-and-compile assertion green while discarding exactly what the
+ * ruling said to keep.
+ *
+ * The rejected alternatives, so they are not re-litigated from scratch:
+ * routing the key to `fields.<f>.externalId` was refused as semantically
+ * different and itself of unproven enforcement, and an authorable spelling on
+ * the binding (`external.primaryKey: string[]`) is **deferred, not rejected** —
+ * it returns as its own `packages/spec` card once federated upsert has a live
+ * runtime consumer to justify the surface.
+ */
+const REMOTE_PRIMARY_KEY_COMMENT = '// Remote primary key: ';
+
+/**
+ * Normalise an injected namespace. Blank / whitespace-only reads as ABSENT:
+ * `validateObjectNamespacePrefix` skips a falsy namespace, but `'  '` is
+ * truthy and would render `  _customers` — one invalid draft traded for
+ * another, which is the failure this card is closing.
+ */
+function normaliseNamespace(raw: string | undefined): string | undefined {
+  const ns = raw?.trim();
+  return ns ? ns : undefined;
+}
+
+/**
+ * Apply the ADR-0028 package prefix to a derived object name.
+ *
+ * The decision is delegated to `validateObjectNamespacePrefix` — the same
+ * function `defineStack` and the runtime publish gate call — so "is this name
+ * already compliant?" has exactly one answer in the tree. `null` means the
+ * name is already acceptable (no namespace to apply, a `sys_*` reserved name,
+ * or a remote table that is ALREADY prefixed, e.g. `crm_accounts` under
+ * namespace `crm` — which must not become `crm_crm_accounts`).
+ */
+function applyNamespacePrefix(objectName: string, namespace: string | undefined): string {
+  if (!namespace) return objectName;
+  return validateObjectNamespacePrefix(objectName, namespace) === null
+    ? objectName
+    : `${namespace}_${objectName}`;
 }
 
 /** snake_case → Title Case label. */
@@ -203,7 +392,11 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const exclude = opts.excludeColumns ? new Set(opts.excludeColumns) : new Set<string>();
     const pkOverride = opts.primaryKey ? new Set(opts.primaryKey) : undefined;
 
-    const fields: Record<string, { type: FieldType; primaryKey?: boolean }> = {};
+    const fields: Record<string, { type: FieldType }> = {};
+    // The remote key is collected here rather than onto the field, because
+    // there is no authorable field key to put it on — see
+    // REMOTE_PRIMARY_KEY_COMMENT for the ruling and the measurements.
+    const primaryKeyFields: string[] = [];
     const review: ObjectDraft['review'] = [];
 
     for (const col of table.columns) {
@@ -228,26 +421,39 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       }
 
       const isPk = pkOverride ? pkOverride.has(col.name) : col.primaryKey;
-      fields[fieldName] = isPk ? { type: fieldType, primaryKey: true } : { type: fieldType };
+      fields[fieldName] = { type: fieldType };
+      if (isPk) primaryKeyFields.push(fieldName);
     }
 
-    const name = toObjectName(resolvedRemoteName);
+    // ADR-0028: every object a package defines must be named
+    // `${namespace}_${shortName}`. `defineStack()` refuses an unprefixed name
+    // outright, so a draft without the prefix cannot be committed into a
+    // namespaced stack — the generator has to resolve the namespace itself.
+    const namespace = normaliseNamespace(await this.config.getNamespace?.(datasource));
+    const shortName = toObjectName(resolvedRemoteName);
+    const name = applyNamespacePrefix(shortName, namespace);
     const definition: Record<string, unknown> = {
       name,
-      label: toLabel(name),
+      // Derived from the SHORT name on purpose: the prefix is an addressing
+      // requirement, not a display one, and keeping the label at 'Customers'
+      // rather than 'Wh Customers' leaves this draft's human-facing text
+      // exactly where it was before the prefix landed.
+      label: toLabel(shortName),
       datasource,
       external: {
         ...(remoteSchema ? { remoteSchema } : {}),
         remoteName: resolvedRemoteName,
       },
       fields,
+      // ADR-0090 D1 / `security-owd-unset` — see GENERATED_SHARING_MODEL.
+      sharingModel: GENERATED_SHARING_MODEL,
     };
 
     return {
       name,
       datasource,
       definition,
-      source: renderObjectSource(definition, fields, review),
+      source: renderObjectSource(definition, fields, review, namespace, primaryKeyFields),
       review,
     };
   }
@@ -302,6 +508,14 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       dialect: schema.dialect,
       tables: Object.values(schema.tables).map((t) => {
         const { schema: s, name } = parseQualified(t.name);
+        // The introspection seam. `ExternalCatalogSchema` defaults this key to
+        // `false`, so when the in-tree driver still spelled it `isPrimary`,
+        // reading only `c.primaryKey` persisted a catalog in which EVERY column
+        // claimed not to be part of the remote key — including the ones that
+        // are. The driver has since been aligned to the spec spelling
+        // (`95437e7d2d`), but this must stay a `primaryKeyReader` call: see its
+        // docblock for the two arms that are still load-bearing.
+        const isPk = primaryKeyReader(t);
         return {
           remoteSchema: s,
           remoteName: name,
@@ -309,7 +523,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
             name: c.name,
             sqlType: c.type,
             nullable: c.nullable,
-            primaryKey: c.primaryKey,
+            primaryKey: isPk(c),
             suggestedFieldType: suggestFieldTypeForSqlType(c.type, schema.dialect as SqlDialect),
           })),
         };
@@ -409,14 +623,29 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     return { ok, datasource, object: objectName, diffs };
   }
 
-  async validateAll(): Promise<SchemaValidationReport> {
-    const objects = await this.config.listObjects();
-    const federated = objects.filter(
-      (o) => o.external !== undefined || (o.datasource && o.datasource !== 'default'),
-    );
+  /**
+   * Is this object part of the federated sweep at all?
+   *
+   * ONE spelling of the predicate, deliberately — {@link validateAll} and
+   * {@link validateDatasource} select from the same population, and the scoped
+   * one exists to do LESS WORK, not to answer a different question. Two copies
+   * would be two answers to "is this object federated" waiting to diverge.
+   */
+  private isFederated(o: ObjectLike): boolean {
+    return o.external !== undefined || Boolean(o.datasource && o.datasource !== 'default');
+  }
 
+  /**
+   * Validate a chosen set of objects, one report.
+   *
+   * A per-object throw becomes a `missing_table` row carrying the thrower's
+   * message rather than rejecting the whole report: one unreachable remote (or
+   * one object whose definition vanished mid-sweep) must not erase the verdicts
+   * of the objects that did validate.
+   */
+  private async validateEach(objects: ObjectLike[]): Promise<SchemaValidationReport> {
     const results = await Promise.all(
-      federated.map((o) =>
+      objects.map((o) =>
         this.validateObject(o.name).catch((err): SchemaValidationResult => {
           this.logger?.warn(`validateObject('${o.name}') failed`, err);
           return {
@@ -439,30 +668,126 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
     const ok = results.every((r) => r.ok);
     return { ok, results };
   }
+
+  async validateAll(): Promise<SchemaValidationReport> {
+    const objects = await this.config.listObjects();
+    return this.validateEach(objects.filter((o) => this.isFederated(o)));
+  }
+
+  /**
+   * [#10537] Validate the federated objects bound to ONE datasource.
+   *
+   * The scoped twin of {@link validateAll}, composed from the same primitives
+   * (`listObjects` → filter → `validateObject`) so a caller that asked about
+   * one datasource drives live remote introspection against THAT datasource
+   * only. `POST /api/v1/datasources/:name/external/validate` used to reach this
+   * by running the whole-farm sweep and post-filtering the report: the rows
+   * were right, but a request scoped by its URL paid for every OTHER federated
+   * datasource's remote round-trips and discarded the results — and an
+   * unreachable *unrelated* remote slowed the answer for the datasource that
+   * was actually asked about.
+   *
+   * Row-for-row identical to that composition, by construction: the same
+   * federation predicate, the same `validateObject`, the same per-object catch,
+   * and a selection keyed on `o.datasource ?? 'default'` — which is exactly the
+   * value `validateObject` reports back as `result.datasource`, so "the rows
+   * the sweep would have kept" and "the objects this selects" are the same set
+   * (pinned in `__tests__/external-datasource-service.test.ts`).
+   *
+   * A name nothing is bound to selects nothing and answers an empty, vacuously
+   * `ok` report — the sweep-then-filter answer for an unknown name, kept rather
+   * than upgraded to a throw: whether an unknown datasource is an error is a
+   * separate question from this one, and this method must not decide it in
+   * passing.
+   *
+   * NOT on `IExternalDatasourceService` (spec): the route composition this
+   * serves was authorized as a service-side helper, while adding a
+   * per-datasource validate to the contract is a spec-surface change that has
+   * to be decided on its own. `packages/rest`'s federation registrar therefore
+   * probes for this method and answers `503` when the wired service has no
+   * scoped spelling, rather than silently falling back to the fan-out.
+   */
+  async validateDatasource(datasource: string): Promise<SchemaValidationReport> {
+    const objects = await this.config.listObjects();
+    return this.validateEach(
+      objects.filter((o) => this.isFederated(o) && (o.datasource ?? 'default') === datasource),
+    );
+  }
 }
 
-/** Render a reviewable `*.object.ts` source string for an object draft. */
+/**
+ * Render a reviewable `*.object.ts` source string for an object draft.
+ *
+ * The output is annotated `ServiceObject`, which makes `tsc` over this string
+ * a complete acceptance instrument for the draft's shape — use it that way.
+ *
+ * `namespace` is passed in rather than re-derived from `definition.name`,
+ * because the two absent cases are NOT the same file: a name that is already
+ * prefixed and a name that could not be prefixed both read as "starts with
+ * something" from here, and only the second one needs the TODO.
+ *
+ * `primaryKeyFields` is rendered as a COMMENT and nowhere else — see
+ * {@link REMOTE_PRIMARY_KEY_COMMENT}. It is passed separately from `fields` on purpose:
+ * a field record that could carry the key at all is a field record something
+ * could accidentally serialise into the definition again.
+ */
 function renderObjectSource(
   definition: Record<string, unknown>,
-  fields: Record<string, { type: FieldType; primaryKey?: boolean }>,
+  fields: Record<string, { type: FieldType }>,
   review: ObjectDraft['review'],
+  namespace?: string,
+  primaryKeyFields: readonly string[] = [],
 ): string {
   const reviewByColumn = new Map(review.map((r) => [r.column, r.note]));
   const external = definition.external as { remoteSchema?: string; remoteName?: string };
 
   const fieldLines = Object.entries(fields).map(([fieldName, f]) => {
     const note = reviewByColumn.get(fieldName);
-    const pk = f.primaryKey ? ', primaryKey: true' : '';
     const comment = note ? ` // REVIEW: ${note}` : '';
-    return `    ${fieldName}: { type: '${f.type}'${pk} },${comment}`;
+    return `    ${fieldName}: { type: '${f.type}' },${comment}`;
   });
+
+  // The whole of ruling D's second half: information for the reader, zero
+  // contract face. Rendered only when a key was actually reported — with no
+  // key there is nothing to preserve, and an empty "none reported" banner would
+  // be noise in every draft of every keyless table.
+  const primaryKeyComment =
+    primaryKeyFields.length > 0
+      ? [
+          `  ${REMOTE_PRIMARY_KEY_COMMENT}${primaryKeyFields.join(', ')}`,
+          `  // Preserved as a COMMENT because 'ServiceObject' has no authorable key for a`,
+          `  // federated object's remote primary key (#11000): 'fields.<f>.primaryKey' is`,
+          `  // not part of the field schema, so emitting it produced a draft that neither`,
+          `  // 'tsc' nor 'ObjectSchema' accepted. Nothing below reads this line.`,
+          `  // It names the column(s) THIS DRAFT WAS GIVEN as the key. For a COMPOSITE key`,
+          `  // some drivers report only the first column (#10997), so treat the list as a`,
+          `  // lower bound and check it against the remote table before relying on it.`,
+        ]
+      : [];
 
   const externalLine = external.remoteSchema
     ? `  external: { remoteSchema: '${external.remoteSchema}', remoteName: '${external.remoteName}' },`
     : `  external: { remoteName: '${external.remoteName}' },`;
 
+  // No namespace resolved → the name is bare. That is legal in a stack whose
+  // manifest declares no `namespace` (`defineStack` skips the check), so the
+  // draft is emitted rather than refused — but it is NOT legal in a namespaced
+  // stack, and this generator cannot tell which one the author will paste it
+  // into. Say so loudly in the file instead of guessing: the same
+  // "emit it with a TODO the validator accepts" shape #9666 settled on.
+  const namespaceTodo = namespace
+    ? []
+    : [
+        `// TODO(namespace): no package namespace could be resolved for this`,
+        `// datasource, so this object name is UNPREFIXED. If the stack you commit`,
+        `// this into declares 'manifest.namespace', rename it to`,
+        `// '<namespace>_${definition.name as string}' — 'defineStack()' refuses an`,
+        `// unprefixed object name (ADR-0028).`,
+      ];
+
   return [
     `// Generated by \`os datasource introspect\` (ADR-0015). Review before committing.`,
+    ...namespaceTodo,
     `import type { ServiceObject } from '@objectstack/spec/data';`,
     ``,
     `const ${definition.name as string}: ServiceObject = {`,
@@ -470,9 +795,16 @@ function renderObjectSource(
     `  label: '${definition.label as string}',`,
     `  datasource: '${definition.datasource as string}',`,
     externalLine,
+    ...primaryKeyComment,
     `  fields: {`,
     ...fieldLines,
     `  },`,
+    `  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1`,
+    `  // requires this to be an authored decision rather than an accident — the`,
+    `  // \`security-owd-unset\` author-time rule refuses an object without it, so a`,
+    `  // draft that omitted it could not compile. '${GENERATED_SHARING_MODEL}' is the rule's own`,
+    `  // recommended default: owner + explicit shares. Widen it deliberately.`,
+    `  sharingModel: '${definition.sharingModel as string}',`,
     `};`,
     ``,
     `export default ${definition.name as string};`,

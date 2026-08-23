@@ -331,9 +331,12 @@ describe('packages envelope (#3843) — error bodies', () => {
       ),
     },
     {
-      // NOT `GET /packages`: that route catches a failing `list()` in an INNER
-      // try and degrades to the registry-only listing, so its 500 arm is
-      // unreachable that way (pinned below). `GET /:id` has no inner catch.
+      // [#11063] Was: "NOT `GET /packages` — that route catches a failing
+      // `list()` in an INNER try and degrades to the registry-only listing, so
+      // its 500 arm is unreachable that way." That inner catch is gone; both
+      // read doors now reach this arm. `GET /:id` is kept as this case's
+      // subject so the case itself is unchanged, and the list door's own 500
+      // arm is pinned in `package-list-durable-read-refusal.test.ts`.
       name: 'an unexpected throw from the package service',
       status: 500,
       code: 'INTERNAL_ERROR',
@@ -375,10 +378,20 @@ describe('packages envelope (#3843) — error bodies', () => {
     }
   });
 
-  it('GET /packages still degrades to a 200 registry-only listing when the database is down', async () => {
-    // Pre-existing, deliberate (`// Database query failed — continue with
-    // registry-only packages`) and unchanged by #3843 — recorded here because it
-    // is why the 500 case above drives `GET /:id` instead.
+  it('GET /packages no longer degrades to a 200 registry-only listing when the durable read fails (#11063)', async () => {
+    // REPLACED, not re-spelled. This pin used to record the opposite — a 200
+    // carrying the registry half alone — described as "pre-existing, deliberate
+    // (`// Database query failed — continue with registry-only packages`)". It
+    // pinned exactly the branch #11063 removed, so re-spelling it would have
+    // left an assertion that passes only because nothing is produced any more.
+    //
+    // ⚠️ Note what this fixture models: a BARE `Error`. Since #10965 the real
+    // `PackageService.list()` swallows its own driver faults and still answers
+    // `[]`, and re-throws only the declared `SERVICE_UNAVAILABLE` / 503 seam
+    // refusal — so this shape is the UNDECLARED arm (a 500 server fault), and
+    // the declared-refusal arm is pinned in
+    // `package-list-durable-read-refusal.test.ts` alongside the `total` and
+    // both-doors-agree assertions.
     const { status, body } = await drive(
       mount({ list: async () => { throw new Error('db down'); } }, {
         protocol: { getMetaItems: async () => ({ items: [{ manifest: MANIFEST }] }) },
@@ -386,9 +399,14 @@ describe('packages envelope (#3843) — error bodies', () => {
       'GET',
       PKGS,
     );
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data.packages).toHaveLength(1);
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error.code).toBe('INTERNAL_ERROR');
+    // The registry half is not served as if it were a complete listing, and no
+    // `total` is reported over a read that failed.
+    expect(body.data?.packages).toBeUndefined();
+    expect(body.data?.total).toBeUndefined();
+    expect(envelopeViolations(body), JSON.stringify(body)).toEqual([]);
   });
 
   it('a repeated `?version=` is refused identically on both verbs (#6307)', async () => {

@@ -55,7 +55,7 @@ export const SysScimProvider = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0071.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'SCIM 2.0 connections (bearer tokens) external IdPs use to provision/deprovision this environment\'s users',
   displayNameField: 'provider_id',

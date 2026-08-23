@@ -28,7 +28,13 @@
 //
 // This is that gate. It is deliberately NOT a docs linter -- it makes exactly
 // one claim, the one a reader acts on first: *the import line at the top of the
-// example resolves*.
+// example resolves*. "Resolves" has two halves and this file learned them in
+// the wrong order: the SYMBOL must exist in the package's types (#9532, above),
+// and the PACKAGE must exist at all (#10893). The second half was open for this
+// gate's whole life, because a specifier naming no workspace member was skipped
+// under the rule written for `react` -- so `import { OrgScopingPlugin } from
+// '@objectstack/plugin-org-scoping'` passed green in a published README while
+// no directory of this repo held that package. See `preTypeTarget`.
 //
 // ## Why the fence is this narrow, with the measurements that set it
 //
@@ -71,9 +77,14 @@
 //   automatically -- coverage that grows with the tree rather than a hard-coded
 //   `README.md`.
 //
-//   ONLY WORKSPACE TARGETS. An import of `react` or `@objectql/core` is not this
-//   repo's business and is skipped. The target must be a workspace member by
-//   name; the check is then made against what that member actually publishes.
+//   ONLY OUR OWN SCOPE. An import of `react` or `@objectql/core` is not this
+//   repo's business and is skipped. An `@objectstack/` specifier is: if it names
+//   a workspace member the check is made against what that member actually
+//   publishes, and if it names none at all that is itself the finding (#10893 —
+//   see `preTypeTarget`, which owns that decision and the measurements behind
+//   its fence). Until #10893 the second case was skipped alongside `react`, so
+//   the gate was strict about a member that exists and SILENT about one that
+//   does not — the inverse of the useful direction.
 //
 // ## Why the BUILT `.d.ts`, and why a missing one is an ERROR
 //
@@ -289,9 +300,71 @@ const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SELF = 'scripts/check-published-readme-exports.mjs';
 const BASELINE_REL = 'scripts/published-readme-exports.baseline.json';
 
+/**
+ * ⛔ THIS GATE DECLARES NO WORKSPACE POPULATION, DELIBERATELY (#10542).
+ *
+ * There is no `ROOT_DIR_WATCH_HINTS` array below, and adding one would be a
+ * regression rather than a fix. This docblock is that decision, with the
+ * measurement that made it, because the card that dispatched the work assumed
+ * the opposite and the source says otherwise.
+ *
+ * ── What #10542 expected ────────────────────────────────────────────────────
+ *
+ * `scripts/pm/dispatch-gates.mjs` names a gate for a card by scanning the
+ * gate's module body for path literals. This gate computes its population at
+ * RUNTIME (it parses pnpm-workspace.yaml, exactly as check-published-files.mjs
+ * does), so it names no workspace path and the derivation named it for no card.
+ * #10542 grouped it with check-published-files.mjs and said of the pair that
+ * they "really do read every published package's manifest, so their population
+ * genuinely is the workspace and the #10114 escape applies directly".
+ *
+ * ── What the source actually does, and the measurement that decides it ──────
+ *
+ * The two gates enumerate the same members and then diverge completely.
+ * check-published-files.mjs JUDGES every non-build file it walks — MINIMAL
+ * tests each one against FORBIDDEN — so a declaration of the workspace globs
+ * names files it really opens: 4803 of the 5263 tracked files the declaration
+ * would name, 91.3%.
+ *
+ * This gate walks the same trees and then narrows twice, to published markdown
+ * and to the manifests: `publishedMarkdown` keeps only `.md` paths the `files`
+ * whitelist admits, and the rest of the read surface is `<member>/package.json`
+ * plus the built type entry under `<member>/dist/`. Measured on the same tree,
+ * the same declaration would name 5263 tracked files to reach 149 — 2.8%.
+ *
+ * That is the `filtered` shape check-examples-live-imports.mjs refuses by name
+ * at 1.6%, and `hintCovers`' docblock prices a fabricated lead above a missing
+ * one: a `packages/**`-class declaration here would paste this gate into every
+ * dispatch prompt whose surface brushes any package source file, and 97 of
+ * every 100 of those leads would name a gate that never opens the file. The
+ * "22 leads is the same as none" failure, bought at a worse ratio than the
+ * wholesale admission the derivation already refuses.
+ *
+ * ── What this gate is left with, and why that is the honest state ───────────
+ *
+ * A card editing this script names it by identity. A card editing a published
+ * README or a manifest names it by nothing — a real blind spot, and one the
+ * instrument cannot close: a root hint covers a whole SUBTREE, and there is no
+ * spelling for "the README of each workspace member". Recorded here rather than
+ * repaired falsely; if the derivation ever grows a narrower key than a subtree
+ * root, this is the gate to revisit first.
+ *
+ * The refusal is pinned in `--self-test` rather than left in this paragraph, so
+ * a later author who adds the workspace globs meets an assertion.
+ */
+const DECLARED_WORKSPACE_POPULATION = [];
+
 // ⛔ SHRINK-ONLY. The authority token the #8435 convention requires; the
 // baseline is a maintainer's registry, never an author's escape hatch.
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * This repo's own npm scope — the boundary of the MEMBER-EXISTENCE claim
+ * (#10893). An `@objectstack/` specifier is a statement about a package this
+ * repo is expected to build; anything else (`react`, `hono`, `@libsql/client`)
+ * is not this gate's business and never was.
+ */
+const OWN_SCOPE = '@objectstack/';
 
 /**
  * Finding kinds produced by the CALL-SITE half, as they appear in a finding id.
@@ -743,6 +816,69 @@ export function splitSpecifier(specifier) {
 }
 
 /**
+ * The verdict for ONE import specifier BEFORE any type surface is consulted,
+ * and the object `analyzeDocument` acts on (#10893).
+ *
+ * ## The false green this closes
+ *
+ * Every other claim in this file is made against a package that IS a workspace
+ * member: `resolveTarget` looks the name up in the `byName` map `publishedDocs`
+ * builds from `workspaceDirs()`, and a specifier that is not there returned
+ * `null` — "not this repo's business", the rule written for `react`. So the
+ * gate was strict about a member that exists and SILENT about one that does
+ * not, which is the inverse of the useful direction:
+ *
+ *     import { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';
+ *
+ * passed green in `packages/plugins/plugin-security/README.md` — not because
+ * `OrgScopingPlugin` was verified, but because the *package* was never found,
+ * so the symbol half had nothing to compare against and never ran. A reader
+ * who pastes that line cannot `pnpm add` the package at all, which is a
+ * strictly worse outcome than the fabricated SYMBOL the gate was built for
+ * (#9532): that one at least installs.
+ *
+ * ## Why the fence is the SCOPE and not "any unresolvable specifier"
+ *
+ * Measured on `409077e93c`, over the 60 published documents: 214 import
+ * statements, 200 of them `@objectstack/`-scoped, and **5 of those named no
+ * workspace member** — in 4 documents, naming 4 distinct packages. Every one
+ * was a real defect, including two READMEs that misname THEIR OWN package
+ * (`@objectstack/plugin-trigger-schedule` for `@objectstack/trigger-schedule`).
+ * Zero false positives at that fence.
+ *
+ * The wider fence — every `@objectstack/` TOKEN anywhere in a published
+ * document — was measured too, and it is the naive version this file's header
+ * warns about: 14 distinct non-member names across 26 sites, of which 5 are
+ * legitimate by construction and would have to be muted one by one —
+ * `@objectstack/security-enterprise` (the enterprise edition, whose install
+ * hint `packages/cli` PRINTS and `capability-preflight.test.ts` pins),
+ * `@objectstack/service-tenant` (the cloud runtime, so named in
+ * `packages/spec/src/system/constants/platform-object-names.ts`),
+ * `@objectstack/framework` (the umbrella install name), and the two package
+ * names `service-datasource`'s README recalls as its own PAST. Prose may name
+ * a package this repo does not build; a runnable import line may not. That is
+ * the same boundary the `diff`-fence rule draws ("a removed import is a
+ * statement about the past") and it is drawn here for the same reason.
+ *
+ * ⛔ NOT an allowlist, deliberately. A roster of out-of-repo `@objectstack/`
+ * packages would today be a population of ZERO — no published document imports
+ * one from a fence — and this file refuses populations of zero everywhere
+ * else. Whether a runnable example may name a package this repo does not build
+ * is a policy question (#10893's second shape), and it wants a card, not a
+ * blank file that a future author fills in to make a red gate go quiet.
+ *
+ * @param name     the bare package name from `splitSpecifier`
+ * @param isMember whether the workspace map holds it
+ * @returns `undefined` — a member; the caller resolves its type entry
+ *          `null` — a foreign package; skipped, as ever
+ *          `{unresolvable:true}` — ours by scope, in no directory of this repo
+ */
+export function preTypeTarget(name, isMember) {
+  if (isMember) return undefined;
+  return name.startsWith(OWN_SCOPE) ? { unresolvable: true } : null;
+}
+
+/**
  * The `.d.ts` a consumer's compiler lands on for `<pkg><subpath>`.
  *
  * Both shapes this repo writes are handled: the flat one
@@ -1040,6 +1176,22 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
     if (!split) continue;
     const target = resolveTarget(split.name, split.subpath, imp.specifier);
     if (!target) continue;
+    // #10893, and it is decided FIRST because nothing below it can be asked:
+    // a specifier that names no workspace member has no `exports` map, no
+    // subpath declaration and no type entry, so every later branch would read
+    // as "checked and clean" over a package that was never found.
+    if (target.unresolvable) {
+      findings.push({
+        id: `${doc.pkg}|${doc.file}|specifier|${imp.specifier}`,
+        line: imp.line,
+        text:
+          `documents \`import … from '${imp.specifier}'\`, but ${split.name} is in no ` +
+          `directory of this repo — so a reader cannot install it, and every symbol this ` +
+          `line claims is unverifiable. Name a package this repo builds, or move the ` +
+          `mention out of a runnable fence and say where the package really ships.`,
+      });
+      continue;
+    }
     if (!target.declared) {
       findings.push({
         id: `${doc.pkg}|${doc.file}|subpath|${imp.specifier}`,
@@ -1234,6 +1386,42 @@ function freshRemedy() {
     `symbol it documents. ${RATCHET_AUTHORITY_MARKER}: ${BASELINE_REL} is a shrink-only\n` +
     'record of the instances #9532 measured. It is not an author remedy and this gate does\n' +
     'not offer it as one — a new entry would mute exactly what the gate exists to report.\n'
+  );
+}
+
+/**
+ * The run's HEADER — the populations every claim below it was made against.
+ *
+ * Rendered by a function, beside `freshRemedy()` and `successSummary()` and for
+ * the same reason: the counts are interpolated, so reading the SOURCE proves
+ * nothing about the sentence an author gets.
+ *
+ * ## Why the resolved/total pair is here rather than only the defect count
+ *
+ * This line is where #10893 was invisible. Before it, the run printed
+ * `214 import statement(s), 49 workspace type entr(ies)` — two numbers about
+ * what RESOLVED, and no number at all for the specifiers it could not place.
+ * A specifier naming no workspace member left no trace in the output and no
+ * trace in the verdict, so the gate read as coverage of every import line when
+ * five of them had never been looked at.
+ *
+ * Printed as `N/N` rather than as a bare `0 unresolvable`, following
+ * `check-published-readme-links`' assertion 5: a recogniser that quietly
+ * stopped matching surfaces as a DENOMINATOR THAT FELL, where a zero-defect
+ * count would have gone on reading exactly like success.
+ */
+export function headerLine({
+  documents,
+  members,
+  importStatements,
+  typeEntries,
+  ownScope,
+  unresolvable,
+}) {
+  return (
+    `${documents} published document(s) across ${members} workspace package(s); ` +
+    `${importStatements} import statement(s), ${typeEntries} workspace type entr(ies), ` +
+    `${ownScope - unresolvable}/${ownScope} ${OWN_SCOPE} specifier(s) naming a workspace member.`
   );
 }
 
@@ -1523,6 +1711,44 @@ export function bindingRefusal(
 }
 
 /**
+ * The population refusal for the MEMBER-EXISTENCE half (#10893).
+ *
+ * Its population is not `targets` and cannot be: `targets` counts specifiers
+ * that RESOLVED, and this half's whole subject is the ones that did not. A
+ * tree where every `@objectstack/` specifier stopped being recognised as
+ * `@objectstack/`-scoped — a change to `splitSpecifier`, a scope rename, an
+ * `extractImports` that still finds statements while mangling the specifier —
+ * would drive `ownScope` to zero and this half to silence, while `targets`
+ * stayed non-zero on the unscoped workspace members (`create-objectstack`,
+ * `objectstack-blank` are both members with no scope at all). So the three
+ * refusals above cannot stand in for it.
+ *
+ * ⛔ Kept OUT of `populationRefusal`. That function words the ONE ordered axis
+ * `documents → import statements → workspace type entries`, each stage a
+ * narrowing of the one before it, and this is not a fourth narrowing of that
+ * axis — it is a sibling population read off the same walk. `bindingRefusal`
+ * is the precedent: a separate refusal, with its own argument made where it
+ * lives, rather than a stage bolted onto an axis it does not belong to.
+ */
+export function scopeRefusal({ documents, importStatements, ownScope }, caller = SELF) {
+  if (ownScope !== 0) return null;
+  return (
+    `${caller}: read ${documents} document(s) and ${importStatements} import statement(s), and ` +
+    `NOT ONE specifier was \`${OWN_SCOPE}\`-scoped — so the member-existence half checked ` +
+    `nothing (#4690).\n` +
+    `  This is not the same state as "every specifier resolved": a resolved target is ` +
+    `counted in \`targets\`, and \`targets\` can stay non-zero on the workspace members that ` +
+    `carry no scope. Zero here means the SCOPE RECOGNISER read nothing — \`splitSpecifier\` ` +
+    `no longer returning the bare name, the scope renamed without this constant following, ` +
+    `or an extractor that finds statements while mangling what they import.\n` +
+    `  If this repo genuinely stopped documenting its own packages in its own published ` +
+    `READMEs, that is the finding — say so and retire this half.\n` +
+    `  ⛔ Not a skip, and ${BASELINE_REL} cannot silence it: a baseline mutes findings, and ` +
+    `this run produced none because it read none.`
+  );
+}
+
+/**
  * Pass 1's population: which workspace type entries the READMEs actually reach,
  * and how many import statements were read to find out.
  *
@@ -1540,22 +1766,37 @@ export function bindingRefusal(
  *
  * @param docs   `[{ pkg, file, text }]`
  * @param byName workspace members by package name
- * @returns `{ importStatements, targets }`, `targets` keyed `"<name><subpath>"`
+ * @returns `{ importStatements, ownScope, unresolvable, targets }`, `targets`
+ *          keyed `"<name><subpath>"`. `ownScope`/`unresolvable` are #10893's
+ *          population and its defect count, read off this same walk.
  */
 export function reachedTargets(docs, byName) {
   let importStatements = 0;
+  let ownScope = 0;
+  let unresolvable = 0;
   const targets = new Map();
   for (const doc of docs) {
     for (const imp of extractImports(doc.text)) {
       importStatements++;
       const split = splitSpecifier(imp.specifier);
-      if (!split || !byName.has(split.name)) continue;
+      if (!split) continue;
+      // #10893's population, counted in the SAME walk that builds `targets` so
+      // the two can never disagree about what was read. `ownScope` is the
+      // denominator the green line prints; `unresolvable` is its complement
+      // over the member map, and it is the quantity that was previously
+      // invisible in both the output and the verdict.
+      const isMember = byName.has(split.name);
+      if (split.name.startsWith(OWN_SCOPE)) {
+        ownScope++;
+        if (!isMember) unresolvable++;
+      }
+      if (!isMember) continue;
       const key = `${split.name}${split.subpath.slice(1)}`;
       if (targets.has(key)) continue;
       targets.set(key, { name: split.name, subpath: split.subpath });
     }
   }
-  return { importStatements, targets };
+  return { importStatements, ownScope, unresolvable, targets };
 }
 
 /**
@@ -1643,7 +1884,10 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
   const { byName, docs } = publishedDocs();
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
-  const { importStatements, targets: reached } = reachedTargets(docs, byName);
+  const { importStatements, ownScope, unresolvable, targets: reached } = reachedTargets(
+    docs,
+    byName,
+  );
 
   // Stages 2 and 3 of the population axis, decided BEFORE a type entry is
   // resolved: nothing below this line can check anything the population above
@@ -1657,6 +1901,12 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
     targets: reached.size,
   });
   if (vacuous) throw new Error(vacuous);
+
+  // #10893's sibling population, decided on the same text-only pass and for the
+  // same reason: a half whose population is zero checks nothing, and green over
+  // zero is indistinguishable from green over clean.
+  const unscoped = scopeRefusal({ documents: docs.length, importStatements, ownScope });
+  if (unscoped) throw new Error(unscoped);
 
   const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, missing }
   for (const [key, { name, subpath }] of reached) {
@@ -1685,7 +1935,15 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
   );
 
   const resolveTarget = (name, subpath) => {
-    if (!byName.has(name)) return null;
+    // ⛔ The member decision is the EXPORTED `preTypeTarget`, not two lines
+    // spelled out here. #10367 is the lesson: `namespaceSymbol` was a hardcoded
+    // `null` at the only production call site for this gate's whole life, and
+    // the self-test could not see it because it drives `analyzeDocument`
+    // through a FAKE resolver — it pinned the branch that CONSUMES the value
+    // and said nothing about the caller that SUPPLIES it. Lifting the decision
+    // out gives the self-test the supplying end too.
+    const pre = preTypeTarget(name, byName.has(name));
+    if (pre !== undefined) return pre;
     const t = targets.get(`${name}${subpath.slice(1)}`);
     if (!t) return null;
     if (!t.declared) return { declared: false };
@@ -1721,9 +1979,14 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
   const memberChecks = findings.filter((f) =>
     CALL_SITE_KINDS.some((kind) => f.id.includes(`|${kind}|`)),
   ).length;
-  const header =
-    `${docs.length} published document(s) across ${byName.size} workspace package(s); ` +
-    `${importStatements} import statement(s), ${targets.size} workspace type entr(ies).`;
+  const header = headerLine({
+    documents: docs.length,
+    members: byName.size,
+    importStatements,
+    typeEntries: targets.size,
+    ownScope,
+    unresolvable,
+  });
 
   if (unbuilt.length > 0) {
     console.error(
@@ -2248,6 +2511,205 @@ function selfTest() {
     analyzeDocument(fabricatedStaticNested, resolveFake).map((f) => f.id),
     ['@objectstack/kernel|packages/kernel/README.md|member|@objectstack/kernel|Kernel.configure'],
   );
+
+  // -- ⭐ MEMBER EXISTENCE: the specifier that names no workspace member (#10893)
+  //
+  // The half every other pin in this file presupposes. Each claim above is made
+  // against a package the workspace map HOLDS; this one is about the specifiers
+  // it does not, which for this gate's whole life were `continue`d as "not this
+  // repo's business" — the rule written for `react`.
+  //
+  // Pinned at BOTH ends, which is the #10367 lesson: `preTypeTarget` is the
+  // SUPPLY end (what production decides), the fixtures below are the CONSUME
+  // end (what `analyzeDocument` does with it). A branch is only as exercised as
+  // its least-tested end, and the fake resolver alone can only ever reach one.
+
+  // -- the supply end, all three arms ------------------------------------------
+  eq('preTypeTarget — a workspace member defers to type resolution', preTypeTarget('@objectstack/spec', true), undefined);
+  eq('preTypeTarget — ours by scope, in no directory of this repo', preTypeTarget('@objectstack/plugin-org-scoping', false), {
+    unresolvable: true,
+  });
+  // ⭐ THE NEGATIVE CONTROL, and it is the one that decides whether this half is
+  // usable at all. `react`, `hono`, `zod`, `@libsql/client` and `@oclif/core`
+  // are all imported by published READMEs in this tree and none of them is a
+  // workspace member. A recogniser that answered "unresolvable" on scope-blind
+  // grounds would redden five correct documents on its first run — the "cries
+  // wolf, gets muted" failure this file's header sets the fence against.
+  eq('preTypeTarget — a foreign package is skipped, exactly as before', preTypeTarget('react', false), null);
+  eq('preTypeTarget — a foreign SCOPED package is skipped too', preTypeTarget('@libsql/client', false), null);
+  // The scope test is a prefix, not a substring: a package whose name merely
+  // CONTAINS the scope is foreign.
+  eq('preTypeTarget — the scope is a prefix, never a substring', preTypeTarget('@fork/@objectstack/spec', false), null);
+
+  // -- the consume end, on the shape measured in the tree -----------------------
+  // Verbatim from `packages/triggers/trigger-schedule/README.md`, which imported
+  // `@objectstack/plugin-trigger-schedule` while the package it ships as is
+  // `@objectstack/trigger-schedule`. The worst instance of the class and the one
+  // that makes the case for it: a package misnaming ITSELF, on the page npm
+  // renders for it, green through every run this gate has ever made.
+  const resolveWithScope = (name) => {
+    const hit = resolveFake(name);
+    if (hit) return hit;
+    return preTypeTarget(name, false);
+  };
+  const misnamesItself = {
+    pkg: '@objectstack/trigger-schedule',
+    file: 'packages/triggers/trigger-schedule/README.md',
+    text: [
+      '```ts',
+      "import { AuditPlugin } from '@objectstack/plugin-audit';",
+      "import { ScheduleTriggerPlugin } from '@objectstack/plugin-trigger-schedule';",
+      "import { useState } from 'react';",
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a README importing from a package in no directory of this repo is reported',
+    analyzeDocument(misnamesItself, resolveWithScope).map((f) => f.id),
+    ['@objectstack/trigger-schedule|packages/triggers/trigger-schedule/README.md|specifier|@objectstack/plugin-trigger-schedule'],
+  );
+  // ⛔ Taken from the finding of THIS KIND, never from `findings[0]`, and the
+  // difference was measured rather than reasoned. Ablating the branch does not
+  // make `analyzeDocument` fall silent: `{unresolvable:true}` carries no
+  // `declared`, so the NEXT arm claims it and emits a `subpath` finding whose
+  // text also interpolates the specifier. Against `findings[0]` the pin "names
+  // the package it could not place" therefore stayed GREEN with the branch it
+  // exists for deleted — satisfied by a sentence telling the author that a
+  // package which is not there fails to declare a subpath. Selecting by kind
+  // makes all five pins discriminating; `?? ''` keeps them reporting as
+  // failures rather than dying on a TypeError before the rest of the suite runs.
+  const unresolvableText =
+    analyzeDocument(misnamesItself, resolveWithScope).find((f) => f.id.split('|')[2] === 'specifier')
+      ?.text ?? '';
+  for (const [what, ok] of [
+    ['name the package it could not place', unresolvableText.includes('@objectstack/plugin-trigger-schedule')],
+    ['say the package is in no directory of this repo', unresolvableText.includes('in no directory of this repo')],
+    ['say the reader cannot install it', unresolvableText.includes('cannot install it')],
+    // Two remedies, because there are two honest outcomes and the author has to
+    // choose: the name is wrong (fix it), or the package really does ship
+    // elsewhere (then it must not sit in a runnable fence pretending otherwise).
+    ['offer the rename remedy', unresolvableText.includes('Name a package this repo builds')],
+    ['offer the out-of-fence remedy', unresolvableText.includes('out of a runnable fence')],
+  ]) {
+    if (!ok) failures.push(`the member-existence finding must ${what}.`);
+  }
+
+  // ⭐ THE OTHER DIRECTION, on the SAME document. Rename the specifier to the
+  // package that really ships and the finding must go — otherwise these pins
+  // would pass just as happily on a branch that reddens every import line.
+  const misnameRepaired = {
+    ...misnamesItself,
+    text: misnamesItself.text
+      .replace('@objectstack/plugin-trigger-schedule', '@objectstack/spec')
+      .replace('ScheduleTriggerPlugin', 'defineStack'),
+  };
+  eq('analyzeDocument — the repaired specifier is silent', analyzeDocument(misnameRepaired, resolveWithScope), []);
+  // ...and the foreign imports in the SAME fence were silent throughout, which
+  // the id list above already shows: `react` is not a member either.
+
+  // A SUBPATH import of an unresolvable package must report the package, not the
+  // subpath. Order matters, and the cost of getting it wrong is MEASURED: with
+  // the branch above ablated, this fixture does not go silent, it reports
+  // `subpath` — "@objectstack/knowledge-turso does not declare the subpath
+  // './plugin' in its `exports` map" — sending the author to read an `exports`
+  // map in a package that is in no directory of the repo. A wrong remedy, not a
+  // missing one, which is the worse of the two failures.
+  const unresolvableSubpath = {
+    pkg: '@objectstack/embedder-openai',
+    file: 'packages/plugins/embedder-openai/README.md',
+    text: ['```ts', "import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso/plugin';", '```'].join('\n'),
+  };
+  eq(
+    'analyzeDocument — an unresolvable package is reported before its subpath is judged',
+    analyzeDocument(unresolvableSubpath, resolveWithScope).map((f) => f.id.split('|')[2]),
+    ['specifier'],
+  );
+
+  // -- the population, MEASURED off a fixture rather than typed ----------------
+  // Same discipline as the `reachedTargets` pins below: a hand-written
+  // `ownScope: 3` would pin the refusal's arithmetic while proving nothing about
+  // the scan that produces the number.
+  const scopeMix = [
+    {
+      pkg: '@fixture/alpha',
+      file: 'packages/alpha/README.md',
+      text: [
+        '```typescript',
+        "import { useState } from 'react';",
+        "import { createClient } from '@libsql/client';",
+        "import { defineStack } from '@objectstack/spec';",
+        "import { OrgScopingPlugin } from '@objectstack/plugin-org-scoping';",
+        '```',
+      ].join('\n'),
+    },
+  ];
+  const specOnly = new Map([['@objectstack/spec', { dir: 'packages/spec', manifest: {} }]]);
+  const mixed = reachedTargets(scopeMix, specOnly);
+  eq(
+    'reachedTargets — the scoped population and its unresolvable complement are both measured',
+    {
+      imports: mixed.importStatements,
+      ownScope: mixed.ownScope,
+      unresolvable: mixed.unresolvable,
+      targets: mixed.targets.size,
+    },
+    { imports: 4, ownScope: 2, unresolvable: 1, targets: 1 },
+  );
+  eq('scopeRefusal — a scoped population of TWO is never refused', scopeRefusal({ documents: 1, importStatements: 4, ownScope: mixed.ownScope }), null);
+
+  // The refusal direction, over a fixture whose zero is likewise measured: a
+  // tree of purely foreign imports reads FOUR import statements and not one
+  // scoped specifier, so this half checked nothing while `targets` could still
+  // be non-zero elsewhere.
+  const foreignOnly = reachedTargets(
+    [
+      {
+        pkg: '@fixture/alpha',
+        file: 'packages/alpha/README.md',
+        text: ['```typescript', "import { useState } from 'react';", "import { Hono } from 'hono';", '```'].join('\n'),
+      },
+    ],
+    specOnly,
+  );
+  const scopeless = scopeRefusal({ documents: 1, importStatements: foreignOnly.importStatements, ownScope: foreignOnly.ownScope }, 'gate');
+  if (scopeless === null) {
+    failures.push(
+      'a run in which NOT ONE import specifier was @objectstack/-scoped is not refused. The\n' +
+        '      member-existence half read nothing, and green over a population of zero is the\n' +
+        '      #4690 claim this gate refuses at every other population it has.',
+    );
+  } else {
+    for (const [what, ok] of [
+      ['name the imports it read', scopeless.includes('2 import statement(s)')],
+      ['carry the #4690 remedy voice', scopeless.includes('(#4690)')],
+      // The remedy must send the reader at the RECOGNISER, not at the tree —
+      // this refusal fires when the scan broke, and "go fix your READMEs" would
+      // be the wrong file.
+      ['point at the scope recogniser', scopeless.includes('SCOPE RECOGNISER')],
+      ['refuse the baseline as a silencer', scopeless.includes(BASELINE_REL)],
+    ]) {
+      if (!ok) failures.push(`the member-existence refusal must ${what}.`);
+    }
+  }
+
+  // -- the header: the line where this half was invisible ----------------------
+  // The card's own evidence was an OUTPUT line: the run reported `214 import
+  // statement(s), 49 workspace type entr(ies)` and said nothing about the five
+  // specifiers it could not place. Pinned as a resolved/total PAIR, so a
+  // recogniser that stops matching shows up as a denominator that fell rather
+  // than as a defect count that stayed at zero.
+  const head = headerLine({ documents: 60, members: 77, importStatements: 214, typeEntries: 49, ownScope: 200, unresolvable: 5 });
+  eq(
+    'headerLine — the scoped population is printed as resolved/total, beside the older counts',
+    head,
+    '60 published document(s) across 77 workspace package(s); 214 import statement(s), 49 workspace type entr(ies), 195/200 @objectstack/ specifier(s) naming a workspace member.',
+  );
+  if (headerLine({ documents: 60, members: 77, importStatements: 214, typeEntries: 49, ownScope: 200, unresolvable: 0 }) === headerLine({ documents: 60, members: 77, importStatements: 214, typeEntries: 49, ownScope: 0, unresolvable: 0 })) {
+    failures.push(
+      'the header renders IDENTICALLY for a tree whose 200 scoped specifiers all resolved and\n' +
+        '      one where the recogniser read NONE. That is the ambiguity the pair exists to remove.',
+    );
+  }
 
   // -- END TO END on the #9870 shape: the receiver is never import-bound --------
   // `packages/plugins/plugin-hono-server/README.md` documented `await
@@ -2992,6 +3454,20 @@ function selfTest() {
     );
   }
 
+  // The dispatch-gates population refusal (#10542). Enforcement cannot hold
+  // this: the declaration is read by another tool entirely, so a wrongly-added
+  // one runs green here forever and pays itself out as a fabricated lead in
+  // every packages/** dispatch prompt. See DECLARED_WORKSPACE_POPULATION's
+  // docblock for the 2.8% measurement that refused it.
+  if (DECLARED_WORKSPACE_POPULATION.length !== 0) {
+    failures.push(
+      'this gate must declare NO workspace population: it narrows the walk to published ' +
+        'markdown and manifests, so the workspace globs would name 5263 tracked files to ' +
+        'reach 149 (2.8%). check-published-files.mjs walks the same members and judges every ' +
+        'file it finds (91.3%), which is why the declaration is honest THERE and not here.',
+    );
+  }
+
   if (failures.length > 0) {
     console.error(`✗ check:published-readme-exports --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
@@ -3021,7 +3497,17 @@ function selfTest() {
       '  row grown, either scalar moved, a whole row lost — must each REFUSE and withhold the\n' +
       '  breakdown instead of publishing one that disagrees with its own total. The header is\n' +
       '  pinned to name the neighbouring whole-repo scalars as having no per-document share,\n' +
-      '  which is the mis-quote the flag exists to make impossible.',
+      '  which is the mis-quote the flag exists to make impossible.\n' +
+      '  MEMBER EXISTENCE (#10893) is pinned at both ends — `preTypeTarget` in all three arms\n' +
+      '  (member defers, ours-by-scope reports, foreign is skipped as ever, prefix not\n' +
+      '  substring) and `analyzeDocument` on the measured shape: a README importing from a\n' +
+      '  package in no directory of this repo is reported, the SAME document with the\n' +
+      '  specifier repaired is silent, an unresolvable package is judged before its subpath,\n' +
+      '  and the finding names the package and BOTH honest remedies. Its population is a\n' +
+      '  refusal too, measured off a fixture by `reachedTargets` — a tree of purely foreign\n' +
+      '  imports reads statements and no scoped specifier — and the header prints the scoped\n' +
+      '  population as resolved/total, so a recogniser that stops matching shows up as a\n' +
+      '  denominator that fell rather than as a defect count that never moved.',
   );
 }
 

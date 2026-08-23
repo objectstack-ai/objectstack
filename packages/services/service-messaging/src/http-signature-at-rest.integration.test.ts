@@ -45,6 +45,15 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { HttpDelivery, SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import type { FetchImpl } from './http-sender.js';
 
+/**
+ * [#10740] `IHttpOutbox.redeliver` now requires its caller to state the
+ * requesting tenant. These fixtures boot an engine with no tenancy posture and
+ * no organization, so `undefined` is the honest answer — the property is
+ * required, not optional, precisely so that answer has to be written down.
+ */
+const NO_TENANT = { tenantId: undefined } as const;
+
+
 /** The secret under test — distinctive enough that a byte-scan cannot miss it. */
 const SECRET = 'whsec_7722_do_not_persist_me';
 
@@ -197,7 +206,7 @@ describe('sys_http_delivery — signing secret at rest (#7722)', () => {
 
         // Redeliver: a terminal row reset to pending and sent again, which is
         // where a resolve-at-send-time design would need the secret back.
-        await outbox.redeliver(id);
+        await outbox.redeliver(id, NO_TENANT);
         const second = makeFetch();
         await new HttpDispatcher({ nodeId: 'n2', outbox, fetchImpl: second.impl, partitionCount: 1 }).tick();
 

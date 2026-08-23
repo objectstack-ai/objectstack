@@ -47,11 +47,33 @@
  * org-stamped case is stated beside the null-org case it must not become.
  *
  * The NULL-org RECORD is here for the third direction: `applyTenantScope`
- * emits `field = ? OR field IS NULL` on purpose (#2734 — a bare equality hid
- * every platform-seeded row from every tenant). A scope "fixed" with a bare
- * equality would pass the cross-org assertions and silently lose the platform
- * record, so `deal_p1` is what distinguishes routing through the chokepoint
- * from reimplementing a worse copy of it.
+ * emits `field = ? OR field IS NULL`, so a scope "fixed" with a bare equality
+ * would pass the cross-org assertions and silently lose that record. `deal_p1`
+ * is what distinguishes ROUTING THROUGH THE CHOKEPOINT from reimplementing a
+ * worse copy of it — and that is the whole of what it pins.
+ *
+ * ## What `deal_p1` does and does NOT assert (#10103)
+ *
+ * It used to be justified as the platform bucket: a NULL organization marks a
+ * platform row that must stay visible to every tenant (#2734, ADR-0120 D3).
+ * That reading is HISTORICAL BEHAVIOUR, SUPERSEDED as a general rule. The
+ * ruling on #10103 makes the single general rule the opposite one — a row
+ * belonging to no organization is INVALID STATE, to be refused or warned about
+ * loudly, never a platform-wide default — and demotes NULL-means-global to a
+ * DRIVER-LEVEL COMPATIBILITY NOTE. The RBAC catalog that reading was invented
+ * for (#2734's "every tenant admin saw ZERO RBAC rows") is now materialized per
+ * organization instead, so no NULL row is load-bearing anywhere.
+ *
+ * The assertion is nevertheless CORRECT and is kept verbatim, because the wall
+ * is untouched at both layers: `applyTenantScope` still emits its `OR ... IS
+ * NULL` arm — that arm IS the compatibility behaviour — so an org-stamped rule
+ * routed through it still matches an organization-less record. What changed is
+ * the JUSTIFICATION, not the behaviour: this case pins that the scope goes
+ * through the driver's chokepoint, and it would be equally load-bearing if the
+ * arm existed for no reason at all. Reading `deal_p1` as an endorsement of
+ * NULL-means-global is what is now wrong; deleting it would cost this suite its
+ * most valuable axis, and weakening it to a bare-equality expectation would
+ * pin the defect.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -136,8 +158,11 @@ const open: SqlDriver[] = [];
  *   deal_a2  ORG_A   stage=lost   <- ORG_A's own non-match (criteria still bite)
  *   deal_b1  ORG_B   stage=won    <- the cross-org match this card is about
  *   deal_b2  ORG_B   stage=won    <- second one, so a count cannot pass by luck
- *   deal_p1  (null)  stage=won    <- platform row: belongs to no tenant, so it
- *                                    belongs to no OTHER tenant either (#2734)
+ *   deal_p1  (null)  stage=won    <- organization-less row, still returned by
+ *                                    `applyTenantScope`'s compatibility arm.
+ *                                    [#10103] Kept as the chokepoint-vs-bare-
+ *                                    equality probe, no longer as a claim that
+ *                                    NULL means platform-wide — see the header.
  */
 async function boot(): Promise<Booted> {
   const driver = new SqlDriver({
@@ -230,9 +255,14 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
       // failure names them rather than printing a set diff.
       expect(granted).not.toContain('deal_b1');
       expect(granted).not.toContain('deal_b2');
-      // ORG_A's own match, plus the null-org platform row the tenant
-      // chokepoint deliberately keeps visible (#2734). `deal_a2` is absent
-      // because the CRITERIA still bite — scoping did not replace them.
+      // ORG_A's own match, plus the organization-less row that `applyTenantScope`
+      // still returns through its compatibility arm. [#10103] That arm is
+      // driver-level COMPATIBILITY behaviour, not the platform-bucket rule it
+      // was once justified as — see this file's header. `deal_p1` earns its
+      // place here by distinguishing a scope routed through the chokepoint from
+      // one reimplemented as a bare equality, which is true either way.
+      // `deal_a2` is absent because the CRITERIA still bite — scoping did not
+      // replace them.
       expect(granted).toEqual(['deal_a1', 'deal_p1']);
       expect(result.matchedRecords).toBe(2);
     });

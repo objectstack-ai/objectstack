@@ -149,7 +149,7 @@ describe('external-datasource envelope (#3843) — success bodies', () => {
       status: 200,
       dataKeys: ['ok', 'results'],
       run: () => drive(
-        mount({ validateAll: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
+        mount({ validateDatasource: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
         'POST',
         `${EXT}/validate`,
       ),
@@ -192,7 +192,7 @@ describe('external-datasource envelope (#3843) — success bodies', () => {
   it("POST /validate keeps its `ok` — a domain verdict, not a second `success`", async () => {
     // All results valid → data.ok true, while `success` reports the request.
     const pass = await drive(
-      mount({ validateAll: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
+      mount({ validateDatasource: async () => ({ results: [{ datasource: 'ext', ok: true }] }) }),
       'POST',
       `${EXT}/validate`,
     );
@@ -204,7 +204,7 @@ describe('external-datasource envelope (#3843) — success bodies', () => {
     // `success` the way storage's was.
     const fail = await drive(
       mount({
-        validateAll: async () => ({
+        validateDatasource: async () => ({
           results: [{ datasource: 'ext', ok: true }, { datasource: 'ext', ok: false }],
         }),
       }),
@@ -279,7 +279,7 @@ describe('external-datasource envelope (#3843) — error bodies', () => {
       status: 400,
       code: 'EXTERNAL_DATASOURCE_ERROR',
       run: () => drive(
-        mount({ validateAll: async () => { throw new Error('metadata store offline'); } }),
+        mount({ validateDatasource: async () => { throw new Error('metadata store offline'); } }),
         'POST',
         `${EXT}/validate`,
       ),
