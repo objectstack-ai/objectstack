@@ -1754,12 +1754,18 @@ export class AuthPlugin implements Plugin {
     // OAuth admin: toggle the `disabled` flag on a registered OAuth client.
     //
     // Why this lives here (and not as a plain data-layer UPDATE on
-    // sys_oauth_application): better-auth 1.6.11's stock admin update
-    // endpoint (`/admin/oauth2/update-client`) does NOT accept `disabled`
-    // in its Zod body schema, so the field gets silently stripped before
-    // it reaches `updateClientEndpoint`. The column exists, the runtime
-    // honours it everywhere (introspect, token, authorize, public-client
-    // lookup), but no client-facing API can flip it.
+    // sys_oauth_application): the stock admin update endpoint
+    // (`/admin/oauth2/update-client`) does NOT accept `disabled` in its
+    // Zod body schema, so the field gets silently stripped before it
+    // reaches `updateClientEndpoint`. Re-measured 2026-08-23 against the
+    // installed @better-auth/oauth-provider 1.7.1 (the package that
+    // carries the endpoint at 1.7.x): `adminUpdateOAuthClient`
+    // (`dist/authorize-Crqw4_bR.mjs:2860`) declares its body schema at
+    // `:2862-2889`, and `disabled` occurs zero times in that block —
+    // while occurring 35 times elsewhere in the same file, so the search
+    // reaches the text. The column exists, the runtime honours it
+    // everywhere (introspect, token, authorize, public-client lookup),
+    // but no client-facing API can flip it.
     //
     // We close the gap by writing through better-auth's own adapter under
     // the `/api/v1/auth/*` namespace so all OAuth-application mutations
