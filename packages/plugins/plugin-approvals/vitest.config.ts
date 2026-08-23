@@ -19,6 +19,13 @@ export default defineConfig({
     // to `…/metadata-protocol/src/index.ts/<subpath>` — `ENOTDIR`, at run
     // time, from a config that reads as correct.
     alias: [
+      // [#10101] The shared platform-row resolver's home — aliased to source
+      // for the same #7668/#7778 reason as the metadata-protocol entry below
+      // (`pnpm check:test-source-alias` is the gate).
+      {
+        find: /^@objectstack\/metadata-core$/,
+        replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+      },
       {
         find: /^@objectstack\/metadata-protocol$/,
         replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),

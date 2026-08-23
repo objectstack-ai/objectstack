@@ -27,6 +27,10 @@ export default defineConfig({
     // One rule for all namespaces cannot go stale that way.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // [#10101] The shared platform-row resolver's home — aliased to source
+      // so the suite's verdict is about the checkout, not metadata-core's
+      // dist build state (`pnpm check:test-source-alias`).
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
       {
         find: /^@objectstack\/platform-objects\/audit$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),

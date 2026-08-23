@@ -2,9 +2,24 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    // [#10101] Widened from `./src` as a CONSEQUENCE of the `paths` rule
+    // below, exactly as `packages/rest` records for #9960: redirecting
+    // `@objectstack/metadata-core` to source puts `packages/metadata-core/
+    // src/**` into this program, and `rootDir` is enforced over every
+    // program file even under `--noEmit` (TS6059). `../..` is the directory
+    // that genuinely contains every file in the program. Emit is unaffected:
+    // this package builds with tsup, and `typecheck` passes `--noEmit`.
+    "rootDir": "../..",
     "types": ["node"],
-    "lib": ["ES2021"]
+    "lib": ["ES2021"],
+    // [#10101] Resolve the shared platform-row resolver to SOURCE for
+    // `tsc --noEmit`, so this package's typecheck is a verdict about the
+    // checkout rather than about `metadata-core/dist` build state
+    // (`pnpm check:type-source-resolution` — same fix `packages/rest`
+    // records for `@objectstack/metadata-protocol`).
+    "paths": {
+      "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules", "**/*.test.ts"]
