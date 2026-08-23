@@ -5,11 +5,11 @@ import { printHeader, printSuccess, printError, emitJson } from '../utils/format
 import { deleteAuthConfig, readAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
 
-export default class AuthLogout extends Command {
+export default class Logout extends Command {
   static override description = 'Clear stored authentication credentials';
 
   static override examples = [
-    '$ os auth logout',
+    '$ os logout',
   ];
 
   static override flags = {
@@ -19,7 +19,7 @@ export default class AuthLogout extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(AuthLogout);
+    const { flags } = await this.parse(Logout);
 
     try {
       if (!flags.json) {

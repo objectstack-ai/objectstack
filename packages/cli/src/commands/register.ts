@@ -59,13 +59,13 @@ async function promptPassword(promptText: string): Promise<string> {
   });
 }
 
-export default class AuthRegister extends Command {
+export default class Register extends Command {
   static override description = 'Create a new account and store credentials';
 
   static override examples = [
-    '$ os auth register',
-    '$ os auth register --email user@example.com --name "Jane Doe" --password mypassword',
-    '$ os auth register --url https://api.example.com',
+    '$ os register',
+    '$ os register --email user@example.com --name "Jane Doe" --password mypassword',
+    '$ os register --url https://api.example.com',
   ];
 
   static override flags = {
@@ -93,7 +93,7 @@ export default class AuthRegister extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(AuthRegister);
+    const { flags } = await this.parse(Register);
 
     try {
       if (!flags.json) {

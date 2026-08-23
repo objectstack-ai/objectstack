@@ -5,13 +5,13 @@ import { printHeader, printError, printKV, emitJson } from '../utils/format.js';
 import { createApiClient, requireAuth } from '../utils/api-client.js';
 import { formatOutput } from '../utils/output-formatter.js';
 
-export default class AuthWhoami extends Command {
+export default class Whoami extends Command {
   static override description = 'Show current session information';
 
   static override examples = [
-    '$ os auth whoami',
-    '$ os auth whoami --format json',
-    '$ os auth whoami --url https://api.example.com --token <token>',
+    '$ os whoami',
+    '$ os whoami --format json',
+    '$ os whoami --url https://api.example.com --token <token>',
   ];
 
   static override flags = {
@@ -34,7 +34,7 @@ export default class AuthWhoami extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(AuthWhoami);
+    const { flags } = await this.parse(Whoami);
 
     try {
       const { client, token } = await createApiClient({
