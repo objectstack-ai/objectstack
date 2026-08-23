@@ -146,6 +146,7 @@ export function expression(source: string, dialect: ExpressionDialect = 'cel', m
 /**
  * Tagged-template helpers for inline expression authoring.
  *
+ * <!-- os:check -->
  * ```ts
  * import { cel, F, P } from '@objectstack/spec';
  *
