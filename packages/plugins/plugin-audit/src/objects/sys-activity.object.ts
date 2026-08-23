@@ -126,6 +126,12 @@ export const SysActivity = ObjectSchema.create({
       required: false,
       readonly: true,
       searchable: true,
+      // [#11339] The id half of the ActivityPointer pair (ADR-0052 §5): a
+      // record id of the object `object_name` names on the same row. Declaring
+      // it makes the pair seedable — a packaged app's seed writes the target's
+      // natural key and the loader resolves it through `object_name`, instead
+      // of storing a literal that attaches to nothing.
+      referenceVia: 'object_name',
       group: 'Target',
     }),
 
@@ -165,6 +171,9 @@ export const SysActivity = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description: 'Record id of the rich source entity (paired with source_object) — lets the timeline drill to the full email/call/meeting record.',
+      // [#11339] Second ActivityPointer pair — same seed-time resolution
+      // through the sibling `source_object` column.
+      referenceVia: 'source_object',
       group: 'Target',
     }),
 

@@ -3694,7 +3694,28 @@ export interface IntrospectedColumn extends SpecIntrospectedColumn {
   maxLength?: number | string;
 }
 
-/** No spec counterpart — foreign keys are a SQL-introspection extra. */
+/**
+ * No spec counterpart — foreign keys are a SQL-introspection extra.
+ *
+ * ## A composite key is ORDERED SIBLING ROWS, and that order is load-bearing
+ *
+ * This is deliberately a FLAT PER-COLUMN record with no ordinal field (#11324).
+ * An N-column foreign key is N records, and the contract every arm of
+ * {@link SqlDriver.introspectForeignKeys} owes is that those records arrive
+ * **contiguous, in declared key order, each pairing its own child column with
+ * its own parent column** — `(x, y) references p (a, b)` is exactly
+ * `x -> p.a` then `y -> p.b`. That is what makes the ordinal unnecessary rather
+ * than merely absent: the position in the array carries it.
+ *
+ * The reason it is written down here is that it was NOT true and nothing said
+ * so. The Postgres arm joined child columns to parent columns with no ordinal
+ * correlation and returned the N x N cartesian product — for the key above,
+ * four records including the phantom `x -> p.b` and `y -> p.a`, which no
+ * consumer of this flat shape can tell from the real two. Widening the record
+ * with an ordinal was considered and rejected: it would have let a wrong ORDER
+ * BY keep shipping wrong rows that merely *describe* their wrongness, where the
+ * pairing is a fact the query itself must get right.
+ */
 export interface IntrospectedForeignKey {
   columnName: string;
   referencedTable: string;
@@ -13164,42 +13185,90 @@ export class SqlDriver implements IDataDriver {
 
     try {
       if (this.isPostgres) {
-        // `information_schema.table_constraints` spans EVERY schema the session
-        // can read, so `tc.table_name = ?` on its own merges a same-named
-        // table's foreign keys from schemas `search_path` never reaches — a
-        // wrong answer, not a missing one, and downstream (federated-object
-        // codegen, the persisted `external_catalog` under ADR-0015,
-        // schema-drift comparison) acts on it. Not theoretical here: the
-        // live-dialect isolation (#9350) gives every test FILE its own schema
-        // inside one database, so colliding table names are the normal state of
-        // a run.
+        // Read from `pg_constraint`, not `information_schema` (#11324). The
+        // three-view join this replaced was wrong in two independent ways, both
+        // measured on PostgreSQL 16.13, and neither is repairable inside
+        // `information_schema`:
         //
-        // The pin is the family's existing one, kept spelled and placed exactly
-        // as `introspectUniqueConstraints` spells it, which in turn follows
-        // `introspectSchema`'s own table listing: `current_schemas(false)` is
-        // the session's `search_path` minus the implicit `pg_catalog`, so a
-        // bare name is scoped the way every other statement in the session
-        // resolves it. (`introspectIndexes` and `introspectPrimaryKeys` reach
-        // the same scoping from the other side — they resolve the name to an
-        // OID through `regclass` — because `pg_index` takes a relation, not a
-        // schema name.)
+        // 1. `ccu.table_schema = tc.table_schema` demanded that parent and
+        //    child sit in the SAME schema. For a FOREIGN KEY,
+        //    `constraint_column_usage` describes the REFERENCED side — that is
+        //    why the projection aliases it `referenced_table` — so its
+        //    `table_schema` is the PARENT's, not the constraint's. A foreign
+        //    key whose target lives next door therefore contributed ZERO rows
+        //    and the table reported having no foreign keys at all: the #7332
+        //    failure mode through a different door, because `[]` does not read
+        //    downstream as "I could not see it", it reads as *this table has no
+        //    foreign keys*, and federated-object codegen, the persisted
+        //    `external_catalog` (ADR-0015) and schema-drift comparison all act
+        //    on that. Cross-schema references are the normal shape for the
+        //    federated remotes ADR-0015 points this driver at.
+        // 2. The `kcu` ↔ `ccu` join carried NO ordinal correlation, so an
+        //    N-column key came back as the N x N cartesian product — a 2-column
+        //    key measured as 4 rows (`x -> a`, `x -> b`, `y -> a`, `y -> b`)
+        //    where the answer is `x -> a`, `y -> b`. `IntrospectedForeignKey`
+        //    is a flat per-column record, so the phantom pairs are
+        //    indistinguishable from the real ones to every consumer.
+        //
+        // Why the whole query moves rather than just the join predicate:
+        // `constraint_column_usage` exposes no ordinal column AT ALL (measured
+        // — its seven columns are the catalog/schema/name triples for the table
+        // and the constraint, plus `column_name`), so defect 2 has nothing to
+        // correlate on there. Correlating `ccu` on `tc.constraint_schema` — the
+        // spelling `introspectUniqueConstraints` already carries, and the
+        // conservative half-fix — was measured to repair defect 1 and leave
+        // defect 2 untouched at 4 rows. `pg_constraint` carries both facts on
+        // ONE row: `conkey` and `confkey` are parallel `smallint[]`s in KEY
+        // order, so unnesting them TOGETHER pairs child column with parent
+        // column by construction, and `WITH ORDINALITY` keeps the key position
+        // the old join threw away — the same shape `introspectPrimaryKeys` uses
+        // for `indkey` (#11101 / #11162). `ORDER BY … k.ord` is what pins a
+        // composite key's rows as ORDERED SIBLING ROWS, which is how the flat
+        // per-column record expresses a composite key correctly with no change
+        // to `IntrospectedForeignKey`'s shape. Measured on a key declared out
+        // of column sequence — `foreign key (second_col, first_col)` — the
+        // result is KEY order, not column order.
+        //
+        // Scoping is unchanged in meaning (#11201): `ns.nspname = ANY
+        // (current_schemas(false))` is `tc.table_schema = ANY (…)` expressed
+        // over the catalog — the session's `search_path` minus the implicit
+        // `pg_catalog` — so a bare name is still scoped the way every other
+        // statement in the session resolves it, and a same-named table in a
+        // schema `search_path` never reaches still contributes nothing.
+        // `con.conname` orders the constraints; `con.oid` breaks a tie between
+        // two same-named constraints in two schemas both on the path, so each
+        // constraint's columns are always contiguous and in key order.
+        // Dropping to `pg_catalog` also drops `information_schema`'s privilege
+        // filter, which is what `introspectPrimaryKeys` and `introspectIndexes`
+        // already do — this family reads the catalog directly.
+        //
+        // An unknown table name still yields an empty list rather than a throw
+        // (measured), i.e. this rewrite deliberately does NOT adopt the
+        // `?::regclass` failure mode `introspectPrimaryKeys` has; the #7332
+        // `onFailure` contract below is unchanged by it.
         const result = await this.knex.raw(
           `
           SELECT
-            kcu.column_name,
-            ccu.table_name AS referenced_table,
-            ccu.column_name AS referenced_column,
-            tc.constraint_name
-          FROM information_schema.table_constraints AS tc
-          JOIN information_schema.key_column_usage AS kcu
-            ON tc.constraint_name = kcu.constraint_name
-            AND tc.table_schema = kcu.table_schema
-          JOIN information_schema.constraint_column_usage AS ccu
-            ON ccu.constraint_name = tc.constraint_name
-            AND ccu.table_schema = tc.table_schema
-          WHERE tc.constraint_type = 'FOREIGN KEY'
-            AND tc.table_name = ?
-            AND tc.table_schema = ANY (current_schemas(false))
+            att.attname AS column_name,
+            parent.relname AS referenced_table,
+            patt.attname AS referenced_column,
+            con.conname AS constraint_name
+          FROM pg_constraint con
+          JOIN pg_class child ON child.oid = con.conrelid
+          JOIN pg_namespace ns ON ns.oid = child.relnamespace
+          JOIN pg_class parent ON parent.oid = con.confrelid
+          CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+            WITH ORDINALITY AS k(attnum, fattnum, ord)
+          JOIN pg_attribute att
+            ON att.attrelid = con.conrelid
+            AND att.attnum = k.attnum
+          JOIN pg_attribute patt
+            ON patt.attrelid = con.confrelid
+            AND patt.attnum = k.fattnum
+          WHERE con.contype = 'f'
+            AND child.relname = ?
+            AND ns.nspname = ANY (current_schemas(false))
+          ORDER BY con.conname, con.oid, k.ord
         `,
           [tableName],
         );

@@ -926,6 +926,33 @@ export const FieldSchema = lazySchema(() => {
     'Target object name (snake_case) for lookup/master_detail fields. '
     + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects.'
   ),
+  /**
+   * Polymorphic pointer declaration (ADR-0052 §5 — the ActivityPointer model).
+   *
+   * Marks this `text` field as the ID HALF of a two-column pointer pair: its
+   * value is a record id of the object NAMED BY the sibling field this key
+   * points at — `record_id: Field.text({ referenceVia: 'object_name' })` on
+   * `sys_activity` is the canonical pair. The target object varies per ROW
+   * (read from the sibling column), which is exactly what the static
+   * `reference` key cannot express; the two are mutually exclusive.
+   *
+   * What declaring it ENFORCES today (#11339): seed loading resolves the
+   * authored value as a natural key against the object the sibling column
+   * names — the same externalId machinery lookup references use — and treats
+   * an unresolvable pointer as the loud reference failure it is, instead of
+   * storing the literal string as a row that attaches to nothing. It does NOT
+   * (yet) add referential integrity, cascade behavior, or $expand support —
+   * consumers that do not read this key keep treating the field as plain text.
+   */
+  referenceVia: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional().describe(
+    'Declares this text field as the id half of a polymorphic pointer pair (ADR-0052 §5 ActivityPointer): '
+    + 'the value is a record id of the object named by the SIBLING FIELD this key names — e.g. '
+    + "`record_id` with `referenceVia: 'object_name'`. The sibling must be a declared field on the same "
+    + 'object holding an object machine name. Text fields only; mutually exclusive with `reference` (a '
+    + 'static and a per-record target contradict). Enforced today at seed load: the value resolves as a '
+    + 'natural key against the object the sibling column names, and an unresolvable pointer is refused '
+    + 'loudly instead of stored verbatim. Adds no referential integrity or $expand behavior.'
+  ),
   // `referenceFilters` (string[]) removed in the 16.x line (#2377, ADR-0049):
   // the lookup picker reads the structured `lookupFilters` ({field,operator,value}),
   // never this string[] form — as authored it filtered nothing. Use `lookupFilters`.
@@ -1466,6 +1493,34 @@ export const FieldSchema = lazySchema(() => {
   // key at the tail and break the byte-identity contract above.
   const shapeOrder = Object.keys(base.shape);
   return base.superRefine((field, ctx) => {
+  // [#11339] `referenceVia` declares the id half of a polymorphic pointer
+  // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a
+  // relationship type it contradicts the type's own single static target, and
+  // on any other type the stored value could not hold a record id. Refused at
+  // the authoring seam, where the fix is one keystroke away.
+  if (field.referenceVia !== undefined && field.type !== 'text') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referenceVia'],
+      message:
+        `\`referenceVia\` is only valid on \`type: 'text'\` (this field is \`${field.type}\`): it marks a ` +
+        'plain text column as the id half of a polymorphic pointer pair whose target object is named per ' +
+        "row by a sibling column (e.g. `record_id` with `referenceVia: 'object_name'`). For a fixed " +
+        'target use a `lookup`/`master_detail` field with `reference` instead.',
+    });
+  }
+  if (field.referenceVia !== undefined && field.reference !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referenceVia'],
+      message:
+        '`referenceVia` cannot be combined with `reference`: one declares a per-row target read from a ' +
+        'sibling column, the other a single static target object — both cannot be honest about where ' +
+        'this field points. Keep `referenceVia` for a polymorphic pointer, or `reference` (on a ' +
+        'lookup/master_detail field) for a fixed relationship.',
+    });
+  }
+
   // ADR-0113: `storage.notNull` × `requiredWhen` is a contradiction, rejected
   // at the authoring seam — when the condition is FALSE the write contract
   // permits null, but the column would refuse it, so the author has declared

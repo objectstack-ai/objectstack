@@ -219,6 +219,11 @@ function isEnvScopedDataset(dataset: Seed): boolean {
  * - Automatic lookup/master_detail reference resolution via externalId
  *   (in-memory for records seeded this load, DB probe by the target
  *   dataset's declared externalId otherwise)
+ * - Declared pointer-pair resolution (#11339, ADR-0052 §5 ActivityPointer):
+ *   a `text` field carrying `referenceVia` resolves per ROW against the
+ *   object its sibling column names (`sys_activity.record_id` through
+ *   `object_name`), by the same externalId rules — and an unresolvable or
+ *   un-addressable pointer is refused loudly, never stored verbatim
  * - Topological dependency ordering (parents before children)
  * - Multi-pass loading for circular references
  * - Dry-run validation mode
@@ -273,6 +278,27 @@ export class SeedLoaderService implements ISeedLoaderService {
    * the very column this answer is about.
    */
   private declaresNameColumnCache = new Map<string, boolean>();
+  /**
+   * [#11339] Declared pointer pairs per seeded object — every `text` field
+   * whose definition carries `referenceVia` (ADR-0052 §5 ActivityPointer:
+   * `sys_activity.record_id` + `object_name`), mapped to the sibling field
+   * that names the target object PER ROW. Built once per {@link load} (step
+   * 4.5) from the same definition resolver the reference graph uses.
+   *
+   * An instance field for the same reason {@link fallbackOrgId} is one: the
+   * consumer ({@link loadDataset}'s per-record resolution loop) sits several
+   * parameters deep, and the map is a per-load constant. Reset per `load`.
+   */
+  private pointerRefsByObject = new Map<string, Array<{ field: string; objectField: string }>>();
+  /**
+   * [#11339] The per-load `dataset.object → declared externalId` map — the
+   * SAME map step 4 threads into {@link buildReferenceMap} for static
+   * references. A pointer pair's target object is only known per ROW, so its
+   * `targetField` cannot be pre-resolved into a refMap entry; the resolution
+   * loop reads this instead, at the moment the sibling column names the
+   * target. Reset per `load`.
+   */
+  private seedExternalIdByObject = new Map<string, string | string[]>();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger) {
     this.engine = engine;
@@ -346,6 +372,30 @@ export class SeedLoaderService implements ISeedLoaderService {
       request.seeds.map(d => [d.object, d.externalId || DEFAULT_EXTERNAL_ID_FIELD]),
     );
     const refMap = this.buildReferenceMap(graph, externalIdByObject);
+
+    // 4.5 [#11339] Collect declared pointer pairs (`referenceVia`) per seeded
+    // object. These are deliberately NOT part of the dependency graph or the
+    // refMap: the target object is named per ROW by the sibling column, so a
+    // pointer contributes no static ordering edge — same-load targets that
+    // happen to load later are healed by the ordinary pass-2 deferral, which
+    // is per record anyway. Only `text` fields participate: the spec refuses
+    // `referenceVia` on other types at authoring, and metadata at rest that
+    // predates that check must not have non-text columns resolved as ids.
+    this.pointerRefsByObject.clear();
+    this.seedExternalIdByObject = externalIdByObject;
+    for (const dataset of orderedDatasets) {
+      if (this.pointerRefsByObject.has(dataset.object)) continue;
+      const objDef = await this.resolveObjectDefinition(dataset.object);
+      const fields = objDef?.fields as Record<string, { type?: string; referenceVia?: unknown }> | undefined;
+      if (!fields) continue;
+      const pairs: Array<{ field: string; objectField: string }> = [];
+      for (const [fieldName, fieldDef] of Object.entries(fields)) {
+        if (fieldDef?.type === 'text' && typeof fieldDef.referenceVia === 'string' && fieldDef.referenceVia.length > 0) {
+          pairs.push({ field: fieldName, objectField: fieldDef.referenceVia });
+        }
+      }
+      if (pairs.length > 0) this.pointerRefsByObject.set(dataset.object, pairs);
+    }
 
     // 5. Pass 1: Insert/upsert records, resolving references
     const insertedRecords = new Map<string, Map<string, string>>(); // object → externalIdValue → internalId
@@ -762,7 +812,72 @@ export class SeedLoaderService implements ISeedLoaderService {
 
       // Resolve references
       let unresolvedRefError = false;
-      for (const ref of objectRefs) {
+
+      // [#11339] Derive this RECORD's pointer-pair references (ADR-0052 §5
+      // ActivityPointer — `record_id` resolving through the object the sibling
+      // `object_name` column names). Unlike a lookup's static target, the
+      // target object is a per-row fact, so each authored row derives its own
+      // reference entry and then flows through the SAME resolution loop below
+      // — same insertedRecords/DB probes, same invalid/deferred/unresolved
+      // branches, same counters — one contract for every reference kind.
+      const pointerPairs = this.pointerRefsByObject.get(objectName) ?? [];
+      const derivedPointerRefs: Array<{ field: string; targetObject: string; targetField: string }> = [];
+      for (const pair of pointerPairs) {
+        const pointerValue = record[pair.field];
+        // Empty pointer = no pointer: nothing to resolve, nothing to refuse.
+        if (pointerValue === undefined || pointerValue === null || pointerValue === '') continue;
+        const targetName = record[pair.objectField];
+        if (typeof targetName !== 'string' || targetName === '') {
+          // UN-ADDRESSABLE: the id half is authored but the type half names no
+          // object, so no pass — now or later — can ever resolve it. Refuse
+          // the record rather than store a pointer that attaches to nothing
+          // (the exact silent failure #11339 measured). Same three registers
+          // as the final unresolvable branch below: counted, reported, logged.
+          const error: ReferenceResolutionError = {
+            sourceObject: objectName,
+            field: pair.field,
+            targetObject: `(missing ${pair.objectField})`,
+            targetField: '(pointer pair)',
+            attemptedValue: pointerValue,
+            recordIndex: i,
+            message:
+              `Pointer ${objectName}.${pair.field} = '${String(pointerValue)}' cannot be addressed: its pair ` +
+              `field \`${pair.objectField}\` is empty on record #${i}, so there is no object to resolve the id ` +
+              `against. Author \`${pair.objectField}\` with the target object's machine name, or drop the ` +
+              `\`${pair.field}\` value.`,
+          };
+          errors.push(error);
+          allErrors.push(error);
+          // Dry-run stays QUIET beyond the report, like the unresolved branch
+          // below (#4997): nothing was written, the caller reads the result.
+          if (!config.dryRun) {
+            this.logger.error(
+              `[SeedLoader] ${error.message} ${objectName} record #${i} was NOT seeded — a row whose pointer ` +
+                `names no object would render on no timeline and match no console filter.`,
+              undefined,
+              { object: objectName, field: pair.field, recordIndex: i },
+            );
+            unresolvedRefError = true;
+          }
+          continue;
+        }
+        // The pair's targetField follows the same rule buildReferenceMap
+        // applies to static references: the target DATASET's declared
+        // externalId when this load carries one (single-field only), else the
+        // historical 'name' default — resolved here because only the row
+        // knows which object it points at.
+        const declaredExternalId = this.seedExternalIdByObject.get(targetName);
+        derivedPointerRefs.push({
+          field: pair.field,
+          targetObject: targetName,
+          targetField: typeof declaredExternalId === 'string' ? declaredExternalId : DEFAULT_EXTERNAL_ID_FIELD,
+        });
+      }
+
+      const recordRefs: Array<
+        Pick<ReferenceResolutionParsed, 'field' | 'targetObject' | 'targetField'> & { multiple?: boolean }
+      > = derivedPointerRefs.length === 0 ? objectRefs : [...objectRefs, ...derivedPointerRefs];
+      for (const ref of recordRefs) {
         // Never re-resolve the tenant stamp we just wrote (see above). A seed
         // that authors `organization_id` ITSELF still goes through resolution,
         // so naming an org by its natural key keeps working.

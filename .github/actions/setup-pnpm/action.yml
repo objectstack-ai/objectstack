@@ -1,0 +1,111 @@
+# Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+#
+# setup-pnpm -- materialise the repo-pinned pnpm from a CACHED Corepack store.
+#
+# Why this exists. `corepack enable` only writes shims; the pnpm tarball is
+# fetched from registry.npmjs.org on the FIRST pnpm invocation in the job --
+# which is why the crash always surfaced in the innocuous-looking
+# `Verify pnpm version` step (`run: pnpm --version`) rather than anywhere that
+# names a download. A queue build is 24 jobs, so one merge attempt made 24
+# independent calls to the registry before a single test ran, and any one of
+# them could eject the PR and force every PR behind it to rebuild.
+#
+# Two failure modes were measured on the queue, both inside Corepack's fetch and
+# neither attributable to the PR being tested:
+#
+#   AssertionError [ERR_ASSERTION]: assert(!this.paused)
+#       at Parser.finish (node:internal/deps/undici/undici:6165:9)
+#
+#   Error: Client network socket disconnected before secure TLS connection
+#   was established ... code: 'ECONNRESET'
+#
+# The first is a crash in Node's own bundled undici parser, so it presents as an
+# AssertionError with no test file attached -- the merge-queue triage heuristic
+# reads that as "real behaviour change, fix the PR", exactly inverting the truth.
+#
+# The remedy is to stop making the call. Corepack keeps materialised package
+# managers under COREPACK_HOME, so restoring that directory from the actions
+# cache makes the happy path fully network-free -- verified locally: with a warm
+# store and the registry pointed at an unreachable host, `corepack install` and
+# `pnpm --version` both still succeed, while the same commands against a cold
+# store die in `installVersion`/`fetchTarballURLAndSignature`, the same code path
+# as the CI crash.
+#
+# The retry is the COLD-cache backstop, not the fix: it only matters on the one
+# build after a `packageManager` bump, when every job misses the cache at once.
+# Restoring the cache is what removes the steady-state exposure.
+#
+# Deliberately NOT in here: `actions/setup-node`. `scripts/check-node-version.mjs`
+# scans `.github/workflows/*.yml` ONLY, and reports how many setup-node steps it
+# audited. Moving those steps into this composite would drop them from its census
+# and it would still print OK -- a gate silently auditing less than it says.
+# Callers keep their own `setup-node` step, with its literal `node-version` pin.
+
+name: Setup pnpm
+description: >-
+  Enable Corepack and materialise the pnpm version pinned in package.json,
+  restoring the Corepack store from cache so the happy path makes no network
+  call to the npm registry.
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the pinned package manager
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        spec="$(node -p "require('$GITHUB_WORKSPACE/package.json').packageManager ?? ''")"
+        if [ -z "$spec" ]; then
+          echo "::error::package.json declares no \"packageManager\" pin -- Corepack has nothing to materialise."
+          exit 1
+        fi
+        echo "Pinned package manager: $spec"
+        {
+          echo "spec=$spec"
+          echo "key=$(printf '%s' "$spec" | sha256sum | cut -d' ' -f1)"
+        } >> "$GITHUB_OUTPUT"
+        # Set for the REST OF THE JOB, not just this action: every later `pnpm`
+        # call must read the same store this action populated.
+        echo "COREPACK_HOME=${{ runner.temp }}/corepack" >> "$GITHUB_ENV"
+
+    # Keyed on the packageManager pin alone -- not on package.json's hash, which
+    # would churn the cache on every unrelated dependency edit. No restore-keys:
+    # a store for a different pnpm version cannot satisfy this pin, and a partial
+    # hit would only mask a cold start. A cache-service failure is non-fatal here
+    # and degrades to a download, which the retry below then covers.
+    - name: Restore the Corepack store
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/corepack
+        key: ${{ runner.os }}-corepack-${{ steps.pin.outputs.key }}
+
+    - name: Enable Corepack
+      shell: bash
+      run: corepack enable
+
+    - name: Materialise pnpm
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PM_SPEC: ${{ steps.pin.outputs.spec }}
+      run: |
+        set -uo pipefail
+        attempts=3
+        for i in $(seq 1 "$attempts"); do
+          # A warm store makes this a no-op that exits 0 without any network I/O.
+          if corepack install; then
+            exit 0
+          fi
+          if [ "$i" -lt "$attempts" ]; then
+            delay=$((i * 5))
+            echo "::warning::Corepack could not materialise ${PM_SPEC} (attempt ${i}/${attempts}); retrying in ${delay}s."
+            sleep "$delay"
+          fi
+        done
+        echo "::error::Corepack failed to materialise ${PM_SPEC} after ${attempts} attempts."
+        exit 1
+
+    - name: Verify pnpm version
+      shell: bash
+      run: pnpm --version

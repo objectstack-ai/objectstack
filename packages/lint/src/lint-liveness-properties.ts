@@ -47,6 +47,10 @@ export interface LedgerEntry {
 /** Flattened, warn-only view of a type's ledger: propPath → entry (incl. `a.b` children). */
 type WarnMap = Map<string, LedgerEntry>;
 
+function isRecord(v: unknown): v is AnyRec {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];
   if (v && typeof v === 'object') return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
@@ -215,8 +219,10 @@ export function checkItemAgainstWarnMap(
 
 /**
  * The compiled-stack collection each governed metadata type lives in.
- * `object`/`field` keep their bespoke walk (fields nest under objects);
- * everything else is a flat top-level array on the stack definition.
+ * `object`/`field` and `translation` keep their bespoke walks (fields nest
+ * under objects; translation bundles nest under locale codes); everything else
+ * is a flat top-level array of items whose TOP-LEVEL keys are the ledger's
+ * props, which is what this loop's `checkItem(type, item, …)` assumes.
  */
 const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'flow', key: 'flows' },
@@ -244,7 +250,13 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
   { type: 'job', key: 'jobs' },
   { type: 'email_template', key: 'emailTemplates' },
   { type: 'mapping', key: 'mappings' },
-  { type: 'translation', key: 'translations' },
+  // `translation` is NOT here — see the bespoke bundle walk in
+  // `lintLivenessProperties`. It was listed here until #11288, and being listed
+  // is precisely what made it silent: an item of `stack.translations` is a
+  // locale-keyed `TranslationBundle`, not a `TranslationItem`, so this loop's
+  // flat `checkItem` read `bundle['flows']` and every warned lookup missed. Do
+  // not re-add the row — registering the collection is only half the contract;
+  // the walk has to match the collection's SHAPE.
   // #4956 — dashboard joins the list the moment its ledger first warns on
   // anything, which is exactly the rule the comment above states. Drilling
   // `widgets` produced five warned keys (`colorVariant`, `actionUrl`,
@@ -267,8 +279,9 @@ const TYPE_COLLECTIONS: Array<{ type: string; key: string }> = [
  * Lint the compiled stack for authored properties the liveness ledger flags as
  * misleading. Advisory only — returns findings, never throws. Covers every
  * governed metadata type: objects (incl. `enable.*`) and their fields walk
- * bespoke nesting; the remaining types are flat stack collections. Container
- * properties fan out over arrays (each flow node, each dataset measure). The
+ * bespoke nesting, and translation bundles walk their locale entries (#11288);
+ * the remaining types are flat stack collections. Container properties fan out
+ * over arrays (each flow node, each dataset measure). The
  * mechanism stays ledger-driven — coverage grows by marking more entries
  * `authorWarn` rather than touching this code.
  */
@@ -287,6 +300,39 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
       for (const field of asArray(obj.fields)) {
         const fieldName = typeof field.name === 'string' ? field.name : '(unnamed field)';
         checkItem('field', field, `object '${objName}' · field '${fieldName}'`, fieldWarn, findings);
+      }
+    }
+  }
+
+  // `translation` walks one level deeper than every other collection. An item of
+  // `stack.translations` is a `TranslationBundle` — `z.record(LocaleSchema,
+  // TranslationDataSchema)` (`packages/spec/src/stack.zod.ts:275`) — so the
+  // ledger's groups (`flows`, `objects`, `messages`, …) live under each locale
+  // code, not on the item. Walked flat (as it was until #11288) every warned
+  // lookup read `bundle['flows']`, which a bundle has at no depth reachable that
+  // way, and the whole translation ledger warned nobody for file-authored
+  // bundles — the only way apps author translations today. Measured on a real
+  // app as a zero-delta ablation: an injected `flows:` section produced no new
+  // findings at all.
+  //
+  // The ledger's own subject is `TranslationItemSchema`, the RUNTIME metadata
+  // door, which does carry the groups at its top level. That door is reached by
+  // no walk here and cannot be: no stack collection carries those items, and
+  // this rule is `surfaces: CLI_ONLY` (`authoring-rules.ts`), so it never runs
+  // at the runtime publish gate either. The two doors share the group
+  // vocabulary, not the container; only the file-authored one is lintable.
+  const translationWarn = loadWarnMap(dir, 'translation');
+  if (translationWarn.size > 0) {
+    const bundles = asArray(stack.translations);
+    for (let i = 0; i < bundles.length; i++) {
+      const bundle = bundles[i];
+      if (!isRecord(bundle)) continue;
+      for (const [locale, data] of Object.entries(bundle)) {
+        // Only a locale entry holds `TranslationData`. Anything else is either a
+        // malformed bundle or the `name` key `asArray` injects for a map-shaped
+        // collection — skipping both keeps the "never throws" contract.
+        if (!isRecord(data)) continue;
+        checkItem('translation', data, `translation bundle #${i} · locale '${locale}'`, translationWarn, findings);
       }
     }
   }

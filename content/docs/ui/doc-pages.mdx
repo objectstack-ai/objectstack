@@ -205,15 +205,26 @@ deliberately gather docs another package ships.
 | :--- | :--- | :--- |
 | `order` | sort position within the group that claims the doc | frontmatter `order:` |
 | `group` | explicit placement — the `key` of the group this doc belongs to, used when no rule expresses it | frontmatter `group:` |
-| `tags` | the operand of a group's `include: { tag }` rule | **not read from frontmatter** — see below |
+| `tags` | the operand of a group's `include: { tag }` rule | frontmatter `tags:` |
 
-<Callout type="warn">
-**`tags` cannot be set from a `src/docs/*.md` file today.** The frontmatter reader
-extracts single-line scalars — `title`, `description`, `order`, `group` — and has no case
-for a list, so a `tags:` block in a Markdown doc is not collected and the doc reaches the
-resolver with no tags. The schema key and the matcher are both live, so a doc declared
-programmatically in a stack's `docs` array does carry tags and does match. For the flat
-Markdown path, express the grouping with a name glob instead.
+<Callout type="info">
+**`tags` is read from `src/docs/*.md` frontmatter**, in the two ordinary YAML sequence
+spellings — inline `tags: [tutorial, beginner]`, or a block of `- item` lines under a bare
+`tags:`. What is collected is what a group's `include: { tag }` rule matches against, so a
+doc authored as flat Markdown and one declared programmatically in a stack's `docs` array
+place themselves the same way.
+
+The reader is deliberately minimal and is not a YAML engine — nested or mapping items,
+block scalars, and quoted items containing commas are outside it. A `tags:` in any other
+spelling is **reported, not dropped**: a `docs/frontmatter-tags` warning quoting the
+spelling it found, raised by `os lint`, `os validate` and `os compile` (`os build` is the
+same command). `os dev` / `os serve` collect docs without linting them, so the warning
+does not appear there. Tags belong to the doc rather than to one translation: a
+`<name>.<locale>.md` variant that declares `tags:` raises the same rule and its tags must
+move to the base file.
+
+Prefer a name convention (`include: "crm_guide_*"`) when one exists — that steer survives
+as a preference, not as a limitation. Tags are for membership that cuts across naming.
 </Callout>
 
 ### Identity and access
@@ -300,8 +311,8 @@ the docs themselves.
 
 The two kinds have a clean split, and the direction of reference only goes one way:
 
-- A **doc** carries the content and, optionally, three scalars that let a spine place it
-  (`order`, `group`, `tags`). It names no book.
+- A **doc** carries the content and, optionally, the three placement keys a spine reads —
+  the `order` and `group` scalars and the `tags` list. It names no book.
 - A **book** carries the structure and names no docs — except in a `pages` override, which
   is the deliberate escape hatch.
 
