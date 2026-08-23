@@ -24,7 +24,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { resolveObjectSortability } from '@objectstack/spec/api';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 const ANON_API = { api: { requireAuth: false } };
 
@@ -101,7 +101,11 @@ async function dispatch(protocol: any, params: any, query: any = {}, config: any
     rest.registerRoutes();
     const res = mockRes();
     await itemRoute(rest)!.handler({ params, query, headers: {} }, res);
-    return { res, body: res.json.mock.calls.at(-1)?.[0] };
+    // Indexed rather than `.at(-1)`: this package's TEST_DEBT re-measure runs
+    // under the repo tsconfig's lib, where `Array.prototype.at` is not typed —
+    // the ledger is shrink-only, so new test code stays off the untyped API.
+    const calls = res.json.mock.calls;
+    return { res, body: calls[calls.length - 1]?.[0] };
 }
 
 describe('#10235 GET /meta/object/:name — the sortability projection rides the envelope', () => {
