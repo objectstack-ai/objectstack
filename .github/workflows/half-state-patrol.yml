@@ -50,6 +50,35 @@ name: Half-State Patrol
 # reads exactly like a clean board — the #4690 failure ("could not read the input"
 # must never look like "input is clean") with a timestamp on it. Failing costs
 # nobody a PR: this workflow gates no branch and blocks no queue.
+#
+# ## Adopting this in a sibling repo (#11217)
+#
+# This file is REPO-AGNOSTIC and is meant to be copied verbatim. It was not:
+# installed in objectstack alone, it left 37 of the fleet's 59 open `pm:blocked`
+# cards outside any patrol, and a hand-run of H19's predicate over objectui's
+# blocked inventory found 7 blocks whose blocker had already closed — 58% of
+# that repo's machine-readable blocks were false, one of them for a week. The
+# same predicate had been catching objectstack's four every hour. The difference
+# was never discipline; it was that one repo had a caller.
+#
+# To adopt, in the sibling repo:
+#
+#   1. copy `scripts/pm/check-half-states.mjs` and this file, unchanged;
+#   2. open one `tracking`-labeled anchor issue there and set the repository
+#      VARIABLE `HALF_STATE_ANCHOR_ISSUE` to its number
+#      (Settings → Secrets and variables → Actions → Variables).
+#
+# That is the whole install. The swept repo needs no configuration at all: it is
+# `github.repository`, so the copy reads the board it lives in — a hardcoded
+# default was how a copied file could have swept THIS repo and written the
+# findings into a sibling's anchor, a fully green report about the wrong board.
+#
+# ⛔ Each install uses its OWN `secrets.GITHUB_TOKEN` and reads its own repo. No
+# cross-repo credential, no matrix over repos, no PAT: that route was refused at
+# grading (it buys no coverage a per-repo install lacks and raises the
+# credential floor for every repo at once). The accepted consequence is that a
+# cross-repo `Blocked-by:` target stays UNJUDGED in each install — H19 says so
+# in its own row rather than reading it as a healthy block.
 
 on:
   schedule:
@@ -94,17 +123,34 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The pinned anchor issue whose body this workflow owns.
+  # The pinned anchor issue whose body this workflow owns — the ONE per-repo
+  # input this file takes (#11217).
   #
-  # TO ROTATE: open a new `tracking`-labeled issue, put its number here, and note
-  # the handover in the OLD issue's body before closing it (its edit history is
-  # the archive and does not travel). Nothing else reads this number, so the
-  # rotation is this one line.
+  # Resolution: the repository variable `HALF_STATE_ANCHOR_ISSUE` if set, else
+  # this repo's own pinned number, else EMPTY — and empty makes the job refuse
+  # to write rather than guess (see the "Resolve the anchor" step). The literal
+  # is guarded by the repository name on purpose: an unguarded fallback is what
+  # would let a verbatim copy in objectui rewrite ITS #9857 — some unrelated
+  # card — with this board's findings, silently and four times a day. A number
+  # is only ever meaningful in the repo it was minted in.
+  #
+  # TO ROTATE (here): open a new `tracking`-labeled issue, put its number below,
+  # and note the handover in the OLD issue's body before closing it (its edit
+  # history is the archive and does not travel).
+  # TO ADOPT (a sibling repo): change NOTHING here — set the repository variable.
   #
   # The anchor deliberately carries `tracking` and NO `domain:*` label: `tracking`
   # is in the sweeper's own H13_EXEMPT_LABELS, so the anchor can never appear as a
   # finding in the sweep it hosts.
-  ANCHOR_ISSUE: '9857'
+  #
+  # ⚠️ Folded scalar, and every continuation line sits at the SAME indent on
+  # purpose: a more-indented line in a `>-` block keeps its newline literally
+  # (measured on this very value), which would hand the expression parser a
+  # multi-line string instead of one expression.
+  ANCHOR_ISSUE: >-
+    ${{ vars.HALF_STATE_ANCHOR_ISSUE
+    || (github.repository == 'objectstack-ai/objectstack' && '9857')
+    || '' }}
 
 jobs:
   patrol:
@@ -127,6 +173,13 @@ jobs:
         id: sweep
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # WHICH board this run reads: the repo this workflow is installed in,
+          # always. The sweeper would resolve the same answer on its own from
+          # the runner's `GITHUB_REPOSITORY` (`resolveSweepRepo`), and it is
+          # passed explicitly anyway so the wiring is visible to a reader of the
+          # workflow — the two agree by construction and a copy of this file
+          # cannot end up sweeping the repo it was copied FROM.
+          PM_SWEEP_REPO: ${{ github.repository }}
           PROVENANCE: >-
             run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`
@@ -145,6 +198,29 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           echo "check-half-states exited $code"
           cat "$RUNNER_TEMP/report.err" >&2 || true
+
+      - name: Resolve the anchor issue
+        # An install with no anchor configured has nowhere to land its report,
+        # and the ONLY safe behaviour is to say so loudly (#11217). The two
+        # alternatives are both the failure this file exists to prevent:
+        # guessing a number would rewrite an unrelated card in this repo, and
+        # skipping the write quietly would leave a patrol that runs, finds, and
+        # tells nobody — indistinguishable from a clean board.
+        #
+        # Placed AFTER the sweep so the run summary still carries the rendered
+        # findings (the same "land the truth, then raise the alarm" order the
+        # final step keeps), and skipped on a pull_request run, which never
+        # writes an anchor at all.
+        if: github.event_name != 'pull_request'
+        run: |
+          if [ -z "${ANCHOR_ISSUE//[[:space:]]/}" ]; then
+            echo "::error::No anchor issue configured for ${{ github.repository }}. The sweep RAN (see the run summary) but has nowhere to land. Open a \`tracking\`-labeled anchor issue in this repo and set the repository variable HALF_STATE_ANCHOR_ISSUE to its number (Settings -> Secrets and variables -> Actions -> Variables)."
+            exit 1
+          fi
+          case "$ANCHOR_ISSUE" in
+            *[!0-9]*|'') echo "::error::HALF_STATE_ANCHOR_ISSUE is '$ANCHOR_ISSUE', which is not an issue number."; exit 1 ;;
+          esac
+          echo "anchor: #$ANCHOR_ISSUE in ${{ github.repository }}"
 
       - name: Update the pinned anchor issue
         # A pull_request run proves the sweep; it must not touch the board.

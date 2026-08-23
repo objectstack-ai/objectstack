@@ -34,6 +34,28 @@
  * treat as a failure is its own non-delivery — a patrol that cannot land its
  * report is the disease, not a finding.
  *
+ * ## Adopting the patrol in a sibling repo (#11217)
+ *
+ * The pair (this file + that workflow) is copied VERBATIM into a sibling repo;
+ * the only per-repo input is one repository variable naming that repo's anchor
+ * issue (`HALF_STATE_ANCHOR_ISSUE`). Each install runs on its own runner with
+ * its own `GITHUB_TOKEN` and reads its own board — ⛔ no cross-repo credential
+ * anywhere, which is the route ruled at grading rather than a matrix job.
+ *
+ * Two things make "verbatim" actually safe, and both are new: the swept repo is
+ * resolved from the runner's own `GITHUB_REPOSITORY` rather than a hardcoded
+ * default (`resolveSweepRepo` carries the argument), and the workflow REFUSES
+ * to run with an unconfigured anchor instead of writing this repo's anchor
+ * number in someone else's repo. It was measured worth doing: with three of the
+ * four repos uninstalled, 37 of the fleet's 59 open `pm:blocked` cards had
+ * never been swept, and 7 of objectui's 12 machine-readable blocks were
+ * already expired when a human read them by hand.
+ *
+ * What still does NOT travel, stated so a reader does not assume it does:
+ * cross-repo `Blocked-by:` targets stay unresolvable per install (each token
+ * reads its own repo), so H19 reports them as UNJUDGED — accepted, and made
+ * loud separately.
+ *
  * ## Why report-only, and why the exit code is ALWAYS 0 on a completed sweep
  *
  * The pm-dispatch state model (.claude/skills/pm-dispatch/SKILL.md, "State
@@ -689,7 +711,78 @@ import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 import { isEntrypoint } from '../invoked-as.mjs';
 
-const OWNER_REPO = process.env.PM_SWEEP_REPO ?? 'objectstack-ai/objectstack';
+/**
+ * The repo this file sweeps when nothing says otherwise. It is a FALLBACK for a
+ * seat's terminal, never the answer on a runner — see `resolveSweepRepo`.
+ */
+export const DEFAULT_SWEEP_REPO = 'objectstack-ai/objectstack';
+
+/** `owner/name`, GitHub's own character set for both halves. */
+export const SWEEP_REPO_SHAPE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+/**
+ * WHICH repo this sweep reads — resolved, and the resolution is the whole
+ * point of the parameterisation (#11217).
+ *
+ * ## The trap this closes, measured
+ *
+ * The patrol pair (this file + `.github/workflows/half-state-patrol.yml`) is
+ * installed in objectstack only, so 37 of the fleet's 59 open `pm:blocked`
+ * cards had never been machine-swept, and a hand-run of H19's predicate over
+ * objectui's blocked inventory found SEVEN blocks whose blocker had already
+ * closed — 58% of that repo's machine-readable blocks were false, some for a
+ * week. The difference was never discipline: one repo has a caller and three
+ * do not.
+ *
+ * The fix is adoption by COPY — a sibling repo takes both files verbatim, runs
+ * them with its OWN `GITHUB_TOKEN` against its own board, and writes its own
+ * anchor (the route ruled at grading: per-repo installs, zero new credentials,
+ * ⛔ never a matrix with a cross-repo token). And a hardcoded default is
+ * exactly what makes "verbatim" unsafe: a copy of this file in objectui, run
+ * with no `PM_SWEEP_REPO`, would cheerfully sweep OBJECTSTACK and write the
+ * findings into objectui's anchor — a full, green, entirely wrong report, whose
+ * only symptom is card numbers that do not exist in the repo reading them.
+ *
+ * So the resolution order is:
+ *
+ *   1. `PM_SWEEP_REPO` — the explicit override, unchanged, and still first: a
+ *      seat pointing this at another board is a deliberate act.
+ *   2. `GITHUB_REPOSITORY` — what Actions sets on every runner, i.e. the repo
+ *      the workflow is INSTALLED IN. This is the line that makes a verbatim
+ *      copy correct by default, and it is why the default below can never be
+ *      reached on a runner.
+ *   3. `DEFAULT_SWEEP_REPO` — a seat's terminal, where neither is set.
+ *
+ * The objectstack leg is unchanged by construction: its runner sets
+ * `GITHUB_REPOSITORY=objectstack-ai/objectstack`, which is the same string the
+ * hardcoded default carried, so every request path is byte-identical. The
+ * workflow ALSO passes `PM_SWEEP_REPO: ${{ github.repository }}` — belt and
+ * braces, and it keeps the wiring visible where a reader of the workflow looks.
+ *
+ * A malformed value is REFUSED rather than silently replaced by the default:
+ * substituting a different board for the one the caller named is how a report
+ * about the wrong repo gets written, which is the disease above. The refusal
+ * happens at the CLI so that importers of this module (`ci-failure.mjs` takes
+ * the transport classifier) are unaffected by a variable they never read.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {{ repo: string, source: string, valid: boolean }}
+ */
+export function resolveSweepRepo(env = {}) {
+  const candidates = [
+    ['PM_SWEEP_REPO', env.PM_SWEEP_REPO],
+    ['GITHUB_REPOSITORY', env.GITHUB_REPOSITORY],
+  ];
+  for (const [source, raw] of candidates) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    return { repo: value, source, valid: SWEEP_REPO_SHAPE.test(value) };
+  }
+  return { repo: DEFAULT_SWEEP_REPO, source: 'default', valid: true };
+}
+
+const SWEEP_REPO = resolveSweepRepo(process.env);
+const OWNER_REPO = SWEEP_REPO.repo;
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 
@@ -8017,6 +8110,40 @@ function selfTest() {
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
 
+  // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
+  // -- install correct rather than a green report about the wrong board (#11217)
+  t('sweep repo: PM_SWEEP_REPO wins when set', resolveSweepRepo({ PM_SWEEP_REPO: 'objectstack-ai/cloud', GITHUB_REPOSITORY: 'objectstack-ai/objectui' }).repo, 'objectstack-ai/cloud');
+  t('sweep repo: …and says where the answer came from', resolveSweepRepo({ PM_SWEEP_REPO: 'objectstack-ai/cloud' }).source, 'PM_SWEEP_REPO');
+  // The line that makes a copied file sweep the repo it was copied INTO.
+  t('sweep repo: a runner with no override sweeps its OWN repo', resolveSweepRepo({ GITHUB_REPOSITORY: 'objectstack-ai/objectui' }).repo, 'objectstack-ai/objectui');
+  t('sweep repo: …reported as such', resolveSweepRepo({ GITHUB_REPOSITORY: 'objectstack-ai/objectui' }).source, 'GITHUB_REPOSITORY');
+  t('sweep repo: a bare terminal falls back to the default', resolveSweepRepo({}).repo, DEFAULT_SWEEP_REPO);
+  t('sweep repo: …and names the fallback as the source', resolveSweepRepo({}).source, 'default');
+  // The objectstack leg, pinned in the exact shape its runner provides: same
+  // string as the hardcoded default this replaced, so every request path is
+  // byte-identical and the behaviour is unchanged by construction.
+  t('sweep repo: the objectstack runner resolves to the pre-change constant', resolveSweepRepo({ PM_SWEEP_REPO: 'objectstack-ai/objectstack', GITHUB_REPOSITORY: 'objectstack-ai/objectstack' }).repo, DEFAULT_SWEEP_REPO);
+  t('sweep repo: …and with only GITHUB_REPOSITORY set, identically', resolveSweepRepo({ GITHUB_REPOSITORY: 'objectstack-ai/objectstack' }).repo, DEFAULT_SWEEP_REPO);
+  t('sweep repo: …and that reading is valid', resolveSweepRepo({ GITHUB_REPOSITORY: 'objectstack-ai/objectstack' }).valid, true);
+  // Empty/whitespace is UNSET, not a value: Actions expressions expand to ''
+  // for an unset variable, and treating '' as a repo would sweep nothing while
+  // reporting a completed run.
+  t('sweep repo: an empty override is unset, not a repo', resolveSweepRepo({ PM_SWEEP_REPO: '', GITHUB_REPOSITORY: 'objectstack-ai/cloud' }).repo, 'objectstack-ai/cloud');
+  t('sweep repo: whitespace is unset too', resolveSweepRepo({ PM_SWEEP_REPO: '   ' }).repo, DEFAULT_SWEEP_REPO);
+  t('sweep repo: surrounding whitespace is trimmed, not rejected', resolveSweepRepo({ PM_SWEEP_REPO: ' objectstack-ai/cloud ' }).repo, 'objectstack-ai/cloud');
+  // A malformed value is REFUSED (the CLI exits 2 on it) and never silently
+  // replaced by the default — substituting a different board is the disease.
+  t('sweep repo: a bare name is invalid', resolveSweepRepo({ PM_SWEEP_REPO: 'objectui' }).valid, false);
+  t('sweep repo: …and is reported as itself, not as the default', resolveSweepRepo({ PM_SWEEP_REPO: 'objectui' }).repo, 'objectui');
+  t('sweep repo: a URL is invalid', resolveSweepRepo({ PM_SWEEP_REPO: 'https://github.com/objectstack-ai/objectui' }).valid, false);
+  t('sweep repo: a three-segment path is invalid', resolveSweepRepo({ PM_SWEEP_REPO: 'a/b/c' }).valid, false);
+  t('sweep repo: a trailing slash is invalid', resolveSweepRepo({ PM_SWEEP_REPO: 'objectstack-ai/' }).valid, false);
+  t('sweep repo: dots, dashes and underscores are legal repo characters', resolveSweepRepo({ PM_SWEEP_REPO: 'my-org/some_repo.js' }).valid, true);
+  t('sweep repo: no env at all is the same as an empty one', resolveSweepRepo().repo, DEFAULT_SWEEP_REPO);
+  // The sweep target rides into the rendered report, so a reader of a sibling
+  // repo's anchor can see WHICH board was read (and a wrong one is legible).
+  t('sweep repo: the rendered summary names the swept repo', summaryLine({ repo: 'objectstack-ai/objectui', issues: 3, unscoped: 4, prs: 1, merged: 2 }, 0).includes('objectstack-ai/objectui'), true);
+
   let failed = 0;
   for (const [name, actual, expected] of cases) {
     const ok = actual === expected;
@@ -8032,6 +8159,20 @@ function selfTest() {
 
 const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
+  // A malformed sweep target is bad usage (exit 2), refused BEFORE any request
+  // — including the probe's, whose second stage is a repo-scoped read of this
+  // very string. Silently falling back to the default would sweep a board
+  // nobody asked for and render a green report about it (#11217). The
+  // self-test path is exempt: it makes no request and must stay runnable in
+  // any container, whatever the environment carries.
+  if (!process.argv.includes('--self-test') && !SWEEP_REPO.valid) {
+    console.error(
+      `check-half-states: ${SWEEP_REPO.source}=${JSON.stringify(SWEEP_REPO.repo)} is not an ` +
+        '`owner/name` repository. Refusing to fall back to a different board — a report about ' +
+        'the wrong repo reads exactly like a report about this one.',
+    );
+    process.exit(2);
+  }
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else if (process.argv.includes('--probe')) {
