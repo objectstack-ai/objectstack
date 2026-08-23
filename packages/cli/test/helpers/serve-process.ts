@@ -25,6 +25,96 @@ export function randomPort(): string {
   return String(40000 + Math.floor(Math.random() * 20000));
 }
 
+/**
+ * The variables vitest sets on its own WORKER process, which must never reach a
+ * spawned `os serve` child (#11267).
+ *
+ * ## Why this exists — measured, not defensive
+ *
+ * A child built with `{ ...process.env, … }` inherits the **vitest worker's**
+ * environment, and vitest sets `TEST=true` on that worker unconditionally,
+ * independent of `NODE_ENV`. better-auth 1.7.1 reads `TEST` **directly**:
+ *
+ * ```js
+ * // @better-auth/core/dist/env/env-impl.mjs:36
+ * const isTest = () => nodeENV === "test" || toBoolean(env.TEST);
+ * // better-auth/dist/context/create-context.mjs:210
+ * skipOriginCheck: options.advanced?.disableOriginCheck !== void 0
+ *   ? options.advanced.disableOriginCheck
+ *   : isTest() ? true : false,
+ * ```
+ *
+ * So an inherited `TEST=true` disables better-auth's origin/CSRF validation
+ * **entirely**, one layer below anything `serve.ts` or `plugin-auth` decide,
+ * and independent of whatever `NODE_ENV` the caller sets on the child. The
+ * dangerous direction is not a red test: it is a security-posture assertion
+ * that can never go red for the reason it exists, which reads as coverage.
+ *
+ * MEASURED on a real boot through this helper's own spawn recipe — same
+ * fixture, same code, the five variables below the only difference. Probe:
+ * `POST /api/v1/auth/sign-in/email` with `Origin: https://evil.example.com`
+ * (untrusted under every branch of `serve.ts`'s trusted-origin assembly,
+ * including the `isDev` `http://localhost:*` convenience that `run-dev.js`
+ * always turns on):
+ *
+ * | child env | answer |
+ * |---|---|
+ * | `{ ...process.env }` (this helper, before #11267) | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
+ * | family below stripped | `403 INVALID_ORIGIN` — validation ran and rejected |
+ * | only `TEST` stripped | `403 INVALID_ORIGIN` |
+ *
+ * The third row is the isolation: **`TEST` alone is load-bearing.** The
+ * `VITEST*` entries are stripped as hygiene — nothing in `os serve` reads them
+ * today, and a child that believes it is a vitest worker is a lie regardless.
+ *
+ * ⛔ `NODE_ENV` is deliberately NOT in this family. The vitest worker exports
+ * `NODE_ENV=test` too, but every caller here already pins the child's
+ * `NODE_ENV` explicitly (`bin/run-dev.js` sets `development` before argv is
+ * even parsed; the `bin/run.js` spawners pass it in `env`), so stripping it
+ * would change which entrypoint those tests resolve through rather than remove
+ * a leak. That is a different defect with its own card (#11317) — ⛔ do not
+ * fold it in here.
+ */
+export const VITEST_WORKER_ENV_KEYS = [
+  'TEST',
+  'VITEST',
+  'VITEST_WORKER_ID',
+  'VITEST_POOL_ID',
+  'VITEST_MODE',
+] as const;
+
+/** `TEST` exactly, or any `VITEST`-prefixed variable — see `childEnv()`. */
+function isVitestWorkerKey(key: string): boolean {
+  return key === 'TEST' || key === 'VITEST' || key.startsWith('VITEST_');
+}
+
+/**
+ * Build the environment for a spawned CLI child: this process's environment
+ * minus the vitest worker family above, plus `overrides`.
+ *
+ * The strip is a **class**, not the fixed list: `TEST` exactly, plus anything
+ * matching `VITEST`/`VITEST_*`. `VITEST_WORKER_ENV_KEYS` names the five that
+ * vitest 4 exports today (and is what the pin asserts against), but a future
+ * runner variable in that namespace is caught without anyone having to
+ * rediscover this trap first.
+ *
+ * `overrides` is applied AFTER the strip, so a test that genuinely wants one of
+ * these set in its child can still say so explicitly — the point is that
+ * nothing arrives by accident. An `undefined` value UNSETS a variable for the
+ * child: Node's `spawn()` omits `undefined`-valued entries rather than
+ * stringifying them, which `''` would not do.
+ */
+export function childEnv(
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (isVitestWorkerKey(key)) continue;
+    env[key] = value;
+  }
+  return { ...env, ...overrides };
+}
+
 export interface ServeRun {
   stdout: string;
   stderr: string;
@@ -56,8 +146,9 @@ export function runServe(
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {
       cwd,
-      env: {
-        ...process.env,
+      // `childEnv`, never a bare `...process.env` — see its header for the
+      // measured reason (#11267).
+      env: childEnv({
         NO_COLOR: '1',
         // Keep the fixture self-contained: no file written, no port conflict
         // with another agent's dev server, no inherited log level.
@@ -65,7 +156,7 @@ export function runServe(
         OS_LOG_LEVEL: '',
         OS_DISABLE_CONSOLE: '1',
         ...(opts.env ?? {}),
-      },
+      }),
     });
 
     let stdout = '';

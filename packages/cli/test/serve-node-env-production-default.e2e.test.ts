@@ -130,6 +130,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -210,8 +211,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   const child = spawn(process.execPath, [CLI, 'serve', '-p', String(port)], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
+    env: childEnv({
       NO_COLOR: '1',
       OS_LOG_LEVEL: 'warn',
       OS_DISABLE_CONSOLE: '1',
@@ -226,22 +226,25 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // than inheriting whatever this test RUNNER's own process (vitest sets
       // NODE_ENV=test) happened to have.
       NODE_ENV: undefined,
-      // MEASURED TRAP, worth stating explicitly: `...process.env` above is
-      // THIS FILE's own process env — the vitest WORKER's — and vitest's
-      // worker carries `TEST=true` (and `VITEST=true`) regardless of
-      // `NODE_ENV`. better-auth 1.7.1 reads `TEST` directly, independent of
-      // `NODE_ENV`: `create-context.mjs` defaults
+      // MEASURED TRAP, and the reason the base above is `childEnv()` rather
+      // than `...process.env`: this file's own process env is the vitest
+      // WORKER's, and that worker carries `TEST=true` (and `VITEST=true`)
+      // regardless of `NODE_ENV`. better-auth 1.7.1 reads `TEST` directly,
+      // independent of `NODE_ENV`: `create-context.mjs` defaults
       // `skipOriginCheck: … isTest() ? true : false`, and
       // `isTest = () => nodeENV === 'test' || toBoolean(env.TEST)`. Left
       // alone, that inherited `TEST=true` makes better-auth skip origin
       // validation ENTIRELY — a false GREEN that has nothing to do with
       // `serve.ts`'s own gate and stays green with the fix reverted, which is
       // exactly the vacuity this card's anti-vacuity section warns against,
-      // one layer further down than the one it names. Unset it the same way
-      // `NODE_ENV` is unset above, for the same reason.
-      TEST: undefined,
+      // one layer further down than the one it names. This file used to unset
+      // `TEST` by hand right here; #11267 moved that into `childEnv()` so
+      // every spawner in this directory gets it without having to know, and
+      // widened it to the whole `VITEST*` family. The behaviour of this
+      // fixture is unchanged — `childEnv()` removes a superset of what the
+      // hand-written `TEST: undefined` removed.
       ...env,
-    },
+    }),
   }) as ProbeChild;
   children.push(child);
 

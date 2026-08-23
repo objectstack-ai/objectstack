@@ -47,7 +47,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomPort } from './helpers/serve-process.js';
+import { childEnv, randomPort } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint, i.e. the one the card's repro names. */
@@ -104,8 +104,12 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
     const child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
+      // `childEnv`, not a bare `...process.env`: the vitest worker exports
+      // `TEST=true`, which better-auth 1.7.1 reads directly and answers by
+      // switching its own origin/CSRF validation OFF in the child — see
+      // `helpers/serve-process.ts` for the measurement (#11267). This file
+      // signs in for real, so it is a child that actually reaches that code.
+      env: childEnv({
         NO_COLOR: '1',
         OS_LOG_LEVEL: 'info',
         OS_DISABLE_CONSOLE: '1',
@@ -114,7 +118,7 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
         // `test`, which would leave the DB user-less and the mint unauthorized.
         NODE_ENV: 'development',
         ...env,
-      },
+      }),
     }) as ChildProcessWithoutNullStreams;
     children.push(child);
 
