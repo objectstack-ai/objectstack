@@ -79,8 +79,7 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ComponentPropsMap, PageComponentSchema, PageSchema } from '@objectstack/spec/ui';
 import type { Page } from '@objectstack/spec/ui';
@@ -309,9 +308,21 @@ function renderFindings(findings: readonly BareExpressionFinding[]): string {
 // The population this gate covers
 // ───────────────────────────────────────────────────────────────────────────
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-/** This package's own `src/` — never escapes the package. */
-const PACKAGE_SRC = join(HERE, '..');
+/**
+ * Seeded from `__dirname`, not `fileURLToPath(import.meta.url)` — the same
+ * choice `managed-api-method-affordance-sweep.test.ts` makes in this package,
+ * for the reason it records there: this package has no ESM `tsconfig.test.json`,
+ * so `import.meta` is a **TS1470** the moment
+ * `check:type-check-coverage --re-measure` puts the test layer in front of tsc,
+ * and that ledger may only shrink. `__dirname` type-checks under the package's
+ * own config and vitest's transform defines it at runtime.
+ *
+ * (Measured, not assumed: the `import.meta` spelling was written here first and
+ * the ratchet caught it — `TEST_DEBT records 3 … now reports 4 (+1)`.)
+ */
+const HERE = __dirname;
+/** …/src/pages → this package's own `src/`. The scan never leaves the package. */
+const PACKAGE_SRC = resolve(HERE, '..');
 
 /** Every `Page` the package's page barrel exports, by export name. */
 const EXPORTED_PAGES: [string, Page][] = Object.entries(pageExports)
@@ -577,7 +588,12 @@ describe('negative control — the detector fires, and every door earns its plac
     const slots = source.slots as AnyRec;
     const alerts = slots.alerts as AnyRec[];
     const authored = (alerts[0]!.visibleWhen as AnyRec).source as string;
-    expect(typeof authored).toBe('string');
+    expect(
+      typeof authored,
+      'this control expects the shipped page to still carry the CANONICAL envelope. '
+        + 'If it is already bare, THIS is not the failure to read — the gate above '
+        + '(`authors NO bare expression string`) is, and it names the offending path.',
+    ).toBe('string');
     alerts[0]!.visibleWhen = authored;
 
     const audit = auditPage(source, pageLabel('SysUserDetailPage', source as unknown as Page));
