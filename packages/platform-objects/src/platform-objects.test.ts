@@ -182,10 +182,12 @@ describe('@objectstack/platform-objects', () => {
       expect(del?.mode).toBe('delete');
 
       // Enable/disable both hit the ObjectStack-added bridge route on
-      // /api/v1/auth (since better-auth 1.6.11's stock admin endpoint
-      // does not accept `disabled` in its update schema). They differ
-      // only in the static `disabled` body field and the visibility
-      // predicate, so exactly one is active at any time.
+      // /api/v1/auth. Re-measured 2026-08-23 against the installed
+      // @better-auth/oauth-provider@1.7.1: the stock admin endpoint's Zod
+      // body schema (`dist/authorize-Crqw4_bR.mjs:2862-2889`) still does
+      // not accept `disabled`, so the bridge route stays warranted. They
+      // differ only in the static `disabled` body field and the
+      // visibility predicate, so exactly one is active at any time.
       expect(disable?.target).toBe('/api/v1/auth/admin/oauth2/toggle-disabled');
       expect(disable?.bodyExtra).toEqual({ disabled: true });
       expect((disable?.visible as any)?.source).toBe('(has(record.disabled) && record.disabled != true) && features.oidcProvider != false');

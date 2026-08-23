@@ -46,14 +46,19 @@ export const SysOauthApplication = ObjectSchema.create({
   // is intentionally dropped from `apiMethods` below so the only delete
   // path is the better-auth wrapper.
   //
-  // Upstream gap (better-auth 1.6.11): the stock `/admin/oauth2/update-client`
-  // endpoint's Zod body schema does NOT accept the `disabled` flag, even
-  // though the column exists and the runtime honours it. We bridge the
-  // gap with `POST /api/v1/auth/admin/oauth2/toggle-disabled`, registered
-  // by plugin-auth, which writes through better-auth's own adapter under
+  // Upstream gap (re-measured 2026-08-23 against the installed
+  // @better-auth/oauth-provider@1.7.1): `adminUpdateOAuthClient`
+  // (`dist/authorize-Crqw4_bR.mjs:2860`) declares the stock
+  // `/admin/oauth2/update-client` endpoint's Zod body schema at
+  // `:2862-2889`, and `disabled` occurs zero times in that block — while
+  // matching 35 other lines of the same file (`grep -c`), so the search
+  // reaches the text. The column exists and the runtime honours it, but
+  // no client-facing API can flip it there. We bridge the gap with
+  // `POST /api/v1/auth/admin/oauth2/toggle-disabled`, registered by
+  // plugin-auth, which writes through better-auth's own adapter under
   // the auth namespace (no generic data-layer bypass). When upstream
-  // ships `disabled` support, retarget the enable/disable actions and
-  // delete the bridge route.
+  // adds `disabled` to `adminUpdateOAuthClient`'s schema, retarget the
+  // enable/disable actions and delete the bridge route.
   //
   // The two toggle predicates are guarded for the SPARSE action face (#8990),
   // and this pair is where the guard actually changes what a user sees. Both
