@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import { SqlDriver } from '../src/index.js';
 
 describe('SqlDriver.introspectSchema emits the spec introspection contract', () => {
@@ -101,5 +102,43 @@ describe('SqlDriver.introspectSchema emits the spec introspection contract', () 
     expect(Object.keys(id)).toEqual(
       expect.arrayContaining(['name', 'type', 'nullable', 'primaryKey']),
     );
+  });
+
+  it('OMITS `indexes` — never a false-empty `[]` (#11122)', async () => {
+    const schema = await driver.introspectSchema();
+
+    // This driver does not read indexes, and the spec key is optional with
+    // absence meaning exactly that. `indexes: []` would instead be a positive
+    // claim the table HAS none — the answer a drift differ acts on — so the
+    // pin is on key ABSENCE, `in`, not on emptiness.
+    expect('indexes' in schema.tables['customers']).toBe(false);
+
+    // And the emitted value now satisfies the spec declaration AS DECLARED —
+    // this assignment is the compile-time half of the pin, the seam that had
+    // no compiler across it while the `Omit` workarounds stood. Restoring the
+    // required `indexes` (or the `string` defaultValue) in the spec turns
+    // this file's `tsc` red at the driver's construction site.
+    const asSpec: SpecIntrospectedSchema = schema;
+    expect(asSpec.tables['customers'].indexes).toBeUndefined();
+  });
+
+  it('emits `defaultValue` / `maxLength` raw — the measured shapes the widened declarations promise (#11122)', async () => {
+    const schema = await driver.introspectSchema();
+    const byName = Object.fromEntries(
+      schema.tables['customers'].columns.map((c) => [c.name, c]),
+    );
+
+    // Measured on live in-memory SQLite (knex `columnInfo()` pass-through):
+    // a column with no default reports `null` — the value the old
+    // `defaultValue?: string` declaration could not even spell.
+    expect(byName.id.defaultValue).toBeNull();
+
+    // varchar maxLength arrives as the STRING "255" on SQLite while other
+    // dialects report a number — the measurement behind `number | string`.
+    // Asserted through Number() so a knex release normalising the spelling
+    // does not read as a contract break; typeof stays inside the declared
+    // union either way.
+    expect(['number', 'string']).toContain(typeof byName.name.maxLength);
+    expect(Number(byName.name.maxLength)).toBe(255);
   });
 });
