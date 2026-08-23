@@ -12850,11 +12850,80 @@ export class SqlDriver implements IDataDriver {
 
   // ── Introspection internals ─────────────────────────────────────────────────
 
+  /**
+   * The table's column names in DECLARED order, read from the catalog's own
+   * ordinal (#11163).
+   *
+   * knex's `columnInfo()` is an object KEYED BY COLUMN NAME, built from a
+   * catalog query that carries no `ORDER BY` — so its key-insertion order is
+   * whatever row order the server's plan yielded, which is unspecified on
+   * every dialect. Measured: SQLite and PostgreSQL 16.13 happened to return
+   * declared order; MySQL 8.0.46 returned ALPHABETICAL order, so a federated
+   * object drafted from a MySQL remote got its fields alphabetized. The
+   * ordinal is the fact and the row order is not, so every arm orders by the
+   * catalog's ordinal rather than trusting a plan.
+   *
+   * Each arm reads the same catalog `columnInfo()` populates, with the same
+   * scoping knex itself applies there (PG: `current_schema()`; MySQL:
+   * `DATABASE()`; SQLite: `PRAGMA table_info`, whose `cid` is the ordinal).
+   */
+  protected async introspectColumnOrder(tableName: string): Promise<string[]> {
+    if (this.isPostgres) {
+      const result = await this.knex.raw(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_name = ?
+            AND table_catalog = current_database()
+            AND table_schema = current_schema()
+          ORDER BY ordinal_position`,
+        [tableName],
+      );
+      return result.rows.map((row: any) => row.column_name);
+    }
+    if (this.isMysql) {
+      const result = await this.knex.raw(
+        `SELECT COLUMN_NAME as column_name
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = ?
+          ORDER BY ORDINAL_POSITION`,
+        [tableName],
+      );
+      return result[0].map((row: any) => row.column_name);
+    }
+    if (this.isSqlite) {
+      const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      const result = await this.knex.raw(`PRAGMA table_info(${safeTableName})`);
+      return (result as { name: string; cid: number }[])
+        .slice()
+        .sort((a, b) => a.cid - b.cid)
+        .map((row) => row.name);
+    }
+    return [];
+  }
+
   protected async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
-    const columnInfo = await this.knex(tableName).columnInfo();
+    const columnInfo = (await this.knex(tableName).columnInfo()) as Record<string, any>;
     const columns: IntrospectedColumn[] = [];
 
-    for (const [colName, info] of Object.entries<any>(columnInfo)) {
+    // #11163: emit in DECLARED order, not the `columnInfo()` object's
+    // key-insertion order (alphabetical on MySQL — see
+    // {@link introspectColumnOrder}). `columnInfo()` stays the source of the
+    // per-column FACTS because each dialect spells type / nullable /
+    // defaultValue / maxLength differently and knex already normalises them;
+    // only the ORDER comes from the ordinal read. A name one read has and the
+    // other lacks (the catalog moved between the two statements) is appended
+    // in `columnInfo()` order rather than dropped, so the merge can reorder
+    // but never lose a column.
+    const has = (name: string) => Object.prototype.hasOwnProperty.call(columnInfo, name);
+    const orderedNames = (await this.introspectColumnOrder(tableName)).filter(has);
+    const seen = new Set(orderedNames);
+    for (const name of Object.keys(columnInfo)) {
+      if (!seen.has(name)) orderedNames.push(name);
+    }
+
+    for (const colName of orderedNames) {
+      const info = columnInfo[colName];
       let type = 'string';
       let maxLength: number | undefined;
 
