@@ -495,6 +495,34 @@
  *       state-model row (its protocol face) and applying the label to the
  *       specimen card, which is a seat's write.
  *
+ * ## H26 — the block that nothing can ever release
+ *
+ *   H26 an open `pm:blocked` card whose resolvable `Blocked-by:` target is OPEN
+ *       and parked in a state that can never close — `pm:on-hold` or
+ *       `needs-user-decision`, both by definition states a card sits in WHILE
+ *       OPEN. The unlock predicate is "the target closed", so such a block is
+ *       structurally indefinite and nothing reported it: the waiting card is
+ *       perfectly well-formed (H4 clean, target resolves, target open, so H19
+ *       clean, label correct), and H9 — the nearest neighbour — audits the HELD
+ *       card rather than the waiting one. Six measured instances, all found by
+ *       a human reading: two cloud cards on one hold parked since July, a third
+ *       on another, and objectos's ENTIRE blocked inventory (2 of 2) waiting on
+ *       its single unanswered decision card, which is also the only item in the
+ *       fleet's decision inbox — one ruling clears that repo. A second leg on
+ *       the same data flags a target that is itself `pm:blocked` (the wait is
+ *       transitive: the measured chain was real one hop up and false two hops
+ *       up, its target being an H19 finding on the same sweep) — it names the
+ *       hop rather than chasing it, which would cost a request per hop and can
+ *       cycle. FREE: H19 already resolves every distinct target, and a resolved
+ *       target's labels rode in on a payload this sweep had already paid for.
+ *       ⛔ Not a judgement that the block is wrong — waiting on a deferred card
+ *       is sometimes right; the row says the wait has no releasing mechanism,
+ *       which is a fact a human should be handed rather than discover.
+ *       Deliberately NOT reported: a target labelled `pm:queue` while titled
+ *       `[Decision]` (one of the six). That is a mislabelling, not a fact in
+ *       the labels, and a title heuristic would make this sweeper guess at
+ *       intent.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -3937,6 +3965,144 @@ export function h25AwaitingMaintainerExclusivity(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H26 — a block whose target can never CLOSE, and the stale chain (#11219).
+//
+// The unlock predicate is "the `Blocked-by:` target CLOSED". `pm:on-hold` and
+// `needs-user-decision` are, by definition, states a card sits in WHILE OPEN.
+// A block naming such a target is therefore structurally indefinite: nothing in
+// the machinery can ever fire it, and until this row nothing said so.
+//
+// ## Why every existing check passes on these cards
+//
+// The waiting card is perfectly well-formed — it has its machine-readable line
+// (H4 clean), its target resolves, the target is open (H19 clean), its label is
+// correct. H9 is the nearest neighbour and asks the mirror question: it audits
+// the HELD card for a fireable `Restart-when:`. Nobody audited the card WAITING
+// on one. So the card passes every gauge and still cannot move — which is why
+// the six measured instances were found by a human reading, not by any sweep:
+//
+//   cloud#1119, cloud#799  -> cloud#987      (`pm:on-hold`), parked since July
+//   cloud#861              -> cloud#855      (`pm:on-hold`)
+//   objectos#75, #135      -> objectos#68    (`needs-user-decision`)
+//   cloud#1332             -> cloud#1331     (`pm:queue`, titled `[Decision]`)
+//
+// The last row is deliberately NOT reported by this predicate: a decision card
+// wearing a work label is a mislabelling to fix, not a fact readable from the
+// labels this row reads, and inventing a title heuristic would make the sweeper
+// guess at intent. Two of the rows are one repo's ENTIRE blocked inventory
+// waiting on its one unanswered decision card — one ruling clears the repo.
+//
+// ## The second leg: the stale chain
+//
+// `cloud#1395` -> `objectstack#10101`, which is OPEN, so the block reads live.
+// But #10101 was itself an H19 finding on the same sweep: both of ITS blockers
+// had already closed. The block was real one level up and false two levels up,
+// and a single-level predicate cannot see that. Flagging a target that is
+// itself `pm:blocked` is the cheap, honest version of that: it does not chase
+// the chain (which would cost a request per hop and could cycle), it says the
+// wait is TRANSITIVE so a reader knows to look one level further.
+//
+// ## Quota
+//
+// Free. H19 already resolves each distinct target — from an open listing this
+// sweep holds, or with one GET — and a resolved target's LABELS are a field
+// that was already in the payload. Nothing here adds a request; the resolution
+// rows simply stopped throwing the labels away.
+//
+// Report-only, and pointedly not a judgement that the block is WRONG: waiting
+// on a deferred card is sometimes exactly right. The row says this block has no
+// mechanism that will ever release it, which is the thing a human should see
+// rather than discover in a hand sweep.
+// ---------------------------------------------------------------------------
+
+/**
+ * Target states that can never satisfy the unlock predicate, because they are
+ * states an OPEN card sits in. `pm:blocked` is deliberately not here — that is
+ * the chain leg below, and it says something different: the target CAN close,
+ * once its own blocker does.
+ */
+export const INDEFINITE_TARGET_LABELS = ['pm:on-hold', 'needs-user-decision'];
+
+/**
+ * H26 — null when every open target can still close on its own, else the
+ * finding sentence.
+ *
+ * ## What an unjudged target does here, and why it is silent rather than loud
+ *
+ * A row whose `labels` is not an array is one this sweep could not read, and
+ * every such target is ALREADY firing H19's unresolved branch on this very
+ * card, with a sentence that says the liveness is unjudged. Repeating it here
+ * would double-report one gap under two items; the #4690 duty is discharged,
+ * once, in the item that owns it.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ key: string, number: number, local: boolean,
+ *   state: 'open'|'closed'|'unresolved', labels?: string[]|null }[]} resolutions
+ */
+export function h26BlockOnIndefiniteTarget(issue, resolutions) {
+  if (!needsBlockerLiveness(issue)) return null;
+  const open = (resolutions ?? []).filter(
+    (r) => r?.state === 'open' && Array.isArray(r.labels),
+  );
+  if (open.length === 0) return null;
+
+  const indefinite = open
+    .map((r) => ({ row: r, states: INDEFINITE_TARGET_LABELS.filter((l) => r.labels.includes(l)) }))
+    .filter((r) => r.states.length > 0);
+  // A target that is BOTH parked and blocked is named once, under the reading
+  // that ends the wait forever rather than the one that merely lengthens it.
+  const chained = open.filter(
+    (r) => r.labels.includes('pm:blocked') && !indefinite.some((i) => i.row.key === r.key),
+  );
+  if (indefinite.length === 0 && chained.length === 0) return null;
+
+  const parts = [];
+  if (indefinite.length > 0) {
+    const named = indefinite
+      .slice(0, H19_TARGET_LIST_CAP)
+      .map(
+        ({ row, states }) =>
+          `\`${row.local ? `#${row.number}` : row.key}\` (${states.map((s) => `\`${s}\``).join(' + ')})`,
+      )
+      .join(', ');
+    const more =
+      indefinite.length > H19_TARGET_LIST_CAP
+        ? ` +${indefinite.length - H19_TARGET_LIST_CAP} more`
+        : '';
+    parts.push(
+      `\`pm:blocked\` on ${indefinite.length} target(s) that can never CLOSE: ${named}${more}. ` +
+        'The unlock predicate is "the `Blocked-by:` target closed", and `pm:on-hold` / ' +
+        '`needs-user-decision` are by definition states a card sits in WHILE OPEN — so this ' +
+        'block has NO MECHANISM THAT WILL EVER RELEASE IT. Every existing check passes on this ' +
+        'card (the line is present, the target resolves, the target is open, the label is ' +
+        'correct), which is why the measured instances were found by a human reading and by no ' +
+        'gauge; H9 asks the mirror question about the HELD card and nothing asked about the ' +
+        'WAITING one. ⚠️ Not a claim that the block is wrong — waiting on a deferred card is ' +
+        'sometimes exactly right. It says the wait is indefinite BY CONSTRUCTION, so the release ' +
+        'has to come from the target\'s own state changing (a ruling answered, a hold restarted) ' +
+        'and someone has to want that.',
+    );
+  }
+  if (chained.length > 0) {
+    const named = chained
+      .slice(0, H19_TARGET_LIST_CAP)
+      .map((r) => `\`${r.local ? `#${r.number}` : r.key}\``)
+      .join(', ');
+    const more =
+      chained.length > H19_TARGET_LIST_CAP ? ` +${chained.length - H19_TARGET_LIST_CAP} more` : '';
+    parts.push(
+      `The wait is TRANSITIVE: ${named}${more} ${chained.length === 1 ? 'is' : 'are'} itself ` +
+        '`pm:blocked`, so this card is waiting on a card that is waiting. A single-level ' +
+        'predicate cannot see past one hop, and the measured chain was real one level up and ' +
+        'FALSE two levels up (the target was an H19 finding on the same sweep — both of ITS ' +
+        'blockers had closed). This row does not chase the chain; it says to look one level ' +
+        'further.',
+    );
+  }
+  return parts.join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -5434,16 +5600,24 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   //
   // One request per DISTINCT target, cached across cards: several cards
   // waiting on one epic is the normal shape, and it costs one read.
-  const openLocalNumbers = new Set();
-  for (const number of seen.keys()) openLocalNumbers.add(number);
-  for (const number of seenUnscoped.keys()) openLocalNumbers.add(number);
+  //
+  // The map holds the ISSUE, not just its number, because H26 (#11219) asks a
+  // second question of the same target — is it parked in a state that can never
+  // close? — and the answer is a field the payload already carried. Free by
+  // construction: a locally-open target is answered from a listing in hand, and
+  // a fetched one arrives with its labels on the same response. Nothing here
+  // adds a request; the resolution rows simply stop discarding the labels.
+  const openLocalIssues = new Map();
+  for (const [number, issue] of seenUnscoped) openLocalIssues.set(number, issue);
+  for (const [number, issue] of seen) openLocalIssues.set(number, issue);
   const blockerCache = new Map();
   const resolveBlockerTarget = async (target) => {
     const cached = blockerCache.get(target.key);
     if (cached) return cached;
     let resolved;
-    if (target.local && openLocalNumbers.has(target.number)) {
-      resolved = { ...target, state: 'open', closedAt: null, detail: null };
+    const localOpen = target.local ? openLocalIssues.get(target.number) : undefined;
+    if (localOpen) {
+      resolved = { ...target, state: 'open', closedAt: null, detail: null, labels: labelNames(localOpen) };
     } else {
       try {
         const row = await rest(`/repos/${target.repo}/issues/${target.number}`);
@@ -5452,6 +5626,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
           state: row.state === 'closed' ? 'closed' : 'open',
           closedAt: row.closed_at ?? null,
           detail: null,
+          labels: labelNames(row),
         };
       } catch (err) {
         // Per-target, never fatal — and deliberately NOT the rethrow H16/H17
@@ -5483,6 +5658,13 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
     const expired = h19BlockOutlivedBlocker(issue, resolutions);
     if (expired) findings.push([issue, 'H19', expired]);
+    // H26 — the same resolutions, asked the OTHER question: not "has the target
+    // closed" but "can it ever". Both rows can fire on one card (a two-target
+    // block where one blocker closed and the other is parked indefinitely), and
+    // they must: they name different halves of the same wait and prescribe
+    // different reads.
+    const indefinite = h26BlockOnIndefiniteTarget(issue, resolutions);
+    if (indefinite) findings.push([issue, 'H26', indefinite]);
   }
   // Distinct targets, which is the unit the cache and the request count are
   // in — and the word is in the summary sentence so the number cannot be read
@@ -8109,6 +8291,68 @@ function selfTest() {
   t('vocabulary: H11 keeps the mechanical remedy for a BLOCKED card', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('Restart-when'), true);
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
+
+  // -- H26: a block whose target can never close, + the stale chain (#11219) --
+  // The measured cards, by name, and both directions of every leg.
+  const waiting = (number = 1119) => ({
+    number,
+    state: 'open',
+    labels: [{ name: 'pm:blocked' }],
+    assignees: [],
+    body: 'Blocked-by: #987',
+    title: '',
+  });
+  const tgt = (number, labels, extra = {}) => ({
+    key: `objectstack-ai/cloud#${number}`,
+    number,
+    local: true,
+    state: 'open',
+    labels,
+    ...extra,
+  });
+  t('H26: target parked in pm:on-hold -> finding', typeof h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]), 'string');
+  t('H26: …and the row says the block has no releasing mechanism', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]).includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
+  t('H26: …and names the target and its state', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold'])]).includes('`#987` (`pm:on-hold`)'), true);
+  t('H26: target parked in needs-user-decision -> finding', typeof h26BlockOnIndefiniteTarget(waiting(75), [tgt(68, ['needs-user-decision'])]), 'string');
+  t('H26: a target carrying BOTH indefinite states names both', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'needs-user-decision'])]).includes('`pm:on-hold` + `needs-user-decision`'), true);
+  // The clean directions — an ordinary open target is not this row's business.
+  t('H26: an ordinary open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:queue', 'domain:devx'])]), null);
+  t('H26: an unlabelled open target -> clean', h26BlockOnIndefiniteTarget(waiting(), [tgt(987, [])]), null);
+  t('H26: no targets at all -> no row (H4 owns the missing line)', h26BlockOnIndefiniteTarget(waiting(), []), null);
+  t('H26: absent resolutions -> no row', h26BlockOnIndefiniteTarget(waiting(), undefined), null);
+  t('H26: the label gate outranks an indefinite target', h26BlockOnIndefiniteTarget({ ...waiting(), labels: [{ name: 'pm:queue' }] }, [tgt(987, ['pm:on-hold'])]), null);
+  // A CLOSED target is H19's row, never this one: it closed, so the unlock CAN
+  // fire — the two items must not double-report one target.
+  t('H26: a CLOSED target is H19\'s row, not this one', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, ['pm:on-hold']), state: 'closed' }]), null);
+  t('H26: …and H19 does fire on it', typeof h19BlockOutlivedBlocker(waiting(), [{ ...tgt(987, ['pm:on-hold']), state: 'closed' }]), 'string');
+  // An unresolved target is silent HERE and loud in H19 — one gap, one row.
+  t('H26: an unresolved target is silent (H19 owns the unjudged sentence)', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]), null);
+  t('H26: …and a labels-less open row cannot be judged either', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(987, undefined) }]), null);
+  t('H26: …while H19 states that gap', h19BlockOutlivedBlocker(waiting(), [{ ...tgt(987, null), state: 'unresolved', detail: 'HTTP 404' }]).includes('UNJUDGED'), true);
+  // The chain leg.
+  t('H26: a target that is itself pm:blocked -> the transitive row', typeof h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]), 'string');
+  t('H26: …and it says to look one level further', h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('TRANSITIVE'), true);
+  t('H26: …and does not claim the block can never release', h26BlockOnIndefiniteTarget(waiting(1395), [tgt(10101, ['pm:blocked'])]).includes('NO MECHANISM'), false);
+  // Both legs at once, on two different targets, in one row.
+  const bothLegs = h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold']), tgt(10101, ['pm:blocked'])]);
+  t('H26: both legs report together', bothLegs.includes('NO MECHANISM THAT WILL EVER RELEASE IT') && bothLegs.includes('TRANSITIVE'), true);
+  // A target that is BOTH parked and blocked is named ONCE, under the reading
+  // that ends the wait forever rather than the one that merely lengthens it.
+  const bothOnOne = h26BlockOnIndefiniteTarget(waiting(), [tgt(987, ['pm:on-hold', 'pm:blocked'])]);
+  t('H26: a parked AND blocked target is named once, as indefinite', bothOnOne.includes('NO MECHANISM THAT WILL EVER RELEASE IT'), true);
+  t('H26: …and not a second time as a chain', bothOnOne.includes('TRANSITIVE'), false);
+  // A partially indefinite block still reports: one live blocker does not make
+  // the indefinite one fireable.
+  t('H26: one indefinite target among open ones still fires', typeof h26BlockOnIndefiniteTarget(waiting(), [tgt(900, ['pm:queue']), tgt(987, ['pm:on-hold'])]), 'string');
+  // The render cap, shared with H19 so one card cannot flood the anchor body.
+  const manyIndefinite = h26BlockOnIndefiniteTarget(waiting(), [1, 2, 3, 4, 5, 6, 7].map((n) => tgt(n, ['pm:on-hold'])));
+  t('H26: the target list is capped like H19\'s', manyIndefinite.includes(`+${7 - H19_TARGET_LIST_CAP} more`), true);
+  t('H26: …and still counts the full set', manyIndefinite.includes('on 7 target(s)'), true);
+  // Cross-repo targets are addressed by full key, as in H19's rows.
+  t('H26: a cross-repo target is named owner/repo#N', h26BlockOnIndefiniteTarget(waiting(), [{ ...tgt(68, ['needs-user-decision']), local: false, key: 'objectstack-ai/objectos#68' }]).includes('`objectstack-ai/objectos#68`'), true);
+  // Both rows can fire on ONE card — different halves of one wait.
+  const expiredAndIndefinite = [{ ...tgt(900, ['pm:queue']), state: 'closed' }, tgt(987, ['pm:on-hold'])];
+  t('H26 + H19: a partially expired, partially indefinite block fires both', Boolean(h19BlockOutlivedBlocker(waiting(), expiredAndIndefinite)) && Boolean(h26BlockOnIndefiniteTarget(waiting(), expiredAndIndefinite)), true);
 
   // -- resolveSweepRepo: the parameterisation that makes a verbatim sibling
   // -- install correct rather than a green report about the wrong board (#11217)
