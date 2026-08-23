@@ -277,6 +277,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.destructive-gate-reachable-types.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.diff-canonical-type-and-history-outage.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -30,8 +30,15 @@
  * gate at all, and if so what does its catch emit.
  *
  * The gate fires only when ALL of: `!request.force`, the folded type is
- * `object` or `field`, an item already exists under the target name, and the
- * diff is non-empty. That predicate is what eliminates four of the seven.
+ * `object`, an item already exists under the target name, and the diff is
+ * non-empty. That predicate is what eliminates four of the seven.
+ *
+ * ⚠️ [#11014] That type list read `object` or `field` while this inventory was
+ * being built, and the `field` half could not produce a finding — so the
+ * enumeration above had to chase a `field` face population that does not
+ * exist. The limb is now trimmed; the reachable type set is `object` alone and
+ * is pinned by `protocol.destructive-gate-reachable-types.test.ts`, which also
+ * carries the measurements for both reasons the limb was inert.
  *
  * | # | caller | type | `force` | reaches gate | face | `issues` structurally |
  * |:--|:--|:--|:--|:--|:--|:--|

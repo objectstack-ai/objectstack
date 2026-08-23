@@ -13326,11 +13326,56 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Phase 3a-destructive: for object/field writes, diff against the
+        // Phase 3a-destructive: for `object` writes, diff against the
         // current schema and 409 if the change would drop data — unless the
         // caller has acknowledged the risk with `force: true`. The admin UI
         // surfaces the structured `issues` payload in a confirmation dialog.
-        if (!request.force && (singularType === 'object' || singularType === 'field')) {
+        //
+        // [#11014] `object` ALONE. This condition used to read
+        // `(singularType === 'object' || singularType === 'field')`, and the
+        // `field` limb could not produce a finding — two independent reasons,
+        // BOTH RE-MEASURED through the real `saveMetaItem` before the trim:
+        //
+        //  1. A `field` body has no `fields` map to diff.
+        //     {@link detectDestructiveObjectChanges} reads `prev.fields` /
+        //     `next.fields`; a `field` item's body IS one field definition
+        //     (`FieldSchema` — a `strictObject` that declares no `fields`
+        //     key), so both sides fold to `{}` and every loop in the detector
+        //     iterates zero times. Measured: a `text` → `number` change on a
+        //     stored `field` row — the exact edit that raises
+        //     `field_type_change` INSIDE an object body — saved with no 409,
+        //     while the same-shaped change on an `object` refused in the same
+        //     harness.
+        //  2. `field` is code-only (`allowRuntimeCreate: false` AND
+        //     `allowOrgOverride: false` in the `packages/spec` kernel
+        //     registry), so the #5086 refusal ABOVE this gate answers first —
+        //     `NOT_CREATABLE` for a runtime-only parent, `NOT_OVERRIDABLE` for
+        //     an artifact-backed one (#7743's `isNestedArtifactField` path) —
+        //     before persistence and before this diff. Measured on both.
+        //
+        // ⚠️ Neither reason is absolute, and the trim is right BECAUSE of
+        // where they stop, not in spite of it. Reason 2 stops at the
+        // documented operator hatch: `OS_METADATA_WRITABLE=field` does carry a
+        // `field` write past that refusal and into this gate — and reason 1
+        // then holds it inert on its own. Reason 1 stops at SCHEMA-VALID
+        // bodies: the detector is type-agnostic, so a stored `field` row
+        // carrying a `fields` map did fire this gate. But such a body is one
+        // `FieldSchema` rejects (`unrecognized_keys: ['fields']`) — corruption,
+        // not authoring — and the finding it produced was a data-loss refusal
+        // naming columns that DO NOT EXIST: a `field` write mints a standalone
+        // `sys_metadata` row nothing composes into its parent object (#7893),
+        // so no driver ever materialised those names. That double fault was
+        // the limb's only reachable behaviour, and it was a false alarm.
+        //
+        // ⛔ Do not "restore" the limb as missing coverage — that reading is
+        // precisely what this card was filed to prevent (#10886's face
+        // inventory had to chase a `field` face population that does not
+        // exist). Giving `field` a real destructive diff only becomes
+        // meaningful if `field` ever becomes runtime-writable, and returns
+        // then as a Feature with that change.
+        // `protocol.destructive-gate-reachable-types.test.ts` pins the
+        // reachable type set and carries the measurements above.
+        if (!request.force && singularType === 'object') {
             try {
                 const existing = await this.getMetaItem({
                     type: request.type,
