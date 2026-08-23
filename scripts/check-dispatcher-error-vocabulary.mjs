@@ -161,6 +161,36 @@
  *     stays THIS gate's site under `assignconst`, lowercase included, and that
  *     gate's pattern deliberately does not reach it. Measured on both sides,
  *     not inferred — one literal, one reporter.
+ *   - [#10918] "Local" meant `const` alone, though — `declaredInitializers`
+ *     anchored on that keyword, so a code held in a `let` or a `var` reduced to
+ *     NOTHING and the `codehelper` branch read the `null` as the runtime-value
+ *     bound: no site AND no unresolved, even when every branch was a literal
+ *     spelled out in the source. `let code = 'A'; if (x) code = 'B';
+ *     err.code = code` stamps two unregistered codes past both gates in
+ *     silence. That is not the bound #9568 wrote — the value was out of reach
+ *     only because of how the anchor was spelled. The anchor now reads
+ *     `const|let|var`, and the mutability it lets in is handled rather than
+ *     ignored, in three states:
+ *       · a `let`/`var` this file never reassigns holds exactly its
+ *         initializer, so it reduces like a `const` and produces SITES;
+ *       · a `let`/`var` this file DOES reassign does not reduce at all — the
+ *         initializer is not the value set, and claiming it would report a
+ *         value the program may never stamp, which is the ALL-OR-NOTHING
+ *         wrongness above. When an initializer is nonetheless a literal, the
+ *         name is REPORTED as unresolved (reason `reassigned`), never dropped:
+ *         a code is visibly spelled out and only the reassignment stops us
+ *         claiming the set. The remedy is in the source — spell it `const`.
+ *       · a mutable local with NO literal anywhere (`let code: unknown = null;
+ *         code = read(x)`) is untouched by all of this. It is the #9460
+ *         runtime-value bound exactly as before: nothing to report, nothing to
+ *         fix, and reporting it would be the "every domain field named `code`
+ *         is a finding" pressure this gate refuses.
+ *     Only the DECLARATOR half is closed. A bare reassignment with no
+ *     declarator (`code = p?.code || 'lit'` where `code` is declared
+ *     elsewhere) has nothing to anchor on and no scopes to read, and
+ *     `check:error-code-casing`'s `local-fallback` deliberately requires a
+ *     declarator too — so that shape remains unowned by both gates, on record
+ *     and not closed here.
  *   - A constant this gate cannot resolve is REPORTED as unresolved, never
  *     dropped: a deriver that goes quietly blind is the same failure one layer
  *     down. [#9223] A constant imported from a WORKSPACE package is resolved
@@ -512,10 +542,23 @@ export function splitChain(expr) {
 /**
  * [#9568] Every `const NAME = …` in `source`, as raw initializer text — the
  * declaration's own `;` terminates it, so a multi-line ternary survives intact.
+ *
+ * [#10918] `let` and `var` too. The anchor read `const` alone, so a code held
+ * in a `let` reduced to nothing — `resolveConstant` answered `null`, the
+ * `codehelper` branch read that as the runtime-value bound and contributed NO
+ * site and NO unresolved, even when the value was a plain literal sitting right
+ * there in the source. That is not the bound #9568 wrote ("a value spelled out
+ * in every branch is not out of reach, whichever shape it arrives through"); it
+ * was out of reach only because of how the anchor was spelled.
+ *
+ * This function stays purely syntactic — it answers "what initializers are
+ * written for this name", not "what values does the name hold". Those differ
+ * for a mutable binding, and the difference is `reassignedInFile`'s job below;
+ * `inFileValues` is where the two are combined.
  */
 export function declaredInitializers(name, source, { exported = false } = {}) {
   const head = new RegExp(
-    `\\b${exported ? 'export\\s+' : '(?:export\\s+)?'}const\\s+${name}\\s*(?::[^=;\\n]+)?=\\s*`,
+    `\\b${exported ? 'export\\s+' : '(?:export\\s+)?'}(?:const|let|var)\\s+${name}\\s*(?::[^=;\\n]+)?=\\s*`,
     'g',
   );
   const inits = [];
@@ -534,6 +577,87 @@ export function declaredInitializers(name, source, { exported = false } = {}) {
 }
 
 /**
+ * [#10918] Is `name` declared MUTABLE (`let`/`var`, WITH an initializer) in
+ * `source`?
+ *
+ * The initializer is required deliberately. `let code;` followed by
+ * `code = compute()` has nothing spelled out to read and is the runtime-value
+ * bound #9460 states, not a value this scan declined to reduce — treating it as
+ * the latter is how "report what you cannot reduce" turns into "report every
+ * domain field named `code`", which this gate already refuses to do.
+ */
+export function declaredMutably(name, source, { exported = false } = {}) {
+  return new RegExp(
+    `\\b${exported ? 'export\\s+' : '(?:export\\s+)?'}(?:let|var)\\s+${name}\\s*(?::[^=;\\n]+)?=`,
+  ).test(source);
+}
+
+/**
+ * [#10918] Does `source` ASSIGN to `name` somewhere other than its declaration?
+ *
+ * This is the whole difficulty of widening the anchor above. A `let` can be
+ * reassigned, so the set of values it holds is NOT its initializer — reducing
+ * it to the initializer alone would report a value the program may never stamp,
+ * which is the same wrongness the ALL-OR-NOTHING rule (#9568) exists to refuse.
+ *
+ * Deliberately biased toward OVER-detection, because the two errors are not
+ * symmetric: a false "reassigned" costs a reduction we could have made (the
+ * value is reported as unresolved instead — loud, and discharged by fixing the
+ * source), while a missed reassignment costs a site asserted out of a value the
+ * program may never stamp — silent, and wrong in the direction #9568 named. So
+ * a destructuring default (`const { code = 'X' } = p`) and a `code` inside a
+ * template string both read as reassignment here, and that is the safe answer.
+ *
+ * File-local is COMPLETE, not an approximation: a local cannot be assigned from
+ * another file, and ES modules forbid an importer assigning to an imported
+ * binding — only the declaring module can reassign an `export let`.
+ *
+ * Compound forms count (`code += x`, `code ||= x`, `code ??= x`); comparisons
+ * and arrows do not (`==`, `===`, `>=`, `=>`), nor does a property of the same
+ * name (`err.code = x`, `p?.code = x`) — that is a stamp, not a rebinding.
+ */
+export function reassignedInFile(name, source) {
+  const re = new RegExp(
+    `(^|[^\\w$.])${name}\\s*(?:\\|\\||&&|\\?\\?|[-+*/%&|^])?=(?![=>])`,
+    'g',
+  );
+  for (const m of source.matchAll(re)) {
+    // The declaration's own `=` is not a reassignment.
+    if (/\b(?:const|let|var)\s+$/.test(source.slice(0, m.index + m[1].length))) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * [#10918] `name` is declared mutable in this file, this file reassigns it, AND
+ * at least one of its written initializers reduces to literal code values.
+ *
+ * That conjunction is the reportable class, and each conjunct earns its place:
+ *
+ *   - mutable + reassigned ⇒ the initializer is not the value set, so
+ *     `inFileValues` refuses to reduce it (below). Correct, but on its own it
+ *     is SILENT in the `codehelper` position — the same silence this widening
+ *     exists to end.
+ *   - a reducible initializer ⇒ there IS a code spelled out in the source that
+ *     we can see and are declining to claim. That is exactly what "reported as
+ *     unresolved, never dropped" is for.
+ *
+ * Without the third conjunct this would report every runtime-valued mutable
+ * local named `code` — `let code: unknown | null = null; code = read(x)` is the
+ * live shape in `packages/metadata-protocol` — and turning those into a red
+ * gate is the silencing pressure this family keeps re-learning (#9460, #9568).
+ * There is no literal there, so there is nothing to report and nothing to fix.
+ */
+export function reassignedMutableLiteral(name, source, opts = {}) {
+  if (!declaredMutably(name, source, opts)) return false;
+  if (!reassignedInFile(name, source)) return false;
+  return declaredInitializers(name, source, opts).some((init) =>
+    literalCodeValues(init, (id, d) => (id === name ? null : inFileValues(id, source, opts, d))),
+  );
+}
+
+/**
  * [#9568] The values `name` can hold according to THIS source, or `null`.
  *
  * Two declarations of one name that reduce differently answer `null` rather
@@ -543,10 +667,18 @@ export function declaredInitializers(name, source, { exported = false } = {}) {
  * source only — following an import from inside a ternary would need the
  * importing file's scope for each limb, and the shape that needs it has not
  * appeared.
+ *
+ * [#10918] A name this file declares MUTABLY and also reassigns answers `null`
+ * for the same reason two differently-reducing declarations do: the written
+ * initializers are not the value set, and half a value set is a finding wrong
+ * in both directions at once. The refusal is file-wide rather than per
+ * declaration — dropping just the mutable declarator and reducing the rest
+ * would be the first-wins guess the two-drivers hazard rules out.
  */
 function inFileValues(name, source, opts = {}, depth = 0) {
   const inits = declaredInitializers(name, source, opts);
   if (!inits.length) return null;
+  if (declaredMutably(name, source, opts) && reassignedInFile(name, source)) return null;
   const sets = [];
   for (const init of inits) {
     const vals = literalCodeValues(init, (id, d) => (id === name ? null : inFileValues(id, source, opts, d)), depth);
@@ -918,8 +1050,25 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
             // `const code = readFrom(x)` has no value to report and no family
             // to report it under, and turning every domain field named `code`
             // into a finding is what this branch already refuses to do.
+            //
+            // [#10918] With ONE class carved out of it. A local this file
+            // declares `let`/`var` and also REASSIGNS, whose initializer is a
+            // literal, is not a runtime value: a code is spelled out right
+            // there, and only the reassignment stops us claiming it is the
+            // whole set. Dropping that silently is the hole this card found —
+            // `let code = 'A'; if (x) code = 'B'; err.code = code` stamped two
+            // unregistered literals and NO gate said a word. It is reported as
+            // unresolved, under `assignconst` for the same reason the reduced
+            // path emits there: it is the assign position, one indirection
+            // away. Reported, never reduced — the ALL-OR-NOTHING rule is what
+            // forbids picking the initializer out of the set (#9568).
             const localValues = resolveConstant(code, stripped, rel, readFile, ctx);
-            if (localValues === null) continue;
+            if (localValues === null) {
+              if (reassignedMutableLiteral(code, stripped)) {
+                addUnresolved(unresolved, { file: rel, shape: 'assignconst', value: code, reason: 'reassigned' });
+              }
+              continue;
+            }
             for (const value of localValues) emit(value, 'assignconst');
             continue;
           }
@@ -1084,12 +1233,21 @@ export function reconcile({ sites, declared, registered, unresolved }) {
   }
 
   for (const u of unresolved) {
+    // [#10918] A reassigned mutable local has a literal in it — the reduction
+    // is refused for a reason the author can act on, so the remedy named is the
+    // one that applies. Telling them to "teach resolveConstant() the spelling"
+    // would point at the resolver when the fix is in their source.
     findings.push({
       kind: 'unresolved-constant',
       text:
-        `${u.file}: the code constant '${u.value}' (${u.shape}) could not be resolved to a literal. ` +
-        `Reported rather than dropped — see the header's bounds. Resolve it, or teach ` +
-        `resolveConstant() the spelling.`,
+        u.reason === 'reassigned'
+          ? `${u.file}: '${u.value}' (${u.shape}) is a \`let\`/\`var\` this file also REASSIGNS, so its ` +
+            `initializer is not the set of codes it stamps and reducing it would report a value the ` +
+            `program may never send. Reported rather than dropped. Make it a \`const\` (a ternary or a ` +
+            `\`||\`/\`??\` chain of literals reduces fine), or stamp the literals at the site.`
+          : `${u.file}: the code constant '${u.value}' (${u.shape}) could not be resolved to a literal. ` +
+            `Reported rather than dropped — see the header's bounds. Resolve it, or teach ` +
+            `resolveConstant() the spelling.`,
     });
   }
 
@@ -1555,6 +1713,168 @@ function selfTest() {
     ok(splitChain(`f(a || b) ?? 'X'`).length === 2, 'splitChain cut inside a nested call');
     ok(literalCodeValues(`('WRAPPED' as const)`).join(',') === 'WRAPPED', 'a parenthesised / `as const` literal did not reduce');
     ok(literalCodeValues(`x ? 'A' : y`) === null, 'a ternary with one runtime branch reduced to half its values');
+  }
+
+  // [#10918] The DECLARATOR widening: `let` / `var`, and the reassignment that
+  // makes a mutable binding's initializer not its value set. Three states, and
+  // the `const` path pinned alongside them — a widening whose test does not
+  // also hold the path it must NOT disturb proves only half of what it claims.
+  {
+    const one = (source) =>
+      deriveSites({ registered, files: [{ rel: 'packages/x/src/a.ts', source }], readFile: () => '' });
+    const codesOf = (r) => r.sites.map((s) => s.code).sort().join(',');
+    const stamp = (decl) => `${decl}\nconst err: any = new Error('x');\nerr.code = code;\nthrow err;`;
+
+    // STATE 1 — a `let`/`var` the file never reassigns holds exactly its
+    // initializer, so it reduces like a `const`. Before this, it reduced to
+    // NOTHING and the codehelper branch dropped it in silence.
+    ok(
+      codesOf(one(stamp(`let code = 'LET_DIRECT_ONE';`))) === 'LET_DIRECT_ONE',
+      'an unreassigned `let` holding a literal produced no site',
+    );
+    ok(
+      codesOf(one(stamp(`var code = 'VAR_DIRECT_ONE';`))) === 'VAR_DIRECT_ONE',
+      'an unreassigned `var` holding a literal produced no site',
+    );
+    ok(
+      codesOf(one(stamp(`let code = flag ? 'LET_TERN_A' : 'LET_TERN_B';`))) === 'LET_TERN_A,LET_TERN_B',
+      'an unreassigned `let` holding a ternary did not reduce to both branches',
+    );
+    // …and it reduces to EXACTLY what the same source spelled `const` does.
+    // The reduction lives in one resolver; the declarator must not change it.
+    ok(
+      codesOf(one(stamp(`let code = flag ? 'SAME_A' : 'SAME_B';`)))
+        === codesOf(one(stamp(`const code = flag ? 'SAME_A' : 'SAME_B';`))),
+      'the `let` and `const` spellings of one initializer reduced differently',
+    );
+    // The SCREAMING module-constant spelling routes through `assignconst`'s own
+    // regex rather than the codehelper branch — the widening is in the shared
+    // resolver, so both arrive.
+    ok(
+      codesOf(one(`let ERR_CODE = 'LET_CONSTNAME_ONE';\nerr.code = ERR_CODE;`)) === 'LET_CONSTNAME_ONE',
+      'an unreassigned `let` in the SCREAMING spelling produced no site',
+    );
+    // …including across a package boundary, where the resolver reads the OTHER
+    // file's source. The `exported` half of the anchor is widened too.
+    ok(
+      declaredInitializers('LET_EXPORTED', `export let LET_EXPORTED = 'X';`, { exported: true }).length === 1,
+      'the exported half of the anchor did not read an `export let`',
+    );
+    ok(
+      deriveSites({
+        registered,
+        files: [
+          { rel: 'packages/runtime/src/x.ts', source: `import { LET_EXPORTED } from '@objectstack/core';\nerr.code = LET_EXPORTED;` },
+          { rel: 'packages/core/src/deny.ts', source: `export let LET_EXPORTED = 'LET_EXPORTED_ONE';` },
+        ],
+        readFile: () => '',
+        packageDirs: parsePackageDirs([{ rel: 'packages/core/package.json', source: '{"name":"@objectstack/core"}' }]),
+      }).sites.some((s) => s.code === 'LET_EXPORTED_ONE'),
+      'an unreassigned exported `let` did not resolve across the package boundary',
+    );
+
+    // STATE 2 — reassigned. The initializer is NOT the value set, so it does
+    // not reduce; and because a literal IS spelled out, it is reported rather
+    // than dropped. This is the card's row 1: two unregistered literals that
+    // reached the stamp with no gate saying a word.
+    const reassigned = one(stamp(`let code = 'REASSIGN_FALLBACK';\nif (x) code = 'REASSIGN_OTHER';`));
+    ok(
+      reassigned.unresolved.length === 1 && reassigned.unresolved[0].reason === 'reassigned',
+      `a reassigned \`let\` holding a literal was not reported: ${JSON.stringify(reassigned.unresolved)}`,
+    );
+    // ⛔ The wrong patch. Reducing a reassigned `let` to its initializer would
+    // report a value the program may never stamp — the ALL-OR-NOTHING wrongness
+    // #9568 exists to refuse. Neither branch may become a site.
+    ok(
+      reassigned.sites.length === 0,
+      `a reassigned \`let\` was reduced to a value the program may never stamp: ${JSON.stringify(reassigned.sites)}`,
+    );
+    // The card's row 2 — the reassignment RHS is a fallback chain rather than a
+    // bare literal. Same answer: reported, not reduced. (Reading the RHS is the
+    // card's half 2, and is deliberately NOT closed here.)
+    const rowTwo = one(stamp(`let code = 'REASSIGN_FALLBACK';\nif (x) code = p?.code || 'reassigned_lower_failed';`));
+    ok(rowTwo.sites.length === 0, 'a reassigned `let` with a chain RHS produced a site');
+    ok(rowTwo.unresolved.length === 1, 'a reassigned `let` with a chain RHS was dropped in silence');
+
+    // STATE 3 — a mutable local with NO literal anywhere is the #9460
+    // runtime-value bound, untouched. `packages/metadata-protocol` holds this
+    // exact shape; reporting it would be the "every domain field named `code`
+    // is a finding" pressure this gate keeps refusing.
+    for (const [what, decl] of [
+      ['a null-initialized mutable local', `let code: unknown | null = null;\ncode = readFrom(x);`],
+      ['a mutable local read at runtime', `let code = readFrom(x);\nif (y) code = readFrom(z);`],
+      ['a mutable local with no initializer', `let code;\ncode = readFrom(x);`],
+    ]) {
+      const r = one(stamp(decl));
+      ok(r.sites.length === 0, `${what} produced a site out of values no scan can see: ${JSON.stringify(r.sites)}`);
+      ok(r.unresolved.length === 0, `${what} was reported as an unresolvable code`);
+    }
+
+    // THE CONTROL — the `const` path this widening must leave exactly as it
+    // was. These are the card's rows 3-5, and they are what makes the rows
+    // above readable as a gap rather than a broken probe.
+    ok(
+      codesOf(one(stamp(`const code = 'local_direct_failed';`))) === 'local_direct_failed',
+      'the `const` control lost its site (lowercase locals are THIS gate\'s, #9460)',
+    );
+    ok(
+      codesOf(one(stamp(`const code = flag ? 'tern_lower_a' : 'tern_lower_b';`))) === 'tern_lower_a,tern_lower_b',
+      'the `const` ternary control lost a branch',
+    );
+    const rowFive = one(stamp(`const code = p?.code || 'reassigned_lower_failed';`));
+    ok(
+      rowFive.sites.length === 0 && rowFive.unresolved.length === 0,
+      "the `const` runtime-chain control moved — it is check:error-code-casing's `local-fallback`, not this gate's",
+    );
+
+    // Two declarations that reduce differently are REPORTED, whatever their
+    // declarators — the same refusal #9568 pinned for two `const`s. Dropping
+    // the mutable one and reducing the rest would be the first-wins guess the
+    // two-drivers hazard rules out.
+    const shadowed = one(`const DUP = 'DUP_A';\nfunction g() { let DUP = 'DUP_B'; }\nerr.code = DUP;`);
+    ok(shadowed.sites.length === 0, `a shadowing \`let\` was resolved to one declaration: ${JSON.stringify(shadowed.sites)}`);
+    ok(shadowed.unresolved.length === 1, 'a name declared both `const` and `let` was not reported');
+
+    // The reassignment scan's own hazards, pinned because every one of them is
+    // SILENT when wrong: a missed reassignment reduces a value the program may
+    // never stamp, and a spurious one costs a reduction.
+    ok(!reassignedInFile('code', `let code = 'A';`), "the declaration's own `=` was read as a reassignment");
+    ok(!reassignedInFile('code', `let code = 'A';\nerr.code = code;`), 'stamping `.code =` was read as rebinding the local');
+    ok(!reassignedInFile('code', `let code = 'A';\nif (code === 'A') f();\nif (code >= b) g();`), 'a comparison was read as a reassignment');
+    ok(!reassignedInFile('code', `let code = 'A';\nconst f = (code) => code;`), 'an arrow `=>` was read as a reassignment');
+    ok(!reassignedInFile('code', `let code = 'A';\np?.code = 'B';`), 'an optional-chained property stamp was read as rebinding');
+    ok(!reassignedInFile('code', `let code = 'A';\nlet decoded = 'B';`), 'a longer identifier ending in the name matched');
+    for (const op of ['=', '+=', '||=', '&&=', '??=']) {
+      ok(reassignedInFile('code', `let code = 'A';\ncode ${op} 'B';`), `\`code ${op}\` was not seen as a reassignment`);
+    }
+    // An initializer is required before a mutable declaration counts: `let
+    // code;` has nothing spelled out to decline, so it stays the #9460 bound.
+    ok(declaredMutably('code', `let code = 'A';`), '`let code = …` was not seen as a mutable declaration');
+    ok(declaredMutably('code', `var code: string = 'A';`), 'an annotated `var` was not seen as a mutable declaration');
+    ok(!declaredMutably('code', `let code;`), 'an uninitialized `let` was counted as a reducible mutable declaration');
+    ok(!declaredMutably('code', `const code = 'A';`), '`const` was read as mutable');
+    ok(
+      reassignedMutableLiteral('code', `let code = 'A';\ncode = 'B';`),
+      'a reassigned mutable local holding a literal was not the reportable class',
+    );
+    ok(
+      !reassignedMutableLiteral('code', `let code = readFrom(x);\ncode = readFrom(y);`),
+      'a reassigned mutable local with NO literal was made reportable',
+    );
+    ok(
+      declaredInitializers('code', `let code = 'A';`).join(',') === ` 'A'`.trim(),
+      'declaredInitializers did not read a `let` initializer',
+    );
+
+    // The finding TEXT names the remedy that applies. A reassigned local is not
+    // a spelling `resolveConstant` has to learn — the fix is in the source.
+    const text = reconcile({
+      sites: [],
+      declared: [],
+      registered: new Set(),
+      unresolved: [{ file: 'packages/x/src/a.ts', shape: 'assignconst', value: 'code', reason: 'reassigned' }],
+    })[0].text;
+    ok(/REASSIGNS/.test(text) && /const/.test(text), `the reassigned finding did not name its remedy: ${text}`);
   }
 
   // [#9223] Workspace-package resolution: `packages/` is inside the scan, so a
