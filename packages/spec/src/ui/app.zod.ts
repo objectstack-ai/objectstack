@@ -1458,8 +1458,10 @@ export const AppSchema = lazySchema(() => strictObject(
     'only thing that opens anonymous access, and ADR-0121 D6 then requires an armed ' +
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
-    'security review, not a rename. A route that genuinely needs handler CODE still ' +
-    'belongs in a plugin manifest `contributes.routes` entry. ' +
+    'security review, not a rename. A route that genuinely needs handler CODE is mounted ' +
+    'imperatively instead: resolve the `http.server` service from your plugin context and ' +
+    'register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — ' +
+    'nothing reads it, so an entry there parses cleanly and serves nothing). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   ),
 

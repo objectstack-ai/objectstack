@@ -156,12 +156,12 @@ behind `/api/v1/data/{object}`, `flow` to the automation pipeline behind
 `POST /api/v1/automation/{name}/trigger`. An endpoint is a stable URL plus a
 policy layer over an existing pipeline, never a second execution dialect.
 
-### Choosing between `apis:` and `contributes.routes`
+### Choosing between `apis:` and a code handler
 
 | Use | When |
 |:---|:---|
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
-| **`contributes.routes`** (plugin manifest) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. This registers a prefix for a plugin-provided service. |
+| **`http.server` mount** (plugin code) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. Mount it on `http.server`; `contributes.routes` parses but serves nothing. |
 
 If the logic is "a bit of computation, then a record write", express it as a
 **flow** and point a `type: 'flow'` endpoint at it — that keeps the URL
