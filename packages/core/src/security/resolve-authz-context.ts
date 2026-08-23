@@ -748,20 +748,41 @@ async function resolveLocalizationContextUncached(
   try {
     if (settings && typeof settings.get === 'function') {
       const sctx = { tenantId, userId } as any;
-      const [tzRes, localeRes, currencyRes] = await Promise.all([
-        settings.get('localization', 'timezone', sctx).catch(() => {
+      // [#10826] ONE grouped namespace read instead of three: `getMany`
+      // resolves all three keys over at most two `loadRows` calls (queries
+      // 16–18 of 24 on the measured rig collapse to one). Same per-key
+      // answers by the service's own equivalence contract. Feature-detected:
+      // an older service without `getMany` keeps the three parallel `get`s
+      // (still 1 leg — this is a query-count fix, per the card's calibration).
+      // A thrown `getMany` lands in the same place a thrown `get` did —
+      // `failed = true` and the direct `$in` fallback below, which reads the
+      // exact same three keys.
+      let tzRes: any; let localeRes: any; let currencyRes: any;
+      if (typeof settings.getMany === 'function') {
+        try {
+          const many = await settings.getMany('localization', ['timezone', 'locale', 'currency'], sctx);
+          tzRes = many.timezone;
+          localeRes = many.locale;
+          currencyRes = many.currency;
+        } catch {
           failed = true;
-          return undefined;
-        }),
-        settings.get('localization', 'locale', sctx).catch(() => {
-          failed = true;
-          return undefined;
-        }),
-        settings.get('localization', 'currency', sctx).catch(() => {
-          failed = true;
-          return undefined;
-        }),
-      ]);
+        }
+      } else {
+        [tzRes, localeRes, currencyRes] = await Promise.all([
+          settings.get('localization', 'timezone', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+          settings.get('localization', 'locale', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+          settings.get('localization', 'currency', sctx).catch(() => {
+            failed = true;
+            return undefined;
+          }),
+        ]);
+      }
       const tz = coerceTimeZone(tzRes?.value);
       const locale = coerceLocale(localeRes?.value);
       const currency = coerceCurrency(currencyRes?.value);
