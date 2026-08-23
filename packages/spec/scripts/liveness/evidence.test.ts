@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { checkEvidence, scanEvidence } from './evidence.mts';
+import { checkCitationLines, checkEvidence, countLines, scanEvidence } from './evidence.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specRoot = resolve(here, '../..');
@@ -96,8 +96,112 @@ describe('checkEvidence', () => {
   });
 
   it('tolerates a non-string evidence value', () => {
-    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], missing: [] });
+    expect(checkEvidence(undefined, none)).toEqual({ local: [], foreign: [], localCitations: [], missing: [] });
     expect(checkEvidence(42, none).missing).toEqual([]);
+  });
+});
+
+// #11210: the parser used to DISCARD the `:NNN` half of a citation, so no gate
+// could bound it and a consumer that moved out of a file which still exists kept
+// a passing pointer. These pin the retention; the bound itself is below.
+describe('scanEvidence — line citations', () => {
+  it('retains the line of a bare `path:line` pointer', () => {
+    expect(scanEvidence('packages/runtime/src/http-dispatcher.ts:120').localCitations)
+      .toEqual([{ path: 'packages/runtime/src/http-dispatcher.ts', line: 120 }]);
+  });
+
+  it('takes the END of a `path:start-end` range', () => {
+    // The end is the stricter bound AND the one that subsumes the other: a start
+    // past EOF implies an end past EOF, never the reverse.
+    expect(scanEvidence('packages/rest/src/import-mapping.ts:115-167').localCitations)
+      .toEqual([{ path: 'packages/rest/src/import-mapping.ts', line: 167 }]);
+  });
+
+  it('sees EVERY citation in a concatenated multi-consumer entry, not just the first', () => {
+    // The house style for a property with several consumers, `+`-joined with
+    // prose between. Seeing only the head would leave the tail of every such
+    // chain exactly as unfalsifiable as the whole string was before.
+    const r = scanEvidence(
+      'packages/plugins/plugin-security/src/permission-evaluator.ts:267 (getSystemPermissions) + '
+      + 'packages/plugins/plugin-sharing/src/sharing-rule-service.ts:136 (assertCanManageRules) + '
+      + 'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:897',
+    );
+    expect(r.localCitations.map((c) => c.line)).toEqual([267, 136, 897]);
+  });
+
+  it('records several lines of ONE file separately', () => {
+    // Deduping on path rather than on `path:line` would drop all but the first —
+    // and a repaired entry routinely cites one file at three call sites.
+    const r = scanEvidence('packages/a/src/x.ts:10 (rank) + packages/a/src/x.ts:20 (merge) + packages/a/src/x.ts:10 (again)');
+    expect(r.local).toEqual(['packages/a/src/x.ts']);
+    expect(r.localCitations).toEqual([
+      { path: 'packages/a/src/x.ts', line: 10 },
+      { path: 'packages/a/src/x.ts', line: 20 },
+    ]);
+  });
+
+  it('leaves a path with no line out of the citation list', () => {
+    const r = scanEvidence('packages/a/src/x.ts (prose only)');
+    expect(r.local).toEqual(['packages/a/src/x.ts']);
+    expect(r.localCitations).toEqual([]);
+  });
+
+  it('never bounds a FOREIGN citation — those files are legitimately absent here', () => {
+    const r = scanEvidence('objectui: packages/app-shell/src/views/RecordDetailView.tsx:573');
+    expect(r.localCitations).toEqual([]);
+  });
+
+  it('still reduces a realm marker written `objectui:` rather than reading it as a line', () => {
+    // The trailing-punctuation pass strips `:`; only a digit suffix is a line.
+    const r = scanEvidence('objectui: packages/app-shell/src/x.tsx:12');
+    expect(r.foreign).toEqual(['packages/app-shell/src/x.tsx']);
+    expect(r.localCitations).toEqual([]);
+  });
+
+  it('reads a citation through the punctuation an entry wraps it in', () => {
+    expect(scanEvidence('(packages/a/src/x.ts:44)').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
+    expect(scanEvidence('packages/a/src/x.ts:44,').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
+    expect(scanEvidence('packages/a/src/x.ts:44.').localCitations).toEqual([{ path: 'packages/a/src/x.ts', line: 44 }]);
+  });
+});
+
+describe('countLines — what a citation can address', () => {
+  it('counts a trailing newline as terminating the last line, not opening a new one', () => {
+    // `wc -l` semantics. The off-by-one that decides whether a 717-line file
+    // "has" a line 718 to cite.
+    expect(countLines('a\nb\nc\n')).toBe(3);
+    expect(countLines('a\nb\nc')).toBe(3);
+  });
+
+  it('reads an empty file as zero addressable lines', () => {
+    expect(countLines('')).toBe(0);
+  });
+});
+
+describe('checkCitationLines', () => {
+  const lines = (n: number) => () => n;
+
+  it('flags a citation past the end of the file and reports the real length', () => {
+    const scan = scanEvidence('packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200');
+    expect(checkCitationLines(scan, lines(717))).toEqual([
+      { path: 'packages/plugins/plugin-hono-server/src/hono-plugin.ts', line: 1200, lines: 717 },
+    ]);
+  });
+
+  it('accepts the last line of the file — the boundary is `>`, not `>=`', () => {
+    expect(checkCitationLines(scanEvidence('packages/a/src/x.ts:717'), lines(717))).toEqual([]);
+    expect(checkCitationLines(scanEvidence('packages/a/src/x.ts:718'), lines(717))).toHaveLength(1);
+  });
+
+  it('flags a RANGE whose head is inside the file but whose tail overruns it', () => {
+    // The shipped `mapping.fieldMapping` shape: 115 exists, 167 does not.
+    const r = checkCitationLines(scanEvidence('packages/rest/src/import-mapping.ts:115-167'), lines(164));
+    expect(r).toEqual([{ path: 'packages/rest/src/import-mapping.ts', line: 167, lines: 164 }]);
+  });
+
+  it('says nothing about a file it cannot read — that verdict belongs to the existence check', () => {
+    // Reporting one rot twice teaches a reader to discount both lists.
+    expect(checkCitationLines(scanEvidence('packages/a/src/gone.ts:9'), () => null)).toEqual([]);
   });
 });
 
@@ -124,5 +228,34 @@ describe('shipped ledgers', () => {
     // Guard against the parser silently degrading to "extracts nothing" — that
     // would make the assertion above vacuously true.
     expect(local).toBeGreaterThan(100);
+  });
+
+  it('every local `path:NNN` citation names a line that file has', () => {
+    const outOfRange: string[] = [];
+    let citations = 0;
+    const lineCount = (p: string): number | null => {
+      const f = join(repoRoot, p);
+      if (!existsSync(f)) return null;
+      return countLines(readFileSync(f, 'utf8'));
+    };
+    for (const f of readdirSync(ledgerRoot).filter((x) => x.endsWith('.json'))) {
+      const ledger = JSON.parse(readFileSync(join(ledgerRoot, f), 'utf8'));
+      const visit = (key: string, entry: any) => {
+        if (entry?.status !== 'live' || typeof entry?.evidence !== 'string') return;
+        const scan = checkEvidence(entry.evidence, () => true);
+        citations += scan.localCitations.length;
+        for (const c of checkCitationLines(scan, lineCount)) {
+          outOfRange.push(`${ledger.type}/${key} → ${c.path}:${c.line} (file has ${c.lines})`);
+        }
+      };
+      for (const [key, entry] of Object.entries<any>(ledger.props || {})) {
+        visit(key, entry);
+        for (const [ck, centry] of Object.entries<any>(entry?.children || {})) visit(`${key}.${ck}`, centry);
+      }
+    }
+    expect(outOfRange).toEqual([]);
+    // Same non-vacuity guard as above, one level down: a parser that stopped
+    // retaining lines would satisfy the assertion above by extracting nothing.
+    expect(citations).toBeGreaterThan(100);
   });
 });
