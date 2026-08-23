@@ -28,7 +28,26 @@
       "Bash(agent-browser snapshot *)",
       "Bash(agent-browser skills *)",
       "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/*/labels *)",
-      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/issues/*/labels *)"
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/issues/*/labels *)",
+      "Bash(curl -sS -X GET https://api.github.com/rate_limit *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/issues?* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/issues?* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/issues/* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/issues/* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/issues/*/comments* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/issues/*/comments* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/issues/*/labels* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/issues/*/labels* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/files* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/pulls/*/files* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/pulls/*/commits* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/pulls/*/commits* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectstack/commits/*/check-runs* *)",
+      "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/commits/*/check-runs* *)",
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)"
     ]
   },
   "hooks": {
