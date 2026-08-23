@@ -75,12 +75,18 @@ const OPTS = { bypassTenantAudit: true };
 /**
  * The instant a row is backdated to before the `update()` under test.
  *
- * A sentinel far in the past rather than a sleep: `knex.fn.now()` compiles to
- * MySQL's `CURRENT_TIMESTAMP`, which carries NO fractional digits, so an insert
- * default of `current_timestamp(3)` and an update a few hundred ms later can
- * legitimately land on the same — or an earlier — stored value. Backdating
- * removes the race without weakening what is asserted: the stamp either moved
- * to ~now or it did not move at all, and those are six years apart.
+ * A sentinel far in the past rather than a sleep: an insert default and an
+ * update a few hundred microseconds later can legitimately land on the same
+ * stored value on any dialect. Backdating removes the race without weakening
+ * what is asserted: the stamp either moved to ~now or it did not move at all,
+ * and those are six years apart.
+ *
+ * This docblock used to record a STRONGER hazard — that on MySQL the update
+ * could land on an EARLIER value than the insert default, because
+ * `updatedAtStamp()`'s bare `knex.fn.now()` compiled to a second-precision
+ * `CURRENT_TIMESTAMP` against a `DATETIME(3)` column defaulted with `now(3)`.
+ * That was the defect #11224 fixed rather than a property of the dialect, and
+ * `sql-driver-11224-update-stamp-precision.test.ts` now asserts it is gone.
  */
 const BACKDATED_MS = Date.parse('2020-01-01T00:00:00.000Z');
 

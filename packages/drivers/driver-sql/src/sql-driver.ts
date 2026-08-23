@@ -5859,32 +5859,6 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#11176] The instant an UPSERT puts in `updated_at`, in the form that column
-   * would have DEFAULTED to on this dialect.
-   *
-   * Deliberately NOT {@link updatedAtStamp}, and the difference is one digit of
-   * precision on MySQL. The audit columns are `DATETIME(3)` there and
-   * {@link createAuditTimestampColumn} defaults them with `now(3)` for exactly
-   * that reason ("`CURRENT_TIMESTAMP` has to carry matching precision for a
-   * `DATETIME(3)` default"). `updatedAtStamp`'s bare `knex.fn.now()` compiles to
-   * an unqualified `CURRENT_TIMESTAMP`, which MySQL truncates to whole seconds —
-   * harmless on the UPDATE door it was written for, but this value also lands on
-   * the INSERT branch of the same statement, where today the column DEFAULT
-   * supplies millisecond precision. Stamping the coarser value there would make
-   * a freshly inserted row's `updated_at` read up to 999 ms EARLIER than its
-   * `created_at`: a regression on the branch this fix is not about. Matching the
-   * default keeps the insert branch value-identical to what `main` stores.
-   *
-   * (The UPDATE door's own truncation on MySQL is pre-existing and is left
-   * alone here — it is a fidelity question, not the advance-or-not question this
-   * card measures.)
-   */
-  protected upsertUpdatedAtStamp(): string | Knex.Raw {
-    if (this.isSqlite) return new Date().toISOString();
-    return this.isMysql ? this.knex.fn.now(3) : this.knex.fn.now();
-  }
-
-  /**
    * [#11176] Put a mergeable `updated_at` in an UPSERT payload — on EVERY
    * dialect, not just SQLite.
    *
@@ -5918,7 +5892,7 @@ export class SqlDriver implements IDataDriver {
   protected stampUpsertUpdatedAt(object: string, formatted: Record<string, any>): void {
     if (formatted.updated_at !== undefined && formatted.updated_at !== null) return;
     if (!this.observedUpdatedAtColumn(object)) return;
-    formatted.updated_at = this.upsertUpdatedAtStamp();
+    formatted.updated_at = this.updatedAtStamp();
   }
 
   /**
@@ -5934,7 +5908,9 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * The canonical instant an UPDATE stamps into `updated_at` on this dialect.
+   * The canonical instant a write stamps into `updated_at` on this dialect —
+   * for EVERY door that stamps it: {@link update}, {@link updateMany},
+   * {@link rotatedUpdateById} and {@link stampUpsertUpdatedAt}.
    *
    * On SQLite (no native timestamp type) full ISO-8601 WITH an explicit `Z` —
    * matching the insert paths ({@link stampInsertTimestamps}) so create and
@@ -5942,11 +5918,45 @@ export class SqlDriver implements IDataDriver {
    * `…replace('T',' ').replace('Z','')` wrote a zone-NAIVE, space-separated
    * string that `Date.parse` reads as LOCAL time, silently shifting the instant
    * by the host offset on a non-UTC runtime (the objectos freshness-probe
-   * miss). Postgres/MySQL keep native `now()` — a real zone-aware TIMESTAMP
-   * that never had the issue.
+   * miss). Postgres/MySQL keep a native server clock — a real zone-aware
+   * TIMESTAMP that never had the issue.
+   *
+   * ## [#11224] MySQL takes the precision its audit column was CREATED with
+   *
+   * {@link createAuditTimestampColumn} builds the audit columns on MySQL as
+   * `DATETIME(3)` defaulted with `now(3)`, and says why in as many words
+   * ("`CURRENT_TIMESTAMP` has to carry matching precision for a `DATETIME(3)`
+   * default", #3942). A bare `knex.fn.now()` compiles to an unqualified
+   * `CURRENT_TIMESTAMP`, which MySQL truncates to whole seconds — so the column
+   * was created at millisecond precision on purpose and then written at second
+   * precision. Measured on live MySQL 8.0.46, a row updated inside the second it
+   * was created in stored `updated_at` 911 ms EARLIER than its own `created_at`.
+   *
+   * Three silent consequences, none of which errors: "last modified" precedes
+   * "created"; a millisecond-precision delta cursor (`updated_at > cursor`)
+   * SKIPS every row truncated back below it; and two updates in the same second
+   * are indistinguishable, so an `order by updated_at` over them is unstable.
+   *
+   * Postgres and SQLite are untouched, and that is a measurement rather than an
+   * assumption (`sql-driver-11224-update-stamp-precision.test.ts` §5 pins the
+   * emitted expression per dialect): `CURRENT_TIMESTAMP` on Postgres is
+   * `transaction_timestamp()` at microsecond precision against a `timestamptz`
+   * column, and the SQLite branch is a JS ISO-8601 string that already carries
+   * millis. Neither has anything to truncate.
+   *
+   * ## One helper, not two
+   *
+   * #11176 needed this exact expression for the UPSERT door — the stamp lands in
+   * the INSERT branch of the same statement, where a coarser value would have
+   * put a brand-new row's `updated_at` before its own `created_at` — and carried
+   * it as a separate `upsertUpdatedAtStamp()` precisely so that a card which had
+   * not measured the UPDATE door's emitted SQL did not change it. This card
+   * measured it, so the pair collapses back into this one definition and there
+   * is no longer a second place for the two doors to drift apart.
    */
   protected updatedAtStamp(): string | Knex.Raw {
-    return this.isSqlite ? new Date().toISOString() : this.knex.fn.now();
+    if (this.isSqlite) return new Date().toISOString();
+    return this.isMysql ? this.knex.fn.now(3) : this.knex.fn.now();
   }
 
   /**

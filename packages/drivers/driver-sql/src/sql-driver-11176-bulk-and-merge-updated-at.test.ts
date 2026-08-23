@@ -39,12 +39,16 @@
  * `declareDialectCell`, so an unprovisioned dialect is REPORTED, never omitted.
  *
  * §4 is the guard on the OTHER branch of the same statement. The stamp lands in
- * the INSERT payload too, and `updatedAtStamp()`'s bare `knex.fn.now()` compiles
- * to an unqualified `CURRENT_TIMESTAMP` that MySQL truncates to whole seconds —
- * against a `DATETIME(3)` column whose DEFAULT is `now(3)`. Using it here would
- * make a freshly INSERTED row's `updated_at` read up to 999 ms earlier than its
- * `created_at`: a new defect on a branch that had none. `upsertUpdatedAtStamp()`
- * matches the column default's precision, and §4 is what measures that.
+ * the INSERT payload too, and a bare `knex.fn.now()` compiles to an unqualified
+ * `CURRENT_TIMESTAMP` that MySQL truncates to whole seconds — against a
+ * `DATETIME(3)` column whose DEFAULT is `now(3)`. Using it here would make a
+ * freshly INSERTED row's `updated_at` read up to 999 ms earlier than its
+ * `created_at`: a new defect on a branch that had none. This card carried the
+ * precision-matched form as a second helper, `upsertUpdatedAtStamp()`, so that
+ * fixing the upsert door did not change the SQL every `update()` emits; #11224
+ * then measured the UPDATE door and collapsed the pair back into the single
+ * `updatedAtStamp()`, which now carries the matched precision for both. §4 is
+ * what measures that the INSERT branch keeps it.
  *
  * §5 pins #7011/#8622's insert-only columns against the new payload key:
  * `created_at` is the row's birth instant and must not move when the merge
@@ -83,12 +87,17 @@ const OPTS = { bypassTenantAudit: true } as any;
 /**
  * The instant a row is backdated to before the write under test.
  *
- * A sentinel far in the past rather than a sleep, for #11067's reason: MySQL's
- * unqualified `CURRENT_TIMESTAMP` carries no fractional digits, so a stamp a few
- * hundred ms after an insert default of `current_timestamp(3)` can legitimately
- * land on the same stored value. Backdating removes the race without weakening
- * the assertion — the stamp either moved to ~now or did not move at all, and
- * those are six years apart.
+ * A sentinel far in the past rather than a sleep, for #11067's reason: a stamp
+ * taken a moment after an insert default can legitimately land on the same
+ * stored value. Backdating removes the race without weakening the assertion —
+ * the stamp either moved to ~now or did not move at all, and those are six
+ * years apart.
+ *
+ * The reason used to be coarser on MySQL specifically: `updatedAtStamp()`'s
+ * unqualified `CURRENT_TIMESTAMP` carried no fractional digits at all, so a
+ * stamp a few hundred MILLISECONDS later still landed on the same value. #11224
+ * gave that helper the column default's `now(3)` precision, so that window is
+ * now sub-millisecond on every dialect.
  */
 const BACKDATED_MS = Date.parse('2020-01-01T00:00:00.000Z');
 
