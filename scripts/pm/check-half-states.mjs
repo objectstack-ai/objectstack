@@ -523,6 +523,43 @@
  *       the labels, and a title heuristic would make this sweeper guess at
  *       intent.
  *
+ * ## H27 — the claim is perfect and the claimant is dead
+ *
+ *   H27 an open `pm:dispatched` card whose claim is TEXTBOOK-CORRECT — assignee
+ *       set, a first-line `Claim:` comment, a named branch that EXISTS on the
+ *       remote — where that branch has not moved since the claim, no PR
+ *       delivers the card, and the claim is older than the protocol's own
+ *       ~24h stale line (`DEAD_CLAIM_STALE_HOURS`). This is the shape a dev
+ *       agent that DIED leaves behind, and the measured cause arrives in
+ *       batches: one shared-account capacity limit killed three concurrently
+ *       dispatched agents at 05:50Z, leaving three cards on which every
+ *       predicate in this file passed. ⭐ Its danger is not that it goes
+ *       unreported but that it reads as HEALTHY: the next PM's round-open
+ *       mutual-exclusion read looks for the latest non-self `Claim:` on a
+ *       lane's dispatched cards, so a dead claim is read as a live claim by
+ *       another session and the lane stays off the card — the protocol's own
+ *       mutual-exclusion mechanism converting a corpse into a lane-wide block.
+ *       H20 is the near neighbour and misses it BY CONSTRUCTION rather than by
+ *       oversight: `.claude/agents/os-dev.md` makes pushing the empty branch
+ *       the FIRST action of the task (a write-route probe), so a
+ *       protocol-compliant agent that dies still leaves a ref and lands
+ *       outside H20's no-ref-at-all population. The better the dev follows the
+ *       protocol, the more invisible its death — which is why the two rows are
+ *       disjoint by construction (H20 fires only when NO branch resolves, H27
+ *       only when one does) and why neither could be widened into the other.
+ *       ⛔ The threshold is QUOTED, not measured: the fleet has 2 liveness
+ *       samples and that is not a distribution, so the row mechanizes SKILL.md's
+ *       existing 死认领回收 line (「认领 >~24h」) — the same 24h the seat-post
+ *       patrol already calls 「与既有回收线同一条」, one number in the protocol
+ *       with two readers. ⚠️ Reporting is not reclaiming, and the row says so:
+ *       the protocol's reclaim rule applies to a branch that does NOT exist and
+ *       states 「有带提交活分支的认领永不回收」, so this row prescribes the
+ *       three-state recovery INSPECTION (remote / container disk / gone, found
+ *       work handed on flagged UNVERIFIED — `references/dispatch-runbook.md`)
+ *       and never an assignee drop. It deliberately under-reports the dev that
+ *       pushed one commit and then died (its branch moved after the claim), for
+ *       the same reason — that is precisely the card the protocol protects.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -4103,6 +4140,226 @@ export function h26BlockOnIndefiniteTarget(issue, resolutions) {
 }
 
 // ---------------------------------------------------------------------------
+// H27 — the claim is PERFECT and the claimant is gone (#11248).
+//
+// H20 above asks whether a dispatch ever HAPPENED, and keys on NO REMOTE REF AT
+// ALL. This row asks the opposite-shaped question: the ref exists, the claim is
+// textbook-correct, and nothing has moved since. The two are disjoint by
+// construction — H20 fires only when no branch resolves, H27 only when one
+// does — and neither could be widened into the other without losing the
+// property that makes it safe.
+//
+// ## Why the ref EXISTS in the failure this row is built on
+//
+// The dev-agent definition makes pushing the empty branch the FIRST action of
+// the task, before any edit, as a write-route probe (`.claude/agents/os-dev.md`
+// rule 1). So an agent that dies at any point after its first minute — which is
+// every point that matters — leaves a branch ON THE REMOTE. That protocol step
+// is correct and worth keeping, but it has a side effect nobody priced: it
+// converts the dead-agent case out of H20's population and into a population
+// with no reader at all. The better the dev follows the protocol, the more
+// invisible its death.
+//
+// ## The measured incident
+//
+// Three devs were dispatched concurrently and all three died at once on one
+// shared-account capacity limit — fleet-wide exhaustion is a single point of
+// failure for every agent in flight, so this arrives in batches, not singly.
+// Each card was left `pm:dispatched`, assigned, carrying a claim comment whose
+// first line is literally `Claim:`, naming a branch that exists. Every
+// predicate in this file passed. Worse than merely unreported: the next PM's
+// round-open mutual-exclusion read looks for the latest non-self `Claim:` on a
+// lane's dispatched cards, so it reads those corpses as LIVE claims by another
+// session and stays off them. The protocol's own mutual-exclusion mechanism
+// converts a dead claim into a lane-wide block.
+//
+// ## Threshold: the protocol's own line, not a new heuristic
+//
+// SKILL.md already carries a stale-claim reclaim rule at 「认领 >~24h」, so this
+// row mechanizes an existing protocol threshold rather than inventing a
+// liveness distribution the fleet does not have (the filing card is explicit
+// that 2 samples is not a distribution). The same 24 hours is already the seat
+// -post patrol's own line — 「与既有回收线同一条」 — so the number has one
+// source in the protocol and two readers, rather than two numbers.
+//
+// ⚠️ The protocol's reclaim rule and this row are NOT the same act, and the
+// remedy sentence keeps them apart. That rule reclaims a claim whose branch
+// does not exist, and it says 「有带提交活分支的认领永不回收」 — a claim whose
+// branch carries commits is never reclaimed. This row fires on branches that DO
+// exist, some of them carrying commits, so it deliberately prescribes the
+// recovery INSPECTION and never the reclaim: reporting a card is not reclaiming
+// it, and the row must not be readable as authority to drop an assignee the
+// protocol protects.
+// ---------------------------------------------------------------------------
+
+/**
+ * The protocol's own stale-claim line, in hours (SKILL.md 死认领回收). The one
+ * threshold in this file that is QUOTED rather than measured — see the section
+ * note above for why a measured one would be worse here.
+ */
+export const DEAD_CLAIM_STALE_HOURS = 24;
+
+/** How old the governing claim is in HOURS — `null` when unreadable, as H20. */
+export function claimAgeHours(claim, nowMs = Date.now()) {
+  const minutes = claimAgeMinutes(claim, nowMs);
+  return minutes === null ? null : minutes / 60;
+}
+
+/**
+ * Which cards buy the branch-activity read — exported for the same reason
+ * `h20NeedsRefProbe` is: a policy that decides what is READ AT ALL is where a
+ * silent hole would live.
+ *
+ * A claim younger than the threshold is not stale, so it buys nothing and this
+ * row says nothing about it either way. An UNREADABLE claim timestamp is
+ * gathered rather than skipped — it must not read as fresh (#4690) — and the
+ * predicate then declines to judge it out loud.
+ */
+export function h27NeedsClaimLivenessRead(issue, claim, nowMs = Date.now()) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return false;
+  if (!claim || (claim.branches ?? []).length === 0) return false;
+  const age = claimAgeHours(claim, nowMs);
+  return age === null || age > DEAD_CLAIM_STALE_HOURS;
+}
+
+/**
+ * Does any PR this sweep holds deliver card `n`? The delivery relation is
+ * `prDeliversCard` — H8's, deliberately shared rather than re-derived, so the
+ * two rows can never disagree about what "has a PR" means.
+ *
+ * Counted per channel because the two windows have different reach: the open
+ * listing is effectively complete (paged to exhaustion), while the merged one
+ * is a bounded recency window (`MERGED_WINDOW_PAGES`). That asymmetry is what
+ * the finding sentence has to disclose, so it is preserved here rather than
+ * collapsed into a boolean.
+ */
+export function claimDelivery(n, openPrs, mergedPrs) {
+  const target = String(n);
+  const open = (openPrs ?? []).filter((pr) => prDeliversCard(pr, target)).length;
+  const merged = (mergedPrs ?? []).filter((pr) => pr?.merged_at && prDeliversCard(pr, target)).length;
+  return { open, merged };
+}
+
+/**
+ * Did this branch move AFTER the claim was posted? Three-valued, never two:
+ * `true` / `false` / `null` when either timestamp is unreadable — an unread
+ * comparison is not a "no" (#4690), and collapsing it would let one unparseable
+ * date manufacture a finding about a card nobody measured.
+ */
+export function branchMovedSinceClaim(refState, claim) {
+  const head = Date.parse(refState?.headCommittedAt ?? '');
+  const posted = Date.parse(claim?.createdAt ?? '');
+  if (!Number.isFinite(head) || !Number.isFinite(posted)) return null;
+  return head > posted;
+}
+
+/**
+ * H27 — null when clean, else the finding sentence.
+ *
+ * ## The conjunction, and why each term is load-bearing
+ *
+ *   `pm:dispatched`          the card still claims to be in flight
+ *   claim older than 24h     the protocol's own stale line
+ *   a claimed branch EXISTS  (else it is H20's row, not this one)
+ *   NO branch moved since    the claim — nothing was pushed for this dispatch
+ *   no PR delivers the card  neither open nor within the merged window
+ *
+ * ⛔ Dropping the branch-activity term would give exactly the PR-keyed row H20
+ * refuses to be, and it is refused there for a measured reason: a dev inside a
+ * long build legitimately has a ref and no PR for over an hour. That objection
+ * is answered here by BOTH remaining terms and not by the threshold alone — a
+ * dev 24 hours in with commits landing is excluded by branch activity, and a
+ * dev with a PR open is excluded by delivery. What is left is a branch that has
+ * not moved since it was claimed, with nothing to show for a day.
+ *
+ * ## What it under-reports, stated rather than discovered
+ *
+ * A dev that pushed one commit and THEN died is not reported: its branch moved
+ * after the claim, so the activity term clears it. That is the measured shape
+ * of one of the three incident cards, and widening the term to "no activity in
+ * the last 24h" would catch it — at the cost of colliding with the protocol's
+ * 「有带提交活分支的认领永不回收」, which is a rule about exactly that card.
+ * Under-reporting on a card the protocol protects is the same call H17's
+ * extractor and H20's branch-shape matcher make: a row a reader cannot act on
+ * is worse than no row.
+ *
+ * @param {object} issue — an OPEN issue.
+ * @param {{ branches: string[], createdAt: string|null }|null} claim
+ * @param {{ branch: string, state: 'exists'|'absent'|'unreadable',
+ *   headCommittedAt?: string|null }[]} refStates
+ * @param {{ open: number, merged: number }} delivery — `claimDelivery`.
+ */
+export function h27DeadClaimNoProgress(issue, claim, refStates, delivery, nowMs = Date.now()) {
+  if (!labelNames(issue ?? {}).includes('pm:dispatched')) return null;
+  if (!claim || (claim.branches ?? []).length === 0) return null;
+  const age = claimAgeHours(claim, nowMs);
+  if (age !== null && age <= DEAD_CLAIM_STALE_HOURS) return null;
+
+  const rows = refStates ?? [];
+  if (rows.length === 0) return null;
+  const present = rows.filter((r) => r.state === 'exists');
+  // No ref at all is H20's row; an unreadable probe is H20's quieter one. This
+  // row speaks only about branches it KNOWS are there.
+  if (present.length === 0) return null;
+
+  // A delivery in either channel ends the question: an open PR is live work (or
+  // work already handed over), and a merged one is H8's row about a paired
+  // write, never this row's about a dead agent.
+  const { open = 0, merged = 0 } = delivery ?? {};
+  if (open > 0 || merged > 0) return null;
+
+  const moved = present.map((r) => branchMovedSinceClaim(r, claim));
+  if (moved.some((m) => m === true)) return null;
+
+  const named = namedBranches(present.map((r) => ({ branch: r.branch, state: r.state })));
+  const recovery =
+    ' Report-only, and pointedly NOT a reclaim: the protocol reclaims a claim whose branch does ' +
+    'NOT exist and states 「有带提交活分支的认领永不回收」, so a row about a branch that DOES ' +
+    'exist can never be authority to drop an assignee. The remedy is the post-kill recovery ' +
+    'inspection (`references/dispatch-runbook.md`): probe the claimant, then read all THREE ' +
+    'states — on the remote / on the container disk only / gone — and hand anything found to a ' +
+    'replacement flagged UNVERIFIED. ⛔ Never a label written from this script.';
+
+  if (moved.some((m) => m === null)) {
+    return (
+      `\`pm:dispatched\` with a complete claim naming ${named}, and whether that branch has MOVED ` +
+      'since the claim could not be determined this sweep (an unreadable claim or head-commit ' +
+      'timestamp) — so this dispatch is UNJUDGED, not confirmed healthy. Unread is not "no ' +
+      'activity" and it is not "activity" either (#4690); a liveness comparison dropped in ' +
+      'silence reads as a working dev forever, which is the exact failure this item exists to ' +
+      'end. Read the branch and the claim by hand.' +
+      recovery
+    );
+  }
+
+  const reading =
+    age === null
+      ? 'an unreadable claim timestamp (which must not read as fresh)'
+      : `~${Math.round(age)}h after the claim was posted (threshold ${DEAD_CLAIM_STALE_HOURS}h, the ` +
+        "protocol's own stale-claim line)";
+
+  return (
+    `\`pm:dispatched\` with a PERFECT claim — assignee set, a first-line \`Claim:\` comment, and ` +
+    `${named} present on the remote — that has NOT MOVED SINCE IT WAS CLAIMED, with no PR ` +
+    `delivering the card, ${reading}. This is what a dev agent that DIED leaves behind, and the ` +
+    'measured cause arrives in batches rather than singly: one shared-account capacity limit ' +
+    'killed three concurrently-dispatched agents at once. ⭐ The card is indistinguishable from ' +
+    'healthy in-flight work from the card itself — every field is correct, which is why no ' +
+    'predicate here fired on it: H1 wants a missing assignee, H2 a missing claim comment, H8 a ' +
+    'merged PR, and H20 no remote ref at all. H20 misses it BY CONSTRUCTION, not by accident: ' +
+    'the dev-agent definition makes pushing the empty branch the first action of the task, so a ' +
+    'protocol-compliant agent that dies still leaves a ref. Left unreported it does worse than ' +
+    "sit there — the next PM's round-open mutual-exclusion read treats a dead `Claim:` as a live " +
+    'claim by another session and stays off the card, so one dead agent blocks the lane. ⛔ Rule ' +
+    'out one reading first: a delivery that merged BEFORE this sweep\'s merged window ' +
+    `(${MERGED_WINDOW_PAGES} pages) is invisible here, so a card whose PR landed days ago and ` +
+    'whose branch was never deleted can reach this row — check the card for a merged delivery ' +
+    'before treating it as a death.' +
+    recovery
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -4220,9 +4477,11 @@ export function summaryLine(counts, findingCount) {
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${btResolved < btTargets ? ' — each unresolved target is named on its own card\'s row, never dropped' : ''}. ` +
-    `Dispatch liveness (H20): remote ref read on ${refRead} of ${refTargets} distinct claimed branch(es) ` +
-    `named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold` +
-    `${refRead < refTargets ? ' — each unread ref is named on its own card\'s row, never dropped' : ''}. ` +
+    `Dispatch liveness (H20 + H27): remote branch read on ${refRead} of ${refTargets} distinct claimed ` +
+    `branch(es) named by open \`pm:dispatched\` card(s) past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute ` +
+    `threshold — one read serving both rows, so H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset ` +
+    'of this one and costs no request of its own' +
+    `${refRead < refTargets ? ' — each unread branch is named on its own card\'s row, never dropped' : ''}. ` +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -5670,20 +5929,40 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const resolveBranchRef = async (branch) => {
     const cached = refCache.get(branch);
     if (cached) return cached;
-    // `/git/ref/heads/<branch>` is an EXACT-match lookup and a 404 there is the
-    // healthy-negative this row is built on — not an error. The branch is
+    // `/branches/<branch>` is an EXACT-match lookup and a 404 there is the
+    // healthy-negative H20 is built on — not an error. The branch is
     // segment-encoded rather than whole-encoded because the slashes in
     // `claude/issue-<n>-<slug>` are path separators to this endpoint.
-    const path = `/repos/${OWNER_REPO}/git/ref/heads/${branch.split('/').map(encodeURIComponent).join('/')}`;
+    //
+    // ⭐ Why this endpoint rather than `/git/ref/heads/<branch>`, which H20
+    // asked originally: H27 (#11248) needs the head commit's DATE, and this
+    // response already carries it while the ref response carries only a sha —
+    // reading it there would cost a second request per branch. Both endpoints
+    // resolve the SAME underlying ref, so existence is answered identically
+    // and H20's three states are untouched; the extra field rides in on a
+    // payload the sweep had already paid for. That is H26's own "FREE" shape,
+    // and it keeps the request COUNT of this pass exactly as it was.
+    const path = `/repos/${OWNER_REPO}/branches/${branch.split('/').map(encodeURIComponent).join('/')}`;
     let resolved;
     try {
-      await rest(path);
-      resolved = { state: 'exists', detail: null };
+      const row = await rest(path);
+      resolved = {
+        state: 'exists',
+        detail: null,
+        // Missing rather than null-coalesced to a date: an absent field must
+        // reach the predicate as "unknown" so it declines to judge, never as a
+        // timestamp that happens to compare false (#4690).
+        headCommittedAt: row?.commit?.commit?.committer?.date ?? null,
+      };
     } catch (err) {
       resolved =
         err?.status === 404
-          ? { state: 'absent', detail: null }
-          : { state: 'unreadable', detail: err?.status ? `HTTP ${err.status}` : 'unreadable' };
+          ? { state: 'absent', detail: null, headCommittedAt: null }
+          : {
+              state: 'unreadable',
+              detail: err?.status ? `HTTP ${err.status}` : 'unreadable',
+              headCommittedAt: null,
+            };
     }
     refCache.set(branch, resolved);
     return resolved;
@@ -5697,6 +5976,20 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     for (const branch of claim.branches) states.push({ branch, ...(await resolveBranchRef(branch)) });
     const undispatched = h20DispatchedNoBranchRef(issue, claim, states);
     if (undispatched) findings.push([issue, 'H20', undispatched]);
+    // H27 — the same claim, the same ref states, the OTHER question: not "was
+    // this ever dispatched" but "is the thing that was dispatched still alive".
+    // Its gathering gate (24h) is a strict subset of H20's (60 min), so every
+    // card it can speak about has already been probed above and it adds NO
+    // request of its own. Delivery is read from the two PR windows this sweep
+    // already holds — H8's inputs, through H8's own delivery relation.
+    if (!h27NeedsClaimLivenessRead(issue, claim)) continue;
+    const deadClaim = h27DeadClaimNoProgress(
+      issue,
+      claim,
+      states,
+      claimDelivery(issue.number, openWindow, mergedWindow),
+    );
+    if (deadClaim) findings.push([issue, 'H27', deadClaim]);
   }
   // Distinct branches, which is the unit the cache and the request count are
   // in — and the word is in the summary sentence for the same reason it is in
@@ -7491,13 +7784,137 @@ function selfTest() {
     repo: 'objectstack-ai/objectstack', issues: 1, unscoped: 1, prs: 0, merged: 0,
     dispatchRefRead, dispatchRefTargets,
   });
-  t('summary: the H20 coverage pair is reported', summaryLine(refCounts(4, 5), 1).includes('remote ref read on 4 of 5 distinct claimed branch(es)'), true);
+  t('summary: the H20 coverage pair is reported', summaryLine(refCounts(4, 5), 1).includes('remote branch read on 4 of 5 distinct claimed branch(es)'), true);
   t('summary: …scoped to the population H20 judges', summaryLine(refCounts(4, 5), 1).includes('named by open `pm:dispatched` card(s)'), true);
   t('summary: …and names the threshold that bounded it', summaryLine(refCounts(4, 5), 1).includes(`past the ${DISPATCHED_NO_REF_STALE_MINUTES}-minute threshold`), true);
-  t('summary: an H20 shortfall points at the rows that carry it', summaryLine(refCounts(4, 5), 1).includes('each unread ref is named on its own card\'s row, never dropped'), true);
-  t('summary: a complete H20 pass adds no shortfall clause', summaryLine(refCounts(5, 5), 1).includes('each unread ref'), false);
-  t('summary: absent H20 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('remote ref read on 0 of 0 distinct'), true);
+  t('summary: an H20 shortfall points at the rows that carry it', summaryLine(refCounts(4, 5), 1).includes('each unread branch is named on its own card\'s row, never dropped'), true);
+  t('summary: a complete H20 pass adds no shortfall clause', summaryLine(refCounts(5, 5), 1).includes('each unread branch'), false);
+  t('summary: absent H20 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('remote branch read on 0 of 0 distinct'), true);
+  // The pair is H27's coverage number too, and a reader seeing a quiet H27
+  // needs to know that — one read serves both rows.
+  t('summary: the pair is declared as serving BOTH rows', summaryLine(refCounts(5, 5), 1).includes('Dispatch liveness (H20 + H27)'), true);
+  t('summary: …naming H27\'s threshold', summaryLine(refCounts(5, 5), 1).includes(`H27's ${DEAD_CLAIM_STALE_HOURS}h population is a subset`), true);
+  t('summary: …and that it costs no request of its own', summaryLine(refCounts(5, 5), 1).includes('costs no request of its own'), true);
   t('summary: the report-only contract still ends the sentence after H20', summaryLine(refCounts(5, 5), 1).endsWith('not a gate verdict.'), true);
+
+  // -- H27: the claim is PERFECT and the claimant is dead (#11248) ------------
+  //
+  // The specimen is the 2026-08-23 capacity kill: three agents dispatched at
+  // ~05:46Z, all three killed at ~05:50Z on one shared-account weekly limit.
+  // `NOW_27` is set past the protocol's own 24h stale line so the age the row
+  // reports is a real one rather than a round number chosen to pass.
+  const CLAIM_27 = '2026-08-23T05:46:00Z';
+  const NOW_27 = Date.parse('2026-08-24T08:00:00Z'); // ~26h after the claim
+  const claim27Body = [
+    'Claim: `domain:devx` execution seat.',
+    'Session: `session_0124Qg8rLvpXnQDwCmpKUmaJ`',
+    'Branch: `claude/issue-5442-metadata-form`',
+  ].join('\n');
+  const claim27 = (createdAt = CLAIM_27) => governingClaim([claimRow(createdAt, claim27Body)]);
+  const BR_27 = 'claude/issue-5442-metadata-form';
+  // A branch that exists and has NOT moved since the claim: its head is the
+  // base commit it was cut from, which predates the claim. That is the shape
+  // the os-dev empty-branch push probe leaves behind.
+  const frozen = (headCommittedAt = '2026-08-23T05:10:00Z') => [
+    { branch: BR_27, state: 'exists', detail: null, headCommittedAt },
+  ];
+  const noDelivery = { open: 0, merged: 0 };
+  const dead27 = (over = {}) =>
+    h27DeadClaimNoProgress(
+      // `in` rather than `??` throughout: a test that passes an explicit
+      // `undefined` must reach the predicate, not be replaced by the default it
+      // is trying to displace (measured — the missing-issue case was green
+      // against a healthy card before this was written out longhand).
+      'issue' in over ? over.issue : dispatchedCard(),
+      'claim' in over ? over.claim : claim27(),
+      'refs' in over ? over.refs : frozen(),
+      'delivery' in over ? over.delivery : noDelivery,
+      NOW_27,
+    );
+
+  // ★ The finding itself, and the facts the sentence must carry.
+  t('H27: a frozen branch + no PR past 24h -> finding', typeof dead27(), 'string');
+  t('H27: …and names the branch', dead27().includes(`\`${BR_27}\``), true);
+  t('H27: …and says the branch has not moved since the claim', dead27().includes('NOT MOVED SINCE IT WAS CLAIMED'), true);
+  t('H27: …and reports the age against the protocol threshold', dead27().includes(`threshold ${DEAD_CLAIM_STALE_HOURS}h`), true);
+  t('H27: …calling that threshold the protocol\'s own line, not a heuristic', dead27().includes("protocol's own stale-claim line"), true);
+  t('H27: …and states the measured ~26h age', dead27().includes('~26h after the claim was posted'), true);
+  t('H27: …and names the lane-block consequence, not just the silence', dead27().includes('mutual-exclusion read'), true);
+  t('H27: …and explains WHY H20 cannot see it', dead27().includes('pushing the empty branch the first action'), true);
+  t('H27: …and rules out the pre-window merged delivery first', dead27().includes(`${MERGED_WINDOW_PAGES} pages`), true);
+  t('H27: not a loud finding', isLoudFinding(dead27()), false);
+
+  // ★ Report-only, and specifically NOT a reclaim — the protocol protects a
+  // claim whose branch carries commits, so this row must never read as
+  // authority to drop an assignee.
+  t('H27: the remedy is the recovery inspection', dead27().includes('post-kill recovery'), true);
+  t('H27: …naming all three recovery states', dead27().includes('on the remote / on the container disk only / gone'), true);
+  t('H27: …and the UNVERIFIED hand-off', dead27().includes('flagged UNVERIFIED'), true);
+  t('H27: …quoting the protocol rule that forbids reclaiming this card', dead27().includes('有带提交活分支的认领永不回收'), true);
+  t('H27: …and never a label written from this script', dead27().includes('Never a label written from this script'), true);
+
+  // ★ Disjoint from H20 BY CONSTRUCTION, in both directions, on one fixture.
+  const absent27 = [{ branch: BR_27, state: 'absent', detail: null, headCommittedAt: null }];
+  t('H27: no ref at all is H20\'s row, not this one', dead27({ refs: absent27 }), null);
+  t('H27: …and H20 does fire on it', typeof h20DispatchedNoBranchRef(dispatchedCard(), claim27(), absent27, NOW_27), 'string');
+  t('H27: an existing ref is clean for H20', h20DispatchedNoBranchRef(dispatchedCard(), claim27(), frozen(), NOW_27), null);
+  t('H27: …while H27 fires on exactly that card', typeof dead27(), 'string');
+  t('H27: an UNREADABLE probe is H20\'s quieter row, not this one', dead27({ refs: [{ branch: BR_27, state: 'unreadable', detail: 'HTTP 500', headCommittedAt: null }] }), null);
+
+  // ★ The branch-activity term. A dev that pushed after claiming is ALIVE for
+  // this row — and the under-report it implies is deliberate (see the docblock).
+  t('H27: a branch that moved AFTER the claim -> clean', dead27({ refs: frozen('2026-08-23T05:49:00Z') }), null);
+  t('H27: a branch whose head predates the claim -> finding', typeof dead27({ refs: frozen('2026-08-22T09:00:00Z') }), 'string');
+  t('H27: one moved branch among frozen ones clears the card', dead27({ refs: [...frozen(), { branch: 'claude/issue-5442-b', state: 'exists', headCommittedAt: '2026-08-23T09:00:00Z' }] }), null);
+  t('H27: activity is measured against the CLAIM, not the threshold', dead27({ refs: frozen('2026-08-23T05:47:00Z') }), null);
+  // Three-valued, never two (#4690): an unreadable comparison is not a "no".
+  t('H27: an unreadable head timestamp does NOT read as healthy', dead27({ refs: frozen(null) }) === null, false);
+  t('H27: …and fires the quieter UNJUDGED row instead', dead27({ refs: frozen(null) }).includes('UNJUDGED, not confirmed healthy'), true);
+  t('H27: …which does not assert the finding it did not measure', dead27({ refs: frozen(null) }).includes('NOT MOVED SINCE IT WAS CLAIMED'), false);
+  t('H27: …citing the unread-is-not-absent rule', dead27({ refs: frozen(null) }).includes('#4690'), true);
+  t('H27: an absent head field reads as unknown, not as an old date', dead27({ refs: [{ branch: BR_27, state: 'exists' }] }).includes('UNJUDGED'), true);
+  t('H27: branchMovedSinceClaim is three-valued', [branchMovedSinceClaim(frozen()[0], claim27()), branchMovedSinceClaim(frozen('2026-08-23T09:00:00Z')[0], claim27()), branchMovedSinceClaim(frozen(null)[0], claim27())].join(','), 'false,true,');
+
+  // ★ The delivery term, through H8's own relation so the two cannot drift.
+  t('H27: an OPEN PR delivering the card -> clean', dead27({ delivery: { open: 1, merged: 0 } }), null);
+  t('H27: a MERGED delivery is H8\'s row, not this one', dead27({ delivery: { open: 0, merged: 1 } }), null);
+  t('H27: claimDelivery reads the body relation', claimDelivery(5442, [{ number: 9, body: 'Part of #5442' }], []).open, 1);
+  t('H27: …and the branch-name fallback', claimDelivery(5442, [{ number: 9, body: '', head: { ref: 'claude/issue-5442-x' } }], []).open, 1);
+  t('H27: …counting merged deliveries separately', claimDelivery(5442, [], [{ number: 9, body: 'Fixes #5442', merged_at: '2026-08-23T10:00:00Z' }]).merged, 1);
+  t('H27: …and ignoring an unmerged closed PR in the merged window', claimDelivery(5442, [], [{ number: 9, body: 'Fixes #5442', merged_at: null }]).merged, 0);
+  t('H27: …and a PR for some OTHER card', claimDelivery(5442, [{ number: 9, body: 'Part of #9999' }], []).open, 0);
+  t('H27: a card delivered in halves is not a death', dead27({ delivery: claimDelivery(5442, [{ number: 9, body: 'Part of #5442' }], []) }), null);
+
+  // ★ Unlike H20, this predicate DOES take pull-request input — that is the
+  // deliberate difference between the two rows, pinned so it cannot be lost.
+  t('H27: the predicate takes a delivery input', h27DeadClaimNoProgress.length, 4);
+  t('H20: …and still takes none', h20DispatchedNoBranchRef.length, 3);
+
+  // The gathering gate, and that it is a strict subset of H20's.
+  t('H27 gate: a claim past 24h is read', h27NeedsClaimLivenessRead(dispatchedCard(), claim27(), NOW_27), true);
+  t('H27 gate: a claim inside 24h buys nothing', h27NeedsClaimLivenessRead(dispatchedCard(), claim27('2026-08-24T04:00:00Z'), NOW_27), false);
+  t('H27 gate: an unreadable claim timestamp is read, never assumed fresh', h27NeedsClaimLivenessRead(dispatchedCard(), claim27('not-a-date'), NOW_27), true);
+  t('H27 gate: a card without `pm:dispatched` is out of scope', h27NeedsClaimLivenessRead(dispatchedCard(['pm:queue']), claim27(), NOW_27), false);
+  t('H27 gate: no claim -> nothing to read (that shape is H2\'s row)', h27NeedsClaimLivenessRead(dispatchedCard(), null, NOW_27), false);
+  t('H27 gate: a missing issue does not crash', h27NeedsClaimLivenessRead(undefined, claim27(), NOW_27), false);
+  // The subset property is what makes H27 cost ZERO extra requests: every card
+  // it can speak about was already probed for H20.
+  t('H27 gate: every H27 candidate is already an H20 candidate', h27NeedsClaimLivenessRead(dispatchedCard(), claim27(), NOW_27) && h20NeedsRefProbe(dispatchedCard(), claim27(), NOW_27), true);
+  t('H27 gate: …and the threshold is strictly wider than H20\'s', DEAD_CLAIM_STALE_HOURS * 60 > DISPATCHED_NO_REF_STALE_MINUTES, true);
+
+  // The remaining gates and the caller contract, H20's shapes on H27's inputs.
+  t('H27: the label gate outranks everything', dead27({ issue: dispatchedCard(['pm:queue']) }), null);
+  t('H27: no claim -> no row', dead27({ claim: null }), null);
+  t('H27: an unprobed card yields no row (caller contract, as H19/H20)', dead27({ refs: [] }), null);
+  t('H27: absent ref states -> no row', dead27({ refs: undefined }), null);
+  t('H27: a missing issue does not crash', dead27({ issue: undefined }), null);
+  t('H27: a young claim -> no row even with a frozen branch', dead27({ claim: claim27('2026-08-24T04:00:00Z') }), null);
+  t('H27: exactly AT the threshold is not past it', dead27({ claim: claim27(new Date(NOW_27 - DEAD_CLAIM_STALE_HOURS * 3_600_000).toISOString()) }), null);
+  const unstamped27 = dead27({ claim: claim27('not-a-date') });
+  t('H27: an unreadable claim timestamp does not read as fresh', unstamped27 === null, false);
+  t('H27: …and yields the UNJUDGED row (the comparison is impossible)', unstamped27.includes('UNJUDGED'), true);
+  const many27 = Array.from({ length: 7 }, (_, i) => ({ branch: `claude/issue-1-b${i}`, state: 'exists', headCommittedAt: '2026-08-22T09:00:00Z' }));
+  t('H27: the branch list is capped at the render budget', dead27({ refs: many27 }).includes(`+${7 - H20_BRANCH_LIST_CAP} more`), true);
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
