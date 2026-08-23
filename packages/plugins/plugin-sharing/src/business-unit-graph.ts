@@ -2,7 +2,7 @@
 
 import type { IBusinessUnitGraphService } from '@objectstack/spec/contracts';
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService } from './team-graph.js';
+import { TeamGraphService, managerIsProvablyOutsideOrg } from './team-graph.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -231,10 +231,22 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     return head;
   }
 
+  /**
+   * [#10231] Honours the declared `organizationId` on BOTH limbs.
+   *
+   * The delegating limb always did, by construction — it hands the argument to
+   * {@link TeamGraphService.managerOf}, which now screens. The STANDALONE
+   * fallback below did not, and that gap was the whole risk: the fallback is
+   * reached exactly when no `teamGraph` was supplied, so a caller could get the
+   * unscreened answer from the same method name purely by how the service
+   * happened to be constructed. A screen that depends on a constructor option
+   * is not a screen.
+   */
   async managerOf(userId: string, organizationId?: string): Promise<string | null> {
     if (this.teamGraph) return this.teamGraph.managerOf(userId, organizationId);
     // Standalone fallback: read sys_user.manager_id directly.
     if (!userId) return null;
+    const org = organizationId ?? this.organizationId;
     try {
       const rows = await this.engine.find('sys_user', {
         where: { id: userId },
@@ -243,7 +255,12 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
         context: SYSTEM_CTX,
       });
       const row: any = Array.isArray(rows) ? rows[0] : null;
-      return row?.manager_id ? String(row.manager_id) : null;
+      const managerId = row?.manager_id ? String(row.manager_id) : null;
+      if (!managerId) return null;
+      // The SAME screen the delegating limb applies — one implementation,
+      // imported rather than restated, so the two limbs cannot drift.
+      if (await managerIsProvablyOutsideOrg(this.engine, managerId, org)) return null;
+      return managerId;
     } catch {
       return null;
     }
