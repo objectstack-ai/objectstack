@@ -817,18 +817,19 @@ expression evaluates truthy.
 
 {/* os:check */}
 ```typescript
-// e.g. on a PageComponent:
+// e.g. on a PageComponent — `record` and `current_user` are both bound:
 visibleWhen: "record.account_type == 'premium'"
 
-// e.g. on a FormSection / FormField:
-visibleWhen: "record.status != 'closed' && user.hasRole('admin')"
+// e.g. on a FormSection / FormField — `record` is bound, `current_user` is NOT:
+visibleWhen: "record.status != 'closed'"
 ```
 
 The predicate's **binding root** is set by the layer, not the key:
 
 | Layer | Predicate binds |
 |---|---|
-| Runtime record forms & pages (`*.view.ts`, `*.page.ts`) | `record` + `current_user` (pages also expose `page.<var>`) |
+| Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |
+| Runtime record form sections/fields (`*.view.ts`) | `record` + `previous` — **not** `current_user` |
 | Metadata-editing forms (`*.form.ts`) | `data` — the row under edit |
 
 The legacy spellings `visibleOn` (view) and `visibility` (page) are `@deprecated`
@@ -845,6 +846,39 @@ points you back at `visibleWhen`.
 Breakpoint-based show/hide is handled separately via the component's
 `responsive.hiddenOn` array (e.g. `hiddenOn: ['xs', 'sm']`), see
 `packages/spec/src/ui/responsive.zod.ts`.
+
+#### Position-gated visibility
+
+There is **no `hasRole()`**: neither the CEL stdlib nor the
+[`EvalUser`](/docs/references/identity/eval-user) contract defines such a call —
+`EvalUser` exposes memberships as data, not as methods. Membership is tested
+against `current_user.positions`, the canonical `string[]` of
+[position](/docs/permissions/positions) names — ADR-0090 D3 retired the older
+vocabulary, and ADR-0068 D1 binds the same object under the `user` and `ctx.user`
+aliases:
+
+{/* os:check */}
+```typescript
+// On a PageComponent, an app/nav entry, or a per-option `visibleWhen`:
+visibleWhen: "'sales_manager' in current_user.positions"
+```
+
+Two limits come with it. **First, `current_user` is not bound on form sections and
+form fields** — those predicates evaluate against `record` (plus `previous`) only,
+so the expression above names an unbound root there instead of gating anything.
+**Second, `visibleWhen` is presentation, not access control**: it decides what a
+client draws from data it already holds. To stop someone from *reading* something,
+use the permission layer — [field-level security](/docs/permissions/field-level-security)
+and [permission sets](/docs/permissions/permission-metadata), or
+[row-level security](/docs/permissions/rls), whose `using` clause accepts the very
+same `'…' in current_user.positions` predicate and is enforced on the server.
+
+<Callout type="warn">
+An unresolvable predicate — an unbound root, or a call to a function that does not
+exist — is **fail-open**: the renderer logs one warning and falls back to its safe
+default, which for visibility is *visible*. A gate that faults does not hide the
+element from anyone; it shows it to everyone.
+</Callout>
 
 ## Real-World Examples
 

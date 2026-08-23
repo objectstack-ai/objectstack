@@ -15,10 +15,18 @@ import Serve from './serve.js';
  * CLI could see. Green in a dev checkout, absent on a real distribution layout
  * (#10908; the same mechanism as cloud#1013 and #10645).
  *
- * The repair moves ONLY the declared case. These tests pin all three branches,
- * because two of them exist to keep behaviour that a naive
+ * The repair moves ONLY the declared case. These tests pin every branch the
+ * method has, including the ones that exist to keep behaviour a naive
  * `await importFromHost(specifier)` would have taken away — see
  * `Serve.importConfigPlugin` for the measurements.
+ *
+ * ⚠️ #11157 collapsed the shape from three branches to two: once `importFromHost`
+ * hands `createHostImporter` this file's own resolver (`fallbackImport`), the
+ * helper's undeclared leg IS the local `import()` the undeclared branch used to
+ * make, so that branch and the re-entry branch became one call. Every assertion
+ * below is unchanged and still describes real behaviour — that is what made the
+ * collapse safe to take. The one that had to move is the structural one at the
+ * bottom: the declaration read now has a single owner inside the helper.
  */
 
 const roots: string[] = [];
@@ -143,11 +151,16 @@ describe('os serve → the missing-plugin diagnostic is a chosen text (#10908 / 
  */
 describe('os serve → the branches that must NOT move (#10908 supersedes nothing)', () => {
   it('keeps this CLI as the resolver for a package the app does not declare', async () => {
-    // `chalk` is declared by packages/cli and by no fixture app. Today's bare
-    // `import()` finds it; through the host importer's fallback — which resolves
-    // from `@objectstack/types` — it does not. An app that writes
-    // `plugins: ['@objectstack/plugin-auth']` without declaring it boots today,
-    // and this is the assertion that says it still does.
+    // `chalk` is declared by packages/cli and by no fixture app. An app that
+    // writes `plugins: ['@objectstack/plugin-auth']` without declaring it boots
+    // today, and this is the assertion that says it still does.
+    //
+    // ⚠️ This assertion is why #11157 had to land BEFORE the branch collapse and
+    // not after. It used to be kept true by a local `import()` here; it is now
+    // kept true by `importFromHost` carrying this file's base. Take the base
+    // away and this line goes red — measured, and pinned again from the other
+    // side (with the no-base control beside it) in
+    // `serve-host-fallback-base.test.ts`.
     const root = makeApp(APP_ONLY, { declare: false, install: false });
 
     const mod = await Serve.importConfigPlugin('chalk', root);
@@ -204,10 +217,24 @@ describe('os serve → the config-plugin load stays wired to the helper', () => 
   });
 
   it('the declaration decides the resolver, so the gate keeps its say (#4719)', () => {
-    // A helper that stopped consulting the declaration would still pass every
-    // behavioural test above that uses a DECLARED fixture, so pin the wiring.
+    // A helper that reached the app's copy by some route OTHER than the host
+    // importer would still pass the behavioural tests above, so pin the wiring.
+    //
+    // ⚠️ This used to also require `isDeclaredByHost(pluginSpecifier, root)` in
+    // this method. #11157 removed that call — not the check. `importFromHost`
+    // now carries this file's resolution base, which made the local undeclared
+    // branch identical to the helper's own fallback, so the declaration is read
+    // exactly once, by `readHostDeclaration` inside `createHostImporter`. Asking
+    // the same question twice in two places is the fork Prime Directive #12
+    // exists to prevent; requiring the second copy HERE would have pinned it.
+    // The single owner is pinned in `packages/types/src/node.test.ts`.
     const helper = SERVE_SOURCE.slice(SERVE_SOURCE.indexOf('static async importConfigPlugin'));
-    expect(helper).toContain('isDeclaredByHost(pluginSpecifier, root)');
-    expect(helper).toContain('importFromHost(pluginSpecifier, root)');
+    const body = helper.slice(0, helper.indexOf('\n  }\n'));
+    expect(body).toContain('importFromHost(pluginSpecifier, root)');
+    // The resolver is never chosen by a second, local reading of the manifest.
+    expect(body).not.toContain('isDeclaredByHost');
+    // …and the entry is never handed to a bare `import()` once it names a
+    // package: that is the #10908 defect itself.
+    expect(body).not.toMatch(/if \(isDeclaredByHost/);
   });
 });

@@ -610,32 +610,69 @@ export function registerPackageRoutes(
       // 2. Database packages (published via POST /packages)
       const packagesMap = new Map<string, any>();
 
-      // Registry packages (via protocol service → SchemaRegistry)
+      // Registry packages (via protocol service → SchemaRegistry).
+      //
+      // [#11130] NOT wrapped in a catch, deliberately — this is the OTHER half
+      // of the two-source merge, and it absorbed a failed registry read into a
+      // 200 for exactly as long as the durable half did. It used to carry:
+      //
+      //     } catch {
+      //       // Protocol unavailable — continue with database only
+      //     }
+      //
+      // which left nothing on the wire to separate "these are all the packages"
+      // from "these are the packages I could still see": `total` was reported as
+      // a complete count either way, and the surviving entries kept
+      // `source: 'database'`, which reads as PROVENANCE, not as a warning that
+      // the registry half is missing. Same standing family ruling as the durable
+      // half below — #10965 · #10677 / PR #10788 · #10789 / PR #10964 · #11063:
+      // **a read that could not happen must not be reported as a read that found
+      // nothing.**
+      //
+      // ⭐ The PRODUCER already declares its refusal, so this is #11063's edit
+      // and not a new posture. The live `protocol` service is
+      // `ObjectStackProtocolImplementation` (`packages/metadata-protocol`),
+      // whose `getMetaItems` sends every non-benign `sys_metadata` overlay read
+      // failure through `rethrowUnlessMetadataStoreUnprovisioned` →
+      // `metadataStoreUnavailableError`: `SERVICE_UNAVAILABLE` / 503 with an
+      // ADR-0112 status+code ON the error, the same envelope #10965 gave
+      // `PackageService.list()`. {@link sendThrownError} carries that status and
+      // code through the declared envelope rather than re-deciding them. The one
+      // benign reason a registry read can fail — `sys_metadata` not provisioned
+      // yet — is NOT a throw at all on that path (`isMissingTableError`), so
+      // first boot still lists the registry set.
+      //
+      // The `if` guard above is a DIFFERENT case and is untouched: a composition
+      // with no protocol service is an absence, not a failed read, and still
+      // answers 200 with the durable half alone.
+      //
+      // ⛔ The card's shape (c) — keep the 200 and make the tolerance visible
+      // with a partial-result marker — is a response-shape change and therefore
+      // a contract decision; it was NOT authorized by this card's grading, and
+      // no wire field is added here.
       if (options.protocol && typeof options.protocol.getMetaItems === 'function') {
-        try {
-          const result = await options.protocol.getMetaItems({ type: 'package' });
-          if (result?.items) {
-            // [#9846] The declared `GetMetaItemsResponse` types `items` as
-            // `unknown[]` — the spec says nothing about what a metadata item
-            // CONTAINS. The registry-specific keys read below (`manifest.id`)
-            // are not spec-declared, so the ELEMENT read stays runtime-shaped
-            // on purpose, exactly as the sibling meta-read doors do via
-            // `metaItemsArray` in `rest-server.ts`. The seam itself is now
-            // spec-typed; this coercion is confined to the read and changes
-            // no behaviour (a malformed entry still throws into the catch
-            // below, as it did when the local shape claimed `any[]`).
-            for (const item of result.items as any[]) {
-              const id = item.manifest?.id || item.id;
-              if (id) {
-                packagesMap.set(id, {
-                  ...item,
-                  source: 'registry',
-                });
-              }
+        const result = await options.protocol.getMetaItems({ type: 'package' });
+        if (result?.items) {
+          // [#9846] The declared `GetMetaItemsResponse` types `items` as
+          // `unknown[]` — the spec says nothing about what a metadata item
+          // CONTAINS. The registry-specific keys read below (`manifest.id`)
+          // are not spec-declared, so the ELEMENT read stays runtime-shaped
+          // on purpose, exactly as the sibling meta-read doors do via
+          // `metaItemsArray` in `rest-server.ts`. The seam itself is now
+          // spec-typed; this coercion is confined to the read and changes
+          // no behaviour (a malformed entry still throws, as it did when the
+          // local shape claimed `any[]` — since #11130 it reaches the outer
+          // catch and is answered as the 500 a fault deserves, instead of
+          // being swallowed into a 200).
+          for (const item of result.items as any[]) {
+            const id = item.manifest?.id || item.id;
+            if (id) {
+              packagesMap.set(id, {
+                ...item,
+                source: 'registry',
+              });
             }
           }
-        } catch {
-          // Protocol unavailable — continue with database only
         }
       }
 

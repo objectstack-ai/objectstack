@@ -2585,6 +2585,28 @@ export class ObjectStackClient {
     },
 
     /**
+     * Set a **first** local password for a signed-in user who has none yet —
+     * the SSO/social-onboarded account that has no `credential` row.
+     *
+     * This is NOT `changePassword`'s sibling-by-convenience: better-auth
+     * registers `setPassword` with no HTTP path of its own (server-only
+     * `auth.api.setPassword`), and ObjectStack's AuthPlugin mounts the wrapper
+     * this method targets. The route requires a valid session and REFUSES
+     * (409 `PASSWORD_ALREADY_SET`) when a credential already exists — in that
+     * case use `changePassword`, which verifies the current password.
+     *
+     * ObjectStack mount: POST /set-initial-password — `{ newPassword }`.
+     */
+    setInitialPassword: async (req: { newPassword: string }) => {
+      const route = this.getRoute('auth');
+      const res = await this.fetch(`${this.baseUrl}${route}/set-initial-password`, {
+        method: 'POST',
+        body: JSON.stringify(req),
+      });
+      return res.json();
+    },
+
+    /**
      * Begin a change-email flow. better-auth sends a verification mail to
      * the new address; the change only takes effect after the user clicks
      * the link.

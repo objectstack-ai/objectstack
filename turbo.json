@@ -17,6 +17,11 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "@objectstack/docs#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
+    },
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
@@ -100,6 +105,7 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/scripts/check-route-envelope.mjs"
       ]
     },

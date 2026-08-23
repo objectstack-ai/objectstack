@@ -194,6 +194,12 @@
       "evidence": "packages/objectql/src/engine.ts:1672",
       "note": "CAVEAT — $expand/cascade/seed live; FK DDL reads reference_to (unmapped from reference)."
     },
+    "referenceVia": {
+      "status": "live",
+      "verifiedAt": "2026-08-23",
+      "evidence": "packages/metadata-protocol/src/seed-loader.ts (load step 4.5 collects declared pointer pairs; loadDataset derives a per-row reference through the sibling column and routes it through the shared resolution loop — same probes, pass-2 deferral, loud refusal); packages/plugins/plugin-audit/src/objects/sys-activity.object.ts (record_id via object_name, source_id via source_object)",
+      "note": "[#11339] Polymorphic pointer pair (ADR-0052 §5 ActivityPointer): marks a text field as the id half whose target object the SIBLING column names per row. Consumer (seed-time natural-key resolution + loud refusal of unresolvable/un-addressable pointers) lands in the same PR (ADR-0049 declare = enforce; the maskingRule precedent). Authoring contradictions refused at parse (text-only, exclusive with reference) and create (sibling must be declared). Proven in packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts and packages/spec/src/data/field.test.ts."
+    },
     "autonumberFormat": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts:765",

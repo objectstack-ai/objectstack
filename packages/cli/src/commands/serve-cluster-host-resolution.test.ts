@@ -278,18 +278,31 @@ const UNRESOLVABLE_BARE_IMPORTS: Record<string, string> = {
   // Serve.CAPABILITY_PROVIDERS — every `pkg` in that table is CLI-declared.
   'spec.pkg': 'Serve.CAPABILITY_PROVIDERS entries are all CLI-declared',
   'ex.pkg': 'CAPABILITY_PROVIDERS `extras` entries are all CLI-declared',
-  // The app's own `plugins: [...]` config entries, now routed through
-  // `Serve.importConfigPlugin` (#10908). Two bare `import()` sites remain there,
-  // both reached only AFTER the declaration has been consulted, and both are the
-  // reason this list exists rather than a hole in it:
-  //   • the specifier is not a package name at all (path, `file://`, `node:`) —
-  //     nothing a package.json can declare;
-  //   • the served app does NOT declare it, so it must resolve from this CLI,
-  //     which is exactly the pre-existing behaviour #10908 promised to keep.
-  // The DECLARED case — the only one this card moves — goes to `importFromHost`.
-  // Pinned behaviourally, not by this comment, in
-  // `serve-config-plugin-host-resolution.test.ts`.
-  pluginSpecifier: 'post-declaration branches: a path/URL, or a package the app does not declare (#10908)',
+  // The app's own `plugins: [...]` config entries, routed through
+  // `Serve.importConfigPlugin` (#10908). ONE bare `import()` site remains there,
+  // and it is the reason this list exists rather than a hole in it: the
+  // specifier is not a package name at all (an absolute path, a `file://` URL, a
+  // `node:` builtin), so nothing a package.json can declare, and every one of
+  // those spellings means the same module from every base.
+  //
+  // It used to be TWO. The second was the UNDECLARED branch, which kept a local
+  // `import()` because the host importer's fallback resolved from
+  // `@objectstack/types` rather than from this CLI. #11157 threaded the base
+  // (`fallbackImport`), which made that branch identical to the helper's own
+  // fallback, and it was collapsed into `importFromHost`. Pinned behaviourally,
+  // not by this comment, in `serve-config-plugin-host-resolution.test.ts` and
+  // `serve-host-fallback-base.test.ts`.
+  pluginSpecifier: 'the non-package branch: an absolute path, a file:// URL or a node: builtin (#10908)',
+  // `importFromHost`'s own `fallbackImport` (#11157) — the caller base
+  // `createHostImporter` resolves everything the served app does NOT declare
+  // from. It is a bare `import()` on purpose and it MUST be written in this
+  // file: ESM resolves a bare specifier against the module containing the call,
+  // so moving it anywhere else moves the base, which is the whole defect. Its
+  // parameter is the helper's argument, so no scan can know the specifier —
+  // and no scan needs to: this site is not a load of any particular package,
+  // it is the resolution base every other undeclared load is handed.
+  fallbackSpecifier:
+    "importFromHost's caller base — the CLI's own resolver, handed to createHostImporter (#11157)",
 };
 
 /**

@@ -164,9 +164,31 @@ class Parser {
         continue;
       }
       // text
+      //
+      // HTML collapses a whitespace run to ONE space; it does not delete it. A
+      // bare `.trim()` here deleted the space that separates a text run from an
+      // adjacent sibling element, so `A <strong>x</strong> page` compiled to
+      // `A`/`page` and the words ran together wherever the tree is rendered.
+      // The rule (triage option (b), shared verbatim with the downstream copy
+      // of this parser so the two agree): collapse the run, then keep a single
+      // leading space only when a sibling precedes the run, and a single
+      // trailing space only when a sibling element follows it. At the parent's
+      // own start/end the edge space is still dropped, so `<p>  hi  </p>` stays
+      // `hi`. A whitespace-only run survives as one space only when it sits
+      // BETWEEN siblings — that is the bounded over-generosity of this rule
+      // inside block containers like `<ul>`, pinned in the tests.
       const text = this.readTextRun();
-      const trimmed = text.replace(/\s+/g, ' ').trim();
-      if (trimmed) children.push(trimmed);
+      const collapsed = text.replace(/\s+/g, ' ');
+      const core = collapsed.trim();
+      const afterSibling = children.length > 0;
+      const beforeElement = this.peek() === '<' && !this.src.startsWith('</', this.pos);
+      if (core) {
+        const lead = afterSibling && collapsed.startsWith(' ') ? ' ' : '';
+        const trail = beforeElement && collapsed.endsWith(' ') ? ' ' : '';
+        children.push(`${lead}${core}${trail}`);
+      } else if (collapsed && afterSibling && beforeElement) {
+        children.push(' ');
+      }
     }
     return children;
   }

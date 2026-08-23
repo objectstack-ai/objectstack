@@ -139,16 +139,12 @@ export const EXIT_NOT_MEASURED = 2;
  * entry and the gate then fails if the entry is still here.
  */
 export const PENDING_DISPOSITION = [
-  {
-    route: 'POST /api/v1/auth/set-initial-password',
-    issue: '#10975',
-    why:
-      'Disposition escalated on #10534 rather than guessed: `server-only` would claim an intent ' +
-      "the route's own peer group contradicts (its three sibling URLs in the same createAuthClient " +
-      'are all ledgered `sdk`), and `gap` is ratcheted to <= 0. Maintainer ruling 2026-08-22: ' +
-      'option C -- add `auth.setInitialPassword` to ObjectStackClient (#10974), THEN ledger the ' +
-      'row as `sdk` (#10975, blocked-by #10974). This entry is deleted by #10975.',
-  },
+  // EMPTY, and that is the ratchet having come down rather than a list nobody
+  // uses. Its one entry -- `POST /api/v1/auth/set-initial-password`, granted by
+  // the maintainer ruling of 2026-08-22 -- was deleted when #10974/#10975
+  // landed its disposition: an `sdk` row naming `auth.setInitialPassword`. The
+  // gate would fail (`resolved-pending`) if the entry had been left behind, so
+  // this deletion is the landing half of that ruling, not tidying.
 ];
 
 /** Shrink-only. Raising it is a maintainer decision, not a repair. */
@@ -167,8 +163,8 @@ export const MIN_NOTE_CHARS = 60;
  * row in `AUTH_ROUTE_LEDGER`, which grows as routes are added and is no ratchet.
  * But both paths that touch PENDING_DISPOSITION expand a shrink-only exemption
  * list, and neither is the landing author's to take. Refusing them outright would
- * be the stronger shape and would also be FALSE: the list has a legitimate entry,
- * granted by a maintainer ruling. There is a real act here with a real owner, so
+ * be the stronger shape and would also be FALSE: the list HAS held a legitimate
+ * entry, granted by a maintainer ruling. There is a real act here with a real owner, so
  * the honest shape is to name the owner rather than to deny the act -- the same
  * reading `check-skills-token-ratchet.mjs` records for its published-catalog
  * ceiling (#10473).
@@ -391,8 +387,9 @@ function dispositionDemand(route) {
     '  a PENDING_DISPOSITION entry naming that issue, and stays printed on every clean run.',
     '',
     `  ${RATCHET_AUTHORITY} -- adding \`${route}\` to PENDING_DISPOSITION is an EXEMPTION from this`,
-    '  gate, and it is not yours to grant yourself. That list is shrink-only, its one entry exists',
-    '  because a maintainer ruled on it (#10534, 2026-08-22), and an author who quietly adds their',
+    '  gate, and it is not yours to grant yourself. That list is shrink-only and is EMPTY today; the',
+    '  one entry it has ever held was there because a maintainer ruled on it (#10534, 2026-08-22)',
+    '  and came off when that disposition landed. An author who quietly adds their',
     '  own route has done the single thing that turns this gate into a parking space: the mount is',
     '  then "accounted for" by a line recording that nobody decided. Escalating costs a round; a',
     '  self-granted exemption costs the gate. There IS a legitimate act here -- it just has an',

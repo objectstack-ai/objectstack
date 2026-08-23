@@ -1266,14 +1266,16 @@ failures so one broken flow does not abort startup.
 ## Expressions in flows
 
 A flow mixes **two expression dialects**, and the rule is short: **every
-condition is CEL; braces are for values.**
+condition is CEL; braces are for values** — and the numeric functions the value
+dialect accepts are mirrored from CEL's, so a name you learn in conditions
+means the same thing inside braces.
 
 | Where | Dialect | Write it like | Bindings |
 |:---|:---|:---|:---|
 | Start-node `condition` | **CEL** (bare, no braces) | `record.amount > 500` | `record.*`, `previous.*`, bare field names, `vars.*` |
 | Edge `condition` | **CEL** (bare, no braces) | `record.status == 'open'` | same as above |
 | Decision-node `conditions[].expression` | **CEL** (bare, no braces) | `order_amount > 10000` | flow variables by name, and `vars.*` |
-| Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days) |
+| Field values in `create_record` / `update_record` | **Interpolation** (braces required) | `'Follow up on {record.name}'`, `'{TODAY() + 7}'` | `{var}`, `{var.path}`, `{$User.Id}`, `{$User.Email}`, `{NOW()}`, `{TODAY()}`, `{TODAY() + 90}` (whole days), and the CEL-mirrored numeric functions `round`, `floor`, `ceil`, `abs`, `min`, `max` (#11060) — `round` is **integer-only**, exactly like CEL's (there is no `round(x, 2)`); for N decimals write the CEL idiom `{round(x * 100) / 100}` (scale 2) |
 
 <Callout type="warn">
 **The failure modes to memorize:**
@@ -1283,6 +1285,13 @@ condition is CEL; braces are for values.**
 2. **Braces put *into* a condition** — `'{record.amount} > 500'`. Conditions
    fail loudly rather than silently, with an error that tells you to drop the
    braces.
+3. **An unsupported function in a field value** — `total: '{ROUND(x, 2)}'`,
+   `'{Math.round(x)}'`, `'{(x).toFixed(2)}'` — fails the node with a **named
+   error** listing the supported set and, where one is close, the spelling you
+   meant. Before #11060 this was a *silent* failure: the unknown name was
+   rewritten to `null` and the field was simply written `undefined`. A `fault`
+   edge does not catch this error — the expression itself is wrong, so
+   re-running can never succeed; fix the spelling.
 </Callout>
 
 <Callout type="info">
