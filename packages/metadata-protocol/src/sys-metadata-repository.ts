@@ -464,9 +464,27 @@ export class SysMetadataRepository implements MetadataRepository {
     // ADR-0048), and with no active row — a brand-new item drafted first —
     // there is nothing to inherit and the package-less semantics stand.
     if (state === 'draft' && opts.packageId == null) {
-      const activeRow = await this.engine.findOne('sys_metadata', {
-        where: this.whereFor(ref, 'active'),
-      });
+      // The overlaid base is resolved with the SAME two-scope reach the draft
+      // list applies (`listDrafts`' $or contract): an org-scoped caller's
+      // active row usually lives ENV-WIDE (`organization_id IS NULL`) — the
+      // ADR-0005 overlay order — so a same-org-only lookup here found nothing
+      // for exactly the console-session saves this inheritance exists for
+      // (measured live: an org-scoped view draft stayed `package_id NULL`
+      // over an env-wide active row bound to `app.k9qk`).
+      const activeWhere: Record<string, unknown> = {
+        type: ref.type,
+        name: ref.name,
+        state: 'active',
+      };
+      if (this.organizationId != null) {
+        activeWhere.$or = [
+          { organization_id: this.organizationId },
+          { organization_id: null },
+        ];
+      } else {
+        activeWhere.organization_id = null;
+      }
+      const activeRow = await this.engine.findOne('sys_metadata', { where: activeWhere });
       const activePkg = (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
       if (activePkg) targetPackageId = activePkg;
     }

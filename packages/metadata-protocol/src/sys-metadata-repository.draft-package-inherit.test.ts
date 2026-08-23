@@ -131,6 +131,28 @@ describe('SysMetadataRepository draft-save package inheritance (#11087)', () => 
     expect(draft.package_id ?? null).toBeNull();
   });
 
+  it('an ORG-scoped save inherits from the env-wide active row — the ADR-0005 overlay reach (#11087 layer 1b)', async () => {
+    // The console's session carries an active org, so its draft lands in the
+    // org scope while the active base row is env-wide. A same-org-only
+    // inheritance lookup finds nothing there (measured live), so the reach
+    // must mirror listDrafts' $or contract.
+    const engine = makeFakeEngine([
+      {
+        type: REF.type, name: REF.name, organization_id: null, state: 'active',
+        package_id: 'app.k9qk', metadata: '{"label":"Member"}', checksum: 'sha-active', version: 1,
+      },
+    ]);
+    const repo = new SysMetadataRepository({
+      engine: engine as never,
+      organizationId: 'org_1',
+      orgLabel: 'org_1',
+    } as never);
+    await repo.put(REF, { label: 'Member v2' }, { parentVersion: null, actor: 't', state: 'draft' as const });
+    const draft = engine.rows.find((r) => r.state === 'draft')!;
+    expect(draft.organization_id).toBe('org_1'); // org-scoped save, unchanged
+    expect(draft.package_id).toBe('app.k9qk'); // inherited across scopes
+  });
+
   it('adopts a pre-fix orphan draft (NULL package) instead of forking a second draft row', async () => {
     const engine = makeFakeEngine([
       {
