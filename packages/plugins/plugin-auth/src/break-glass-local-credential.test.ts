@@ -87,6 +87,12 @@ async function buildConfig(
  * caller's session lookup finds.
  */
 const CALLER_TOKEN = 'tok_admin_caller';
+// [#11074] `/delete-user` now keys its target on the resolved ACTOR,
+// unconditionally — never `body.userId`. A synthetic ctx that wants to reach
+// the guard's refusal on that path has to authenticate AS the credential
+// holder, not merely name one in the body. This second token resolves to a
+// different session user so that leg can be driven honestly.
+const OWNER_TOKEN = 'tok_owner_caller';
 
 function adapterWithCredentials(holders: string[]) {
   const rows = holders.map((userId) => ({ userId, providerId: 'credential' }));
@@ -94,9 +100,13 @@ function adapterWithCredentials(holders: string[]) {
     findOne: vi.fn(async ({ model, where }: { model?: string; where: Array<{ field: string; value: unknown }> }) => {
       if (model === 'session') {
         const token = where.find((w) => w.field === 'token')?.value;
-        return token === CALLER_TOKEN
-          ? { token, userId: 'usr_admin_caller', expiresAt: new Date(Date.now() + 3_600_000) }
-          : null;
+        if (token === CALLER_TOKEN) {
+          return { token, userId: 'usr_admin_caller', expiresAt: new Date(Date.now() + 3_600_000) };
+        }
+        if (token === OWNER_TOKEN) {
+          return { token, userId: 'usr_owner', expiresAt: new Date(Date.now() + 3_600_000) };
+        }
+        return null;
       }
       const userId = where.find((w) => w.field === 'userId')?.value;
       return rows.find((r) => r.userId === userId) ?? null;
@@ -113,9 +123,9 @@ function hookCtx(
   path: string,
   body: Record<string, unknown>,
   adapter: unknown,
-  { signedIn = true }: { signedIn?: boolean } = {},
+  { signedIn = true, token = CALLER_TOKEN }: { signedIn?: boolean; token?: string } = {},
 ) {
-  const headers = new Headers(signedIn ? { authorization: `Bearer ${CALLER_TOKEN}` } : {});
+  const headers = new Headers(signedIn ? { authorization: `Bearer ${token}` } : {});
   return { path, body, headers, context: { adapter } };
 }
 
@@ -198,11 +208,34 @@ describe('[#5892] the last local password login survives ban / remove / delete',
     const before = config.hooks?.before;
     expect(typeof before).toBe('function');
 
-    for (const path of BAN_PATHS) {
+    // `/admin/ban-user` and `/admin/remove-user` still resolve their target
+    // from `body.userId` — an admin acting on someone else, per their own
+    // vendor contract.
+    for (const path of ['/admin/ban-user', '/admin/remove-user']) {
       const adapter = adapterWithCredentials(['usr_owner']);
       let caught: unknown;
       try {
         await before!(hookCtx(path, { userId: 'usr_owner' }, adapter));
+      } catch (e) {
+        caught = e;
+      }
+      expect(isAPIError(caught)).toBe(true);
+      const api = caught as { statusCode: number; body: { code?: string; message?: string } };
+      expect(api.body.code).toBe('LAST_LOCAL_CREDENTIAL');
+      expect(api.body.message).toMatch(/identity-\s*provider outage|provider outage/);
+    }
+
+    // [#11074] `/delete-user` is self-service: the target is the ACTOR,
+    // unconditionally. A body-named target — even the genuine holder — is
+    // never consulted, so the refusal is only reachable by authenticating AS
+    // the holder.
+    {
+      const adapter = adapterWithCredentials(['usr_owner']);
+      let caught: unknown;
+      try {
+        await before!(
+          hookCtx('/delete-user', { userId: 'usr_someone_else' }, adapter, { token: OWNER_TOKEN }),
+        );
       } catch (e) {
         caught = e;
       }
