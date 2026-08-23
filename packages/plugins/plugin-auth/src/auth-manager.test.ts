@@ -1942,8 +1942,9 @@ describe('AuthManager', () => {
     // Rethrowing that envelope as a plain `Error` made better-call answer
     // **500 with a null body**: its router maps only `APIError`
     // (`isAPIError = err instanceof APIError || err?.name === 'APIError'`,
-    // better-call@1.3.7 `dist/utils.mjs:57`, consumed at `dist/router.mjs:93`),
-    // and everything else takes the `console.error` + 500 branch. Meanwhile the
+    // better-call@1.4.0 `dist/utils.mjs:55-56`, consumed at `dist/router.mjs:92`;
+    // re-measured 2026-08-23 against the installed copy), and everything
+    // else takes the `console.error` + 500 branch (`:93-97`). Meanwhile the
     // per-number wall on the SAME endpoint (`assertPhoneOtpSendAllowed`, in the
     // admission hook) throws a real `APIError('TOO_MANY_REQUESTS')` and answers
     // 429 — so one endpoint spoke with two voices, which is the reverse of what

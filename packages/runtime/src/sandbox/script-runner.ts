@@ -241,6 +241,40 @@ export interface ScriptContext {
   result?: unknown;
   api?: unknown;
   /**
+   * Host seam behind the VM's `ctx.title(field?)` — "what is this record
+   * called?", answered from the object's own `nameField` declaration (#11293).
+   *
+   * Hook bodies only. `installCtx` (quickjs-runner.ts) is the SOLE caller and
+   * supplies both arguments; a body sees a one-argument `ctx.title(field?)`.
+   *
+   *  - `field === undefined` → this record's title. Resolved from the record
+   *    state the hook is already firing on (`hookRecordState`, the same state
+   *    the declarative `condition` gate evaluates), so it performs **no I/O**
+   *    at all — including when the title is a formula, which is the majority
+   *    case.
+   *  - `field` names a reference column → that related record's title. This
+   *    one costs a single `findOne`, which is why the VM-facing wire gates it
+   *    behind `api.read` while the no-argument form needs no capability: the
+   *    token gates the read, and the no-argument form has no read to gate.
+   *
+   * `api` is the read channel the installer resolves AT CALL TIME — the
+   * transaction-scoped context while a body-opened `ctx.api.transaction` is in
+   * flight, the base `ctx.api` otherwise. It is a parameter rather than a
+   * closure because the seam is built once per invocation, in `body-runner.ts`,
+   * before any transaction can exist; threading it is what keeps a related-title
+   * read on the transaction's own connection instead of asking the pool for a
+   * second one, which on a `pool max=1` datasource (SQLite, the default for
+   * `objectstack dev`) is a deadlock rather than a slow path.
+   *
+   * Resolves `undefined` — never the record's id — when there is no title to
+   * give. See `record-title.ts` in `@objectstack/objectql` for why an id
+   * fallback is refused. Inside the VM that absence arrives as `null`, which is
+   * what every host value crossing this boundary becomes when it is not
+   * JSON-representable; `ctx.title() ?? '…'` reads the same either way, and
+   * `=== undefined` does not, so the VM-facing contract is stated as `null`.
+   */
+  title?: (field: string | undefined, api: unknown) => Promise<string | undefined>;
+  /**
    * Host-provided log seam for the `['log']` capability — four levels, matching
    * the four `installCtx` (quickjs-runner.ts) wires onto the VM's `ctx.log` and
    * the four the CLI's capability extractor infers `log` from.
