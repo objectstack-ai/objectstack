@@ -17,6 +17,6 @@
     // repo compiles them as relative sources for the same reason.
     "rootDir": "../../.."
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["test/**/*"],
   "exclude": ["node_modules"]
 }
