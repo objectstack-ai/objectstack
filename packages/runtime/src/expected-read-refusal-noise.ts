@@ -243,3 +243,175 @@ export function captureExpectedReadRefusals(
     },
   };
 }
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * [#10983] A SECOND, independent predicate: cross-field `{ $field }` refusal
+ *          engine noise (#7929) — the sibling {@link captureExpectedReadRefusals}
+ *          cannot recognise, because it has no table to key on
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ## Why this cannot reuse the table-keyed predicate above
+ *
+ * `captureExpectedReadRefusals` withholds an engine frame only when it sits
+ * directly above a driver refusal ITS OWN `captureDriver` sink already
+ * recognised ({@link pending} in that closure) — the engine frame alone never
+ * carries enough identity to withhold safely, so the driver channel supplies
+ * it via the caller's declared TABLE plus that table's `no such table` reason.
+ *
+ * A cross-field `{ $field }` refusal (#7929, `uncompilableFieldReferenceError`
+ * in `driver-sql/src/sql-driver.ts`) never goes through that path at all: it is
+ * a validation refusal raised while COMPILING the filter, not a backend
+ * statement fault, so it never reaches `SqlDriver.backendStatementFault` and
+ * there is no driver-channel line — and therefore no `pending` entry — for an
+ * engine frame to sit above. There is no table involved either: the refusal is
+ * about which FIELDS a filter compared, not which table was queried.
+ *
+ * ## What replaces the table: the engine frame's own message, measured
+ *
+ * Unlike the generic "no such table" case, THIS engine frame's `error.message`
+ * already carries the refusal's own identity — so the message itself is the
+ * correlation, and no driver-channel line is needed to supply it. Measured
+ * directly off a real run of `cross-field-refusal-operand-withhold.test.ts`
+ * (`--reporter=default`, the reporter this feature bypasses regardless — see
+ * the file's own header): its 6 ERROR frames carry not one message shape but
+ * TWO, both produced by `uncompilableFieldReferenceError` —
+ *
+ *   * the WITHHELD generic wording (4 of the 6): `"A cross-field comparison
+ *     ({ \"$field\": … }) in this filter cannot be compiled here. …"`;
+ *   * the [#8220] author-DISCLOSED wording (2 of the 6, from the one case in
+ *     that file where the predicate is positively marked `'author'` and the
+ *     driver restores the full diagnostic): `"Operator \"$gt\" on field
+ *     \"amount\" compares against another field ({ \"$field\":
+ *     \"secret_policy_column\" }), which cannot be compiled here: …"`.
+ *
+ * A predicate keyed on the withheld wording alone would silently miss the
+ * disclosed half — 4 of 6 withheld and 2 loud is not "expected-noise
+ * withholding", it is a partial mute with a passing assertion sitting on top
+ * of it. Both strings share exactly two substrings and no third candidate
+ * does: **`cannot be compiled here`** (verified by source grep to appear
+ * NOWHERE else in `driver-sql/src/sql-driver.ts` — it is
+ * `uncompilableFieldReferenceError`'s own wording and no other builder's) and
+ * **`$field`** (present on every `{ $field }`-shaped refusal, cross-field
+ * comparison or not). Requiring BOTH — mirroring the sibling predicate's
+ * "table AND reason" pairing above — is what keeps a sibling `{ $field }`
+ * family (`bareFieldReferenceError`'s "bare field reference … with no
+ * operator", which contains `$field` but never "cannot be compiled here")
+ * OUTSIDE the match: same operand syntax, different refusal, stays loud.
+ *
+ * ## ⛔ Still not a mute: the counting dimension moves, the discipline does not
+ *
+ * There is no driver-channel table to count against, so what is counted
+ * changes from "per table, across two correlated channels" to "per OBJECT,
+ * on the one channel that exists" — the engine frame's own `object` meta,
+ * scoped to the caller's declared list exactly as the table list scopes the
+ * sibling predicate. What does NOT change: a frame is withheld only on an
+ * exact identity match (declared object AND both message markers), the
+ * withholding is COUNTED per object, and the caller MUST assert those counts
+ * ({@link ExpectedCrossFieldRefusalCapture.silentChannels}) — a capture
+ * nobody asserts is a mute, whichever dimension it counts by.
+ *
+ * ⛔ Test-only, same reason as above: not exported from `src/index.ts`.
+ */
+
+export interface ExpectedCrossFieldRefusalCapture {
+  /** Per-object count of engine `Find operation failed` frames withheld. */
+  readonly frames: WithheldByTable;
+  /** Total engine frames withheld, across every declared object. */
+  totalFrames(): number;
+  /** The declared objects that were seen at least once. */
+  objectsSeen(): string[];
+  /**
+   * The declared objects whose expected cross-field frame never fired — the
+   * assertion surface, mirroring
+   * {@link ExpectedReadRefusalCapture.silentChannels}. ⛔ Repairing a failure
+   * here means finding out why the refusal stopped firing (or reproducing on
+   * a new message shape this predicate has not been taught) — NEVER loosening
+   * the match in {@link captureExpectedCrossFieldRefusalNoise} to make it pass.
+   *
+   * @param required the subset that must have fired. Defaults to every
+   *   declared object.
+   */
+  silentChannels(required?: readonly string[]): string[];
+  /**
+   * Install the engine sink. Same access pattern and same call-before-reads
+   * discipline as {@link ExpectedReadRefusalCapture.captureEngine} — the
+   * engine's logger is a private field with no setter.
+   */
+  captureEngine(engine: unknown): void;
+}
+
+/**
+ * Build a capture for the cross-field `{ $field }` refusal family (#7929) on
+ * a fixture's declared objects.
+ *
+ * @param objects the object names whose cross-field `{ $field }` refusals are
+ *   EXPECTED here. Derive them by measurement (as the file header does)
+ *   rather than assumption, so an object this predicate was not told about
+ *   stays loud rather than silently swallowed.
+ */
+export function captureExpectedCrossFieldRefusalNoise(
+  objects: readonly string[],
+): ExpectedCrossFieldRefusalCapture {
+  const frames = new Map<string, number>();
+
+  const bump = (object: string): void => {
+    frames.set(object, (frames.get(object) ?? 0) + 1);
+  };
+
+  const sum = (): number => {
+    let n = 0;
+    for (const v of frames.values()) n += v;
+    return n;
+  };
+
+  /**
+   * Both markers must be present — see the docblock above for why each one
+   * alone is either not unique enough (`$field` alone also matches
+   * `bareFieldReferenceError`) or, on its own, unverified against a message
+   * shape this predicate has never seen.
+   */
+  const isExpectedCrossFieldRefusal = (detail: string): boolean =>
+    detail.includes('cannot be compiled here') && detail.includes('$field');
+
+  return {
+    frames,
+    totalFrames: () => sum(),
+    objectsSeen: () => [...frames.keys()].sort(),
+
+    silentChannels(required: readonly string[] = objects): string[] {
+      const out: string[] = [];
+      for (const o of required) {
+        if ((frames.get(o) ?? 0) === 0) {
+          out.push(
+            `the engine's 'Find operation failed' frame for the cross-field refusal on '${o}' was never emitted`,
+          );
+        }
+      }
+      return out;
+    },
+
+    captureEngine(engine: unknown): void {
+      const base = (engine as { logger: Record<string, any> }).logger;
+      (engine as { logger: unknown }).logger = new Proxy(base, {
+        get: (target: Record<string, any>, key: string) =>
+          key === 'error'
+            ? (msg: string, err?: unknown, meta?: unknown) => {
+                const object = (meta as { object?: string } | undefined)?.object;
+                const detail = String((err as { message?: string } | undefined)?.message ?? '');
+                if (
+                  msg === 'Find operation failed' &&
+                  object !== undefined &&
+                  objects.includes(object) &&
+                  isExpectedCrossFieldRefusal(detail)
+                ) {
+                  bump(object);
+                  return;
+                }
+                target.error(msg, err, meta);
+              }
+            : target[key],
+      });
+    },
+  };
+}

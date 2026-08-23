@@ -81,6 +81,7 @@ import type { AggregationNode, Cube, FilterCondition } from '@objectstack/spec/d
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
+import { captureExpectedCrossFieldRefusalNoise } from './expected-read-refusal-noise.js';
 
 const OBJECT = 'cross_field_deal';
 
@@ -335,9 +336,25 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
      * caller cannot see, which is the entire premise of this card.
      */
     let crudScope: FilterCondition | null = null;
+    /**
+     * [#10983] Every read below that the driver refuses reaches this engine's
+     * `find()`, so its `catch` logs an `ERROR Find operation failed` frame
+     * BEFORE rethrowing (`engine.ts`) — a green-test noise instance of the
+     * same defect class #10629/#10630 closed, just without a table to key on
+     * (the refusal never reaches `backendStatementFault`; see
+     * `expected-read-refusal-noise.ts`'s second predicate for why and how).
+     * Withheld and COUNTED here, never muted — `silentChannels()` and
+     * `totalFrames()` are asserted in this describe's own `afterAll`.
+     */
+    let crossFieldNoise: ReturnType<typeof captureExpectedCrossFieldRefusalNoise>;
 
     beforeAll(async () => {
       ql = new ObjectQL();
+      // Installed before the first read this describe block issues — the
+      // engine's `logger` is a private field with no setter, same access
+      // discipline `captureExpectedReadRefusals` documents.
+      crossFieldNoise = captureExpectedCrossFieldRefusalNoise([OBJECT]);
+      crossFieldNoise.captureEngine(ql);
       ql.registerDriver(driver as never, true);
       await ql.init();
       ql.registerObject({
@@ -367,6 +384,19 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
         }
         await next();
       });
+    });
+
+    afterAll(() => {
+      // [#10983] The pin, not the mute: every declared object's channel fired
+      // at least once, AND the count is exactly what this describe block's
+      // five `it`s produce — six `ql.find()` calls refused (the sixth test
+      // below drives the driver directly, bypassing this engine on purpose,
+      // so it contributes no seventh). A capture that withheld 0, or any
+      // number other than 6, means either the predicate stopped matching or
+      // a call this accounting did not expect appeared — either way a
+      // silent-mute reading is exactly what this assertion exists to catch.
+      expect(crossFieldNoise.silentChannels()).toEqual([]);
+      expect(crossFieldNoise.totalFrames()).toBe(6);
     });
 
     const readWithScope = async (
