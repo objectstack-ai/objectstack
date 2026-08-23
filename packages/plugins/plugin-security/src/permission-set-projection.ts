@@ -511,20 +511,27 @@ export async function upsertEnvPermissionSet(
       // ADMIN-owned (formerly stamped 'user'). No runtime path branches on the
       // value except the 'package' guard, so this is a pure vocab rename.
       managed_by: 'admin',
-      // [#11097 SCOPE] Deliberately UNCHANGED from pre-#11097 behaviour:
-      // `!!customized`, the caller's raw opinion, exactly as before this card.
-      // A fresh `managed_by:'admin'` row can be born `customized: true` when
-      // this insert runs with `customized: overlayBacked` from a name that has
-      // NO package baseline at all — that reads wrong against the update
-      // branch's rule two lines below (`managed_by === 'package' ? !!customized
-      // : false`), and self-heals on the very next `projectPermissionMutation`
-      // call because `customizedDiffers` (below) compares against that SAME
-      // rule and issues a corrective UPDATE. Tightening the insert to match is
-      // a real, if narrow, PROJECTED-STATE change — not a round-trip-count
-      // change — and belongs to its own card with its own review, not a rider
-      // on a perf fix (AGENTS.md Prime Directive #10 / Rule 3's same-defect-
-      // class test). Filed separately; left exactly as `main` has it.
-      ...(customized !== undefined ? { customized: !!customized } : {}),
+      // [#11097] `false`, not `!!customized`, and this is NOT optional once the
+      // write-skip below exists. This row is being CREATED, so it is
+      // `managed_by:'admin'` one line up — an env-authored definition, not a
+      // customization of a packaged one — and the update branch's rule a few
+      // lines down already encodes exactly that (`existing.managed_by ===
+      // 'package' ? !!customized : false`). Stamping the caller's raw opinion
+      // here instead (main's behaviour) means a fresh overlay-backed admin row
+      // is born `customized: true`; the NEXT `projectPermissionMutation` call
+      // for the same name recomputes `patch.customized` via that SAME rule,
+      // gets `false`, and — now that writes are equality-gated — that mismatch
+      // is a real, measured drift, not a no-op. Verified by ablation: with
+      // `!!customized` here, `#11097 — env overlay reconciliation: round
+      // trips > does not grow the steady-state round-trip count` and
+      // `#11097 — drift STILL reconciles > only the DRIFTED overlay is
+      // written` both fail — the "steady state" boot immediately following a
+      // creation issues a real corrective UPDATE for every overlay-backed
+      // admin row, forever, not once historically. So this insert-time fix is
+      // required for the round-trip claim itself to hold, not an unrelated
+      // rider — the equality check needed on the write side implies the
+      // matching write on the create side.
+      ...(customized !== undefined ? { customized: false } : {}),
     };
     const created = await tryInsert(ql, 'sys_permission_set', row);
     if (created) {
