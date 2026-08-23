@@ -17,7 +17,7 @@ import {
   SystemOverviewDatasets,
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
@@ -492,8 +492,33 @@ export class AuthPlugin implements Plugin {
     // never probes. `getService` is a cheap registry lookup and org-scoping
     // registers AFTER plugin-auth, so the probe is deferred to first read
     // (start()/request time).
+    const requestedPosture = resolveTenancyPosture();
+    // [#11184 / cloud#1509] Fail-closed clause of the 2026-08-23 ruling
+    // (「1509 选择 env 指定 owner 邮箱」): a WALLED posture must declare its
+    // platform owner. Under `group`/`isolated` the "first registrant becomes
+    // platform admin" bootstrap path is removed (plugin-security's
+    // `bootstrapPlatformAdmin` grants the cross-tenant `admin_full_access`
+    // only to the account matching the declared owner email), so a walled
+    // deployment with no owner declared would otherwise boot into a state
+    // with NO way to ever mint a platform admin — or, worse, tempt a silent
+    // fallback to first-registrant elevation, the exact hole cloud#1509
+    // measured. Refuse startup instead, naming the variable — the same
+    // fail-fast direction as `resolveTenancyPosture`'s own throw and the
+    // ADR-0093 D5 degraded-tenancy guard. A throw here aborts kernel boot
+    // (Phase 1 `init()` failures propagate). The `single` posture never
+    // consults the variable: "first user is owner" stays as ruled.
+    if (postureEnforcesWall(requestedPosture) && !resolvePlatformOwnerEmail()) {
+      throw new Error(
+        `[auth] tenancy posture '${requestedPosture}' requires ${PLATFORM_OWNER_EMAIL_ENV} to be set. ` +
+          'Under walled postures the first self-registrant is NOT promoted to platform admin; ' +
+          'the platform-admin grant goes only to the account whose email matches the declared ' +
+          'owner. Refusing to boot rather than silently reverting to first-registrant elevation. ' +
+          `Set ${PLATFORM_OWNER_EMAIL_ENV} to the operator's email address, or set ` +
+          "OS_TENANCY_POSTURE=single to run single-org.",
+      );
+    }
     const tenancy: TenancyService = createTenancyService({
-      requested: resolveTenancyPosture(),
+      requested: requestedPosture,
       probeIsolation: () => {
         try {
           return !!ctx.getService('org-scoping');

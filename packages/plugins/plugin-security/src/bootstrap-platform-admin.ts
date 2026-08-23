@@ -8,10 +8,16 @@
  *  1. **Seed `sys_permission_set` rows** for each `defaultPermissionSets`
  *     entry (admin_full_access / member_default / viewer_readonly).
  *
- *  2. **Promote the first registered user to platform admin** by
- *     inserting a `sys_user_permission_set` row that points at
- *     `admin_full_access` with `organization_id = NULL` (= cross-tenant).
- *     If a platform admin already exists, this is a no-op forever.
+ *  2. **Promote the platform OWNER to platform admin** by inserting a
+ *     `sys_user_permission_set` row that points at `admin_full_access` with
+ *     `organization_id = NULL` (= cross-tenant). If a platform admin already
+ *     exists, this is a no-op forever. WHO the owner is depends on the
+ *     tenancy posture (#11184, maintainer ruling 2026-08-23):
+ *       - `single`: the first registered human user (unchanged);
+ *       - walled (`group`/`isolated`): ONLY the account matching the
+ *         env-declared `OS_PLATFORM_OWNER_EMAIL` — never the first
+ *         registrant, and never anyone at all while that var is undeclared
+ *         (fail-closed; the boot-refusal half lives in plugin-auth `init()`).
  *
  * The "create a Default Organization for the freshly-promoted admin"
  * behavior moved to `@objectstack/organizations` (see
@@ -45,8 +51,13 @@
  * make, not one a boot should make on their behalf.
  */
 
-import type { PermissionSet } from '@objectstack/spec/security';
+import { postureEnforcesWall, type PermissionSet } from '@objectstack/spec/security';
 import { SystemUserId } from '@objectstack/spec/system';
+import {
+  PLATFORM_OWNER_EMAIL_ENV,
+  resolvePlatformOwnerEmail,
+  resolveTenancyPosture,
+} from '@objectstack/types';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 
 interface BootstrapOptions {
@@ -54,6 +65,14 @@ interface BootstrapOptions {
   logger?: {
     info: (message: string, meta?: Record<string, any>) => void;
     warn: (message: string, meta?: Record<string, any>) => void;
+    /**
+     * [#11184] Optional because pre-existing callers hand in narrower shapes;
+     * the walled owner-email refusal degrades to `warn` when absent. The meta
+     * parameter is `any` on purpose: the kernel Logger types it `Error`, the
+     * siblings above type it `Record<string, any>`, and this option must
+     * accept both.
+     */
+    error?: (message: string, meta?: any) => void;
   };
   /**
    * [#2705] Force re-materialization of the default permission-set rows from
@@ -251,25 +270,104 @@ export async function bootstrapPlatformAdmin(
     return { seeded: seededCount, adminPromoted: false, reason: 'already_have_admin', ...resyncCounts };
   }
 
-  const allUsers = await tryFind(ql, 'sys_user', {}, 50);
+  // [#11184 / cloud#1509] Elevation is POSTURE-KEYED (maintainer ruling
+  // 2026-08-23, verbatim: 「1509 选择 env 指定 owner 邮箱」):
+  //
+  //   - `single`: first human user is promoted — ruled reasonable, unchanged.
+  //   - walled (`group` / `isolated`): the first-registrant path is REMOVED.
+  //     Platform admin is granted ONLY to the account matching the
+  //     env-declared owner email (`OS_PLATFORM_OWNER_EMAIL`). On a walled
+  //     deployment with self-registration reachable, whoever curls sign-up
+  //     first would otherwise receive the cross-tenant `admin_full_access`
+  //     grant AND (via `ensureDefaultOrganization`, which binds "the platform
+  //     admin") the operator's Default Organization — measured on a real
+  //     walled SaaS in cloud#1509.
+  //
+  // The REQUESTED posture (`resolveTenancyPosture()`, what the operator asked
+  // for) is deliberately the input here rather than the enforced one: a
+  // deployment that requested a wall must not fall back to first-registrant
+  // elevation even while running degraded (OS_ALLOW_DEGRADED_TENANCY=1) —
+  // fail toward the stricter reading, same direction ADR-0093 D5 fails.
+  //
+  // The startup half of the fail-closed clause (walled + undeclared owner ⇒
+  // REFUSE BOOT, naming the variable) lives in plugin-auth's `init()`, which
+  // every standard walled composition runs and where a throw aborts the boot.
+  // This branch is the defense-in-depth backstop for paths that reach the
+  // bootstrap without that guard (`os meta resync`, embeddings without
+  // plugin-auth): it refuses the ELEVATION, loudly, and never silently
+  // reverts to promoting the first registrant.
+  const walled = postureEnforcesWall(resolveTenancyPosture());
+  const declaredOwnerEmail = walled ? resolvePlatformOwnerEmail() : undefined;
+  if (walled && !declaredOwnerEmail) {
+    const message =
+      `[security] tenancy posture is walled but ${PLATFORM_OWNER_EMAIL_ENV} is not set — ` +
+      'REFUSING platform-admin elevation. Under walled postures the first registrant is ' +
+      'never promoted; platform admin is granted only to the account matching the declared ' +
+      `owner email. Set ${PLATFORM_OWNER_EMAIL_ENV} to the operator's email address.`;
+    if (logger?.error) logger.error(message);
+    else logger?.warn?.(message);
+    return {
+      seeded: seededCount,
+      adminPromoted: false,
+      reason: 'walled_owner_email_undeclared',
+      ...resyncCounts,
+    };
+  }
+
   // Exclude the non-loginable system service account. It is created during
   // seed loading — *before* the first human sign-up — so without this filter
   // it is the earliest user and steals the platform-admin promotion, leaving
   // the real admin login without `setup.access` / `studio.access` (Setup and
   // Studio then stay invisible even though login succeeds).
-  const humanUsers = allUsers.filter(
-    (u) => u.id !== SystemUserId.SYSTEM && u.role !== 'system',
-  );
-  if (humanUsers.length === 0) {
-    logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
-    return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
+  const isHumanUser = (u: any) => u && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
+  const oldestOf = (users: any[]) =>
+    [...users].sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return ta - tb;
+    })[0];
+
+  let target: any;
+  if (walled) {
+    // Query BY EMAIL rather than scanning the first N users: on a walled
+    // deployment any number of self-registrants may exist before the owner
+    // registers, and the owner must be found regardless of arrival order.
+    // Email comparison is case-insensitive; better-auth stores sign-up emails
+    // lowercased, but imported/legacy rows may not be, so both the lowercased
+    // and the verbatim spellings are queried and matches are de-duplicated.
+    const wanted = declaredOwnerEmail!.toLowerCase();
+    const spellings = [...new Set([wanted, declaredOwnerEmail!])];
+    const byId = new Map<string, any>();
+    for (const spelling of spellings) {
+      for (const u of await tryFind(ql, 'sys_user', { email: spelling }, 5)) {
+        if (u?.id) byId.set(u.id, u);
+      }
+    }
+    const owners = [...byId.values()].filter(
+      (u) => isHumanUser(u) && String(u.email ?? '').trim().toLowerCase() === wanted,
+    );
+    if (owners.length === 0) {
+      logger?.info?.(
+        `[security] walled posture — platform admin will be granted to the declared owner ` +
+          `(${PLATFORM_OWNER_EMAIL_ENV}) when that account registers; self-registrants are never promoted`,
+      );
+      return {
+        seeded: seededCount,
+        adminPromoted: false,
+        reason: 'walled_owner_not_registered',
+        ...resyncCounts,
+      };
+    }
+    target = oldestOf(owners);
+  } else {
+    const allUsers = await tryFind(ql, 'sys_user', {}, 50);
+    const humanUsers = allUsers.filter(isHumanUser);
+    if (humanUsers.length === 0) {
+      logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
+      return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
+    }
+    target = oldestOf(humanUsers);
   }
-  const sorted = [...humanUsers].sort((a, b) => {
-    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return ta - tb;
-  });
-  const target = sorted[0];
 
   const inserted = await tryInsert(ql, 'sys_user_permission_set', {
     id: genId('ups'),

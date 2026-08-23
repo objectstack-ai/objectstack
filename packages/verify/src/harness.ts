@@ -357,7 +357,27 @@ export async function bootStack(
   const prevTenancyPosture = process.env.OS_TENANCY_POSTURE;
   const requestIsolatedPosture = !!opts.multiTenant && !prevTenancyPosture;
   if (requestIsolatedPosture) process.env.OS_TENANCY_POSTURE = 'isolated';
+  // [#11184] A walled posture now REFUSES BOOT unless OS_PLATFORM_OWNER_EMAIL
+  // is declared (plugin-auth init), and plugin-security promotes ONLY the
+  // account matching it — never the first registrant. A correctly configured
+  // walled deployment declares its owner, so the harness does too: the
+  // declared owner is the dev admin the harness seeds and signs in as, which
+  // keeps every walled fixture's observable state exactly as before (the
+  // seeded admin is promoted; a fresh `signUp` stays a plain member). A
+  // caller-provided value wins, mirroring the posture knob above; restored on
+  // stop() alongside it.
+  const bootRunsWalled =
+    requestIsolatedPosture || prevTenancyPosture === 'isolated' || prevTenancyPosture === 'group';
+  const prevPlatformOwnerEmail = process.env.OS_PLATFORM_OWNER_EMAIL;
+  const declareHarnessOwnerEmail = bootRunsWalled && !prevPlatformOwnerEmail;
+  if (declareHarnessOwnerEmail) {
+    process.env.OS_PLATFORM_OWNER_EMAIL = opts.admin?.email ?? DEFAULT_ADMIN_EMAIL;
+  }
   const restoreTenancyPosture = () => {
+    if (declareHarnessOwnerEmail) {
+      if (prevPlatformOwnerEmail === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+      else process.env.OS_PLATFORM_OWNER_EMAIL = prevPlatformOwnerEmail;
+    }
     if (!requestIsolatedPosture) return;
     if (prevTenancyPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
     else process.env.OS_TENANCY_POSTURE = prevTenancyPosture;

@@ -162,6 +162,50 @@ export function resolveTenancyPosture(): TenancyPosture {
 }
 
 /**
+ * The env variable naming the deployment's PLATFORM OWNER account
+ * (#11184, the framework leg of cloud#1509).
+ *
+ * Exported as a constant so every message that refuses over it (the walled
+ * boot guard in plugin-auth, the elevation refusal in plugin-security's
+ * `bootstrapPlatformAdmin`) names exactly one spelling.
+ */
+export const PLATFORM_OWNER_EMAIL_ENV = 'OS_PLATFORM_OWNER_EMAIL';
+
+/**
+ * [#11184 / cloud#1509] Resolve the env-declared platform OWNER email —
+ * `OS_PLATFORM_OWNER_EMAIL`.
+ *
+ * Under a WALLED tenancy posture (`group` / `isolated`) the "first registrant
+ * becomes owner/platform admin" bootstrap path is REMOVED (maintainer ruling
+ * 2026-08-23, verbatim: 「1509 选择 env 指定 owner 邮箱」): on a walled
+ * deployment with self-registration reachable, whoever curls the sign-up
+ * endpoint first would otherwise receive the cross-tenant `admin_full_access`
+ * grant — measured on a real walled SaaS in cloud#1509. Platform admin is
+ * granted ONLY to the account whose email matches this variable, and a walled
+ * posture with no value declared REFUSES STARTUP (fail-closed, same reasoning
+ * as {@link resolveTenancyPosture}'s throw and ADR-0093 D5) rather than
+ * silently reverting to first-registrant elevation.
+ *
+ * The `single` posture never consults this: "first user is owner" is ruled
+ * reasonable there and unchanged.
+ *
+ * Returns the operator's value trimmed, or `undefined` when unset/blank.
+ * Comparison against `sys_user.email` is the CONSUMER's job and must be
+ * case-insensitive (this resolver echoes what the operator typed so refusal
+ * messages can quote it verbatim).
+ *
+ * Reads `process.env` live on each call, through `globalThis` like the other
+ * resolvers here (this package targets non-Node runtimes too).
+ */
+export function resolvePlatformOwnerEmail(): string | undefined {
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.[PLATFORM_OWNER_EMAIL_ENV];
+  if (raw == null) return undefined;
+  const trimmed = String(raw).trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
  * Escape hatch for the degraded-tenancy boot guard (ADR-0093 D5).
  *
  * When `OS_MULTI_ORG_ENABLED=true` but the enterprise `@objectstack/organizations`

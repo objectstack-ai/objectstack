@@ -22,7 +22,8 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
