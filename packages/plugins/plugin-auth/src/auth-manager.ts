@@ -1673,10 +1673,21 @@ export class AuthManager {
             if (breakGlassActor?.userId) {
               try {
                 // `/delete-user` names no target in the vendor's own contract:
-                // the subject IS the authenticated caller, which is now already
-                // resolved rather than looked up a second time.
-                let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
-                if (!targetId && ctx.path === '/delete-user') targetId = breakGlassActor.userId;
+                // the subject IS the authenticated caller. That must hold
+                // UNCONDITIONALLY — a body-supplied `userId` on this
+                // self-service route is never the target, present or not.
+                // (A prior `if (!targetId && …)` form let a body value win
+                // whenever one was supplied, turning the guard's refusal into
+                // a per-record oracle over the break-glass holder for any
+                // authenticated caller, not just the caller acting on
+                // themselves. `/admin/remove-user` and `/admin/ban-user`
+                // legitimately name a target in their own contract, so only
+                // this route's resolution is keyed on the actor instead of
+                // the body.)
+                const targetId: string | undefined =
+                  ctx.path === '/delete-user'
+                    ? breakGlassActor.userId
+                    : (ctx?.body?.userId ?? ctx?.body?.user_id);
                 if (targetId) {
                   isLastLocalCredential = await isLastLocalCredentialHolder(
                     ctx.context.adapter,
