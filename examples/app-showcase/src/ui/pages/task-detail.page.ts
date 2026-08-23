@@ -8,7 +8,8 @@ import { definePage } from '@objectstack/spec/ui';
  *   • `record:path`        — Salesforce-style status stepper across the task
  *                            lifecycle (Backlog → … → Done).
  *   • `record:alert`       — a conditional banner shown only while the task is
- *                            In Review (demonstrates `visible` expressions).
+ *                            In Review (demonstrates the ADR-0089 component-node
+ *                            `visibleWhen` predicate, `has()`-guarded).
  *   • `record:quick_actions` — object Actions surfaced as inline buttons.
  *   • `record:highlights` + `record:details` — the standard compact + section
  *                            layout.
@@ -41,14 +42,27 @@ export const TaskDetailPage = definePage({
             ],
           },
         },
+        // The banner's gate is the ADR-0089 canonical, component-NODE
+        // `visibleWhen` — a sibling of `properties`, never a key inside it.
+        // `properties.visible` is declared on `record:alert` too, but the page
+        // metadata serves that bag verbatim (`properties` is an opaque record
+        // on `PageComponentSchema`), so a bare string there reaches the
+        // renderer's LEGACY JS evaluator, which has no `has()`. The node key is
+        // `ExpressionInputSchema`, normalized to `{ dialect: 'cel', source }`
+        // before it is served, so it runs on CEL — where an absent key is a
+        // FAULT and the surface is fail-soft, i.e. an unguarded predicate would
+        // leave this banner permanently shown. Hence the `has()` guard, and
+        // hence no `visible` beside it: a node `visibleWhen` and
+        // `properties.visible` compose as AND, so leaving both would keep the
+        // legacy predicate load-bearing.
         {
           type: 'record:alert',
+          visibleWhen: "has(record.status) && record.status == 'in_review'",
           properties: {
             severity: 'warning',
             icon: 'eye',
             title: 'Awaiting review',
             body: 'This task is in review — confirm the work before marking it done.',
-            visible: "record.status == 'in_review'",
             dismissible: true,
           },
         },

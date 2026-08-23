@@ -57,8 +57,25 @@ export const SysUserDetailPage: Page = {
     // current user viewing their own profile (admins looking at other
     // users see nothing — they can use Setup actions instead).
     alerts: [
+      // The gate is the ADR-0089 canonical, component-NODE `visibleWhen` — a
+      // sibling of `properties`, never a key inside it. `record:alert` also
+      // DECLARES `properties.visible`, but the page metadata serves that bag
+      // verbatim (`properties` is an opaque record on `PageComponentSchema`),
+      // so a bare string there reaches the renderer's LEGACY JS evaluator,
+      // which has no `has()`. The node key is `ExpressionInputSchema`,
+      // normalized to `{ dialect: 'cel', source }` before it is served, so it
+      // runs on CEL — where an absent key is a FAULT and the surface is
+      // fail-soft, i.e. an unguarded predicate would leave "Email not verified"
+      // permanently shown, even beside the page's own "Email Verified: Yes"
+      // chip. Hence the `has()` guards (the same shape the sibling
+      // `resend_verification_email` action predicate already carries), and
+      // hence no `visible` beside it: a node `visibleWhen` and
+      // `properties.visible` compose as AND, so leaving both would keep the
+      // legacy predicate load-bearing.
       {
         type: 'record:alert',
+        visibleWhen:
+          'has(record.id) && has(record.email_verified) && record.id == ctx.user.id && record.email_verified == false',
         properties: {
           severity: 'warning',
           icon: 'mail',
@@ -76,7 +93,6 @@ export const SysUserDetailPage: Page = {
             'ja-JP': 'パスワードリセットや重要なシステム通知を受け取るには、メールアドレスを認証してください。',
             'es-ES': 'Verifica tu correo para recibir restablecimientos de contraseña y notificaciones importantes del sistema.',
           },
-          visible: 'record.id == ctx.user.id && record.email_verified == false',
           dismissible: false,
           action: {
             actionName: 'resend_verification_email',
