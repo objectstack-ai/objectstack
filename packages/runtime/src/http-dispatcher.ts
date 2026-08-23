@@ -9,6 +9,7 @@ import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } f
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { readServiceSelfInfo, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
+import { resolveRuntimeVersion } from './runtime-version.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
 // `import * as actionExec from './action-execution.js'` was dropped in #4936:
@@ -258,6 +259,16 @@ export class HttpDispatcher {
      * `this.kernel` (#5155).
      */
     private readonly defaultKernel: ObjectKernel;
+    /**
+     * The value served as `version` on `GET /health` and in the discovery
+     * payload (#10993) — an injected `OS_RUNTIME_VERSION` stamp, falling back
+     * to the resolved `@objectstack/runtime` package version. Resolved ONCE
+     * here, at construction, not per request: it names the running process,
+     * which cannot change over the dispatcher's lifetime. See
+     * {@link resolveRuntimeVersion} for the derivation and the fallback
+     * order.
+     */
+    private readonly runtimeVersion: string;
     private defaultProject?: { environmentId: string; orgId?: string };
     private kernelResolver?: KernelResolver;
     private scopeManager?: EnvironmentScopeManager;
@@ -304,6 +315,7 @@ export class HttpDispatcher {
      */
     constructor(kernel: ObjectKernel, _envRegistryIgnored?: unknown, options?: HttpDispatcherOptions) {
         this.defaultKernel = kernel;
+        this.runtimeVersion = resolveRuntimeVersion();
         const resolveService = (name: string): any => {
             try { return (kernel as any).getService?.(name); } catch { return undefined; }
         };
@@ -558,7 +570,7 @@ export class HttpDispatcher {
                 response: this.success({
                     status: 'ok',
                     timestamp: new Date().toISOString(),
-                    version: '1.0.0',
+                    version: this.runtimeVersion,
                     uptime: typeof process !== 'undefined' ? process.uptime() : undefined,
                 }),
             }),
@@ -1407,7 +1419,13 @@ export class HttpDispatcher {
 
         return {
             name: 'ObjectOS',
-            version: '1.0.0',
+            // [#10993] Was a hardcoded '1.0.0' literal — the identical defect
+            // as `/health`'s `version` (same field name, same "System
+            // Identity" contract in `DiscoverySchema`, same artifact-identity
+            // purpose), fixed the same way: {@link resolveRuntimeVersion},
+            // resolved once at dispatcher construction. See
+            // `packages/runtime/src/runtime-version.ts`.
+            version: this.runtimeVersion,
             // [#4828] Mapped, not passed through. `DiscoverySchema.environment`
             // is an ENUM (`production|sandbox|development`) and this used to be
             // `getEnv('NODE_ENV', 'development')` raw — so `NODE_ENV=test` (what

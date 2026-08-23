@@ -1,13 +1,27 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRequire } from 'node:module';
 import { HttpDispatcher } from './http-dispatcher';
 import { ObjectKernel } from '@objectstack/core';
+
+// [#10993] `version` on both the root ("") and `/discovery` payloads is no
+// longer the literal '1.0.0' — it is `@objectstack/runtime`'s own resolved
+// package version (no `OS_RUNTIME_VERSION` stamp injected below), read the
+// same way the production code does so this assertion can never silently
+// drift from what `resolveRuntimeVersion()` actually returns.
+const RUNTIME_PACKAGE_VERSION = (
+    createRequire(import.meta.url)('../package.json') as { version: string }
+).version;
 
 describe('HttpDispatcher Root Handling', () => {
     let kernel: ObjectKernel;
     let dispatcher: HttpDispatcher;
 
     beforeEach(() => {
+        // No build stamp injected — these assertions exercise the package-
+        // version FALLBACK path of resolveRuntimeVersion() (#10993).
+        delete process.env.OS_RUNTIME_VERSION;
+
         // Mock minimal Kernel structure
         kernel = {
             services: {},
@@ -37,7 +51,7 @@ describe('HttpDispatcher Root Handling', () => {
         expect(data).toBeDefined();
         // getDiscoveryInfo returns 'name' not 'apiName'
         expect(data.name).toBe('ObjectOS');
-        expect(data.version).toBe('1.0.0');
+        expect(data.version).toBe(RUNTIME_PACKAGE_VERSION);
         expect(data.routes).toBeDefined();
         // Since we passed empty prefix in dispatch code (hardcoded), routes should be relative
         expect(data.routes.metadata).toBe('/meta');
@@ -54,7 +68,7 @@ describe('HttpDispatcher Root Handling', () => {
         const data = result.response?.body?.data;
         expect(data).toBeDefined();
         expect(data.name).toBe('ObjectOS');
-        expect(data.version).toBe('1.0.0');
+        expect(data.version).toBe(RUNTIME_PACKAGE_VERSION);
         expect(data.routes).toBeDefined();
     });
 
