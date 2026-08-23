@@ -67,42 +67,40 @@ export const SysAutomationRun = ObjectSchema.create({
   fields: {
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
 
-    // ⚠️ MEASURED DEFECT, cloud#1395 — read this before trusting the column.
+    // [#10101, the cloud#1395 Option A ruling] The SUBJECT record's
+    // organization, with the acting context as fallback — resolved by the
+    // SHARED platform-row resolver (`resolveRecordOrganizationField`,
+    // `@objectstack/metadata-core`) in `ObjectStoreSuspendedRunStore`, from
+    // the trigger-record snapshot, on BOTH write paths (a paused row's
+    // `serialize()` and a terminal row's `recordTerminal()` — same inputs,
+    // same precedence, so the two rows of one run agree by construction).
     //
-    // The value is resolved from the ACTING CONTEXT (`AutomationContext.
-    // tenantId`) and from nothing else, so it is NULL for every run whose
-    // trigger carries no acting organization — which is all of them on the
-    // schedule, time-relative and api triggers, none of which sets a tenant, by
-    // construction: a scheduled sweep has no one acting organization. On a
-    // walled single-database HotCRM SaaS boot this measured 31 of 31 rows
-    // org-less, each one naming a `trigger_object` / `trigger_record_id` that
-    // DOES belong to a specific customer.
+    // Why subject-first: the schedule, time-relative and api triggers carry no
+    // acting tenant at all, by construction, so the pre-#10101 actor-only read
+    // measured 31 of 31 rows org-less on a walled HotCRM SaaS boot — each row
+    // naming a `trigger_object` / `trigger_record_id` that DOES belong to a
+    // specific customer. Subject-first is what `sys_audit_log`'s writer
+    // already did (#8707 honouring #8287's ruling); three platform side
+    // tables, one answer now. A trigger with no record (a plain scheduled
+    // sweep has no ONE subject) keeps the acting-context fallback — NULL there
+    // stays NULL: fabricating an acting organization stays vetoed (Option C).
     //
-    // ⛔ Do NOT read that as "platform tables do not carry an organization".
-    // The negative control on the same boot refutes it: `sys_audit_log` (1669
-    // rows) was correctly attributed throughout, because its writer resolves the
-    // organization from the RECORD the row is about and falls back to the
-    // session only when the record has none (plugin-audit
-    // `resolveRecordOrganizationField`, #8707 honouring #8287's ruling). Three
-    // platform side tables, two answers — that disagreement is the defect, not
-    // the column.
-    //
-    // Which column a side-table row should take its organization from is an
-    // open contract question on cloud#1395: the audit writer's resolver is
-    // scope-pinned to audit stamping by the #8778 ruling, so a second consumer
-    // needs its own. Pinned meanwhile by `suspended-run-store.test.ts`
-    // ('PINNED: a tenant-less trigger context…') and by check `a4` in cloud's
-    // `verify-hotcrm-saas.mjs`; both must be PROMOTED, never repaired, when the
-    // write side is fixed.
+    // Promoted from the cloud#1395 pinned-defect state by #10101: the
+    // framework pin (`suspended-run-store.test.ts`, formerly 'PINNED: a
+    // tenant-less trigger context…') now asserts the resolved organization;
+    // the two cloud-side pins (`hotcrm-multitenant.acceptance.ts`, check `a4`
+    // in `verify-hotcrm-saas.mjs`) are tracked on cloud#1395 and follow at the
+    // next `.objectstack-sha` bump.
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
       group: 'System',
-      // ⛔ String unchanged on purpose — same reason as
-      // `sys_approval_request.organization_id`: it is extracted into the
-      // generated i18n bundles, so the reword rides the write-side fix and its
-      // regeneration pass rather than arriving as a silent bundle drift here.
-      description: 'Tenant that owns this run (propagated from the trigger context)',
+      // Reworded with the #10101 write-side fix (was "Tenant that owns this
+      // run (propagated from the trigger context)" — ADR-0120 §Terminology
+      // requires "organization", and the value is subject-first now).
+      // Extracted into the generated i18n bundles as `help`; the four locales
+      // regenerate in the same pass.
+      description: 'Organization of the record that triggered this run (falls back to the acting context when the trigger has none)',
     }),
 
     flow_name: Field.text({

@@ -1462,6 +1462,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -2187,6 +2190,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -2194,9 +2200,6 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

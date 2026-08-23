@@ -19,12 +19,19 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // heuristic here would be a second de-facto contract that disagrees with the
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
-import { resolveDisplayField, isTenancyDisabled } from '@objectstack/spec/data';
-// [#8707] The canonical spelling of the tenant anchor, imported rather than
-// re-typed. `SystemFieldName.ORGANIZATION_ID` is the reference this repo keeps
-// precisely so consumers stop inventing their own (`org_id`, `tenant_id`,
-// `space`) — the drift class framework#4330 / cloud#982 already paid for.
-import { SystemFieldName } from '@objectstack/spec/system';
+import { resolveDisplayField } from '@objectstack/spec/data';
+// [#8707 / #10101] The platform-row organization resolver, imported rather
+// than owned. It started life in THIS file (#8707, honouring #8287's ruling)
+// and was promoted to `@objectstack/metadata-core` by the maintainer ruling
+// recorded on cloud#1395: ONE shared resolver for all three platform-row
+// writers (audit, approvals, automation runs) — a per-writer copy of the
+// precedence is exactly the two-tables-disagree drift the promotion ends.
+// `createFieldPresenceProbe` moved with it (same file, same criterion) and is
+// re-exported below so this package's public surface is unchanged.
+import {
+  createFieldPresenceProbe,
+  createRecordOrganizationResolver,
+} from '@objectstack/metadata-core';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -209,155 +216,15 @@ const NOISE_FIELDS = new Set<string>([
 ]);
 
 /**
- * "Does this object's REGISTERED schema declare this field?", memoized per
- * object.
- *
- * Extracted to module scope (#8144) so the CRUD writer below and the auth-event
- * writer (`auth-event-audit.ts`) ask the question ONE way. Both stamp the same
- * two conditional columns on the same table, and a second hand-rolled probe
- * would answer differently on the day one of them is fixed.
- *
- * Why the probe exists at all: the SchemaRegistry auto-injects
- * `organization_id` only in multi-tenant mode (`applySystemFields({
- * multiTenant })`), so on single-tenant stacks the `sys_audit_log` /
- * `sys_activity` tables have no such column. Unconditionally stamping it there
- * made every audit INSERT fail with "table sys_audit_log has no column named
- * organization_id" — and the error was swallowed, so audit logging was silently
- * non-functional. Resolve the field set lazily from the engine schema and cache
- * it; object schemas are static after registration.
- *
- * Best-effort in both directions: an engine with no `getSchema` (an in-memory
- * test double) reports every field absent, which skips the stamp rather than
- * failing the write.
+ * [#8144 / #8707 / #10101] `createFieldPresenceProbe` and
+ * `resolveRecordOrganizationField` were defined HERE until #10101 promoted
+ * them to `@objectstack/metadata-core` (the cloud#1395 ruling: one shared
+ * platform-row organization resolver for audit, approvals and automation
+ * runs). Re-exported from this original path so this package's public surface
+ * — and every existing import — is unchanged; the moved modules carry the
+ * full precedence documentation.
  */
-export function createFieldPresenceProbe(
-  engine: unknown,
-): (objectName: string, field: string) => boolean {
-  const fieldSetCache = new Map<string, Set<string> | null>();
-  return (objectName: string, field: string): boolean => {
-    let set = fieldSetCache.get(objectName);
-    if (set === undefined) {
-      set = null;
-      try {
-        const schema: any =
-          typeof (engine as any)?.getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
-        const fields = schema?.fields;
-        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
-          set = new Set<string>(Object.keys(fields));
-        } else if (Array.isArray(fields)) {
-          set = new Set<string>(fields.map((f: any) => f?.name).filter(Boolean));
-        }
-      } catch {
-        /* ignore — best-effort; absence just means we skip the stamp */
-      }
-      fieldSetCache.set(objectName, set);
-    }
-    return set != null && set.has(field);
-  };
-}
-
-/**
- * [#8707] "Which column carries THIS object's own organization?" — resolved
- * from the object's REGISTERED schema, never hard-coded to one spelling.
- *
- * The audit row is stamped from the organization the record is ABOUT (see the
- * precedence note at the `tenantId` computation below, and #8287's ruling). To
- * do that the writer has to know which column holds it, and `organization_id`
- * is not universally the answer: `sys_api_key` carries
- * `active_organization_id` by deliberate design (#8287). Adding a second
- * literal name beside the first would make this writer correct for exactly two
- * objects and silently wrong for the third, so the question is asked of the
- * schema instead.
- *
- * ## Precedence — deliberately the platform's own, not a second opinion
- *
- * It mirrors `SqlDriver.computeTenantField` step for step, because that is the
- * platform's single existing answer to "which column is this object
- * tenant-scoped by", and an audit row's stamp must agree with the wall the row
- * will later be read through. Re-derived here rather than imported: that method
- * is `protected` on a DRIVER class, and plugin-audit takes no driver
- * dependency (its package contract is core/objectql/platform-objects/spec).
- * The two shared inputs ARE imported — `isTenancyDisabled` (ADR-0066's single
- * source of truth for the opt-out) and `SystemFieldName.ORGANIZATION_ID` — so
- * the parts that could drift are one definition, and only the ordering is
- * restated.
- *
- *  0. **Declared `tenancy.organizationField`, when the object really has that
- *     field.** The read-neutral, STAMP-ONLY declaration #8778's ruling added
- *     for exactly this consumer (option A; #8707's remaining half). It
- *     answers "which column says who this row is ABOUT" — a different
- *     question from "what is this object walled by", which is why it wins
- *     over every limb below, the ADR-0066 opt-out included: an author who
- *     declares it on an unwalled object (`sys_api_key`, `enabled: false` by
- *     necessity — the credential table must never be org-walled, #8287) is
- *     stating precisely that the trail should follow the record's own
- *     organization even though no wall does. Honoured only when the field is
- *     really present, same #5315 guard as limb 2. ⛔ Stamp-only cuts both
- *     ways: this resolver is the key's ONLY consumer by scope pin — a read
- *     path that starts consulting it needs its own ruling.
- *  1. **`tenancy.enabled === false` → `null`.** ADR-0066 platform-global
- *     objects (`sys_sso_provider` is the shipped example) keep an optional org
- *     FK while explicitly NOT being tenant-scoped. Stamping an audit row from
- *     that FK would scope a global object's audit trail into one organization
- *     and hide it from the platform admin who acted — strictly LESS visible
- *     than today. This limb is what keeps the precedence flip from trading one
- *     invisibility for another; it is not an optimisation.
- *  2. **Declared `tenancy.tenantField`, when the object really has that
- *     field.** The spec key already exists for "this object's tenant column
- *     genuinely is not the platform's" and the driver already honours it, so an
- *     object that declares one gets its audit rows stamped from the same column
- *     its rows are walled by. Honoured only when the field is really present —
- *     the same guard `computeTenantField` applies, for the same reason (#5315:
- *     a declared name pointing at a missing column must fall through, not
- *     resolve to nothing).
- *  3. **The canonical injected `organization_id`, when present.** What every
- *     multi-tenant object gets from `applySystemFields`.
- *  4. Otherwise `null` — the object has no organization of its own, and the
- *     caller falls back to the acting session's tenant exactly as before.
- *
- * ## What it deliberately does NOT do
- *
- * ⛔ It does not scan for "a lookup whose `reference` is `sys_organization`".
- * That derivation is FALSIFIED by a shipped object: `sys_organization` itself
- * declares no `organization_id` and exactly one such lookup —
- * `parent_organization_id` — so the scan would stamp every organization's audit
- * rows with its PARENT's id, hiding them from the very tenant they concern.
- * Worse, reading `parent_organization_id` for a visibility decision is an
- * ADR-0105 D6 red line that `validateOrgAxisRedLines` (@objectstack/lint) makes
- * a build error for RLS policies, sharing rules and scopes; a plugin reaching
- * the same conclusion through a heuristic is the same mistake with no gate on
- * it.
- *
- * `sys_api_key.active_organization_id` is reachable through limb 0 since
- * #8778 (it was the object that motivated the key). Its column is still not —
- * and must never become — the object's tenant-scope column:
- * `tenancy.tenantField` feeds `applyTenantScope` / `injectTenantOnInsert`, so
- * declaring it there would wall the credential table on an equality that
- * excludes NULL — every pre-#8287 key would vanish from its own owner's
- * list, which is the defect #8287 exists to have removed.
- *
- * @param objectDef the registered object definition (`engine.getSchema(name)`)
- * @param hasField the memoized field-presence probe for the SAME object — this
- *   file asks "does the schema declare this field?" exactly one way
- *   ({@link createFieldPresenceProbe}), and a second hand-rolled shape check
- *   here would answer differently on the day one of them is fixed.
- */
-export function resolveRecordOrganizationField(
-  objectDef: unknown,
-  hasField: (field: string) => boolean,
-): string | null {
-  if (!objectDef || typeof objectDef !== 'object') return null;
-  const tenancy = (objectDef as { tenancy?: { organizationField?: unknown; tenantField?: unknown } }).tenancy;
-  // Limb 0 — the explicit stamp-only declaration (#8778) wins over everything,
-  // the ADR-0066 opt-out below included: see the precedence doc above.
-  const stampField = tenancy?.organizationField;
-  if (typeof stampField === 'string' && stampField.length > 0 && hasField(stampField)) return stampField;
-  if (isTenancyDisabled(objectDef)) return null;
-  const declared = tenancy?.tenantField;
-  if (typeof declared === 'string' && declared.length > 0 && hasField(declared)) return declared;
-  if (hasField(SystemFieldName.ORGANIZATION_ID)) return SystemFieldName.ORGANIZATION_ID;
-  return null;
-}
+export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
 /** Action name produced from a HookContext.event string. */
 function actionFor(event: string): 'create' | 'update' | 'delete' | null {
@@ -987,21 +854,13 @@ export function installAuditWriters(
     return def;
   };
 
-  // [#8707] The object's own organization COLUMN — see
-  // `resolveRecordOrganizationField` for the precedence and for why the answer
-  // comes from the schema rather than a literal. Memoized per object like the
-  // two caches above: object schemas are static after registration, and this
-  // runs on every audited write.
-  const orgFieldCache = new Map<string, string | null>();
-  const resolveRecordOrgField = (objectName: string): string | null => {
-    const hit = orgFieldCache.get(objectName);
-    if (hit !== undefined) return hit;
-    const resolved = resolveRecordOrganizationField(getObjectDef(objectName), (field) =>
-      objectHasField(objectName, field),
-    );
-    orgFieldCache.set(objectName, resolved);
-    return resolved;
-  };
+  // [#8707 / #10101] The object's own organization COLUMN and value, through
+  // the SHARED platform-row resolver (`@objectstack/metadata-core`) — one
+  // memoized instance per installation, the same instance shape the approval
+  // writer and the automation-run recorder hold. See
+  // `resolveRecordOrganizationField` there for the precedence and for why the
+  // answer comes from the schema rather than a literal.
+  const recordOrgResolver = createRecordOrganizationResolver(engine);
 
   // Display label for an object under a given translate fn: translated label
   // → authored def label → API name. Shared by activity summaries and the
@@ -1337,13 +1196,8 @@ export function installAuditWriters(
     // and B, active in B, writing an A record — the union wall permits it) and
     // `shared`, and on system/sudo paths that write another org's row while
     // carrying a session.
-    const orgField = resolveRecordOrgField(ctx.object);
-    const readRecordOrg = (rec: any): string | undefined => {
-      if (!orgField || !rec || typeof rec !== 'object') return undefined;
-      const v = (rec as Record<string, unknown>)[orgField];
-      return typeof v === 'string' && v.length > 0 ? v : undefined;
-    };
-    const recordOrgId: string | undefined = readRecordOrg(ctx.result) ?? readRecordOrg(before);
+    const recordOrgId: string | undefined =
+      recordOrgResolver.organizationOf(ctx.object, ctx.result, before) ?? undefined;
     //
     // [#9516] The fallback arm reads `organizationId` — the ONLY name the
     // engine emits. `ObjectQL.buildSession` builds the hook session as a fixed

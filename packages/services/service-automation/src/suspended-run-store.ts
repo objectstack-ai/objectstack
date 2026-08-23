@@ -1,6 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Logger } from '@objectstack/spec/contracts';
+// [#10101] The SHARED platform-row organization resolver — the cloud#1395
+// ruling ("A platform row's organization is the SUBJECT record's organization;
+// actor context is the fallback, never the primary"), implemented once in
+// `@objectstack/metadata-core` and consumed by all three sanctioned writers
+// (audit stamping, the approval-row writer, this automation-run recorder). A
+// recorder-local re-derivation here was rejected by name (Option B): it would
+// be a third answer to a question the codebase already answered two ways.
+import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import type { RunRecord, SuspendedRun, SuspendedRunStore } from './engine.js';
 
 /**
@@ -148,6 +156,15 @@ export interface SuspendedRunStoreEngine {
   insert(object: string, data: any, options?: any): Promise<any>;
   update(object: string, data: any, options?: any): Promise<any>;
   delete?(object: string, options?: any): Promise<any>;
+  /**
+   * [#10101] Registered object definition for a name — what the shared
+   * platform-row organization resolver (`@objectstack/metadata-core`) reads to
+   * answer "which column carries the TRIGGERING object's own organization".
+   * Optional so an in-memory test double without it degrades to the
+   * acting-context fallback rather than failing the write (the same
+   * best-effort posture the resolver itself takes).
+   */
+  getSchema?(objectName: string): unknown;
 }
 
 interface MinimalLogger {
@@ -178,6 +195,15 @@ export interface ObjectStoreSuspendedRunStoreOptions {
  */
 export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   private readonly maxTerminalRunsPerFlow: number;
+  /**
+   * [#10101] Memoized shared platform-row organization resolver over the same
+   * engine the rows are written through — answers "which column carries the
+   * TRIGGERING object's own organization, and what does the trigger record
+   * hold there". One instance for the store's lifetime: object schemas are
+   * static after registration, and the audit and approval writers memoize the
+   * same way.
+   */
+  private readonly recordOrgResolver: RecordOrganizationResolver;
 
   constructor(
     private readonly engine: SuspendedRunStoreEngine,
@@ -186,6 +212,7 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   ) {
     this.maxTerminalRunsPerFlow =
       options?.maxTerminalRunsPerFlow ?? DEFAULT_MAX_TERMINAL_RUNS_PER_FLOW;
+    this.recordOrgResolver = createRecordOrganizationResolver(engine);
   }
 
   async save(run: SuspendedRun): Promise<void> {
@@ -259,7 +286,20 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     const id = HISTORY_PREFIX + record.runId;
     const row = {
       id,
-      organization_id: record.organizationId ?? null,
+      // [#10101, the cloud#1395 Option A ruling] SUBJECT first, actor second:
+      // the organization of the record this run is ABOUT (resolved from the
+      // trigger-record snapshot through the shared platform-row resolver —
+      // `sys_api_key`'s divergent `active_organization_id` included), falling
+      // back to the acting context's tenant (`record.organizationId`) when the
+      // trigger carries no record or the object has no organization of its
+      // own. A plain scheduled sweep has neither and keeps NULL — fabricating
+      // an acting organization stays vetoed (Option C). Same inputs and same
+      // precedence as `serialize()` below, so a run's paused row and its
+      // terminal row agree by construction.
+      organization_id:
+        this.recordOrgResolver.organizationOf(record.triggerObject ?? '', record.triggerRecord) ??
+        record.organizationId ??
+        null,
       flow_name: record.flowName,
       flow_version: record.flowVersion ?? null,
       node_id: record.nodeId ?? null,
@@ -407,20 +447,29 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
     // safety"; a producer that wants this row attributed sets the declared
     // `tenantId`.
     //
-    // ⚠️ MEASURED, and NOT fixed by the line above (cloud#1395): this resolves
-    // to null on every trigger path that carries no acting tenant — the
-    // schedule, time-relative and api triggers set none at all, by
-    // construction, because a scheduled run has no one organization. Those runs
-    // persist `organization_id = NULL` while describing a record that DOES
-    // belong to a customer. `sys_audit_log` does not have this defect on the
-    // same boot because its writer resolves the organization from the RECORD it
-    // describes (plugin-audit `resolveRecordOrganizationField`, #8707 honouring
-    // #8287's ruling) and falls back to the session only when the record has
-    // none. ⛔ Do not read that asymmetry as "platform tables carry no org" —
-    // it is two writers reading the acting context where a third reads the
-    // subject. Which column a side-table row should take its organization from
-    // is the open contract question on cloud#1395.
-    const org = ctx.tenantId ?? null;
+    // [#10101, the cloud#1395 Option A ruling] SUBJECT first, actor second:
+    // the paused row's organization is the organization of the record this run
+    // is ABOUT — resolved from the trigger-record snapshot through the SHARED
+    // platform-row resolver (`resolveRecordOrganizationField`,
+    // `@objectstack/metadata-core`; `sys_api_key`'s divergent
+    // `active_organization_id` included, via `tenancy.organizationField`) —
+    // and the acting tenant above is the ruled FALLBACK, never the primary.
+    //
+    // This closes the measured half of cloud#1395: the schedule, time-relative
+    // and api triggers carry no acting tenant at all, by construction, so
+    // before this every run they produced persisted `organization_id = NULL`
+    // while `trigger_object` / `trigger_record_id` on the very same row named
+    // a record that DOES belong to a customer. It is the same subject-first
+    // precedence `sys_audit_log`'s writer already stamped with (#8707
+    // honouring #8287's ruling) — three platform side tables, one answer now.
+    //
+    // The fallback still stands, and still matters: an object with no
+    // organization of its own (single-tenant stacks, ADR-0066 platform-global
+    // objects), a trigger with no record (a plain scheduled sweep has no ONE
+    // subject — fabricating an acting organization stays vetoed, Option C),
+    // and an engine double with no `getSchema` all resolve `null` here and
+    // keep the acting context's answer.
+    const org = this.recordOrgResolver.organizationOf(String(ctx.object ?? ''), ctx.record) ?? ctx.tenantId ?? null;
     // #7533 — the same three trigger columns the terminal path writes. A paused
     // row is a `sys_automation_run` row too, and leaving them null here would
     // make "which runs did this record provoke?" answer for finished runs while

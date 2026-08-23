@@ -10,6 +10,14 @@ import {
   type ApprovalNodeConfig,
 } from '@objectstack/spec/automation';
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
+// [#10101] The SHARED platform-row organization resolver — the cloud#1395
+// ruling ("A platform row's organization is the SUBJECT record's organization;
+// actor context is the fallback, never the primary"), implemented once in
+// `@objectstack/metadata-core` and consumed by all three sanctioned writers
+// (audit stamping, this approval-row writer, the automation-run recorder). A
+// writer-local re-derivation here was rejected by name (Option B): it would be
+// a third answer to a question the codebase already answered two ways.
+import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import { keysetWalk } from '@objectstack/types';
 import {
   ADMIN_FULL_ACCESS,
@@ -75,6 +83,15 @@ export interface ApprovalEngine {
   insert(object: string, data: any, options?: any): Promise<any>;
   update(object: string, idOrData: any, dataOrOptions?: any, options?: any): Promise<any>;
   delete(object: string, options?: any): Promise<any>;
+  /**
+   * [#10101] Registered object definition for a name — what the shared
+   * platform-row organization resolver (`@objectstack/metadata-core`) reads to
+   * answer "which column carries this object's own organization". Optional so
+   * an in-memory test double without it degrades to the acting-context
+   * fallback rather than failing the write (the same best-effort posture the
+   * resolver itself takes).
+   */
+  getSchema?(objectName: string): unknown;
 }
 
 export interface ApprovalClock { now(): Date }
@@ -598,9 +615,18 @@ export class ApprovalService implements IApprovalService {
    * deployment gets on upgrade.
    */
   private readonly recordReaderVisibleObjects: ReadonlySet<string>;
+  /**
+   * [#10101] Memoized shared platform-row organization resolver over
+   * {@link ApprovalService.engine} — answers "which column carries the SUBJECT
+   * object's own organization, and what does this record hold there". One
+   * instance for the service's lifetime: object schemas are static after
+   * registration, and the audit writer memoizes the same way.
+   */
+  private readonly recordOrgResolver: RecordOrganizationResolver;
 
   constructor(opts: ApprovalServiceOptions) {
     this.engine = opts.engine;
+    this.recordOrgResolver = createRecordOrganizationResolver(opts.engine);
     this.clock = opts.clock ?? { now: () => new Date() };
     this.logger = opts.logger;
     this.automation = opts.automation;
@@ -1956,6 +1982,29 @@ export class ApprovalService implements IApprovalService {
     // `organizationId` is not on the envelope — see isOverrideActor().
     const ctxOrg = (context as any)?.organizationId ?? context?.tenantId ?? input.organizationId ?? null;
     const nowDate = this.clock.now();
+    // [#10101, the cloud#1395 Option A ruling] The request's organization is
+    // the SUBJECT record's organization; the acting context is the fallback,
+    // never the primary. Resolved through the SHARED platform-row resolver
+    // (`@objectstack/metadata-core`) — the same precedence the audit writer
+    // stamps `sys_audit_log` with, so an approval row and an audit row about
+    // the same record land behind the same wall (`sys_api_key`'s divergent
+    // `active_organization_id` included, via `tenancy.organizationField`).
+    //
+    // Before this, `ctxOrg` alone stamped the row: NULL on every schedule /
+    // time-relative / api triggered flow (none carries an acting tenant, by
+    // construction), which produced the measured cloud#1395 defect — a pending
+    // request that LOCKS the record it is about while being invisible in every
+    // inbox, its owner's included (`buildRequestWhere` matches the wall by
+    // strict equality, so the owner fails exactly as a stranger does).
+    //
+    // The fallback is unchanged and still load-bearing: an object with no
+    // organization of its own (single-tenant stacks, ADR-0066 platform-global
+    // objects) resolves `null` here and keeps the acting context's answer.
+    // `requestOrg` feeds everything that means "this request's organization" —
+    // the request row, `sys_approval_action`, the `sys_approval_approver`
+    // index, AND the approver-slate expansion below: a slate resolved in a
+    // different organization than the wall the request lands behind would be
+    // approvers who cannot see the request they are asked to decide.
     // OOO auto-skip (#1322 M1): reroute individually-routed approvers who are
     // out of office. Collected hops drive the audit + notification below (M4).
     const substitutions: OooSubstitution[] = [];
@@ -1967,9 +2016,13 @@ export class ApprovalService implements IApprovalService {
     // the trigger snapshot carried in `input.record`. This is the whole fix — an
     // earlier step may have written the field this node routes on.
     const liveRecord = await this.loadLiveRecord(input.object, input.recordId, input.record);
+    // Live state first, trigger snapshot second — the same precedence the
+    // approver expansion just below applies to the record itself (#3447).
+    const subjectOrg = this.recordOrgResolver.organizationOf(input.object, liveRecord, input.record);
+    const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
     const approvers = await this.expandApprovers(
-      { approvers: input.config.approvers }, liveRecord, ctxOrg, {
+      { approvers: input.config.approvers }, liveRecord, requestOrg, {
         now: nowDate.getTime(), substitutions, groups,
         exprCtx: { trigger: input.record ?? null, vars: input.variables ?? null },
         resolvedFrom,
@@ -2057,14 +2110,14 @@ export class ApprovalService implements IApprovalService {
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
       node_config_json: JSON.stringify(configSnapshot),
-      organization_id: ctxOrg,
+      organization_id: requestOrg,
       created_at: now,
       updated_at: now,
     };
     await this.engine.insert('sys_approval_request', row, { context: SYSTEM_CTX });
-    await this.syncApproverIndex(id, approvers, ctxOrg, now);
+    await this.syncApproverIndex(id, approvers, requestOrg, now);
     await this.engine.insert('sys_approval_action', {
-      id: uid('aact'), request_id: id, organization_id: ctxOrg,
+      id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
       actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
     }, { context: SYSTEM_CTX });
@@ -2075,7 +2128,7 @@ export class ApprovalService implements IApprovalService {
     // delegate — who now owns the slot — and the skipped approver.
     for (const sub of substitutions) {
       await this.engine.insert('sys_approval_action', {
-        id: uid('aact'), request_id: id, organization_id: ctxOrg,
+        id: uid('aact'), request_id: id, organization_id: requestOrg,
         step_name: input.nodeId, step_index: 0, action: 'ooo_substitute',
         actor_id: null,
         comment: `${sub.from} → ${sub.to}${sub.reason ? ` — ${sub.reason}` : ''}`,

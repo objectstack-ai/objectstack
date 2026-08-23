@@ -1067,6 +1067,16 @@ export interface RunRecord {
     /** Failure reason for a `failed` run — what a designer needs to fix it. */
     error?: string;
     nodeId?: string;
+    /**
+     * [#10101] The ACTING context's tenant (`AutomationContext.tenantId`),
+     * copied onto the record by {@link AutomationEngine.recordLog} — the ruled
+     * FALLBACK for the persisted `organization_id`, never the primary. The
+     * primary is the SUBJECT record's own organization, which the DB-backed
+     * store resolves from {@link RunRecord.triggerRecord} through the shared
+     * platform-row resolver (`@objectstack/metadata-core`, the cloud#1395
+     * Option A ruling) at write time. Before #10101 nothing set this field at
+     * all, so every terminal history row persisted `organization_id = NULL`.
+     */
     organizationId?: string | null;
     userId?: string | null;
     /**
@@ -1089,6 +1099,19 @@ export interface RunRecord {
     triggerType?: string;
     triggerObject?: string;
     triggerRecordId?: string;
+    /**
+     * [#10101] The triggering record SNAPSHOT (`AutomationContext.record`),
+     * carried for the store's write-time subject-organization resolution — the
+     * same snapshot the suspended-run row resolves from, so a run's paused row
+     * and its terminal row agree by construction. A write-time INPUT, not a
+     * column: the DB-backed store reads the resolved organization column off
+     * it and persists only `organization_id`. Absent for triggers that carry
+     * no record (a plain scheduled sweep has no one subject), in which case
+     * the acting-context fallback ({@link RunRecord.organizationId}) stands —
+     * fabricating an acting organization for schedule/api triggers stays
+     * vetoed (cloud#1395 Option C).
+     */
+    triggerRecord?: Record<string, unknown>;
     /**
      * Bounded per-node step log (see {@link AutomationEngine.compactStepsForHistory}),
      * so "which node blew up?" survives a restart. Optional — history rows
@@ -3322,7 +3345,7 @@ export class AutomationEngine implements IAutomationService {
                 trigger: buildRunTrigger(context),
                 steps,
                 output,
-            });
+            }, context);
 
             return {
                 success: true,
@@ -3391,7 +3414,7 @@ export class AutomationEngine implements IAutomationService {
                     trigger: buildRunTrigger(context),
                     steps,
                     variables: variablesSnapshot,
-                });
+                }, context);
                 return {
                     success: true,
                     status: 'paused',
@@ -3416,7 +3439,7 @@ export class AutomationEngine implements IAutomationService {
                 trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
-            });
+            }, context);
 
             // Error handling strategy.
             //
@@ -4186,7 +4209,7 @@ export class AutomationEngine implements IAutomationService {
                     trigger: buildRunTrigger(context),
                     steps,
                     output,
-                });
+                }, context);
 
                 // ── Subflow up-bubble (nested pause): this run was a subflow
                 // child whose parent suspended awaiting it. Auto-resume the
@@ -4239,7 +4262,7 @@ export class AutomationEngine implements IAutomationService {
                         trigger: buildRunTrigger(context),
                         steps,
                         variables: variablesSnapshot,
-                    });
+                    }, context);
                     return { success: true, status: 'paused', runId, durationMs, screen: err.screen };
                 }
 
@@ -4256,7 +4279,7 @@ export class AutomationEngine implements IAutomationService {
                     trigger: buildRunTrigger(context),
                     steps,
                     error: errorMessage,
-                });
+                }, context);
                 // Subflow chain: a child failing terminally fails every
                 // ancestor awaiting it — they can never be resumed otherwise.
                 // The delegation path handles its own level (skipBubble).
@@ -4482,7 +4505,7 @@ export class AutomationEngine implements IAutomationService {
             trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error,
-        });
+        }, run.context);
     }
 
     /**
@@ -4560,7 +4583,7 @@ export class AutomationEngine implements IAutomationService {
             trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error: reason,
-        });
+        }, run.context);
         return true;
     }
 
@@ -4695,7 +4718,15 @@ export class AutomationEngine implements IAutomationService {
      *   {@link AutomationResult} hands the counts straight back without a second
      *   fold or a `getRun` round-trip.
      */
-    private recordLog(entry: ExecutionLogEntry): ExecutionLogEntry {
+    // [#10101] `context` is the run's {@link AutomationContext}, passed by
+    // every call site (the same value each already hands `buildRunTrigger`) so
+    // a TERMINAL record can carry the two organization-attribution inputs the
+    // durable store resolves from: the triggering record snapshot (the
+    // SUBJECT — primary, per the cloud#1395 Option A ruling) and the acting
+    // tenant (the ruled fallback). Threaded as a parameter rather than read
+    // off the entry because `ExecutionLogEntry` deliberately keeps the
+    // published `trigger` block's shape (`ExecutionLogSchema`).
+    private recordLog(entry: ExecutionLogEntry, context?: AutomationContext): ExecutionLogEntry {
         // #4354 — fold the run's outcome BEFORE anything downstream trims the
         // step log. History compaction keeps 200 steps; the summary must count
         // all 5000, or a long sweep's `acted` would shrink with its step log and
@@ -4758,6 +4789,14 @@ export class AutomationEngine implements IAutomationService {
                 durationMs: entry.durationMs,
                 error: entry.error,
                 userId: entry.trigger?.userId,
+                // [#10101] The two organization-attribution inputs, from the
+                // run context (see the `recordLog` doc): the acting tenant is
+                // the ruled FALLBACK, the trigger-record snapshot is what the
+                // store resolves the SUBJECT organization from — the same
+                // snapshot the paused row resolves from, so the two rows of
+                // one run agree by construction.
+                organizationId: context?.tenantId ?? null,
+                triggerRecord: context?.record,
                 // #7533 — the rest of the trigger block, not just its userId.
                 // The information exists at this exact point (the in-memory log
                 // entry one line up carries it); it was simply not copied onto
@@ -6599,7 +6638,7 @@ export class AutomationEngine implements IAutomationService {
                 trigger: buildRunTrigger(context),
                 steps,
                 output,
-            });
+            }, context);
 
             // #4354 — a retried run reports its own attempt's counts, not the
             // failed one's: `retryExecution` returns THIS result on success.
@@ -6682,7 +6721,7 @@ export class AutomationEngine implements IAutomationService {
                     trigger: buildRunTrigger(context),
                     steps,
                     variables: variablesSnapshot,
-                });
+                }, context);
                 return {
                     success: true,
                     status: 'paused',
@@ -6705,7 +6744,7 @@ export class AutomationEngine implements IAutomationService {
                 trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
-            });
+            }, context);
             // [#9378] The retry loop reads only `result.success` and this
             // result never escapes `retryExecution` on its own, but it is the
             // same ran-and-failed exit as the two above and is classified the

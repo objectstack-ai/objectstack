@@ -81,3 +81,15 @@ export * from './item-key-discriminators.js';
 // situation this package exists to resolve. `runtime` imports it from here now,
 // so its behaviour is unchanged and there is no second copy to drift.
 export * from './meta-write-org-scope.js';
+
+// [#8707 / #10101] The shared platform-row organization resolver — sunk here
+// from `@objectstack/plugin-audit` per the maintainer ruling recorded on
+// cloud#1395 ("promoted to a shared resolver used by all three platform-row
+// writers"). The three sanctioned consumers — audit stamping, the approval-row
+// writer, the automation-run recorder — live in `plugin-audit`,
+// `plugin-approvals` and `service-automation`, which share no other common
+// home; this package's `{ @objectstack/spec, zod }`-only contract lets all
+// three import ONE precedence instead of drifting a copy each. `plugin-audit`
+// re-exports `createFieldPresenceProbe` from its original path, so its public
+// surface is unchanged.
+export * from './record-organization.js';
