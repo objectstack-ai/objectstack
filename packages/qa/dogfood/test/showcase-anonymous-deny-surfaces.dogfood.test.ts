@@ -16,6 +16,17 @@
 // is what a fresh production deployment gets) and asserts every surface denies
 // an anonymous caller with 401 while an authenticated member is unaffected.
 //
+// ── #11373: `/meta` means its WRITE doors too, not just a read ──────────────
+//
+// The `/meta` surface entered this file as a single anonymous `GET`, which is
+// the shape the leak it was built for had. objectui#5828 then asked the other
+// half — a guest / previewMode boot writes an `@anon` metadata seed, so does the
+// server refuse an anonymous WRITE? — and no artifact in this repo answered it
+// end-to-end. The six mutating routes are now driven here as real HTTP. The
+// reading is recorded in full at the door table below; the short version is that
+// the umbrella already refused all six, so #11373 is a measurement plus its pin,
+// not a fix.
+//
 // ── Why `/actions` and `/automation` are here (#5570) ────────────────────────
 //
 // `authz-conformance.matrix.ts` names THIS FILE as the proof artifact for the
@@ -70,6 +81,62 @@ const ACTION = '/actions/showcase_task/showcase_mark_done/anon-probe-id';
 // A real showcase flow declaration, so the deregister case names something that
 // genuinely exists in the app's metadata.
 const FLOW = 'showcase_reassign_wizard';
+
+// ── #11373 — the /meta WRITE doors, driven through the REAL mount ──────────
+//
+// The `/meta` cases above this line were, for this file's whole life, ONE
+// anonymous `GET`. That left the question objectui#5828 raised unanswerable
+// from any artifact in the repo: a guest / previewMode boot there writes an
+// `@anon` metadata seed, and nothing here said whether the server refuses it.
+//
+// It was not that the refusal was unpinned — it was pinned in the WRONG LAYER.
+// `packages/rest/src/meta-write-door-capability-enumeration.test.ts` already
+// asserts a 401 on all six doors, but it constructs a `RestServer` over a
+// `vi.fn()` transport and invokes `route.handler(req, res)` directly. That
+// proves the handler wrapper refuses a context it was handed; it cannot prove
+// the composed app routes a real `PUT /api/v1/meta/...` into that wrapper at
+// all. Those are different claims, and only the second one is what a guest
+// browser actually meets.
+//
+// So these cases drive the doors as HTTP, on the same booted showcase the rest
+// of this file uses. Measured 2026-08-23 on this stack, all six doors:
+//   anonymous                      → 401 UNAUTHENTICATED, rest-flat envelope
+//   member (no manage_metadata)    → 403 FORBIDDEN  ← a DIFFERENT gate
+//   dev admin, same URL/method/body→ the door runs; `PUT` persisted and the
+//                                    read-back flipped 404 → 200
+// The admin leg is the reverse-check and deliberately does NOT live here: it
+// WRITES metadata, which the shared-showcase eligibility rules forbid (see
+// `shared-showcase.ts`). Its transcript is on #11373 and in that PR's body.
+//
+// Every door names a NON-EXISTENT object/view on purpose — the same discipline
+// the `/packages` block below states for its `:id`. The auth floor is the first
+// thing each door meets, so a refusal must not need a real target; and it makes
+// these cases safe-by-construction for the shared stack, since a door that
+// somehow ran would still find nothing to mutate.
+const META_PROBE_OBJECT = 'anon_probe_object_11373';
+const META_PROBE_VIEW = 'anon_probe_view_11373';
+
+interface MetaWriteDoor {
+  readonly seam: string;
+  readonly method: string;
+  readonly path: string;
+  readonly body?: unknown;
+}
+
+/** The six mutating `/meta` routes `registerMetadataEndpoints` composes. */
+const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
+  { seam: 'POST /meta/_migrate-stored', method: 'POST', path: '/meta/_migrate-stored', body: {} },
+  {
+    seam: 'PUT /meta/:type/:name (save)', method: 'PUT', path: `/meta/object/${META_PROBE_OBJECT}`,
+    // A body that PASSES author-time validation, so a missing gate would be a
+    // completed write rather than a 422 that merely looks like a refusal.
+    body: { name: META_PROBE_OBJECT, label: 'Anon Probe', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } },
+  },
+  { seam: 'DELETE /meta/:type/:name (reset)', method: 'DELETE', path: `/meta/object/${META_PROBE_OBJECT}` },
+  { seam: 'POST /meta/:type/:name/publish', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/publish`, body: {} },
+  { seam: 'POST /meta/:type/:name/rollback', method: 'POST', path: `/meta/object/${META_PROBE_OBJECT}/rollback`, body: { toVersion: 1 } },
+  { seam: 'PUT /meta/:type/:section/:name (compound save)', method: 'PUT', path: `/meta/object/views/${META_PROBE_VIEW}`, body: { name: META_PROBE_VIEW } },
+];
 
 // ── #5632 — the TWO declared anonymous-401 envelopes, as executable rules ───
 //
@@ -160,10 +227,13 @@ const readDenial = (family: DenyFamily, body: unknown): { code: unknown; message
 describe('showcase: anonymous posture is uniform across surfaces (#2567)', () => {
   let stack: VerifyStack;
   let memberToken: string;
+  // [#11373] The dev admin, for the READ-BACK that proves the anonymous write
+  // attempts left nothing behind. Read-only here — this file writes no metadata.
+  let adminToken: string;
 
   beforeAll(async () => {
     stack = await getSharedShowcase(); // platform default (deny anonymous)
-    await stack.signIn();
+    adminToken = await stack.signIn();
     memberToken = await stack.signUp('surfaces-member@verify.test');
   }, 60_000);
 
@@ -185,6 +255,51 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   it('an authenticated member is NOT denied on /meta (deny targets anonymity)', async () => {
     const r = await stack.apiAs(memberToken, 'GET', '/meta');
     expect(r.status, 'authenticated metadata read must clear the auth gate').not.toBe(401);
+  });
+
+  // ── /meta WRITE doors (#11373) ─────────────────────────────────────────
+  it.each(META_WRITE_DOORS.map((d) => [d.seam, d] as const))(
+    'anonymous %s is denied (401) — the metadata plane is not anonymously writable',
+    async (_seam, door) => {
+      const r = await anon(door.method, door.path, door.body);
+      expect(r.status, `${door.seam}: an anonymous metadata WRITE must be 401`).toBe(401);
+    },
+  );
+
+  it.each(META_WRITE_DOORS.map((d) => [d.seam, d] as const))(
+    'an authenticated member is NOT denied on %s — and is NOT 404, so the door is really there',
+    async (_seam, door) => {
+      // The reverse-check, in the form this shared stack can hold. Two claims,
+      // and the pin is worth nothing without both:
+      //
+      //  `.not.toBe(401)` — the 401 above is about ANONYMITY. Same URL, same
+      //  method, same body, one process, one second apart: a session changes
+      //  the answer, so the refusal is the auth floor and not the door being
+      //  broken. (Deliberately not `.toBe(403)`. A member's exact status is the
+      //  capability gate's business — #8919's proof owns that, and pinning it
+      //  here would make this file red for another proof's reasons. Measured
+      //  today it is 403 FORBIDDEN `manage_metadata` on all six.)
+      //
+      //  `.not.toBe(404)` — the anti-vacuity half. A probe with a typo'd path
+      //  or an unrouted method would 404, and an anonymous 404 is not a 401, so
+      //  the case above would have gone red — but only for the doors that still
+      //  route. This states the reachability directly instead of inferring it.
+      const r = await stack.apiAs(memberToken, door.method, door.path, door.body);
+      expect(r.status, `${door.seam}: an authenticated caller must clear the auth floor`).not.toBe(401);
+      expect(r.status, `${door.seam}: the door must be registered — a 404 would make the 401 above vacuous`).not.toBe(404);
+    },
+  );
+
+  it('[#11373] no anonymous write door left anything behind', async () => {
+    // The half a status code cannot carry. A gate that answers 401 AFTER the
+    // save would still be the defect and would still pass every case above.
+    for (const door of META_WRITE_DOORS) {
+      await anon(door.method, door.path, door.body);
+    }
+    const r = await stack.apiAs(adminToken, 'GET', `/meta/object/${META_PROBE_OBJECT}`);
+    expect(r.status, 'the object the anonymous PUT tried to author must not exist').toBe(404);
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body.code).toBe('RESOURCE_NOT_FOUND');
   });
 
   // ── /data (surface-level; served by @objectstack/rest, its sole owner) ──
@@ -437,6 +552,19 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     call: () => Promise<Response>;
   }> = [
     { seam: 'GET /meta', owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', '/meta') },
+    // [#11373] The six WRITE doors, classified alongside the read. This is what
+    // makes the 401 cases above non-vacuous in the one dimension a status code
+    // cannot show: if a `/meta` write route were ever unregistered, the hono
+    // catch-all would hand it to `runtime/domains/meta.ts`, whose own anonymous
+    // gate ALSO answers 401 — in the dispatcher-wrapper envelope. Same status,
+    // different producer. Classifying the family is what tells the two apart,
+    // so a silently relocated door fails here instead of passing everywhere.
+    ...META_WRITE_DOORS.map((door) => ({
+      seam: `anon ${door.seam}`,
+      owner: '@objectstack/rest registerMetadataEndpoints guarded registrar',
+      family: 'rest-flat' as DenyFamily,
+      call: () => anon(door.method, door.path, door.body),
+    })),
     { seam: `GET ${OBJ}`, owner: '@objectstack/rest enforceAuth', family: 'rest-flat', call: () => anon('GET', OBJ) },
     { seam: 'POST /actions/:object/:action/:id', owner: 'runtime domains/actions.ts', family: 'dispatcher-wrapper', call: () => anon('POST', ACTION, { params: {} }) },
     { seam: 'POST /automation/:name/trigger', owner: 'runtime domains/automation.ts', family: 'dispatcher-wrapper', call: () => anon('POST', `/automation/${FLOW}/trigger`, {}) },
