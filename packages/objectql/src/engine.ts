@@ -5938,6 +5938,46 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Driver options for a PRIVILEGED, driver-level read so it JOINS the open
+   * ambient transaction instead of asking the pool for a second connection.
+   *
+   * The three privileged read verbs — {@link resolveSecret},
+   * {@link resolveSecretField}, {@link resolveInternalField} — deliberately
+   * read at DRIVER level, the only layer where the masked/omitted value still
+   * exists. That bypasses hooks, field-level security and sharing by design;
+   * what it must NOT bypass is the connection the surrounding transaction is
+   * holding. {@link buildDriverOptions} threads the ambient handle onto every
+   * ordinary read for that reason (ADR-0034); these three passed NO options at
+   * all, so their read went to a FRESH pooled connection.
+   *
+   * On a roomy pool that is invisible — the pool simply hands out a second
+   * connection. On a **single-connection pool it is a deadlock**: SQLite's knex
+   * pool is `max: 1` (`driver-sqlite-wasm` and `driver-sql`/better-sqlite3
+   * both), so the open transaction holds the one connection and the privileged
+   * read waits for a connection that cannot be freed until the transaction
+   * that is waiting on the read commits. Measured on the erasure path
+   * (`runSubjectErasureAtomically` → better-auth `/admin/remove-user` →
+   * `reattachInternalFieldsOnRead` → `resolveInternalField`): the read blocked
+   * until knex's own acquire timeout fired ("Timeout acquiring a connection.
+   * The pool is probably full", from `Transaction_Sqlite.acquireConnection`),
+   * and the vendor route degraded that into an authentication refusal — a
+   * signed-in caller answered `401` after ~120 s, on a route reachable without
+   * credentials. Postgres/MySQL (`max >= 10`) never exhibited it.
+   *
+   * Reads only, and only the transaction: the same-origin gate (#5351) still
+   * decides whether the handle is this object's driver's to use, so a
+   * privileged read that resolves to a DIFFERENT datasource keeps its own
+   * connection rather than executing on the wrong one. Returns `undefined`
+   * when there is no ambient transaction, which is the pre-existing shape.
+   */
+  private privilegedReadDriverOptions(object: string): { transaction: unknown } | undefined {
+    const tx = this.txStore.getStore()?.transaction;
+    if (tx === undefined) return undefined;
+    if (!this.transactionCoversDriverFor(object, tx)) return undefined;
+    return { transaction: tx };
+  }
+
+  /**
    * Dereference a stored secret ref back to its plaintext. Intended for
    * privileged, server-side consumers (e.g. a datasource connection-pool
    * binder) — NOT exposed through the generic read path, which only ever
@@ -5953,7 +5993,11 @@ export class ObjectQL implements IObjectQLEngine {
       throw new Error('Cannot resolve secret: no CryptoProvider is registered (fail-closed).');
     }
     const secretDriver = this.getDriver('sys_secret');
-    const found = await secretDriver.find('sys_secret', { where: { id } });
+    const found = await secretDriver.find(
+      'sys_secret',
+      { where: { id } },
+      this.privilegedReadDriverOptions('sys_secret'),
+    );
     const secret: any = Array.isArray(found) ? found[0] : found;
     if (!secret) {
       throw new Error(`Cannot resolve secret: sys_secret row "${id}" not found (fail-closed).`);
@@ -6018,7 +6062,11 @@ export class ObjectQL implements IObjectQLEngine {
       );
     }
     const driver = this.getDriver(object);
-    const found = await driver.find(object, { where: { id: recordId } });
+    const found = await driver.find(
+      object,
+      { where: { id: recordId } },
+      this.privilegedReadDriverOptions(object),
+    );
     const row: any = Array.isArray(found) ? found[0] : found;
     if (!row) return null;
     return this.resolveSecret(row[field], opts);
@@ -6100,10 +6148,14 @@ export class ObjectQL implements IObjectQLEngine {
     const out = new Map<string, unknown>();
     if (recordIds.length === 0) return out;
     const driver = this.getDriver(object);
-    const found = await driver.find(object, {
-      where: { id: { $in: [...recordIds] } },
-      fields: ['id', field],
-    });
+    const found = await driver.find(
+      object,
+      {
+        where: { id: { $in: [...recordIds] } },
+        fields: ['id', field],
+      },
+      this.privilegedReadDriverOptions(object),
+    );
     for (const row of Array.isArray(found) ? found : [found]) {
       if (!row || typeof row !== 'object') continue;
       const id = (row as Record<string, unknown>).id;

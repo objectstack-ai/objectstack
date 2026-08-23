@@ -585,26 +585,22 @@ describe('#9482 C9: every derived /admin/ route refuses a non-admin', () => {
       // vocabulary — not a validation error, which would mean the request died
       // before the gate and this assertion measured nothing.
       //
-      // ⚠️ #10792, found the moment #10349 made this branch executable at all.
-      // It was guarded by `member.code !== undefined`, and the code WAS
-      // undefined on every bodyless refusal — so for those routes this check
-      // had never once run. On the first run where it did, `remove-user` came
-      // back `401 UNAUTHENTICATED` for a SIGNED-IN member while its siblings
+      // ⚠️ #10792 CLOSED — `remove-user` used to be carved out here, accepting
+      // `UNAUTHENTICATED` as an additional code. It was the one erasure-wrapped
+      // route in this bucket, and inside that transaction the privileged read
+      // behind the vendor's session re-read asked a `pool max=1` datasource for
+      // a SECOND connection, blocked until knex's acquire timeout fired, and
+      // degraded into `401` for a SIGNED-IN member while its unwrapped siblings
       // `set-role` and `update-user` answered the same bearer
-      // `403 YOU_ARE_NOT_ALLOWED_*`: on that path alone the session is re-read
-      // inside the #7724 erasure transaction and comes back empty, so
-      // authentication answers a question authorization should have.
+      // `403 YOU_ARE_NOT_ALLOWED_*`. The privileged read now joins the ambient
+      // transaction, so this route answers the authorization question like
+      // every other member of the bucket and needs no exception.
       //
-      // Recorded as an ADDITIONAL accepted code for that one route, never as a
-      // pin — same reasoning as the platform-admin arm below. Pinning today's
-      // 401 would turn the fix red; pinning the 403 is red today; and widening
-      // the vocabulary for EVERY route would let the next route drift into the
-      // same state in silence. Delete this arm when #10792 closes.
-      const KNOWN_AUTHN_BEFORE_AUTHZ = 'POST /api/v1/auth/admin/remove-user'; // #10792
-      const denialCodes =
-        route === KNOWN_AUTHN_BEFORE_AUTHZ
-          ? /^(YOU_ARE_NOT_ALLOWED|UNAUTHENTICATED$)/
-          : /^YOU_ARE_NOT_ALLOWED/;
+      // ⛔ Do not re-widen the vocabulary — for this route or for all of them.
+      // A route that answers `UNAUTHENTICATED` to a signed-in caller is
+      // announcing that authentication ran where authorization should have, and
+      // that is precisely the state this arm exists to catch.
+      const denialCodes = /^YOU_ARE_NOT_ALLOWED/;
       if (member.code !== undefined) {
         expect(
           member.code,
