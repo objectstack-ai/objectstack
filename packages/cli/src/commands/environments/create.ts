@@ -7,21 +7,21 @@ import { formatOutput } from '../../utils/output-formatter.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 
 /**
- * `os projects create` — provision a new project.
+ * `os environments create` — provision a new project.
  *
  * Delegates to `ProjectProvisioningService.provisionProject` on the server.
  * On success, optionally activates the new project for the current session
  * and persists `activeEnvironmentId` into `~/.objectstack/credentials.json`
  * (unless `--no-activate` is passed).
  */
-export default class ProjectsCreate extends Command {
+export default class EnvironmentsCreate extends Command {
   static override description = 'Provision a new project';
 
   static override examples = [
-    '$ os projects create --org 00000000-0000-0000-0000-000000000000 --name Staging',
-    '$ os projects create --org $ORG --name Dev --plan free',
-    '$ os projects create --org $ORG --name "Clone" --clone-from <source-id> --no-activate',
-    '$ os projects create --org $ORG --name CRM --artifact ./examples/app-crm/dist/objectstack.json',
+    '$ os environments create --org 00000000-0000-0000-0000-000000000000 --name Staging',
+    '$ os environments create --org $ORG --name Dev --plan free',
+    '$ os environments create --org $ORG --name "Clone" --clone-from <source-id> --no-activate',
+    '$ os environments create --org $ORG --name CRM --artifact ./examples/app-crm/dist/objectstack.json',
   ];
 
   static override flags = {
@@ -56,7 +56,7 @@ export default class ProjectsCreate extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(ProjectsCreate);
+    const { flags } = await this.parse(EnvironmentsCreate);
 
     try {
       const { client, token } = await createApiClient({ url: flags.url, token: flags.token });

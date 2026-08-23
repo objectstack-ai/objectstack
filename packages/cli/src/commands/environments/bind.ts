@@ -9,7 +9,7 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os projects bind` — bind a locally-compiled artifact to an existing
+ * `os environments bind` — bind a locally-compiled artifact to an existing
  * multi-environment server project.
  *
  * Equivalent to `PATCH /api/v1/cloud/environments/<id>` with
@@ -20,13 +20,13 @@ import { formatOutput } from '../../utils/output-formatter.js';
  * Use `--build` to compile `objectstack.config.ts` first so the artifact
  * reflects the latest source.
  */
-export default class ProjectsBind extends Command {
+export default class EnvironmentsBind extends Command {
   static override description = 'Bind a local objectstack artifact to an existing project';
 
   static override examples = [
-    '$ os projects bind <project-id> --artifact ./dist/objectstack.json',
-    '$ os projects bind <project-id> --artifact ./dist/objectstack.json --build',
-    '$ os projects bind <project-id> --reseed',
+    '$ os environments bind <project-id> --artifact ./dist/objectstack.json',
+    '$ os environments bind <project-id> --artifact ./dist/objectstack.json --build',
+    '$ os environments bind <project-id> --reseed',
   ];
 
   static override args = {
@@ -59,7 +59,7 @@ export default class ProjectsBind extends Command {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(ProjectsBind);
+    const { args, flags } = await this.parse(EnvironmentsBind);
 
     try {
       const artifactRel = flags.artifact ?? './dist/objectstack.json';

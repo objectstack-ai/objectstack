@@ -6,19 +6,19 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os projects list` — list projects visible to the current session.
+ * `os environments list` — list projects visible to the current session.
  *
  * Filters by organization via `--org`. Output format is the same
  * table/json/yaml shape used by other metadata commands, for a
  * consistent DX.
  */
-export default class ProjectsList extends Command {
+export default class EnvironmentsList extends Command {
   static override description = 'List projects visible to the current session';
 
   static override examples = [
-    '$ os projects list',
-    '$ os projects list --org 00000000-0000-0000-0000-000000000000',
-    '$ os projects list --format json',
+    '$ os environments list',
+    '$ os environments list --org 00000000-0000-0000-0000-000000000000',
+    '$ os environments list --format json',
   ];
 
   static override flags = {
@@ -35,7 +35,7 @@ export default class ProjectsList extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(ProjectsList);
+    const { flags } = await this.parse(EnvironmentsList);
 
     try {
       const { client, token, environmentId: activeId } = await createApiClient({

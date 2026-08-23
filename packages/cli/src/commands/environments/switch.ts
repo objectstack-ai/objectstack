@@ -6,7 +6,7 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 
 /**
- * `os projects switch <id>` — set the active project for this CLI session.
+ * `os environments switch <id>` — set the active project for this CLI session.
  *
  * Calls `POST /api/v1/cloud/environments/:id/activate` to update the
  * server-side session, then persists `activeEnvironmentId` into
@@ -14,12 +14,12 @@ import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
  * client they create via `createApiClient`) automatically target this
  * project.
  */
-export default class ProjectsSwitch extends Command {
+export default class EnvironmentsSwitch extends Command {
   static override description = 'Activate a project for subsequent CLI calls';
 
   static override examples = [
-    '$ os projects switch 00000000-0000-0000-0000-000000000001',
-    '$ os projects switch proj-123 --no-remote',
+    '$ os environments switch 00000000-0000-0000-0000-000000000001',
+    '$ os environments switch proj-123 --no-remote',
   ];
 
   static override args = {
@@ -37,7 +37,7 @@ export default class ProjectsSwitch extends Command {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(ProjectsSwitch);
+    const { args, flags } = await this.parse(EnvironmentsSwitch);
 
     try {
       const { client, token } = await createApiClient({ url: flags.url, token: flags.token });

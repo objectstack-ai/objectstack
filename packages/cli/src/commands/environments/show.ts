@@ -6,17 +6,17 @@ import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
 
 /**
- * `os projects show <id>` — show detailed information for a single project.
+ * `os environments show <id>` — show detailed information for a single project.
  *
  * Renders the project row plus its database, active credential, and
  * membership row (same shape as `client.projects.get(id)`).
  */
-export default class ProjectsShow extends Command {
+export default class EnvironmentsShow extends Command {
   static override description = 'Show detailed information for a project';
 
   static override examples = [
-    '$ os projects show 00000000-0000-0000-0000-000000000001',
-    '$ os projects show proj-123 --format json',
+    '$ os environments show 00000000-0000-0000-0000-000000000001',
+    '$ os environments show proj-123 --format json',
   ];
 
   static override args = {
@@ -35,7 +35,7 @@ export default class ProjectsShow extends Command {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(ProjectsShow);
+    const { args, flags } = await this.parse(EnvironmentsShow);
 
     try {
       const { client, token } = await createApiClient({ url: flags.url, token: flags.token });
