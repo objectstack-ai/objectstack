@@ -97,6 +97,40 @@ describe('knowledgeTestActionHandler', () => {
     expect(r.ok).toBe(true);
   });
 
+  // The turso adapter's plugin package is NOT built in this repo, so the live-call
+  // hint an operator reads in Settings -> AI & Embedder cannot be a bare "Mount
+  // @objectstack/knowledge-turso": that instruction was un-followable — it named a
+  // package with no directory here and no statement of where it comes from. Pinned
+  // as a property (names the package AND where it ships), not as a literal, so the
+  // wording can be improved without the guard going stale.
+  it('turso live-call hint says where the out-of-repo package comes from', async () => {
+    const r = await knowledgeTestActionHandler({
+      values: { adapter: 'turso', turso_url: 'file:./knowledge.db' },
+    } as any);
+    expect(r.ok).toBe(true);
+    const message = String(r.message);
+    expect(message).toContain('@objectstack/knowledge-turso');
+    expect(message).toMatch(/ObjectStack Cloud monorepo/);
+    // the un-followable form this card retired: named, with no origin stated
+    expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
+  });
+
+  // Contrast, so the assertion above cannot be satisfied by blanket-rewording every
+  // hint: ragflow's plugin IS built here, and its hint stays the plain mount line.
+  it('ragflow live-call hint stays a plain mount line (its plugin is built here)', async () => {
+    const r = await knowledgeTestActionHandler({
+      values: {
+        adapter: 'ragflow',
+        ragflow_base_url: 'http://localhost:9380',
+        ragflow_api_key: 'k',
+      },
+    } as any);
+    expect(r.ok).toBe(true);
+    expect(String(r.message)).toContain(
+      'Mount @objectstack/knowledge-ragflow to exercise live calls',
+    );
+  });
+
   it('rejects ragflow without base URL', async () => {
     const r = await knowledgeTestActionHandler({
       values: { adapter: 'ragflow', ragflow_api_key: 'k' },
