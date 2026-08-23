@@ -30,10 +30,20 @@
  *
  * ## What is deliberately NOT re-litigated here
  *
- * The engine's payload-first dispatch (`a SCALAR data.id still wins over a
- * scalar where.id`, `ENGINE_UPDATE_DISPATCH_CASES`) is correct and merged
- * (#5748 / PR #5919) for a caller who hands ObjectQL a payload and nothing
- * else, and #6435 / PR #6475's by-id payload strip is likewise untouched —
+ * The engine's payload-first dispatch (#5748's ladder in
+ * `ENGINE_UPDATE_DISPATCH_CASES`) is correct and merged (#5748 / PR #5919) for
+ * a caller who hands ObjectQL a payload and nothing else, and #6435 / PR
+ * #6475's by-id payload strip is likewise untouched —
+ *
+ * ⚠️ [#11142/#11230] That ladder no longer includes the case this paragraph
+ * used to quote by name, `a SCALAR data.id still wins over a scalar where.id`:
+ * a `where.id` that disagrees with a bound payload id is refused at dispatch
+ * (`UPDATE_ID_MISMATCH`, 400) — a different scalar since #11142, a non-scalar
+ * predicate since #11230. This ingress folds the path id INTO the payload, so
+ * every call it makes carries two ids that agree, which is the spelling both
+ * rulings keep honoured; the fake below inherits the refusals for free because
+ * it asks the producer rather than mirroring it.
+ *
  * both are driven against the REAL engine in `packages/objectql`. The fake
  * below therefore does not re-implement either: its `update` asks the
  * producer's own `assertEngineUpdateDispatch` which row a call binds and obeys

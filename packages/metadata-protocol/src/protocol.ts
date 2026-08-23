@@ -9458,10 +9458,21 @@ export class ObjectStackProtocolImplementation implements
         // the path `:id` — and nothing in the payload gets to move it.
         //
         // The engine's dispatch reads the PAYLOAD first: a truthy scalar `data.id`
-        // outranks `options.where.id` (`engine-update-dispatch.ts`, case *"a SCALAR
-        // data.id still wins over a scalar where.id"* — `expectId: 'rec_1'`). That
-        // rule is correct and deliberate for a caller who hands ObjectQL a payload
-        // and nothing else (#5748 / PR #5919, ruling A); it is a HOLE here, because
+        // outranks `options.where.id` (`engine-update-dispatch.ts`, #5748's
+        // payload-first ladder). That rule is correct and deliberate for a caller
+        // who hands ObjectQL a payload and nothing else (#5748 / PR #5919, ruling
+        // A); it is a HOLE here, because
+        //
+        // ⚠️ [#11142/#11230] The case this paragraph used to cite by name — *"a
+        // SCALAR data.id still wins over a scalar where.id"*, `expectId: 'rec_1'`
+        // — no longer exists in `ENGINE_UPDATE_DISPATCH_CASES`. A `where.id` that
+        // DISAGREES with a bound payload id is refused at dispatch now
+        // (`UPDATE_ID_MISMATCH`, 400), whether it is a different scalar (#11142)
+        // or a non-scalar predicate over a row set (#11230). Nothing below
+        // changes: the fold makes the two ids EQUAL, the one spelling both
+        // rulings deliberately keep honoured. What changes is the pre-fix
+        // behaviour described here — it is a loud refusal now, not a silent
+        // cross-row write.
         // this caller has already named the row twice — in the URL and in `where` —
         // and the three gates around this line all judge THAT row:
         //

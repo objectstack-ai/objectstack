@@ -28,6 +28,7 @@ import {
   scalarUpdateId,
   engineByIdUnhonouredPredicateMessage,
   engineUpdateIdConflictMessage,
+  engineUpdateIdPredicateConflictMessage,
   unhonouredByIdPredicateKeys,
 } from './engine-update-dispatch.js';
 
@@ -195,16 +196,41 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
   //    payload. It is pinned here rather than left to the reader, because it
   //    is exactly what a hand-copied guard gets wrong in the OTHER direction —
   //    too strict, and the double then refuses a call the producer accepts.
-  it('a SCALAR data.id still outranks where and multi (the common legal spelling, untouched by #5748)', () => {
+  //
+  //    [#11230] THE PIN THE #11230 RULING FLIPPED, name and all. It read
+  //
+  //      it('a SCALAR data.id still outranks where and multi (the common legal
+  //          spelling, untouched by #5748)', …)
+  //        expect(resolveEngineUpdateDispatch({ id: 'rec_1' },
+  //                 { where: { id: { $in: ['a'] } }, multi: true }))
+  //          .toEqual({ kind: 'by-id', id: 'rec_1' });
+  //
+  //    — the REMAINING half of the #5748 verdict after #11142 took the unequal
+  //    scalar half, and the last silent arm of this family: the `$in` row set
+  //    AND the declared `multi: true` were both discarded with no diagnostic.
+  //    The maintainer ruling on #11230 (2026-08-23) reverses it. The assertion
+  //    is INVERTED in place, never deleted and never relaxed, so the reversal
+  //    is visible exactly where the old verdict stood.
+  it('a SCALAR data.id outranks a `where` that declares NO id, and outranks multi — but no longer outranks a DECLARED where.id (#11142/#11230)', () => {
+    // FLIPPED (#11230): this line asserted `{ kind: 'by-id', id: 'rec_1' }`.
     expect(resolveEngineUpdateDispatch({ id: 'rec_1' }, { where: { id: { $in: ['a'] } }, multi: true }))
-      .toEqual({ kind: 'by-id', id: 'rec_1' });
+      .toEqual({
+        kind: 'reject',
+        message: engineUpdateIdPredicateConflictMessage('rec_1', { $in: ['a'] }),
+        code: ENGINE_UPDATE_ID_CONFLICT_CODE,
+        status: ENGINE_UPDATE_ID_CONFLICT_STATUS,
+      });
     // [#11142] `{ id: 'rec_1' }` beside `{ where: { id: 'rec_2' } }` used to
     // sit here as a by-id assertion; the UNEQUAL scalar pair is now refused
     // (the reversed #5748 pin — see the #11142 describe below). The EQUAL
     // pair stays the honoured spelling:
     expect(resolveEngineUpdateDispatch({ id: 'rec_1' }, { where: { id: 'rec_1' } }))
       .toEqual({ kind: 'by-id', id: 'rec_1' });
+    // What a scalar payload id STILL outranks, untouched by either reversal:
+    // an explicit `multi: true` beside a `where` that declares no id.
     expect(resolveEngineUpdateDispatch({ id: 42, title: 'x' }, { multi: true }))
+      .toEqual({ kind: 'by-id', id: 42 });
+    expect(resolveEngineUpdateDispatch({ id: 42, title: 'x' }, { where: {}, multi: true }))
       .toEqual({ kind: 'by-id', id: 42 });
   });
 
@@ -340,8 +366,9 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
 //    DIFFERENT row than the bound payload id is refused, never silently
 //    dropped. Maintainer ruling 2026-08-23 — the UNEQUAL shape only; the
 //    equal-ids spelling (REST folds the path id into the payload) stays
-//    honoured, and the falsy / non-scalar `where.id` boundaries keep their
-//    pre-existing verdicts (truthiness rule; un-reversed #5748 pin).
+//    honoured. #11142 also left the FALSY and NON-SCALAR `where.id` boundaries
+//    at their pre-existing verdicts; only the falsy one is still there —
+//    #11230 reversed the non-scalar half (see the [#11230] describe below).
 describe('[#11142] a conflicting scalar where.id beside the payload id is refused', () => {
   const data = { id: 'rec_1', title: 'x' };
   const options = { where: { id: 'rec_2' } };
@@ -426,14 +453,20 @@ describe('[#11142] a conflicting scalar where.id beside the payload id is refuse
       .toEqual({ kind: 'by-id', id: 'rec_1' });
   });
 
-  it('a NON-SCALAR where.id keeps its #5748 verdict — the payload id wins (out of the #11142 ruled scope)', () => {
-    // The un-reversed neighbour pin, restated from the ruling's own boundary:
-    // widening the refusal over operator-object / array / null `where.id`
-    // beside a scalar payload id is a separate decision, not a rider here.
-    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: { $in: ['a'] } }, multi: true }))
-      .toEqual({ kind: 'by-id', id: 'rec_1' });
-    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: null } }))
-      .toEqual({ kind: 'by-id', id: 'rec_1' });
+  it('a NON-SCALAR where.id is REFUSED TOO since #11230 — the boundary #11142 left standing did not survive its own ruling', () => {
+    // FLIPPED (#11230, maintainer ruling 2026-08-23). This pin read "a
+    // NON-SCALAR where.id keeps its #5748 verdict — the payload id wins (out
+    // of the #11142 ruled scope)" and asserted `{ kind: 'by-id', id: 'rec_1' }`
+    // for both shapes below, restating #11142's own boundary: "widening the
+    // refusal over operator-object / array / null `where.id` beside a scalar
+    // payload id is a separate decision, not a rider here." #11230 IS that
+    // separate decision, and it went the other way. Inverted in place, not
+    // deleted; the full envelope and the boundaries that DID survive are
+    // pinned in the [#11230] describe below.
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: { $in: ['a'] } }, multi: true }).kind)
+      .toBe('reject');
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: null } }).kind)
+      .toBe('reject');
   });
 
   it('the #11009 refusal keeps PRIORITY on a where that also carries extra keys (its message names them, unchanged)', () => {
@@ -442,5 +475,156 @@ describe('[#11142] a conflicting scalar where.id beside the payload id is refuse
     // before this change — no existing #11009 pin moves.
     expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: 'rec_2', tenant: 't1' } }))
       .toEqual({ kind: 'reject', message: engineByIdUnhonouredPredicateMessage('Update', ['tenant']) });
+  });
+});
+
+// ── [#11230] The OTHER reversed half of the #5748 pin, and the last silent arm
+//    of the #5748 / #11009 / #11142 family: a DECLARED but non-scalar
+//    `where.id` — an operator object, an array, `null` — beside a bound scalar
+//    payload id. The by-id path evaluates no predicate, so the declared row SET
+//    and any declared `multi: true` were BOTH discarded with no diagnostic.
+//    Maintainer ruling 2026-08-23, on the same terms as #11142 and sharing its
+//    error code: one defect class, one remedy, two messages.
+describe('[#11230] a DECLARED non-scalar where.id beside the payload id is refused', () => {
+  const data = { id: 'rec_1', title: 'x' };
+  const options = { where: { id: { $in: ['a', 'b'] } }, multi: true };
+  const message = engineUpdateIdPredicateConflictMessage('rec_1', { $in: ['a', 'b'] });
+
+  it('the predicate refuses with the declared message, code and status', () => {
+    expect(resolveEngineUpdateDispatch(data, options)).toEqual({
+      kind: 'reject',
+      message,
+      code: ENGINE_UPDATE_ID_CONFLICT_CODE,
+      status: ENGINE_UPDATE_ID_CONFLICT_STATUS,
+    });
+    // Deliberately the SAME ADR-0112 envelope #11142 declares — see the
+    // constant's own note in `engine-update-dispatch.ts`. Pinned by value here
+    // too, so a future split into a second ledger code is a deliberate act.
+    expect(ENGINE_UPDATE_ID_CONFLICT_CODE).toBe('UPDATE_ID_MISMATCH');
+    expect(ENGINE_UPDATE_ID_CONFLICT_STATUS).toBe(400);
+  });
+
+  it('assertEngineUpdateDispatch throws it carrying code + status (every pinned fake inherits this)', () => {
+    let caught: any;
+    try {
+      assertEngineUpdateDispatch(data, options);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'expected the non-scalar predicate refusal, but the call resolved').toBeDefined();
+    expect(caught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(caught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(caught.message).toBe(message);
+  });
+
+  it('the REAL engine throws the same envelope and NOTHING reaches the driver', async () => {
+    const { engine, calls } = await makeEngine();
+    let caught: any;
+    try {
+      await engine.update('task', data as any, options as any);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'expected the non-scalar predicate refusal, but the call resolved').toBeDefined();
+    expect(caught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(caught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(caught.message).toBe(message);
+    // The entire point: the pre-#11230 behaviour wrote rec_1 — one row, by id
+    // — with the `$in` row set and the declared `multi: true` both ignored.
+    expect(calls).toEqual([]);
+  });
+
+  // ⚠️ CONTROL for the three pins above. A refusal assertion passes trivially
+  //    if the fixture never constructs the contradictory pair (a typo in
+  //    `options`, a `where` the engine never reads). These two calls are the
+  //    SAME call minus one half of the contradiction, and each must still
+  //    reach the driver — so the refusals above are the branch firing, not the
+  //    fixture missing it.
+  it('CONTROL — the same call without the payload id still succeeds, as the bulk write it declared', async () => {
+    const observed = await observeEngine({ title: 'x' }, options);
+    expect(observed.kind).toBe('multi');
+  });
+
+  it('CONTROL — the same call without the where.id predicate still succeeds, as a by-id write on the payload id', async () => {
+    const observed = await observeEngine(data, { multi: true });
+    expect(observed.kind).toBe('by-id');
+    expect(observed.boundId).toBe('rec_1');
+  });
+
+  it('every non-scalar spelling is refused, and the message names the kind the caller wrote', () => {
+    const operator = resolveEngineUpdateDispatch(data, { where: { id: { $in: ['a'] } } });
+    expect(operator.kind).toBe('reject');
+    expect((operator as { message?: string }).message).toContain("an operator object ('$in')");
+
+    const array = resolveEngineUpdateDispatch(data, { where: { id: ['a', 'b'] } });
+    expect(array.kind).toBe('reject');
+    expect((array as { message?: string }).message).toBe(engineUpdateIdPredicateConflictMessage('rec_1', ['a', 'b']));
+    expect((array as { message?: string }).message).toContain('an array of 2 values');
+
+    const nul = resolveEngineUpdateDispatch(data, { where: { id: null } });
+    expect(nul.kind).toBe('reject');
+    expect((nul as { message?: string }).message).toContain('declares null');
+
+    // An explicitly-`undefined` `id` key is a DECLARED key (`'id' in where`),
+    // and this repo already reads an explicitly-undefined `where` key as a
+    // real declaration one clause over: `{ where: { tenant: undefined } }`
+    // beside a payload id is a #11009 refusal today. Same answer here, so the
+    // two clauses cannot disagree about what "declared" means.
+    const undef = resolveEngineUpdateDispatch(data, { where: { id: undefined } });
+    expect(undef.kind).toBe('reject');
+    expect((undef as { message?: string }).message).toContain('declares undefined');
+  });
+
+  it('the message prescribes BOTH call-site fixes, and says the bulk intent was dropped too', () => {
+    expect(message).toContain('multi:true');
+    expect(message).toContain('drop id from the payload');
+    expect(message).toContain('drop where.id');
+    expect(message).toContain('#11230');
+  });
+
+  it('a FALSY scalar where.id is a SCALAR, so #11230 does not reach it — the #11142 boundary is untouched', () => {
+    // The truthiness rule (module header point 3): `0` / `''` are scalars that
+    // identify no row, so there is neither a second row address (#11142) nor a
+    // predicate over a set (#11230). Pinned so the reversal cannot creep.
+    expect(resolveEngineUpdateDispatch(data, { where: { id: 0 } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch(data, { where: { id: '' } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+  });
+
+  it('a where that DECLARES no id at all is untouched — the refusal is about a declaration, not about `where`', () => {
+    expect(resolveEngineUpdateDispatch(data, { where: {} })).toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch(data, {})).toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch(data, undefined)).toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch(data, { where: 'not-an-object' as unknown })).toEqual({ kind: 'by-id', id: 'rec_1' });
+  });
+
+  it('with NO scalar payload id the ladder is exactly as #5748 left it — a non-scalar where.id never reached this arm', () => {
+    // The refusal lives on the PAYLOAD-sourced by-id arm only. Without a
+    // payload id these calls fall down the ordinary ladder, and #11230 changes
+    // neither verdict.
+    expect(resolveEngineUpdateDispatch({ title: 'x' }, { where: { id: { $in: ['a'] } }, multi: true }))
+      .toEqual({ kind: 'multi' });
+    expect(resolveEngineUpdateDispatch({ title: 'x' }, { where: { id: { $in: ['a'] } } }))
+      .toEqual({ kind: 'reject', message: ENGINE_UPDATE_REJECT_MESSAGE });
+    // …and a NON-scalar payload id is not an id either, so it does not open
+    // this arm: the decision still falls through to `multi` (#5748).
+    expect(resolveEngineUpdateDispatch({ id: { $in: ['x'] }, title: 'x' }, { where: { id: { $in: ['a'] } }, multi: true }))
+      .toEqual({ kind: 'multi' });
+  });
+
+  it('the #11009 refusal keeps PRIORITY when `where` also carries extra keys (its message names them, unchanged)', () => {
+    // Both defects at once. The unhonoured-keys check runs first and is
+    // byte-identical to before this change — no existing #11009 pin moves.
+    expect(resolveEngineUpdateDispatch(data, { where: { id: { $in: ['a'] }, tenant: 't1' } }))
+      .toEqual({ kind: 'reject', message: engineByIdUnhonouredPredicateMessage('Update', ['tenant']) });
+  });
+
+  it('the #11142 message is NOT reused for this shape — the two refusals stay distinguishable', () => {
+    // One code, two messages (ADR-0112: the code classifies, the message
+    // locates). A future edit that collapses them would tell a caller who
+    // wrote `{ $in: [...] }` that they named "a DIFFERENT row".
+    expect(message).not.toBe(engineUpdateIdConflictMessage('rec_1', 'rec_2'));
+    expect(message).not.toContain('names a DIFFERENT row');
   });
 });

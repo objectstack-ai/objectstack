@@ -87,9 +87,30 @@
  *    never identifies a row anywhere on this ladder (point 3 below), so there
  *    is no second row address to disagree with.
  *  - A NON-scalar `where.id` (`{ $in: [...] }`, an array, `null`) beside a
- *    scalar payload id keeps its #5748 verdict (`by-id`, payload wins) — that
- *    pin was not reversed, and widening over it is a separate decision, not a
- *    rider here (#6435's own boundary, one shape over).
+ *    scalar payload id kept its #5748 verdict here (`by-id`, payload wins) —
+ *    #11142 deliberately did not reach it. #11230 does; see the next clause.
+ *
+ * **[#11230] A third overriding clause, on the same PAYLOAD-sourced by-id
+ * arm:** a `where.id` that is DECLARED but is not a scalar id at all
+ * (`{ $in: [...] }`, an array, `null`) beside a bound scalar payload id is
+ * refused too — the same `UPDATE_ID_MISMATCH` / 400 envelope, because it is
+ * the same defect one step further out. The by-id path binds one primary key
+ * and evaluates no predicate, so the declared row-SET was discarded with no
+ * diagnostic, and a declared `multi: true` went with it: the caller asked for
+ * a bulk write over `{ $in: [...] }` and got one silent single-row write.
+ * This reverses the REMAINING half of the #5748 pin (`a SCALAR data.id still
+ * outranks where and multi`) — maintainer ruling on #11230, 2026-08-23 — and
+ * closes the last silent arm of the #5748 / #11009 / #11142 family. The
+ * boundaries that do NOT move:
+ *
+ *  - A FALSY scalar `where.id` (`0`, `''`) IS a scalar, so it is not this
+ *    clause's shape at all and keeps its #11142 verdict (`by-id`, nothing to
+ *    conflict with — point 3 below).
+ *  - A `where` with no `id` key (`{}`, no `where` at all, or a `where` that is
+ *    not an object) declares no id predicate and is untouched.
+ *  - With NO scalar id in the payload, a non-scalar `where.id` never reached
+ *    this arm in the first place: it falls down the ladder to `multi`, then
+ *    `reject`, exactly as #5748 left it.
  *
  * Three things about that list are load-bearing and easy to get wrong when
  * copying it by hand — which is the whole argument for importing it instead:
@@ -104,11 +125,13 @@
  * 2. **`data.id` outranks `where.id`, but only when it IS an id.** The payload
  *    is read first, so a scalar `data.id` still wins over `where` and over an
  *    explicit `multi: true`; `update(o, { id: 'rec_1', … }, { multi: true })`
- *    is one by-id write, unchanged. Since #11142, "wins over `where`" no
- *    longer includes silently overriding a truthy scalar `where.id` that
- *    names a DIFFERENT row — that call is refused (see the clause above);
- *    what stays is precedence, not the silent drop. What a non-scalar
- *    `data.id` no longer does
+ *    is one by-id write, unchanged. Since #11142 and #11230, "wins over
+ *    `where`" no longer includes silently overriding a DECLARED `where.id`
+ *    that is not the bound id — a truthy scalar naming a different row
+ *    (#11142) or a non-scalar predicate over a row set (#11230). Both are
+ *    refused (see the two clauses above); what stays is precedence over a
+ *    `where` that declares no id and over `multi`, never a silent drop. What
+ *    a non-scalar `data.id` no longer does
  *    is *outrank* anything: it is not an id, so the decision falls through to
  *    `where.id`, then to `multi`, then to `reject` — exactly the ladder a
  *    non-scalar `where.id` falls down. Until objectstack#5748 the payload half
@@ -152,17 +175,27 @@ import {
 export const ENGINE_UPDATE_REJECT_MESSAGE = 'Update requires an ID or options.multi=true';
 
 /**
- * [#11142] The `error.code` of the conflicting-id refusal: a by-id update
- * whose truthy scalar `options.where.id` names a different row than the bound
- * payload `data.id`. Registered in the spec's `ERROR_CODE_LEDGER` (ADR-0112)
- * under `@objectstack/objectql`, the production thrower; travels with
- * {@link ENGINE_UPDATE_ID_CONFLICT_STATUS} on the thrown error's own property
- * bag (the `recordNotFoundError` convention), so the REST boundary's
- * status/code passthrough answers 400 instead of a sanitised 500.
+ * [#11142/#11230] The `error.code` of the conflicting-id refusals: a by-id
+ * update whose bound payload `data.id` stands beside an `options.where.id`
+ * that is not that same id — a truthy scalar naming a DIFFERENT row (#11142),
+ * or a non-scalar predicate over a row SET (#11230). Registered in the spec's
+ * `ERROR_CODE_LEDGER` (ADR-0112) under `@objectstack/objectql`, the production
+ * thrower; travels with {@link ENGINE_UPDATE_ID_CONFLICT_STATUS} on the thrown
+ * error's own property bag (the `recordNotFoundError` convention), so the REST
+ * boundary's status/code passthrough answers 400 instead of a sanitised 500.
+ *
+ * **One code, two messages, deliberately (#11230).** The two shapes are one
+ * defect class — the call declares the row address twice and the two
+ * declarations cannot both hold — and the caller's remedy is the same act in
+ * both: drop one of the two spellings. A second ledger code would buy a
+ * consumer no branch it could act on differently, while adding a member to the
+ * closed `error.code` vocabulary every AI-authored consumer must switch over
+ * (ADR-0112 D3/D4: registration is deliberate, and the catalog stays small).
+ * The two messages carry the difference, which is where ADR-0112 puts it.
  */
 export const ENGINE_UPDATE_ID_CONFLICT_CODE = 'UPDATE_ID_MISMATCH';
 
-/** [#11142] The HTTP status the conflicting-id refusal declares: a caller error, 400. */
+/** [#11142/#11230] The HTTP status the conflicting-id refusals declare: a caller error, 400. */
 export const ENGINE_UPDATE_ID_CONFLICT_STATUS = 400;
 
 /** What `ObjectQLEngine.update` will do with a given `(data, options)` pair. */
@@ -173,10 +206,11 @@ export type EngineUpdateDispatch =
   | { readonly kind: 'multi' }
   /**
    * Neither — the engine throws `ENGINE_UPDATE_REJECT_MESSAGE`, the #11009
-   * unhonoured-predicate message, or (#11142) the conflicting-id message.
+   * unhonoured-predicate message, or one of the two conflicting-id messages
+   * (#11142 unequal scalar, #11230 non-scalar predicate).
    *
    * `code`/`status` are present only when the refusal declares an ADR-0112
-   * envelope of its own (today: the #11142 conflict,
+   * envelope of its own (today: the #11142 / #11230 conflicting-id refusals,
    * {@link ENGINE_UPDATE_ID_CONFLICT_CODE} / 400). The #5748 / #11009
    * refusals deliberately stay undecorated — adding an envelope to them is a
    * wire-contract change this module must not make by side effect. Throwers
@@ -236,10 +270,33 @@ function asScalarId(value: unknown): string | number | bigint | undefined {
 export function scalarUpdateId(
   options?: EngineUpdateDispatchInput | null,
 ): string | number | bigint | undefined {
+  const declared = declaredWhereId(options);
+  return declared.present ? asScalarId(declared.value) : undefined;
+}
+
+/**
+ * [#11230] Did the caller DECLARE `options.where.id`, and with what raw value?
+ *
+ * {@link scalarUpdateId} collapses "no `id` key at all" and "an `id` key
+ * holding something that is not a primary key" into the same `undefined`,
+ * because for *picking a row* they are the same answer. The #11230 refusal
+ * needs them apart: `{ where: {} }` declares nothing, while
+ * `{ where: { id: { $in: [...] } } }` declares a predicate the by-id path
+ * would silently discard — and the refusal message has to quote it.
+ *
+ * Private on purpose, and `scalarUpdateId` is re-expressed on top of it rather
+ * than duplicating the lookup: the module header's point is that one rule gets
+ * one definition, and a second public spelling of "what is in `where.id`" is
+ * how that stops being true.
+ */
+function declaredWhereId(
+  options?: EngineUpdateDispatchInput | null,
+): { readonly present: boolean; readonly value: unknown } {
   const where = options?.where;
-  if (!where || typeof where !== 'object') return undefined;
-  if (!('id' in (where as Record<string, unknown>))) return undefined;
-  return asScalarId((where as Record<string, unknown>).id);
+  if (!where || typeof where !== 'object') return { present: false, value: undefined };
+  const record = where as Record<string, unknown>;
+  if (!('id' in record)) return { present: false, value: undefined };
+  return { present: true, value: record.id };
 }
 
 /**
@@ -277,6 +334,64 @@ export function engineUpdateIdConflictMessage(
     `type included. If both spellings mean one row, make them equal; otherwise drop one: ` +
     `update(object, { id, ...fields }) addresses the row by the payload id, and ` +
     `update(object, fields, { where: { id } }) — with no id in the payload — addresses it by where.id.`
+  );
+}
+
+/**
+ * [#11230] How a DECLARED but non-scalar `where.id` is named inside its
+ * refusal message: by kind, never by dumping the value.
+ *
+ * The reader needs to recognise what they wrote (`{ $in: [...] }`, an array,
+ * `null`), not to read it back — and a caller's predicate can be arbitrarily
+ * large or cyclic, so `JSON.stringify` here would trade a diagnostic for a
+ * second failure mode. Operator objects name their keys, which is the half a
+ * reader actually scans for.
+ */
+function spellDeclaredWhereId(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) {
+    return `an array of ${value.length} value${value.length === 1 ? '' : 's'}`;
+  }
+  if (typeof value === 'object') {
+    const keys = Object.keys(value as Record<string, unknown>);
+    return keys.length > 0
+      ? `an operator object (${keys.map((k) => `'${k}'`).join(', ')})`
+      : 'an operator object with no keys';
+  }
+  return `a ${typeof value}`;
+}
+
+/**
+ * [#11230] The message a by-id update is refused with when its bound scalar
+ * payload `data.id` stands beside a DECLARED `options.where.id` that is not a
+ * primary key at all — an operator object, an array, `null`.
+ *
+ * The last silent member of the #5748 / #11009 / #11142 dropped-declaration
+ * family, and the widest of them: the by-id path discarded the declared row
+ * SET *and* any declared `multi: true`, so a caller who asked to update every
+ * row matching `{ $in: [...] }` got one silent single-row write to a row the
+ * predicate may not even select. Refusing it reverses the REMAINING half of
+ * the #5748 pin (`a SCALAR data.id still outranks where and multi`) —
+ * maintainer ruling on #11230, 2026-08-23.
+ *
+ * Shares {@link ENGINE_UPDATE_ID_CONFLICT_CODE} with the #11142 message rather
+ * than registering a second ledger code: same defect class, same remedy (drop
+ * one of the two row-address spellings), and the difference between them is
+ * exactly what a message is for. See that constant's note.
+ */
+export function engineUpdateIdPredicateConflictMessage(
+  payloadId: string | number | bigint,
+  whereId: unknown,
+): string {
+  return (
+    `Update binds the payload id ${spellScalarId(payloadId)} as the row address, but options.where.id ` +
+    `declares ${spellDeclaredWhereId(whereId)} — a predicate over a SET of rows, not one primary key. ` +
+    `The by-id path binds ONLY that one id and never evaluates a predicate, so the write would land on ` +
+    `${spellScalarId(payloadId)} with the where.id predicate — and any declared multi:true — silently ` +
+    `ignored (#11230). To write EVERY row the predicate selects, drop id from the payload and declare ` +
+    `the predicate path: update(object, fields, { where: { id: <predicate> }, multi: true }). To write ` +
+    `the single row ${spellScalarId(payloadId)}, drop where.id: update(object, { id, ...fields }).`
   );
 }
 
@@ -380,6 +495,29 @@ export function resolveEngineUpdateDispatch(
           status: ENGINE_UPDATE_ID_CONFLICT_STATUS,
         };
       }
+      // [#11230] The same defect one step further out, and the last silent
+      // arm of this family. `where.id` is DECLARED but is not a primary key
+      // at all — `{ $in: [...] }`, an array, `null` — so it is a predicate
+      // over a SET of rows, and the by-id path evaluates no predicate. The
+      // call used to dispatch `by-id` on the payload id and discard BOTH the
+      // row set and any declared `multi: true` with no diagnostic: the
+      // #5748-pinned verdict `a SCALAR data.id still outranks where and
+      // multi`, whose REMAINING half the maintainer ruling on #11230
+      // (2026-08-23) reverses. `conflictingWhereId === undefined` means the
+      // scalar test above found no id; `declared.present` separates the two
+      // reasons it could not — an absent `id` key (nothing was declared,
+      // by-id stands) from a declared non-scalar (refused here).
+      if (conflictingWhereId === undefined) {
+        const declared = declaredWhereId(options);
+        if (declared.present) {
+          return {
+            kind: 'reject',
+            message: engineUpdateIdPredicateConflictMessage(payloadId, declared.value),
+            code: ENGINE_UPDATE_ID_CONFLICT_CODE,
+            status: ENGINE_UPDATE_ID_CONFLICT_STATUS,
+          };
+        }
+      }
     }
     return { kind: 'by-id', id };
   }
@@ -478,6 +616,21 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // `multi` (#5748), so the call is still a by-id write carrying a where.id it
   // can never honour.
   { what: 'a SCALAR data.id beside a DIFFERENT scalar where.id and multi:true — still refused, the payload id outranks multi (#11142)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' }, multi: true }, expect: 'reject' },
+  // [#11230] The OTHER half of the reversed #5748 pin, and the last silent arm
+  // of this family: a DECLARED but NON-SCALAR `where.id` beside a scalar
+  // payload id. It never had a row of its own in this case-set — the assertion
+  // that pinned it lived in `engine-update-dispatch.test.ts` ("a SCALAR
+  // data.id still outranks where and multi", first expectation) and is flipped
+  // there. It gets rows HERE now, so every double bound to this case-set
+  // inherits the refusal rather than each one re-deriving it.
+  { what: 'a SCALAR data.id beside an $in where.id and multi:true — refused; the row SET and the declared bulk intent were BOTH silently dropped (#11230 reverses the remaining half of the #5748 pin)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside an $in where.id, no multi — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } } }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside an ARRAY where.id — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: ['a', 'b'] } }, expect: 'reject' },
+  { what: 'a SCALAR data.id beside a NULL where.id — refused (#11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: null } }, expect: 'reject' },
+  // [#11230] The boundary that does NOT move: a FALSY scalar `where.id` IS a
+  // scalar, so it is not this refusal's shape at all and keeps the #11142
+  // verdict. Pinned so the reversal cannot creep over the truthiness rule.
+  { what: 'a SCALAR data.id beside a FALSY scalar where.id (0) — still by-id, a falsy id identifies no row (the #11142 boundary, untouched by #11230)', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 0 } }, expect: 'by-id', expectId: 'rec_1' },
   // ── The payload's scalar test (objectstack#5748). A non-scalar `data.id`
   //    names no row, so it stops shadowing everything under it: the decision
   //    falls through to `where.id`, then `multi`, then `reject`. Before #5748

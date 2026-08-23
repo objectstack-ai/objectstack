@@ -9868,8 +9868,9 @@ export class ObjectQL implements IObjectQLEngine {
                //  - A TRUTHY SCALAR `data.id` is left exactly as it is. There
                //    the payload's `id` IS the bound key (it outranks `where` —
                //    same case-set; since #11142 a truthy scalar `where.id`
-               //    naming a DIFFERENT row is refused at dispatch and never
-               //    reaches this branch), so the write is `SET id = 'rec_1'
+               //    naming a DIFFERENT row, and since #11230 a DECLARED
+               //    non-scalar `where.id` predicate, are refused at dispatch
+               //    and never reach this branch), so the write is `SET id = 'rec_1'
                //    WHERE id = 'rec_1'`: a same-value no-op, redundant rather
                //    than damaging, and long-standing behaviour. Widening the
                //    strip to cover it is a separate decision, not a rider
