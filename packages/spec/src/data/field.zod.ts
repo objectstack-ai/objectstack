@@ -368,25 +368,40 @@ export { AddressSchema };
  */
 /**
  * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology): the error must carry the vocabulary and, for the two
- * predictable near-misses (`'tenant'`, `'org'`), name `'organization'`
- * explicitly — a typo must be a loud, fixable parse error, never a silent
- * scope change. Declared before `UniqueScopeSchema` because
+ * §Terminology) **on the FIELD surface**: the error must carry the vocabulary
+ * and, for the two predictable near-misses (`'tenant'`, `'org'`), name
+ * `'organization'` explicitly — a typo must be a loud, fixable parse error,
+ * never a silent scope change. Declared before `UniqueScopeSchema` because
  * `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
  *
- * ⚠️ **The last hand-written `$ZodErrorMap` in `packages/spec`, and it stays
- * one.** This docblock used to say "pattern of `strictCapabilitiesError`";
- * #6805 folded that sibling into the shared `strictObject` template and the
- * pointer would have gone stale, so it is replaced by the reason this map is
- * NOT following it. The fold's channel is `unrecognized_keys` — an unknown
- * KEY, answered from a per-key `guidance` table. This map answers
- * `invalid_union`, a VALUE-level verdict on a key the schema declares, which
- * `strictObject` does not address at any level. Folding it would be a category
- * error, and `alias-integrity.test.ts`'s class pin
+ * ⚠️ **Field-surface only — the parenthetical below is FALSE on a declared
+ * index, and that is why this map is not shared.** "`'organization'` … the
+ * explicit spelling of true" holds here (`FieldSchema.unique`), where bare
+ * `true` resolves per-organization. On `IndexSchema.unique` bare `true` is the
+ * positional spelling of `'global'` (the #4986 trap, retired at protocol 18 by
+ * #5082) — so a shared message read at the one moment an author is looking for
+ * the accepted spelling prescribed a value that CHANGES materialization on an
+ * index that may already exist, which is the unannounced reinterpretation the
+ * #8323 ruling (maintainer, 2026-08-13) exists to prevent. `object.zod.ts`
+ * therefore carries its own sibling map, `declaredIndexUniqueScopeError`,
+ * pinned equivalent to this one on accept/reject by
+ * `unique-scope-message.test.ts`. Keep the two vocabularies in step; only the
+ * parentheticals may differ.
+ *
+ * ⚠️ **One of the two hand-written `$ZodErrorMap`s in `packages/spec`, and the
+ * pair stays a pair.** This docblock used to say "pattern of
+ * `strictCapabilitiesError`"; #6805 folded that sibling into the shared
+ * `strictObject` template and the pointer would have gone stale, so it is
+ * replaced by the reason this map is NOT following it. The fold's channel is
+ * `unrecognized_keys` — an unknown KEY, answered from a per-key `guidance`
+ * table. This map answers `invalid_union`, a VALUE-level verdict on a key the
+ * schema declares, which `strictObject` does not address at any level. Folding
+ * it would be a category error, and `alias-integrity.test.ts`'s class pin
  * (`NO module outside the shared helpers writes its own unrecognized_keys
  * map`) is scoped by `issue.code` precisely so this site is out of class by
  * measurement rather than by an exemption — that pin reads this file as a live
- * control.
+ * control, and the index-surface sibling is out of class by the same
+ * measurement rather than by an added exemption.
  */
 const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code !== 'invalid_union') return undefined;
@@ -447,6 +462,16 @@ const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
  * accepted and are NOT aliases — "tenant" is overloaded across deployment
  * topologies and the platform spells the noun out (`organization_id`). The
  * parse error names `'organization'` so the fix ships inside the rejection.
+ *
+ * ⚠️ **This schema is the FIELD surface's.** The vocabulary above is shared
+ * with `IndexSchema.unique`, but the *meaning of bare `true`* is not: on a
+ * declared index it is the positional spelling of `'global'`, not of
+ * `'organization'` (the #4986 trap; #5082 retires it at protocol 18). The
+ * index surface therefore declares its own structurally identical union with
+ * its own rejection text in `object.zod.ts` — accepting and rejecting exactly
+ * what this one does, pinned by `unique-scope-message.test.ts`. Widening or
+ * narrowing the member list here is a change to BOTH surfaces: make it in both
+ * places or the pin fails.
  */
 export const UniqueScopeSchema = lazySchema(() =>
   z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
