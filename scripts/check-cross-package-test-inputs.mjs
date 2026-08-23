@@ -177,6 +177,41 @@
 // package's manifest) -- which it answers with the trade `walkLiteral` already
 // makes for an unreadable argument: keep the escape verdict, invent no name.
 //
+// ── The fourth way to be invisible: the LINE BREAK (#11093) ────────────────
+//
+// Every section above widened the set of recognised SHAPES. This one is not a
+// shape at all: the same recognised call, printed by a formatter across four
+// lines instead of one, resolved to nothing.
+//
+// A `const X = …` initialiser used to be matched by a regex with a hard TWO-LINE
+// window, so a call prettier broke past the print width matched nothing at all
+// -- no binding, no depth, no name, and therefore no flag. A read ARGUMENT never
+// carried that window (`balancedArgs` has always been line-agnostic), which is
+// why #11093 reported the asymmetry as `new URL()` seen / `resolve()` unseen.
+// Measured rather than reasoned, on `7f30b6be`: the split is POSITION, not
+// spelling. Multi-line `new URL()`, `resolve()` and `join()` were ALL invisible
+// in declaration position and all three visible in argument position. So the
+// spelling a formatter produces for any relative literal long enough to break
+// the line was the unseen one -- the default, not an exotic case.
+//
+// Two halves, and only one of them is loud. `declarationInitialiser()` reads the
+// statement to a depth-0 terminator, which restores the DEPTH and with it the
+// escape flag. `withoutTrailingComma()` restores the NAME, which the formatter's
+// trailing comma was costing on its own: `splitTopLevel` yields that comma as an
+// EMPTY final argument, and an empty argument read as "one I cannot fold" nulls
+// the segments (`pathExpression`). Fixing only the first half would have flagged
+// the read and still left its declared glob held by nothing -- the #10566
+// failure, reported against the glob rather than against the scan.
+//
+// Measured on `7f30b6be` with a probe test in `packages/spec`, both directions:
+// `resolve(HERE, '../../../scripts/js-comment-mask.mjs')` on one line reached the
+// roster, and the four-line spelling of the same call did not. On the tree as it
+// stands the whole answer -- every escaping package, every rostered path and
+// directory, every `globHolderVerdict` -- is byte-identical before and after, so
+// this recognises more without re-attributing any existing glob. The probe is
+// what proves the instrument was sensitive; the unchanged tree on its own would
+// prove nothing.
+//
 // Usage:
 //   node scripts/check-cross-package-test-inputs.mjs --verify
 //   node scripts/check-cross-package-test-inputs.mjs --union-into <turbo-ls.json> --changed <file>
@@ -846,6 +881,10 @@ export const RECOGNISED_PATH_SPELLINGS = [
   "readFileSync(resolve(HERE, '<rel>'))    // the same expressions in argument",
   "readFileSync(new URL('<rel>', import.meta.url))              // position",
   '',
+  '// Any call above may be BROKEN ACROSS LINES -- a formatter does that to every',
+  '// argument list past the print width, so it is the DEFAULT spelling for a long',
+  '// relative literal, and it is read whole, trailing comma and all (#11093).',
+  '',
   '// ANCHOR seeds -- a findUp walk, for a CJS-typed package where import.meta',
   '// is a TS1470. Both compose with every expression above (#10029).',
   "const PKG = findUp((dir) => JSON.parse(readFileSync(join(dir, 'package.json'))).name",
@@ -1071,7 +1110,25 @@ function splitTopLevel(text) {
 }
 
 const PATH_LITERAL = /^(['"`])([^'"`]*)\1$/;
-const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.url\s*\)$/;
+const NEW_URL_LITERAL = /^new\s+URL\(\s*(['"`])([^'"`]*)\1\s*,\s*import\.meta\.url\s*,?\s*\)$/;
+
+/**
+ * A formatter's TRAILING COMMA, dropped from an argument list before it is read.
+ *
+ * The other half of the line-spanning spelling (#11093), and the half that would
+ * have survived a fix to `declarationInitialiser()` alone: prettier ends every
+ * argument list it breaks across lines with one, and `splitTopLevel` yields it
+ * as an EMPTY final argument. An empty argument is not a literal, so the walk
+ * below took it for "an argument I cannot fold" and threw the NAME away while
+ * keeping the depth — the read would have been flagged as escaping and still
+ * held no glob. Measured on `7f30b6be`: the depth-only half of this defect is
+ * silent, so a case pinning only "it flags" passes with the name still lost.
+ *
+ * Safe as a text rule because it only strips a comma that is the LAST non-space
+ * character of a whole argument list: a quoted literal always ends with its own
+ * quote, so no string can be shortened by it.
+ */
+const withoutTrailingComma = (args) => args.replace(/,\s*$/, '');
 
 /**
  * Resolve one path expression to `{ end, min, vendored, segs }`, or `undefined`
@@ -1101,9 +1158,11 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
 
   // `fileURLToPath(x)` does not move the path, only its spelling.
   const unwrapped = expr.match(/^(?:url\.)?fileURLToPath\(([\s\S]*)\)$/);
-  if (unwrapped) return pathExpression(unwrapped[1], hereDepth, known, fileSegs);
+  if (unwrapped) return pathExpression(withoutTrailingComma(unwrapped[1]), hereDepth, known, fileSegs);
 
-  if (/^(?:path\.)?dirname\(\s*(?:url\.)?fileURLToPath\(\s*import\.meta\.url\s*\)\s*\)$/.test(expr)) {
+  // Every `\s*` below already spans newlines, so each seed reads the same broken
+  // across lines as on one — `,?` is all the line-spanning form adds (#11093).
+  if (/^(?:path\.)?dirname\(\s*(?:url\.)?fileURLToPath\(\s*import\.meta\.url\s*,?\s*\)\s*,?\s*\)$/.test(expr)) {
     return at(hereDepth, dirSegs);
   }
   if (expr === '__dirname') return at(hereDepth, dirSegs);
@@ -1111,7 +1170,7 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
   // the two seeds above. No test uses them TODAY — which is the reason to accept
   // them now: the first author who reaches for them would otherwise get silence.
   if (expr === 'import.meta.dirname') return at(hereDepth, dirSegs);
-  if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*\)$/.test(expr)) {
+  if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*,?\s*\)$/.test(expr)) {
     return at(hereDepth, dirSegs);
   }
   // The directory-naming seeds above NAME the directory. `import.meta.url` and
@@ -1141,7 +1200,7 @@ function pathExpression(expr, hereDepth, known, fileSegs = null) {
 
   const call = expr.match(/^(?:path\.)?(?:resolve|join)\(([\s\S]*)\)$/);
   if (!call) return undefined;
-  const args = splitTopLevel(call[1]);
+  const args = splitTopLevel(withoutTrailingComma(call[1]));
   const base = pathExpression(args[0], hereDepth, known, fileSegs);
   if (!base) return undefined;
   let { end, min, vendored, segs } = base;
@@ -1190,22 +1249,31 @@ function* readArgumentLists(src) {
 }
 
 /**
- * The argument text of a call whose opening paren sits at `from - 1`, or `null`
- * when the parens never close. Quote-aware, so a `(` inside a string literal --
- * or the `)` inside a `` throw new Error(`could not locate ${what}`) `` -- does
- * not move the depth.
+ * Scan `src` forward from `from`, quote-aware, tracking PARENTHESIS depth, and
+ * return the index of the first character `stop(char, depth)` accepts -- or -1
+ * if the scan ran off the end without one. `depth` is the depth AFTER the
+ * character has been counted, so the paren that closes the group `from` sits
+ * inside arrives as -1.
  *
- * Extracted from `readArgumentLists` rather than written a second time beside
- * the anchor seeds below, which need the same balanced read over a DIFFERENT
- * callee. A mirrored helper is the shape #10628 already had to undo in this file
- * once (a hand-copied `globToRegExp`); one balancer means a fix to it cannot
- * land on one caller and miss the other.
+ * The one place this file knows how to skip a string literal. Quote-awareness
+ * is why a `(` inside a quoted path -- or the `)` inside a
+ * `` throw new Error(`could not locate ${what}`) `` -- does not move the depth,
+ * and it is the part a future fix is most likely to land on. Both readers below
+ * share it for that reason: a mirrored helper is the shape #10628 already had to
+ * undo in this file once (a hand-copied `globToRegExp`), and one scanner means a
+ * fix to it cannot land on one caller and miss the other.
+ *
+ * ⛔ `[` and `{` are deliberately NOT counted. `declarationInitialiser()` ends a
+ * statement at a depth-0 newline, and counting braces would make a declaration
+ * whose initialiser is a function or object BODY swallow every declaration
+ * inside it -- the two-line window's failure mode (#11093), one nesting level up.
+ * An unbalanced bracket costs a name, never invents one, which is the trade
+ * `walkLiteral` already makes everywhere else here.
  */
-function balancedArgs(src, from) {
-  let depth = 1;
+function scanBalanced(src, from, stop) {
+  let depth = 0;
   let quote = null;
-  let i = from;
-  for (; i < src.length; i++) {
+  for (let i = from; i < src.length; i++) {
     const c = src[i];
     if (quote) {
       if (c === '\\') i += 1;
@@ -1214,9 +1282,55 @@ function balancedArgs(src, from) {
     }
     if (c === "'" || c === '"' || c === '`') quote = c;
     else if (c === '(') depth += 1;
-    else if (c === ')' && --depth === 0) break;
+    else if (c === ')') depth -= 1;
+    if (stop(c, depth)) return i;
   }
-  return depth === 0 ? src.slice(from, i) : null;
+  return -1;
+}
+
+/**
+ * The argument text of a call whose opening paren sits at `from - 1`, or `null`
+ * when the parens never close.
+ *
+ * Extracted from `readArgumentLists` rather than written a second time beside
+ * the anchor seeds below, which need the same balanced read over a DIFFERENT
+ * callee.
+ */
+function balancedArgs(src, from) {
+  const end = scanBalanced(src, from, (c, depth) => c === ')' && depth < 0);
+  return end === -1 ? null : src.slice(from, end);
+}
+
+/**
+ * The initialiser text of a `const X = …` declaration whose `=` has just been
+ * consumed, or `null` when the statement never ends. The terminator is a `;` or
+ * a newline at paren depth 0 -- a call that BREAKS ACROSS LINES is still inside
+ * its own parens at every line end, so it is read whole (#11093).
+ *
+ * ⚠️ This is where the line-spanning spelling was lost, and it was never about
+ * `resolve()` in particular. The initialiser used to be matched by a regex with
+ * a hard TWO-LINE window (`[^;\n]+(?:\n\s*[^;\n]*)??`), so ANY declaration whose
+ * call a formatter broke over three or more lines matched nothing at all -- no
+ * binding, no depth, no name, and therefore no flag. Measured on `7f30b6be`
+ * against a probe in `packages/spec`: the one-line
+ * `resolve(HERE, '../../../scripts/js-comment-mask.mjs')` reached the roster and
+ * the same call spelled across four lines did not, while `new URL()` broken the
+ * same way was equally invisible. What made `new URL()` look like the recognised
+ * half in #11093's report is POSITION, not spelling: a read ARGUMENT is read by
+ * `balancedArgs` above, which was always line-agnostic, and only the declaration
+ * position carried the window. Prettier writes the multi-line form for any path
+ * long enough to pass the print width, so this was the DEFAULT spelling for a
+ * long relative literal, not an exotic one.
+ *
+ * A newline at depth 0 ends the statement as well as `;` does, so an initialiser
+ * this scan cannot use (a `{` object literal, an arrow-function body) stops at
+ * its first line instead of running to some later `;`. That keeps the head-match
+ * loop in `scanPathExpressions()` able to reach every declaration NESTED inside
+ * such an initialiser, which the two-line window consumed and hid.
+ */
+function declarationInitialiser(src, from) {
+  const end = scanBalanced(src, from, (c, depth) => depth < 0 || (depth === 0 && (c === ';' || c === '\n')));
+  return end === -1 ? null : src.slice(from, end).trim();
 }
 
 /**
@@ -1378,9 +1492,16 @@ function scanPathExpressions(src, hereDepth, fileSegs = null, ownPackageName = n
     report(name, info);
   }
 
-  const DECL = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+(?:\n\s*[^;\n]*)??)\s*;/g;
-  for (const m of src.matchAll(DECL)) {
-    const info = pathExpression(m[2].trim(), hereDepth, known, fileSegs);
+  // The binding HEAD only. The initialiser is read by `declarationInitialiser()`
+  // instead of by this regex, which is what makes a call broken across lines
+  // readable at all (#11093) -- and, because the match now advances past the
+  // `=` rather than past the whole statement, a declaration nested inside
+  // another one's initialiser is still reached.
+  const DECL_HEAD = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*/g;
+  for (const m of src.matchAll(DECL_HEAD)) {
+    const expr = declarationInitialiser(src, m.index + m[0].length);
+    if (expr === null) continue;
+    const info = pathExpression(expr, hereDepth, known, fileSegs);
     if (!info) continue;
     known.set(m[1], info);
     collect(files, info);
@@ -1687,12 +1808,22 @@ function verify() {
               return `      ${g}${gone.length ? `   (witness no longer escaping: ${gone.join(', ')})` : ''}`;
             })
             .join('\n') +
-          `\n    Delete the glob (and its turbo.json input) if the read is gone. If the read\n` +
-          `    is real but its path is one this detector cannot NAME \u2014 a loop variable, a\n` +
-          `    \`git ls-files\` result, an argument it cannot fold \u2014 name the test that reads\n` +
-          `    it in the entry's \`heldBy\` instead. A glob held by nothing is a declaration\n` +
-          `    that has stopped being checked against the code, which is the whole reason a\n` +
-          `    radius is allowed to be narrow.`,
+          `\n    Three dispositions, in the order to try them. Deleting is LAST because a\n` +
+          `    glob can read as unheld for two opposite reasons, and only one of them means\n` +
+          `    the declaration is wrong:\n` +
+          `      1. The read is REAL and this scan does not SEE it. Check the reads against\n` +
+          `         the recognised spellings printed below \u2014 an unrecognised one yields no\n` +
+          `         name, which is indistinguishable here from no read. (A call broken\n` +
+          `         across lines IS read; what still yields no name is a path built by\n` +
+          `         template literal or out of a variable.) Fix the spelling, or teach the\n` +
+          `         detector and add a --self-test case in the same edit.\n` +
+          `      2. The read is real and this scan cannot NAME it even though it sees it \u2014\n` +
+          `         a loop variable, a \`git ls-files\` result, an argument it cannot fold.\n` +
+          `         Name the test that reads it in the entry's \`heldBy\`.\n` +
+          `      3. The read is GONE. Delete the glob (and its turbo.json input).\n` +
+          `    A glob held by nothing is a declaration that has stopped being checked\n` +
+          `    against the code, which is the whole reason a radius is allowed to be narrow\n` +
+          `    \u2014 so deleting one that is still read re-opens the blind spot silently.`,
       );
     }
     if (stray.length) {
@@ -1921,6 +2052,81 @@ function selfTest() {
   ok(
     'flags a read whose argument is a multi-line new URL()',
     at("const c = readFileSync(\n  new URL('../../../scripts/gate.mjs', import.meta.url),\n  'utf8',\n);", 1),
+  );
+
+  // ── the LINE-SPANNING DECLARATION (#11093) ────────────────────────────────
+  //
+  // The case directly above pins a multi-line call in a READ ARGUMENT, which
+  // `balancedArgs` has always read whole. A call bound to a NAME was read by a
+  // regex with a hard two-line window instead, so the same expression spelled
+  // across three or more lines matched nothing at all: no binding, no depth, no
+  // name, and therefore no flag. #11093 reported it as `new URL()` recognised /
+  // `resolve()` not; the measurement says the split is POSITION, not spelling —
+  // every shape below was invisible in declaration position and every one of
+  // them is visible in argument position. Prettier breaks any argument list past
+  // the print width, so this is the DEFAULT spelling for a long relative
+  // literal, not an exotic one.
+  //
+  // Each case below fails on a detector without `declarationInitialiser()`. The
+  // ones pinning a NAME fail without `withoutTrailingComma()` as well, and they
+  // are the load-bearing half: the name is what a declared glob is checked
+  // against, so losing it leaves a real read holding no radius while the escape
+  // flag still fires — a `globHolderVerdict()` failure blamed on the glob.
+  //
+  // `packages/spec/src/x.test.ts` — one directory below its package root.
+  const SPANNED_FILE = ['packages', 'spec', 'src', 'x.test.ts'];
+  const spannedNames = (src) => [...scanPathExpressions(src, 1, SPANNED_FILE).files];
+  const SPANNED_SEED = 'const HERE = dirname(fileURLToPath(import.meta.url));\n';
+  const SPANNED_RESOLVE = SPANNED_SEED + "const P = resolve(\n  HERE,\n  '../../../scripts/gate.mjs',\n);";
+  ok('flags a resolve() DECLARATION spelled across lines (the shape a formatter writes)', at(SPANNED_RESOLVE, 1));
+  ok(
+    '⭐ and NAMES the file it resolved — the roster half, which a flags-only case passes without',
+    spannedNames(SPANNED_RESOLVE).includes('scripts/gate.mjs'),
+  );
+  const SPANNED_JOIN = SPANNED_SEED + "const P = path.join(\n  HERE,\n  '../../../scripts/gate.mjs',\n);";
+  ok('flags a join() declaration spelled across lines, symmetrically with resolve()', at(SPANNED_JOIN, 1));
+  ok('and names that one too', spannedNames(SPANNED_JOIN).includes('scripts/gate.mjs'));
+  const SPANNED_URL = "const P = new URL(\n  '../../../scripts/gate.mjs',\n  import.meta.url,\n);";
+  ok('flags a multi-line new URL() in DECLARATION position, not only in a read argument', at(SPANNED_URL, 1));
+  ok('and names it', spannedNames(SPANNED_URL).includes('scripts/gate.mjs'));
+  ok(
+    'flags a multi-line fileURLToPath(new URL()) declaration',
+    at("const P = fileURLToPath(\n  new URL('../../../scripts/gate.mjs', import.meta.url),\n);", 1),
+  );
+  ok(
+    'reads a seed whose own dirname(fileURLToPath(import.meta.url)) is broken across lines',
+    at(
+      'const HERE = dirname(\n  fileURLToPath(import.meta.url),\n);\n' + "const P = resolve(HERE, '../../../scripts/gate.mjs');",
+      1,
+    ),
+  );
+  // The trailing comma is prettier's, not the author's, so the same shape must
+  // resolve identically with and without it — otherwise the fix would be keyed
+  // to one formatter's output.
+  ok(
+    'the same span with NO trailing comma names the same file',
+    spannedNames(SPANNED_SEED + "const P = resolve(\n  HERE,\n  '../../../scripts/gate.mjs'\n);").includes(
+      'scripts/gate.mjs',
+    ),
+  );
+  ok(
+    'does NOT flag a multi-line resolve() that stays inside the package',
+    !at(SPANNED_SEED + "const FIX = resolve(\n  HERE,\n  '../fixtures',\n);", 2),
+  );
+  // Reading the initialiser to a depth-0 terminator instead of matching a
+  // two-line window is what keeps these two reachable: the window consumed
+  // whatever it matched, so the NEXT declaration started after it.
+  ok(
+    'a declaration FOLLOWING a multi-line one is still read',
+    spannedNames(
+      SPANNED_SEED + "const A = resolve(\n  HERE,\n  '../fixtures',\n);\n" + "const B = resolve(HERE, '../../../scripts/gate.mjs');",
+    ).includes('scripts/gate.mjs'),
+  );
+  ok(
+    'a declaration nested inside a function-body initialiser is reached',
+    spannedNames(
+      SPANNED_SEED + 'const load = () => {\n' + "  const G = resolve(HERE, '../../../scripts/gate.mjs');\n" + '  return G;\n' + '};',
+    ).includes('scripts/gate.mjs'),
   );
   ok(
     'flags a resolve() nested straight into a read',
