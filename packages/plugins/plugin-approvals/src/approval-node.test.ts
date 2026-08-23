@@ -15,7 +15,14 @@ const noopLogger = {
  * Tiny in-memory ObjectQL stand-in — supports the `where`-equality + `$in`
  * queries the approval service issues, enough to drive the node bridge.
  */
-function makeFakeEngine() {
+function makeFakeEngine(
+  // [#10101] Optional name → object-definition map. When given, the fake
+  // grows the `getSchema` the shared platform-row organization resolver
+  // probes for; when omitted (every pre-#10101 caller) the fake has no
+  // schema access and `openNodeRequest` keeps the acting-context fallback —
+  // the documented degradation, exercised below rather than assumed.
+  schemas?: Record<string, any>,
+) {
   const tables = new Map<string, any[]>();
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
   const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
@@ -26,6 +33,7 @@ function makeFakeEngine() {
   });
   return {
     tables,
+    ...(schemas ? { getSchema: (name: string) => schemas[name] } : {}),
     async find(object: string, opts: any = {}) {
       const where = opts.where ?? opts.filter ?? {};
       let out = rows(object).filter(r => matches(r, where));
@@ -353,5 +361,137 @@ describe('Approval node bridge (ADR-0019)', () => {
     expect(result.success).toBe(false);
     expect(String(result.error ?? '')).toMatch(/current\.<field>|current\./);
     expect(await fake.find('sys_approval_request', {})).toHaveLength(0);
+  });
+});
+
+// ─── Organization attribution on the request (cloud#1395, #10101) ────────────
+//
+// The cloud#1395 Option A ruling, implemented by #10101: a platform row's
+// organization is the SUBJECT record's organization; actor context is the
+// fallback, never the primary. `openNodeRequest` resolves it through the
+// SHARED platform-row resolver (`@objectstack/metadata-core`) — the same
+// precedence `sys_audit_log`'s writer stamps with — and the one resolved value
+// feeds the request row, `sys_approval_action`, and the `sys_approval_approver`
+// index ("all three move together").
+//
+// Why it matters (measured on cloud#1395, over HTTP): an approval opened with
+// no acting organization LOCKED the record it was about while being invisible
+// in every inbox, its owner's included — `buildRequestWhere` matches the wall
+// by strict equality, so under a SYSTEM context the owner's match failed by
+// the same failure as a stranger's. Every schedule / time-relative / api
+// trigger produces exactly that context, by construction.
+describe('openNodeRequest — organization attribution (cloud#1395, #10101)', () => {
+  const DEAL_SCHEMA = { crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } } };
+  const openInput = (over: Record<string, unknown> = {}) => ({
+    object: 'crm_deal', recordId: 'd1', runId: 'run_1', nodeId: 'approve_step',
+    flowName: 'deal_approval',
+    config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const },
+    record: { id: 'd1', amount: 100 },
+    ...over,
+  });
+
+  it('stamps the SUBJECT record’s organization on the request, the action row AND the approver index — actor context present but not primary', async () => {
+    const fake = makeFakeEngine(DEAL_SCHEMA);
+    fake.tables.set('crm_deal', [{ id: 'd1', amount: 100, organization_id: 'org_subject' }]);
+    const svc = new ApprovalService({ engine: fake as any, logger: noopLogger });
+
+    await svc.openNodeRequest(openInput() as any, { userId: 'u1', tenantId: 'org_actor' } as any);
+
+    const [req] = await fake.find('sys_approval_request', {});
+    expect(req.organization_id, 'subject first — the cloud#1395 Option A ruling').toBe('org_subject');
+    // Both directions pinned: the actor's organization is NOT what landed.
+    expect(req.organization_id).not.toBe('org_actor');
+    const actions = await fake.find('sys_approval_action', {});
+    expect(actions.length).toBeGreaterThan(0);
+    for (const a of actions) expect(a.organization_id).toBe('org_subject');
+    const approvers = await fake.find('sys_approval_approver', {});
+    expect(approvers.length).toBeGreaterThan(0);
+    for (const a of approvers) expect(a.organization_id).toBe('org_subject');
+  });
+
+  it('a tenant-less open (the schedule / api trigger shape) resolves the subject organization instead of persisting NULL', async () => {
+    const fake = makeFakeEngine(DEAL_SCHEMA);
+    fake.tables.set('crm_deal', [{ id: 'd1', amount: 100, organization_id: 'org_subject' }]);
+    const svc = new ApprovalService({ engine: fake as any, logger: noopLogger });
+
+    // The measured defect's context: a flow run with no acting organization.
+    await svc.openNodeRequest(openInput() as any, { isSystem: true } as any);
+
+    const [req] = await fake.find('sys_approval_request', {});
+    expect(req.organization_id).toBe('org_subject');
+  });
+
+  it('the live record is the first source; the trigger snapshot answers when the live read finds nothing', async () => {
+    const fake = makeFakeEngine(DEAL_SCHEMA);
+    // No crm_deal row seeded — loadLiveRecord falls back to input.record.
+    const svc = new ApprovalService({ engine: fake as any, logger: noopLogger });
+
+    await svc.openNodeRequest(
+      openInput({ record: { id: 'd1', amount: 100, organization_id: 'org_snapshot' } }) as any,
+      { userId: 'u1', tenantId: 'org_actor' } as any,
+    );
+    const [req] = await fake.find('sys_approval_request', {});
+    expect(req.organization_id).toBe('org_snapshot');
+  });
+
+  it('the acting-context fallback still stands — pinned in BOTH directions (subject unresolvable ⇒ actor answers)', async () => {
+    // ① the object has no organization column of its own
+    const noColumn = makeFakeEngine({ crm_deal: { fields: { id: {}, amount: {} } } });
+    noColumn.tables.set('crm_deal', [{ id: 'd1', amount: 100 }]);
+    const svc1 = new ApprovalService({ engine: noColumn as any, logger: noopLogger });
+    await svc1.openNodeRequest(openInput() as any, { userId: 'u1', tenantId: 'org_actor' } as any);
+    expect((await noColumn.find('sys_approval_request', {}))[0].organization_id).toBe('org_actor');
+
+    // ② an engine double with no getSchema at all (the pre-#10101 shape)
+    const noSchema = makeFakeEngine();
+    noSchema.tables.set('crm_deal', [{ id: 'd1', amount: 100, organization_id: 'org_subject' }]);
+    const svc2 = new ApprovalService({ engine: noSchema as any, logger: noopLogger });
+    await svc2.openNodeRequest(openInput() as any, { userId: 'u1', tenantId: 'org_actor' } as any);
+    expect((await noSchema.find('sys_approval_request', {}))[0].organization_id).toBe('org_actor');
+
+    // ③ tenant-less AND subject-less stays NULL — fabricating an acting
+    // organization stays vetoed (cloud#1395 Option C)
+    const neither = makeFakeEngine({ crm_deal: { fields: { id: {}, amount: {} } } });
+    neither.tables.set('crm_deal', [{ id: 'd1', amount: 100 }]);
+    const svc3 = new ApprovalService({ engine: neither as any, logger: noopLogger });
+    await svc3.openNodeRequest(openInput() as any, { isSystem: true } as any);
+    expect((await neither.find('sys_approval_request', {}))[0].organization_id).toBeNull();
+  });
+
+  it('⛔ pins the sys_api_key divergence: stamps the DECLARED active_organization_id, and never treats an ADR-0066 org FK as the stamp', async () => {
+    // The credential table (#8287/#8778): unwalled by necessity, rows still
+    // ABOUT one organization under `tenancy.organizationField` — limb 0 wins
+    // over the disabled-tenancy opt-out.
+    const apiKey = makeFakeEngine({
+      sys_api_key: {
+        tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
+      },
+    });
+    apiKey.tables.set('sys_api_key', [{ id: 'key1', name: 'ci', active_organization_id: 'org_key' }]);
+    const svc = new ApprovalService({ engine: apiKey as any, logger: noopLogger });
+    await svc.openNodeRequest(
+      openInput({ object: 'sys_api_key', recordId: 'key1', record: { id: 'key1' } }) as any,
+      { userId: 'u1', tenantId: 'org_actor' } as any,
+    );
+    expect((await apiKey.find('sys_approval_request', {}))[0].organization_id).toBe('org_key');
+
+    // The other half of not flattening ABOUT vs WALLED-BY: a platform-global
+    // object (ADR-0066, `enabled: false`, NO organizationField) keeps its org
+    // FK out of the stamp — the acting context answers, exactly as the audit
+    // writer's limb 1 does.
+    const globalObj = makeFakeEngine({
+      sys_sso_provider: {
+        tenancy: { enabled: false },
+        fields: { id: {}, organization_id: {} },
+      },
+    });
+    globalObj.tables.set('sys_sso_provider', [{ id: 'sso1', organization_id: 'org_fk' }]);
+    const svc2 = new ApprovalService({ engine: globalObj as any, logger: noopLogger });
+    await svc2.openNodeRequest(
+      openInput({ object: 'sys_sso_provider', recordId: 'sso1', record: { id: 'sso1' } }) as any,
+      { userId: 'u1', tenantId: 'org_actor' } as any,
+    );
+    expect((await globalObj.find('sys_approval_request', {}))[0].organization_id).toBe('org_actor');
   });
 });

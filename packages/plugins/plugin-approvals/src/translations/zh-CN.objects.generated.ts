@@ -25,7 +25,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "组织",
-        help: "拥有该审批请求的租户（从提交方上下文传播）"
+        help: "该请求所涉记录所属的组织（记录无组织时回退到操作上下文）"
       },
       process_name: {
         label: "来源",

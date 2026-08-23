@@ -25,7 +25,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant that owns this approval request (propagated from submitter context)"
+        help: "Organization of the record this request is about (falls back to the acting context when the record has none)"
       },
       process_name: {
         label: "Source",

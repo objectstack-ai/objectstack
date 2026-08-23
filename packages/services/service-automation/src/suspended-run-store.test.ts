@@ -28,7 +28,14 @@ function createTestLogger() {
  * exercise {@link ObjectStoreSuspendedRunStore} (and a restart through it)
  * without a real driver.
  */
-function createFakeEngine(): SuspendedRunStoreEngine & { rows: Map<string, any> } {
+function createFakeEngine(
+    // [#10101] Optional name → object-definition map. When given, the fake
+    // grows the `getSchema` the shared platform-row organization resolver
+    // probes for; when omitted (every pre-#10101 caller) the fake has no
+    // schema access and the store keeps the acting-context fallback — the
+    // documented degradation, exercised below rather than assumed.
+    schemas?: Record<string, any>,
+): SuspendedRunStoreEngine & { rows: Map<string, any> } {
     const rows = new Map<string, any>();
     // Equality plus the `$lt` operator (kept for where-clause generality).
     const matches = (row: any, where: any) =>
@@ -40,6 +47,7 @@ function createFakeEngine(): SuspendedRunStoreEngine & { rows: Map<string, any> 
         });
     return {
         rows,
+        ...(schemas ? { getSchema: (name: string) => schemas[name] } : {}),
         async find(_object, options) {
             const where = options?.where;
             const out = [...rows.values()].filter(r => matches(r, where));
@@ -548,16 +556,19 @@ describe('ObjectStoreSuspendedRunStore — trigger attribution columns (#7533)',
     });
 });
 
-// ─── Organization attribution on the row (cloud#1395) ────────────────────────
+// ─── Organization attribution on the row (cloud#1395, fixed by #10101) ───────
 //
-// The finding this pins was measured from UNDER the wall, on a walled
-// single-database HotCRM SaaS boot (cloud#1338's `verify-hotcrm-saas.mjs`,
-// check `a4`): `sys_automation_run` carried `organization_id = NULL` on 31 of
-// 31 rows while every one of them described a record owned by a specific
-// customer — on a boot where `sys_audit_log` (1669 rows) was correctly
-// attributed. That negative control is the whole reason this is a defect and
-// not "platform tables do not carry an organization", so it is restated in
-// every comment here and must stay restated.
+// The finding this group started as was measured from UNDER the wall, on a
+// walled single-database HotCRM SaaS boot (cloud#1338's
+// `verify-hotcrm-saas.mjs`, check `a4`): `sys_automation_run` carried
+// `organization_id = NULL` on 31 of 31 rows while every one of them described
+// a record owned by a specific customer — on a boot where `sys_audit_log`
+// (1669 rows) was correctly attributed. That negative control is the whole
+// reason it was a defect and not "platform tables do not carry an
+// organization". #10101 promoted the audit writer's subject-first resolution
+// to the shared platform-row resolver (`@objectstack/metadata-core`, the
+// cloud#1395 Option A ruling) and this store now stamps through it; the
+// assertions below specify that behaviour, fallback directions included.
 //
 // These assertions read the persisted CELL for the same reason the #7533 group
 // above does: the column is what a wall filters on, and what an inbox query
@@ -588,28 +599,23 @@ describe('ObjectStoreSuspendedRunStore — organization attribution (cloud#1395)
         expect(engine.rows.get('run_abc').organization_id).toBeNull();
     });
 
-    // ⛔ PINNED DEFECT — this is cloud#1395 IN THE SHAPE MEASURED, not a
-    // specification of desired behaviour. It asserts what the writer does
-    // today: a run whose trigger carried no acting tenant persists NO
-    // organization, even though `trigger_object` / `trigger_record_id` on the
-    // very same row name a record that belongs to one.
-    //
-    // The schedule, time-relative and api triggers set no tenant AT ALL — by
-    // construction, since a scheduled sweep has no single acting organization —
-    // so this is not an edge case, it is every run those triggers produce.
-    //
-    // ⛔ When the write side is fixed, this test must FAIL and be rewritten to
-    // assert the organization resolved from the trigger record. Do not "repair"
-    // it to keep it green; a pinned defect that quietly adapts to the fix is the
-    // unfalsifiable green this whole line of work exists to prevent. Its sibling
-    // pin is check `a4` in cloud's `verify-hotcrm-saas.mjs`, which carries the
-    // same instruction and must be promoted in the same change.
-    it('PINNED: a tenant-less trigger context persists organization_id = NULL beside a record that HAS an organization', async () => {
-        const engine = createFakeEngine();
+    // PROMOTED (#10101) — this was the cloud#1395 PINNED DEFECT ('a tenant-less
+    // trigger context persists organization_id = NULL beside a record that HAS
+    // an organization'), rewritten per its own instruction the moment the write
+    // side was fixed: the assertion now specifies the ruled behaviour. Its
+    // sibling pins — cloud's `hotcrm-multitenant.acceptance.ts` suite and check
+    // `a4` in `verify-hotcrm-saas.mjs` — carry the same promote-never-repair
+    // instruction and follow at the next `.objectstack-sha` bump (tracked on
+    // cloud#1395).
+    it('PROMOTED (was the cloud#1395 pin): a tenant-less trigger context resolves organization_id from the SUBJECT record', async () => {
+        const engine = createFakeEngine({
+            crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } },
+        });
         const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
 
-        // The shape a schedule / api trigger produces: a real triggering record,
-        // carrying its own `organization_id`, and no tenant on the context.
+        // The shape a schedule / time-relative / api trigger produces: a real
+        // triggering record, carrying its own `organization_id`, and no tenant
+        // on the context — every run those triggers produce, by construction.
         await store.save({
             ...baseRun(),
             context: { object: 'crm_deal', record: { id: 'd1', organization_id: 'org_1' } } as any,
@@ -617,8 +623,165 @@ describe('ObjectStoreSuspendedRunStore — organization attribution (cloud#1395)
 
         const row = engine.rows.get('run_abc');
         expect(row.trigger_record_id, 'the row names the record it is about').toBe('d1');
-        // …and stores no organization for it. Both halves asserted together:
-        // the NULL alone would be satisfiable by a row that describes nothing.
-        expect(row.organization_id, 'PINNED DEFECT cloud#1395 — fix this and PROMOTE the assertion').toBeNull();
+        // …and now stores that record's organization. Both halves asserted
+        // together: the value alone would be satisfiable by a row that
+        // describes nothing.
+        expect(row.organization_id, 'the cloud#1395 Option A ruling: subject first').toBe('org_1');
+    });
+
+    it('the SUBJECT record beats the acting tenant when both are present (actor context is the fallback, never the primary)', async () => {
+        const engine = createFakeEngine({
+            crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } },
+        });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        // A member of A and B, active in B, whose flow touches an A record —
+        // the `group`-posture shape where actor-first measurably misfiles.
+        await store.save({
+            ...baseRun(),
+            context: {
+                object: 'crm_deal', tenantId: 'org_actor',
+                record: { id: 'd1', organization_id: 'org_subject' },
+            } as any,
+        });
+        expect(engine.rows.get('run_abc').organization_id).toBe('org_subject');
+    });
+
+    it('the acting-context fallback still stands: no record, no org column, or no schema access each keep tenantId', async () => {
+        // ① trigger carries no record (a plain scheduled sweep has no ONE
+        // subject — fabricating one stays vetoed, cloud#1395 Option C)
+        const noRecord = createFakeEngine({ crm_deal: { fields: { id: {}, organization_id: {} } } });
+        await new ObjectStoreSuspendedRunStore(noRecord, createTestLogger()).save({
+            ...baseRun(), context: { object: 'crm_deal', tenantId: 'org_1' } as any,
+        });
+        expect(noRecord.rows.get('run_abc').organization_id).toBe('org_1');
+
+        // ② the object has no organization of its own (single-tenant shape)
+        const noColumn = createFakeEngine({ crm_deal: { fields: { id: {}, amount: {} } } });
+        await new ObjectStoreSuspendedRunStore(noColumn, createTestLogger()).save({
+            ...baseRun(),
+            context: { object: 'crm_deal', tenantId: 'org_1', record: { id: 'd1', amount: 100 } } as any,
+        });
+        expect(noColumn.rows.get('run_abc').organization_id).toBe('org_1');
+
+        // ③ an engine double with no getSchema at all (the pre-#10101 fake
+        // shape) — the resolver degrades to null and the fallback answers
+        const noSchema = createFakeEngine();
+        await new ObjectStoreSuspendedRunStore(noSchema, createTestLogger()).save({
+            ...baseRun(),
+            context: { object: 'crm_deal', tenantId: 'org_1', record: { id: 'd1', organization_id: 'org_2' } } as any,
+        });
+        expect(noSchema.rows.get('run_abc').organization_id).toBe('org_1');
+    });
+
+    it('tenant-less AND subject-less stays NULL — Option C (fabricating an acting org) remains vetoed', async () => {
+        const engine = createFakeEngine({ crm_deal: { fields: { id: {}, organization_id: {} } } });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.save({ ...baseRun(), context: { object: 'crm_deal' } as any });
+        expect(engine.rows.get('run_abc').organization_id).toBeNull();
+    });
+
+    it('⛔ pins the sys_api_key divergence: the stamp column is the DECLARED active_organization_id, not the wall', async () => {
+        // The credential table: unwalled by necessity (`enabled: false`,
+        // #8287) while its rows are still ABOUT one organization under
+        // `tenancy.organizationField` (#8778). A flow triggered by an api-key
+        // record must file its run under the org the key authenticates into —
+        // limb 0 of the shared resolver, winning over the ADR-0066 opt-out.
+        const engine = createFakeEngine({
+            sys_api_key: {
+                tenancy: { enabled: false, organizationField: 'active_organization_id' },
+                fields: { id: {}, name: {}, user_id: {}, active_organization_id: {}, revoked: {} },
+            },
+        });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.save({
+            ...baseRun(),
+            context: {
+                object: 'sys_api_key',
+                record: { id: 'key1', name: 'ci', active_organization_id: 'org_key' },
+            } as any,
+        });
+        expect(engine.rows.get('run_abc').organization_id).toBe('org_key');
+    });
+
+    it('recordTerminal resolves the SUBJECT organization from the trigger-record snapshot, with the acting tenant as fallback', async () => {
+        const engine = createFakeEngine({
+            crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } },
+        });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        // Subject resolvable → subject org, even beside an acting tenant.
+        await store.recordTerminal({
+            runId: 'r1', flowName: 'f', status: 'completed', startedAt: '2026-01-01T00:00:00.000Z',
+            organizationId: 'org_actor',
+            triggerType: 'record-after-update', triggerObject: 'crm_deal', triggerRecordId: 'd1',
+            triggerRecord: { id: 'd1', organization_id: 'org_subject' },
+        } as RunRecord);
+        expect(engine.rows.get('run_r1').organization_id).toBe('org_subject');
+
+        // No snapshot (a plain scheduled sweep) → the acting-context fallback.
+        await store.recordTerminal({
+            runId: 'r2', flowName: 'f', status: 'completed', startedAt: '2026-01-01T00:00:00.000Z',
+            organizationId: 'org_actor', triggerType: 'schedule',
+        } as RunRecord);
+        expect(engine.rows.get('run_r2').organization_id).toBe('org_actor');
+
+        // Neither → NULL, never a fabricated value.
+        await store.recordTerminal({
+            runId: 'r3', flowName: 'f', status: 'completed', startedAt: '2026-01-01T00:00:00.000Z',
+            triggerType: 'schedule',
+        } as RunRecord);
+        expect(engine.rows.get('run_r3').organization_id).toBeNull();
+    });
+
+    it('end to end: a tenant-less engine run lands a terminal history row carrying the SUBJECT organization', async () => {
+        // Pins the engine → store handoff itself (`recordLog` copying the
+        // context's trigger-record snapshot and acting tenant onto the
+        // RunRecord), not just the store's resolution over a hand-built record.
+        const engine = createFakeEngine({
+            crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } },
+        });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        const e = new AutomationEngine(createTestLogger(), store);
+        e.registerFlow('attr_flow', {
+            name: 'attr_flow', label: 'Attribution Flow', type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        });
+        const result = await e.execute('attr_flow', {
+            // the schedule / time-relative shape: a subject record, no tenant
+            object: 'crm_deal', event: 'record-after-update',
+            record: { id: 'd9', organization_id: 'org_1', amount: 5 },
+        } as any);
+        expect(result.success).toBe(true);
+        // recordTerminal is fire-and-forget off the terminal recordLog — give
+        // the microtask queue one turn to land the row.
+        await new Promise((r) => setImmediate(r));
+        const terminal = [...engine.rows.values()].find((r) => r.status === 'completed');
+        expect(terminal, 'a terminal history row landed').toBeTruthy();
+        expect(terminal.trigger_record_id).toBe('d9');
+        expect(terminal.organization_id).toBe('org_1');
+    });
+
+    it('a run’s paused row and its terminal row agree by construction (same inputs, same precedence)', async () => {
+        const engine = createFakeEngine({
+            crm_deal: { fields: { id: {}, amount: {}, organization_id: {} } },
+        });
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        const context = { object: 'crm_deal', record: { id: 'd1', organization_id: 'org_1' } };
+
+        await store.save({ ...baseRun(), context: context as any });
+        await store.recordTerminal({
+            runId: 'abc2', flowName: 'approval_flow', status: 'completed',
+            startedAt: '2026-01-01T00:00:00.000Z',
+            triggerType: 'record-after-update', triggerObject: context.object,
+            triggerRecordId: 'd1', triggerRecord: context.record,
+        } as RunRecord);
+
+        expect(engine.rows.get('run_abc').organization_id).toBe('org_1');
+        expect(engine.rows.get('run_abc2').organization_id).toBe('org_1');
     });
 });

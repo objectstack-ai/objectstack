@@ -25,7 +25,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "組織",
-        help: "この承認リクエストを所有するテナント（送信者コンテキストから伝播）"
+        help: "このリクエストの対象レコードが属する組織（レコードに組織がない場合は操作コンテキストにフォールバック）"
       },
       process_name: {
         label: "ソース",

@@ -25,7 +25,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organización",
-        help: "Tenant que posee esta solicitud de aprobación (propagado desde el contexto del solicitante)."
+        help: "Organización del registro al que se refiere esta solicitud (recurre al contexto del actor cuando el registro no tiene ninguna)."
       },
       process_name: {
         label: "Origen",
