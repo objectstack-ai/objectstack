@@ -511,19 +511,20 @@ export async function upsertEnvPermissionSet(
       // ADMIN-owned (formerly stamped 'user'). No runtime path branches on the
       // value except the 'package' guard, so this is a pure vocab rename.
       managed_by: 'admin',
-      // [#11097] `false`, not `!!customized`. This row is being CREATED, so it
-      // is `managed_by:'admin'` one line up — an env-authored definition, not a
-      // customization of a packaged one — and the update branch below already
-      // encodes exactly that rule (`existing.managed_by === 'package' ?
-      // !!customized : false`). The insert used to stamp the caller's raw
-      // opinion instead, so a new overlay-backed record was born badged
-      // "customized" in the Setup list while owning no package to be a
-      // customization OF, and the very next boot's projection cleared it. That
-      // second write is invisible while every boot re-writes every record; it
-      // stops being invisible the moment writes are skipped when nothing
-      // differs, which is why it is repaired here rather than left to make the
-      // steady state take two boots to settle.
-      ...(customized !== undefined ? { customized: false } : {}),
+      // [#11097 SCOPE] Deliberately UNCHANGED from pre-#11097 behaviour:
+      // `!!customized`, the caller's raw opinion, exactly as before this card.
+      // A fresh `managed_by:'admin'` row can be born `customized: true` when
+      // this insert runs with `customized: overlayBacked` from a name that has
+      // NO package baseline at all — that reads wrong against the update
+      // branch's rule two lines below (`managed_by === 'package' ? !!customized
+      // : false`), and self-heals on the very next `projectPermissionMutation`
+      // call because `customizedDiffers` (below) compares against that SAME
+      // rule and issues a corrective UPDATE. Tightening the insert to match is
+      // a real, if narrow, PROJECTED-STATE change — not a round-trip-count
+      // change — and belongs to its own card with its own review, not a rider
+      // on a perf fix (AGENTS.md Prime Directive #10 / Rule 3's same-defect-
+      // class test). Filed separately; left exactly as `main` has it.
+      ...(customized !== undefined ? { customized: !!customized } : {}),
     };
     const created = await tryInsert(ql, 'sys_permission_set', row);
     if (created) {
