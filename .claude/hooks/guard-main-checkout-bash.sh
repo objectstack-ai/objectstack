@@ -48,7 +48,7 @@
 # for anyone who means to write there, and the target of this guard is the reflexive
 # `sed -i` an agent reaches for mid-task, not a determined evader.
 #
-# Writing ABOUT the ban must never trip the ban (#4890's lesson). Three layers:
+# Writing ABOUT the ban must never trip the ban (#4890's lesson). Four layers:
 #   1. quote-aware segmentation + tokenisation — a `>` or a `sed -i` inside '…' or "…" is
 #      literal text, so `grep -n "sed -i" .claude/` and `echo "never sed -i in main"` pass;
 #   2. heredoc bodies are stripped before analysis — the LINES of a `cat > /tmp/notes <<EOF`
