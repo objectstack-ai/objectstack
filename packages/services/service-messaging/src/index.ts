@@ -52,6 +52,10 @@ export type {
     QuietHours,
 } from './preference-resolver.js';
 
+// Plugin-facing inbox writes scoped to the authenticated caller (ADR-0030 L5)
+export { InboxCallerError, resolveInboxRecipient } from './inbox-caller.js';
+export type { InboxCaller } from './inbox-caller.js';
+
 // Channel seam
 export { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 export type { InboxChannelOptions } from './inbox-channel.js';

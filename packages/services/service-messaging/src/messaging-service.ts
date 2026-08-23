@@ -19,6 +19,7 @@ import type {
     RedeliverOptions,
 } from './http-outbox.js';
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
+import { type InboxCaller, resolveInboxRecipient } from './inbox-caller.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
 export const NOTIFICATION_EVENT_OBJECT = 'sys_notification';
@@ -493,6 +494,20 @@ export class MessagingService {
      * `(notification_id, user_id, channel:'inbox')`); inserts one only when
      * absent. `ids` are notification (event) ids. Returns the REST contract
      * shape (`MarkNotificationsReadResponseSchema`): `{ success, readCount }`.
+     *
+     * **This is the REST door's method** — `INotificationService.markRead?`,
+     * called by `runtime/src/domains/notifications.ts`, which binds `userId`
+     * to `context.executionContext.userId` after answering 401 for a request
+     * that has none. The target user is a declared parameter here *because*
+     * that door has already authenticated it.
+     *
+     * An IN-PROCESS caller has no such door in front of it, and for that caller
+     * the parameter is simply a free string — the "any plugin can mark any
+     * user's messages read" shape. Plugins use {@link markReadAsCaller}, which
+     * derives the recipient from the caller's execution context and has no
+     * target-user parameter to get wrong. This signature stays as it is: it is
+     * the published `INotificationService` contract, and the REST door needs
+     * exactly it.
      */
     async markRead(userId: string, ids: readonly string[]): Promise<{ success: boolean; readCount: number }> {
         const data = this.ctx.getData?.();
@@ -558,6 +573,66 @@ export class MessagingService {
         const data = this.ctx.getData?.();
         if (!data || !userId) return { success: true, readCount: 0 };
         return this.markRead(userId, await this.unreadNotificationIds(data, userId));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Plugin-facing inbox writes — scoped to the AUTHENTICATED caller     */
+    /*                                                                     */
+    /*  The pair above is the REST door's contract surface                 */
+    /*  (`INotificationService.markRead?/markAllRead?`), whose `userId` is  */
+    /*  filled by the runtime from an already-authenticated session. The    */
+    /*  pair below is the door for IN-PROCESS callers, and it takes no      */
+    /*  target user at all: the recipient is derived from the caller's      */
+    /*  execution context, so acting on someone else's inbox has no         */
+    /*  spelling here. See `inbox-caller.ts` for the full rationale,        */
+    /*  including why `attributedUserId` / `actor` / `isSystem` are refused */
+    /*  rather than accepted as fallbacks.                                 */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Mark notifications read **in the calling user's own inbox** — the
+     * plugin-facing counterpart to {@link markRead}.
+     *
+     * This is what a plugin closing out a notification it pushed should call:
+     * `emit()` returns the `notificationId`, the business record keeps it, and
+     * the hook that completes the work hands that id back here together with
+     * the context it is running under. The approval case the surface was asked
+     * for is exactly this shape — the approver who clears the request IS the
+     * recipient whose badge is stuck, so the authenticated caller and the
+     * receipt's owner are the same principal.
+     *
+     * Refuses (`InboxCallerError`, 401 `UNAUTHENTICATED`) when the context
+     * names no authenticated user. **The refusal is evaluated FIRST**, before
+     * the empty-`ids` and no-data-engine short-circuits {@link markRead}
+     * applies: those return a `{ success: true, readCount: 0 }` envelope, and
+     * letting an unauthenticated call reach one would report success for a
+     * write that was never authorized to happen — the silent-success shape
+     * this door exists to replace.
+     *
+     * @param caller The caller's execution context. The recipient is read from
+     *               its `userId` and from nothing else.
+     * @param ids    Notification (event) ids, as returned by `emit()`.
+     */
+    async markReadAsCaller(
+        caller: InboxCaller | undefined,
+        ids: readonly string[],
+    ): Promise<{ success: boolean; readCount: number }> {
+        return this.markRead(resolveInboxRecipient(caller, 'markReadAsCaller'), ids);
+    }
+
+    /**
+     * Mark the calling user's WHOLE inbox read — the plugin-facing counterpart
+     * to {@link markAllRead}, on the same authenticated-caller axis as
+     * {@link markReadAsCaller} (and with the same refusal, evaluated first).
+     *
+     * Deliberately still the caller's own inbox and not a sweep primitive: a
+     * background job that must clear someone else's inbox is naming a target
+     * user, which is {@link markAllRead}'s declared contract, not this one's.
+     */
+    async markAllReadAsCaller(
+        caller: InboxCaller | undefined,
+    ): Promise<{ success: boolean; readCount: number }> {
+        return this.markAllRead(resolveInboxRecipient(caller, 'markAllReadAsCaller'));
     }
 
     /**
