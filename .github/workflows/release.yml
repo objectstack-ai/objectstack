@@ -40,14 +40,15 @@ name: Release
 #
 # HOW THE LANES ARE SPLIT NOW
 # ---------------------------
-#   push to main  →  `version-pr`         keeps the "chore: version packages" PR
-#                                          (#4935) current. Carries NO publish
-#                                          capability: the changesets step is
+#   schedule (6-hourly)  →  `version-pr`  keeps the "chore: version packages" PR
+#   or a dispatch with                     (#4935) current. Carries NO publish
+#   `refresh_version_pr`                   capability: the changesets step is
 #                                          invoked WITHOUT a `publish:` script,
 #                                          so the action's publish branch is
 #                                          unreachable by construction, not by
 #                                          an `if:` someone can get wrong.
-#                 →  `release-integrity`   audits ONLY the version at
+#                                          NOT on push — see the section below.
+#   push to main  →  `release-integrity`   audits ONLY the version at
 #                                          `github.sha`. Never publishes, never
 #                                          pushes a tag. May backfill GitHub
 #                                          Releases / the ADR-0087 D4 asset /
@@ -64,8 +65,58 @@ name: Release
 #                                          at `environment: release` until a
 #                                          required reviewer approves it.
 #   workflow_dispatch → `publish`          the repair lane. Takes no version;
-#                                          audits main exactly as the push lane
-#                                          does. Same environment gate.
+#   (WITHOUT                                audits main exactly as the push lane
+#    `refresh_version_pr`)                  does. Same environment gate.
+#
+# WHY `version-pr` LEFT THE PUSH TRIGGER (#11233, 2026-08-23)
+# ----------------------------------------------------------
+# changesets/action's version path is `git reset --hard <github.context.sha>` →
+# re-version → `git push --force origin HEAD:changeset-release/main` (its source
+# is quoted at the top of this file). On push that recomputes and force-pushes
+# #4935 on EVERY landing, and main takes ~18 merges a working day. The standing
+# Version Packages PR therefore never held still long enough for its own branch
+# CI to finish: every run was superseded by the next force-push, so the PR could
+# not converge and was ejected from the merge queue on entry. That is a
+# structural property of (action algorithm × trigger frequency), not of the CLI
+# version — this repo is already on @changesets/cli ^3.0.0 and the churn was
+# unchanged. The fix is the one the changesets project documents for exactly
+# this: refresh on a SCHEDULE instead of on every push.
+#
+# Between refreshes `changeset-release/main` is a static branch. Its CI
+# converges, and it merges through the ordinary queue like any other PR. A stale
+# window of up to six hours is the whole cost, and it is bounded on demand:
+# dispatch with `refresh_version_pr` when you want it current NOW (immediately
+# before a GA cut, say). The bookkeeping is not time-critical — the changesets
+# are already committed on main; #4935 is only their rendering.
+#
+# ⛔ THE DISPATCH COLLISION, AND WHY THERE IS AN INPUT FOR IT
+# ----------------------------------------------------------
+# `workflow_dispatch` was already taken: it is the publish REPAIR lane (D4).
+# One event name now has to start two lanes that must never start each other —
+# a refresh that also queued the publish audit would park a WAITING DEPLOYMENT
+# at the `release` environment on every routine refresh, i.e. an approval prompt
+# a maintainer must open and dismiss to keep the real ones meaningful. Approval
+# noise is how an approval stops being read, and this file's whole barrier is
+# that approval (see below).
+#
+# So the event is split by an INPUT rather than by a second workflow file (the
+# maintainer does not want another lane to maintain, and a second file would
+# duplicate the publish invariants where they can drift apart):
+#
+#     dispatch WITH    `refresh_version_pr` → version-pr only, no deployment
+#     dispatch WITHOUT `refresh_version_pr` → the repair lane, exactly as before
+#     schedule                              → version-pr only
+#     push to main                          → release-integrity (+ publish)
+#
+# Every job carries the half of that split it needs, in its own `if:`. No job
+# infers its lane from another job's presence.
+#
+# ⚠️ The two inputs are INDEPENDENT, so `refresh_version_pr` + `force` is a
+# reachable form, and it is refused rather than resolved: `publish`'s guard
+# excludes any dispatch carrying `refresh_version_pr`, so that combination
+# refreshes and publishes NOTHING. A dispatch that both refreshes bookkeeping
+# and force-publishes is not a thing anyone means; the harmless reading is the
+# one that runs.
 #
 # WHERE THE HUMAN IS, AFTER ADR-0125 (2026-08-20)
 # -----------------------------------------------
@@ -98,17 +149,36 @@ name: Release
 #
 # WHAT IS DELIBERATELY STILL AUTOMATIC
 # ------------------------------------
-# Version-PR maintenance (this file's `version-pr` job) stays on push runs —
-# harmless bookkeeping, and #4935 must keep regenerating. Release/D4/image
-# backfill for an already-published version stays on push runs — it is the
-# #4900 repair, and it cannot mint a version. `npm publish` and `git push --tags`
-# still live in exactly one job, and that job cannot start without a human
-# approving it.
+# Version-PR maintenance (this file's `version-pr` job) still runs unattended —
+# harmless bookkeeping, and #4935 must keep regenerating — it just runs on a
+# 6-hourly schedule instead of on every push (#11233). A `schedule` trigger
+# reaching this job is not a loosening: the job has no publish capability by
+# construction, so the event that starts it cannot change what it is able to do.
+# Release/D4/image backfill for an already-published version stays on push runs —
+# it is the #4900 repair, and it cannot mint a version. `npm publish` and
+# `git push --tags` still live in exactly one job, that job is reachable from
+# `push` and from the repair dispatch ONLY — never from `schedule`, never from a
+# refresh dispatch — and it cannot start without a human approving it.
 
 on:
   push:
     branches:
       - main
+  # Version-PR bookkeeping only (#11233). GitHub runs `schedule` on the DEFAULT
+  # BRANCH exclusively, which is the ref `version-pr` may ever regenerate from,
+  # so the trigger cannot reach a ref the job is not meant to touch. Six-hourly
+  # is the stale-window budget: #4935 renders changesets that are already
+  # committed on main, so lateness costs nothing that cannot be bought back on
+  # demand with `refresh_version_pr` below.
+  #
+  # ⚠️ Scheduled runs are queued, not guaranteed on the minute — GitHub delays
+  # or drops them under load, and disables them entirely after 60 days of
+  # repository inactivity. Both are acceptable HERE and would not be on a
+  # publishing lane: a refresh that arrives late leaves #4935 stale, which is
+  # visible on the PR and fixable by one dispatch. This is a second reason the
+  # publish lane must never be reachable from `schedule`.
+  schedule:
+    - cron: '0 */6 * * *'
   # The repair lane (ADR-0125 D4). Takes NO version: both lanes audit main the
   # same way. `force` exists for the one case the push lane's predicate cannot
   # see — a publish that died having already shipped the @objectstack/cli canary
@@ -126,6 +196,20 @@ on:
         required: false
         default: false
         type: boolean
+      # The on-demand half of #11233's schedule. Its ONLY effect is to move this
+      # dispatch onto the bookkeeping lane: `version-pr` requires it, and both
+      # `release-integrity` and `publish` refuse a dispatch that carries it. It
+      # therefore cannot widen anything — it is strictly subtractive, the one
+      # input in this file that can only ever cause LESS to run.
+      refresh_version_pr:
+        description: >-
+          Regenerate the "chore: version packages" PR (#4935) now instead of
+          waiting for the next 6-hourly refresh. Runs the bookkeeping lane ONLY:
+          no audit, no publish, no deployment queued at the `release`
+          environment. Leave unchecked to use the publish repair lane.
+        required: false
+        default: false
+        type: boolean
 
 # ⛔ NO workflow-level concurrency — per-JOB groups below, deliberately
 # (ADR-0125 D5).
@@ -139,10 +223,13 @@ on:
 #
 # Worse than not separating: a job waiting on the `release` environment approval
 # holds its run IN PROGRESS for as long as the maintainer takes. Under one
-# shared group every main push in that window would queue as pending and evict
+# shared group every other run in that window would queue as pending and evict
 # the one before it, so an hour spent deciding would silently stop the Version
 # Packages PR from regenerating. Per-job groups keep the waiting publish from
-# touching the bookkeeping lane at all.
+# touching the bookkeeping lane at all. #11233 sharpened this rather than
+# retiring it: the runs that would be evicted are now the 6-hourly refreshes and
+# any on-demand one, and a refresh is exactly what someone reaches for while a
+# release is mid-approval.
 
 jobs:
   # ══════════════════════════════════════════════════════════════════════════
@@ -150,12 +237,28 @@ jobs:
   # ══════════════════════════════════════════════════════════════════════════
   version-pr:
     name: Version PR maintenance
-    if: github.event_name == 'push'
+    # ⛔ NOT `push` (#11233). On push this job force-pushed #4935 on every one of
+    # main's ~18 daily landings, so the PR's own CI could never converge and the
+    # PR could never merge. The scheduled tick is the refresh; the dispatch input
+    # is the same refresh on demand.
+    #
+    # `inputs.refresh_version_pr` is guarded by the event test rather than read
+    # bare: the `inputs` context exists only on `workflow_dispatch`, so on a
+    # `schedule` run it is null — and `null` is falsy, which would be the right
+    # answer by accident. Say which event we are on, so the guard states the lane
+    # split instead of leaning on a context's emptiness.
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr)
     runs-on: ubuntu-latest
-    # Serialise against itself so two landings cannot race the force-push to
-    # `changeset-release/main`; never cancel in progress. An evicted PENDING run
-    # is harmless here — this job regenerates the PR from scratch, so the newest
-    # run's result is the one that was wanted anyway.
+    # Serialise against itself so two refreshes cannot race the force-push to
+    # `changeset-release/main`; never cancel in progress. The races it covers
+    # changed with the trigger (#11233) but did not go away: a scheduled tick can
+    # still overlap the previous one if a refresh runs long, and an on-demand
+    # dispatch is most likely to be fired precisely when someone is impatient
+    # with a tick already in flight. An evicted PENDING run is harmless here —
+    # this job regenerates the PR from scratch, so the newest run's result is the
+    # one that was wanted anyway.
     concurrency:
       group: release-version-pr-${{ github.ref }}
       cancel-in-progress: false
@@ -246,10 +349,23 @@ jobs:
   # ══════════════════════════════════════════════════════════════════════════
   release-integrity:
     name: Release integrity (audit + no-mint backfill)
-    # Runs on BOTH events now (ADR-0125 D1): it is the single place that reads
-    # what main carries and asks npm whether that version exists, so the push
-    # lane and the repair lane converge on ONE predicate and one guard instead
-    # of two code paths that can drift.
+    # Runs on both RELEASE events (ADR-0125 D1): it is the single place that
+    # reads what main carries and asks npm whether that version exists, so the
+    # push lane and the repair lane converge on ONE predicate and one guard
+    # instead of two code paths that can drift.
+    #
+    # This `if:` is new with #11233 and is the reason that sentence still holds.
+    # The job used to carry no `if:` at all, which meant "every event this file
+    # has" — correct while the file had exactly the two release events, and
+    # wrong the moment a third arrived. Without it the 6-hourly tick and every
+    # on-demand refresh would run a full release audit, and each one that found
+    # main's version absent from npm would queue a deployment at the `release`
+    # environment for a maintainer to dismiss. The audit mints nothing, so this
+    # is not a safety guard; it is the noise guard the collision section above
+    # argues for. Bookkeeping events do not get a release audit.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr)
     runs-on: ubuntu-latest
     # Serialised: its backfills create GitHub Releases and push a runtime image,
     # and two runs doing that at once is not a state worth reasoning about.
@@ -459,10 +575,21 @@ jobs:
     # than `||`, so `success() && A || B` would let the force branch publish on
     # top of a FAILED audit — and the audit is what computes the version this
     # job's name, guard and tag all read. If the audit dies, nothing publishes.
+    #
+    # `!inputs.refresh_version_pr` on the force branch is #11233's half, and it
+    # is written even though it is currently redundant. A refresh dispatch skips
+    # `release-integrity`, and a SKIPPED `needs` job makes `success()` false — so
+    # the belt already holds (the `docker` job below documents that same GitHub
+    # behaviour from the other direction). Redundant is not the same as
+    # unnecessary: what makes the force branch safe would then be a fact about a
+    # DIFFERENT job's `if:`, discoverable only by reading it, and the next person
+    # to touch either guard gets no warning. This is the one job in the
+    # repository that publishes; its guard states its own preconditions.
     if: >-
       success() &&
       (needs.release-integrity.outputs.publish-pending == 'true' ||
-       (github.event_name == 'workflow_dispatch' && inputs.force))
+       (github.event_name == 'workflow_dispatch' && inputs.force &&
+        !inputs.refresh_version_pr))
     runs-on: ubuntu-latest
     # One publish at a time per ref, and never cancelled — a run cancelled
     # mid-`changeset publish` is the state that leaves a fixed group half on npm.
@@ -748,11 +875,17 @@ jobs:
     # Called as a reusable workflow so the same build can be re-run manually via
     # workflow_dispatch (e.g. base-image CVE rebuilds) — see docker-publish.yml.
     #
-    # `!cancelled()` rather than the default implicit success(): exactly one of
+    # `!cancelled()` rather than the default implicit success(): at most one of
     # the two upstream jobs runs on any given event, so the other is always
     # SKIPPED — under the implicit success() this job would then never run at
     # all. It also survives a publish job that reached npm and then died
     # (#4900). The outputs are the gate; the jobs' statuses are not.
+    #
+    # On #11233's bookkeeping events (`schedule`, or a dispatch carrying
+    # `refresh_version_pr`) NEITHER upstream job runs, which is why "at most"
+    # replaced "exactly". Nothing else here changes: both outputs are then unset,
+    # unset compares false against 'true', and this job stays skipped — the
+    # outputs were already the gate, so a third event needed no new condition.
     if: ${{ !cancelled() && (needs.release-integrity.outputs.published == 'true' || needs.publish.outputs.published == 'true') }}
     permissions:
       contents: read

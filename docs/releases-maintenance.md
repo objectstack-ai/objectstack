@@ -363,12 +363,20 @@ What it does, in order:
    commit**. Never the other way round: rc.3 and rc.4 tagged commits that lived only
    on `changeset-release/main`, which is #6170.
 
-**Why this lane exists.** The standing Version Packages PR is force-refreshed on
-every main push, so its CI cannot converge while main is busy — and cutting through
-it used to mean chasing a moving objectui pin as well (rc.6 was chased across four
-pin-bump laps, every one overtaken before its CI finished, and finishing would have
-needed ~40 minutes of coordinated freezes across two repos). A snapshot removes the
-race instead of asking people to hold still.
+**Why this lane exists.** The standing Version Packages PR *was* force-refreshed on
+every main push, so its CI could not converge while main was busy — and cutting
+through it used to mean chasing a moving objectui pin as well (rc.6 was chased across
+four pin-bump laps, every one overtaken before its CI finished, and finishing would
+have needed ~40 minutes of coordinated freezes across two repos). A snapshot removes
+the race instead of asking people to hold still.
+
+⚠️ **The first half of that premise no longer holds** (#11233, 2026-08-23):
+`release.yml`'s `version-pr` job moved off `push` onto a 6-hourly `schedule` plus an
+on-demand `workflow_dispatch` (`refresh_version_pr`), so between refreshes
+`changeset-release/main` is static and its CI does converge. This section is left
+standing because the *snapshot* lane was never only about that — the moving objectui
+pin is untouched, and `cut-rc` is still the rc route. What it does mean is that "the
+version PR can never converge" is no longer a reason to reach for it.
 
 **On the pin.** `cut-rc` builds against `.objectui-sha` exactly as committed. It
 does not resolve objectui `main`, does not compare the pin to anything, and does not
@@ -389,22 +397,25 @@ configured the push step fails with that message and **nothing is published**.
 
 **What happens to the standing Version Packages PR.** After a cut, the standing
 `chore: version packages (rc)` PR ([#6208](https://github.com/objectstack-ai/objectstack/pull/6208),
-branch `changeset-release/main`) comes to rest in one of two states, and *which* one
-depends on the push credential above — so it is written down here rather than
-rediscovered at 2am:
+branch `changeset-release/main`) comes to rest **stale**, showing an
+already-consumed version bump, until the next refresh of the version-PR lane. Since
+#11233 that refresh is the 6-hourly `schedule` (or one `workflow_dispatch` with
+`refresh_version_pr`, if you want it now) — **not** the cut's own push, under either
+push credential, because `version-pr` no longer runs on `push` at all.
+
+The push credential still decides whether the cut's push fires `release.yml` at all,
+which matters for the `release-integrity` lane below — so it is written down here
+rather than rediscovered at 2am:
 
 - **Route (a), the Actions identity.** GitHub does not create workflow runs from
   events triggered by the automatic `GITHUB_TOKEN` — the documented recursion guard,
   whose only exceptions are `workflow_dispatch` and `repository_dispatch`. So the
-  version-commit push does **not** fire `release.yml`'s `push` lane, `version-pr`
-  never runs, and #6208 keeps showing a stale, already-consumed version bump until
-  some later unrelated push to `main` refreshes it. This repo already depends on that
-  guard elsewhere and says so: see `docker-publish.yml`'s header, which explains that
-  a `push: tags:` trigger "would never fire" because the release workflow pushes its
-  tags with `GITHUB_TOKEN`.
+  version-commit push does **not** fire `release.yml`'s `push` lane at all. This repo
+  already depends on that guard elsewhere and says so: see `docker-publish.yml`'s
+  header, which explains that a `push: tags:` trigger "would never fire" because the
+  release workflow pushes its tags with `GITHUB_TOKEN`.
 - **Route (b), a PAT in `RELEASE_PUSH_TOKEN`.** A PAT is not the `GITHUB_TOKEN`, so
-  the push triggers normally, `version-pr` runs, and #6208 regenerates (or closes)
-  by itself.
+  the push triggers normally and `release-integrity` audits the pushed commit.
 
 **A stale #6208 after an rc cut is EXPECTED AND HARMLESS — do not "fix" it by hand.**
 Its changesets were consumed by the cut and MOVED into `.changeset/pre/` — under
@@ -412,9 +423,10 @@ Its changesets were consumed by the cut and MOVED into `.changeset/pre/` — und
 `.changeset/pre.json` carries `{"mode","tag"}` and nothing else, so it is not a
 record of what was consumed (it was, under v2). The PR is bookkeeping, it carries no
 publish capability by construction (`release.yml` passes the changesets action no
-`publish:` script), and it regenerates correctly at the next push to `main` or the
-next GA cut. Editing or force-refreshing it manually only risks putting a version
-commit somewhere the publish lane can reach.
+`publish:` script), and it regenerates correctly at the next scheduled refresh (at
+most six hours; sooner if you dispatch one) or the next GA cut. Editing or
+force-refreshing it manually only risks putting a version commit somewhere the
+publish lane can reach.
 
 **The runtime image is not built here.** `release.yml`'s `release-integrity` lane runs
 on every push to `main` and requests the image once the version is on npm, so it
@@ -435,6 +447,16 @@ judgement about which console revision that should be belongs in an issue and a 
 PR *before* the cut. Merge the `chore: version
 packages` PR (#4935), then **Actions → Release → Run workflow** with the version
 `main` now carries. `release.yml`'s three lanes are untouched by the rc lane.
+
+**First, check #4935 is current** (#11233). It is regenerated on a 6-hourly schedule
+rather than on every push, so at cut time it can be up to one refresh window behind
+main — i.e. it may not yet carry a changeset that landed in the last few hours.
+Compare its head against `main` and, if it is behind, **Actions → Release → Run
+workflow** with **`refresh_version_pr` checked**, which runs the bookkeeping lane
+only: no audit, no publish, and no deployment parked at the `release` environment.
+Wait for the refreshed PR's CI, then merge it. That merge is still the decision to
+release, and the `release` environment approval is still the authorisation — neither
+is changed by where the refresh came from.
 
 ## Drift guard
 
