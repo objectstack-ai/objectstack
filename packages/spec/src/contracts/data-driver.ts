@@ -318,6 +318,30 @@ export interface IDataDriver {
   registerExternalObject?(schema: unknown): void | Promise<void>;
 
   /**
+   * Register MANAGED objects' read/write metadata WITHOUT running DDL — the
+   * managed sibling of {@link registerExternalObject}.
+   *
+   * A driver that encodes values from an object's DECLARED field types (the SQL
+   * driver's JSON / boolean / numeric / date / datetime / time coercion
+   * registries, its auto_number descriptors and its tenant-isolation column)
+   * normally learns them as a side effect of `syncSchema()`. A deployment that
+   * manages DDL out-of-band (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`) never
+   * calls that — so without this entry point the driver serves writes while
+   * knowing nothing about the objects, and every value is encoded by whatever
+   * the underlying database client does with a bare JS value. On Postgres that
+   * rejects an array on a JSON field outright and silently stores `[]` as `{}`.
+   *
+   * Implementations MUST NOT issue DDL, probe for existence, or otherwise touch
+   * the database here: the flag this serves exists to protect a cold-start
+   * budget, so registration has to be pure in-memory bookkeeping. Idempotent —
+   * the engine re-drives it after every metadata reload.
+   *
+   * Optional: drivers whose encoding does not depend on declared field types
+   * (memory, mongodb) simply omit it, and the engine skips them.
+   */
+  registerObjectMetadata?(schemas: unknown[]): void | Promise<void>;
+
+  /**
    * What this driver's schema synchronisation has DONE since `connect()`:
    * how many tables it created, and how many it found already present.
    *

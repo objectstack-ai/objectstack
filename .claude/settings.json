@@ -26,7 +26,9 @@
       "mcp__Claude_Code_Remote__list_sessions",
       "mcp__Claude_Code_Remote__create_trigger",
       "Bash(agent-browser snapshot *)",
-      "Bash(agent-browser skills *)"
+      "Bash(agent-browser skills *)",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/*/labels *)",
+      "Bash(curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectui/issues/*/labels *)"
     ]
   },
   "hooks": {

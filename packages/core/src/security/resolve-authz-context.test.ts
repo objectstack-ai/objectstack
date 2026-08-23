@@ -355,6 +355,169 @@ describe('grant validity windows (ADR-0091 D1/D2)', () => {
     const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1'), nowMs: NOW });
     expect(ctx.positions).not.toContain('approver');
   });
+
+  // ── #10982 — the sys_member half: ONE row, ONE answer ───────────────────
+  //
+  // `resolveUserAuthzGrants` reads `sys_member` ONCE and derives two facts from
+  // it: `accessible_org_ids` (the `group` posture's read reach) and the
+  // org-administration role projection into `positions`. Only the first applied
+  // the ADR-0091 window, so a lapsed membership granted no org ACCESS while
+  // still conferring its org-admin ROLE — two answers from one row.
+  //
+  // Maintainer ruling, 2026-08-22 live session (item 2): **A — the role
+  // projection honours the window. A lapsed membership is NO MEMBERSHIP, not
+  // merely no org access.** Fail-closed per ADR-0091 D2. The fix is one
+  // `isGrantActive` call in the `activeMembers` filter, placed BEFORE the
+  // derivation — the shape §6 already gives `sys_user_permission_set`.
+  //
+  // ⚠️ `sys_member` declares NEITHER bound today, and `isGrantActive` reads an
+  // absent bound as unbounded, so no shipped row can be lapsed and none changes
+  // answer. The unbounded leg below is what says that out loud; without it this
+  // block would be satisfied by an implementation that filtered everything and
+  // silently un-admined every real org member.
+  describe('#10982 — a lapsed sys_member row confers no role either', () => {
+    it('a lapsed membership projects NO org role, and no org access — one row, one answer', async () => {
+      const ql = makeQl({
+        sys_user: [{ id: 'u1' }],
+        sys_member: [{ user_id: 'u1', role: 'member', organization_id: 'o1', valid_until: PAST }],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+      });
+      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      // The half that was already correct.
+      expect(ctx.accessible_org_ids).toEqual([]);
+      // The half this card fixes — it used to carry `org_member`.
+      expect(ctx.positions).not.toContain('org_member');
+      // `everyone` is the ADR-0090 D5 audience anchor, held by every
+      // AUTHENTICATED principal and NOT membership-derived: asserted present so
+      // the line above cannot pass by the resolver having returned nothing.
+      expect(ctx.positions).toContain('everyone');
+    });
+
+    it('a not-yet-active membership (future valid_from) projects no role either', async () => {
+      const ql = makeQl({
+        sys_user: [{ id: 'u1' }],
+        sys_member: [{ user_id: 'u1', role: 'admin', organization_id: 'o1', valid_from: FUTURE }],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+      });
+      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      expect(ctx.positions).not.toContain('org_admin');
+      expect(ctx.accessible_org_ids).toEqual([]);
+    });
+
+    // ⛔ LOAD-BEARING. An implementation that dropped every membership row would
+    // satisfy every lapsed assertion above while un-admining the entire
+    // installed base. Both rows sit in the SAME organization on purpose: the
+    // active-org filter cannot explain either verdict, so the ONLY thing
+    // separating them is the validity window — a blanket filter fails the first
+    // assertion, and no filter at all fails the second.
+    it('an ACTIVE membership still projects its role — the lapsed legs cannot pass vacuously', async () => {
+      const tables = {
+        sys_user: [{ id: 'u1' }],
+        sys_member: [
+          { user_id: 'u1', role: 'owner', organization_id: 'o2', valid_until: PAST },
+          { user_id: 'u1', role: 'member', organization_id: 'o2', valid_from: PAST, valid_until: FUTURE },
+        ],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+      };
+      const ctx = await resolveAuthzContext({
+        ql: makeQl(tables), headers: H(), getSession: session('u1', { org: 'o2' }), nowMs: NOW,
+      });
+      expect(ctx.positions).toContain('org_member'); // the in-window row still grants
+      expect(ctx.positions).not.toContain('org_owner'); // the lapsed one, same org, does not
+      expect(ctx.accessible_org_ids).toEqual(['o2']); // and the two halves agree
+    });
+
+    // ⛔ LOAD-BEARING, the safe-to-land-now leg. `sys_member` has no
+    // `valid_from`/`valid_until` columns, so EVERY shipped row looks like this.
+    // If this reddens, the change is not a tightening — it is a regression on
+    // every existing deployment.
+    it('a membership with NO bounds is unbounded — every shipped row is unaffected', async () => {
+      const ql = makeQl({
+        sys_user: [{ id: 'u1' }],
+        sys_member: [{ user_id: 'u1', role: 'owner,member', organization_id: 'o1' }],
+        sys_user_position: [],
+        sys_user_permission_set: [],
+      });
+      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }), nowMs: NOW });
+      expect(ctx.positions).toContain('org_owner');
+      expect(ctx.positions).toContain('org_member');
+      expect(ctx.accessible_org_ids).toEqual(['o1']);
+    });
+
+    // ── The escalation the card is filed on ──────────────────────────────
+    //
+    // Make the lapsed row's role `owner` and the question stops being tidiness:
+    // `org_owner` is a capability-bearing name. A suite that only checked
+    // `org_member` would not catch a regression here, so the rung is pinned in
+    // BOTH directions on the same fixture shape.
+    //
+    // ⚠️ Which escalation path this closes, stated precisely, because the two
+    // differ: `derivePosture` reads HELD CAPABILITY GRANTS, never the
+    // better-auth role (ADR-0095 D2/D3). The role reaches TENANT_ADMIN by two
+    // routes — (P) `org_owner` resolves a `sys_position` row whose bound set is
+    // an org-admin grant, entirely inside this resolver; and (D) plugin-security's
+    // `reconcileOrgAdminGrant` provisions a direct `sys_user_permission_set`
+    // row from the role. This fix closes (P). It deliberately does NOT reach
+    // into (D): that row is standing authority in its own right, carrying its
+    // OWN ADR-0091 window, and revoking someone else's grant row from a read
+    // path is not this resolver's job. Both are pinned below so the boundary is
+    // a measured fact rather than an assumption.
+    const orgOwnerPositionTables = (memberRow: Record<string, unknown>) => ({
+      sys_user: [{ id: 'esc' }],
+      sys_member: [{ user_id: 'esc', role: 'owner', organization_id: 'o1', ...memberRow }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+      sys_position: [{ id: 'pos_owner', name: 'org_owner' }],
+      sys_position_permission_set: [{ position_id: 'pos_owner', permission_set_id: 'psO' }],
+      sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
+    });
+
+    it('escalation, BEFORE: an ACTIVE owner membership still resolves TENANT_ADMIN', async () => {
+      const ctx = await resolveAuthzContext({
+        ql: makeQl(orgOwnerPositionTables({})), headers: H(),
+        getSession: session('esc', { org: 'o1' }), nowMs: NOW,
+      });
+      expect(ctx.positions).toContain('org_owner');
+      expect(ctx.permissions).toContain('organization_admin');
+      expect(ctx.posture).toBe('TENANT_ADMIN');
+    });
+
+    it('escalation, AFTER: a LAPSED owner membership resolves MEMBER, not TENANT_ADMIN', async () => {
+      const ctx = await resolveAuthzContext({
+        ql: makeQl(orgOwnerPositionTables({ valid_until: PAST })), headers: H(),
+        getSession: session('esc', { org: 'o1' }), nowMs: NOW,
+      });
+      expect(ctx.positions).not.toContain('org_owner');
+      // The rung falls with the name: `org_owner` never resolves its
+      // `sys_position` row, so the bound org-admin set is never collected.
+      expect(ctx.permissions).not.toContain('organization_admin');
+      expect(ctx.posture).toBe('MEMBER');
+      expect(ctx.accessible_org_ids).toEqual([]);
+    });
+
+    it('the boundary: a DIRECT org-admin grant is standing authority and survives the lapse — by design', async () => {
+      // Route (D). The role is only the PROVISIONING source (ADR-0095 D3); the
+      // grant row it caused is separate authority with its own window. So the
+      // role projection goes quiet while the capability keeps resolving. This
+      // is the correct layering, not a residual hole — but it IS the reason the
+      // rung can outlive the membership, so it is pinned rather than assumed.
+      const ql = makeQl({
+        sys_user: [{ id: 'esc2' }],
+        sys_member: [{ user_id: 'esc2', role: 'owner', organization_id: 'o1', valid_until: PAST }],
+        sys_user_position: [],
+        sys_user_permission_set: [{ user_id: 'esc2', permission_set_id: 'psO', organization_id: 'o1' }],
+        sys_permission_set: [{ id: 'psO', name: 'organization_admin' }],
+      });
+      const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('esc2', { org: 'o1' }), nowMs: NOW });
+      expect(ctx.positions).not.toContain('org_owner'); // the role projection is closed
+      expect(ctx.permissions).toContain('organization_admin'); // the grant row is not
+      expect(ctx.posture).toBe('TENANT_ADMIN');
+      expect(ctx.accessible_org_ids).toEqual([]); // and access is still withheld
+    });
+  });
 });
 
 describe('audience anchors in the resolver (ADR-0090 D5)', () => {

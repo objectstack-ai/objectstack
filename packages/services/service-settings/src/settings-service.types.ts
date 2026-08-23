@@ -292,6 +292,14 @@ export type SettingsActionHandler = (input: {
  */
 export interface SettingsDiagnosticsLogger {
   error?: (message: string) => void;
+  /**
+   * `warn` carries the diagnostics that are NOT refusals — today, the pre-bind
+   * READ report (#10250). Same one-argument shape, and for the same reasons the
+   * header above gives for `error`: `Logger.warn(message, meta?)`, `ctx.logger`,
+   * `console.warn` and a one-line spy all stay assignable, and no `meta` object
+   * is passed that the redactor could silently empty.
+   */
+  warn?: (message: string) => void;
 }
 
 export interface SettingsServiceOptions {

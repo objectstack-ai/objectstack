@@ -29,7 +29,8 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 
 1. **Worktree-first。** 任何编辑之前:
    `git worktree add ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`,然后
-   `cd` 进去 `pnpm install`。永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时
+   `cd` 进去 `pnpm install`,并在动笔前记下基点 `BASE=$(git rev-parse HEAD)`(「标准条
+   款」家族规则的锚)。永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时
    **一仓一 worktree**。**建好分支后的第一个动作:先把空分支
    推上去**(任何编辑之前 `git push -u origin <branch>`)——它既是认领评论所指分支的落地
    标记,又是第一分钟的写路由探针:容器凭据是不对称的,等门禁全绿才发现推不上去就太晚了。
@@ -84,14 +85,12 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 5. **永不按进程名杀**(`pkill -f` 能把并行 agent 的运行一起带走)。记下你启动的 PID,只
    对那个 PID 操作。
 6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
-   ⛔ 永不把验证挂在后台 watcher 上然后停轮(禁令与两种合法终态见「干净收尾」)。唯一合
-   法的长等待是规则 1 的锁排队——主动、在轮内(规则 7),从不是停轮的理由。
+   ⛔ 永不把验证挂在后台 watcher 上然后停轮(禁令与两种合法终态见「干净收尾」)。
    **平台事实(2026-08-20 实测):容器把前台命令钉在 ~10 分钟上限,超时 SIGTERM 杀掉
    (`exit 143`,日志常常连一个发现都没写出)。** 这不改前台纪律,它划定前台里放什么:
    重活走规则 1 的锁 —— 串行化之后不再与并行 build 抢 CPU,争用下顶到上限的命令轻载只要
    ~2 分钟;仓级扫描归 CI(见「本地验证范围」);消融/变异脚本自带还原 trap(硬线在「标
-   准条款」的 ablation 条)。一次 SIGTERM 实测正落在消融中途,把变异树留给了之后的每一
-   次测量。
+   准条款」的 ablation 条)。
 7. **排队不是停摆 —— 在轮内主动等。** 持锁的是你不拥有的进程,它的完成不会以任何方式唤
    醒你:⛔ 永不为「等锁」结束一轮(实测:这么做的每个 agent 都无通知地停摆,赔进一轮探
    活)。循环:拿到 99 就把间隔花在无锁工作上(写测试、changeset、PR 正文、包内
@@ -136,6 +135,12 @@ JSON,所以终报消息就是 JSON 本身,别无其它。
 加深即可。补跑它新增而你的 diff 确实触及的,并在报告里点名新增项。代价是偶尔一轮 push-fix;安全的另一
 半归 PM,在你报告之后读真实门禁 job 结论。⛔ 这不是跳过点名族的许可 —— 它们是你仍然欠的
 便宜一半;你不再欠的是报告前等 CI。
+
+**该脚本只住在 objectstack,答案永远只关于它自己所在的那棵树** —— 每次推导第一行(stderr)
+点名答案取自哪个仓与 commit,读之前先核对。姊妹仓(objectui / cloud)没有 `scripts/pm/`,
+把它们的路径喂到 objectstack 的检出里,得到的是 objectstack 的门禁族:形态完整、退出码
+0、全错;那边的清单从该仓自己的 `package.json` 与 `.github/workflows/` 手工推导。要机械保
+险就加 `--repo <owner>/<name>` 申报本次答案该属于哪个仓 —— 不匹配即拒绝并同时点名两个仓。
 
 **仓级扫描(以 `pnpm lint` = `eslint . --no-inline-config` 扫全仓为首)是 CI 拥有的运
 行,永不是你欠的。** 前台上限之内跑得完就**可以**跑(轻载实测 ~2 分钟;争用下会被 cap
@@ -186,11 +191,16 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   械化:`bash scripts/pm/os-regen-merge.sh`)。姊妹陷阱:`gen:schema` 的清理会抹掉
   `gen:openapi` 的产物(rest 里冒出假 5xx 失败);用
   `pnpm --filter @objectstack/spec gen:openapi` 恢复。
-- **⛔ 取出修复用临时 commit 或 patch 文件——永不 `git stash`。** worktree 隔离文件与
-  HEAD,不隔离 `refs/stash`:所有 worktree 共享一个 LIFO 栈,两个 agent 同时 stash 会互换
-  条目而 `pop` 照样报成功(机制与 hook 见 AGENTS.md)。安全替代,都在自己 worktree 内:
-  `git commit -am wip` 再 `git reset --soft HEAD~1`;
-  `git diff > /tmp/wip.patch && git checkout -- <paths>` 再 `git apply /tmp/wip.patch`。
+- **家族规则:`git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切 —— refs(含
+  `refs/remotes/*`)、stash 栈、config、hooks —— 全 worktree 共享;配方只有不点名共享态
+  才 worktree-safe。家族同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他
+  人文件。** ⛔ 永不 `git stash`(共享一个 LIFO 栈,两个 agent 同时 stash 互换条目;机
+  制与 hook 见 AGENTS.md);取出修复用临时 commit 或 patch 文件,都在自己 worktree 内:
+  `git commit -am wip` 再 `git reset --soft HEAD~1`;`git diff > /tmp/wip.patch &&
+  git checkout -- <paths>` 再 `git apply /tmp/wip.patch`。⛔ `origin/main` 是共享指针,
+  别的 agent 一次 fetch 就推进它:`git reset --soft origin/main` 把你分支点之后**他人
+  已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮住)。
+  「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑,
   `git checkout origin/main -- <path>` 不留任何恢复点 —— 工作树曾是唯一副本,而丢弃它是
@@ -269,12 +279,15 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   缺口,⛔ 不自行扩写、不自行抬预算 —— 预算是 PM 的,抬它是维护者裁决。
 - **`skip-changeset` 标签按仓库分流——先认清目标仓库有没有这个机制。** 仅含 tests/
   workflow/`.claude/` 的 PR 不发布任何东西,但「不发布」的声明方式因仓库而异。**本仓库**:
-  标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一建立就打;**先读回、再写并集**——标
-  签写入是整组 PUT(裸集合会抹掉机器人刚打的标签,CI 的写入也可能抹掉你的;changeset 门的
-  首轮可能与你的写入竞态),等机器人稳定后读一次、把清单引进报告:关闭此步骤的是读回,不
-  是写入;口头声明不算打上。**objectui:该标签不存在**——tests/docs-only 的声明方式是空
-  frontmatter 的 changeset;⛔ 永不在那边创建或施加该标签——一次 label add 会静默铸出一
-  个仓库标签,被下一个 agent 读成真实机制。
+  标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一建立就打;写入走**加法端点**——不碰
+  已有标签、无并集可算、无读写窗口(实测从 dev 座位可达;权限集已放行此拼写,别改写):
+  `curl -sS -X POST https://api.github.com/repos/objectstack-ai/objectstack/issues/<n>/labels -H "Authorization: Bearer $GITHUB_TOKEN" -d '{"labels":["skip-changeset"]}'`
+  加法写必要但**不充分**:实测 size-labeler 的整组 PUT 曾在 ~1 秒内抹掉一次正确的加法写。
+  所以收尾仍是**读回**,且在机器人稳定之后——读一次、把清单引进报告;标签消失读作被抹,
+  **重新加上**,不是你的错。仅当加法调用被拒才用回退:读→并集→整组写,**申报**用了回退
+  并报告其读回。关闭此步骤的是读回,不是写入;口头声明不算打上。**objectui:该标签不存
+  在**——tests/docs-only 的声明方式是空 frontmatter 的 changeset;⛔ 永不在那边创建或施
+  加该标签——一次 label add 会静默铸出一个仓库标签,被下一个 agent 读成真实机制。
 - **报告在 draft PR 时点交付 —— CI 收敛等待归 PM,不归你**(维护者 2026-08-10 拍板)。
   分支一推上、draft PR 一开出,立刻交报告;门禁状态如实记录 —— `in_progress` 是诚实
   值。⛔ draft PR 开出后永不 sleep、定时等待或空转轮询 CI(实测:空转轮询烧掉的恰是一个

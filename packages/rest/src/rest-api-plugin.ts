@@ -192,7 +192,37 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                             // resolver strategy starts keying off routePath,
                             // add prefix-stripped assembly here.
                             const context: { request: unknown; environmentId?: string } = { request: req };
-                            await kernelResolver.resolveKernel(context, hostKernelFacade);
+                            // Ask the environment-only question when the host
+                            // can answer it. This wrapper wants an ID and
+                            // nothing else; `resolveKernel` is a kernel-
+                            // ACQUISITION api, and the kernel it hands back
+                            // here is discarded on the success path and lost
+                            // with the rejection on the cold one. That discard
+                            // is free on a warm environment and is a whole
+                            // waiter window on a cold or wedged one — measured
+                            // on a live host with `waiterTimeoutMs: 20s`,
+                            // REST-owned routes (`/api/v1/discovery`,
+                            // `/api/v1/data/:object`) answered 503 after 42s
+                            // against a wedged environment because
+                            // `resolveProtocol` then opens a SECOND window to
+                            // acquire the kernel for real. Preferring
+                            // `resolveEnvironment` leaves `resolveProtocol` as
+                            // the single acquisition point, so one request
+                            // pays one window.
+                            //
+                            // ⛔ No fallback to `resolveKernel` when this
+                            // returns without setting `environmentId`: an unset
+                            // id is the seam's FINAL answer for an unscoped /
+                            // control-plane request (see
+                            // `RestRequestEnvResolver`), and "retry with the
+                            // expensive method" would re-buy exactly the window
+                            // this prefers away, on precisely the requests that
+                            // need no environment at all.
+                            if (typeof kernelResolver.resolveEnvironment === 'function') {
+                                await kernelResolver.resolveEnvironment(context, hostKernelFacade);
+                            } else {
+                                await kernelResolver.resolveKernel(context, hostKernelFacade);
+                            }
                             return context.environmentId;
                         },
                     };

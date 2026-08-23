@@ -147,6 +147,49 @@ export interface KernelResolver {
         context: HttpProtocolContext,
         defaultKernel: ObjectKernel,
     ): Promise<ObjectKernel | undefined> | ObjectKernel | undefined;
+
+    /**
+     * Resolve ONLY the request's environment onto `context`. **No kernel
+     * acquisition.**
+     *
+     * `resolveKernel` answers two questions at once — *which environment?* and
+     * *give me its kernel* — because every dispatcher consumer needed both.
+     * A consumer that needs only the first (`@objectstack/rest`'s
+     * `resolveRequestEnvironmentId` seam) had no way to ask for it, so it asked
+     * the kernel-acquisition API and threw the kernel away. On a WARM
+     * environment the discarded acquisition is a cache hit and costs nothing,
+     * which is why it stayed invisible; on a cold or wedged one it opens the
+     * host's whole bounded waiter window, and the consumer then acquires the
+     * kernel again for real. Measured on a live multi-tenant host with a 20s
+     * `waiterTimeoutMs`: REST-owned routes answered 503 after **42s** — two
+     * serial windows — where dispatcher-owned routes answered after 21s.
+     * Catching the resolver's rejection and keeping the id it already wrote
+     * does NOT recover it (measured 2.38x/2.02x, still two acquisitions): the
+     * window is spent inside the resolver call, before any id is returned.
+     *
+     * Contract for an implementor:
+     *  - Write `context.environmentId` (and, where it is free, `dataDriver`)
+     *    exactly as `resolveKernel` would for the same request — this is
+     *    `resolveKernel`'s environment-resolution half, split out, not a second
+     *    strategy. Two answers for one request is the failure this seam exists
+     *    to prevent.
+     *  - Acquire NO kernel. An implementation that awaits one has simply
+     *    reproduced `resolveKernel` under a new name.
+     *  - Leaving `context.environmentId` unset is a real answer — "unscoped /
+     *    control-plane / single-environment" — and consumers treat it as final.
+     *    Do not signal "ask `resolveKernel` instead" by declining.
+     *
+     * Optional on purpose: a host that implements only `resolveKernel` keeps
+     * working unchanged (it keeps paying for the discarded acquisition on cold
+     * builds), so this landed with no flag day. Consumers that need the kernel
+     * itself — the dispatcher's own `resolveRequestScope`, its
+     * `resolveProjectKernelObjectQL` seam — keep calling `resolveKernel`; this
+     * member never replaces it.
+     */
+    resolveEnvironment?(
+        context: HttpProtocolContext,
+        defaultKernel: ObjectKernel,
+    ): Promise<void> | void;
 }
 
 /**

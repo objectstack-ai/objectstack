@@ -38,6 +38,21 @@ bundlers may drop what a consumer does not reach — module-scope side effects
 in any published module are therefore also a defect (measured, not assumed;
 see objectstack#10031).
 
+**Node-only imports are refused everywhere a browser bundler resolves**
+(#11072). Every entry is loadable from a browser build by construction —
+schema-bearing entries included — so no published bundle may link a Node
+builtin or a server-only package. The one sanctioned exception is the
+pg-grammar arm of the postgres `url` refinement (`pg-connection-string`, whose
+`parse` statically resolves `require('fs')`): the entries that reach it carry a
+`browser` export condition pointing at `dist/browser/**` bundles in which that
+arm is swapped for a dependency-free twin (`src/data/driver/pg-url-grammar.*`,
+`tsup.config.ts` → `swapServerOnlyGrammarArm`), and Node consumers keep the
+full DSN refusal unchanged. `check:browser-reachable-entries` enforces both
+halves — a browser-conditioned bundle that still links the parser, and a
+non-conditioned bundle that links anything Node-only, are each a red — with a
+positive control on the Node side. Need Node-only work in a schema? Route it
+through a seam module the browser pass swaps, never import it directly.
+
 ## Usage
 
 **Recommended: Use `ObjectSchema.create()` with `Field.*` helpers for strict TypeScript validation:**

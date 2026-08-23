@@ -118,10 +118,25 @@ function safeJsonParse<T>(s: string, fallback: T): T {
   try { return JSON.parse(s) as T; } catch { return fallback; }
 }
 
-async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+async function tryFind(
+  ql: any,
+  object: string,
+  where: any,
+  limit = 100,
+  /**
+   * Resolve inside ONE organization. Threaded into the execution context, so
+   * the read routes through `SqlDriver.applyTenantScope` — the governed
+   * chokepoint — rather than being re-implemented here as a bare equality.
+   * Omitted keeps the pre-existing installation-wide read, which is what the
+   * user-keyed reads above want (they are already narrowed by `user_id`) and
+   * what a `single`-posture deployment wants everywhere.
+   */
+  organizationId?: string,
+): Promise<any[]> {
   if (!ql || typeof ql.find !== 'function') return [];
   try {
-    let rows = await ql.find(object, { where, limit, context: { isSystem: true } } as any);
+    const context = organizationId ? { isSystem: true, tenantId: organizationId } : { isSystem: true };
+    let rows = await ql.find(object, { where, limit, context } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -373,13 +388,26 @@ export async function resolveUserAuthzGrants(
   }
   grants.accessible_org_ids = Array.from(accessibleOrgIds);
 
-  // Positions come from the ACTIVE org's membership only (unchanged): a role
-  // held in one organization must not grant its capabilities while the caller
-  // operates in another. With no active org, every membership contributes —
-  // exactly the pre-D2 behavior of the org-less read.
-  const activeMembers = tenantId
-    ? members.filter((m) => (m.organization_id ?? m.organizationId) === tenantId)
-    : members;
+  // Positions come from the ACTIVE org's membership only: a role held in one
+  // organization must not grant its capabilities while the caller operates in
+  // another. With no active org, every membership contributes — exactly the
+  // pre-D2 behavior of the org-less read.
+  //
+  // [ADR-0091 D2] Rows outside their validity window are dropped BEFORE the
+  // role derivation — the same discipline §6 gives `sys_user_permission_set`,
+  // so a lapsed membership can no more yield `org_owner` than an expired
+  // `admin_full_access` can yield `platform_admin`. Maintainer ruling
+  // 2026-08-22 (live session, item 2): a lapsed membership is NO MEMBERSHIP,
+  // not merely no org access — so this half now answers the same question as
+  // `accessible_org_ids` above, off the same rows, and (a)'s "correct the
+  // moment they do" promise covers BOTH derivations rather than one. Fail
+  // closed (D2). `sys_member` declares neither bound today and `isGrantActive`
+  // reads an absent bound as unbounded, so no shipped row changes answer.
+  const activeMembers = members.filter(
+    (m) =>
+      isGrantActive(m, nowMs)
+      && (!tenantId || (m.organization_id ?? m.organizationId) === tenantId),
+  );
   for (const m of activeMembers) {
     if (m.role && typeof m.role === 'string') {
       for (const raw of m.role.split(',').map((s: string) => s.trim()).filter(Boolean)) {
@@ -462,7 +490,31 @@ export async function resolveUserAuthzGrants(
   //     with no `sys_position` row at all (`org_owner`, a membership-derived
   //     role) has no flag to read and is untouched.
   if (grants.positions.length > 0) {
-    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 100);
+    //     [#10103] Scoped to the CALLER's organization. `sys_position` spells
+    //     its name index `unique: 'organization'` and its rows are materialized
+    //     per organization, so several organizations hold a row named
+    //     `everyone` (and one named after every declared position). Swept by
+    //     name alone, this read returned EVERY organization's rows, and the
+    //     junction read below then collected another organization's bindings —
+    //     a cross-organization grant bleed, measured reachable from one tenant's
+    //     resolution to another tenant's `everyone` binding. It also made the
+    //     sweep O(organizations) on a table that is read on every request.
+    //
+    //     Scoped by threading the organization into the context rather than by
+    //     adding an `organization_id` predicate here: the driver's
+    //     `applyTenantScope` is the one governed spelling of this wall, and a
+    //     bare equality written at this call site would be a second, ungoverned
+    //     implementation of it — the exact shape that produced the defect this
+    //     card repairs. Per-request cost stays O(the caller's own organization's
+    //     catalog).
+    //
+    //     Limit raised with it: the cap has to admit this organization's rows
+    //     alongside any organization-less ones the driver's compatibility arm
+    //     still returns, or a caller silently loses positions. Those
+    //     organization-less rows stay REACHABLE on purpose — they are not
+    //     reaped, and grants point at them by row id, so dropping them here
+    //     would revoke standing access silently.
+    const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 200, tenantId);
     const deactivatedNames = new Set<string>(
       positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
     );

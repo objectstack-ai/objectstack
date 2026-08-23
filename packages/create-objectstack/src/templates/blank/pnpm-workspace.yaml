@@ -1,11 +1,20 @@
+# An explicit EMPTY workspace: this project has no member packages, so
+# this file is settings-only. The key is not decoration — pnpm 9.x and
+# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file
+# without a `packages:` key outright ("ERROR packages field missing or
+# empty") before resolving a single dependency.
+# Not `packages: ['.']`: that would declare this project a workspace
+# MEMBER — a monorepo root, which it is not.
+packages: []
+
 # pnpm does not run dependency install scripts unless they are approved here.
 # Without this file a fresh `pnpm install` on pnpm 11 exits 1 with
 # ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard error.
 #
 # Both keys are needed; they are read by different pnpm versions:
-#   allowBuilds             pnpm >= 10.31 and pnpm 11+. pnpm 11 reads ONLY this
+#   allowBuilds             pnpm >= 10.26 and pnpm 11+. pnpm 11 reads ONLY this
 #                           one — onlyBuiltDependencies alone still errors.
-#   onlyBuiltDependencies   pnpm 10.0–10.30, which do not understand allowBuilds.
+#   onlyBuiltDependencies   pnpm 10.0–10.25, which do not understand allowBuilds.
 #
 # better-sqlite3 is the native sqlite driver (@objectstack/driver-sql's optional
 # dependency); esbuild compiles objectstack.config.ts. Both ship prebuilt
@@ -22,9 +31,10 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
 
-# Two third-party peer ranges resolve outside what their declaring package
-# states. `pnpm install` reports both as unmet peers — which would be the first
-# thing a brand-new project shows you — and neither is a real incompatibility:
+# Some third-party peer ranges resolve outside what their declaring package
+# states. `pnpm install` reports each one as an unmet peer — which would be the
+# first thing a brand-new project shows you — and none is a real
+# incompatibility:
 #
 #   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x. That
 #   peer is optional and covers handing better-auth a raw better-sqlite3
@@ -38,7 +48,26 @@ allowBuilds:
 #   neglect) peers better-call at an exact 1.3.7, while better-auth itself
 #   depends on 1.4.0. A better-auth plugin has to share the host's better-call
 #   instance, so the single 1.4.0 copy is the correct resolution rather than a
-#   skew to repair. This entry retires when SCIM moves off the rc.
+#   skew to repair. This entry retires when SCIM moves off the rc: stable
+#   @better-auth/scim 1.7.1 already peers better-call 1.4.0.
+#
+#   @better-auth/core, @better-auth/oauth-provider, @better-auth/scim and
+#   @better-auth/sso each peer an exact @better-auth/utils 0.4.2, while the
+#   tree hands them 0.5.0 — because better-call, better-auth's own HTTP layer,
+#   depends on ^0.5.0, and that is the copy your project's plugins resolve
+#   their peer against. Measured on the surface the range governs: those four
+#   import three symbols in total (base64/base64Url, createHash and, in core,
+#   createRandomStringGenerator), 0.5.0 declares all three unchanged, and on
+#   the inputs those call sites pass the two versions return identical values —
+#   checked again end to end through better-auth with the sso, oauth-provider
+#   and scim plugins, where both resolutions produce the same sign-up, sign-in,
+#   session, OAuth metadata, PKCE challenge and SCIM/SSO responses. Forcing
+#   utils back to 0.4.2 instead would push better-call off its own declared
+#   ^0.5.0 — trading four reported skews for one real one.
+#   Reported by pnpm 10.15–10.30; pnpm 10.31 changed peer resolution so all
+#   four land on 0.4.2 on their own. These four entries retire when the pnpm
+#   floor reaches 10.31, or when the four packages accept 0.5.0 upstream —
+#   NOT with the SCIM rc pin above, which the utils skew outlives.
 #
 # These suppress the report only: no resolution moves, and the lockfile is
 # byte-identical with and without this block.
@@ -47,3 +76,7 @@ peerDependencyRules:
   allowedVersions:
     'better-auth>better-sqlite3': '13'
     '@better-auth/scim>better-call': '1.4.0'
+    '@better-auth/core>@better-auth/utils': '0.5.0'
+    '@better-auth/oauth-provider>@better-auth/utils': '0.5.0'
+    '@better-auth/scim>@better-auth/utils': '0.5.0'
+    '@better-auth/sso>@better-auth/utils': '0.5.0'

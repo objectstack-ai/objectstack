@@ -24,6 +24,12 @@
  *     (`LAST_LOCAL_CREDENTIAL`). Under enforced SSO the managed team has no
  *     local credential at all, so that one account IS the escape hatch.
  *
+ *     [#10776] The guard now runs only once the caller's identity is
+ *     established. That moved WHEN it decides, not WHAT it decides, so the
+ *     cases below still pin the same verdicts — they just have to present a
+ *     resolvable credential to reach the guard at all, and the last case pins
+ *     that an anonymous caller never reaches it.
+ *
  * The middleware is driven directly with a synthetic `ctx` — the same shape
  * better-auth passes it (`path`, `body`, `context.adapter`) — because the
  * decision under test is entirely a function of those three, and standing up
@@ -73,16 +79,44 @@ async function buildConfig(
 /**
  * The `account` rows a deployment holds. `findOne` answers the target's own
  * credential lookup; `findMany` answers "who else holds one".
+ *
+ * [#10776] It also answers the `session` lookup the hook now makes BEFORE the
+ * guard: the guard runs only for a caller whose identity is established, so a
+ * synthetic ctx that wants to reach the guard has to carry one. Anything the
+ * fake is not asked about answers `null`, which is exactly what an anonymous
+ * caller's session lookup finds.
  */
+const CALLER_TOKEN = 'tok_admin_caller';
+
 function adapterWithCredentials(holders: string[]) {
   const rows = holders.map((userId) => ({ userId, providerId: 'credential' }));
   return {
-    findOne: vi.fn(async ({ where }: { where: Array<{ field: string; value: unknown }> }) => {
+    findOne: vi.fn(async ({ model, where }: { model?: string; where: Array<{ field: string; value: unknown }> }) => {
+      if (model === 'session') {
+        const token = where.find((w) => w.field === 'token')?.value;
+        return token === CALLER_TOKEN
+          ? { token, userId: 'usr_admin_caller', expiresAt: new Date(Date.now() + 3_600_000) }
+          : null;
+      }
       const userId = where.find((w) => w.field === 'userId')?.value;
       return rows.find((r) => r.userId === userId) ?? null;
     }),
     findMany: vi.fn(async () => rows),
   };
+}
+
+/**
+ * A ctx the way better-auth hands it to the global before-hook, carrying a
+ * resolvable credential. `signedIn: false` is the anonymous caller.
+ */
+function hookCtx(
+  path: string,
+  body: Record<string, unknown>,
+  adapter: unknown,
+  { signedIn = true }: { signedIn?: boolean } = {},
+) {
+  const headers = new Headers(signedIn ? { authorization: `Bearer ${CALLER_TOKEN}` } : {});
+  return { path, body, headers, context: { adapter } };
 }
 
 let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -168,7 +202,7 @@ describe('[#5892] the last local password login survives ban / remove / delete',
       const adapter = adapterWithCredentials(['usr_owner']);
       let caught: unknown;
       try {
-        await before!({ path, body: { userId: 'usr_owner' }, context: { adapter } });
+        await before!(hookCtx(path, { userId: 'usr_owner' }, adapter));
       } catch (e) {
         caught = e;
       }
@@ -184,11 +218,7 @@ describe('[#5892] the last local password login survives ban / remove / delete',
     const adapter = adapterWithCredentials(['usr_owner', 'usr_second_admin']);
 
     await expect(
-      config.hooks!.before!({
-        path: '/admin/ban-user',
-        body: { userId: 'usr_owner' },
-        context: { adapter },
-      }),
+      config.hooks!.before!(hookCtx('/admin/ban-user', { userId: 'usr_owner' }, adapter)),
     ).resolves.toBeUndefined();
   });
 
@@ -199,11 +229,7 @@ describe('[#5892] the last local password login survives ban / remove / delete',
     const adapter = adapterWithCredentials(['usr_owner']);
 
     await expect(
-      config.hooks!.before!({
-        path: '/admin/ban-user',
-        body: { userId: 'usr_managed' },
-        context: { adapter },
-      }),
+      config.hooks!.before!(hookCtx('/admin/ban-user', { userId: 'usr_managed' }, adapter)),
     ).resolves.toBeUndefined();
     // Only the target's own lookup ran — the whole-table scan is skipped.
     expect(adapter.findMany).not.toHaveBeenCalled();
@@ -211,8 +237,17 @@ describe('[#5892] the last local password login survives ban / remove / delete',
 
   it('fails OPEN on a lookup error — the opposite direction from the ban guard, on purpose', async () => {
     const { config } = await buildConfig({ ssoOnlyMode: true });
+    // The session lookup succeeds — the identity is established — and it is the
+    // GUARD's own lookup that fails. Otherwise this would be measuring the
+    // #10776 fall-through instead of the fail-open direction.
     const adapter = {
-      findOne: vi.fn(async () => {
+      findOne: vi.fn(async ({ model, where }: { model?: string; where: Array<{ field: string; value: unknown }> }) => {
+        if (model === 'session') {
+          const token = where.find((w) => w.field === 'token')?.value;
+          return token === CALLER_TOKEN
+            ? { token, userId: 'usr_admin_caller', expiresAt: new Date(Date.now() + 3_600_000) }
+            : null;
+        }
         throw new Error('account table unreadable');
       }),
       findMany: vi.fn(async () => []),
@@ -222,11 +257,34 @@ describe('[#5892] the last local password login survives ban / remove / delete',
     // is the cost in `last-admin-ban-guard.ts`. Different failure modes,
     // different directions — see that file's header.
     await expect(
-      config.hooks!.before!({
-        path: '/admin/ban-user',
-        body: { userId: 'usr_owner' },
-        context: { adapter },
-      }),
+      config.hooks!.before!(hookCtx('/admin/ban-user', { userId: 'usr_owner' }, adapter)),
     ).resolves.toBeUndefined();
+  });
+
+  // ── [#10776] the guard is now downstream of authentication ───────────────
+
+  it('does not run AT ALL for an unauthenticated caller — no throw, and no lookup', async () => {
+    // The disclosure this closes is not only the 409: it is that the guard
+    // queried the database about a user named by a caller nobody had
+    // authenticated. So the absence of the lookup is asserted, not just the
+    // absence of the refusal. The status-level half is pinned end-to-end in
+    // `break-glass-guard-authentication-order.test.ts`.
+    const { config } = await buildConfig({ ssoOnlyMode: true });
+
+    for (const path of BAN_PATHS) {
+      const adapter = adapterWithCredentials(['usr_owner']);
+
+      await expect(
+        config.hooks!.before!(hookCtx(path, { userId: 'usr_owner' }, adapter, { signedIn: false })),
+      ).resolves.toBeUndefined();
+
+      const askedAboutAccounts = adapter.findOne.mock.calls.some(
+        ([q]: [{ model?: string }]) => q?.model === 'account',
+      );
+      expect(askedAboutAccounts, `${path}: the guard must not query for an anonymous caller`).toBe(
+        false,
+      );
+      expect(adapter.findMany).not.toHaveBeenCalled();
+    }
   });
 });

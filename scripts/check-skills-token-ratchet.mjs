@@ -145,7 +145,9 @@ export const CEILINGS = new Map([
   ['skills/objectstack-api/SKILL.md', 6348],
   ['skills/objectstack-automation/SKILL.md', 12543],
   // basis 7228d6c25 (PR #10402 head), not main — see CEILING_BASIS.
-  ['skills/objectstack-data/SKILL.md', 13797],
+  // +20 (13797→13817): maintainer ruling 2026-08-23 on PR #11141 — the three
+  // SECURITY_OWD_UNSET-required sharingModel keys. Ruling quoted in that PR's body.
+  ['skills/objectstack-data/SKILL.md', 13817],
   ['skills/objectstack-formula/SKILL.md', 6055],
   ['skills/objectstack-i18n/SKILL.md', 6349],
   // basis 7228d6c25 (PR #10402 head), not main — see CEILING_BASIS.
@@ -153,7 +155,9 @@ export const CEILINGS = new Map([
   ['skills/objectstack-pm-dispatch/SKILL.md', 14239],
   ['skills/objectstack-query/SKILL.md', 5569],
   ['skills/objectstack-ui/SKILL.md', 25154],
-  ['skills/objectstack-upgrade/SKILL.md', 8325],
+  // +10 (8325→8335): same 2026-08-23 ruling — crm_lead's SECURITY_OWD_UNSET-required
+  // sharingModel key (value mirrored from examples/app-crm per the same ruling).
+  ['skills/objectstack-upgrade/SKILL.md', 8335],
 ]);
 
 /**

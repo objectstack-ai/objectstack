@@ -54,6 +54,14 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  * sites, and `SqlHttpOutbox.redeliver` — request-reachable — carries a
  * threaded tenant and no bypass at all.
  *
+ * ⛔ [#11009] `redeliver` is now ALSO a `multi: true` write (its terminal-
+ * status compare-and-set must ride the predicate path to be evaluated at
+ * all), which makes it TYPE-compatible with this helper — and still the one
+ * write on these objects that must never use it: this helper's warrant is
+ * "no request context exists", and `redeliver` is precisely the site that
+ * has one. `multi` stopped discriminating the two; the classification —
+ * threaded tenant vs declared-global bypass — is the line that still does.
+ *
  * @param where Predicate identifying the rows this sweep claims or reaps.
  */
 export function dispatcherSweepOptions(

@@ -42,6 +42,12 @@
  *      cannot silently turn a governed answer into an environment complaint.
  *   1  bad args — no paths given. ⛔ Silence never reads as "not governed":
  *      `--test` with an empty path list is a failure, never a green light.
+ *   One register row carries a provenance-aware exception (the generated-
+ *   artifact section below): a hit on exactly
+ *   `.claude/workflows/docs-accuracy-audit.js` answers 0 only when that file's
+ *   diff byte-equals its own generator's output recomputed on the tree under
+ *   test — every other reading of that path, and every other path, is
+ *   unchanged.
  *
  * ## The regime this audit belongs to (maintainer ruling, 2026-08-18)
  *
@@ -81,6 +87,50 @@
  * entries are the REPO-ROOT instruction files exactly — not
  * `examples/AGENTS.md` (an example-tree file) and not the
  * `create-objectstack` template copy (product content).
+ *
+ * ## The generated-artifact exception (#9866; maintainer 2026-08-20 + 2026-08-22)
+ *
+ * Exactly one file under `.claude/**` is not instruction-tree prose but a
+ * required gate's own `--write` artifact: `check:docs-audit-scope` keeps its
+ * generated `ALL_HANDWRITTEN` page-scope block inside
+ * `.claude/workflows/docs-accuracy-audit.js` (the workflow runs in a `node:vm`
+ * sandbox that cannot read files, so the list must live inline). Adding a docs
+ * page reddens that gate, the gate's own `--write` regenerates the block, and
+ * the block sat inside this fence — so EVERY page-adding docs PR crossed the
+ * governed surface (measured 5-for-5 on #9866), and three of the crossings
+ * merged with nobody recording them. A fence that fires on routine traffic
+ * trains every seat to read past it.
+ *
+ * The maintainer ruled for the provenance-aware exception — #10277's Option C
+ * = #9866's shape 2 — verbatim 「10277 同意 C」 (2026-08-20), re-confirmed over
+ * the same day's earlier relocate-the-artifact ruling: 「A:按方案 2(最新裁
+ * 定)」 (2026-08-22). Four load-bearing constraints, each pinned by
+ * `--self-test`; drop one and the exception is a hole:
+ *
+ *   1. RECOMPUTE, never compare to a stored baseline. The pass criterion is
+ *      "the file's diff byte-equals what
+ *      `node scripts/docs-audit/check-audit-scope.mjs --write` produces on the
+ *      tree under test" — concretely, the tree's copy of the file must equal
+ *      the generator's `replaceBlock(baseFile, docsDerivedFromThisTree)`. Any
+ *      stored or cached comparison can be constructed against.
+ *   2. BYTE-EXACT, no shape heuristics. There is no "only the ALL_HANDWRITTEN
+ *      block changed, so allow it" — a reordered-but-equal list rejects too.
+ *   3. A NAMED single-file exception, not a class mechanism.
+ *      `GENERATED_SURFACE_EXCEPTIONS` is structurally a list, seeded with this
+ *      one entry by ruling; every other governed-surface judgment — the rest
+ *      of `.claude/**` included — is character-for-character unchanged.
+ *   4. FAIL CLOSED, and the mixed-diff rule is untouched: provenance that
+ *      cannot be recomputed (no base version, unreadable file, generator
+ *      failure, empty derivation) keeps the path governed, and a hit on any
+ *      OTHER governed path still forks the whole PR — 「混合 diff 一条命中即整
+ *      PR 分叉」.
+ *
+ * The exception applies to the `--test` predicate only. The post-merge SWEEP
+ * still lists a pure-regeneration merge: under-enumeration is the one
+ * direction the sweep must never be wrong in (#9902), recomputing a generator
+ * against historical trees is a different machine, and the maintainer
+ * recognising a regen entry costs a glance — so the list stays complete and
+ * the predicate stops forcing the crossing in the first place.
  *
  * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619)
  *
@@ -278,10 +328,15 @@
  * fetch if it predates your last one. The GitHub API is consulted only for
  * ATTRIBUTION, one `GET /pulls/{n}` per governed entry — on the ordinary day
  * with no governed merges the sweep costs ZERO lookups. `--test` never
- * touches the network or git at all: it reads the register in this file.
+ * touches the network, and touches git in exactly one case: a hit on the one
+ * `GENERATED_SURFACE_EXCEPTIONS` path recomputes the generator's output on
+ * the local tree under test (reads the file, `git merge-base`/`git show` for
+ * the base version, and the docs derivation) — still zero API calls; every
+ * other `--test` run reads only the register in this file.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
@@ -340,6 +395,103 @@ export const GOVERNED_SURFACES = Object.freeze([
  * halves.
  */
 export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
+
+/**
+ * The provenance-aware exception (#9866; header section above carries the
+ * rulings verbatim). A NAMED single-file list, seeded with exactly one entry
+ * by maintainer ruling — ⛔ do not add a second entry without a ruling of its
+ * own: the structure is a list so the next real `--write` target has a place
+ * to land, not a license to widen this one.
+ *
+ * `generator` is the command whose recomputed output the tree's copy must
+ * byte-equal; it is rendered to the operator, and the recompute imports the
+ * generator's own exported `replaceBlock` so the two cannot drift.
+ */
+export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
+  Object.freeze({
+    path: '.claude/workflows/docs-accuracy-audit.js',
+    surfaceId: 'claude-tree',
+    generator: 'node scripts/docs-audit/check-audit-scope.mjs --write',
+    what: "the docs-audit workflow's generated ALL_HANDWRITTEN scope block (a gate-owned --write artifact, not instruction-tree prose)",
+  }),
+]);
+
+/**
+ * The byte-exact provenance verdict, pure so `--self-test` pins all four
+ * ruled cases offline. Inputs: the file at the PR's merge base
+ * (`baseSource`), the file on the tree under test (`prSource`), the doc set
+ * derived from that same tree (`derivedDocs`), and the generator's own
+ * `replaceBlock`. Pass ⟺ `prSource === replaceBlock(baseSource, derivedDocs)`
+ * — which is exactly "the PR's diff to this file equals the diff `--write`
+ * produces on the PR's own tree": the generated block must be the recomputed
+ * render (rejects in-block hand edits, reorderings included) AND everything
+ * outside the block must be untouched relative to base (rejects out-of-block
+ * hand edits, which `--write` itself would preserve and so cannot vouch for).
+ * Every non-pass answers with a stated reason; there is no heuristic branch.
+ */
+export function docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock }) {
+  if (typeof prSource !== 'string') {
+    return { pureRegeneration: false, reason: 'the file could not be read from the tree under test — fail closed: the path stays governed' };
+  }
+  if (typeof baseSource !== 'string') {
+    return { pureRegeneration: false, reason: 'no base version to diff against (file added, or unreadable at the merge base) — a whole new workflow file is not a regeneration; fail closed' };
+  }
+  if (!Array.isArray(derivedDocs) || derivedDocs.length === 0) {
+    return { pureRegeneration: false, reason: 'the derived doc set is empty or unreadable — refusing to certify a regeneration of nothing (the generator itself refuses the same); fail closed' };
+  }
+  let expected;
+  try {
+    expected = replaceBlock(baseSource, derivedDocs);
+  } catch (error) {
+    return { pureRegeneration: false, reason: `the generator could not splice the base file (${String(error?.message ?? error).split('\n')[0]}) — fail closed` };
+  }
+  if (prSource === expected) {
+    return { pureRegeneration: true, reason: 'byte-equal to the generator output recomputed on this tree (no stored baseline consulted)' };
+  }
+  return {
+    pureRegeneration: false,
+    reason:
+      'differs from the generator output recomputed on this tree — byte-exact equality is the only pass, so a hand edit ' +
+      '(inside or outside the generated block, a reordering included) keeps the path governed',
+  };
+}
+
+/**
+ * Apply the exception register to a `--test` verdict. Pure: provenance
+ * arrives as a Map of path → `docsAuditRegenVerdict`-shaped result. A
+ * registered path with verified pure-regeneration provenance is LIFTED from
+ * the hit set (recorded under `exceptions`, never under `clearPaths` — it is
+ * on the register, exempted, not absent); a registered path with failed or
+ * ABSENT provenance stays governed (constraint 4: fail closed). Unregistered
+ * paths never consult provenance at all, and a hit on any other governed
+ * path keeps the whole PR governed — the mixed-diff rule is untouched.
+ */
+export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) {
+  const registered = new Map(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.path, e]));
+  const exceptions = verdict.hitPaths
+    .filter((p) => registered.has(p))
+    .map((path) => {
+      const provenance = provenanceByPath.get(path) ?? null;
+      return {
+        path,
+        generator: registered.get(path).generator,
+        pureRegeneration: provenance?.pureRegeneration === true,
+        reason: provenance?.reason ?? 'provenance was not recomputed — fail closed: the path stays governed',
+      };
+    });
+  const lifted = new Set(exceptions.filter((e) => e.pureRegeneration).map((e) => e.path));
+  if (lifted.size === 0) return { ...verdict, exceptions };
+  const matched = verdict.matched
+    .map((s) => ({ ...s, files: s.files.filter((f) => !lifted.has(f)) }))
+    .filter((s) => s.files.length > 0);
+  return {
+    ...verdict,
+    matched,
+    hitPaths: verdict.hitPaths.filter((p) => !lifted.has(p)),
+    governed: matched.length > 0,
+    exceptions,
+  };
+}
 
 /**
  * The four repos the 2026-08-18 cross-repo extension governs. `id` doubles as
@@ -469,6 +621,31 @@ export function testVerdict(paths) {
   };
 }
 
+/**
+ * The exception lines a verdict carries, rendered under either branch. Empty
+ * string when no registered exception path was among the hits, so every
+ * verdict that never consulted the exception renders byte-identically to the
+ * pre-exception form (constraint 3: every other judgment unchanged).
+ */
+export function renderExceptionLines(verdict) {
+  const exceptions = verdict.exceptions ?? [];
+  if (exceptions.length === 0) return '';
+  return (
+    '\n' +
+    exceptions
+      .map((e) =>
+        e.pureRegeneration
+          ? `  ℹ️  generated-surface exception (#9866): ${e.path} is a PURE REGENERATION —\n` +
+            `      byte-equal to \`${e.generator}\` recomputed on THIS tree (never a stored baseline),\n` +
+            `      so this path does not govern the PR by itself. Any other governed hit still forks the whole PR.`
+          : `  ⛔  generated-surface exception (#9866) did NOT lift ${e.path}:\n` +
+            `      ${e.reason}\n` +
+            `      The path stays governed; a pure \`${e.generator}\` regeneration is the only thing the exception passes.`,
+      )
+      .join('\n')
+  );
+}
+
 /** The words a seat reads before flipping ready. Pure, so --self-test pins them. */
 export function renderTestVerdict(verdict) {
   const head = `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
@@ -477,7 +654,8 @@ export function renderTestVerdict(verdict) {
       `${head}\n` +
       `  ✅  NOT governed — ordinary queue landing applies to a PR with exactly this file list.\n` +
       `      Derived from GOVERNED_SURFACES, not recalled. Re-run on the FINAL file list: the register\n` +
-      `      has grown several times in two days, and a reading taken earlier in the session is recall.`
+      `      has grown several times in two days, and a reading taken earlier in the session is recall.` +
+      renderExceptionLines(verdict)
     );
   }
   const lines = verdict.matched.map((s) => {
@@ -490,8 +668,55 @@ export function renderTestVerdict(verdict) {
     `  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n` +
     `      No seat flips it ready, enqueues it, or arms auto-merge (AGENTS.md Prime Directive #14).\n` +
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
-    `${lines.join('\n')}${clear}`
+    `${lines.join('\n')}${clear}` +
+    renderExceptionLines(verdict)
   );
+}
+
+/**
+ * The real recompute behind the exception, on the local tree at `root` (the
+ * tree under test — run the PR's own copy of this script from the PR's own
+ * checkout, or point `--root` at it). Constraint 1 in code: the expected
+ * bytes are produced HERE, from this tree's docs derivation spliced by the
+ * generator's own exported `replaceBlock`, never read from anywhere stored.
+ * Every failure path answers fail-closed with a stated reason. No network.
+ */
+export async function recomputeDocsAuditProvenance(root, exception) {
+  const failClosed = (reason) => ({ pureRegeneration: false, reason: `${reason} — fail closed: the path stays governed` });
+  let replaceBlock;
+  try {
+    ({ replaceBlock } = await import('../docs-audit/check-audit-scope.mjs'));
+    if (typeof replaceBlock !== 'function') return failClosed('the generator module exports no replaceBlock');
+  } catch (error) {
+    return failClosed(`could not load the generator module (${String(error?.message ?? error).split('\n')[0]})`);
+  }
+  let prSource;
+  try {
+    prSource = readFileSync(join(root, exception.path), 'utf8');
+  } catch (error) {
+    return failClosed(`could not read ${exception.path} from the tree under test (${String(error?.message ?? error).split('\n')[0]})`);
+  }
+  let baseSource;
+  try {
+    const base = git(root, ['merge-base', 'origin/main', 'HEAD']).trim();
+    baseSource = git(root, ['show', `${base}:${exception.path}`]);
+  } catch (error) {
+    return failClosed(`could not read the merge-base version of ${exception.path} (${String(error?.message ?? error).split('\n')[0]})`);
+  }
+  let derivedDocs;
+  try {
+    derivedDocs = JSON.parse(
+      execFileSync(process.execPath, [join(root, 'scripts/docs-audit/affected-docs.mjs'), '--all', '--json'], {
+        cwd: root,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ).docs;
+  } catch (error) {
+    return failClosed(`could not derive the doc set on this tree (${String(error?.message ?? error).split('\n')[0]})`);
+  }
+  return docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock });
 }
 
 // ── local git (enumeration + diff paths; zero API) ──────────────────────────
@@ -700,9 +925,15 @@ export function renderReport({ sinceIso, repos, scanned, entries, lookups }) {
 
 const invokedDirectly = isEntrypoint(import.meta.url);
 
-function runTestMode(args) {
+async function runTestMode(args) {
   const i = args.indexOf('--test');
-  const paths = args.slice(i + 1).filter((a) => !a.startsWith('--'));
+  const paths = [];
+  const tail = args.slice(i + 1);
+  for (let j = 0; j < tail.length; j++) {
+    if (tail[j] === '--root') { j++; continue; } // `--root <path>`'s value is a flag argument, not a PR path
+    if (tail[j].startsWith('--')) continue;
+    paths.push(tail[j]);
+  }
   if (paths.length === 0) {
     console.error(
       `❌  --test wants the PR's changed paths, and got none. An empty path list is a failure, never\n` +
@@ -711,7 +942,20 @@ function runTestMode(args) {
     );
     return EXIT_CANNOT_SWEEP;
   }
-  const verdict = testVerdict(paths);
+  let verdict = testVerdict(paths);
+  // The one provenance-aware exception (#9866): recompute only when a
+  // registered path is actually among the hits, so every other `--test` run
+  // stays the zero-git, zero-cost read it always was.
+  const hitExceptions = GENERATED_SURFACE_EXCEPTIONS.filter((e) => verdict.hitPaths.includes(e.path));
+  if (hitExceptions.length > 0) {
+    const rootIdx = args.indexOf('--root');
+    const root = resolve(rootIdx > -1 && args[rootIdx + 1] ? args[rootIdx + 1] : resolve(scriptDir, '..', '..'));
+    const provenance = new Map();
+    for (const exception of hitExceptions) {
+      provenance.set(exception.path, await recomputeDocsAuditProvenance(root, exception));
+    }
+    verdict = applyGeneratedExceptions(verdict, provenance);
+  }
   if (args.includes('--json')) console.log(JSON.stringify(verdict, null, 2));
   else console.log(renderTestVerdict(verdict));
   return verdict.governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
@@ -719,7 +963,7 @@ function runTestMode(args) {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args.includes('--test')) return runTestMode(args);
+  if (args.includes('--test')) return await runTestMode(args);
 
   const argOf = (name) => {
     const i = args.indexOf(name);
@@ -918,7 +1162,7 @@ const REPLAYS = [
   { name: 'the first human merge under the new regime', subject: 'docs(pm-skill): stale-premise check covers ruling-named cards; triage self-exit guard sees in-flight sibling rounds (#9501)', files: ['.claude/skills/pm-dispatch/SKILL.md'], pr: 9501 },
 ];
 
-function selfTest() {
+async function selfTest() {
   let checked = 0;
   const failures = [];
   const assert = (name, cond, detail) => {
@@ -1143,12 +1387,111 @@ function selfTest() {
     assert(`--test-answers-governed-for-${surface.id}`, testVerdict([sample]).governed === true, sample);
   }
 
+  // ── the generated-artifact exception (#9866; rulings 2026-08-20 + -22) ───
+  //
+  // Safety-relevant merge-gate code: a bug here waves real instruction edits
+  // past the fence. The four ruled cases are pinned against the GENERATOR'S
+  // OWN exported render/splice functions, not imitations, so the fixtures are
+  // real `--write` output; if the generator ever renames its block markers,
+  // `replaceBlock` stops splicing these fixtures and the pure-regen case goes
+  // red HERE — loud, which is the point.
+  const { renderBlock: genRender, replaceBlock: genReplace } = await import('../docs-audit/check-audit-scope.mjs');
+  // The register: exactly the one ruled entry, and it must name a path its
+  // declared surface actually governs — an exception for an ungoverned path
+  // would be a register row nothing reads.
+  assert('exactly-one-generated-exception-is-registered-the-ruled-single-file',
+    GENERATED_SURFACE_EXCEPTIONS.length === 1 && GENERATED_SURFACE_EXCEPTIONS[0].path === '.claude/workflows/docs-accuracy-audit.js',
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path)));
+  assert('the-exception-names-a-path-its-surface-actually-governs',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => {
+      const m = governedPathsIn([e.path]);
+      return m.length === 1 && m[0].id === e.surfaceId;
+    }));
+  assert('the-exception-names-its-generator-command',
+    GENERATED_SURFACE_EXCEPTIONS[0].generator.includes('check-audit-scope.mjs --write'));
+
+  const oldDocs = ['content/docs/a.mdx'];
+  const newDocs = ['content/docs/a.mdx', 'content/docs/new-page.mdx'];
+  const baseWorkflow =
+    `// header prose\n// <generated:docs-audit-scope>${genRender(oldDocs)}// </generated:docs-audit-scope>\n` +
+    `const RELEASE_OWNED_PREFIX = 'content/docs/releases/'\n// footer\n`;
+  const pureRegen = genReplace(baseWorkflow, newDocs);
+  const regen = (prSource, over = {}) =>
+    docsAuditRegenVerdict({ baseSource: baseWorkflow, prSource, derivedDocs: newDocs, replaceBlock: genReplace, ...over });
+  assert('the-pure-regen-fixture-is-a-real-diff-not-a-no-op', pureRegen !== baseWorkflow && pureRegen.includes('new-page.mdx'));
+  // Ruled case 1: a pure regeneration passes.
+  const pureVerdict = regen(pureRegen);
+  assert('ruled-case-1-pure-regeneration-passes', pureVerdict.pureRegeneration === true, pureVerdict.reason);
+  assert('a-pass-says-it-recomputed-and-consulted-no-stored-baseline', /recomputed on this tree/.test(pureVerdict.reason) && /no stored baseline/.test(pureVerdict.reason), pureVerdict.reason);
+  // Ruled case 2: an in-block hand edit rejects.
+  const inBlockEdit = pureRegen.replace('  "content/docs/new-page.mdx",', '  "content/docs/new-page.mdx",\n  "content/docs/sneaked-in.mdx",');
+  assert('the-in-block-mutation-applied', inBlockEdit !== pureRegen);
+  assert('ruled-case-2-in-block-hand-edit-rejects', regen(inBlockEdit).pureRegeneration === false);
+  // Ruled case 3: an out-of-block edit rejects — `--write` itself would
+  // PRESERVE it, which is exactly why the compare runs from the base file.
+  const outOfBlockEdit = pureRegen.replace('// footer', '// footer, hand-edited');
+  assert('the-out-of-block-mutation-applied', outOfBlockEdit !== pureRegen);
+  assert('ruled-case-3-out-of-block-edit-rejects', regen(outOfBlockEdit).pureRegeneration === false);
+  // Ruled case 4: mixed regeneration + hand edit rejects.
+  const mixedEdit = inBlockEdit.replace('// footer', '// footer, hand-edited');
+  assert('ruled-case-4-mixed-regen-plus-hand-edit-rejects', regen(mixedEdit).pureRegeneration === false);
+  // Byte-exact means byte-exact: the same doc SET reordered is not a pass —
+  // the "only the block changed, and to equivalent content" heuristic is the
+  // shape the ruling forbids.
+  const reordered = pureRegen.replace(
+    '  "content/docs/a.mdx",\n  "content/docs/new-page.mdx",',
+    '  "content/docs/new-page.mdx",\n  "content/docs/a.mdx",',
+  );
+  assert('the-reorder-mutation-applied', reordered !== pureRegen);
+  assert('an-equal-set-in-a-different-order-rejects-no-shape-heuristics', regen(reordered).pureRegeneration === false);
+  // Fail-closed inputs, each with its own stated reason.
+  assert('no-base-version-rejects-an-added-workflow-file-is-not-a-regeneration', regen(pureRegen, { baseSource: null }).pureRegeneration === false);
+  assert('an-unreadable-tree-file-rejects', regen(null).pureRegeneration === false);
+  assert('an-empty-derivation-rejects-like-the-generator-itself-refuses-it', regen(pureRegen, { derivedDocs: [] }).pureRegeneration === false);
+  assert('a-generator-splice-failure-rejects', regen(pureRegen, { baseSource: 'no markers here at all' }).pureRegeneration === false);
+
+  // Applying the exception to a verdict — the fence semantics.
+  const wfPath = GENERATED_SURFACE_EXCEPTIONS[0].path;
+  const verified = new Map([[wfPath, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]);
+  const liftedVerdict = applyGeneratedExceptions(testVerdict(['content/docs/x.mdx', wfPath]), verified);
+  assert('a-verified-pure-regen-lifts-the-only-hit-and-the-pr-is-not-governed',
+    liftedVerdict.governed === false && liftedVerdict.hitPaths.length === 0 && liftedVerdict.matched.length === 0, JSON.stringify(liftedVerdict.hitPaths));
+  assert('a-lifted-path-is-recorded-as-an-exception-never-as-a-clear-path',
+    !liftedVerdict.clearPaths.includes(wfPath) && liftedVerdict.exceptions.length === 1 && liftedVerdict.exceptions[0].pureRegeneration === true, JSON.stringify(liftedVerdict.exceptions));
+  const rejectedVerdict = applyGeneratedExceptions(testVerdict([wfPath]), new Map([[wfPath, { pureRegeneration: false, reason: 'differs (fixture)' }]]));
+  assert('a-failed-provenance-keeps-the-path-governed', rejectedVerdict.governed === true && rejectedVerdict.hitPaths.join() === wfPath);
+  const absentProvenance = applyGeneratedExceptions(testVerdict([wfPath]), new Map());
+  assert('absent-provenance-fails-closed-never-open', absentProvenance.governed === true && /fail closed/.test(absentProvenance.exceptions[0].reason), JSON.stringify(absentProvenance.exceptions));
+  // The mixed-diff rule is untouched: one hit on any OTHER governed path
+  // still forks the whole PR, provenance verified or not.
+  const mixedGoverned = applyGeneratedExceptions(testVerdict([wfPath, '.claude/skills/x/SKILL.md']), verified);
+  assert('one-hit-on-any-OTHER-governed-path-still-forks-the-whole-pr',
+    mixedGoverned.governed === true && mixedGoverned.hitPaths.join() === '.claude/skills/x/SKILL.md', JSON.stringify(mixedGoverned.hitPaths));
+  assert('and-the-lifted-path-is-still-reported-as-lifted-on-a-mixed-diff', mixedGoverned.exceptions[0].pureRegeneration === true);
+  // A NAMED single file, not a class: a sibling workflow file never consults
+  // provenance, even provenance that claims to be verified.
+  const sibling = '.claude/workflows/some-other-workflow.js';
+  const siblingVerdict = applyGeneratedExceptions(testVerdict([sibling]), new Map([[sibling, { pureRegeneration: true, reason: 'x' }]]));
+  assert('a-sibling-workflow-file-is-not-excepted-single-file-not-a-class',
+    siblingVerdict.governed === true && siblingVerdict.exceptions.length === 0, JSON.stringify(siblingVerdict.exceptions));
+  assert('a-verdict-that-never-consulted-the-exception-carries-no-exceptions-field', testVerdict(['AGENTS.md']).exceptions === undefined);
+
+  // The words a seat reads.
+  const liftedRender = renderTestVerdict(liftedVerdict);
+  assert('a-lifted-render-names-the-exception-the-generator-and-the-recompute',
+    liftedRender.includes('PURE REGENERATION') && liftedRender.includes('check-audit-scope.mjs --write') && liftedRender.includes('THIS tree'), liftedRender);
+  assert('a-lifted-render-still-warns-that-any-other-governed-hit-forks', liftedRender.includes('forks the whole PR'), liftedRender);
+  const rejectedRender = renderTestVerdict(rejectedVerdict);
+  assert('a-rejected-render-stays-GOVERNED-and-says-why-the-exception-did-not-lift',
+    rejectedRender.includes('GOVERNED') && rejectedRender.includes('did NOT lift') && rejectedRender.includes('differs (fixture)'), rejectedRender);
+  assert('a-verdict-without-exceptions-renders-exactly-as-before', renderExceptionLines(testVerdict(['AGENTS.md'])) === '' && !renderTestVerdict(testVerdict(['AGENTS.md'])).includes('#9866'));
+
   if (failures.length > 0) {
     console.error(`✗ check-governed-merges --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the exit table, and the report wording pins).`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, and its render words — the exit table, and the report wording pins).`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
@@ -1165,5 +1508,5 @@ function runTestModeExitFor(paths) {
 // code. A self-test is a mode of the file that is being RUN, never a side
 // effect of importing it.
 if (invokedDirectly && process.argv.includes('--self-test')) {
-  selfTest();
+  await selfTest();
 }

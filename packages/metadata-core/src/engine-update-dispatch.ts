@@ -54,6 +54,22 @@
  *  - otherwise → **`reject`**. The call names neither one row nor a bulk
  *    intent, and the engine throws rather than rewriting every row it can see.
  *
+ * **[#11009] One overriding clause on the two by-id arms:** the by-id route
+ * binds ONLY the primary key, so a `where` carrying any key besides `id` is a
+ * predicate the by-id path would silently discard. Such a call is never
+ * dispatched `by-id`:
+ *
+ *  - id sourced from `where`, `multi` truthy → **`multi`** — a declared
+ *    predicate call; the full `where` (scalar id included, as an equality
+ *    term) rides the AST to `driver.updateMany`. The compare-and-set spelling.
+ *  - anything else (no `multi`; or the id came from `data.id`, which outranks
+ *    `multi` per #5748 and cannot be demoted onto the predicate path) →
+ *    **`reject`**, naming the keys that would have been dropped.
+ *
+ * A PURE-id `where` (`{ where: { id } }`) is untouched by this clause: it
+ * stays `by-id` even beside `multi: true` (LifecycleService's guarded-reap
+ * idiom — pinned in the case-set below).
+ *
  * Three things about that list are load-bearing and easy to get wrong when
  * copying it by hand — which is the whole argument for importing it instead:
  *
@@ -101,6 +117,11 @@
  *      needs `ObjectQL`, which this package must never depend on.
  * @see scripts/check-engine-double-contract.mjs — the gate that keeps doubles on both.
  */
+
+import {
+  engineByIdUnhonouredPredicateMessage,
+  unhonouredByIdPredicateKeys,
+} from './engine-dispatch-unhonoured-predicate.js';
 
 /** The message `update()` throws when a call identifies neither one row nor a bulk intent. */
 export const ENGINE_UPDATE_REJECT_MESSAGE = 'Update requires an ID or options.multi=true';
@@ -195,14 +216,43 @@ export function resolveEngineUpdateDispatch(
   // parked in the payload is not an id and does not shadow the ladder below
   // it. `data.id` stays UNGUARDED so a missing payload is the producer's
   // `TypeError`, not a kinder verdict.
-  let id: unknown = asScalarId(data.id);
+  const payloadId = asScalarId(data.id);
+  let id: unknown = payloadId;
   if (!id) {
     const fromWhere = scalarUpdateId(options);
     if (fromWhere !== undefined) id = fromWhere;
   }
   // The engine branches on `if (hookContext.input.id)` — truthiness, so a
   // falsy scalar id is not an identifying call. See header point 3.
-  if (id) return { kind: 'by-id', id };
+  if (id) {
+    // [#11009] A `where` carrying more than the primary key is a REAL
+    // predicate, and the by-id path does not evaluate predicates — it binds
+    // only the id, so every extra key used to be silently discarded (a
+    // compare-and-set guard that evaluated to nothing). Two honest verdicts
+    // replace that silent drop:
+    //
+    //  - the caller ALSO declared `multi: true`, and the id came from `where`
+    //    → `multi`: a declared predicate call, routed to the predicate path
+    //    where `applyFilters` compiles every key (a scalar `where.id` is an
+    //    ordinary equality term there). This is the compare-and-set spelling.
+    //    ⚠️ A PURE-id `where` (`{ where: { id } }`) never reaches this branch
+    //    and stays by-id even under `multi: true` — LifecycleService's guarded
+    //    reap depends on that for per-record cascade handling.
+    //  - otherwise → `reject`, loudly naming the keys the by-id path would
+    //    have dropped. A truthy scalar `data.id` lands here even with
+    //    `multi: true`: the payload id outranks `multi` (#5748), and silently
+    //    demoting the row address into a bulk write would be the same class
+    //    of dropped declaration this refusal exists to prevent.
+    const unhonoured = unhonouredByIdPredicateKeys(options?.where);
+    if (unhonoured.length > 0) {
+      if (!payloadId && options?.multi) return { kind: 'multi' };
+      return {
+        kind: 'reject',
+        message: engineByIdUnhonouredPredicateMessage('Update', unhonoured),
+      };
+    }
+    return { kind: 'by-id', id };
+  }
   if (options?.multi) return { kind: 'multi' };
   return { kind: 'reject', message: ENGINE_UPDATE_REJECT_MESSAGE };
 }
@@ -268,12 +318,15 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   // ── by-id via `where`.
   { what: 'scalar string where.id', data: { title: 'x' }, options: { where: { id: 'rec_1' } }, expect: 'by-id' },
   { what: 'scalar number where.id', data: { title: 'x' }, options: { where: { id: 42 } }, expect: 'by-id' },
-  { what: 'scalar where.id alongside other predicates', data: { title: 'x' }, options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'by-id' },
+  // [#11009] A PURE-id `where` stays by-id even under a declared `multi` —
+  // there is no predicate the by-id path could drop, and LifecycleService's
+  // guarded reap relies on this shape taking the per-record path.
+  { what: 'scalar where.id with multi:true and NOTHING else in where — still one by-id write (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1' }, multi: true }, expect: 'by-id', expectId: 'rec_1' },
   // ── by-id via the PAYLOAD. A SCALAR `data.id` still outranks `where` and
   //    `multi` alike — that is the common, legal `update(o, { id, …fields })`
   //    spelling and objectstack#5748 left it exactly as it was.
   { what: 'id carried in the data payload, no where at all', data: { id: 'rec_1', title: 'x' }, options: undefined, expect: 'by-id', expectId: 'rec_1' },
-  { what: 'a SCALAR data.id still wins over an explicit multi:true', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'by-id', expectId: 'rec_1' },
+  { what: 'a SCALAR data.id still wins over an explicit multi:true', data: { id: 'rec_1', title: 'x' }, options: { multi: true }, expect: 'by-id', expectId: 'rec_1' },
   { what: 'a SCALAR data.id still wins over a scalar where.id', data: { id: 'rec_1', title: 'x' }, options: { where: { id: 'rec_2' } }, expect: 'by-id', expectId: 'rec_1' },
   // ── The payload's scalar test (objectstack#5748). A non-scalar `data.id`
   //    names no row, so it stops shadowing everything under it: the decision
@@ -285,6 +338,11 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   { what: 'multi with a predicate', data: { title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'multi' },
   { what: 'multi with no predicate at all', data: { title: 'x' }, options: { multi: true }, expect: 'multi' },
   { what: 'multi alongside an $in id set', data: { title: 'x' }, options: { where: { id: { $in: ['a', 'b'] } }, multi: true }, expect: 'multi' },
+  // [#11009] The compare-and-set spelling: a scalar `where.id` beside real
+  // predicate keys WITH a declared `multi` is a predicate call — every key
+  // (the id included, as an equality term) rides the AST to
+  // `driver.updateMany`, so the declared condition is honoured in full.
+  { what: 'scalar where.id + extra predicate keys + multi:true — the predicate path honours ALL of it (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1', status: 'draft' }, multi: true }, expect: 'multi' },
   { what: 'multi with a FALSY data.id (0 does not identify a row)', data: { id: 0, title: 'x' }, options: { multi: true }, expect: 'multi' },
   { what: 'operator object in data.id WITH multi:true — the declared bulk intent is honoured (#5748)', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: true }, expect: 'multi' },
   { what: 'array data.id with multi:true', data: { id: ['a', 'b'], title: 'x' }, options: { multi: true }, expect: 'multi' },
@@ -305,4 +363,18 @@ export const ENGINE_UPDATE_DISPATCH_CASES: readonly EngineUpdateDispatchCase[] =
   { what: 'operator object in data.id, multi explicitly false', data: { id: { $in: ['a', 'b'] }, title: 'x' }, options: { multi: false }, expect: 'reject' },
   { what: 'array data.id, no multi', data: { id: ['a', 'b'], title: 'x' }, options: undefined, expect: 'reject' },
   { what: 'null data.id, no multi', data: { id: null, title: 'x' }, options: undefined, expect: 'reject' },
+  // ── [#11009] The unhonoured-predicate refusals. Each of these used to
+  //    dispatch `by-id` and silently DISCARD every `where` key other than
+  //    `id` — a compare-and-set guard that evaluated to nothing, reading
+  //    exactly like a working conditional write. Now they are loud: the
+  //    refusal names the dropped keys and prescribes the predicate path
+  //    (`multi: true`), which honours the full `where`.
+  { what: 'scalar where.id alongside other predicates, NO multi — the guard would be silently dropped (#11009)', data: { title: 'x' }, options: { where: { id: 'rec_1', tenant: 't1' } }, expect: 'reject' },
+  { what: 'scalar where.id + a CAS operator predicate, multi explicitly false (#11009 — the redeliver shape)', data: { title: 'x' }, options: { where: { id: 'rec_1', status: { $in: ['done'] } }, multi: false }, expect: 'reject' },
+  { what: 'scalar data.id + extra where predicate, no multi — same drop through the payload door (#11009)', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' } }, expect: 'reject' },
+  // The payload id outranks `multi` (#5748), so a declared `multi: true`
+  // cannot re-route it onto the predicate path — and the unhonourable
+  // predicate is REFUSED rather than silently dropped (the pre-#11009
+  // behaviour) or silently promoted to a bulk write.
+  { what: 'scalar data.id + extra where predicate + multi:true — refused, the payload id cannot take the predicate path (#11009)', data: { id: 'rec_1', title: 'x' }, options: { where: { tenant: 't1' }, multi: true }, expect: 'reject' },
 ];

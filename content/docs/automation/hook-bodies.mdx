@@ -257,7 +257,7 @@ If you have a body that genuinely cannot be expressed in L1+L2 (typically: it ne
 
    Note that a CommonJS `require('node:os')` in a TypeScript config reaches the extractor as esbuild's `__require("node:os")`. Both spellings are refused under the same `require()` reason.
 
-Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. When the inference is wrong, supply `body` yourself with an explicit `capabilities` array — the `// @capabilities` directive comment [does not reach the build](#capability-inference).
+Capabilities are inferred by matching known patterns in the body source (e.g. `ctx.api.object(...).insert(...)` ⇒ `api.write`). A fuller AST-based analysis is planned for a later version. When the inference is wrong, supply `body` yourself with an [explicit `capabilities` array](#capability-inference) — that path is data rather than a comment, so it survives the build.
 
 ## Migration
 
@@ -319,46 +319,46 @@ The extractor scans each body for known patterns and adds the matching capabilit
 | `ctx.crypto.randomUUID` | `crypto.uuid` |
 | `ctx.log.info / warn / error / debug` | `log` |
 
-To override the inference, add a directive comment as the first line of your handler body:
+When inference does not derive what a body needs, declare the tokens yourself by
+supplying `body` on the hook or action instead of a `handler`:
 
 ```ts
-handler: async (ctx) => {
-  // @capabilities api.read api.write log
-  …
-}
+hooks: [
+  {
+    name: 'notify_owner',
+    object: 'account',
+    events: ['afterInsert'],
+    body: {
+      language: 'js',
+      source: "await ctx.api.object('task').insert({ subject: 'follow up' });",
+      capabilities: ['api.write', 'log'],
+    },
+  },
+]
 ```
 
-<Callout type="warn" title="This directive does not reach `objectstack build`">
-  The override is read off the handler's **stringified source** (`String(fn)`), so it
-  only works if the function the CLI holds still carries the comment. Through
-  `objectstack build`, it never does.
+That path is **data, not a comment**, so nothing in the build pipeline can strip it
+on the way through — which is what makes it the supported way to say what a body
+needs.
 
-  `loadConfig` runs your config through `bundle-require` → esbuild, and esbuild strips
-  `//` line comments before the handler is ever a runtime function. The directive is
-  gone by the time the extractor looks at it. Measured on all four authoring shapes:
+<Callout type="warn" title="The `@capabilities` directive comment was removed in 17.1">
+  A directive comment on the first line of a handler body was once documented as a
+  way to override inference. It was **retired** (#10917) and the extractor no longer
+  reads it.
 
-  | Authoring shape | `// @capabilities api.write log` reaches the extractor? |
-  |---|---|
-  | `objectstack.config.ts` | **No** — comment stripped by esbuild |
-  | `objectstack.config.js` | **No** — esbuild runs on `.js` too |
-  | `objectstack.config.mjs` | **No** — same path |
-  | handler imported from a local `./handlers.js` | **No** — esbuild bundles it as well |
+  It had never worked from any ordinary authoring path. The override was read off
+  the handler's stringified source (`String(fn)`), and `loadConfig` runs your config
+  through `bundle-require` → esbuild, which strips `//` line comments before the
+  handler is ever a runtime function. Measured on all four shapes —
+  `objectstack.config.ts`, `.js`, `.mjs`, and a handler imported from a local module
+  — the build exited 0, printed nothing, and emitted the **inferred** capabilities
+  alone. A handler asking for more than inference derived was then refused by the
+  sandbox at runtime, far from the cause.
 
-  In every case the build exits 0, prints nothing, and emits the **inferred**
-  capabilities only. A handler asking for `api.write log` whose body reads
-  `ctx.api.object('x').find({})` ships `"capabilities": ["api.read"]` — inference won,
-  silently, and the directive had no effect at all.
-
-  **So do not rely on this directive.** Write the body so the
-  [inference table](#capability-inference) above derives what you need, or supply
-  `body` yourself on the hook with an explicit `capabilities` array — that path is
-  data, not a comment, and survives the build.
-
-  Inference is unaffected: it matches the *code*, which esbuild keeps. Only the
-  comment-borne override is lost. Tracked in #10678, where the question of whether the
-  directive should get a real authorable surface (or be retired) is open — this page
-  documents the reach as measured, and an `objectstack build`-level test pins it so
-  this page and the extractor cannot drift apart again.
+  **If a config of yours still carries one:** removing it changes nothing, because it
+  was already inert. If you meant the tokens it named, declare them in
+  `body.capabilities` as above. Inference is unaffected either way — it matches the
+  *code*, which esbuild keeps.
 </Callout>
 
 ### Build pipeline at a glance

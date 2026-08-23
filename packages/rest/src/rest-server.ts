@@ -744,6 +744,17 @@ export interface RestEnvRegistry {
  * built-in chain must NOT second-guess it. Only a thrown error falls back to
  * the legacy chain, so a misbehaving resolver degrades to pre-seam behavior
  * instead of taking down REST routing.
+ *
+ * **Cost.** Answering this question must not acquire a kernel. `RestApiPlugin`
+ * builds the adapter over the host's `kernel-resolver` and prefers its
+ * environment-only member (`KernelResolver.resolveEnvironment`, ADR-0006) for
+ * exactly that reason: asking the kernel-ACQUISITION method for an id bought a
+ * kernel and discarded it, and on a cold or wedged environment that discard is
+ * a full waiter window — after which {@link RestServer.resolveProtocol} opens
+ * a second one to acquire the kernel for real. Measured on a live host with a
+ * 20s `waiterTimeoutMs`: 42s to a 503 on REST-owned routes against 21s on
+ * dispatcher-owned ones. A host that implements only `resolveKernel` still
+ * works, and still pays twice.
  */
 export interface RestRequestEnvResolver {
     resolveRequestEnvironmentId(req: unknown): Promise<string | undefined>;
@@ -1109,6 +1120,25 @@ export class RestServer {
         return undefined;
     }
 
+    /**
+     * Resolve the protocol that serves this request — and THE single
+     * kernel-acquisition point on the path a REST-owned route takes to answer.
+     *
+     * Two steps, deliberately of different kinds: {@link
+     * resolveRequestEnvironmentId} answers *which environment* (cheap, and
+     * kernel-free wherever the host implements `resolveEnvironment` — see
+     * {@link RestRequestEnvResolver}), then `getOrCreate` acquires that
+     * environment's kernel. Anything that collapses them back together
+     * re-creates the double waiter window: the env question routed through a
+     * kernel-acquisition API, paid for, discarded, then paid again here.
+     *
+     * **This `getOrCreate` fails closed and must keep doing so.** A genuinely
+     * unavailable kernel rejects here, the rejection propagates to the route's
+     * `handleRouteError`, and the caller gets the host's declared 503 — never a
+     * response served against no kernel. Removing the first (wasted) window
+     * shortened the wait to that 503; it did not, and must not, turn it into a
+     * success.
+     */
     private async resolveProtocol(environmentId?: string, req?: any): Promise<RestProtocol> {
         if (environmentId === 'platform') return this.protocol;
         const envId = await this.resolveRequestEnvironmentId(environmentId, req);
@@ -3920,9 +3950,24 @@ export class RestServer {
                         // [#6877] Both narrow the draft list to one package /
                         // one type; an array reached `listDrafts` untouched.
                         if (refuseRepeatedQueryParams(req, res, ['packageId', 'type'])) return;
+                        // [#11087] Read in the CALLER'S org scope, symmetric with
+                        // the save route (`saveMetaItem`'s `organizationId:
+                        // ctx?.tenantId`, below): a draft saved by a session
+                        // carrying an active org lands in that org's overlay
+                        // scope, and this route used to read with NO org —
+                        // `getOverlayRepo(null)` sees only env-wide
+                        // (`organization_id IS NULL`) rows, so every org-scoped
+                        // draft was invisible to the pending-changes surfaces
+                        // while single reads (which thread the ctx) and the
+                        // publisher (which resolves each draft's own scope)
+                        // saw it fine — the write-org/read-null split behind
+                        // cloud#1593. With the org threaded, the repository's
+                        // own `$or` contract surfaces BOTH the caller's org
+                        // overlay and env-wide drafts.
                         const result = await (p as any).listDrafts({
                             packageId: (req.query?.packageId as string | undefined) || undefined,
                             type: (req.query?.type as string | undefined) || undefined,
+                            organizationId: ctx?.tenantId ?? undefined,
                         });
                         res.json(result);
                     } catch (error: any) {
@@ -5474,6 +5519,16 @@ export class RestServer {
                         name: req.params.name,
                         item,
                         organizationId,
+                        // [#10888] This door answers with an ADR-0112 error
+                        // envelope that carries the refusal's `issues[]`
+                        // structurally beside the message (`sendError` threads a
+                        // top-level `issues`), so `saveMetaItem`'s 422 renders
+                        // its findings as a headline here instead of restating
+                        // the per-key prose a console would then show twice.
+                        // Server-stated: this object is built field by field
+                        // from named `req` values and never spreads the body, so
+                        // a client cannot smuggle a face in.
+                        writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
@@ -6592,6 +6647,16 @@ export class RestServer {
                         name: compoundName,
                         item: req.body,
                         organizationId,
+                        // [#10888] This door answers with an ADR-0112 error
+                        // envelope that carries the refusal's `issues[]`
+                        // structurally beside the message (`sendError` threads a
+                        // top-level `issues`), so `saveMetaItem`'s 422 renders
+                        // its findings as a headline here instead of restating
+                        // the per-key prose a console would then show twice.
+                        // Server-stated: this object is built field by field
+                        // from named `req` values and never spreads the body, so
+                        // a client cannot smuggle a face in.
+                        writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),

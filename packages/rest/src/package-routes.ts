@@ -639,22 +639,49 @@ export function registerPackageRoutes(
         }
       }
 
-      // Database packages (published artifacts)
-      try {
-        const dbPackages = await packageService.list();
-        for (const pkg of dbPackages) {
-          const id = pkg.manifest?.id || pkg.id;
-          if (id) {
-            // Database entry takes precedence (has richer metadata from publish)
-            packagesMap.set(id, {
-              ...packagesMap.get(id),
-              ...pkg,
-              source: packagesMap.has(id) ? 'both' : 'database',
-            });
-          }
+      // Database packages (published artifacts).
+      //
+      // [#11063] NOT wrapped in a catch, deliberately — this is the half that
+      // used to absorb a failed durable read into a 200. The absorbed failure
+      // left nothing on the wire to separate "these are all the packages" from
+      // "these are the packages I could still see": `total` was reported as a
+      // complete count either way, and the registrar-sourced entries kept
+      // `source: 'registry'`, which reads as PROVENANCE, not as a warning that
+      // the database half is missing. A refusal the caller never sees is the
+      // family this repo has already ruled on — #10965 · #10677 / PR #10788 ·
+      // #10789 / PR #10964: **a read that could not happen must not be reported
+      // as a read that found nothing.** Here it was one level up, in a
+      // consumer-side catch rather than in a flattener.
+      //
+      // What escapes is exactly ONE throw, and it is a declared refusal, not a
+      // fault: `PackageService.list()` catches its own driver faults and still
+      // answers `[]` (logging at error), and re-throws only the #10965 seam
+      // refusal — `SERVICE_UNAVAILABLE` / 503 with the ADR-0112 status+code on
+      // the error — raised when the storage seam ACCEPTED the query and
+      // returned no result set. The outer catch hands it to
+      // {@link sendThrownError}, which carries the producer's own status and
+      // code through the declared envelope rather than re-deciding them.
+      //
+      // ⭐ This ALIGNS the two read doors rather than inventing a posture:
+      // `GET /packages/:id` next door has never had an inner catch, so it has
+      // answered that same 503 since #10965. The list door answering 200 while
+      // the detail door refused was the inconsistency, not the fix.
+      //
+      // ⛔ The alternative the card sketched — keep the 200 and add a declared
+      // partial-result marker — is a response-shape change and therefore a
+      // contract decision; it was NOT authorized by this card's grading, and no
+      // wire field is added here.
+      const dbPackages = await packageService.list();
+      for (const pkg of dbPackages) {
+        const id = pkg.manifest?.id || pkg.id;
+        if (id) {
+          // Database entry takes precedence (has richer metadata from publish)
+          packagesMap.set(id, {
+            ...packagesMap.get(id),
+            ...pkg,
+            source: packagesMap.has(id) ? 'both' : 'database',
+          });
         }
-      } catch {
-        // Database query failed — continue with registry-only packages
       }
 
       const packages = Array.from(packagesMap.values());

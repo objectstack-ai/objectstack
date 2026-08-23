@@ -89,7 +89,23 @@ describe('generateObjectDraft', () => {
     expect(draft.name).toBe('fact_orders');
     expect(draft.datasource).toBe('warehouse');
     const fields = draft.definition.fields as Record<string, { type: string; primaryKey?: boolean }>;
-    expect(fields.order_id).toEqual({ type: 'text', primaryKey: true });
+    /**
+     * `order_id` is the table's primary key, and the field carries NOTHING
+     * about that.
+     *
+     * This assertion used to read `{ type: 'text', primaryKey: true }`. It was
+     * flipped by the maintainer ruling of 2026-08-22 (「同意所有」, item 8 = D,
+     * recorded on #11000): `fields.<f>.primaryKey` is not a key of the spec
+     * field schema, so the draft it pinned was one `tsc --noEmit` refused
+     * (`TS2353`) and `ObjectSchema.safeParse` refused (`unrecognized_keys`).
+     * The pin is kept, not deleted — inverted, it is now the guard that the
+     * unauthorable key does not come back. `toEqual` (not `toMatchObject`) is
+     * load-bearing here: it is what makes the assertion fail on an EXTRA key.
+     *
+     * Where the key went instead is pinned in
+     * `external-object-draft-primary-key.test.ts`.
+     */
+    expect(fields.order_id).toEqual({ type: 'text' });
     expect(fields.amount.type).toBe('number');
     expect(fields.ordered_at.type).toBe('datetime');
     expect(fields.metadata.type).toBe('json');
@@ -101,7 +117,11 @@ describe('generateObjectDraft', () => {
     expect(draft.source).toContain("remoteName: 'fact_orders'");
     expect(draft.source).toContain("remoteSchema: 'mart'");
     expect(draft.source).toContain('REVIEW:');
-    expect(draft.source).toContain("order_id: { type: 'text', primaryKey: true }");
+    // Same flip, source side: the rendered field line no longer carries the
+    // key, and the introspected key survives as the comment ruling D requires.
+    expect(draft.source).toContain("order_id: { type: 'text' },");
+    expect(draft.source).not.toContain('primaryKey: true');
+    expect(draft.source).toContain('// Remote primary key: order_id');
   });
 
   it('honours include/exclude/rename/primaryKey options', async () => {
@@ -113,6 +133,10 @@ describe('generateObjectDraft', () => {
     });
     const fields = draft.definition.fields as Record<string, unknown>;
     expect(Object.keys(fields)).toEqual(['order_id', 'total']);
+    // `opts.primaryKey` still HAS an effect after ruling D — it moved from the
+    // definition to the comment. An implementation that dropped the option
+    // entirely would pass every other assertion in this file.
+    expect(draft.source).toContain('// Remote primary key: order_id');
   });
 
   it('throws when the remote table is missing', async () => {

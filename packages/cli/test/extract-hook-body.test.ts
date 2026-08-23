@@ -113,13 +113,40 @@ describe('extractHookBody', () => {
     expect(() => extractHookBody(fn, 'hook bad')).toThrow(/eval/);
   });
 
-  it('honours explicit @capabilities override', () => {
-    const fn = (_ctx: any) => {
-      // @capabilities api.read api.write log
-      return 1;
+  // ── the `@capabilities` directive, RETIRED (#10917) ─────────────────────
+  //
+  // Ruled under ADR-0049 enforce-or-remove: the comment-borne override was read
+  // off `String(fn)`, and every ordinary authoring path (`.ts`, `.js`, `.mjs`,
+  // an imported handler) runs through esbuild, which strips `//` comments before
+  // the handler is ever a runtime function. It therefore did nothing, silently,
+  // for every author — while THIS file's raw JS literals kept their comments and
+  // made it read as working. Two tests pinning that override were deleted with
+  // the branch; this one replaces them.
+  //
+  // ⚠️ NON-VACUITY, both halves asserted below, because "the directive has no
+  // effect" is exactly the claim that also passes when nothing was measured:
+  //   1. the comment SURVIVED into the extracted source — so this test really is
+  //      standing on the one shape where the override used to fire. If a future
+  //      transform starts stripping comments here, this fails loudly instead of
+  //      passing for the wrong reason.
+  //   2. inference still ran on the same body and produced `api.read` — so an
+  //      empty/narrow capability list is a decision about the directive, not a
+  //      body that never reached the extractor.
+  it('ignores the retired `@capabilities` directive even when the comment survives into String(fn) (#10917)', () => {
+    const fn = (ctx: any) => {
+      // @capabilities api.write crypto.uuid log
+      return ctx.api.object('x').find({});
     };
-    const ext = extractHookBody(fn, 'hook e');
-    expect(ext.capabilities.sort()).toEqual(['api.read', 'api.write', 'log']);
+    const ext = extractHookBody(fn, 'hook retired-directive');
+
+    // (1) the directive is genuinely present in what the extractor read.
+    expect(ext.source).toContain('@capabilities');
+
+    // (2) inference ran and won on its own; the directive contributed nothing.
+    expect(ext.capabilities).toEqual(['api.read']);
+    expect(ext.capabilities).not.toContain('api.write');
+    expect(ext.capabilities).not.toContain('crypto.uuid');
+    expect(ext.capabilities).not.toContain('log');
   });
 
   // ── `crypto.hash` inference retired (#4391) ──────────────────────────────
@@ -143,15 +170,11 @@ describe('extractHookBody', () => {
     expect(ext.source).toContain('ctx.crypto.hash');
   });
 
-  it('ignores crypto.hash in an explicit @capabilities override (#4391)', () => {
-    const fn = (_ctx: any) => {
-      // @capabilities api.read crypto.hash log
-      return 1;
-    };
-    const ext = extractHookBody(fn, 'hook f');
-    expect(ext.capabilities.sort()).toEqual(['api.read', 'log']);
-    expect(ext.capabilities).not.toContain('crypto.hash');
-  });
+  // The #4391 sibling that pinned `crypto.hash` being filtered OUT of an
+  // explicit `@capabilities` override went with the directive (#10917): with no
+  // override branch there is no token list to filter, so the guarantee is now
+  // structural rather than a case. The inference half of #4391 is still pinned
+  // by the test above, which is the route `crypto.hash` could still arrive on.
 
   it('still infers crypto.uuid — the sibling that IS implemented (#4391)', () => {
     const fn = (ctx: any) => {

@@ -102,3 +102,63 @@ describe('HttpDispatcher — ADR-0006 kernelResolver seam', () => {
         expect(context.environmentId).toBeUndefined();
     });
 });
+
+/**
+ * The optional environment-only member (`resolveEnvironment`) exists for
+ * consumers that want the ID and nothing else — `@objectstack/rest`'s
+ * `resolveRequestEnvironmentId` wrapper, which used to buy a kernel through
+ * `resolveKernel` and discard it, paying a whole waiter window for an id.
+ *
+ * The dispatcher is NOT such a consumer: `resolveRequestScope` serves the
+ * request FROM the resolved kernel, so it must keep asking the acquisition
+ * method. Pinned here because "prefer the cheaper method everywhere" is the
+ * obvious-looking follow-up edit, and here it would leave `context.kernel` on
+ * `defaultKernel` — every multi-tenant request silently served from the host
+ * kernel, which is the class of defect ADR-0006 Phase 5 exists to prevent.
+ */
+describe('HttpDispatcher — resolveEnvironment is not the dispatcher\'s question', () => {
+    it('still acquires through resolveKernel when the host implements both', async () => {
+        const defaultKernel = makeKernel('default');
+        const envKernel = makeKernel('env');
+
+        const resolveEnvironment = vi.fn((ctx: HttpProtocolContext) => {
+            ctx.environmentId = 'env-from-resolver';
+        });
+        const resolveKernel = vi.fn(async (ctx: HttpProtocolContext) => {
+            ctx.environmentId = 'env-from-resolver';
+            return envKernel;
+        });
+        // Typed as the contract, so this also pins that a resolver carrying the
+        // new member satisfies `KernelResolver`.
+        const resolver: KernelResolver = { resolveKernel, resolveEnvironment };
+        const dispatcher = new HttpDispatcher(defaultKernel, undefined, {
+            kernelResolver: resolver,
+            enforceProjectMembership: false,
+        });
+
+        const context: any = { request: { headers: { host: 'tenant.example.com' } } };
+        await dispatcher.dispatch('GET', '/data/widget', undefined, {}, context);
+
+        expect(resolveKernel).toHaveBeenCalledTimes(1);
+        expect(resolveEnvironment).not.toHaveBeenCalled();
+        // The request is served from the kernel the resolver handed back — the
+        // whole reason the dispatcher may not take the cheap door.
+        expect(context.kernel).toBe(envKernel);
+        expect(context.environmentId).toBe('env-from-resolver');
+    });
+
+    it('is unaffected by a resolver that omits the optional member', async () => {
+        const defaultKernel = makeKernel('default');
+        const envKernel = makeKernel('env');
+        const resolver: KernelResolver = { resolveKernel: vi.fn(async () => envKernel) };
+        const dispatcher = new HttpDispatcher(defaultKernel, undefined, {
+            kernelResolver: resolver,
+            enforceProjectMembership: false,
+        });
+
+        const context: any = { request: { headers: {} } };
+        await dispatcher.dispatch('GET', '/data/widget', undefined, {}, context);
+
+        expect(context.kernel).toBe(envKernel);
+    });
+});

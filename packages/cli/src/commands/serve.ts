@@ -399,6 +399,65 @@ export default class Serve extends Command {
   }
 
   /**
+   * Is this `plugins: [...]` entry a RELATIVE module specifier — `./x.js`,
+   * `../x.js`, `.`, `..` (and their backslash spellings, which Node's URL
+   * resolution normalises to the same thing)?
+   *
+   * Deliberately NARROWER than `packageNameFromSpecifier(s) === undefined`,
+   * which also answers "not a package" for every BASE-INDEPENDENT spelling —
+   * an absolute POSIX path, a `file://` URL, a Windows drive path, `node:`,
+   * `data:`. Those resolve to the same module no matter who imports them, so
+   * they are none of this predicate's business; only a specifier whose meaning
+   * depends on WHICH FILE does the importing is.
+   *
+   * A bare `local-plugin.js` is NOT relative and is not matched: ESM reads it
+   * as a package name, and so does this file — it reaches the declaration
+   * branches below and gets #4719's "declare it in that app's package.json"
+   * answer, which is the correct one for a bare specifier.
+   */
+  static isRelativePluginSpecifier(pluginSpecifier: string): boolean {
+    return /^\.\.?(?:[\\/]|$)/.test(pluginSpecifier);
+  }
+
+  /**
+   * The refusal text for a relative `plugins: [...]` entry — one owner, so the
+   * string a user reads is CHOSEN and pinned rather than assembled at a call
+   * site (the same discipline `importConfigPlugin`'s failure wrapper follows).
+   *
+   * It names both spellings that DO resolve from the served app, because a
+   * refusal that only says "no" leaves the author exactly as stuck as the
+   * silence it replaced. `new URL(spec, import.meta.url).href` is the second
+   * one written the way an author actually wants it: the CONFIG computes the
+   * absolute URL from its own location, so a plugin file sitting next to
+   * `objectstack.config.ts` loads without publishing it as a package — using
+   * only resolution that already works today.
+   */
+  static relativePluginSpecifierRefusal(pluginSpecifier: string): string {
+    // Quoted the way a config author writes it — single quotes unless the
+    // specifier itself would break them, in which case JSON's escaping is
+    // correct JS too. A backslash spelling (`.\\x.js`) takes that branch, so
+    // the suggested line stays copy-pasteable rather than silently dropping
+    // the escape.
+    const q = /^[^'\\\r\n]*$/.test(pluginSpecifier)
+      ? `'${pluginSpecifier}'`
+      : JSON.stringify(pluginSpecifier);
+    return [
+      `Refused the plugin entry ${q} in \`plugins: [...]\`: a RELATIVE path there is`,
+      `resolved against the CLI's own installation directory, never against your app — so`,
+      `it can never load a file from your project. This spelling has never worked; it used`,
+      `to fail with a "Cannot find module" naming a path inside the CLI's install directory.`,
+      '',
+      'Use one of the two spellings that resolve from your app:',
+      '',
+      "  1. a package name your app DECLARES in its own package.json:",
+      "         plugins: ['@mycompany/crm']        (then: pnpm add @mycompany/crm)",
+      '',
+      '  2. an absolute path, or a file:// URL the config computes for itself:',
+      `         plugins: [new URL(${q}, import.meta.url).href]`,
+    ].join('\n');
+  }
+
+  /**
    * Load one `plugins: [...]` entry of the served app's own config that is
    * written as a STRING (#10908).
    *
@@ -456,12 +515,40 @@ export default class Serve extends Command {
    * declared one resolves FROM. The #4719 declaration gate is untouched, and no
    * undeclared package gains a way in that it did not already have.
    *
+   * ── The relative branch is REFUSED, not resolved (#10944) ──────────────────
+   *
+   * A relative entry is the one spelling that can never mean what its author
+   * meant. It is resolved against THIS file's directory — the installed CLI's
+   * `@objectstack/cli/dist/commands/` — so the served app's root never enters
+   * the resolution at all. Measured from a fixture app that really does carry
+   * `local-plugin.js` next to its config: `'./local-plugin.js'` resolves to
+   * `<cli>/src/commands/local-plugin.js` and the app's own file is never seen,
+   * while `'..'` LOADS this package's own command barrel. The boot loop then
+   * catches the failure, prints one red line naming a path inside the CLI, and
+   * serves the app WITHOUT the plugin — so the deployment looks healthy and is
+   * quietly missing the extension it declared.
+   *
+   * Ruled at triage on #10944: refuse it, naming the two spellings that work.
+   * That expands no accepted set — the spelling has never loaded an app's file
+   * — and turns a diagnostic about the CLI's internals into an answer the
+   * author can act on. Resolving relative entries against the SERVED APP's root
+   * instead is a capability addition with no measured pull (no doc, example or
+   * test in this repo uses the spelling); it stays a decision for a maintainer,
+   * and this refusal is where that request would come from.
+   *
    * @param pluginSpecifier The string as the app wrote it in `plugins: [...]`.
    * @param hostRoot Root of the served app; defaults to the process CWD, the
    * same value `serve`'s boot path computes.
    */
   static async importConfigPlugin(pluginSpecifier: string, hostRoot?: string): Promise<any> {
     const root = hostRoot ?? process.cwd();
+    // Refused BEFORE the try, and deliberately not wrapped in the
+    // `Failed to import plugin '<spec>': …` text below: nothing was imported,
+    // and calling a refusal an import failure sends the author looking for a
+    // missing file. The refusal names the specifier itself.
+    if (Serve.isRelativePluginSpecifier(pluginSpecifier)) {
+      throw new Error(Serve.relativePluginSpecifierRefusal(pluginSpecifier));
+    }
     try {
       // `await` inside the `try` rather than a bare `return`: a returned promise
       // would settle OUTSIDE it and skip the diagnostic wrapper below.

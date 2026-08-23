@@ -273,6 +273,19 @@ describe('#10340 the /meta doors decide org scope on the FOLDED type, not the ra
             });
             expect(requestFrom(b.listDrafts).type).toBe('translations');
         });
+
+        it('threads the CALLER org into GET /meta/_drafts — read scope symmetric with the save route (#11087)', async () => {
+            // A draft saved by a session carrying an active org lands in that
+            // org's overlay scope (`saveMetaItem`'s `organizationId:
+            // ctx?.tenantId`). Reading with NO org sees only env-wide rows
+            // (`getOverlayRepo(null)` → `organization_id IS NULL`), so every
+            // org-scoped draft was invisible to the pending-changes surfaces —
+            // the write-org/read-null split behind cloud#1593. The repository's
+            // own `$or` contract surfaces BOTH scopes once the org is threaded.
+            const b = boot(AUTHORIZED);
+            await b.drive('GET', `${META}/_drafts`, {});
+            expect(requestFrom(b.listDrafts).organizationId).toBe(ORG);
+        });
     });
 
     describe('what the fold deliberately does NOT touch', () => {

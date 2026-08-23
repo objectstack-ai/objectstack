@@ -2096,6 +2096,77 @@ function metadataIssueHeadline(issues: MetadataIssueEntry[]): string {
 }
 
 /**
+ * [#10888] The `422 INVALID_METADATA` findings clause, rendered PER FACE.
+ *
+ * The refusal is raised in one place ({@link
+ * ObjectStackProtocolImplementation.saveMetaItem}'s overlay spec check) and
+ * quoted onto whatever response the caller's catch builds, so one clause is
+ * read on every face at once — and the faces do not agree on whether the
+ * structured `issues[]` array reaches the consumer beside it. Where it does,
+ * restating the prose here is the #10524 duplication exactly: every console
+ * rendering both channels shows each finding twice. Where it does NOT, this
+ * clause is the SOLE carrier and trimming it deletes the author's
+ * prescription from the wire outright.
+ *
+ * ## The polarity is the load-bearing decision, not the wording
+ *
+ * Silence renders the FULL prose — byte-identical to what every face carried
+ * before this card. Only a face that positively declares it carries the
+ * structured channel gets the headline. That direction is deliberate and is
+ * the opposite of a convenience default:
+ *
+ *  - the destructive direction (deleting prose) requires an explicit,
+ *    reviewable declaration at a call site, so it can never happen by
+ *    omission;
+ *  - a new write door added later, or one whose author never read this
+ *    comment, keeps the complete sentence. The failure mode of forgetting is
+ *    a redundant sentence on a console, not an author who is told a body is
+ *    invalid and never told which key.
+ *
+ * ⛔ Do not invert this to "trim by default, message-only faces opt out".
+ * Measured on `origin/main` for THIS gate (see
+ * `protocol.invalid-metadata-422-face-inventory.test.ts`): four of the seven
+ * callers are message-only, and two of them live in OTHER packages
+ * (`@objectstack/runtime`'s ADR-0045 visibility flip, `plugin-security`'s
+ * permission-set projection) where no face can be stated without making the
+ * field caller-settable. Under the inverted polarity those two lose their
+ * prescription silently — and `plugin-security`'s remedy sentence
+ * ("make the record body spec-valid (the error names the offending key)")
+ * is written on the assumption that this clause names it.
+ *
+ * ⚠️ Unlike the 409's {@link destructiveChangeRemedy}, whose faces differ on
+ * WHAT REMEDY EXISTS, the faces here differ only on WHETHER A SECOND CHANNEL
+ * CARRIES THE SAME FACTS. Nothing is withheld from anyone: `err.issues` is
+ * attached identically on every face, and the headline still names how many
+ * findings there are and where they are.
+ */
+function specValidationFindings(
+    face: MetadataWriteFace | undefined,
+    issues: MetadataIssueEntry[],
+): string {
+    switch (face) {
+        case 'meta-envelope':
+            // The door answers with an ADR-0112 error envelope that carries
+            // `issues[]` beside the message (`@objectstack/rest`'s
+            // `sendError` threads a top-level `issues`; `@objectstack/runtime`'s
+            // dispatcher threads `details.issues`). The prose lives there,
+            // once. Same headline grammar the seed refusal and the author-time
+            // gate compose — count plus `path [zod code]` locators.
+            return metadataIssueHeadline(issues);
+        default:
+            // Byte-identical to the pre-#10888 clause: the first three findings
+            // as `<path>: <message>`, then a `(+N more)` tail. Read by
+            // `duplicatePackage`'s `failed[].error`, `migrateStoredMetadata`'s
+            // `rows[].reason`, and the two out-of-package log faces — none of
+            // which carry `issues[]`.
+            return issues.slice(0, 3)
+                .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
+                .join('; ')
+                + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '');
+    }
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -3200,6 +3271,87 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         }
     }
     return issues;
+}
+
+/**
+ * [#11015] The remedy clause the Phase 3a-destructive refusal ends with — one
+ * sentence per FACE, because the mechanism that lifts the refusal is not the
+ * same on every door that raises it.
+ *
+ * The refusal is raised in ONE place ({@link ObjectStackProtocolImplementation.saveMetaItem}'s
+ * Phase 3a-destructive gate) and is quoted onto whatever response the caller's
+ * catch builds, so the clause used to read `re-submit with ?force=true to
+ * proceed.` on every face. That is correct prose for exactly one of them —
+ * `PUT /api/v1/meta/:type/:name`, whose route reads `?force` and threads it
+ * into the request — and a caller on any OTHER face who does what the sentence
+ * says gets the identical refusal back.
+ *
+ * MEASURED on the face this card was filed on: `POST /packages/:id/duplicate`
+ * accepts `targetPackageId`, `targetName`, `targetNamespace`, `organizationId`
+ * and `actor` — no `force`, in the query string or the body — and
+ * {@link ObjectStackProtocolImplementation.duplicatePackage}'s own request type
+ * has no `force` field either, so its internal `saveMetaItem` call cannot carry
+ * one. There is nothing on that door for the caller to set.
+ *
+ * ⛔ What is repaired is the CLAUSE, not the door. Giving the duplicate route a
+ * `force` would widen a public surface and is a contract decision, deliberately
+ * NOT taken here. Nor is the clause deleted on that face: #10886 measured that
+ * `duplicatePackage`'s `failed[].error` is the SOLE carrier of this
+ * prescription, so deleting the remedy there deletes it from the wire outright.
+ * Each face therefore states the remedy it actually has.
+ *
+ * ⚠️ An absent `face` renders the `?force=true` wording, byte-identical to what
+ * every face carried before. That default is right on the single-segment REST
+ * `PUT` — but `protocol.destructive-409-face-inventory.test.ts` inventories two
+ * further doors that reach this gate and never thread `force` either
+ * (`@objectstack/rest`'s compound-name `PUT /meta/:type/:a/:b`, and
+ * `@objectstack/runtime`'s dispatcher `PUT /meta`). Those are wrong for the
+ * same reason and are deliberately NOT repaired here: unlike the duplicate
+ * gesture, which has a genuine collision-free alternative to prescribe, the
+ * right repair for a `PUT` that cannot acknowledge a risk may well be to thread
+ * `force` on those routes — a contract question, filed as #11095 rather than
+ * guessed at. Adding a face value here is one of the two candidate repairs it
+ * weighs.
+ */
+/**
+ * [#11015 / #10888] Which write door a `saveMetaItem` refusal is being
+ * rendered FOR. Stated by the SERVER — either by the protocol's own internal
+ * call ({@link ObjectStackProtocolImplementation.duplicatePackage}) or by the
+ * in-process HTTP boundary that owns the response envelope — never by a remote
+ * caller: no write door spreads a request body into the `saveMetaItem` request
+ * object, so there is no path for a client to smuggle a face in (pinned in
+ * both face-inventory suites).
+ *
+ * Two refusals read this, and they read it for DIFFERENT questions:
+ *
+ *  - {@link destructiveChangeRemedy} (409) — which remedy actually exists on
+ *    this door;
+ *  - {@link specValidationFindings} (422) — whether a structured `issues[]`
+ *    channel reaches the consumer beside the message.
+ *
+ * A door therefore answers both questions by naming itself once, and neither
+ * switch may assume the other's default. `'meta-envelope'` deliberately keeps
+ * the 409's `?force=true` wording (it is the single-segment REST `PUT`'s
+ * genuine remedy) while changing the 422's clause.
+ */
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope';
+
+function destructiveChangeRemedy(
+    face: MetadataWriteFace | undefined,
+    name: string,
+): string {
+    switch (face) {
+        case 'package-duplicate':
+            // The duplicate-AGAIN workflow: the target namespace already holds
+            // the renamed item this copy is about to overwrite. Both remedies
+            // are things the caller can actually do on THIS door — choose a
+            // free target namespace, or make the collision non-destructive.
+            return `this copy cannot be forced: the duplicate door accepts no \`force\`. `
+                + `Duplicate into a target namespace that does not already hold '${name}', `
+                + `or reconcile that item with the source first.`;
+        default:
+            return 're-submit with ?force=true to proceed.';
+    }
 }
 
 /**
@@ -4451,6 +4603,28 @@ export class ObjectStackProtocolImplementation implements
      * scope is returned unchanged, so a genuinely absent draft still raises the
      * same `NO_DRAFT` refusal, from the scope the caller asked about.
      *
+     * [#11003] `packageId` — the ADR-0048 package dimension, threaded into BOTH
+     * probes exactly as {@link promoteDraftForPublish} threads it into
+     * `repo.promoteDraft`: stated (string, or `null` pinning the unbound row),
+     * each probe adds `package_id` to its `where`, so the scope probes ask the
+     * promote's question and the ADR-0005 precedence above is applied WITHIN
+     * the stated package's rows. `undefined` (caller stated no package) keeps
+     * the historical package-agnostic probes — the promote is then
+     * package-agnostic too, so the two questions still agree.
+     *
+     * Maintainer ruling 2026-08-22 (#11003, option A — recorded on the issue):
+     * a package-stating publish resolves the scope of the draft it NAMED.
+     * Without the dimension, probe 1 could match ANOTHER package's row in the
+     * caller's org, name a scope the package-exact promote then finds empty,
+     * and answer `404 [no_draft]` over a publishable draft sitting env-wide.
+     * Accepted cost, on the record: a caller stating a package no longer
+     * discovers a no-package draft of the same `(type, name)` — it 404s and the
+     * caller retries without `?package=`; that narrowing is the ruling, not a
+     * side effect. A package-first probe FALLING BACK to package-agnostic was
+     * rejected by name (it reintroduces the two-question resolution #8907
+     * removed, and a mistyped package would silently publish another package's
+     * draft instead of failing loudly).
+     *
      * ⛔ This is discovery, not a tolerant fallback: it names the one row the
      * promote will then address, and it reads DRAFT rows in `sys_metadata` (the
      * thing being promoted) rather than the history lineage
@@ -4465,31 +4639,32 @@ export class ObjectStackProtocolImplementation implements
         singularType: string,
         name: string,
         requestOrgId: string | null,
+        packageId?: string | null,
     ): Promise<string | null> {
         if (requestOrgId === null) return null;
-        // The package dimension is absent from both probes, and the rule
-        // behind that is the LIVE one: these reads must ask the same question
-        // `promoteDraft` will (see `SysMetadataRepository.whereFor`), because
-        // their whole job is to name the scope the promote then addresses. A
-        // probe NARROWER than the promote hides a draft the promote can see; a
-        // probe WIDER names a scope it cannot.
+        // These reads must ask the same question `promoteDraft` will (see
+        // `SysMetadataRepository.whereFor`), because their whole job is to name
+        // the scope the promote then addresses. A probe NARROWER than the
+        // promote hides a draft the promote can see; a probe WIDER names a
+        // scope it cannot.
         //
-        // [#10350] ⚠️ The justification this comment used to carry — "the
-        // per-item door names no package" — is STALE. Since #10063
-        // `publishMetaItem` accepts a `packageId` and forwards it, so when the
-        // caller states one the promote IS package-scoped while these probes
-        // stay package-agnostic, and the two can then ask different questions.
-        // Behaviour is deliberately UNCHANGED here: closing that asymmetry is
-        // its own fix with its own fixture and its own precedence ruling
-        // (ADR-0005 overlay order vs the ADR-0048 package key), filed as #11003
-        // rather than ridden in on a comment repair. What is corrected is the claim, so the next
-        // reader does not conclude the per-item door still cannot name one.
+        // [#11003] That rule is what threads the package dimension in: since
+        // #10063 the per-item door names a package whenever its HTTP caller
+        // does (`?package=PKG_ID`), and the promote's `whereFor` then
+        // constrains `package_id` — so a package-agnostic probe here was the
+        // WIDER shape, naming a scope off another package's row (ADR-0048 keys
+        // overlay rows by `(org, type, name, package_id)`, so two packages'
+        // same-name drafts coexist in different scopes). `undefined` spreads
+        // NOTHING — the caller stated no package, the promote matches any
+        // package, and these probes keep asking that same question. See the
+        // docblock above for the #11003 ruling and its accepted narrowing.
+        const packageDim = packageId !== undefined ? { package_id: packageId } : {};
         const inOrg = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft' },
+            where: { organization_id: requestOrgId, type: singularType, name, state: 'draft', ...packageDim },
         });
         if (inOrg) return requestOrgId;
         const inEnv = await this.engine.findOne('sys_metadata', {
-            where: { organization_id: null, type: singularType, name, state: 'draft' },
+            where: { organization_id: null, type: singularType, name, state: 'draft', ...packageDim },
         });
         return inEnv ? null : requestOrgId;
     }
@@ -12847,7 +13022,7 @@ export class ObjectStackProtocolImplementation implements
         }
     }
 
-    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
         // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
         // refusal in this method declares `code` AND `status`
         // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
@@ -13151,11 +13326,56 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
-        // Phase 3a-destructive: for object/field writes, diff against the
+        // Phase 3a-destructive: for `object` writes, diff against the
         // current schema and 409 if the change would drop data — unless the
         // caller has acknowledged the risk with `force: true`. The admin UI
         // surfaces the structured `issues` payload in a confirmation dialog.
-        if (!request.force && (singularType === 'object' || singularType === 'field')) {
+        //
+        // [#11014] `object` ALONE. This condition used to read
+        // `(singularType === 'object' || singularType === 'field')`, and the
+        // `field` limb could not produce a finding — two independent reasons,
+        // BOTH RE-MEASURED through the real `saveMetaItem` before the trim:
+        //
+        //  1. A `field` body has no `fields` map to diff.
+        //     {@link detectDestructiveObjectChanges} reads `prev.fields` /
+        //     `next.fields`; a `field` item's body IS one field definition
+        //     (`FieldSchema` — a `strictObject` that declares no `fields`
+        //     key), so both sides fold to `{}` and every loop in the detector
+        //     iterates zero times. Measured: a `text` → `number` change on a
+        //     stored `field` row — the exact edit that raises
+        //     `field_type_change` INSIDE an object body — saved with no 409,
+        //     while the same-shaped change on an `object` refused in the same
+        //     harness.
+        //  2. `field` is code-only (`allowRuntimeCreate: false` AND
+        //     `allowOrgOverride: false` in the `packages/spec` kernel
+        //     registry), so the #5086 refusal ABOVE this gate answers first —
+        //     `NOT_CREATABLE` for a runtime-only parent, `NOT_OVERRIDABLE` for
+        //     an artifact-backed one (#7743's `isNestedArtifactField` path) —
+        //     before persistence and before this diff. Measured on both.
+        //
+        // ⚠️ Neither reason is absolute, and the trim is right BECAUSE of
+        // where they stop, not in spite of it. Reason 2 stops at the
+        // documented operator hatch: `OS_METADATA_WRITABLE=field` does carry a
+        // `field` write past that refusal and into this gate — and reason 1
+        // then holds it inert on its own. Reason 1 stops at SCHEMA-VALID
+        // bodies: the detector is type-agnostic, so a stored `field` row
+        // carrying a `fields` map did fire this gate. But such a body is one
+        // `FieldSchema` rejects (`unrecognized_keys: ['fields']`) — corruption,
+        // not authoring — and the finding it produced was a data-loss refusal
+        // naming columns that DO NOT EXIST: a `field` write mints a standalone
+        // `sys_metadata` row nothing composes into its parent object (#7893),
+        // so no driver ever materialised those names. That double fault was
+        // the limb's only reachable behaviour, and it was a false alarm.
+        //
+        // ⛔ Do not "restore" the limb as missing coverage — that reading is
+        // precisely what this card was filed to prevent (#10886's face
+        // inventory had to chase a `field` face population that does not
+        // exist). Giving `field` a real destructive diff only becomes
+        // meaningful if `field` ever becomes runtime-writable, and returns
+        // then as a Feature with that change.
+        // `protocol.destructive-gate-reachable-types.test.ts` pins the
+        // reachable type set and carries the measurements above.
+        if (!request.force && singularType === 'object') {
             try {
                 const existing = await this.getMetaItem({
                     type: request.type,
@@ -13198,16 +13418,22 @@ export class ObjectStackProtocolImplementation implements
                         // `protocol.destructive-409-face-inventory.test.ts`
                         // carries the whole inventory and pins this face.
                         //
-                        // ⛔ Whatever else a future trim does, the `?force=true`
-                        // remedy below must survive it: this is a
+                        // ⛔ Whatever else a future trim does, the remedy
+                        // clause below must survive it: this is a
                         // risk-acknowledgement refusal, not a validation one,
                         // and no structured channel on any face carries the
                         // remedy.
+                        //
+                        // [#11015] Which remedy that IS depends on the face —
+                        // `?force=true` names a query parameter only the
+                        // single-segment REST `PUT` reads, and prescribing it
+                        // to a caller who has no way to set it sends them in a
+                        // circle. See {@link destructiveChangeRemedy}.
                         const summary = issues.slice(0, 3).map((i) => i.message).join('; ');
                         const err = new Error(
                             `[destructive_change] ${request.type}/${request.name} would drop or transform existing data: ${summary}`
                             + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
-                            + ` — re-submit with ?force=true to proceed.`
+                            + ` — ${destructiveChangeRemedy(request.writeFace, request.name)}`
                         );
                         (err as any).code = 'DESTRUCTIVE_CHANGE';
                         (err as any).status = 409;
@@ -13377,25 +13603,24 @@ export class ObjectStackProtocolImplementation implements
                 const parsed = schema.safeParse(request.item);
                 if (!parsed.success) {
                     const issues = zodIssuesToMetadataIssues(parsed.error.issues);
-                    // [#10524] Deliberately NOT trimmed to the headline the
-                    // author-time gate and `seedRequestValidationError` now
-                    // compose, although this is the same duplication shape on
-                    // the 422 envelope face (message prose + `details.issues`).
-                    // Measured during that card: this message is quoted on
-                    // faces where it is the SOLE carrier — `duplicatePackage`'s
-                    // `failed[].error` threads no `issues`, and three #8333
-                    // GUARD pins hold the author's prescription ("Unrecognized
-                    // key(s) …", the `defineView(` spelling) to it. Trimming
-                    // here without first declaring a structured channel on
-                    // those faces deletes the prescription from the wire —
-                    // the declare-then-trim order, violated. Filed as its own
-                    // card; see the #10524 PR for the measurement.
-                    const summary = issues.slice(0, 3)
-                        .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
-                        .join('; ');
+                    // [#10524 → #10888] The findings clause is rendered PER
+                    // FACE — see {@link specValidationFindings}. #10524's
+                    // headline is applied on the faces that carry the same
+                    // findings structurally beside the message (the `/meta`
+                    // HTTP write doors, which declare `'meta-envelope'`), and
+                    // the full prose is kept everywhere else, because on those
+                    // faces this sentence is the SOLE carrier of the author's
+                    // prescription — `duplicatePackage`'s `failed[].error`
+                    // above all, whose three #8333 GUARD pins hold
+                    // "Unrecognized key(s) …" and the `defineView(` spelling to
+                    // it. A blanket trim here was tried during #10524 and
+                    // reverted for exactly that reason; the face split is what
+                    // lets the duplication go without the prescription going
+                    // with it. `err.issues` below is unconditional — the split
+                    // decides only what the SENTENCE repeats.
                     const err = new Error(
-                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: ${summary}`
-                        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : '')
+                        `[invalid_metadata] ${request.type}/${request.name} failed spec validation: `
+                        + specValidationFindings(request.writeFace, issues)
                     );
                     (err as any).code = 'INVALID_METADATA';
                     (err as any).status = 422;
@@ -14492,10 +14717,21 @@ export class ObjectStackProtocolImplementation implements
         // #6190 org-scoped-write refusal and the promote all judge ONE scope —
         // the one the row is actually in. Resolving it later would gate against
         // a partition the promotion never touches.
+        //
+        // [#11003] The package dimension rides along under the SAME
+        // present/absent contract `promoteDraftForPublish` spells as
+        // `...('packageId' in request ? { packageId: request.packageId ?? null }
+        // : {})`: an ABSENT key keeps the historical package-agnostic probes,
+        // a stated one (string, or `null` for the unbound row) makes both
+        // probes ask the promote's package-exact question. Passing
+        // `request.packageId` bare would collapse "absent" and
+        // "present-and-undefined" into one spelling — the coercion trap the
+        // request type's own TSDoc warns against.
         {
             const singular = PLURAL_TO_SINGULAR[request.type] ?? request.type;
             const resolvedOrgId = await this.resolveDraftOrgScopeForPublish(
                 singular, request.name, request.organizationId ?? null,
+                'packageId' in request ? (request.packageId ?? null) : undefined,
             );
             if (resolvedOrgId !== (request.organizationId ?? null)) {
                 const { organizationId: _requested, ...rest } = request;
@@ -16847,6 +17083,14 @@ export class ObjectStackProtocolImplementation implements
                     item: rewritten,
                     mode: 'publish',
                     packageId: request.targetPackageId,
+                    // [#11015] Which door the refusal below will be prescribing
+                    // a remedy FOR. Stated by the server, never by the caller —
+                    // `duplicatePackage`'s own request type has no such field,
+                    // exactly as `source` is server-stated one gate down. The
+                    // Phase 3a-destructive gate reaches this call on the
+                    // duplicate-AGAIN workflow, and its `?force=true` default
+                    // would name a parameter this door does not accept.
+                    writeFace: 'package-duplicate',
                     ...(copyOrgId ? { organizationId: copyOrgId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });

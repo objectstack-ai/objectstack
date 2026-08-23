@@ -11,7 +11,17 @@
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
+ *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## This tool answers about the tree it RUNS IN, and says so on every run
+ *
+ * It lives in one repo and derives from that repo's workflows and check
+ * scripts. Handed another repo's paths it used to answer anyway — confidently,
+ * well-formed, exit 0, about the wrong tree. Every derivation now opens with a
+ * banner naming the repo and commit it came from, and `--repo` turns a caller's
+ * expectation into a checked assertion that refuses on mismatch. See the
+ * cross-repo guard section for what can be detected honestly and what cannot.
  *
  * ## Two input modes, because there are two questions (#9320)
  *
@@ -3141,6 +3151,258 @@ function derivationProvenance({ paths, base, mergeBase, counts }) {
 }
 
 // ---------------------------------------------------------------------------
+// WHOSE repo is this answer about? — the cross-repo guard
+// ---------------------------------------------------------------------------
+
+/**
+ * This tool exists in ONE repo and answers about the tree it is run in.
+ *
+ * ## The measured failure
+ *
+ * The gate inventory is derived from the workflows and check scripts of
+ * whatever checkout the process happens to sit in. That is the whole design and
+ * it is right — but the answer never said so. A seat dispatching a card that
+ * lands in a SISTER repo (which has no copy of this script at all: no
+ * `scripts/pm` directory, nothing to run) ran it from this checkout with that
+ * card's paths and got back a confident, well-formed, entirely wrong answer:
+ * 121 families across 26 workflow files, three matched, a residue breakdown —
+ * every number real, and every number about the WRONG repo. Exit 0. The only
+ * tell was incidental: a family name and a package name the other repo does not
+ * have, noticed by accident rather than by the tooling.
+ *
+ * The correct list for that card had to be hand-derived, and it differed
+ * substantially — the load-bearing family in it was one this checkout's run
+ * never mentions. So the failure is not "slightly off": it is the exact shape
+ * the derive-don't-recall contract exists to remove, one level up. A dev is
+ * handed families that do not exist in its repo and is missing the ones that
+ * do; it runs what it was told, reports those green, and the real gates are
+ * first exercised in CI.
+ *
+ * ## What can be detected honestly, and what cannot
+ *
+ * The paths a caller passes are REPO-RELATIVE, and the explicit-path mode is
+ * documented as a hypothesis about files that may not exist yet. So a path's
+ * home repo is not recoverable from its shape, and existence in this checkout
+ * is a WEAK signal in both directions — the measured failure used `package.json`
+ * and the lockfile, which every repo in the family has. Guessing a repo from a
+ * path would fabricate the same kind of confident wrong answer one layer down.
+ *
+ * What is honestly available is two things, and this guard is exactly those:
+ *
+ *   BANNER      Every derivation says, as its FIRST line, which repo's tree
+ *               produced it, at which commit. Unconditional, so the seat cannot
+ *               be reading an answer without reading whose answer it is. It
+ *               costs nothing and it closes "no tell" — which was the defect.
+ *   ASSERTION   `--repo <owner>/<name>` states which repo the answer must be
+ *               about. It is checked against this checkout's own `origin`
+ *               remote and a mismatch REFUSES, naming both repos. A caller that
+ *               knows the answer it needs can now demand the tool prove it.
+ *
+ * Refusal, not a warning, for the assertion half: a warning is the failure mode
+ * already measured one level up — output that reads as an answer while being
+ * about the wrong tree. A caller that spelled `--repo` has stated a
+ * requirement, and a requirement the tool cannot meet is an error. The banner
+ * half is unconditional precisely because it cannot refuse: with no assertion
+ * there is nothing to contradict, and refusing every explicit-path run would
+ * break the mode the PM uses on every dispatch.
+ *
+ * ## Why the banner goes to STDERR
+ *
+ * Not to hide it — it is printed first and it is a full sentence. Stdout is
+ * contractually the ANSWER and nothing else, because both modes' stdout gets
+ * pasted verbatim (the tier verdict into a claim comment, the gate list into a
+ * dispatch prompt). A provenance line on stdout would travel into those
+ * artifacts as though it were part of the answer, and the derived-change-set
+ * provenance next door already made this call for the same reason.
+ *
+ * ## What this guard deliberately does NOT do
+ *
+ * It does not point the derivation at another checkout. `--repo` asserts, it
+ * never retargets — and it refuses a value shaped like a filesystem path so
+ * that the misreading fails loudly instead of being taken as a repo name.
+ * Deriving another repo's gates would be new cross-repo capability, and no
+ * second-repo consumer for it exists yet: the sister repos hold no copy of this
+ * script and their seats hand-derive. When one does exist it gets its own flag,
+ * whose value is a checkout, and the two meanings stay apart.
+ */
+
+/** The assertion flag. Leading dashes keep it out of this file's own hint set. */
+const REPO_FLAG = '--repo';
+
+/**
+ * `<owner>/<name>` out of a git remote URL, or null when it is not recoverable.
+ *
+ * Both spellings git writes end in the same two segments — the URL form and the
+ * SCP-like form differ only in the separator before the owner, so splitting on
+ * both separators and taking the last two is one rule for both. A value that
+ * does not end in two plain name segments returns null rather than a guess: an
+ * unrecognised remote must read as "unknown", never as a repo identity, because
+ * the assertion below treats unknown as unverifiable and refuses.
+ */
+export function parseRepoSlug(remoteUrl) {
+  const raw = String(remoteUrl ?? '').trim();
+  if (!raw) return null;
+  const segments = raw
+    .replace(/\?.*$/, '')
+    .replace(/[/\\]+$/, '')
+    .replace(/\.git$/i, '')
+    .split(/[:/\\]+/)
+    .filter(Boolean);
+  if (segments.length < 2) return null;
+  const [owner, name] = segments.slice(-2);
+  if (!isPlainRepoSegment(owner) || !isPlainRepoSegment(name)) return null;
+  return `${owner}/${name}`;
+}
+
+/** A repo/owner name segment: word characters, dots and dashes — never all dots. */
+function isPlainRepoSegment(segment) {
+  return /^[\w.-]+$/.test(segment) && /[^.]/.test(segment);
+}
+
+/**
+ * Who this checkout is, measured — never assumed and never hardcoded.
+ *
+ * Every field is independently optional. A tree with no readable `origin`
+ * remote is a real state (a fresh clone-less checkout, a mirror with a
+ * differently-named remote), and it must degrade to "unverified" rather than
+ * throw: the banner still has a directory and a commit to name, and only the
+ * assertion — which needs an identity to compare against — refuses.
+ */
+export function repoIdentity({ cwd = ROOT } = {}) {
+  const read = (args) => {
+    try {
+      const r = runGit(args, cwd);
+      return r.status === 0 ? r.stdout.trim() : null;
+    } catch {
+      return null; // git itself unavailable — the banner degrades, it never throws
+    }
+  };
+  const root = read(['rev-parse', '--show-toplevel']);
+  const head = read(['rev-parse', '--short', 'HEAD']);
+  const remote = read(['remote', 'get-url', DEFAULT_BASE_REMOTE]);
+  return { root: root ?? cwd, head, remote, slug: remote ? parseRepoSlug(remote) : null };
+}
+
+/**
+ * Split argv into paths, flags and the repo assertion.
+ *
+ * The assertion's VALUE must not fall through into the path list. The previous
+ * parse took every non-`--` argument as a path, so a two-token flag added
+ * without touching it would have quietly derived gates for a repo NAME read as
+ * a file — a new silent wrong answer inside the fix for a silent wrong answer.
+ * Both spellings are accepted because both get typed.
+ */
+export function splitArgv(argv) {
+  const paths = [];
+  const flags = [];
+  let assertion = null;
+  let malformed = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === REPO_FLAG) {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        malformed = `${REPO_FLAG} needs a value`;
+      } else {
+        assertion = value;
+        i++;
+      }
+      continue;
+    }
+    if (arg.startsWith(`${REPO_FLAG}=`)) {
+      const value = arg.slice(REPO_FLAG.length + 1);
+      if (!value) malformed = `${REPO_FLAG} needs a value`;
+      else assertion = value;
+      continue;
+    }
+    if (arg.startsWith('-')) flags.push(arg);
+    else paths.push(arg);
+  }
+  return { paths, flags, assertion, malformed };
+}
+
+/**
+ * Check an assertion against this checkout. `{ ok }` plus the lines to print.
+ *
+ * Every refusal names BOTH repos — the one asserted and the one this tree
+ * actually is — because the whole defect was an answer that named neither.
+ */
+export function repoAssertionVerdict({ asserted, identity }) {
+  const wanted = String(asserted ?? '').trim();
+  const here = identity?.slug ?? null;
+  // Normalised for COMPARISON only; every message quotes the value as typed.
+  const normalized = /^[~.]|^\/|\\/.test(wanted) || wanted.split('/').filter(Boolean).length !== 2
+    ? null
+    : parseRepoSlug(wanted);
+
+  if (!normalized) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: ${REPO_FLAG} expects an owner and a repository name separated by a slash — got '${wanted}'.`,
+        `  This flag ASSERTS which repo the answer must be about; it does not point the derivation at another checkout.`,
+        `  Gate families are read from the tree this process runs in${here ? ` (${here})` : ''} and from no other.`,
+      ],
+    };
+  }
+
+  if (!here) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: cannot verify ${REPO_FLAG} '${wanted}' — this checkout's '${DEFAULT_BASE_REMOTE}' remote is unreadable, so its repo identity is UNKNOWN.`,
+        `  Refusing rather than assuming the assertion holds: an unverifiable assertion that passes is worth less than no assertion at all.`,
+        `  Tree: ${identity?.root ?? 'unknown'}`,
+      ],
+    };
+  }
+
+  if (here.toLowerCase() !== normalized.toLowerCase()) {
+    return {
+      ok: false,
+      lines: [
+        `dispatch-gates: REFUSING — asked for '${wanted}', but this checkout is '${here}'.`,
+        `  Gate families are derived from the workflows and check scripts of the tree this process runs in, so an answer from here is about '${here}' whatever paths you pass.`,
+        `  Repo-relative paths cannot tell the two apart: the same manifest and lockfile names exist in both, which is why a run like this used to return a confident wrong answer instead of this message.`,
+        `  Derive '${wanted}' from a checkout OF '${wanted}' — this script exists only in '${here}', so a sister repo's list is hand-derived from its own package manifest and its own workflow files.`,
+        `  Tree: ${identity.root}`,
+      ],
+    };
+  }
+
+  return { ok: true, lines: [] };
+}
+
+/**
+ * The provenance banner — the first thing every derivation prints.
+ *
+ * The unplaceable-path count is reported in ONE direction only. Paths missing
+ * from this tree are expected for a card whose surface is not written yet, and
+ * they are also what a wrong-repo run looks like, so the line says both and
+ * claims neither. There is deliberately no "all paths present" line: that would
+ * read as a clearance, and it is precisely the reading the measured failure
+ * would have passed — its two paths exist in every repo in the family.
+ */
+export function bannerLines({ identity, paths = [] }) {
+  const at = identity?.head ? ` at commit ${identity.head}` : '';
+  const who = identity?.slug
+    ? `'${identity.slug}'${at} (${identity.root})`
+    : `${identity?.root ?? 'this directory'}${at} — repo identity UNVERIFIED, its '${DEFAULT_BASE_REMOTE}' remote could not be read`;
+  const lines = [
+    `dispatch-gates: gate list derived from the tree of ${who}.`,
+    `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
+  ];
+  const missing = paths.filter((p) => !p.includes('*') && !existsSync(join(identity?.root ?? ROOT, p)));
+  if (missing.length > 0) {
+    lines.push(
+      `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
+      `  Expected for a surface not written yet — and also what a run against another repo's paths looks like. Not evidence either way.`,
+    );
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Self-test — extraction + matching over fixtures.
 //
 // The extraction and hint cases run over inline fixtures and touch no
@@ -5185,6 +5447,91 @@ function selfTest() {
     rmSync(gitTmp, { recursive: true, force: true });
   }
 
+  // ── Whose repo the answer is about — the cross-repo guard ─────────────────
+  //
+  // The defect this pins is an answer that was RIGHT about the wrong tree, so
+  // both directions have to be measured on the real CLI, not reasoned about:
+  // a matching assertion must leave the answer byte-identical (otherwise the
+  // guard taxes every correct dispatch), and a mismatching one must end the run
+  // (otherwise it is the warning that was already measured as ignorable).
+  t('a remote in URL form yields its owner and name', parseRepoSlug('https://github.com/an-owner/a-repo.git') === 'an-owner/a-repo');
+  t('and in the SCP-like form git also writes', parseRepoSlug('git@github.com:an-owner/a-repo.git') === 'an-owner/a-repo');
+  t('a suffixless URL with a trailing slash reads the same', parseRepoSlug('https://github.com/an-owner/a-repo/') === 'an-owner/a-repo');
+  t('a remote that does not end in two name segments is UNKNOWN, never a guess', parseRepoSlug('some-bare-word') === null && parseRepoSlug('') === null);
+
+  const splitWithValue = splitArgv([REPO_FLAG, 'an-owner/a-repo', 'packages/spec/src/index.ts', '--residue']);
+  t('the assertion value never falls through into the path list', splitWithValue.paths.length === 1 && splitWithValue.paths[0] === 'packages/spec/src/index.ts');
+  t('and the assertion and the other flags both survive the split', splitWithValue.assertion === 'an-owner/a-repo' && splitWithValue.flags.includes('--residue'));
+  t('the joined spelling parses to the same thing', splitArgv([`${REPO_FLAG}=an-owner/a-repo`]).assertion === 'an-owner/a-repo');
+  t('a valueless assertion is malformed, not silently dropped', !!splitArgv([REPO_FLAG]).malformed && !!splitArgv([REPO_FLAG, '--tier']).malformed);
+  t('no assertion passed stays null, so the unasserted run is untouched', splitArgv(['packages/spec/src/index.ts']).assertion === null);
+
+  const hereIdentity = { root: '/tmp/x', head: 'abc1234', remote: 'r', slug: 'an-owner/a-repo' };
+  t('an assertion this checkout satisfies passes', repoAssertionVerdict({ asserted: 'an-owner/a-repo', identity: hereIdentity }).ok);
+  t('and it passes case-insensitively, as repo slugs compare', repoAssertionVerdict({ asserted: 'An-Owner/A-Repo', identity: hereIdentity }).ok);
+  const mismatch = repoAssertionVerdict({ asserted: 'other-owner/other-repo', identity: hereIdentity });
+  t('an assertion this checkout contradicts is REFUSED', !mismatch.ok);
+  const mismatchText = mismatch.lines.join('\n');
+  t('and the refusal names BOTH repos — the defect was an answer that named neither', mismatchText.includes('other-owner/other-repo') && mismatchText.includes('an-owner/a-repo'));
+  t('the refusal says repo-relative paths cannot tell the two apart', mismatchText.includes('Repo-relative paths cannot tell the two apart'));
+  t('and it sends the reader to a checkout of the repo they asked about', mismatchText.includes('hand-derived'));
+  const unverifiable = repoAssertionVerdict({ asserted: 'an-owner/a-repo', identity: { root: '/tmp/x', head: null, remote: null, slug: null } });
+  t('an assertion that cannot be VERIFIED refuses too — an unverifiable pass is worth less than none', !unverifiable.ok && unverifiable.lines.join('\n').includes('UNKNOWN'));
+  const retargetAttempt = repoAssertionVerdict({ asserted: '../a-sister-checkout', identity: hereIdentity });
+  t('a value shaped like a checkout PATH is refused, so the retarget misreading fails loudly', !retargetAttempt.ok && retargetAttempt.lines.join('\n').includes('does not point the derivation at another checkout'));
+  t('and so is a three-segment value', !repoAssertionVerdict({ asserted: 'a/b/c', identity: hereIdentity }).ok);
+
+  const bannerHit = bannerLines({ identity: hereIdentity, paths: [] });
+  t('the banner names the repo and the commit the answer came from', bannerHit[0].includes('an-owner/a-repo') && bannerHit[0].includes('abc1234'));
+  t('and it points at the assertion flag, so the tell is actionable', bannerHit.join('\n').includes(REPO_FLAG));
+  t('an unreadable remote reads as UNVERIFIED in the banner, never as a repo name', bannerLines({ identity: { root: '/tmp/x', head: null, remote: null, slug: null }, paths: [] }).join('\n').includes('UNVERIFIED'));
+  const bannerAbsent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts', 'packages/this-repo-has-no-such-package/src/index.ts'] });
+  t('paths absent from this tree are counted and named', bannerAbsent.join('\n').includes('1 of 2 path(s) are absent'));
+  t('and the count claims nothing in either direction', bannerAbsent.join('\n').includes('Not evidence either way'));
+  const bannerPresent = bannerLines({ identity: { ...hereIdentity, root: ROOT }, paths: ['packages/spec/src/index.ts'] });
+  t('all paths present prints NO clearance line — absence and clearance must not share a spelling', !bannerPresent.join('\n').includes('absent from this tree') && bannerPresent.length === 2);
+
+  const idTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-id-'));
+  try {
+    const gi = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+    gi(['init', '-q', '-b', 'main', 'named'], idTmp);
+    const named = join(idTmp, 'named');
+    gi(['remote', 'add', DEFAULT_BASE_REMOTE, 'https://github.com/an-owner/a-repo.git'], named);
+    const namedIdentity = repoIdentity({ cwd: named });
+    t('a checkout with a readable remote identifies itself from git, never from a constant', namedIdentity.slug === 'an-owner/a-repo');
+    gi(['init', '-q', '-b', 'main', 'anonymous'], idTmp);
+    const anonymous = repoIdentity({ cwd: join(idTmp, 'anonymous') });
+    t('a checkout with no such remote degrades to unverified and still names its tree', anonymous.slug === null && !!anonymous.root);
+  } finally {
+    rmSync(idTmp, { recursive: true, force: true });
+  }
+
+  // End to end, on the real CLI. The one card path is arbitrary; what is under
+  // test is the guard around the answer, not the answer.
+  const CLI = fileURLToPath(import.meta.url);
+  const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', cwd: ROOT });
+  const plainRun = runCli(['--tier', 'packages/spec/src/index.ts']);
+  t('an unasserted explicit-path run still answers', plainRun.status === 0 && (plainRun.stdout ?? '').trim().length > 0);
+  t('and it opens with the banner, on the FIRST line of stderr', (plainRun.stderr ?? '').split('\n')[0].includes('gate list derived from the tree of'));
+  t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
+  const liveSlug = repoIdentity().slug;
+  const assertedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
+  t(
+    liveSlug
+      ? 'asserting the repo this checkout really is leaves the run green'
+      : 'with no readable remote, ANY assertion refuses rather than passing unverified',
+    liveSlug ? assertedRun.status === 0 : assertedRun.status === 2,
+  );
+  t('a satisfied assertion changes the answer not at all', !liveSlug || (assertedRun.stdout ?? '') === (plainRun.stdout ?? ''));
+  const refusedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, 'not-an-owner/not-a-repo']);
+  t('asserting a repo this checkout is not ENDS the run', refusedRun.status === 2);
+  t('and it prints no answer at all — a refusal must not also be pasteable', (refusedRun.stdout ?? '').trim() === '');
+  t('and the refusal names the repo that was asked for', (refusedRun.stderr ?? '').includes('not-an-owner/not-a-repo'));
+  const wrongShapeRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, '../a-sister-checkout']);
+  t('and pointing the flag at a checkout refuses instead of retargeting', wrongShapeRun.status === 2 && (wrongShapeRun.stdout ?? '').trim() === '');
+  const valuelessRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG]);
+  t('a valueless assertion refuses rather than deriving as though it were absent', valuelessRun.status === 2);
+
   // ── The entry guard (#9757) ───────────────────────────────────────────────
   //
   // Both directions are measured by really spawning node, because the guard's
@@ -5368,10 +5715,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * branch: a branch added inside it later cannot forget to carry it.
  */
 if (invokedDirectly) {
-  const argvPaths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const argv = splitArgv(process.argv.slice(2));
+  const argvPaths = argv.paths;
   const wantsChanged = process.argv.includes('--changed');
   if (process.argv.includes('--self-test')) {
     selfTest();
+  } else if (argv.malformed) {
+    console.error(`dispatch-gates: ${argv.malformed} — the repo this answer must be about, as an owner and a name.`);
+    process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:
     // silently preferring one would make the other's arguments vanish without a
@@ -5379,9 +5730,27 @@ if (invokedDirectly) {
     console.error('dispatch-gates: --changed derives the paths itself — do not pass paths with it.');
     process.exit(2);
   } else {
+    // Whose tree is about to answer? Printed BEFORE the answer and before the
+    // change-set provenance, so no run of this tool can be read without reading
+    // which repo it is about — the one thing the silent wrong answer never said.
+    const identity = repoIdentity();
+    const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+    for (const line of bannerLines({ identity, paths: declaredPaths })) console.error(line);
+    if (argv.assertion !== null) {
+      // An assertion the tree contradicts is the measured failure, caught. It
+      // ends the run: a caller that named the repo it needs has stated a
+      // requirement, and this checkout cannot meet it by printing anyway.
+      const verdict = repoAssertionVerdict({ asserted: argv.assertion, identity });
+      if (!verdict.ok) {
+        for (const line of verdict.lines) console.error(line);
+        process.exit(2);
+      }
+      console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
+    }
+    console.error('');
     let paths;
     if (argvPaths.length > 0) {
-      paths = argvPaths.map((p) => p.replace(/^\.\//, ''));
+      paths = declaredPaths;
     } else {
       // No paths: derive them. This is the dev-side form — "the gates my ACTUAL
       // diff implicates" — and it is the default because the caller-supplied
@@ -5392,7 +5761,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {

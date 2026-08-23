@@ -70,10 +70,18 @@ export default class ProjectsBind extends Command {
       if (flags.build) {
         printStep('Compiling objectstack.config.ts → ' + artifactAbs);
         const binPath = process.argv[1];
+        // NOTE: Do NOT set NODE_ENV='development' on this child. It activates
+        // oclif's tsx TypeScript source loader, which honours the CWD
+        // tsconfig's `paths` — and an app's `paths` redirect a CommonJS
+        // workspace package to its `.ts` source, after which Node's CJS
+        // resolver fails on that file's sibling imports. `os dev` carried the
+        // same spawn and died on exactly that; `os start`'s compile spawn
+        // never set it. `compile` reads NODE_ENV nowhere. See the NOTEs in
+        // commands/dev.ts and child-env-source-loader.pin.test.ts.
         const r = spawnSync(
           process.execPath,
           [binPath, 'compile', '--output', artifactAbs],
-          { stdio: 'inherit', env: { ...process.env, NODE_ENV: 'development' } },
+          { stdio: 'inherit', env: process.env },
         );
         if (r.status !== 0) {
           printError('Compile failed — fix errors above before binding');

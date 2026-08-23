@@ -634,6 +634,7 @@ import { defineAgent } from '@objectstack/spec/ai';
 // physical constraint explicitly via `storage.notNull`.
 export const Lead = ObjectSchema.create({
   name: 'crm_lead',
+  sharingModel: 'public_read_write',
   label: 'Lead',
   fields: {
     name: { type: 'text', required: true, storage: { notNull: true } },

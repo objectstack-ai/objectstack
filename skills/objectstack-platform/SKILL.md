@@ -392,7 +392,7 @@ export default app;          // Deploy to Cloudflare Workers, Deno, Bun, Node
 
 1. Accept a `kernel` (ObjectKernel) instance
 2. Create an `HttpDispatcher` internally
-3. Mount explicit routes for auth, GraphQL, storage, discovery
+3. Mount explicit routes for auth and discovery
 4. Delegate everything else to the dispatcher
 
 This means **new routes added to HttpDispatcher work automatically**

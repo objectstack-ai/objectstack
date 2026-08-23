@@ -377,6 +377,19 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // [#8069] Every refusal runs BEFORE the reset UPDATE — a refused
         // redelivery leaves the row exactly as it was, `dead` reason included.
         await assertRedeliverAllowed(this.toDelivery(current), options.guard);
+        // [#11009] `multi: true`, deliberately, and it is the compare-and-set
+        // half of this method's check-then-act: the status predicate re-states
+        // the terminal requirement AT THE WRITE so a row that changed under us
+        // (the dispatcher's tick claims `pending` rows into `in_flight`
+        // continuously) is NOT reset. On the by-id path (`multi: false`) this
+        // exact predicate was silently discarded — `driver.update` binds only
+        // the id — so the guard evaluated to nothing and a mid-flight claim
+        // was overwritten while redeliver reported success; the engine now
+        // REFUSES that spelling outright. The predicate path
+        // (`driver.updateMany`) compiles every `where` key, `id` equality
+        // included, so the reset lands only if the row is still terminal.
+        // A miss writes 0 rows and the read-back below reports the refusal
+        // (`DELIVERY_NOT_ELIGIBLE`) instead of a false success.
         await this.engine.update(
             this.objectName,
             {
@@ -390,7 +403,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
                 response_body: null,
                 error: null,
             },
-            { where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: false, ...scope },
+            { where: { id, status: { $in: ['success', 'failed', 'dead'] } }, multi: true, ...scope },
         );
         const after = (await this.engine.findOne(this.objectName, {
             where: { id },

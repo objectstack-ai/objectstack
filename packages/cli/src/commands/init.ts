@@ -82,10 +82,10 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  * states, keyed `<declaring package>><peer>` — pnpm's scoped `allowedVersions`
  * spelling, so each entry widens exactly one declaration and nothing else.
  *
- * Both are reported by `pnpm install` on a brand-new scaffold, and neither is a
- * real incompatibility. They are declared here because that report is the first
- * thing a newcomer sees, on the one screen where they are deciding whether this
- * project is solid, and there is nothing they did to cause it.
+ * Every one of them is reported by `pnpm install` on a brand-new scaffold, and
+ * none is a real incompatibility. They are declared here because that report is
+ * the first thing a newcomer sees, on the one screen where they are deciding
+ * whether this project is solid, and there is nothing they did to cause it.
  *
  *  - `better-auth>better-sqlite3` — better-auth 1.7.1 peers `^12.0.0` while the
  *    tree resolves 13.x (`@objectstack/driver-sql`'s optional dependency). The
@@ -105,48 +105,106 @@ export const SCAFFOLD_BUILT_DEPENDENCIES = ['better-sqlite3', 'esbuild'];
  *    HOST's better-call instance, so the single 1.4.0 copy every install
  *    already resolves is the correct tree, not a skew to repair.
  *    ⚠️ This entry retires together with the SCIM rc pin — delete both at once.
+ *    Stable `@better-auth/scim@1.7.1` peers `better-call@1.4.0`, so the skew
+ *    this line covers is genuinely gone the moment the pin moves.
  *
- * `allowedVersions` suppresses the report ONLY; it moves no resolution.
+ *  - `<four>@better-auth/utils` — `@better-auth/core`, `/oauth-provider`,
+ *    `/scim` and `/sso` each peer an EXACT `@better-auth/utils@0.4.2`, while a
+ *    scaffolded tree hands them 0.5.0. The 0.5.0 comes from `better-call@1.4.0`
+ *    (better-auth's own HTTP layer), which DEPENDS on `^0.5.0`;
+ *    `@objectstack/plugin-auth` names the four packages as direct dependencies
+ *    without naming utils, so pnpm satisfies their peer from better-call's copy
+ *    rather than from better-auth's own exact 0.4.2 dependency.
+ *
+ *    Measured compatible rather than assumed. Those four import exactly three
+ *    symbols across two subpaths — `base64`/`base64Url` (`/base64`),
+ *    `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
+ *    (`/random`). 0.5.0 exports all three with identical signatures; `/random`
+ *    is unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)`
+ *    for a helper that IS `new Uint8Array(data)` on non-strings, and `/hash`
+ *    only widens its input coercion for views not backed by a plain
+ *    ArrayBuffer. Run against the input shapes those call sites actually pass,
+ *    0.4.2 and 0.5.0 agree on every value; run end to end (better-auth with the
+ *    sso, oauth-provider and scim plugins), a tree where the four resolve 0.5.0
+ *    and one where they resolve 0.4.2 produce the same transcript — sign-up,
+ *    sign-in, session, both OAuth metadata documents, the RFC 7636 PKCE
+ *    challenge, and the SCIM and SSO endpoint outcomes.
+ *
+ *    ⛔ A resolution change is the WRONG remedy here, and was measured too:
+ *    pinning utils back to 0.4.2 clears the four lines only by dragging
+ *    `better-call@1.4.0` off its own declared `^0.5.0` — manufacturing one real
+ *    range violation to silence four benign ones.
+ *
+ *    Spelled `0.5.0` exactly, not `0.5`: 0.5.0 is the version that was
+ *    measured, and a future 0.6.0 SHOULD report again rather than inherit this
+ *    finding.
+ *
+ *    ⚠️ These four do NOT retire with the SCIM rc pin, even though one of them
+ *    names scim. Stable `@better-auth/scim@1.7.1` still peers
+ *    `@better-auth/utils@0.4.2`, so this skew outlives that pin. They retire
+ *    when the four packages accept 0.5.0 upstream, or when
+ *    `SCAFFOLD_PNPM_RANGE` reaches `>=10.31` — pnpm 10.31 changed peer
+ *    resolution so that all four land on 0.4.2 by themselves. Measured on the
+ *    rendered scaffold, one clean resolve per pnpm version:
+ *
+ *      pnpm 10.15.0 – 10.30.0   all four reported as unmet peers.
+ *      pnpm >= 10.31.0          resolved to 0.4.2; nothing to report.
+ *
+ * `allowedVersions` suppresses the report ONLY; it moves no resolution — the
+ * lockfile a scaffold resolves is byte-identical with and without this block
+ * (verified by digest on pnpm 10.15.0 and 10.30.0).
  */
 export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
   'better-auth>better-sqlite3': '13',
   '@better-auth/scim>better-call': '1.4.0',
+  '@better-auth/core>@better-auth/utils': '0.5.0',
+  '@better-auth/oauth-provider>@better-auth/utils': '0.5.0',
+  '@better-auth/scim>@better-auth/utils': '0.5.0',
+  '@better-auth/sso>@better-auth/utils': '0.5.0',
 };
 
 /**
  * Lowest pnpm that can actually install this scaffold, declared as
  * `engines.pnpm` in the generated `package.json`.
  *
- * The rendered `pnpm-workspace.yaml` is a settings-only file with no
- * `packages:` key (see `renderPnpmWorkspaceYaml` below). Early pnpm 10 refuses
- * that file outright: `pnpm install` exits 1 with "ERROR packages field
- * missing or empty" before it resolves a single dependency, so a brand-new
- * project cannot be installed at all. pnpm 10.15.0 and everything above accept
- * the keyless file.
+ * The rendered `pnpm-workspace.yaml` declares an explicit empty `packages: []`
+ * (see `renderPnpmWorkspaceYaml` below). It did not always, and that history is
+ * why this floor is reachable at all: while the key was omitted, pnpm 10.0–10.4
+ * refused the file outright — `pnpm install` exited 1 with "ERROR packages
+ * field missing or empty" before resolving a single dependency — and those
+ * versions parse `pnpm-workspace.yaml` BEFORE they read `engines`, so no floor
+ * value could ever be consulted on that band.
  *
- * Declaring the floor does not repair those pnpm versions — it makes them
+ * Declaring the floor does not repair the versions below it — it makes them
  * report a cause the user can act on instead of a workspace error about a file
  * they did not write. Measured on the rendered shape, one clean install per
  * pnpm version, each with its own store:
  *
- *   pnpm 10.0.0 – 10.4.0    pnpm parses `pnpm-workspace.yaml` BEFORE it reads
- *                           `engines`, so these still print the raw "packages
- *                           field missing or empty". The floor cannot reach
- *                           this sliver; only a decision about the `packages:`
- *                           key itself closes it.
- *   pnpm 10.5.0 – 10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
- *                           pnpm version is incompatible with <project>.
- *                           Expected version: >=10.15".
+ *   pnpm 9.15.9, 10.0.0,    refused as ERR_PNPM_UNSUPPORTED_ENGINE — "Your
+ *   10.4.0, 10.5.0–10.14.0  pnpm version is incompatible with PROJECT.
+ *                           Expected version: >=10.15". With the key omitted,
+ *                           9.x and 10.0–10.4 printed the raw workspace error
+ *                           here instead, naming a file the user never wrote.
  *   pnpm >= 10.15.0         installs; unchanged by this declaration.
+ *
+ * ⚠️ So this floor, not the workspace file, is now what stops pnpm 10.0–10.4:
+ * with the floor lowered they install (measured, exit 0). Admitting them is a
+ * support decision rather than an edit — measured on 10.0.0 and 10.4.0, they
+ * read neither the build allowlist nor the peer rules out of
+ * `pnpm-workspace.yaml` ("The following dependencies have build scripts that
+ * were ignored: better-sqlite3, esbuild"), so a scaffold installed there is
+ * quietly missing its native builds. Do not move this floor as a side effect;
+ * whether to admit that band at all is #11048.
  *
  * `engines.pnpm` rather than a `packageManager` stamp, on purpose. npm, yarn
  * and bun ignore `engines.pnpm` entirely, so the scaffold keeps working for all
  * four package managers `objectstack init` can hand off to (see
  * `detectPackageManager`). `packageManager: "pnpm@x.y.z"` would instead declare
  * the project pnpm-only — corepack-driven yarn refuses to run in such a project
- * — and pin one exact version that goes stale on every pnpm release. It also
- * buys nothing on 10.0–10.4, which reach the workspace error before they read
- * that field either.
+ * — and pin one exact version that goes stale on every pnpm release. Those two
+ * reasons carry the choice on their own: the third one recorded when the stamp
+ * was rejected ("it buys nothing on 10.0–10.4") was measured against the
+ * keyless file, and the explicit `packages:` key retires it.
  */
 export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 
@@ -178,9 +236,15 @@ export function renderScaffoldPackageJson(
 
 /**
  * Render the `pnpm-workspace.yaml` that allowlists native build scripts and
- * declares the two known-benign peer skews.
- * Kept minimal (no `packages:` key) so it acts purely as a settings file for
- * the single-package scaffold rather than declaring a workspace.
+ * declares the known-benign peer skews.
+ * Declares an explicit empty `packages: []`: a workspace root with no member
+ * packages, which is what a single-package scaffold is — the file stays purely
+ * a settings file. Spelling the key out is what lets pnpm 10.0–10.4 (and 9.x)
+ * parse the file at all; they read it before `engines` and refuse a file
+ * without the key outright. ⛔ Never `packages: ['.']`: that declares the
+ * project root a workspace MEMBER, i.e. a monorepo root, which this is not —
+ * and it is the shape an AI reader would take as licence to add member packages
+ * to a scaffolded app.
  *
  * The allowlist is emitted TWICE, under two keys that no single pnpm version
  * range reads both of. Measured against a scaffold of this exact shape, one
@@ -210,6 +274,15 @@ export function renderPnpmWorkspaceYaml(
   const peerEntries = Object.entries(allowedPeerVersions);
 
   return [
+    '# An explicit EMPTY workspace: this project has no member packages, so',
+    '# this file is settings-only. The key is not decoration — pnpm 9.x and',
+    '# 10.0–10.4 parse this file BEFORE they read `engines`, and refuse a file',
+    '# without a `packages:` key outright ("ERROR packages field missing or',
+    '# empty") before resolving a single dependency.',
+    '# Not `packages: [\'.\']`: that would declare this project a workspace',
+    '# MEMBER — a monorepo root, which it is not.',
+    'packages: []',
+    '',
     '# pnpm does not run dependency build scripts unless they are approved',
     '# here. Without this file a fresh `pnpm install` exits 1 on pnpm 11 with',
     '# ERR_PNPM_IGNORED_BUILDS — pnpm 10 only warned, pnpm 11 made it a hard',
@@ -234,9 +307,9 @@ export function renderPnpmWorkspaceYaml(
     // declaration that is not there.
     ...(peerEntries.length === 0 ? [] : [
       '',
-      '# Two third-party peer ranges resolve outside what their declaring package',
-      '# states, and pnpm reports both on a first install. Neither is a real',
-      '# incompatibility:',
+      '# Third-party peer ranges that resolve outside what their declaring',
+      '# package states, and that pnpm reports on a first install. None is a',
+      '# real incompatibility:',
       '#',
       '#   better-auth peers better-sqlite3 ^12.0.0 while the tree resolves 13.x.',
       '#   That peer is optional and covers handing better-auth a raw',
@@ -249,7 +322,18 @@ export function renderPnpmWorkspaceYaml(
       '#   better-auth plugin has to share the host\'s better-call instance, so',
       '#   the single 1.4.0 copy is the correct resolution.',
       '#',
-      '# These suppress the report only — no resolution moves.',
+      '#   @better-auth/core, /oauth-provider, /scim and /sso each peer an exact',
+      '#   @better-auth/utils 0.4.2, while better-call (better-auth\'s own HTTP',
+      '#   layer) depends on ^0.5.0 and is what the tree resolves them against.',
+      '#   0.5.0 keeps every symbol those four import — base64/base64Url,',
+      '#   createHash, createRandomStringGenerator — with the same signatures',
+      '#   and the same values on the inputs they pass, so the report is the',
+      '#   only difference. Pinning utils back instead would drag better-call',
+      '#   off its own declared range, which is a real violation rather than a',
+      '#   reported one.',
+      '#',
+      '# These suppress the report only — no resolution moves, and the lockfile',
+      '# is byte-identical with and without this block.',
       'peerDependencyRules:',
       '  allowedVersions:',
       ...peerEntries.map(([k, v]) => `    '${k}': '${v}'`),

@@ -267,10 +267,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       enable_two_factor: {
         label: "Enable Two-Factor Auth",
-        successMessage: "Two-factor authentication enabled. Scan the QR code or paste the otpauth URI into your authenticator app, then verify a code to complete setup.",
         params: {
           password: {
             label: "Current Password"
+          }
+        },
+        resultDialog: {
+          title: "Two-factor authentication enabled",
+          description: "Scan the QR code with your authenticator app, then save the backup codes somewhere safe. The backup codes are shown only once.",
+          acknowledge: "I have saved my backup codes",
+          fields: {
+            totpURI: "Authenticator URI",
+            backupCodes: "Backup Codes"
           }
         }
       },
@@ -287,10 +295,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       generate_backup_codes: {
         label: "Regenerate Backup Codes",
         description: "Generate a new set of backup codes? Any previously generated codes will stop working.",
-        successMessage: "New backup codes generated — save them somewhere safe.",
         params: {
           password: {
             label: "Current Password"
+          }
+        },
+        resultDialog: {
+          title: "New backup codes generated",
+          description: "Previous backup codes are now invalid. Save these new codes somewhere safe — they are shown only once.",
+          acknowledge: "I have saved the new codes",
+          fields: {
+            backupCodes: "Backup Codes"
           }
         }
       }
@@ -1030,7 +1045,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       backup_codes: {
         label: "Backup Codes",
-        help: "JSON-serialized backup recovery codes"
+        help: "Backup recovery codes, encrypted at rest (a single opaque ciphertext, not readable JSON)"
       },
       verified: {
         label: "Verified",

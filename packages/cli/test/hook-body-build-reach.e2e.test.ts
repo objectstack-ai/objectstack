@@ -22,14 +22,27 @@
  * `validate-top-level-strict.e2e.test.ts` pattern) and reads the artifact the
  * shell was left holding.
  *
- * ⛔ These tests pin REACH, not endorsement. `@capabilities` being dead through
- * `os build` is the measured state, not a decision that it should stay dead —
- * whether the directive gets a real authorable surface or is retired is a
- * maintainer call on the published surface (#10678). If that call lands, the
- * capability assertions below must be REWRITTEN, not deleted, and
- * `content/docs/automation/hook-bodies.mdx` must move with them. That coupling
- * is the point of the file: docs and extractor cannot drift apart silently
- * again.
+ * ⛔ THE CALL LANDED (#10917). The maintainer ruled the directive RETIRED under
+ * ADR-0049 enforce-or-remove: the override branch, its docs block and the two
+ * unit tests that masked it are gone, and `body.capabilities` — measured here to
+ * survive — is the covered route for the same need. Per this header's own
+ * standing instruction the capability assertions below were REWRITTEN, not
+ * deleted, and `content/docs/automation/hook-bodies.mdx` moved with them.
+ *
+ * What the first describe pins is now the RETIREMENT'S BLAST RADIUS, and the
+ * expected reading is that there isn't one: the directive contributed nothing
+ * before the removal (esbuild had already stripped it) and contributes nothing
+ * after, so every artifact-side number here is unchanged by #10917. That is the
+ * claim worth pinning over a real build — a retirement of an inert surface must
+ * be observationally identical for authors, and if any of these flips, the
+ * removal took something live with it.
+ *
+ * ⚠️ These e2e assertions therefore CANNOT witness the removal itself: they read
+ * the same on both sides of it. The test that does is the unit pin in
+ * `test/extract-hook-body.test.ts`, which feeds a raw JS literal whose comment
+ * survives into `String(fn)` — the one shape where the override ever fired — and
+ * asserts both that the comment is present and that it grants nothing. Restore
+ * the branch and that one goes red; nothing here would.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -78,11 +91,17 @@ const OBJECT = `{
   }`;
 
 /**
- * DEFECT 1 fixture. The handler asks for `api.write log` via the directive AND
- * contains a `.find(...)` call that inference reads as `api.read`. Both halves
- * matter: the inferred token proves the extractor really ran on this body (an
- * assertion of `capabilities: []` alone would also pass if the hook had never
- * got a body at all), and the absent directive tokens are the defect.
+ * The retired-directive fixture (#10678 defect 1, kept as the #10917 regression
+ * probe). The handler asks for `api.write log` via the directive AND contains a
+ * `.find(...)` call that inference reads as `api.read`. Both halves matter: the
+ * inferred token proves the extractor really ran on this body (an assertion of
+ * `capabilities: []` alone would also pass if the hook had never got a body at
+ * all), and the absent directive tokens are what the retirement makes permanent.
+ *
+ * The fixture keeps authoring the directive ON PURPOSE, though nothing documents
+ * it any more: an app in the wild may still carry one, and the guarantee owed to
+ * that app is that its build is unaffected. Deleting the fixture would delete the
+ * only place that is checked.
  */
 const CONFIG_CAPABILITIES_DIRECTIVE = `
 export default {
@@ -101,7 +120,13 @@ export default {
 };
 `;
 
-/** The escape hatch the docs now point at: `body.capabilities` is DATA, not a comment. */
+/**
+ * The route the docs point at, and after #10917 the ONLY way to declare
+ * capabilities a body's code does not reveal: `body.capabilities` is DATA, not a
+ * comment, so nothing in the pipeline strips it. This fixture is what makes the
+ * retirement safe to have shipped — the need did not go away with the directive,
+ * and this is the surface that serves it.
+ */
 const CONFIG_EXPLICIT_BODY = `
 export default {
   manifest: { id: 'com.example.hbbody', name: 'hbbody', version: '1.0.0', type: 'app' },
@@ -169,8 +194,8 @@ afterAll(() => {
   for (const dir of Object.values(dirs)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe('#10678 defect 1 — `// @capabilities` reach through `os build`', () => {
-  it('the directive does NOT reach the extractor; only inference lands', async () => {
+describe('#10917 — the retired `@capabilities` directive changes nothing on the build path', () => {
+  it('the directive reaches nothing; only inference lands (unchanged by the retirement)', async () => {
     const run = await runCli(['build'], dirs.caps);
     expect(run.code, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`).toBe(0);
 
@@ -181,12 +206,14 @@ describe('#10678 defect 1 — `// @capabilities` reach through `os build`', () =
     expect(hook.body.language).toBe('js');
     expect(hook.body.source).toContain('.find(');
 
-    // esbuild stripped the `//` line before `String(fn)` ever saw it.
+    // esbuild stripped the `//` line before `String(fn)` ever saw it — the
+    // mechanism that made the directive unreachable, and the reason retiring it
+    // is not a behaviour change for anyone.
     expect(hook.body.source).not.toContain('@capabilities');
 
     // Inference won; the directive contributed nothing. `api.read` comes from
     // `.object(...).find(...)`; `api.write` and `log` are what the directive
-    // asked for and did not get.
+    // asked for and — before and after #10917 alike — did not get.
     expect(hook.body.capabilities).toEqual(['api.read']);
     expect(hook.body.capabilities).not.toContain('api.write');
     expect(hook.body.capabilities).not.toContain('log');
@@ -202,7 +229,7 @@ describe('#10678 defect 1 — `// @capabilities` reach through `os build`', () =
     expect(json.bodyExtractionWarnings).toEqual([]);
   }, 120_000);
 
-  it('the documented escape hatch works: an explicit `body.capabilities` survives', async () => {
+  it('the covered route works end to end: an explicit `body.capabilities` survives the build', async () => {
     const run = await runCli(['build'], dirs.body);
     expect(run.code, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`).toBe(0);
     const hook = artifact(dirs.body).hooks[0];

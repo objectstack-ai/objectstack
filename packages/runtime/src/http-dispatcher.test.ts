@@ -136,7 +136,15 @@ describe('HttpDispatcher', () => {
             expect(mockProtocol.saveMetaItem).toHaveBeenCalledWith({
                 type: 'objects',
                 name: 'my_obj',
-                item: body
+                item: body,
+                // [#10888] Server-stated, and asserted here rather than relaxed
+                // to `objectContaining`: this door's whole claim to the face is
+                // that it answers through `errorFromThrown`, which carries a
+                // refusal's `issues[]` in `details` (pinned below). If the face
+                // ever stops being stated, `saveMetaItem`'s 422 silently goes
+                // back to restating prose the envelope already carries — an
+                // exact-match assertion is what makes that visible.
+                writeFace: 'meta-envelope',
             });
             expect(result.response?.body).toEqual({
                 success: true,
@@ -159,6 +167,9 @@ describe('HttpDispatcher', () => {
                 type: 'lead',
                 name: 'views/all_leads',
                 item: body,
+                // [#10888] The compound-name door states the same face — it is
+                // the same handler and the same envelope.
+                writeFace: 'meta-envelope',
             });
         });
 

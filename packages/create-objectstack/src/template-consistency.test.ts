@@ -127,30 +127,34 @@ describe('bundled template declared version surfaces', () => {
       }
     });
 
-    // The bundled `pnpm-workspace.yaml` is a settings-only file with no
-    // `packages:` key, and early pnpm 10 refuses such a file outright: `pnpm
-    // install` exits 1 with "ERROR packages field missing or empty" before it
-    // resolves a single dependency, so a scaffolded project cannot be installed
-    // at all. Measured on the bundled shape, one clean install per pnpm
-    // version, each with its own store:
+    // The bundled `pnpm-workspace.yaml` declares an explicit empty `packages:
+    // []` — see the block at the end of this file. That key is what makes this
+    // floor reachable: while it was omitted, pnpm 9.x and 10.0–10.4 parsed the
+    // workspace file before reading `engines` and refused it outright ("ERROR
+    // packages field missing or empty"), so no floor value could reach them.
+    // Measured on the bundled shape, one clean install per pnpm version, each
+    // with its own store:
     //
-    //   10.0.0–10.4.0    parse pnpm-workspace.yaml BEFORE reading `engines`, so
-    //                    the floor cannot reach them — still the raw workspace
-    //                    error. Only a decision about the `packages:` key
-    //                    itself closes that sliver, and it is not made here.
-    //   10.5.0–10.14.0   refused as ERR_PNPM_UNSUPPORTED_ENGINE.
-    //   >=10.15.0        install succeeds.
+    //   9.15.9, 10.0.0, 10.4.0,   ERR_PNPM_UNSUPPORTED_ENGINE naming the range
+    //   10.5.0–10.14.0            (the first three printed the raw workspace
+    //                             error before the key existed).
+    //   >=10.15.0                 install succeeds.
+    //
+    // ⚠️ With the floor lowered, 10.0.0 and 10.4.0 install (exit 0, measured) —
+    // but they read neither the build allowlist nor the peer rules out of the
+    // workspace file, so admitting them is a support decision (#11048), not a
+    // value to drift here.
     //
     // `objectstack init` (packages/cli/src/commands/init.ts) is the other
     // scaffold path and declares the same floor from `SCAFFOLD_PNPM_RANGE`.
-    it('package.json declares a pnpm floor at or above the version that accepts the keyless workspace file', () => {
+    it('package.json declares a pnpm floor at or above the version measured to honour the workspace file', () => {
       const templatePkg = JSON.parse(readTemplateFile('package.json'));
       const range: unknown = templatePkg.engines?.pnpm;
       expect(
         typeof range,
-        `${template}/package.json must declare engines.pnpm — without it, pnpm 10.5–10.14 ` +
-          'hit "packages field missing or empty" on a brand-new project instead of being told ' +
-          'to upgrade',
+        `${template}/package.json must declare engines.pnpm — without it, every pnpm below ` +
+          'the supported floor installs a scaffold whose native build approvals it never read, ' +
+          'instead of being told to upgrade',
       ).toBe('string');
 
       const match = /^>=\s*(\d+)\.(\d+)(?:\.(\d+))?$/.exec(String(range).trim());
@@ -160,8 +164,8 @@ describe('bundled template declared version surfaces', () => {
       const declared = rank(Number(match![1]), Number(match![2]), Number(match![3] ?? '0'));
       expect(
         declared,
-        `engines.pnpm "${range}" admits pnpm versions measured to refuse this template's ` +
-          'pnpm-workspace.yaml — the first accepting version is 10.15.0',
+        `engines.pnpm "${range}" admits pnpm versions measured NOT to honour this template's ` +
+          'pnpm-workspace.yaml — the first version measured to run its build allowlist is 10.15.0',
       ).toBeGreaterThanOrEqual(rank(10, 15, 0));
     });
 
@@ -371,11 +375,67 @@ describe('templates survive npm packing', () => {
   });
 });
 
+// A scaffolded project is a workspace root with NO member packages, and the
+// bundled file says so in one line instead of leaving it to be inferred from a
+// missing key. Not cosmetic: pnpm 9.x and 10.0–10.4 parse `pnpm-workspace.yaml`
+// BEFORE they read `engines`, and refuse a file without the key outright —
+// `pnpm install` exits 1 with "ERROR packages field missing or empty" before
+// resolving a single dependency, naming a file the user never wrote. Measured
+// on the bundled shape, one clean install per pnpm version, each with its own
+// store: 9.15.9 / 10.0.0 / 10.4.0 went from that raw workspace error to the
+// floor's own ERR_PNPM_UNSUPPORTED_ENGINE, and 10.15.0 / 10.34.5 / 11.22.0
+// install exactly as before — byte-identical `pnpm-lock.yaml`.
+//
+// ⛔ NOT `packages: ['.']`: it satisfies the same parsers but declares the
+// project root a workspace MEMBER — a monorepo root. This template is the start
+// of every AI-written app on the platform, so a line that reads as "add member
+// packages here" is the expensive half of that choice.
+//
+// `objectstack init` renders the second copy of this rule
+// (`renderPnpmWorkspaceYaml` in packages/cli/src/commands/init.ts) and is
+// ratcheted there; both paths carry it until the two renderers are unified.
+describe('blank template explicit empty workspace', () => {
+  const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
+  // Same comment-stripping as the blocks below: the prose above the key names
+  // it, and must not be what satisfies an assertion about the declaration.
+  const settings = fs.existsSync(wsPath)
+    ? fs.readFileSync(wsPath, 'utf8').replace(/^\s*#.*$/gm, '')
+    : '';
+
+  it('declares `packages:` — the key early pnpm refuses the file without', () => {
+    expect(
+      /^packages:/m.test(settings),
+      'the bundled pnpm-workspace.yaml must declare `packages:` — without it pnpm 9.x and ' +
+        '10.0–10.4 exit 1 with "packages field missing or empty" before reading engines',
+    ).toBe(true);
+  });
+
+  it('declares it EMPTY — a workspace root with no member packages', () => {
+    const inline = /^packages:[ \t]*(.*)$/m.exec(settings);
+    expect(inline, '`packages:` must be declared inline').not.toBeNull();
+    expect(
+      inline![1].trim(),
+      "`packages:` must be an empty list; `['.']` would declare the project root a " +
+        'workspace MEMBER (a monorepo root), which a single-package scaffold is not',
+    ).toBe('[]');
+  });
+
+  it('declares no member in any spelling', () => {
+    expect(settings).not.toMatch(/^packages:[ \t]*\[[ \t]*[^\]\s]/m);
+    expect(settings).not.toMatch(/^packages:[ \t]*\n[ \t]*-/m);
+  });
+
+  it('adds no other top-level setting to the bundled file', () => {
+    const keys = [...settings.matchAll(/^([A-Za-z][\w-]*):/gm)].map((m) => m[1]);
+    expect(keys).toEqual(['packages', 'onlyBuiltDependencies', 'allowBuilds', 'peerDependencyRules']);
+  });
+});
+
 // pnpm 11 turned an unapproved dependency build script from a warning into a
 // hard error, so the template declaring nothing meant `npx create-objectstack`
 // + `pnpm install` exited 1 for every user on a current pnpm (#3119). Both keys
 // are load-bearing and read by different pnpm versions: pnpm 11 honours only
-// `allowBuilds`, while pnpm 10.0–10.30 understand only `onlyBuiltDependencies`.
+// `allowBuilds`, while pnpm 10.0–10.25 understand only `onlyBuiltDependencies`.
 describe('blank template pnpm build approvals (#3119)', () => {
   const wsPath = path.join(pkgRoot, 'src', 'templates', 'blank', 'pnpm-workspace.yaml');
   const APPROVED = ['better-sqlite3', 'esbuild'];
@@ -403,12 +463,12 @@ describe('blank template pnpm build approvals (#3119)', () => {
     }
   });
 
-  it('lists the same packages under onlyBuiltDependencies for pnpm 10.0–10.30', () => {
+  it('lists the same packages under onlyBuiltDependencies for pnpm 10.0–10.25', () => {
     const block = /^onlyBuiltDependencies:\n((?:[ \t]*-.*\n?)*)/m.exec(settings)?.[1] ?? '';
     for (const pkg of APPROVED) {
       expect(
         new RegExp(`^\\s*-\\s*${pkg}\\s*$`, 'm').test(block),
-        `onlyBuiltDependencies must list "${pkg}" — pnpm < 10.31 does not understand allowBuilds`,
+        `onlyBuiltDependencies must list "${pkg}" — pnpm < 10.26 does not understand allowBuilds`,
       ).toBe(true);
     }
   });
@@ -450,6 +510,41 @@ describe('blank template peer-skew declarations (#10326)', () => {
       /^\s*'@better-auth\/scim>better-call':\s*'1\.4\.0'\s*$/m.test(allowed),
       'allowedVersions must accept the single better-call 1.4.0 copy scim resolves to',
     ).toBe(true);
+  });
+
+  it.each([
+    ['@better-auth/core'],
+    ['@better-auth/oauth-provider'],
+    ['@better-auth/scim'],
+    ['@better-auth/sso'],
+  ])('declares %s\'s exact @better-auth/utils peer against the resolved 0.5.0', (declaring) => {
+    // These four peer an EXACT @better-auth/utils 0.4.2 while the tree resolves
+    // 0.5.0 through better-call's `^0.5.0` dependency. Measured on the surface
+    // the range governs — the three symbols the four import — 0.4.2 and 0.5.0
+    // agree on every value, so the report is the only difference. This template
+    // ships to `npx create-objectstack` users; the `objectstack init` renderer
+    // declares the same four, and scaffold-workspace-consistency.test.ts in
+    // packages/cli is what fails if the two ever disagree.
+    const key = `${declaring}>@better-auth/utils`.replace(/[/*+?^${}()|[\]\\]/g, '\\$&');
+    expect(
+      new RegExp(`^\\s*'${key}':\\s*'0\\.5\\.0'\\s*$`, 'm').test(allowed),
+      `allowedVersions must widen ${declaring}'s @better-auth/utils peer to 0.5.0`,
+    ).toBe(true);
+  });
+
+  it('covers every declaring package that peers @better-auth/utils', () => {
+    // The defect was PARTIAL coverage — two skews declared, four left showing.
+    // A set assertion fails both ways: a fifth declaration nobody measured, and
+    // a drop of one of these four while the rest stay.
+    const declaring = [...allowed.matchAll(/^\s*'([^']+)>@better-auth\/utils':/gm)]
+      .map((m) => m[1])
+      .sort();
+    expect(declaring).toEqual([
+      '@better-auth/core',
+      '@better-auth/oauth-provider',
+      '@better-auth/scim',
+      '@better-auth/sso',
+    ]);
   });
 
   it('scopes every rule to one declaring package, never a bare peer name', () => {

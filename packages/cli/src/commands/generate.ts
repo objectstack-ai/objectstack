@@ -12,6 +12,21 @@ const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
   generate: (name: string) => string;
+  /**
+   * Per-generator override for the written file's name. Optional, and today
+   * exactly one generator sets it — see `skill` below for why that one is
+   * different and why the divergence was not resolved the other way.
+   *
+   * The default is `NAME.ts`, which is what this harness has always written.
+   * `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec`) meanwhile gives every
+   * metadata type `filePatterns` of the form `NAME.TYPE.ts`, and the example
+   * apps author that way (`account.object.ts`, `lead.view.ts`). Converging
+   * the harness on the registry's convention for all seven types is the
+   * repo-wide change that would settle the mismatch properly — it moves every
+   * generator's output plus the docs and examples that show it, so it is its
+   * own decision and deliberately does NOT ride in here (#11025).
+   */
+  fileName?: (name: string) => string;
 }> = {
   object: {
     description: 'Business data object',
@@ -163,6 +178,91 @@ const ${toCamelCase(name)}App: UI.App = {
 export default ${toCamelCase(name)}App;
 `,
   },
+
+  skill: {
+    description: 'AI skill (ADR-0063 extension primitive)',
+    defaultDir: 'src/skills',
+    /**
+     * The ONE generator that overrides the harness's `NAME.ts` convention, and
+     * the reason is not cosmetic.
+     *
+     * `DEFAULT_METADATA_TYPE_REGISTRY` declares this type's file convention
+     * as `*.skill.ts` / `*.skill.yml`, and that declaration is load-bearing:
+     * `MetadataPlugin._loadFromFileSystem` globs each registered type by its
+     * own `filePatterns`, `MetadataManager.getTypeInfo` publishes them to
+     * Studio and every other type-descriptor consumer, and it is the shape
+     * the example apps and the manifest's own glob keys are written in
+     * throughout (`account.object.ts`, `lead.view.ts`, and so on for every
+     * type).
+     *
+     * A scaffold written as `lead_qualification.ts` matches NEITHER pattern.
+     * `skill` is `allowRuntimeCreate: true` — a type the platform expects to
+     * discover rather than one wired in by hand — and a file no pattern
+     * matches still type-checks, still passes `os validate` and still
+     * publishes, with nothing anywhere saying it was skipped. That is the
+     * silent-strip shape ADR-0063's retirement of `os g agent` closed
+     * (#10359), re-entering through the scaffolder that replaced it
+     * (#11025), which is why a template alone would have been worse than no
+     * generator at all.
+     *
+     * Scoped to `skill` rather than fixed for all seven types on purpose: the
+     * other six write into the same mismatch, but nothing there is
+     * filesystem-discovered today, and moving the whole harness to
+     * `NAME.TYPE.ts` moves every existing generator's output plus the docs
+     * and examples that show it. That is a repo-wide decision of its own —
+     * see the `fileName` docblock above.
+     */
+    fileName: (name: string) => `${toSnakeCase(name)}.skill.ts`,
+    generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
+
+/**
+ * ${toTitleCase(name)} Skill
+ *
+ * Skills are the third-party AI extension primitive (ADR-0063 §2) — agents are
+ * platform-internal, so a skill, plus the declarative actions your app already
+ * ships, is how you give the assistant a new capability.
+ *
+ * Authored through \`defineSkill\` rather than as a bare typed literal so the
+ * object is parsed the moment this module loads: an unknown or retired key is
+ * a startup error naming the key, not a field that goes missing later.
+ */
+const ${toCamelCase(name)}Skill = defineSkill({
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+  description: 'One line on what this skill is for — the model routes on it.',
+
+  // ADR-0063 §3 — the kernel agent surface this skill binds to, enforced at
+  // load time: 'ask' (the data console), 'build' (the authoring surface), or
+  // 'both' for a genuinely shared read-only capability. A skill only binds to
+  // an agent whose surface it matches. 'ask' is also the schema default, so
+  // writing it changes nothing at runtime; it is here because a default taken
+  // in silence is a decision the next author cannot see they are inheriting.
+  surface: 'ask',
+
+  // Injected into the active agent's system prompt, and projected onto the MCP
+  // \`prompts\` primitive by @objectstack/mcp — the half of a skill that runs in
+  // every distribution. This is the text the model actually reads.
+  instructions: 'Explain when this skill applies and how to use its tools.',
+
+  // Empty on purpose, and a complete skill as it stands: it contributes its
+  // instructions and no tools. Under ADR-0064 an agent's tool set is the union
+  // of its surface-compatible skills' tools with NO global fall-through, so an
+  // empty list grants nothing rather than everything.
+  //
+  // Fill it with names that resolve — a platform-registered tool, or
+  // \`action_NAME\` materialised from one of your own declarative actions that
+  // opts in with \`ai: { exposed: true, description: '…' }\` (ADR-0011/0109).
+  // A made-up placeholder would be worse than nothing: \`os validate\` reports
+  // it (\`ai-skill-tool-unresolved\`), and at runtime the reference is dropped
+  // while the instructions keep promising the capability.
+  //
+  //   tools: ['action_${toSnakeCase(name)}', 'query_records'],
+  tools: [],
+});
+
+export default ${toCamelCase(name)}Skill;
+`,
+  },
 };
 
 // ─── Retired Generators ─────────────────────────────────────────────
@@ -207,10 +307,12 @@ const RETIRED_GENERATORS: Record<string, {
       'Author a SKILL instead. Skills (plus tools / MCP) are the third-party',
       'extension primitive ADR-0063 names — the live surface this one was not.',
       '',
-      'There is no `os g skill` scaffolder yet. Write the file by hand:',
+      'Scaffold one — the file lands where the loader looks for it:',
       '',
-      '    src/skills/<name>.skill.ts',
-      "    import { defineSkill } from '@objectstack/spec/ai';",
+      '    os g skill <name>    ->  src/skills/<name>.skill.ts',
+      '',
+      "It writes a `defineSkill` template with `surface` and `tools` filled in",
+      'and explained, ready to edit.',
       '',
       'Docs: https://objectstack.ai/docs/ai/agents',
     ],
@@ -364,7 +466,16 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     }
 
     const dir = flags.dir || generator.defaultDir;
-    const fileName = `${toSnakeCase(name)}.ts`;
+    // `NAME.ts` unless the generator declares otherwise — see the `fileName`
+    // docblock on GENERATORS, and `skill`, the one type that must not use it.
+    const fileName = generator.fileName ? generator.fileName(name) : `${toSnakeCase(name)}.ts`;
+    // The barrel re-export has to name the file that was actually written, so
+    // it is derived from `fileName` rather than rebuilt from `name`. For the
+    // six generators that take the default this is byte-identical to the old
+    // `./${toSnakeCase(name)}`; for `skill` it keeps the `.skill` infix the
+    // loader's file pattern requires instead of pointing at a module that
+    // does not exist.
+    const moduleSpecifier = `./${fileName.replace(/\.ts$/, '')}`;
     const filePath = path.join(process.cwd(), dir, fileName);
 
     console.log(`  ${chalk.dim('Type:')}  ${chalk.cyan(type)} — ${generator.description}`);
@@ -407,15 +518,15 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       const indexPath = path.join(process.cwd(), dir, 'index.ts');
       if (fs.existsSync(indexPath)) {
         const indexContent = fs.readFileSync(indexPath, 'utf-8');
-        const exportLine = `export { default as ${toCamelCase(name)} } from './${toSnakeCase(name)}';`;
-        
+        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
+
         if (!indexContent.includes(toCamelCase(name))) {
           fs.appendFileSync(indexPath, exportLine + '\n');
           printSuccess(`Updated ${dir}/index.ts with export`);
         }
       } else {
         // Create barrel index
-        const exportLine = `export { default as ${toCamelCase(name)} } from './${toSnakeCase(name)}';\n`;
+        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';\n`;
         fs.writeFileSync(indexPath, exportLine);
         printSuccess(`Created ${dir}/index.ts`);
       }

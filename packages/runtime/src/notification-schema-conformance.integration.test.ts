@@ -209,7 +209,7 @@ describe('[#5792] the notification wire bodies conform to the schemas the catalo
   const noise = captureExpectedAbsentTableNoise();
 
   beforeAll(async () => {
-    kernel = new ObjectKernel({ logLevel: 'silent' });
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
     // [#10380] The driver is named rather than inlined so its logger can be
     // scoped before it ever runs a statement.
     const driver = new SqliteWasmDriver({ filename: ':memory:' });

@@ -1080,6 +1080,7 @@ os g action approve         # Generate an action
 os g flow customer          # Generate an automation flow
 os g dashboard sales        # Generate a dashboard
 os g app crm                # Generate an app definition
+os g skill lead-qual        # Generate an AI skill
 
 os g object task -d lib/    # Override target directory
 os g object task --dry-run  # Preview without writing
@@ -1087,14 +1088,27 @@ os g object task --dry-run  # Preview without writing
 
 **Available types:**
 
-| Type | Default Directory | Description |
-|------|------------------|-------------|
-| `object` | `src/objects/` | Business data object with fields |
-| `view` | `src/views/` | List or form view definition |
-| `action` | `src/actions/` | Button or batch action |
-| `flow` | `src/flows/` | Automation flow |
-| `dashboard` | `src/dashboards/` | Analytics dashboard |
-| `app` | `src/apps/` | Application navigation |
+| Type | Default Directory | Written as | Description |
+|------|------------------|------------|-------------|
+| `object` | `src/objects/` | `NAME.ts` | Business data object with fields |
+| `view` | `src/views/` | `NAME.ts` | List or form view definition |
+| `action` | `src/actions/` | `NAME.ts` | Button or batch action |
+| `flow` | `src/flows/` | `NAME.ts` | Automation flow |
+| `dashboard` | `src/dashboards/` | `NAME.ts` | Analytics dashboard |
+| `app` | `src/apps/` | `NAME.ts` | Application navigation |
+| `skill` | `src/skills/` | `NAME.skill.ts` | AI skill — the ADR-0063 extension primitive |
+
+<Callout type="info" title="Why `skill` alone gets a filename suffix">
+`skill` is the one type whose scaffold is written as `NAME.skill.ts` rather
+than `NAME.ts`. The metadata type registry declares that type's file
+convention as `*.skill.ts` / `*.skill.yml`, and `skill` is discoverable
+metadata — a file matching neither pattern still type-checks, still validates
+and still publishes, with nothing anywhere reporting that it was skipped.
+
+The other six generators keep `NAME.ts`. Aligning the whole scaffolder with
+the registry's `NAME.TYPE.ts` convention — the shape the example apps already
+author in — would change every generator's output and is a separate decision.
+</Callout>
 
 <Callout type="warn" title="`os g agent` is retired">
 There is no `agent` type. Running `os g agent <name>` fails with a message
@@ -1106,8 +1120,8 @@ Agents are **platform-internal**: the kernel ships exactly two (`ask` and
 scaffolded `src/agents/*.ts` therefore passed `os validate`, published without
 complaint, and never appeared — silently. Skills (plus tools / MCP) are the
 third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
-`defineSkill`; see [AI Agents](/docs/ai/agents). There is no `os g skill`
-scaffolder yet, so write that file by hand for now.
+`defineSkill`; see [AI Agents](/docs/ai/agents). Scaffold one with
+`os g skill <name>`, which writes exactly that path.
 </Callout>
 
 **Options:**
