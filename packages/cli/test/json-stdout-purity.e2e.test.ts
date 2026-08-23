@@ -15,9 +15,9 @@
  *
  * ## Why the whole family, from one expectation
  *
- * The contract has one implementation face per command, and there are nine of
+ * The contract has one implementation face per command, and there are ten of
  * them. A file that pinned `migrate recorded-by` alone would go green while the
- * other eight stayed broken, and would say nothing at all about the tenth. So
+ * other nine stayed broken, and would say nothing at all about the eleventh. So
  * the family is DISCOVERED from the source tree — every command that calls
  * `bootSchemaStack` and declares a `--json` flag — and the discovered set is
  * reconciled against {@link FAMILY} below. Add a member and this file goes red
@@ -87,6 +87,7 @@ const FAMILY: Record<string, string[]> = {
   'migrate resume': [],
   'migrate summary-nulls': [],
   'migrate value-shapes': [],
+  'storage orphans': [],
 };
 
 /** Boot lines every member emits — the diagnostics that must survive on stderr. */
