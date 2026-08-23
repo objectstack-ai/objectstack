@@ -150,6 +150,22 @@ export default defineConfig({
         find: /^create-objectstack\/created-summary$/,
         replacement: path.resolve(__dirname, '../create-objectstack/src/created-summary.ts'),
       },
+      // `test/serve-node-env-production-default.e2e.test.ts` (#11113) writes a
+      // FIXTURE config file whose text is `import { AuthPlugin } from
+      // '@objectstack/plugin-auth'` — real code, but code the fixture's own
+      // SPAWNED CHILD process resolves via bundle-require, never through this
+      // Vite config. `check-test-source-alias` is a dependency-free text
+      // reader (this file's own header explains why); it cannot tell that
+      // occurrence apart from a real import in THIS file, and flags it as an
+      // unaliased artifact import the same way it would a genuine one. This
+      // entry satisfies the gate; it is inert for the actual e2e run (the
+      // child's own dist/-resolving `exports` lookup is what that test
+      // deliberately exercises — see the file's header for why testing the
+      // BUILT artifact is the point there).
+      {
+        find: /^@objectstack\/plugin-auth$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-auth/src/index.ts'),
+      },
     ],
   },
 });

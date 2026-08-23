@@ -82,6 +82,29 @@
  * different from the port `serve` itself binds to — so a pass can only be
  * explained by the wildcard `http://localhost:*` substitution, never by
  * better-auth's own default trust of the deployment's own origin.
+ *
+ * ## The bounded retry — a documented CI infrastructure shape, not a mask
+ *
+ * CI measured (run 32625390225, `Test Core (2/6)`): the FIRST leg of this
+ * file's suite failed with oclif's own `Error: command serve not found`
+ * before ever reaching "Server is ready" — the other two legs, and 1824 other
+ * tests in the same shard, passed. That sentence is `scripts/
+ * cli-build-prerequisite.mjs`'s own documented signature for a `dist/` that
+ * reads unbuilt-or-half-built to oclif's live `dist/commands/**` glob scan
+ * (no manifest cache — `packages/cli` ships no `oclif.manifest.json`, so
+ * EVERY invocation re-globs). `pnpm --filter @objectstack/cli typecheck` and
+ * a full local run of this file were both clean; `packages/cli`'s own suite
+ * spawns the real built CLI from ~20 other files, so a transient read of a
+ * just-finished, cold `tsc` build under this package's heavy concurrent-spawn
+ * load (measured 485s wall, 1825 tests, dozens of real child processes) is a
+ * documented shape of THIS suite specifically, not a property of the fix
+ * under test — the ordering proof above already establishes that
+ * `serve.ts`'s ENTIRE ELSE branch runs after the command was already found
+ * and `run()` already entered, so it cannot be the cause of a failure to find
+ * the command in the first place. `bootServeWithRetry` below retries once,
+ * scoped EXACTLY to that one oclif sentence — any other failure (a real
+ * assertion, a real crash, a real timeout with a different tail) still fails
+ * on the first attempt, unretried.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -162,11 +185,40 @@ interface OriginCheckResult {
  * child — Node's `spawn()` omits `undefined`-valued env entries rather than
  * stringifying them, so this is not the same as `NODE_ENV=''`.
  */
-async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
-  const port = randomPort();
-  const untrustedOriginPort = port + 1;
-  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
+/**
+ * oclif's own "command <id> not found" — what its live `dist/commands/**` glob
+ * answers with when it scans a target directory that is unbuilt OR (the shape
+ * measured against this file, see the retry below) TRANSIENTLY appears
+ * incomplete under this package's own heavy concurrent-spawn test load.
+ * `scripts/cli-build-prerequisite.mjs` names this exact signature as the
+ * shared detector several of this repo's own CI gates already carry for
+ * commands shelled out to the built CLI, including oclif's own line-wrapping
+ * of the sentence across ` › `-prefixed lines — flattened here the same way,
+ * not re-imported (that module lives at the repo root for GATES to share;
+ * this is a package test, a different resolution domain).
+ */
+function looksLikeMissingCliCommand(text: string): string {
+  const flattened = text
+    .split('\n')
+    .map((line) => line.replace(/^\s*›\s*/, ''))
+    .join('')
+    .replace(/\s+/g, ' ');
+  return flattened.match(/Error:\s*command\b.*?\bnot found\b/)?.[0] ?? '';
+}
 
+class BootFailure extends Error {
+  constructor(public readonly stdout: string, public readonly stderr: string) {
+    super(`serve did not reach "Server is ready"\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
+  }
+}
+
+/**
+ * Spawn `os serve` once and resolve when it prints "Server is ready", or
+ * reject with a {@link BootFailure} carrying everything it wrote. Never
+ * retries — that policy lives one level up, in {@link bootServeWithRetry},
+ * where it can be scoped to the one failure shape it exists for.
+ */
+function bootServeOnce(port: number, env: Record<string, string | undefined>): { child: ProbeChild; ready: Promise<void> } {
   const child = spawn(process.execPath, [CLI, 'serve', '-p', String(port)], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -207,10 +259,9 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
 
   let out = '';
   let err = '';
-
-  await new Promise<void>((readyResolve, readyReject) => {
+  const ready = new Promise<void>((readyResolve, readyReject) => {
     const timer = setTimeout(() => {
-      readyReject(new Error(`serve never reached "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      readyReject(new BootFailure(out, err));
     }, 150_000);
     const onData = () => {
       if (/Server is ready/.test(out + err)) {
@@ -220,20 +271,60 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     };
     child.stdout.on('data', (d) => { out += String(d); onData(); });
     child.stderr.on('data', (d) => { err += String(d); onData(); });
-    child.on('exit', (code) => {
+    child.on('exit', () => {
       clearTimeout(timer);
-      readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      readyReject(new BootFailure(out, err));
     });
   });
+  return { child, ready };
+}
+
+/**
+ * {@link bootServeOnce}, retried EXACTLY ONCE, and only when the failure is
+ * oclif's own documented "command not found" — never on any other shape,
+ * which would mask a real regression instead of absorbing a known
+ * infrastructure characteristic. See {@link looksLikeMissingCliCommand}'s
+ * header for what that signature means and why this package's own suite is
+ * positioned to hit it: ~20 files in this same suite spawn the real built CLI
+ * (this file among them), so a transient read of a just-built `dist/commands`
+ * under concurrent load is a documented shape here, not a hypothesis reached
+ * for to explain away a failure.
+ */
+async function bootServeWithRetry(port: number, env: Record<string, string | undefined>): Promise<ProbeChild> {
+  const first = bootServeOnce(port, env);
+  try {
+    await first.ready;
+    return first.child;
+  } catch (e) {
+    if (!(e instanceof BootFailure) || !looksLikeMissingCliCommand(e.stderr)) throw e;
+    await stop(first.child);
+    const retryPort = randomPort();
+    writeFileSync(join(dir, 'objectstack.config.ts'), configFor(retryPort), 'utf8');
+    const second = bootServeOnce(retryPort, env);
+    await second.ready;
+    return second.child;
+  }
+}
+
+async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
+  const port = randomPort();
+  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
+
+  const child = await bootServeWithRetry(port, env);
+  // `bootServeWithRetry` may have rebound to a different port on its retry
+  // leg — read the port the child actually reports itself as, from the last
+  // arg it was spawned with, so the probe below always targets the live one.
+  const boundPort = Number(child.spawnargs[child.spawnargs.length - 1]);
+  const boundUntrustedOriginPort = boundPort + 1;
 
   try {
-    const res = await fetch(`http://localhost:${port}/api/v1/auth/sign-in/email`, {
+    const res = await fetch(`http://localhost:${boundPort}/api/v1/auth/sign-in/email`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         // No cookie header — this is the shape `validateFormCsrf` forces an
         // origin check for when neither Sec-Fetch-* nor a cookie is present.
-        origin: `http://localhost:${untrustedOriginPort}`,
+        origin: `http://localhost:${boundUntrustedOriginPort}`,
       },
       body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
     });
