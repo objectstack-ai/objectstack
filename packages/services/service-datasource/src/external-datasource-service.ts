@@ -171,15 +171,21 @@ const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
  *  - It is still not dead code, because the producer population here is open
  *    by design. `contracts/datasource-driver-factory.ts` says the framework
  *    "ships no universal driver-by-id registry" — concrete drivers are built
- *    by the HOST — and types the handle as `introspectSchema?(): Promise<unknown>`.
- *    The retirement shipped as a BREAKING change whose stated migration
- *    channel is the compiler, "precisely and at every site"; against an
- *    `unknown` result that channel never fires, so a host-built driver still
- *    emitting the old spelling is reached by nothing and would silently lose
- *    its key here.
- *  - The belt's clock has not run either: the union (#11001) and the
- *    retirement (#11124) are BOTH still unconsumed changesets at `17.1.0`, so
- *    no released version has ever emitted `primaryKey` from this driver.
+ *    by the HOST. Since #11381 (option C of the #11123 ruling) the handle
+ *    types `introspectSchema?(): Promise<IntrospectedSchema>` — the spec
+ *    contract — so the retirement's stated migration channel, the compiler,
+ *    finally reaches a host-built TypeScript driver "precisely and at every
+ *    site" the moment it RECOMPILES against this version. Whom no compiler
+ *    reaches, ever: drivers already built against older versions, plain-JS
+ *    drivers, and casts. For that population the old spelling still arrives
+ *    here at runtime, and this belt is what absorbs it.
+ *  - The belt's clock HAS started: the union (#11001) and the retirement
+ *    (#11124) were consumed into `17.2.0` (version-packages commit
+ *    `e7d2cc67fd`, 2026-08-23), so the "unconsumed changesets at 17.1.0"
+ *    argument this bullet used to carry is expired. Whether option B's gate —
+ *    the retirement actually PUBLISHED — is met is a release-record question
+ *    (npm, not this tree); B also waits on the #11381 tightening being
+ *    released. Re-judge both there before touching the arm.
  *
  * Dropping the arm is therefore a NARROWING OF ACCEPTED INPUT rather than a
  * dead-code deletion, and wants the contract-review gate. Its only exercise is
