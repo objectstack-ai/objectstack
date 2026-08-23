@@ -221,6 +221,8 @@ export interface ObjectPlan {
   plannedByStatus: Record<string, number>;
   /** Ids skipped as out-of-ruling — reported so the count is checkable, never written. */
   outOfRulingScopeIds: string[];
+  /** Planned rows whose write threw. Reported, never retried, never fatal. */
+  failures: Array<{ id: string; error: string }>;
   rows: PlannedRow[];
   /** Conditions a reader must see, e.g. "this engine exposes no such column". */
   notes: string[];
@@ -251,6 +253,12 @@ export interface BackfillOptions {
   pageSize?: number;
   /** Hard ceiling per object, so a pathological table cannot spin forever. */
   maxRowsPerObject?: number;
+  /**
+   * `false` writes. Defaults to `true`: a sweep over existing data that
+   * defaults to writing is one typo away from an unplanned migration, and the
+   * ruling puts the dry run first anyway.
+   */
+  dryRun?: boolean;
 }
 
 const SYSTEM_CONTEXT = { isSystem: true, positions: [], permissions: [] };
@@ -279,6 +287,7 @@ function newObjectPlan(object: string, role: ObjectPlan['role'], organizationFie
     skipped: emptySkips(),
     plannedByStatus: {},
     outOfRulingScopeIds: [],
+    failures: [],
     rows: [],
     notes: [],
   };
@@ -626,6 +635,9 @@ export function formatBackfillReport(report: BackfillReport): string {
         + `${row.status ? `, status=${row.status}` : ''})`,
       );
     }
+    for (const failure of plan.failures) {
+      lines.push(`  ✗ ${failure.id} NOT written — ${failure.error}`);
+    }
     for (const note of plan.notes) lines.push(`  ⚠️  ${note}`);
   }
   lines.push('');
@@ -636,4 +648,60 @@ export function formatBackfillReport(report: BackfillReport): string {
     + `out-of-ruling(subject has no organization)=${report.totals.outOfRulingScope}`,
   );
   return lines.join('\n');
+}
+
+/**
+ * Write the plan. Each planned row gets ONE update carrying its id and its
+ * resolved organization column — nothing else on the row is touched, which is
+ * what makes the undo expressible as "write NULL back to these ids".
+ *
+ * A row whose write throws is RECORDED and the sweep continues: a driver
+ * rejecting one row must not cost the other N-1 their repair, and a half-done
+ * sweep is safe here precisely because the next run picks up exactly what is
+ * still unstamped.
+ *
+ * ⛔ Takes a plan rather than building one, so the rows written are the rows a
+ * human read in the dry run — not a fresh scan that may have moved.
+ */
+export async function applyPlatformRowOrganizationBackfill(
+  engine: BackfillEngine,
+  plan: BackfillReport,
+  options: BackfillOptions = {},
+): Promise<BackfillReport> {
+  const context = options.context ?? SYSTEM_CONTEXT;
+  for (const objectPlan of plan.objects) {
+    objectPlan.written = 0;
+    objectPlan.failures = [];
+    for (const row of objectPlan.rows) {
+      try {
+        await engine.update(
+          objectPlan.object,
+          { id: row.id, [row.organizationField]: row.organization },
+          { context },
+        );
+        objectPlan.written += 1;
+      } catch (err) {
+        objectPlan.failures.push({ id: row.id, error: String((err as Error)?.message ?? err) });
+      }
+    }
+  }
+  return { dryRun: false, objects: plan.objects, totals: totalsOf(plan.objects) };
+}
+
+/**
+ * Plan, then (unless `dryRun`) write — the whole sweep in one call.
+ *
+ * Idempotent by construction rather than by a guard: the plan is built from
+ * `WHERE <organization column> IS NULL`, and every write fills that column, so
+ * a second call over an unchanged database plans nothing and writes nothing.
+ * `backfill-platform-row-organizations.test.ts` asserts that second run rather
+ * than describing it.
+ */
+export async function runPlatformRowOrganizationBackfill(
+  engine: BackfillEngine,
+  options: BackfillOptions = {},
+): Promise<BackfillReport> {
+  const plan = await planPlatformRowOrganizationBackfill(engine, options);
+  if (options.dryRun !== false) return plan;
+  return applyPlatformRowOrganizationBackfill(engine, plan, options);
 }

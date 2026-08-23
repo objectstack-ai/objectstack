@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   planPlatformRowOrganizationBackfill,
+  runPlatformRowOrganizationBackfill,
   formatBackfillReport,
   BACKFILL_TARGETS,
   type BackfillEngine,
@@ -276,5 +277,63 @@ describe('platform-row organization backfill — dry run', () => {
     for (const target of BACKFILL_TARGETS) expect(text).toContain(target.object);
     expect(text).toContain('areq_3');
     expect(text).toContain('out-of-ruling(subject has no organization)=1');
+  });
+});
+
+describe('platform-row organization backfill — write', () => {
+  let engine: FakeEngine;
+  beforeEach(() => {
+    engine = makeEngine(strandedFixture());
+  });
+
+  it('stamps exactly the planned rows, and only the resolved column', async () => {
+    const dry = await planPlatformRowOrganizationBackfill(engine);
+    const applied = await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
+    expect(applied.dryRun).toBe(false);
+    expect(applied.totals.written).toBe(dry.totals.planned);
+    expect(engine.updates).toHaveLength(dry.totals.planned);
+    for (const update of engine.updates) {
+      expect(Object.keys(update.data).sort()).toEqual(['id', 'organization_id']);
+    }
+    expect(engine.tables.sys_approval_request.find(r => r.id === 'areq_1')?.organization_id).toBe('org_A');
+    expect(engine.tables.sys_approval_action.find(r => r.id === 'aact_1')?.organization_id).toBe('org_A');
+    expect(engine.tables.sys_approval_approver.find(r => r.id === 'aapr_1')?.organization_id).toBe('org_A');
+    expect(engine.tables.sys_automation_run.find(r => r.id === 'run_p1')?.organization_id).toBe('org_A');
+  });
+
+  it('⛔ leaves the out-of-ruling rows and the credential table untouched', async () => {
+    await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
+    expect(engine.tables.sys_approval_request.find(r => r.id === 'areq_3')?.organization_id).toBeNull();
+    expect(engine.tables.sys_approval_action.find(r => r.id === 'aact_2')?.organization_id).toBeNull();
+    expect(engine.updates.some(u => u.object === 'sys_api_key')).toBe(false);
+    expect(engine.tables.sys_api_key[0].organization_id).toBeNull();
+    expect(engine.tables.sys_api_key[0].active_organization_id).toBe('org_K');
+  });
+
+  it('is idempotent: the SECOND run writes zero rows', async () => {
+    const first = await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
+    expect(first.totals.written).toBeGreaterThan(0);
+    const writesAfterFirst = engine.updates.length;
+
+    const second = await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
+    expect(second.totals.planned).toBe(0);
+    expect(second.totals.written).toBe(0);
+    expect(engine.updates.length).toBe(writesAfterFirst);
+    // The rows it deliberately skipped are re-REPORTED, never re-written.
+    expect(second.totals.outOfRulingScope).toBe(first.totals.outOfRulingScope);
+  });
+
+  it('reports a row that failed to write instead of aborting the sweep', async () => {
+    const dry = await planPlatformRowOrganizationBackfill(engine);
+    const realUpdate = engine.update.bind(engine);
+    engine.update = async (object: string, data: any) => {
+      if ((data as any).id === 'areq_1') throw new Error('driver: constraint violation');
+      return realUpdate(object, data);
+    };
+    const applied = await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
+    expect(applied.totals.written).toBe(dry.totals.planned - 1);
+    const plan = planFor(applied, 'sys_approval_request');
+    expect(plan.failures.map(f => f.id)).toEqual(['areq_1']);
+    expect(formatBackfillReport(applied)).toContain('constraint violation');
   });
 });
