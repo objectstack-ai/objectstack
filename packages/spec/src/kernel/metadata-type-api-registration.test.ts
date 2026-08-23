@@ -189,17 +189,39 @@ describe('the declaration shape door (artifact / publish route — see the heade
     }
   });
 
-  it('refuses a body missing `target` — loudly, naming the key', () => {
-    // The shape `PUT /meta/api/:name` used to store with a 200: no execution
-    // target at all, so nothing could ever run it.
+  it('a headless body parses at the shape door and is refused by the GATE, naming the missing half (#10338)', () => {
+    // Until #10338 the VOCABULARY refused this body for its missing `target`.
+    // That requirement was a dead letter for `object_operation` — nothing
+    // reads `target` for that type — so the key is optional now, and "no
+    // execution target at all, nothing could ever run it" is judged where the
+    // real execution address lives: the publish gate on `objectParams` (and,
+    // for `type: 'flow'`, on `target`). The refusal is still loud and still
+    // names the key; it just names the key that matters.
     const parsed = ApiEndpointSchema.safeParse({
       name: 'headless_endpoint',
       path: '/api/v1/apps/showcase/x',
       method: 'GET',
       type: 'object_operation',
     });
-    expect(parsed.success).toBe(false);
-    expect(parsed.error!.issues.map((i) => i.path.join('.'))).toContain('target');
+    expect(parsed.success, 'the SHAPE is fine — only servability is not').toBe(true);
+
+    const failure = identityFreeEndpointGateFailure(parsed.data!);
+    expect(failure, 'the gate must refuse an endpoint with no execution address').toBeDefined();
+    expect(failure!.path).toEqual(['objectParams']);
+
+    // The flow-typed spelling of the same headlessness is refused at `target`,
+    // where the flow's execution address lives.
+    const flowParsed = ApiEndpointSchema.safeParse({
+      name: 'headless_flow_endpoint',
+      path: '/api/v1/apps/showcase/y',
+      method: 'POST',
+      type: 'flow',
+    });
+    expect(flowParsed.success).toBe(true);
+    const flowFailure = identityFreeEndpointGateFailure(flowParsed.data!);
+    expect(flowFailure).toBeDefined();
+    expect(flowFailure!.path).toEqual(['target']);
+    expect(flowFailure!.message).toMatch(/names no target flow/);
   });
 
   it('refuses a body that is not an endpoint at all', () => {
