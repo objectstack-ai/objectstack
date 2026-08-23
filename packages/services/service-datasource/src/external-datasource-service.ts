@@ -593,6 +593,25 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   async validateObject(objectName: string): Promise<SchemaValidationResult> {
+    // A direct call performs its own live read — no memo. Read reuse is the
+    // sweep's per-call concern ({@link validateEach}), never this method's: a
+    // long-lived service must answer every direct call from the remote's
+    // schema as it is NOW (pinned: two direct calls are two live reads).
+    return this.validateObjectUsing(objectName, (ds) => this.config.introspect(ds));
+  }
+
+  /**
+   * [#10962] The body of {@link validateObject}, with the live-schema read
+   * abstracted behind `readSchema` so one sweep can share a single read per
+   * datasource across all of its objects. `readSchema` is either
+   * `config.introspect` itself (the public single-object path above) or the
+   * per-sweep memoised reader from {@link sweepScopedIntrospect} — never a
+   * cache that outlives one call.
+   */
+  private async validateObjectUsing(
+    objectName: string,
+    readSchema: (datasource: string) => Promise<IntrospectedSchema>,
+  ): Promise<SchemaValidationResult> {
     const obj = await this.config.getObject(objectName);
     if (!obj) {
       throw new Error(`Object '${objectName}' not found.`);
@@ -605,7 +624,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       return { ok: true, datasource, object: objectName, diffs: [] };
     }
 
-    const schema = await this.config.introspect(datasource);
+    const schema = await readSchema(datasource);
     const dialect = schema.dialect as SqlDialect | undefined;
     const remoteName = obj.external?.remoteName ?? obj.name;
     const table = this.findTable(schema, remoteName);
@@ -685,17 +704,49 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
+   * [#10962] One live schema read per datasource per SWEEP.
+   *
+   * Returns a reader that memoises `config.introspect` by datasource name for
+   * the lifetime of ONE {@link validateEach} call. The memo is a local of that
+   * call — deliberately NOT an instance field — so a long-lived service can
+   * never serve a stale schema to a later sweep: the next `validateAll()` /
+   * `validateDatasource()` builds a fresh memo and reads live again (both
+   * directions pinned in `__tests__/external-datasource-service.test.ts`).
+   *
+   * The PROMISE is memoised, not the resolved value: the sweep validates its
+   * objects concurrently (`Promise.all`), so the first reader for a datasource
+   * starts the read and every concurrent sibling awaits the same in-flight
+   * promise. A rejected read is shared the same way — M objects on one
+   * unreachable datasource produce M failure rows from ONE connection attempt.
+   */
+  private sweepScopedIntrospect(): (datasource: string) => Promise<IntrospectedSchema> {
+    const memo = new Map<string, Promise<IntrospectedSchema>>();
+    return (datasource) => {
+      let read = memo.get(datasource);
+      if (!read) {
+        read = this.config.introspect(datasource);
+        memo.set(datasource, read);
+      }
+      return read;
+    };
+  }
+
+  /**
    * Validate a chosen set of objects, one report.
    *
    * A per-object throw becomes a `missing_table` row carrying the thrower's
    * message rather than rejecting the whole report: one unreachable remote (or
    * one object whose definition vanished mid-sweep) must not erase the verdicts
    * of the objects that did validate.
+   *
+   * [#10962] All objects in one call share one live schema read per datasource
+   * (see {@link sweepScopedIntrospect}); the memo dies with this call.
    */
   private async validateEach(objects: ObjectLike[]): Promise<SchemaValidationReport> {
+    const readSchema = this.sweepScopedIntrospect();
     const results = await Promise.all(
       objects.map((o) =>
-        this.validateObject(o.name).catch((err): SchemaValidationResult => {
+        this.validateObjectUsing(o.name, readSchema).catch((err): SchemaValidationResult => {
           this.logger?.warn(`validateObject('${o.name}') failed`, err);
           return {
             ok: false,
