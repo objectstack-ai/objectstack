@@ -862,99 +862,102 @@
     },
     {
       "id": "cli.doctor-health-report",
-      "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored ✓s that bless an unexamined tree are the expected-fail",
+      "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored scans announce a named skip in a user app instead of blessing a tree they never walked",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
       "fixtures": {
         "app": "scaffold",
         "requires": [
-          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-doctor -t blank` + install — the same provisioning cli.scaffold-first-run drives) as the USER-APP shaped tree; the monorepo-vs-user-app split is load-bearing for the expected-fail clause",
+          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-doctor -t blank` + install — the same provisioning cli.scaffold-first-run drives) as the USER-APP shaped tree; the monorepo-vs-user-app split is load-bearing for the monorepo-anchored-skip clause and BOTH cwds must be run — the skip rows exist only outside this checkout, and the rows they stand in for only inside it",
           "a scratch copy of the config for the deliberate config findings (orphan view, circular lookup pair, unreferenced object) — breakage never touches shared fixtures",
           "a writable .objectstack/installed-packages/ in the scratch tree, so an unreadable ledger entry can be staged per run"
         ],
         "knownGaps": [
           "no stock fixture ships a config with an orphan view / circular lookup / unused object, so the config-analysis rows must be staged; record the staged shapes in evidence rather than skipping the rows silently",
-          "the config-analysis block runs only `if (configExists())` (doctor.ts:1955) — a bare directory exercises the environment rows alone; run both shapes and label which produced which rows"
+          "the config-analysis block runs only `if (configExists())` (doctor.ts:2064) — a bare directory exercises the environment rows alone; run both shapes and label which produced which rows"
         ]
       },
       "steps": [
-        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the environment rows print first: Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, then the extended checks)",
+        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the unconditional environment rows print first: Node.js, pnpm, TypeScript, Dependencies, Git, Environment files — then whichever finding-only rows are live, then the extended checks)",
         "stage the config findings in the scratch copy: a view whose object does not exist (orphan), two objects whose lookup fields point at each other (circular), and one object nothing references (unused); run `os doctor` and capture the three warning rows — then restore and capture the three ✓ rows (Dependencies / Object usage / View integrity)",
         "unparseable posture: `OS_TENANCY_POSTURE=isolatd os doctor; echo $?` — the Tenancy posture ERROR row must print naming the variable and the allowed set, the REST of the report must still run, and the exit must be 1 (#5382: report-not-refuse, resolved OUTSIDE the config-analysis try at doctor.ts:1752-1753, row pushed at :1891-1893)",
         "env provenance: put the same bad posture in a .env FILE (not the shell) and re-run — the finding must still fire (#5387 dotenv cascade) and the Environment files row must attribute the value to the file that supplied it",
         "ledger: write .objectstack/installed-packages/broken.json holding non-JSON; run `os doctor` with NO posture set (default `single`) and capture the Installed packages row; then with a valid config and OS_TENANCY_POSTURE=isolated, confirm the run does NOT print the 'Unique scope ✓' success line while that entry is unreadable",
         "exit split: on a warnings-only run capture `echo $?` (expect 0, '⚠️  Environment is functional' summary); on the posture-error run expect 1 ('❌ Some critical issues found' + the collected fix lines)",
-        "the expected-fail pair: in the scaffold — which has NO packages/spec/src — capture verbatim the '✓ Test coverage         All *.zod.ts files have matching tests' and '✓ Deprecations          No @deprecated tags found' lines, and note the sibling '@objectstack/spec  Not built' warning row from the same monorepo-anchored path family (doctor.ts:1837)"
+        "the monorepo-anchored skips: in the scaffold — which has NO packages/spec/src — capture verbatim the two informational rows 'ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)' and 'ℹ Deprecations          Skipped — no packages/spec/src in this directory (monorepo-only check)', then re-run with -v and capture the '→ Looked for <cwd>/packages/spec/src and found nothing to walk. …' detail line under each. Assert the ABSENCE of three lines in the SAME transcript: '✓ Test coverage         All *.zod.ts files have matching tests', '✓ Deprecations          No @deprecated tags found', and the '@objectstack/spec  Not built' warning row — that probe is now gated on <cwd>/packages/spec/package.json (doctor.ts:1929), so in a user app the row is correctly not printed at all. Then run the same command from a monorepo checkout for the counterpart transcript: there the '→ Checking…' step lines, the scan's own ✓/⚠ rows and '✓ @objectstack/spec    Built' all print"
       ],
       "acceptance": [
         {
-          "clause": "every environment check emits its own row — Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, Installed packages — and -v adds the fix/detail lines without changing the verdicts",
+          "clause": "every environment check emits its own row, and the finding-only rows appear exactly when their finding is live — Node.js, pnpm, TypeScript, Dependencies, Git and Environment files are unconditional; @objectstack/spec prints only where <cwd>/packages/spec/package.json exists (#10679), NODE_ENV only while NODE_ENV is unset (#5673), Tenancy posture only on an unrecognized value (#5382), and Installed packages only on a ledger failure or a skipped entry (#5429) — and -v adds the fix/detail lines without changing the verdicts",
           "oracle": "log",
-          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts:1918-1926); the -v run differs only by detail lines",
-          "evidence": "the paired transcripts"
+          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts:2014-2022); the six unconditional rows are pushed across doctor.ts:1838-1971 and the four finding-only rows at :1929-1948 (spec workspace, gated on the package.json probe), :1978-1981 (nodeEnvCheck), :1987-1989 (postureReading) and :2006-2007 (installedPackageLedgerChecks, which returns [] on a clean ledger); the -v run differs only by detail lines",
+          "evidence": "the paired scaffold transcripts, plus the same pair from a monorepo cwd — a conditional row that is absent and a row that was dropped read identically in one transcript alone"
         },
         {
           "clause": "#5387 env provenance: doctor resolves the same .env* cascade os serve reads, and the Environment files row names WHICH source supplied each value — the files are never silently merged into process.env",
           "oracle": "log",
-          "verify": "the .env-staged posture still produces the finding, and the Environment files row attributes it to that file rather than the shell (environmentSourcesCheck at doctor.ts:1875; pinned by doctor-env-provenance.test.ts — cite its pass as the attribution oracle, drive the CLI for the row itself)",
+          "verify": "the .env-staged posture still produces the finding, and the Environment files row attributes it to that file rather than the shell (environmentSourcesCheck at doctor.ts:1971; pinned by doctor-env-provenance.test.ts — cite its pass as the attribution oracle, drive the CLI for the row itself)",
           "evidence": "the transcript + the .env file staged"
         },
         {
           "clause": "#5382 posture honesty: an unrecognized OS_TENANCY_POSTURE is an ERROR row naming the variable — never swallowed by the config-analysis catch as 'Could not load config for analysis' — the rest of the report still runs, and the summary owns exit 1",
           "oracle": "log",
-          "verify": "the isolatd run prints the Tenancy posture error row, later report sections still print after it, and echo $? is 1 (posture resolved once at doctor.ts:1752-1753, outside every try; exit via the hasErrors summary at :2158-2163)",
+          "verify": "the isolatd run prints the Tenancy posture error row, later report sections still print after it, and echo $? is 1 (posture resolved once at doctor.ts:1828-1829, outside every try; exit via the hasErrors summary at :2296-2302)",
           "evidence": "transcript + exit code"
         },
         {
           "clause": "#5429 ledger independence: installed-package ledger rows print under EVERY posture including the default `single` — an unreadable entry under .objectstack/installed-packages/ is its own row whether or not a config loaded and whether or not any posture was set",
           "oracle": "log",
-          "verify": "the broken.json run with no posture set carries the Installed packages failure row (readInstalledPackageEntries called unconditionally at doctor.ts:1910-1911; posture-independence pinned by doctor-ledger-posture-independence.test.ts + doctor-ledger-read-failure.test.ts)",
+          "verify": "the broken.json run with no posture set carries the Installed packages failure row (readInstalledPackageEntries called unconditionally at doctor.ts:2006-2007; posture-independence pinned by doctor-ledger-posture-independence.test.ts + doctor-ledger-read-failure.test.ts)",
           "evidence": "the default-posture transcript"
         },
         {
           "clause": "the unique-scope ✓ is WITHHELD when the ledger read was incomplete: under `isolated` with an unreadable ledger entry, the 'Unique scope' success line must NOT print — a ✓ over an unexamined ledger is a false PASS (#5412/#5413/#5644)",
           "oracle": "log",
-          "verify": "the isolated+broken-ledger run prints no 'Unique scope … No unconfirmed installation-wide uniques' line (gated on ledgerReadingIsComplete at doctor.ts:2063-2065), while the same run with the entry removed prints it",
+          "verify": "the isolated+broken-ledger run prints no 'Unique scope … No unconfirmed installation-wide uniques' line (gated on ledgerReadingIsComplete at doctor.ts:2172-2174), while the same run with the entry removed prints it",
           "evidence": "the two isolated-run transcripts diffed on that line"
         },
         {
           "clause": "config-analysis rows both ways: the staged orphan view, circular lookup and unused object each produce a warning row naming the offender, and the restored config produces the three ✓ rows",
           "oracle": "log",
-          "verify": "detectCircularDependencies / findUnusedObjects / findOrphanViews rows (doctor.ts:1998-2080) name the staged shapes; the clean run prints 'Dependencies', 'Object usage', 'View integrity' successes",
+          "verify": "detectCircularDependencies / findUnusedObjects / findOrphanViews rows (called at doctor.ts:2110, :2122 and :2180) name the staged shapes; the clean run prints the 'Dependencies' (:2117), 'Object usage' (:2129) and 'View integrity' (:2187) successes",
           "evidence": "the staged and clean transcripts"
         },
         {
           "clause": "exit contract: 1 exactly when any ERROR row exists; warnings alone exit 0 under the '⚠️  Environment is functional' summary — warnings never flip the exit",
           "oracle": "log",
-          "verify": "echo $? per run matches the summary branch taken (process.exit(1) only under hasErrors, doctor.ts:2158-2169)",
+          "verify": "echo $? per run matches the summary branch taken (process.exit(1) only under hasErrors, doctor.ts:2296-2307)",
           "evidence": "exit codes paired with summary lines"
         },
         {
-          "clause": "EXPECTED-FAIL (product defect — record actual behavior): findMissingTests and findDeprecatedUsages examine only <cwd>/packages/spec/src (doctor.ts:1142-1143 and :1160-1161) and return [] in any user app, whereupon doctor prints '✓ Test coverage' (:1939) and '✓ Deprecations' (:1951) about a tree it never examined. By doctor's own withhold-the-✓ reasoning (the ledger clause above, :2049-2065) a ✓ over an unexamined tree is the FAIL: the ✓ must be withheld, scoped to the tree actually walked, or the check skipped with a named reason. Today it prints — the run records the verbatim lines as the failure evidence and extracts the defect card",
+          "clause": "the two monorepo-anchored scans report whether they RAN, and the ✓ is reachable only from the arm that did (#10679 — this clause was the EXPECTED-FAIL at revision 1 and is now an ordinary pass): findMissingTests and findDeprecatedUsages return a MonorepoTreeScan (doctor.ts:1173-1175, :1217-1233 and :1235-1257) whose `scanned: false` arm is taken in any app without <cwd>/packages/spec/src. There doctor prints neither ✓ and neither '→ Checking…' step line; each check KEEPS its name column and prints an informational skip naming the reason, and -v adds the directory doctor resolved and looked for. The skip goes through printInfo, never printWarning — withholding a false ✓ must not manufacture a false ⚠ (rationale at :1187-1191)",
           "oracle": "log",
-          "verify": "in the scaffold (no packages/spec/src anywhere) both ✓ lines print verbatim; the clause FAILS while they do, and flips to pass only when the tree ships a fix that withholds or scopes them",
-          "evidence": "the verbatim ✓ lines + an `ls packages/spec/src` refusal from the same cwd"
+          "verify": "in the scaffold (no packages/spec/src anywhere) the report carries 'ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)' and the same row for 'Deprecations' (monorepoTreeSkipNotice :1193-1206, printed at :2034 and :2050); the two ✓ lines (:2043, :2059) and their step lines are absent; and the skip rows move neither hasErrors nor hasWarnings, so the summary branch is the one the other rows earned. The -v run adds '→ Looked for <cwd>/packages/spec/src and found nothing to walk. …' under each. From a monorepo checkout the scanned arm still runs and its ✓/⚠ findings still print — the fix scoped the check, it did not delete it",
+          "evidence": "the verbatim skip rows from both the plain and the -v scaffold run, an `ls packages/spec/src` refusal from the same cwd, and the monorepo-cwd transcript showing the scanned arm still reporting"
         }
       ],
       "negative": [
         "an unrecognized posture reported only as 'Could not load config for analysis' with exit 0 is the exact #5382 regression the placement fix closed",
         "a 'Unique scope ✓' printed while an installed-packages entry was unreadable is a false PASS — worse than a missing check, because it stops the operator looking further",
         "warnings flipping the exit to 1, or an error row exiting 0, breaks every CI wrapper that gates on doctor",
-        "adjacent, same class as the expected-fail: the '@objectstack/spec  Not built' WARNING in a user app (doctor.ts:1837 probes <cwd>/packages/spec/dist) is monorepo-anchored noise — record it in the run notes; it is not this item's fail but belongs on the same defect card"
+        "a '@objectstack/spec  Not built' WARNING in a user app is a REGRESSION of #10679, not a note to record: outside this checkout there is no such workspace, and that row used to flip every stock scaffold to '⚠️  Environment is functional but has some warnings' while prescribing `pnpm --filter @objectstack/spec build`, a command that cannot succeed there. The probe is now gated on <cwd>/packages/spec/package.json (doctor.ts:1929) and the honest report in a user app is no row at all",
+        "a ⚠ rather than a ℹ on the Test coverage / Deprecations skip rows is the same false-signal class inverted: nothing is wrong in an app that has no packages/spec/src, and routing the skip through printWarning would end every healthy user app's report on 'Environment is functional but has some warnings'",
+        "the skip rows disappearing instead of printing is the other wrong shape — an operator scans the report by its name column, so a check that did not run must be PRESENT and say so"
       ],
       "traps": ["absence-inference", "stale-dist"],
       "source": [
-        "packages/cli/src/commands/doctor.ts (class at :1712, flags -v/--scan-deprecations :1715-1718, run body :1720-2172; posture resolve :1752-1753 + row :1891-1893; env sources row :1875; ledger read :1910-1911; unique-scope withhold :2049-2065; findMissingTests :1141-1157; findDeprecatedUsages :1159-1181; summary exit :2158-2169)",
-        "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
+        "packages/cli/src/commands/doctor.ts (class at :1788, flags -v/--scan-deprecations :1792-1793, run body :1796-2311; posture resolve :1828-1829 + row :1987-1989; env sources row :1971; NODE_ENV row :1978-1981; spec-workspace probe :1929-1948; ledger read :2006-2007; unique-scope withhold :2172-2174; MonorepoTreeScan :1173-1175, monorepoTreeSkipNotice :1193-1206, printMonorepoTreeSkip :1209-1215, findMissingTests :1217-1233, findDeprecatedUsages :1235-1257, their print sites :2032-2045 and :2048-2061; summary exit :2296-2307)",
+        "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts, doctor-unexamined-spec-tree.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
         "sibling item cli.flag-command-error-ux (owns only `os doctor --help`; this item is the command's first functional coverage)",
         "sibling item cli.doctor-deprecation-scan (the --scan-deprecations flag's own item — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts:1720-2172 with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts:1720-2172 with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-23", "change": "text refresh only, no capability change: #10679 landed the fix this item's expected-fail predicted, so that clause inverts into an ordinary pass. findMissingTests/findDeprecatedUsages now return a MonorepoTreeScan and the ✓ is reachable only from the scanned arm; outside a monorepo each check prints 'ℹ <name> Skipped — no packages/spec/src in this directory (monorepo-only check)', with the resolved directory under -v. Rewritten against a REAL run of the shipped CLI in a `create-objectstack -t blank` scaffold and again from a monorepo checkout, not from source: (a) the expected-fail clause, step 7 and the item title inverted; (b) the row enumeration in acceptance[0] and step 1 corrected — measurement falsified the premise that only @objectstack/spec became conditional: `Installed packages` was ALREADY findings-only (installedPackageLedgerChecks returns [] on a clean ledger) and had never been an unconditional row, and NODE_ENV/Tenancy posture are finding-only too, so the enumeration now splits unconditional from finding-only rather than naming one exception; (c) the '@objectstack/spec  Not built' negative flipped from an accepted note into a regression, its probe being gated at :1929; (d) two negatives added for the skip row's own wrong shapes (a ⚠ instead of a ℹ, and the row vanishing); (e) doctor-unexamined-spec-tree.test.ts added to the pins; (f) every line anchor in the item re-derived at this base — doctor.ts grew ~90 lines, so every number quoted at revision 1 had moved", "ref": "#10798" }
       ]
     },
     {
