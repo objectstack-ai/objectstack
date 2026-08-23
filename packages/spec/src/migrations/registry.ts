@@ -5133,7 +5133,17 @@ const step18: MigrationStep = {
     'on the highlight chip). The mechanical conversion strips the key from the object ' +
     'entries of every `record:highlights` `fields[]` (pure lossless delete — the chip ' +
     'renders label and value only, so it never had an effect to lose); there is no ' +
-    'replacement, and the live neighbour `readonly` (#5176) is untouched.',
+    'replacement, and the live neighbour `readonly` (#5176) is untouched. ' +
+    'It also retires the import mapping `lookup` transform\'s steering params (#10329, ' +
+    'ADR-0049 enforce-or-remove — the sub-walk half of 17.0.0\'s #4509 mapping cleanup): ' +
+    '`fieldMapping[].params.object` / `.fromField` / `.toField` / `.autoCreate` declared a ' +
+    'per-entry reference-resolution dialect the import path never implemented — `lookup` ' +
+    'copies the cell through and resolution runs off the target field\'s own metadata — ' +
+    'and `autoCreate` read as create-if-missing while an unresolved reference actually ' +
+    'fails the row (`import_reference_not_found`), with or without the key. The eleven ' +
+    'alias spellings convert to guidance so every spelling lands on the prescription; the ' +
+    'mechanical conversion strips the four keys from stored sources (pure lossless ' +
+    'deletes — none ever had an effect to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5143,6 +5153,7 @@ const step18: MigrationStep = {
     'field-column-lists-canonicalized',
     'metric-filters-removed',
     'record-highlights-field-icon-removed',
+    'mapping-lookup-params-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

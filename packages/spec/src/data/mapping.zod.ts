@@ -77,6 +77,79 @@ const MAPPING_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
 };
 
 /**
+ * `params`' lookup-steering keys, retired in the 17.x line (#10329, ADR-0049).
+ *
+ * `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
+ * reference-resolution dialect that the import path never implemented:
+ * `applyMappingToRows` handles `lookup` in the same branch as `none` (the cell
+ * is copied through unchanged), and reference resolution happens afterwards in
+ * `import-coerce.ts`, driven by the TARGET FIELD's own metadata — never by
+ * these keys. Implementing them was considered and declined (a second
+ * reference-resolution dialect on the import path; the code comment in
+ * `packages/rest/src/import-mapping.ts` declines it and the #10329 triage
+ * ruling confirms), so under ADR-0049 they go.
+ *
+ * `autoCreate` is the one with teeth: it reads as "create the referenced
+ * record when nothing matches", and what actually happens — with or without
+ * the key — is that the row FAILS with an unresolved-reference error
+ * (`import_reference_not_found`). The guidance says so outright.
+ *
+ * The alias spellings (`lookupObject`/`targetObject`, `match`/`matchOn`/
+ * `matchField`/`keyField`, `returnField`/`valueField`, `create`/
+ * `createIfMissing`/`upsert`) are listed too: an author who learned any of
+ * them should land on the prescription, not on a "did you mean" pointing at a
+ * key that is also gone.
+ */
+const RETIRED_LOOKUP_OBJECT =
+  '`fieldMapping[].params.object` was removed in @objectstack/spec 17 (#10329, ADR-0049) — the '
+  + '`lookup` transform never read it: the cell is copied through unchanged and the import '
+  + 'pipeline resolves references from the TARGET FIELD\'s own metadata (the field\'s declared '
+  + '`reference` names the lookup object), so "Lookup Object" steered nothing. Delete the key; '
+  + 'point `target` at a reference field and the referenced object is the field\'s own '
+  + '`reference`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const RETIRED_LOOKUP_FROM_FIELD =
+  '`fieldMapping[].params.fromField` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  + 'the `lookup` transform never read it: the import pipeline matches the cell\'s display '
+  + 'value (name / email / id) against the referenced object itself, not against a '
+  + 'mapping-declared match field, so "Match on" steered nothing. Delete the key. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const RETIRED_LOOKUP_TO_FIELD =
+  '`fieldMapping[].params.toField` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  + 'the `lookup` transform never read it: reference resolution always writes the referenced '
+  + 'record\'s id (what a reference column stores), so "Value to take" steered nothing. '
+  + 'Delete the key. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const RETIRED_LOOKUP_AUTO_CREATE =
+  '`fieldMapping[].params.autoCreate` was removed in @objectstack/spec 17 (#10329, ADR-0049) — '
+  + 'it read as "create the referenced record when nothing matches", and nothing was ever '
+  + 'created: with or without this key, a cell that resolves to no record FAILS its row with an '
+  + 'unresolved-reference error (`import_reference_not_found`). Delete the key; create or '
+  + 'import the referenced records first, then import the rows that point at them. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const PARAMS_RETIRED_KEY_GUIDANCE: Readonly<Record<string, string>> = {
+  object: RETIRED_LOOKUP_OBJECT,
+  lookupObject: RETIRED_LOOKUP_OBJECT,
+  targetObject: RETIRED_LOOKUP_OBJECT,
+  fromField: RETIRED_LOOKUP_FROM_FIELD,
+  match: RETIRED_LOOKUP_FROM_FIELD,
+  matchOn: RETIRED_LOOKUP_FROM_FIELD,
+  matchField: RETIRED_LOOKUP_FROM_FIELD,
+  keyField: RETIRED_LOOKUP_FROM_FIELD,
+  toField: RETIRED_LOOKUP_TO_FIELD,
+  returnField: RETIRED_LOOKUP_TO_FIELD,
+  valueField: RETIRED_LOOKUP_TO_FIELD,
+  autoCreate: RETIRED_LOOKUP_AUTO_CREATE,
+  create: RETIRED_LOOKUP_AUTO_CREATE,
+  createIfMissing: RETIRED_LOOKUP_AUTO_CREATE,
+  upsert: RETIRED_LOOKUP_AUTO_CREATE,
+};
+
+/**
  * Transformation Logic
  * Built-in helpers for converting data during import.
  */
@@ -150,22 +223,27 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
     history: MAPPING_HISTORY,
     aliases: {
       default: 'value', defaultValue: 'value', constant: 'value',
-      lookupObject: 'object', targetObject: 'object',
-      match: 'fromField', matchOn: 'fromField', matchField: 'fromField', keyField: 'fromField',
-      returnField: 'toField', valueField: 'toField',
-      create: 'autoCreate', createIfMissing: 'autoCreate', upsert: 'autoCreate',
+      // NOTE: `lookupObject` / `targetObject` / `match` / `matchOn` /
+      // `matchField` / `keyField` / `returnField` / `valueField` / `create` /
+      // `createIfMissing` / `upsert` were aliases onto the four lookup keys
+      // removed in the 17.x line (#10329). An alias pointing at a key that no
+      // longer exists routes the author into a second rejection, so their
+      // spellings fall through to the `guidance` prescriptions instead —
+      // the 17.0.0 (#4509) treatment, one level down.
       map: 'valueMap', mapping: 'valueMap', values: 'valueMap', valueMapping: 'valueMap',
       delimiter: 'separator', splitOn: 'separator', joinWith: 'separator',
     },
+    guidance: PARAMS_RETIRED_KEY_GUIDANCE,
   }, {
     // Constant
     value: z.unknown().optional(),
 
-    // Lookup
-    object: z.string().optional(), // Lookup Object
-    fromField: z.string().optional(), // Match on (e.g. "name")
-    toField: z.string().optional(), // Value to take (e.g. "id")
-    autoCreate: z.boolean().optional(), // Create if missing
+    // `object` / `fromField` / `toField` / `autoCreate` — the `lookup`
+    // transform's steering keys — were removed in the 17.x line (#10329,
+    // ADR-0049); see PARAMS_RETIRED_KEY_GUIDANCE above. The live mechanism:
+    // `lookup` copies the cell through and the import pipeline resolves the
+    // reference from the target field's own metadata (`import-coerce.ts`),
+    // so there was never anything for these to steer.
 
     // Map
     valueMap: z.record(z.string(), z.unknown()).optional(), // { "Open": "draft" }

@@ -129,14 +129,6 @@ path, one is a deliberate pass-through, and one is refused:
 | `lookup` | **Pass-through.** The cell is copied unchanged, and the import's own reference resolution turns the display text into a record id afterwards — see [After the mapping](#after-the-mapping-cell-coercion). | — |
 | `javascript` | **Refused.** There is no server-side sandbox, and silently skipping a declared transform would corrupt data. `defineStack()` fails the build; a runtime-saved mapping is rejected by the import request with `400 UNSUPPORTED_TRANSFORM`. | — |
 
-<Callout type="warn">
-  The `lookup` transform's own `params` keys (`object`, `fromField`, `toField`,
-  `autoCreate`) parse, but the import path reads none of them: reference resolution is
-  driven by the **target object's field definitions**, not by the mapping. Do not write
-  them expecting them to steer anything — tracked as
-  [#10329](https://github.com/objectstack-ai/objectstack/issues/10329).
-</Callout>
-
 For logic beyond these, transform the data before you post it, or model it as a
 [flow](/docs/automation) on the target object.
 

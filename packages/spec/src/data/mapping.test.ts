@@ -87,23 +87,92 @@ describe('ImportFieldMappingSchema', () => {
     expect(mapping.params?.value).toBe('active');
   });
 
-  it('should accept lookup transform', () => {
+  it('should accept lookup transform (a pass-through with no params of its own)', () => {
     const mapping = ImportFieldMappingSchema.parse({
       source: 'account_name',
       target: 'account_id',
       transform: 'lookup',
-      params: {
-        object: 'account',
-        fromField: 'name',
-        toField: 'id',
-        autoCreate: false
-      }
     });
 
     expect(mapping.transform).toBe('lookup');
-    expect(mapping.params?.object).toBe('account');
-    expect(mapping.params?.fromField).toBe('name');
-    expect(mapping.params?.toField).toBe('id');
+  });
+
+  // ── `params` lookup keys retired in the 17.x line (#10329, ADR-0049) ───────
+  //
+  // `object` / `fromField` / `toField` / `autoCreate` declared a per-entry
+  // reference-resolution dialect the import path never implemented: `lookup`
+  // copies the cell through and resolution runs afterwards off the target
+  // field's own metadata. These pin the REJECTION carrying the prescription,
+  // not just the absence — the schema is strict, so a bare "unrecognized key"
+  // would already fail; what must survive refactors is the guidance.
+
+  const lookupEntry = { source: 'account_name', target: 'account_id', transform: 'lookup' as const };
+
+  it('rejects the retired `params.object` with the target-field-metadata prescription', () => {
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry,
+      params: { object: 'account' },
+    })).toThrow(/params\.object.*removed.*TARGET FIELD/s);
+  });
+
+  it('rejects the retired `params.fromField` with the display-value-matching prescription', () => {
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry,
+      params: { fromField: 'name' },
+    })).toThrow(/params\.fromField.*removed.*display.*value/s);
+  });
+
+  it('rejects the retired `params.toField` with the record-id prescription', () => {
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry,
+      params: { toField: 'id' },
+    })).toThrow(/params\.toField.*removed.*record.*id/s);
+  });
+
+  it('rejects the retired `params.autoCreate` saying what ACTUALLY happens (row fails)', () => {
+    // The one with teeth: the key read as "create the referenced record when
+    // nothing matches". Nothing was ever created — the row fails with an
+    // unresolved-reference error either way — so the prescription must say so
+    // rather than merely "removed".
+    const parse = () => ImportFieldMappingSchema.parse({
+      ...lookupEntry,
+      params: { autoCreate: true },
+    });
+    expect(parse).toThrow(/params\.autoCreate.*removed/s);
+    expect(parse).toThrow(/nothing was ever created/is);
+    expect(parse).toThrow(/import_reference_not_found/s);
+  });
+
+  it('routes the retired ALIAS spellings to the same prescriptions', () => {
+    // The alias table used to fold eleven spellings onto the four keys. Leaving
+    // them as aliases would answer "did you mean `fromField`?" — a rename
+    // suggestion pointing at a key that is also gone, i.e. a second rejection.
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry, params: { lookupObject: 'account' },
+    })).toThrow(/params\.object.*removed/s);
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry, params: { matchOn: 'name' },
+    })).toThrow(/params\.fromField.*removed/s);
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry, params: { returnField: 'id' },
+    })).toThrow(/params\.toField.*removed/s);
+    expect(() => ImportFieldMappingSchema.parse({
+      ...lookupEntry, params: { createIfMissing: true },
+    })).toThrow(/params\.autoCreate.*removed/s);
+  });
+
+  it('leaves the surviving params surface intact', () => {
+    const mapping = ImportFieldMappingSchema.parse({
+      source: 'status',
+      target: 'status_code',
+      transform: 'map',
+      params: { valueMap: { Open: 'open' } },
+    });
+    expect(mapping.params).not.toHaveProperty('object');
+    expect(mapping.params).not.toHaveProperty('fromField');
+    expect(mapping.params).not.toHaveProperty('toField');
+    expect(mapping.params).not.toHaveProperty('autoCreate');
+    expect(mapping.params?.valueMap).toHaveProperty('Open', 'open');
   });
 
   it('should accept map transform', () => {
@@ -375,14 +444,11 @@ describe('MappingSchema', () => {
           params: { value: 'active' }
         },
         {
+          // `lookup` is a pass-through: the import pipeline resolves the
+          // reference from the target field's own metadata (#10329).
           source: 'account_name',
           target: 'account_id',
-          transform: 'lookup',
-          params: {
-            object: 'account',
-            fromField: 'name',
-            toField: 'id'
-          }
+          transform: 'lookup'
         },
         {
           source: ['first_name', 'last_name'],

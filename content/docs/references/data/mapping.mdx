@@ -30,7 +30,7 @@ const result = ImportFieldMappingSchema.parse(data);
 | **source** | `string \| string[]` | ✅ | Source column header(s) |
 | **target** | `string \| string[]` | ✅ | Target object field(s) |
 | **transform** | `Enum<'none' \| 'constant' \| 'lookup' \| 'split' \| 'join' \| 'javascript' \| 'map'>` | optional (default: `"none"`) |  |
-| **params** | `{ value?: any; object?: string; fromField?: string; toField?: string; … }` | optional |  |
+| **params** | `{ value?: any; valueMap?: Record<string, any>; separator?: string }` | optional |  |
 
 
 ---
