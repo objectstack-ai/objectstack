@@ -178,6 +178,29 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — no dispatch, no nag; restart condition in the hold comment" 2>/dev/null || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" 2>/dev/null || true
+  # pm:awaiting-maintainer — the state for a card whose remaining work is a
+  # MANUAL maintainer action (maintainer ruling 2026-08-23, verbatim: 「可以新标
+  # 签,最好 pm: 开头」; the spelling was finalized in the implementing PR).
+  # It exists because the two adjacent states are both wrong for that shape and
+  # the specimen card oscillated between them: needs-user-decision is the RULING
+  # inbox (here the ruling is already given, and parking an act there inflates
+  # the count of decisions owed), while pm:on-hold requires a machine-fireable
+  # Restart-when: line — H9 counts `Restart-when: manual — …` as MISSING by
+  # design, so a hold is the one state this card can never be well-formed in.
+  # ⛔ MUTUALLY EXCLUSIVE with pm:queue / pm:dispatched / pm:blocked /
+  # pm:on-hold / needs-user-decision: the state labels are one-of, and a second
+  # state claim declares a second release mechanism that does not exist.
+  # Named consumers, all in scripts/pm/check-half-states.mjs: H25 (that
+  # exclusivity), H11 (its parked inventory — an important card in a state with
+  # no machine exit ages out of sight unless a human is re-asked), H13's
+  # PM_STATE_LABELS (a card in this state HAS a state, so it must not read as
+  # the half-annotated shape) and H22's PM_RESIDUE_LABELS (a claim that an act
+  # is still owed is residue on a closed card). Five-repo loop for the same
+  # reason priority:p0 and pm:retriage are in it: the sweep is repo-parameterized
+  # (PM_SWEEP_REPO) and the state-model row requires the label in all five.
+  # Colour: needs-user-decision's family (a HUMAN owes something), one shade
+  # lighter because the ruling here is already given.
+  gh label create pm:awaiting-maintainer -R "$R" -c e99695 -d "Awaiting a manual maintainer action — ruling already given; no dispatch, no machine exit" 2>/dev/null || true
   # priority:p0 is the QUEUE-JUMP tier of the lane pull order, and ordering
   # only: a p0 card still obeys the same-file serial queue and the claim
   # protocol (SKILL.md state model, 「优先是排序,不是豁免」). Set by the triage

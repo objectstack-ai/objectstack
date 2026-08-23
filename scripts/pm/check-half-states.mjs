@@ -435,6 +435,44 @@
  *       (2026-08-22); a blocking posture for this surface is a later card on
  *       its own baseline.
  *
+ * ## H24 + H25 — the queue/assignee contradiction, and the state that closes it
+ *
+ *   H24 an OPEN card carrying `pm:queue` with a NON-EMPTY assignee — the queue
+ *       view reads it as dispatchable, the claim rule reads it as taken, and
+ *       both readers are right about the field they read, so the card is
+ *       available to everyone and forbidden to everyone at once. A pure
+ *       intersection of two fields: no threshold, no timestamp, no identity
+ *       test. Every adjacent row declines the shape for a reason of its own —
+ *       H1 wants NO assignee, H2 wants a MISSING claim comment (the measured
+ *       carriers have complete ones), H3 wants two LABELS while here the
+ *       second half of the contradiction is a FIELD — which is how 17 cards
+ *       across three repos (2026-08-23 census: 6 objectstack, 10 objectui, 1
+ *       cloud) sat in it with nothing reporting them. The measured origin is a
+ *       state ROLLBACK that swaps the label and leaves the field: of the three
+ *       rollback paths, only dead-claim reclamation ever named the assignee
+ *       drop, so H8's and H19's remedy sentences now name it too (「同笔摘
+ *       assignee」). ⚠️ The field carries two meanings — dead agent claims and
+ *       genuine human ownership — and the row deliberately does NOT try to tell
+ *       them apart: the ruling of 2026-08-23 puts the rule FIRST and any
+ *       true-ownership exemption in an explicit marker LATER, never the other
+ *       way round. It names the login instead, and states the asymmetric
+ *       remedy (an agent may clear agent residue; ⛔ never a human's).
+ *   H25 `pm:awaiting-maintainer` coexisting with another pm STATE label — the
+ *       exclusivity half of the new state ruled in on 2026-08-23 (「可以新标
+ *       签,最好 pm: 开头」). The state exists because the board had no legal
+ *       place for "everything mechanical is done, a human must now act":
+ *       `needs-user-decision` is the ruling inbox (the ruling here is already
+ *       given) and `pm:on-hold` requires a machine-fireable `Restart-when:`
+ *       (H9), which this card can never have. Each forbidden pairing is a
+ *       specific lie about which mechanism will release the card, and the row
+ *       names the one it found. Written while the population is zero, which is
+ *       the cheapest moment to pin a vocabulary. The label also joins H11's
+ *       parked inventory, H13's state vocabulary and H22's residue set, so the
+ *       new state is a first-class citizen of every reader rather than a hole
+ *       four rows wide. ⛔ Deferred, declared rather than dropped: the SKILL.md
+ *       state-model row (its protocol face) and applying the label to the
+ *       specimen card, which is a seat's write.
+ *
  * ## The close mechanism, measured (#8293)
  *
  * A half-delivered card (#8131) was closed `completed` two seconds after its
@@ -663,6 +701,38 @@ const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 export function labelNames(issue) {
   return (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name));
 }
+
+/**
+ * The "awaiting a manual maintainer action" state (#11196 fix 5, maintainer
+ * ruling 2026-08-23, verbatim: 「可以新标签,最好 pm: 开头」 — the spelling is
+ * finalized here, in the implementing PR the ruling sent it to).
+ *
+ * It exists because the board had NO legal state for its shape, and the two
+ * adjacent states are both wrong in a way that made a card oscillate between
+ * them (the measured specimen, #7276: everything mechanical is done and the
+ * remaining action is the maintainer clicking through a Routines UI):
+ *
+ *   `needs-user-decision`  is the DECISION inbox — a question awaiting an
+ *                          answer. Here the decision is already made; what is
+ *                          outstanding is an ACT, and parking it in the inbox
+ *                          makes the inbox lie about how many rulings are owed.
+ *   `pm:on-hold`           requires a machine-fireable `Restart-when:` line
+ *                          (H9), and `Restart-when: manual — …` counts as
+ *                          MISSING there by deliberate design. A hold is the
+ *                          one state this card can never be well-formed in.
+ *
+ * ⛔ It is defined here, at the top of the predicates, and not beside the item
+ * that introduced it: four separate readers key on it (H11's parked inventory,
+ * H13's state vocabulary, H22's residue set, H25's exclusivity) and a module
+ * constant they all import cannot drift the way four string literals would —
+ * which is the failure family this whole file belongs to.
+ *
+ * Deliberately NOT decided here, and declared rather than dropped: the
+ * SKILL.md state-model table row (its protocol face — who applies it, who
+ * removes it, what a card in it owes) lands separately, and applying the label
+ * to the specimen card is the seat's write, never this script's.
+ */
+export const AWAITING_MAINTAINER_LABEL = 'pm:awaiting-maintainer';
 
 export function h1DispatchedNoAssignee(issue) {
   const labels = labelNames(issue);
@@ -1350,7 +1420,13 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   return (
     `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
     `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
-    `remainder (re-queue, close, or block the un-delivered half) in the same stroke.`
+    `remainder (re-queue, close, or block the un-delivered half) in the same stroke, ` +
+    `and 「同笔摘 assignee」 — the landing re-label owes the ASSIGNEE DROP too. A ` +
+    `re-graded card that keeps the finished dev's assignee lands straight in H24's ` +
+    `two-views contradiction (\`pm:queue\` + assigned = dispatchable to the queue view, ` +
+    `taken to the claim rule), which is how 17 cards across three repos got stuck where ` +
+    `nobody could legally move them (#11196). ⚠️ Agent identity only: a HUMAN assignment ` +
+    `may be real ownership and is ⛔ never cleared by an agent.`
   );
 }
 
@@ -1532,6 +1608,21 @@ export function h10StaleUnclaimedP0(issue, nowMs = Date.now()) {
 export const IMPORTANT_PARKED_STALE_DAYS = 7;
 
 /**
+ * The states H11 counts as PARKED — every state in which an open card is
+ * legitimately not being worked, so an importance signal can sit inside it
+ * indefinitely without anyone's queue showing it.
+ *
+ * `pm:awaiting-maintainer` joined the set with the state itself (#11196 fix 5)
+ * rather than being left for a later card, because the omission would have
+ * re-created H11's own defect one state to the left: a `bug` card parked
+ * awaiting a manual action is the exact inventory the maintainer named
+ * (2026-08-16, 「我担心的优先的,重要的问题…被放进 blocked 或者 on-hold 没人理
+ * 会」), and a new parked state invisible to the inventory row is a new place
+ * for it to hide.
+ */
+export const PARKED_STATE_LABELS = ['pm:blocked', 'pm:on-hold', AWAITING_MAINTAINER_LABEL];
+
+/**
  * H11 — null when clean, else the finding sentence.
  *
  * Importance is read from BOTH the native issue type (`Bug`, object or string
@@ -1544,7 +1635,7 @@ export const IMPORTANT_PARKED_STALE_DAYS = 7;
  */
 export function h11ImportantParked(issue, nowMs = Date.now()) {
   const labels = labelNames(issue);
-  const parked = labels.includes('pm:blocked') || labels.includes('pm:on-hold');
+  const parked = labels.some((l) => PARKED_STATE_LABELS.includes(l));
   if (!parked) return null;
   const typeName = typeof issue.type === 'string' ? issue.type : issue.type?.name;
   const signals = [];
@@ -1556,16 +1647,26 @@ export function h11ImportantParked(issue, nowMs = Date.now()) {
   const created = Date.parse(issue.created_at ?? '');
   const ageDays = Number.isFinite(created) ? (nowMs - created) / 86_400_000 : null;
   if (ageDays !== null && ageDays <= IMPORTANT_PARKED_STALE_DAYS) return null;
-  const state = labels.includes('pm:blocked') ? 'pm:blocked' : 'pm:on-hold';
+  const state = PARKED_STATE_LABELS.find((l) => labels.includes(l));
   const age =
     ageDays === null
       ? 'an unreadable `created_at` (which must not read as fresh)'
       : `open ~${Math.round(ageDays)}d`;
+  // The exit a parked card owes is state-specific, so the remedy names the one
+  // this card actually has: a hold/block is re-checked mechanically, while
+  // `pm:awaiting-maintainer` has no machine exit BY CONSTRUCTION (that is why
+  // it exists), and prescribing a `Restart-when:` re-check for it would send
+  // the reader to look for a line the state is defined by not having.
+  const exit =
+    state === AWAITING_MAINTAINER_LABEL
+      ? `This state has NO machine exit by construction — the release is the maintainer action the ` +
+        `card names — so an important card in it ages out of sight unless a human is re-asked. ` +
+        `Re-surface it to the maintainer in the triage round.`
+      : `Re-check the card's \`Blocked-by:\` / \`Restart-when:\` liveness in the triage round.`;
   return (
     `important card parked: ${signals.join(' + ')} sitting in \`${state}\`, ${age} ` +
     `(threshold ${IMPORTANT_PARKED_STALE_DAYS}d) — the important-parked inventory exists so a bug ` +
-    `or security card cannot age out of sight inside a parked state. Re-check the card's ` +
-    `\`Blocked-by:\` / \`Restart-when:\` liveness in the triage round.`
+    `or security card cannot age out of sight inside a parked state. ${exit}`
   );
 }
 
@@ -1643,6 +1744,12 @@ export const PM_STATE_LABELS = [
   'pm:dispatched',
   'pm:blocked',
   'pm:on-hold',
+  // A card awaiting a manual maintainer action HAS a state and a named reader
+  // (the triage round re-surfaces it), so it is not the half-annotated shape
+  // H13 reports. Omitting it here would make every card in the new state a
+  // standing H13 finding two hours after it entered — a new label that fires a
+  // false row on every carrier is worse than no label at all.
+  AWAITING_MAINTAINER_LABEL,
   'pm:epic',
   'pm:seat',
   'needs-user-decision',
@@ -2783,7 +2890,11 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
     'condition already spent, re-fired, reinstates an expired premise as the current one), and ② refuse ' +
     'to release when the card carries a MERGED PR newer than that conversion comment (the card moved on ' +
     'after the condition was written, so the cited fact can be true and no longer current). This row ' +
-    'surfaces the candidate; the unlock sweep releases it — ⛔ never a label written from this script.';
+    'surfaces the candidate; the unlock sweep releases it — ⛔ never a label written from this script. ' +
+    'When that release does happen, its paired write includes 「同笔摘 assignee」: a card returned to ' +
+    '`pm:queue` still carrying the assignee of the seat that parked it is dispatchable to the queue ' +
+    'view and taken to the claim rule at the same time (H24), which is the state the unlock scan was ' +
+    'measured leaving behind — ⚠️ agent identity only, a HUMAN assignment is ⛔ never cleared by an agent.';
 
   if (closed.length > 0) {
     const rest =
@@ -3365,7 +3476,22 @@ export function h21NegatedClosingKeyword(pr) {
  *                 measures it, rather than being widened in on a hunch. The
  *                 set is one edit away when that measurement exists.
  */
-export const PM_RESIDUE_LABELS = ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:on-hold', 'pm:blocking'];
+export const PM_RESIDUE_LABELS = [
+  'pm:dispatched',
+  'pm:queue',
+  'pm:blocked',
+  'pm:on-hold',
+  'pm:blocking',
+  // `pm:awaiting-maintainer` is residue on a closed card for the same reason
+  // `pm:on-hold` is: it claims an action is still OWED. It joins the set with
+  // the state itself (#11196 fix 5) rather than waiting for a census the way
+  // `pm:retriage` does, and the two cases are not alike — `pm:retriage` was
+  // measured absent from a live population, while this label has no live
+  // population at all yet. Adding it now costs nothing (it can only match a
+  // card that carries it) and means the state cannot accumulate exactly the
+  // closed-card residue this row exists to catch before anyone measures it.
+  AWAITING_MAINTAINER_LABEL,
+];
 
 /**
  * H22 — null when the closed card is clean, else the finding sentence.
@@ -3554,6 +3680,166 @@ export function h23CommitMessageContradiction(commit) {
     `is the PR-BODY remedy (H7's and H21's sentences end with it, correctly, for bodies) and it is ` +
     `false on this surface. The only fix here is to REWORD, so that no closing keyword sits next to ` +
     `a card number.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H24 — an OPEN card that is `pm:queue` AND assigned: the board saying two
+// contradictory things about one card at once (#11196 fix 1).
+//
+// ## Why it is its own row rather than a widening of H1/H2/H3
+//
+// Every adjacent row declines this shape for a reason of its own, which is how
+// 17 cards across three repos sat in it with nothing reporting them: H1 wants a
+// dispatched card with NO assignee (this one HAS one), H2 wants a MISSING claim
+// comment (the measured carriers have complete ones — they were claimed, worked
+// and then rolled back), and H3 wants two LABELS (here exactly one label is
+// present and the second half of the contradiction lives in a different FIELD).
+// The shape falls precisely between them.
+//
+// ## What the contradiction costs
+//
+// The two readers disagree and BOTH are right about what they read:
+//
+//   the queue view    reads `pm:queue` as "dispatchable now";
+//   the claim rule    reads a non-empty assignee as "taken, ⛔ never reassign".
+//
+// So the card is simultaneously available to everyone and forbidden to
+// everyone, and the outcome is not a race but PARALYSIS — a card nobody can
+// legally move, in the one state no seat has a reason to look at twice. The
+// census this row was filed on (2026-08-23, REST full pagination): 135 open
+// `pm:queue` cards in objectstack of which 6 were assigned, 146/10 in objectui,
+// 19/1 in cloud.
+//
+// ## Zero judgement, by construction — and the ordering that makes it safe
+//
+// The predicate is a pure intersection of two fields with no threshold, no
+// timestamp and no identity test in it. That is deliberate: the same census
+// found the assignee field carrying TWO different meanings (dead agent claims
+// left by a state rollback, and genuine human ownership on a handful of
+// objectui cards), and a row that tried to tell them apart would be guessing at
+// the one thing this file refuses to guess at. The maintainer's ruling settles
+// the order (2026-08-23): the rule lands FIRST and any true-ownership exemption
+// is an explicit marker LATER — never the other way round. An exemption
+// invented here, in the absence of that marker, would silently un-report the
+// exact population the row exists for.
+//
+// ⛔ And the remedy is asymmetric, so the sentence says so: an agent may clear
+// a dead agent claim on the evidence, and must NEVER clear a human's
+// assignment.
+// ---------------------------------------------------------------------------
+
+/**
+ * H24 — null when clean, else the finding sentence.
+ *
+ * Gated on the card being OPEN (like H22's gate, in mirror image): a closed
+ * card carrying `pm:queue` is H22's residue row, and reporting it here too
+ * would double-count one card under two items that prescribe different writes.
+ * `state` is absent from some fixtures and every live open listing sets it, so
+ * only an explicit `closed` declines — an unknown state is judged, never used
+ * as a silent exemption.
+ */
+export function h24QueuedWithAssignee(issue) {
+  if (issue?.state === 'closed') return null;
+  if (!labelNames(issue ?? {}).includes('pm:queue')) return null;
+  const logins = (issue?.assignees ?? [])
+    .map((a) => (typeof a === 'string' ? a : a?.login))
+    .filter(Boolean);
+  if (logins.length === 0) return null;
+  return (
+    `\`pm:queue\` while ASSIGNED to ${logins.map((l) => `\`${l}\``).join(', ')} — the board makes ` +
+    'two contradictory claims about this one card: the queue view reads `pm:queue` as ' +
+    'dispatchable NOW, and the claim protocol reads a non-empty assignee as TAKEN (⛔ never ' +
+    'reassign). Both readers are right about what they read, so the card is available to everyone ' +
+    'and forbidden to everyone at once — not a race, a card nobody can legally move. The measured ' +
+    'origin is a state ROLLBACK that swapped the label and left the field: the landing re-label ' +
+    'and the unlock scan both owe 「同笔摘 assignee」 and only dead-claim reclamation ever said ' +
+    'so (17 carriers across three repos at the 2026-08-23 census). Remedy: whichever write set ' +
+    '`pm:queue` owes the assignee drop in the SAME stroke — do it now. ⚠️ Asymmetric: an agent ' +
+    'identity in that field is dead-claim residue and may be cleared on its evidence; a HUMAN ' +
+    'assignment may be real ownership and ⛔ must never be cleared by an agent — take it to the ' +
+    'maintainer. This row fires either way and states the login so the reader can tell them ' +
+    'apart: the rule lands first and an ownership exemption is an explicit marker later, never ' +
+    'the other way round (ruling 2026-08-23).'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H25 — `pm:awaiting-maintainer` coexisting with another pm STATE label
+// (#11196 fix 5, the exclusivity half of the new state).
+//
+// The state model makes the pm state labels ONE-OF: each is a claim about
+// where the card is, and two of them at once leaves every reader to pick. H3
+// is the same invariant for the one pair that was measured drifting, and this
+// row is the same invariant for the newest state — written now, while the
+// population is zero, because the cheapest moment to pin a vocabulary is
+// before anything can carry it.
+//
+// Each coexistence is a specific lie, not a generic tidiness complaint:
+//
+//   + `pm:queue`             dispatchable AND waiting on a human — H24's
+//                            two-views contradiction with a different second
+//                            half, and the shape this whole family is about.
+//   + `pm:dispatched`        a dev is on it AND nobody is: the label pair says
+//                            an agent is working a card whose next act is the
+//                            maintainer's.
+//   + `pm:blocked`           two different release mechanisms are declared at
+//                            once (an unlock scan over `Blocked-by:`, and a
+//                            human act), so neither reader can tell which one
+//                            will actually free it.
+//   + `pm:on-hold`           the hold requires a machine-fireable
+//                            `Restart-when:` (H9) and this state exists
+//                            precisely for the card that cannot have one.
+//                            Carrying both claims an exit that does not exist.
+//   + `needs-user-decision`  the decision inbox says a RULING is owed; this
+//                            state says a ruling was already given and an ACT
+//                            is owed. Both at once inflates the inbox with a
+//                            question nobody has to answer.
+//
+// ⛔ Deliberately NOT here, and deferred rather than dropped: any requirement
+// that the card NAME the awaited action. That is a grammar for a protocol face
+// the SKILL.md state-model row has not been written for yet, and inventing one
+// in the sweeper would make the sweeper the author of the protocol it audits.
+// ---------------------------------------------------------------------------
+
+/** The states `pm:awaiting-maintainer` must never coexist with. */
+export const AWAITING_MAINTAINER_EXCLUSIVE_LABELS = [
+  'pm:queue',
+  'pm:dispatched',
+  'pm:blocked',
+  'pm:on-hold',
+  'needs-user-decision',
+];
+
+/**
+ * Why each coexistence is a contradiction — one clause per label, so the
+ * finding names the specific lie rather than "these two labels disagree".
+ */
+const AWAITING_MAINTAINER_CONFLICT_REASON = {
+  'pm:queue': 'dispatchable now AND waiting on a human act',
+  'pm:dispatched': 'an agent is working it AND the next act is the maintainer\'s',
+  'pm:blocked': 'two different release mechanisms declared at once (unlock scan vs. a human act)',
+  'pm:on-hold': 'a hold owes a machine-fireable `Restart-when:` (H9) and this state is for the card that cannot have one',
+  'needs-user-decision': 'the decision inbox says a ruling is owed; this state says one was already given',
+};
+
+/** H25 — null when clean, else the finding sentence. */
+export function h25AwaitingMaintainerExclusivity(issue) {
+  if (issue?.state === 'closed') return null;
+  const labels = labelNames(issue ?? {});
+  if (!labels.includes(AWAITING_MAINTAINER_LABEL)) return null;
+  const conflicts = AWAITING_MAINTAINER_EXCLUSIVE_LABELS.filter((l) => labels.includes(l));
+  if (conflicts.length === 0) return null;
+  const named = conflicts
+    .map((l) => `\`${l}\` (${AWAITING_MAINTAINER_CONFLICT_REASON[l]})`)
+    .join('; ');
+  return (
+    `\`${AWAITING_MAINTAINER_LABEL}\` coexists with ${named} — the pm state labels are ONE-OF, ` +
+    'and two state claims on one card leave every reader to pick which is true. The awaiting ' +
+    'state is the card whose remaining work is a MANUAL maintainer action, which is exactly why ' +
+    'it has no machine exit; pairing it with a state that declares a different exit tells the ' +
+    'unlock scan, the queue view and the decision inbox three different stories. Keep the ONE ' +
+    'state that is true and drop the other(s) in a single write.'
   );
 }
 
@@ -4649,7 +4935,14 @@ async function listAllOpenIssues() {
 }
 
 async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null) {
-  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', 'priority:p0']) {
+  // `pm:awaiting-maintainer` is listed like every other state label (#11196
+  // fix 5). H25's exclusivity carriers would be reachable through the label
+  // they wrongly coexist with, but a card in the state ALONE would otherwise be
+  // swept by nothing at all — no H2 claim check, no H11 parked inventory — and
+  // "the patrol's input set is narrower than the states the board produces" is
+  // the defect this whole family is about. One label page per sweep, four
+  // sweeps a day, against a 15,000/h core quota.
+  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', AWAITING_MAINTAINER_LABEL, 'priority:p0']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
 
@@ -4729,6 +5022,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (h3QueueAndDispatched(issue)) {
       findings.push([issue, 'H3', '`pm:queue` and `pm:dispatched` both present']);
     }
+    // H24 + H25 — two field/label intersections over cards this loop already
+    // holds, so neither costs a request. H24's population is the `pm:queue`
+    // listing; H25's carriers are all listed too, either by the awaiting label
+    // page below or by the very state label they wrongly coexist with.
+    const queuedAndTaken = h24QueuedWithAssignee(issue);
+    if (queuedAndTaken) findings.push([issue, 'H24', queuedAndTaken]);
+    const doubleState = h25AwaitingMaintainerExclusivity(issue);
+    if (doubleState) findings.push([issue, 'H25', doubleState]);
     // H4 — judged across BOTH channels. The fetch is gated by
     // `needsBlockedByComments`, so it costs a request only for the body-clean
     // cards whose verdict it can actually change (~2/3 of the blocked
@@ -5814,9 +6115,14 @@ function selfTest() {
   t('H22: `pm:seat` + a state label is residue for the state label', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:dispatched`'), true);
   t('H22: …and does not name the identity sticker', h22ClosedCardPmResidue(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:seat`'), false);
 
-  // The census's five, each pinned — the set is the item's scope, so a silent
-  // edit to it should break a test rather than quietly change what patrols.
-  t('H22: the measured residue set is the five from the census', PM_RESIDUE_LABELS.join(','), 'pm:dispatched,pm:queue,pm:blocked,pm:on-hold,pm:blocking');
+  // The census's five plus the state ruled in on 2026-08-23, each pinned — the
+  // set is the item's scope, so a silent edit to it should break a test rather
+  // than quietly change what patrols. `pm:awaiting-maintainer` is the ONE
+  // member not drawn from the #10688 census, and deliberately so: it had no
+  // live carriers to census when it was created, and admitting it at creation
+  // is what keeps the state from accruing the residue this row exists to catch
+  // before anyone thinks to measure it (#11196 fix 5).
+  t('H22: the residue set is the census five + the newly ruled state', PM_RESIDUE_LABELS.join(','), 'pm:dispatched,pm:queue,pm:blocked,pm:on-hold,pm:blocking,pm:awaiting-maintainer');
   // …and the two similarly-named sets stay APART: H13's carries `finding`, this
   // one carries `pm:blocking`, and unifying them would break both items.
   t('H22: the residue set is NOT H13\'s visibility set', PM_RESIDUE_LABELS.join(',') === PM_STATE_LABELS.join(','), false);
@@ -7630,6 +7936,86 @@ function selfTest() {
     JSON.stringify(classifyTransportProbe({ token: 'prox_SECRETVALUE', authed: { status: 401 }, anon: { status: 200 } })).includes('SECRETVALUE'),
     false,
   );
+
+  // -- H24: `pm:queue` + a non-empty assignee (#11196 fix 1) ------------------
+  // The two-field intersection, both directions, plus the three adjacent rows
+  // that decline the shape (which is why it had no reader for 17 cards).
+  const queued = (labels, assignees = [], extra = {}) => ({
+    number: 10638,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: assignees.map((login) => ({ login })),
+    body: '',
+    title: '',
+    ...extra,
+  });
+  t('H24: queued + assignee -> finding', typeof h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'])), 'string');
+  t('H24: queued + no assignee -> clean', h24QueuedWithAssignee(queued(['pm:queue'], [])), null);
+  t('H24: assigned but not queued is out of scope (H1/H2 own it)', h24QueuedWithAssignee(queued(['pm:dispatched'], ['os-elon'])), null);
+  t('H24: neither -> clean', h24QueuedWithAssignee(queued(['domain:skills'], [])), null);
+  t('H24: a missing issue does not crash', h24QueuedWithAssignee(undefined), null);
+  t('H24: …and the row names the login so residue and ownership are separable', h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])).includes('`yinlianghui`'), true);
+  t('H24: every assignee is named, not just the first', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon', 'qq9340100'])).includes('`qq9340100`'), true);
+  t('H24: assignees given as plain logins are read too', typeof h24QueuedWithAssignee({ ...queued(['pm:queue']), assignees: ['os-elon'] }), 'string');
+  // The ruling's ORDER, pinned: the rule fires on a human assignment too, and
+  // the sentence carries the asymmetric remedy rather than an exemption.
+  t('H24: a human assignment still fires (exemption is a later explicit marker)', typeof h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])), 'string');
+  t('H24: …and the row refuses the human-clearing write', h24QueuedWithAssignee(queued(['pm:queue'], ['yinlianghui'])).includes('never be cleared by an agent'), true);
+  t('H24: …and names the paired write it is owed', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'])).includes('同笔摘 assignee'), true);
+  t('H24: …and names both contradicting readers', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'])).includes('dispatchable NOW'), true);
+  // The closed gate, in mirror image to H22's open gate: one card, one row.
+  t('H24: a CLOSED queued+assigned card is H22 residue, not this row', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'], { state: 'closed' })), null);
+  t('H24: …and H22 does fire on that same card', typeof h22ClosedCardPmResidue(queued(['pm:queue'], ['os-elon'], { state: 'closed', state_reason: 'completed' })), 'string');
+  // An absent `state` is JUDGED — an unknown field must never act as a silent
+  // exemption (#4690 direction).
+  t('H24: an absent state field is judged, not exempted', typeof h24QueuedWithAssignee({ ...queued(['pm:queue'], ['os-elon']), state: undefined }), 'string');
+  // The adjacent rows stay silent on the measured shape — the reason it needed
+  // a row of its own rather than a widening.
+  t('H24 adjacency: H1 is silent (the card HAS an assignee)', h1DispatchedNoAssignee(queued(['pm:queue'], ['os-elon'])), false);
+  t('H24 adjacency: H3 is silent (only ONE label is present)', h3QueueAndDispatched(queued(['pm:queue'], ['os-elon'])), false);
+  t('H24 adjacency: H2 is silent when the claim comment is complete', h2AssigneeNoClaimComment(queued(['pm:queue'], ['os-elon']), ['Claim: PM loop round 1\nSession: session_x']), false);
+
+  // -- The paired-write remedy texts (#11196 fix 2) ---------------------------
+  // H8's landing re-label and H19's unlock scan are the two rollback paths that
+  // never named the assignee drop; both sentences name it now, and the
+  // half-delivered branch must NOT (there the label and the claim are CORRECT).
+  const pairedMerged = [{ number: 900, merged_at: '2026-08-22T10:00:00Z', body: 'Fixes #10638', head: { ref: 'x' } }];
+  const pairedOpenHalf = [{ number: 901, merged_at: null, draft: true, body: 'Part of #10638', head: { ref: 'y' } }];
+  t('H8: the full-delivery remedy names 同笔摘 assignee', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔摘 assignee'), true);
+  t('H8: …and points at H24 as the state it prevents', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('H24'), true);
+  t('H8: …and keeps the human-assignment refusal', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('never cleared by an agent'), true);
+  t('H8: the HALF-delivered branch prescribes no assignee drop', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔摘 assignee'), false);
+  t('H8: …and still says the label is correct there', h8MergedPrStillDispatched(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('must NOT be dropped'), true);
+  t('H19: the release text names 同笔摘 assignee', h19BlockOutlivedBlocker(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔摘 assignee'), true);
+  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19BlockOutlivedBlocker(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔摘 assignee'), true);
+
+  // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
+  t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
+  t('H25: awaiting + pm:queue -> finding', typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])), 'string');
+  t('H25: …and the row names the coexisting label', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'])).includes('`pm:queue`'), true);
+  t('H25: …and the specific lie, not a tidiness complaint', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:on-hold'])).includes('Restart-when'), true);
+  t('H25: awaiting ALONE -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL])), null);
+  t('H25: awaiting + a non-state label -> clean', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'domain:skills', 'priority:p0', 'pm:blocking'])), null);
+  t('H25: no awaiting label -> out of scope however many states', h25AwaitingMaintainerExclusivity(queued(['pm:queue', 'pm:dispatched'])), null);
+  t('H25: a CLOSED card is H22 residue, not a live exclusivity breach', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue'], [], { state: 'closed' })), null);
+  t('H25: a missing issue does not crash', h25AwaitingMaintainerExclusivity(undefined), null);
+  t('H25: several conflicts are ALL named', h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, 'pm:queue', 'needs-user-decision'])).includes('`needs-user-decision`'), true);
+  for (const conflicting of AWAITING_MAINTAINER_EXCLUSIVE_LABELS) {
+    t(`H25: awaiting + \`${conflicting}\` -> finding`, typeof h25AwaitingMaintainerExclusivity(queued([AWAITING_MAINTAINER_LABEL, conflicting])), 'string');
+  }
+  // The four readers the new state joins — each pinned in BOTH directions, so
+  // the vocabulary cannot be half-added (the defect class this family is about).
+  t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
+  t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
+  t('vocabulary: H22 counts awaiting as residue on a closed card', h22ClosedCardPmResidue(closedCard([AWAITING_MAINTAINER_LABEL])).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
+  t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
+  t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
+  t('vocabulary: …and names it as the parked state', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
+  t('vocabulary: …with the exit this state actually has (no Restart-when re-check)', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('Restart-when'), false);
+  t('vocabulary: …and it says the state has no machine exit', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes('NO machine exit'), true);
+  t('vocabulary: H11 keeps the mechanical remedy for a BLOCKED card', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('Restart-when'), true);
+  t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
+  t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
 
   let failed = 0;
   for (const [name, actual, expected] of cases) {
