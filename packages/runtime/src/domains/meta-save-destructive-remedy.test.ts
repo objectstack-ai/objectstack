@@ -107,13 +107,44 @@ function boot() {
         checksum: 'sha256_11095_fixture', version: 1,
     });
 
-    const match = (r: any, where: Record<string, unknown>): boolean =>
-        Object.entries(where ?? {}).every(([k, v]) => {
-            if (k === '$or') return (v as Array<Record<string, unknown>>).some((c) => match(r, c));
-            return v === null || v === undefined
+    /**
+     * Scalar equality ONLY, and every combinator is REFUSED rather than
+     * approximated — `pnpm check:where-matcher`
+     * (`scripts/check-where-matcher-conformance.mjs`, #8494): "a discovered
+     * matcher must answer every combinator probe CORRECTLY, or REFUSE it by
+     * throwing".
+     *
+     * The refusal is MEASURED, not assumed. Instrumenting this `match` to log
+     * every `where` it receives across all 8 cases recorded 9 calls — every
+     * one of them a flat scalar object over `type` / `name` / `state` /
+     * `organization_id` / `package_id` — zero `$or`, zero `$and`. The `$or` arm
+     * this replaces was therefore dead code, and it was also HALF a surface:
+     * `$and` fell straight through to `r['$and']`, compared `undefined` against
+     * an array, excluded the row and returned an empty result set with nothing
+     * erroring. A suite can go green on that while asserting about a DIFFERENT
+     * query than the one the protocol sent — the exact "declared ≠ enforced"
+     * shape this card is about, one layer down in its own fixture.
+     *
+     * A `throw` cannot do that. The protocol does build `$or` against
+     * `sys_metadata` elsewhere (org-scoped reads); if one is ever routed through
+     * this door, this suite goes RED and asks for a real implementation instead
+     * of quietly asserting on nothing. `$`-prefixed keys are never field names —
+     * `protocol.ts`'s own `FILTER_LOGICAL_KEYS` rule — so the guard is a prelude
+     * rather than an arm inside the loop: a preceding scalar miss must not be
+     * able to short-circuit `.every` past an operator we cannot answer.
+     */
+    const match = (r: any, where: Record<string, unknown>): boolean => {
+        for (const k of Object.keys(where ?? {})) {
+            if (k.startsWith('$')) {
+                throw new Error(`fake engine: unsupported logical operator ${k}`);
+            }
+        }
+        return Object.entries(where ?? {}).every(([k, v]) =>
+            v === null || v === undefined
                 ? r[k] === null || r[k] === undefined
-                : r[k] === v;
-        });
+                : r[k] === v,
+        );
+    };
 
     const engine: any = {
         async find(table: string, o?: { where?: Record<string, unknown> }) {
