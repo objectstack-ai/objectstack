@@ -27,6 +27,45 @@
  * default after the imports/gates below would pass that unit test and still
  * ship with the door open — that ordering is what only a real boot can catch.
  *
+ * ## WHY THE FIXTURE CONSTRUCTS `AuthPlugin` ITSELF, RATHER THAN LEAVING
+ * `os serve` TO AUTO-INJECT IT — measured, and it contradicts the naive
+ * reading of the regression-pin wording
+ *
+ * `os serve`'s OWN auto-injection wiring (`serve.ts`, the `!hasAuthPlugin &&
+ * tierEnabled('auth')` block) does two things that make
+ * `plugin-auth/auth-manager.ts`'s `NODE_ENV`-gated substitution (line ~1927)
+ * UNREACHABLE through that path, regardless of `NODE_ENV`, before or after
+ * this fix:
+ *
+ *   1. It ALWAYS pushes the resolved `baseUrl`'s origin into `trustedOrigins`
+ *      before handing the array to `AuthPlugin` — so `this.config.trustedOrigins`
+ *      inside `auth-manager.ts` is NEVER empty, and that substitution is
+ *      itself gated on `!origins.length`.
+ *   2. It has its OWN, separate localhost-wildcard convenience
+ *      (`if (isDev && …) trustedOrigins.push('http://localhost:*')`), gated on
+ *      `isDev = flags.dev || NODE_ENV === 'development'` — an EQUALITY test
+ *      against `'development'` that was never open on unset `NODE_ENV` to
+ *      begin with (unset `!== 'development'`, same as `'production'`).
+ *
+ * MEASURED on real boots, both ways: spawning `os serve` with NO declared
+ * `plugins` (letting the CLI auto-inject `AuthPlugin`) answers `403
+ * INVALID_ORIGIN` to an untrusted-localhost-origin probe with UNSET
+ * `NODE_ENV` — identically — on the pre-fix tree AND the post-fix tree. That
+ * is not this fix working; it is `serve.ts`'s own, unrelated `isDev` gate,
+ * which was already closed. A pin built on the auto-injected path would have
+ * been GREEN with the fix reverted — the exact vacuity this card's own
+ * anti-vacuity section warns against, just one layer further down than the
+ * one it names.
+ *
+ * The gate this card is actually about — `auth-manager.ts`'s own
+ * `NODE_ENV`-gated substitution — IS reached by a host app that constructs
+ * `AuthPlugin` ITSELF (a supported, real shape: `serve.ts`'s `hasAuthPlugin`
+ * check exists precisely to detect and defer to it), without pre-populating
+ * `trustedOrigins`. So that is what this fixture does. Reverse-verified: on
+ * the pre-fix tree, this exact fixture with unset `NODE_ENV` answers `401
+ * INVALID_EMAIL_OR_PASSWORD` (origin accepted, gate OPEN) to the same probe
+ * that gets `403 INVALID_ORIGIN` post-fix.
+ *
  * WHY THE PROBE IS AN ORIGIN CHECK, NOT A SIGN-IN. The trusted-origin
  * substitution is consulted by better-auth's CSRF/origin middleware BEFORE
  * the sign-in handler ever looks at the credentials in the body (see
@@ -34,10 +73,10 @@
  * with bogus credentials still tells the two states apart: gate OPEN answers
  * with whatever `sign-in/email` says about the (wrong) credentials, gate
  * CLOSED never reaches that logic and answers `403 INVALID_ORIGIN` first.
- * `OS_AUTH_SECRET` is set explicitly in every boot below so the outcome is
- * never confused with `serve.ts`'s separate "AuthPlugin skipped, no secret"
- * warning path (`serve.ts` ~2444) — that path is orthogonal to this gate and
- * unaffected by this fix (it is keyed on `isDev`, not on the raw variable).
+ * `OS_AUTH_SECRET` is set explicitly in every boot below and threaded into
+ * the fixture's own `AuthPlugin({ secret: … })` — `AuthPlugin.init()` throws
+ * `'AuthPlugin: secret is required'` synchronously otherwise, which is a
+ * boot failure, not a signal about this gate.
  *
  * The probed Origin is `http://localhost:<a DIFFERENT random port>` —
  * different from the port `serve` itself binds to — so a pass can only be
@@ -48,7 +87,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,7 +94,21 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint. See the file header for why this one, not `run-dev.js`. */
 const CLI = resolve(HERE, '../bin/run.js');
 
-const CONFIG = `
+/**
+ * The fixture's parent directory sits INSIDE `packages/cli/test/`, not the
+ * system tmpdir: the config below does a real, static
+ * `import { AuthPlugin } from '@objectstack/plugin-auth'`, and that only
+ * resolves because `packages/cli/node_modules/@objectstack/plugin-auth`
+ * (a real dependency of this package) is reachable by Node's ordinary
+ * upward `node_modules` walk from wherever the config file lives. A fixture
+ * rooted in `os.tmpdir()` has no such ancestor and the import fails.
+ */
+const FIXTURES_ROOT = HERE;
+
+function configFor(port: number): string {
+  return `
+import { AuthPlugin } from '@objectstack/plugin-auth';
+
 export default {
   manifest: {
     id: 'com.example.nodeenvdefault',
@@ -71,8 +123,17 @@ export default {
     sharingModel: 'public',
     fields: { title: { type: 'text', label: 'Title' } },
   }],
+  // Constructed here, by the HOST — not left to os serve's own auto-inject.
+  // See the file header for why that distinction is load-bearing for this pin.
+  plugins: [
+    new AuthPlugin({
+      secret: process.env.OS_AUTH_SECRET,
+      baseUrl: 'http://localhost:${port}',
+    }),
+  ],
 };
 `;
+}
 
 let dir: string;
 const children: ChildProcessWithoutNullStreams[] = [];
@@ -100,6 +161,7 @@ interface OriginCheckResult {
 async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
   const port = randomPort();
   const untrustedOriginPort = port + 1;
+  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
 
   const child = spawn(process.execPath, [CLI, 'serve', '-p', String(port)], {
     cwd: dir,
@@ -107,18 +169,33 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     env: {
       ...process.env,
       NO_COLOR: '1',
-      OS_LOG_LEVEL: '',
+      OS_LOG_LEVEL: 'warn',
       OS_DISABLE_CONSOLE: '1',
       OS_DATABASE_URL: ':memory:',
-      // Explicit and real, so the boot never takes the orthogonal "AuthPlugin
-      // skipped — no OS_AUTH_SECRET" path (serve.ts) regardless of which
-      // NODE_ENV state this call is probing.
+      // Explicit and real, threaded into the fixture's own `new AuthPlugin({
+      // secret: … })` — so the boot never takes the orthogonal
+      // "AuthPlugin.init() throws: secret is required" path regardless of
+      // which NODE_ENV state this call is probing.
       OS_AUTH_SECRET: 'e2e-node-env-default-probe-secret-not-for-real-use',
       // The base default for every call: truly unset, unless overridden by
       // `env` below. Node's spawn omits an `undefined`-valued entry rather
       // than inheriting whatever this test RUNNER's own process (vitest sets
       // NODE_ENV=test) happened to have.
       NODE_ENV: undefined,
+      // MEASURED TRAP, worth stating explicitly: `...process.env` above is
+      // THIS FILE's own process env — the vitest WORKER's — and vitest's
+      // worker carries `TEST=true` (and `VITEST=true`) regardless of
+      // `NODE_ENV`. better-auth 1.7.1 reads `TEST` directly, independent of
+      // `NODE_ENV`: `create-context.mjs` defaults
+      // `skipOriginCheck: … isTest() ? true : false`, and
+      // `isTest = () => nodeENV === 'test' || toBoolean(env.TEST)`. Left
+      // alone, that inherited `TEST=true` makes better-auth skip origin
+      // validation ENTIRELY — a false GREEN that has nothing to do with
+      // `serve.ts`'s own gate and stays green with the fix reverted, which is
+      // exactly the vacuity this card's anti-vacuity section warns against,
+      // one layer further down than the one it names. Unset it the same way
+      // `NODE_ENV` is unset above, for the same reason.
+      TEST: undefined,
       ...env,
     },
   }) as ChildProcessWithoutNullStreams;
@@ -183,13 +260,13 @@ async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
 
 describe('#11113: os serve defaults NODE_ENV to production when unset', () => {
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), 'serve-node-env-default-e2e-'));
-    writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG, 'utf8');
+    dir = mkdtempSync(join(FIXTURES_ROOT, 'tmp-node-env-default-'));
     writeFileSync(
       join(dir, 'package.json'),
       JSON.stringify({ name: 'serve-node-env-default-e2e-fixture', private: true, type: 'module' }, null, 2),
       'utf8',
     );
+    // objectstack.config.ts is written per-probe (configFor embeds the port).
   });
 
   afterAll(async () => {
