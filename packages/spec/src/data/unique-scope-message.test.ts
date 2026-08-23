@@ -47,8 +47,15 @@ const parseField = (unique: unknown) =>
 const parseIndex = (unique: unknown) =>
   IndexSchema.safeParse({ fields: ['code'], unique });
 
+/**
+ * A parse from EITHER surface. Spelled as the union rather than as one of the
+ * two, because reading the same assertion off both is the whole point of this
+ * file — a helper typed to one surface silently makes the other half unwritable.
+ */
+type ScopeParse = ReturnType<typeof parseField> | ReturnType<typeof parseIndex>;
+
 /** The sole `unique` issue, or a failure the caller can read. */
-const uniqueIssue = (result: ReturnType<typeof parseField>) => {
+const uniqueIssue = (result: ScopeParse) => {
   expect(result.success, 'expected this value to be REFUSED').toBe(false);
   if (result.success) throw new Error('unreachable');
   const issues = result.error.issues.filter((i) => i.path.join('.') === 'unique');
