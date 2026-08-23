@@ -77,9 +77,34 @@ company_name:
 ```
 
 **Database mapping:**
-- SQL driver: `TEXT` on every dialect. `maxLength` is enforced by record
-  validation, not by the column type — the DDL does not read it.
+- SQL driver: `TEXT` on every dialect — **except when a declared index keys the
+  column**, where it is `VARCHAR(maxLength)` instead. Both conditions are
+  required: the field declares a `maxLength` of **768 or less** (the widest key
+  part utf8mb4 allows — MySQL's 3072-byte index limit ÷ 4 bytes per character),
+  **and** some declared index keys on it (field-level `unique`, or an entry in
+  the object's `indexes[]`). So the `company_name` field above stays `TEXT`
+  unless an index names it, and a keyed field declaring `maxLength: 1024` stays
+  `TEXT` too.
 - MongoDB: `String`
+
+<Callout type="info">
+**Why the bound follows the index.** MySQL refuses a `TEXT`/`BLOB` column in a
+key without a prefix length, so an unbounded keyed column makes its own index
+un-creatable — the `CREATE TABLE` succeeds and the `ALTER TABLE … ADD INDEX`
+fails, leaving the table without the constraint it declared. Bounding an
+*unkeyed* column would buy nothing and cost something: `TEXT` is stored
+off-page, while a wide `VARCHAR` counts against MySQL's 65535-byte row limit.
+
+When a keyed column cannot be bounded, the driver **refuses the index** and
+names the field, rather than silently substituting a prefix index — a
+prefix-`UNIQUE` constrains the prefix rather than the value, so it rejects two
+different values that happen to share one.
+
+`maxLength` is enforced by record validation on **every** field. On a keyed
+column it is *additionally* enforced by the column type, so PostgreSQL and
+MySQL refuse an over-length write at the database as well (SQLite does not
+enforce `VARCHAR` length).
+</Callout>
 
 **UI rendering:**
 ```html
@@ -104,7 +129,8 @@ description:
 ```
 
 **Database mapping:**
-- SQL driver: `TEXT`
+- SQL driver: `TEXT` — or `VARCHAR(maxLength)` when a declared index keys the
+  column, on the same two conditions as the `text` type above.
 - MongoDB: `String`
 
 **UI rendering:**
@@ -129,7 +155,8 @@ bio:
 ```
 
 **Database mapping:**
-- SQL driver: `TEXT`
+- SQL driver: `TEXT` — or `VARCHAR(maxLength)` when a declared index keys the
+  column, on the same two conditions as the `text` type above.
 - MongoDB: `String`
 
 **UI rendering:**
@@ -1095,7 +1122,7 @@ The column each type gets from the SQL driver, per dialect:
 
 | ObjectQL Type | PostgreSQL | MySQL | SQLite |
 |---------------|------------|-------|--------|
-| `text` | `TEXT` | `TEXT` | `TEXT` |
+| `text` / `textarea` / `html` | `TEXT` \* | `TEXT` \* | `TEXT` \* |
 | `email` / `url` / `phone` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `number` / `currency` / `percent` | `REAL` | `FLOAT` | `REAL` |
 | `date` | `DATE` | `DATE` | `TEXT` (`YYYY-MM-DD`) |
@@ -1109,6 +1136,14 @@ The column each type gets from the SQL driver, per dialect:
 | `autonumber` | `VARCHAR(255)` | `VARCHAR(255)` | `VARCHAR(255)` |
 | `formula` | *(no column — virtual)* | *(no column)* | *(no column)* |
 | `json` / `location` / `address` | `JSON` | `JSON` | `TEXT` (JSON) |
+
+\* The text family is `VARCHAR(maxLength)` rather than `TEXT`, on all three
+dialects, when **both** hold: the field declares a `maxLength` of 768 or less,
+**and** a declared index keys the column (field-level `unique`, or an entry in
+the object's `indexes[]`). A column no index touches stays `TEXT` whatever it
+declares, and so does a keyed column whose bound exceeds 768 characters — see
+the `text` type above for why, and for what the driver does when a keyed column
+cannot be bounded.
 
 Any field flagged `multiple: true` becomes a `JSON` column regardless of its
 type. Relationship columns are plain id strings with no database `FOREIGN KEY`
