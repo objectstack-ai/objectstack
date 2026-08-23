@@ -42,7 +42,6 @@ os compile
 | `os init [name]` | Initialize a new ObjectStack project in the current directory |
 | `os dev [package]` | Start development mode with hot reload |
 | `os serve [config]` | Start the ObjectStack server with plugin auto-detection |
-| `os studio [config]` | Launch Studio UI with development server |
 
 ### Build & Validate
 
