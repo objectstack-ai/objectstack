@@ -112,9 +112,11 @@ describe('scanEvidence — line citations', () => {
 
   it('takes the END of a `path:start-end` range', () => {
     // The end is the stricter bound AND the one that subsumes the other: a start
-    // past EOF implies an end past EOF, never the reverse.
-    expect(scanEvidence('packages/rest/src/import-mapping.ts:115-167').localCitations)
-      .toEqual([{ path: 'packages/rest/src/import-mapping.ts', line: 167 }]);
+    // past EOF implies an end past EOF, never the reverse. Fixture path for the
+    // reason given above `describe('checkCitationLines')`: this reads no file,
+    // and a bare out-of-package literal reds check:cross-package-test-inputs.
+    expect(scanEvidence('packages/a/src/y.ts:115-167').localCitations)
+      .toEqual([{ path: 'packages/a/src/y.ts', line: 167 }]);
   });
 
   it('sees EVERY citation in a concatenated multi-consumer entry, not just the first', () => {
@@ -178,13 +180,27 @@ describe('countLines — what a citation can address', () => {
   });
 });
 
+// These assert the ARITHMETIC of the bound, with the line count injected. They
+// read no file at all, so their sample paths are deliberately the fixture
+// spelling (`packages/a/…`) and not the two real files whose rot they are shaped
+// on — `hono-plugin.ts` for the `permission.tabPermissions` instance and
+// `import-mapping.ts` for `mapping.fieldMapping`.
+//
+// ⛔ Do not "improve" these by restoring the real paths. `pnpm
+// check:cross-package-test-inputs` reads a test's path literals as declared
+// inputs, and @objectstack/spec's globs cover neither package — so naming them
+// reds that gate, and the only way to satisfy it would be to declare an input
+// this file does not have. The counts below come from a stub, not from those
+// files: a citation whose real line count matters is asserted against the real
+// ledgers in the contract test at the bottom of this file.
 describe('checkCitationLines', () => {
   const lines = (n: number) => () => n;
 
   it('flags a citation past the end of the file and reports the real length', () => {
-    const scan = scanEvidence('packages/plugins/plugin-hono-server/src/hono-plugin.ts:1200');
+    // The `permission.tabPermissions` shape: line 1200 cited, 717 lines exist.
+    const scan = scanEvidence('packages/a/src/x.ts:1200');
     expect(checkCitationLines(scan, lines(717))).toEqual([
-      { path: 'packages/plugins/plugin-hono-server/src/hono-plugin.ts', line: 1200, lines: 717 },
+      { path: 'packages/a/src/x.ts', line: 1200, lines: 717 },
     ]);
   });
 
@@ -195,8 +211,8 @@ describe('checkCitationLines', () => {
 
   it('flags a RANGE whose head is inside the file but whose tail overruns it', () => {
     // The shipped `mapping.fieldMapping` shape: 115 exists, 167 does not.
-    const r = checkCitationLines(scanEvidence('packages/rest/src/import-mapping.ts:115-167'), lines(164));
-    expect(r).toEqual([{ path: 'packages/rest/src/import-mapping.ts', line: 167, lines: 164 }]);
+    const r = checkCitationLines(scanEvidence('packages/a/src/y.ts:115-167'), lines(164));
+    expect(r).toEqual([{ path: 'packages/a/src/y.ts', line: 167, lines: 164 }]);
   });
 
   it('says nothing about a file it cannot read — that verdict belongs to the existence check', () => {
