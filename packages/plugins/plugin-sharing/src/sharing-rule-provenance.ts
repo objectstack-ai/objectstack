@@ -26,22 +26,19 @@
  * `input.id`) are not stamped — every rule-editing UI path updates by id.
  */
 
+import type { OptionalSharingLogger } from './logger-shapes.js';
+
 interface MinimalEngine {
   find(object: string, opts?: any): Promise<any[]>;
   registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
   unregisterHooksByPackage(packageId: string): number;
 }
 
-interface MinimalLogger {
-  info?: (msg: string, meta?: Record<string, any>) => void;
-  warn?: (msg: string, meta?: Record<string, any>) => void;
-}
-
 export const SHARING_RULE_PROVENANCE_PACKAGE = 'plugin-sharing:rule-provenance';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-export function bindRuleProvenanceStamp(engine: MinimalEngine, logger?: MinimalLogger): void {
+export function bindRuleProvenanceStamp(engine: MinimalEngine, logger?: OptionalSharingLogger): void {
   engine.registerHook(
     'beforeUpdate',
     async (ctx: any) => {

@@ -19,6 +19,24 @@
  * between this shape and a module that still declares its own, the diagnostic
  * names two different types instead of the same one twice.
  *
+ * ## Why the members are spelled precisely, and must stay that way
+ *
+ * The members take a `string` message and an optional `Record` of string keys
+ * to `any` values as structured metadata — NOT `(msg: any, ...rest: any[])`.
+ *
+ * This shape first shipped with that loose spelling, carried over from the two
+ * byte-identical declarations it replaced. `sharing-rule-provenance.ts` was
+ * left out of it precisely BECAUSE its own declaration was stricter, and
+ * folding it onto the loose spelling would have deleted real checking. That
+ * open question was ruled the other way (#10692): the shared contract takes the
+ * PRECISE spelling and the third module joins it.
+ *
+ * ⛔ Do not loosen these members back to `any` to make some new caller fit.
+ * `(msg: any, ...rest: any[])` documents nothing and catches nothing — the same
+ * complaint this package's card levels at bare `Function`. All call sites on
+ * this shape already pass exactly a message plus an optional metadata object;
+ * a caller that does not fit is the thing to look at, not this declaration.
+ *
  * ## ⛔ Why this shape declares no `error`, and must not grow one
  *
  * `check:optional-error-sink` (#9754) draws its population STRUCTURALLY: a sink
@@ -47,15 +65,9 @@
  *   `SharingServiceOptions['logger']` and `ShareLinkServiceOptions['logger']` —
  *   are themselves spelled with bare `Function`. Tightening it requires
  *   tightening those producers first, which is a gate-population change, not a
- *   refactor. Recorded on #10692 rather than done quietly here.
- * - `sharing-rule-provenance.ts` — `{ info?, warn? }` by OPTIONALITY but with a
- *   stricter member signature, `(msg: string, meta?: Record<string, any>)`.
- *   Folding it onto the `(msg: any, ...rest: any[])` spelling below would DELETE
- *   real checking at its call sites; folding the others onto ITS spelling would
- *   tighten two modules. Either direction changes meaning, so neither is a
- *   de-duplication — see #10692 for the open contract question.
+ *   refactor. It stays open on #10692 rather than being done quietly here.
  */
 export interface OptionalSharingLogger {
-  info?: (msg: any, ...rest: any[]) => void;
-  warn?: (msg: any, ...rest: any[]) => void;
+  info?: (msg: string, meta?: Record<string, any>) => void;
+  warn?: (msg: string, meta?: Record<string, any>) => void;
 }
