@@ -271,7 +271,7 @@ function servedAppRootOrCwd(): string {
  * author, because the value every later line needs — the absolute config path —
  * is produced by the same call that sets it.
  *
- * ── Why the fallback is conditional, and why it can only ADD working cases ───
+ * ── Why the fallback is conditional, and the one row that MOVES ───────────
  *
  * A resolution base is only useful if a `package.json` is there to be read
  * (`readHostDeclaration` reads a MANIFEST — reachability is deliberately not
@@ -283,10 +283,34 @@ function servedAppRootOrCwd(): string {
  *   • config in a manifest-less subdirectory of the app → unchanged (CWD)
  *   • no config at all (artifact boot, `<cwd>/dist/…`)  → unchanged (CWD)
  *
- * No layout that resolves today resolves differently after this, which is why
- * it is a repair rather than a policy change. The app root is the directory
- * that DECLARES; a directory with no manifest declares nothing, and anchoring
- * there could only turn a working boot into an `undeclared` refusal.
+ * Those four rows are unchanged. A FIFTH one is NOT, and this comment will not
+ * claim otherwise — an absolute here ("no layout that resolves today resolves
+ * differently") reads to the next author as a licence to skip the check:
+ *
+ *   • config beside the app's manifest, CWD = elsewhere, the CWD's manifest
+ *     DECLARES the package and the served app's does NOT → the load moves off
+ *     the declared leg onto the fallback leg: it still succeeds wherever that
+ *     fallback can reach the package, and refuses where it cannot.
+ *
+ * MEASURED. Before: hostRoot was the CWD, so `declared` was true and
+ * `hostRequire.resolve` found the package under the CWD's `node_modules`.
+ * After: hostRoot is the served app, `declared` is false, and the load goes to
+ * `createHostImporter`'s fallback — which is a bare `import()` physically
+ * inside `@objectstack/types`, because `importFromHost` passes no
+ * `fallbackImport` (#11157's residue). Node ESM walks `node_modules` UPWARD
+ * from there, so the common shape survives: in a hoisted monorepo whose ROOT
+ * manifest declares the package while the served `apps/foo/package.json` does
+ * not, that walk reaches the same hoisted store and boot is what it always
+ * was — only the leg changed. It genuinely refuses only where the walk cannot
+ * reach the package: a global / `npx` CLI serving an app elsewhere, with the
+ * optional service installed only beside the operator. Remedy for anyone who
+ * lands there — declare the package in the SERVED app's own `package.json`,
+ * which is what #4719 asks for regardless.
+ *
+ * So this narrows one row toward the declaration #4719 already requires; it
+ * widens nothing. The app root is the directory that DECLARES — a directory
+ * with no manifest declares nothing, which is why anchoring at one is not
+ * attempted: it could only turn a working boot into an `undeclared` refusal.
  */
 function anchorServedApp(configArg: string): { configPath: string; configExists: boolean } {
   const configPath = path.resolve(process.cwd(), configArg);
