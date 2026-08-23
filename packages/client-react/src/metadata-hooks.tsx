@@ -63,7 +63,10 @@ export interface UseMetadataResult<T = any> {
  * now. See {@link useFields} for the pre-flattened field list.
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useObject } from '@objectstack/client-react';
+ *
  * function ObjectSchemaViewer({ objectName }: { objectName: string }) {
  *   const { data, isLoading, error } = useObject(objectName);
  *
@@ -187,12 +190,15 @@ export function useObject(
  * Hook for fetching view configuration
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useView } from '@objectstack/client-react';
+ *
  * function ViewConfiguration({ objectName }: { objectName: string }) {
  *   const { data: view, isLoading } = useView(objectName, 'list');
- * 
+ *
  *   if (isLoading) return <div>Loading view...</div>;
- * 
+ *
  *   return (
  *     <div>
  *       <h3>List View for {objectName}</h3>
@@ -259,12 +265,15 @@ export function useView(
  * Hook for extracting fields from object schema
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useFields } from '@objectstack/client-react';
+ *
  * function FieldList({ objectName }: { objectName: string }) {
  *   const { data: fields, isLoading } = useFields(objectName);
- * 
+ *
  *   if (isLoading) return <div>Loading fields...</div>;
- * 
+ *
  *   return (
  *     <ul>
  *       {fields?.map(field => (
@@ -301,15 +310,18 @@ export function useFields(
  * Generic metadata hook for custom metadata queries
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useMetadata } from '@objectstack/client-react';
+ *
  * function CustomMetadata() {
  *   const { data, isLoading } = useMetadata(async (client) => {
  *     // Custom metadata fetching logic
- *     const object = await client.meta.getObject('custom_object');
+ *     const object = await client.meta.getItem('object', 'custom_object');
  *     const view = await client.meta.getView('custom_object', 'list');
  *     return { object, view };
  *   });
- * 
+ *
  *   return <pre>{JSON.stringify(data, null, 2)}</pre>;
  * }
  * ```

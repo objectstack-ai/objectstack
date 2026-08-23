@@ -96,6 +96,63 @@
  * three bare `any` annotations, all in one block, so the wider scope cost nothing
  * to adopt and there is no ratchet file: the baseline is zero and stays zero.
  *
+ * ── SURFACES (#10969) ─────────────────────────────────────────────────────
+ * Until #10969 the only prose scanned was `skills/**` + `content/docs/**`, and
+ * the only thing marked blocks were checked against was `@objectstack/spec`.
+ * TSDoc `@example` blocks inside `packages/client-react/src` and
+ * `packages/client/src` — the SDK's own hand-written docs, not generated
+ * prose — carried the identical unguarded-rot shape (#10750 found two: the
+ * copied `useQuery`/`usePagination` examples read `data?.value`, a key
+ * `PaginatedResult` never declared).
+ *
+ * Rather than a second extractor, the file/marker/tsc pipeline is now
+ * SURFACE-parameterised (`SURFACES` below): each surface names its own
+ * prose roots, its own throwaway build dir (which package's `node_modules`
+ * a bare specifier like `react` or the surface's own package name resolves
+ * against), and its own package(s) to derive a `paths` map from. Adding a
+ * surface — #10924's `packages/spec/src/**` TSDoc `@example` channel is the
+ * next candidate — is a new `SURFACES` entry, not a fork.
+ *
+ * TWO differences from the original skills/docs surface, both load-bearing:
+ *
+ *   1. **The marker lives inside a JSDoc block comment**, not free-standing
+ *      prose, so every source line carries a leading JSDoc gutter (` * `).
+ *      A root flagged `commentPrefixed: true` has that gutter stripped —
+ *      from the fence-open/close lines, the marker line, AND the block
+ *      body — before any of the existing regexes see it; see
+ *      `logicalLines()`. This also means the MDX root's curly-brace-wrapped
+ *      marker spelling cannot be reused verbatim here: written out it ENDS
+ *      in the two characters star then slash, and a block comment is
+ *      terminated by the first such pair it contains — that spelling would
+ *      close the JSDoc comment early and turn the rest of it (fence
+ *      included) into a syntax error in the REAL source file, not just the
+ *      throwaway copy. (This paragraph avoids spelling that pair out for
+ *      the same reason.) `<!-- os:check -->` ends in no such pair, so it is
+ *      reused as-is for this surface too; it also renders inert if a
+ *      future TSDoc/TypeDoc pass ever treats `@example` prose as markdown.
+ *   2. **The examples are `tsx`, not `ts`** — every one of the 19 blocks
+ *      this surface adds is fenced ` ```tsx ` (React components), and the
+ *      original fence-language regex matched only `ts`/`typescript`. A
+ *      marker placed above a `tsx` fence would previously have been a
+ *      silent no-op — no orphan, no extraction, nothing — because the
+ *      `open` regex never matched, so the FIRST check this file makes of
+ *      the tsx corpus is with `tsx` finally recognised as a fence language
+ *      (`FENCE_OPEN_RE`), and the block is written out with a matching
+ *      `.tsx` build-file extension so JSX syntax is legal in it at all.
+ *
+ * Module resolution for the client surface is NOT `paths`-only like spec's:
+ * `@objectstack/client-react`'s examples need `react`'s real types, which
+ * live in ITS OWN `node_modules` (pnpm does not hoist them to the repo
+ * root — measured, not assumed), so that surface's throwaway build dir is
+ * created INSIDE `packages/client-react/` rather than beside `packages/spec`.
+ * `@objectstack/client` resolves the same way through client-react's
+ * workspace-linked `node_modules/@objectstack/client` symlink; each
+ * surface's OWN package(s) still get an explicit `paths` self-entry
+ * (`packagePaths()`, generalised from the old `specPaths()`) so a block can
+ * `import { useQuery } from '@objectstack/client-react'` the same way a
+ * real consumer would, rather than relying on a same-package self-import
+ * trick that may or may not resolve.
+ *
  * Usage:
  *   tsx scripts/check-skill-examples.ts            # extract + type-check (CI)
  *   tsx scripts/check-skill-examples.ts --self-test  # pin the `any` detector, both directions
@@ -114,8 +171,31 @@ import { inspectDistFreshness } from './lib/dist-freshness';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const SPEC_DIR = path.resolve(__dirname, '..');
-const BUILD_DIR = path.resolve(SPEC_DIR, '.examples-build');
 const SPEC_PKG_JSON = path.resolve(SPEC_DIR, 'package.json');
+const CLIENT_REACT_DIR = path.resolve(REPO_ROOT, 'packages/client-react');
+const CLIENT_DIR = path.resolve(REPO_ROOT, 'packages/client');
+
+/** A prose/source root: where to look, what to look for, how to read it. */
+interface SourceRoot {
+  dir: string;
+  /** File extension(s) this root scans. A single string, or several for a
+   *  root that spans more than one (unused today, kept for #10924). */
+  ext: string | string[];
+  label: string;
+  marker: string;
+  /** Absolute directories to skip entirely (existing: generated docs). */
+  exclude?: string[];
+  /** Skip individual files by basename — e.g. test files, which are not the
+   *  documented SDK surface even though they share the source root's `ext`. */
+  excludeFile?: (name: string) => boolean;
+  /** True when this root's prose lives inside a JSDoc/TSDoc block comment
+   *  rather than free-standing markdown — every line then carries a leading
+   *  JSDoc gutter (` * `) that must be stripped before the fence/marker
+   *  regexes, or the body, ever see it. See the header comment's "SURFACES"
+   *  section for why the MDX root's wrapper marker form can't be reused
+   *  verbatim here. */
+  commentPrefixed?: boolean;
+}
 
 /**
  * Prose trees whose code examples are copied verbatim by humans and AI, and so
@@ -131,13 +211,7 @@ const SPEC_PKG_JSON = path.resolve(SPEC_DIR, 'package.json');
  * `content/docs/references/` is excluded: `build-docs.ts` regenerates it from the
  * schemas, so its snippets cannot drift independently of their source.
  */
-const SOURCE_ROOTS: Array<{
-  dir: string;
-  ext: string;
-  label: string;
-  marker: string;
-  exclude?: string[];
-}> = [
+const SKILLS_DOCS_ROOTS: SourceRoot[] = [
   { dir: path.resolve(REPO_ROOT, 'skills'), ext: '.md', label: 'skills', marker: '<!-- os:check -->' },
   {
     dir: path.resolve(REPO_ROOT, 'content/docs'),
@@ -151,13 +225,78 @@ const SOURCE_ROOTS: Array<{
   },
 ];
 
+/** `.test.ts(x)` / `.spec.ts(x)` files are not the documented SDK surface. */
+const isTestFile = (name: string): boolean => /\.(test|spec)\.tsx?$/.test(name);
+
 /**
- * Every marker spelling, in any root. A block tagged with the WRONG root's
- * spelling would be silently unchecked (and, in `.mdx`, would also break the
- * docs build), so both forms are recognised for orphan detection and only the
- * root's own form actually opts a block in.
+ * `packages/client-react/src` + `packages/client/src` — the SDK's own
+ * hand-written TSDoc `@example` blocks (#10969). See the header comment's
+ * "SURFACES" section for the two ways this root type differs from prose
+ * markdown: the JSDoc comment gutter, and the `tsx` fence language.
  */
-const ALL_MARKERS = ['<!-- os:check -->', '{/* os:check */}'];
+const CLIENT_SDK_ROOTS: SourceRoot[] = [
+  {
+    dir: path.resolve(CLIENT_REACT_DIR, 'src'),
+    ext: '.tsx',
+    label: 'client-react',
+    marker: '<!-- os:check -->',
+    commentPrefixed: true,
+    excludeFile: isTestFile,
+  },
+  {
+    dir: path.resolve(CLIENT_DIR, 'src'),
+    ext: '.ts',
+    label: 'client',
+    marker: '<!-- os:check -->',
+    commentPrefixed: true,
+    excludeFile: isTestFile,
+  },
+];
+
+/**
+ * A surface groups prose/source roots that share ONE module-resolution
+ * environment — one throwaway build dir (so a bare specifier resolves the
+ * same way for every block written into it) and one `paths` map, derived
+ * from each surface's own package(s) `exports`. See the header comment's
+ * "SURFACES" section for why the client surface needs its own resolution
+ * dir (react's real types) rather than reusing spec's.
+ */
+interface Surface {
+  name: string;
+  roots: SourceRoot[];
+  /** Where the throwaway build dir + tsconfig.json live. Module resolution
+   *  for bare specifiers (react, workspace packages) walks up from here. */
+  resolutionDir: string;
+  /** package.json dirs whose `exports` become explicit `paths` entries —
+   *  what lets a block `import` its own surface's package by name. */
+  selfPackages: string[];
+}
+
+const SURFACES: Surface[] = [
+  {
+    name: 'skills + docs (@objectstack/spec)',
+    roots: SKILLS_DOCS_ROOTS,
+    resolutionDir: SPEC_DIR,
+    selfPackages: [SPEC_DIR],
+  },
+  {
+    name: 'client SDK (@objectstack/client-react, @objectstack/client)',
+    roots: CLIENT_SDK_ROOTS,
+    // client-react's node_modules is the one with react's real types (pnpm
+    // does not hoist them to the repo root) AND workspace-linked access to
+    // @objectstack/client, so it is the resolution root for both files.
+    resolutionDir: CLIENT_REACT_DIR,
+    selfPackages: [CLIENT_REACT_DIR, CLIENT_DIR],
+  },
+];
+
+/**
+ * Every marker spelling, across every root of every surface. A block tagged
+ * with the WRONG root's spelling would be silently unchecked (and, in
+ * `.mdx`, would also break the docs build), so every form is recognised for
+ * orphan detection and only a root's own form actually opts a block in.
+ */
+const ALL_MARKERS = Array.from(new Set(SURFACES.flatMap((s) => s.roots.map((r) => r.marker))));
 
 const KEEP = process.argv.includes('--keep');
 const SELF_TEST = process.argv.includes('--self-test');
@@ -177,17 +316,20 @@ interface Example {
   fileName: string;
 }
 
-/** Every candidate prose file across `SOURCE_ROOTS`, with the root that owns it. */
-function sourceFiles(): Array<{ file: string; root: (typeof SOURCE_ROOTS)[number] }> {
-  const out: Array<{ file: string; root: (typeof SOURCE_ROOTS)[number] }> = [];
-  for (const root of SOURCE_ROOTS) {
+/** Every candidate prose/source file across a surface's roots, with the root that owns it. */
+function sourceFiles(roots: SourceRoot[]): Array<{ file: string; root: SourceRoot }> {
+  const out: Array<{ file: string; root: SourceRoot }> = [];
+  for (const root of roots) {
     if (!fs.existsSync(root.dir)) continue;
+    const exts = Array.isArray(root.ext) ? root.ext : [root.ext];
     const walk = (dir: string) => {
       if (root.exclude?.some((x) => dir === x || dir.startsWith(x + path.sep))) return;
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full);
-        else if (e.name.endsWith(root.ext)) out.push({ file: full, root });
+        else if (exts.some((ext) => e.name.endsWith(ext)) && !root.excludeFile?.(e.name)) {
+          out.push({ file: full, root });
+        }
       }
     };
     walk(root.dir);
@@ -196,42 +338,79 @@ function sourceFiles(): Array<{ file: string; root: (typeof SOURCE_ROOTS)[number
 }
 
 /**
- * Flat, collision-free build-dir name for a block: `<root>__<path>__<n>.ts`.
+ * Flat, collision-free build-dir name for a block: `<root>__<path>__<n><ext>`.
  * Path separators become `_` so two pages of the same basename in different
  * folders (`ui/actions.mdx`, `protocol/objectui/actions.mdx`) cannot collide.
+ *
+ * `buildExt` is the FENCE's language (`.tsx` for a ` ```tsx ` block, `.ts`
+ * otherwise), not the source root's own extension — a `.tsx` source file can
+ * still fence a plain `.ts` example, and JSX syntax is only legal in a file
+ * TypeScript treats as `.tsx`, so the two must be allowed to differ.
  */
-function buildFileName(source: string, root: (typeof SOURCE_ROOTS)[number], n: number): string {
-  const relPath = path.relative(root.dir, source).replace(new RegExp(`\\${root.ext}$`), '');
-  return `${root.label}__${relPath.split(path.sep).join('_')}__${n}.ts`;
+function buildFileName(source: string, root: SourceRoot, n: number, buildExt: '.ts' | '.tsx'): string {
+  const exts = Array.isArray(root.ext) ? root.ext : [root.ext];
+  let relPath = path.relative(root.dir, source);
+  for (const ext of exts) {
+    if (relPath.endsWith(ext)) {
+      relPath = relPath.slice(0, -ext.length);
+      break;
+    }
+  }
+  return `${root.label}__${relPath.split(path.sep).join('_')}__${n}${buildExt}`;
+}
+
+/** Fence languages this gate recognises as TypeScript. `tsx` matters only for
+ *  `commentPrefixed` roots today — every #10969 block is a React component —
+ *  but is recognised for every root so a marker over a markdown `tsx` fence
+ *  (several already exist, unmarked, in skills/docs) is no longer a silent
+ *  no-op the day someone marks one. */
+const FENCE_OPEN_RE = /^```(ts|tsx|typescript)\s*$/;
+const FENCE_CLOSE_RE = /^```\s*$/;
+/** The JSDoc continuation gutter: optional leading whitespace, one `*`, at
+ *  most one following space. Strips ` *   const x = 1;` → `  const x = 1;`
+ *  (indentation beyond the gutter is real code indentation and is kept). */
+const JSDOC_GUTTER_RE = /^\s*\*\s?/;
+
+/**
+ * The lines a root's regexes actually match against. Identical to the raw
+ * file lines for markdown roots; for a `commentPrefixed` root, the JSDoc
+ * gutter is stripped from every line first — so a marker, a fence, and a
+ * block's body all read the same whether they came from a `.md` file or a
+ * JSDoc-wrapped `@example` in `.tsx` source (see the header comment's
+ * "SURFACES" section for why the wrapper marker forms can't be reused
+ * verbatim, and why that comment itself avoids the very sequence being
+ * described here).
+ */
+function logicalLines(rawLines: string[], root: SourceRoot): string[] {
+  return root.commentPrefixed ? rawLines.map((l) => l.replace(JSDOC_GUTTER_RE, '')) : rawLines;
 }
 
 /**
- * Pull every marked ```ts / ```typescript block out of one markdown file.
- * A block is marked when the line immediately above its opening fence is
- * exactly the MARKER (ignoring surrounding whitespace).
+ * Pull every marked ```ts / ```tsx / ```typescript block out of one prose or
+ * source file. A block is marked when the line immediately above its opening
+ * fence is exactly the MARKER (ignoring surrounding whitespace) — after
+ * gutter-stripping, for a `commentPrefixed` root.
  *
  * Also reports `orphans`: MARKER lines that are NOT directly above a ts fence.
  * A misplaced marker (a blank line slipped in between, or it precedes a bash /
  * json block) silently checks nothing — exactly the failure mode this gate
  * exists to prevent — so the caller treats an orphan as an error, not a no-op.
  */
-function extractFromFile(
-  source: string,
-  root: (typeof SOURCE_ROOTS)[number],
-): { examples: Example[]; orphans: number[] } {
-  const lines = fs.readFileSync(source, 'utf-8').split('\n');
+function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
+  const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
+  const lines = logicalLines(rawLines, root);
   const examples: Example[] = [];
   const claimed = new Set<number>(); // MARKER line indices that opened a real block
   let n = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    const open = lines[i].match(/^```(ts|typescript)\s*$/);
+    const open = lines[i].match(FENCE_OPEN_RE);
     if (!open) continue;
     const marked = i > 0 && lines[i - 1].trim() === root.marker;
     // Find the matching close fence regardless of marking, so `i` advances past
     // this block and we never treat its body as top-level markdown.
     let close = i + 1;
-    while (close < lines.length && !/^```\s*$/.test(lines[close])) close++;
+    while (close < lines.length && !FENCE_CLOSE_RE.test(lines[close])) close++;
     if (marked) {
       claimed.add(i - 1);
       const body = lines.slice(i + 1, close);
@@ -240,7 +419,7 @@ function extractFromFile(
         source,
         bodyStartLine: i + 2, // 1-based line of body[0]
         code: body.join('\n'),
-        fileName: buildFileName(source, root, n),
+        fileName: buildFileName(source, root, n, open[1] === 'tsx' ? '.tsx' : '.ts'),
       });
     }
     i = close; // skip to the close fence
@@ -305,7 +484,15 @@ function describeAnyPosition(node: ts.Node): string | null {
  * the `tsc` pass that follows, which is the right division of labour.
  */
 function findBareAny(code: string, fileName: string): AnyFinding[] {
-  const sf = ts.createSourceFile(fileName, code, ts.ScriptTarget.ES2020, /* setParentNodes */ true, ts.ScriptKind.TS);
+  // `.tsx` MUST parse as TSX, not TS (#10969): under ScriptKind.TS, `<Foo>` at
+  // an expression position is an old-style type-assertion prefix, not JSX —
+  // so a React example's `<div>…</div>` mis-parses into a cascade of syntax
+  // nodes this walker was never designed to see. `createSourceFile` degrades
+  // silently on that (never throws), which would make this guard exactly the
+  // kind of dormant checker its own docblock above warns about: not wrong
+  // NOISILY, just quietly not looking at what it claims to.
+  const scriptKind = fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const sf = ts.createSourceFile(fileName, code, ts.ScriptTarget.ES2020, /* setParentNodes */ true, scriptKind);
   const findings: AnyFinding[] = [];
 
   const visit = (node: ts.Node): void => {
@@ -323,48 +510,79 @@ function findBareAny(code: string, fileName: string): AnyFinding[] {
   return findings;
 }
 
-// ── Module resolution derived from the spec's own `exports` ──────────────────
+// ── Module resolution derived from each surface's own package `exports` ──────
 
+/**
+ * `package.json#exports` condition objects come in two shapes across this
+ * monorepo, measured rather than assumed (#10969): spec nests `types` one
+ * level down per condition (`{ import: { types, default }, require: {…} }`,
+ * to carry a `browser` variant too) — client-react's and client's `exports`
+ * are FLAT (`{ types, import, require }`, `types` a sibling of the
+ * conditions, not nested under either). Both are legal `package.json`
+ * shapes; a resolver written against only the nested one silently resolves
+ * every flat-shaped package to `undefined` — no error, just an empty
+ * `paths` map, which is indistinguishable from "package not built" three
+ * lines later. `resolveTypes()` reads either.
+ */
 interface ExportEntry {
+  types?: string;
   import?: { types?: string };
   require?: { types?: string };
 }
 
+/** The declared `.d.ts` for one export condition object, flat or nested shape alike. */
+function resolveTypes(entry: ExportEntry | string): string | undefined {
+  if (typeof entry === 'string') return entry;
+  return entry.types ?? entry.require?.types ?? entry.import?.types;
+}
+
 /**
- * Build a tsconfig `paths` map from `@objectstack/spec`'s published `exports`,
- * pointing each specifier at its built `.d.ts`. Deriving it from the real
+ * Build a tsconfig `paths` map from ONE package's own published `exports`,
+ * pointing each specifier at its built `.d.ts` — generalised from the
+ * original `specPaths()` (#10969) so a surface can self-import ITS OWN
+ * package the same way `@objectstack/spec`'s examples always have, whether
+ * that package is spec, client-react, or client. Deriving it from the real
  * exports means a new subpath export (or a removed one) is reflected here for
  * free — the map cannot drift from what consumers actually resolve.
  *
  * Returns the map plus the list of declaration files that must exist; a missing
- * root declaration means the spec was not built (or built with OS_SKIP_DTS), and
- * the caller fails loudly rather than checking against a stale/absent surface.
+ * root declaration means the package was not built (or built with OS_SKIP_DTS),
+ * and the caller fails loudly rather than checking against a stale/absent surface.
  */
-function specPaths(): { paths: Record<string, string[]>; missing: string[] } {
-  const pkg = JSON.parse(fs.readFileSync(SPEC_PKG_JSON, 'utf-8'));
-  const exportsMap = pkg.exports as Record<string, ExportEntry | string>;
+function packagePaths(pkgDir: string): { paths: Record<string, string[]>; missing: string[] } {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(pkgDir, 'package.json'), 'utf-8'));
+  const exportsMap = (pkg.exports ?? {}) as Record<string, ExportEntry | string>;
   const paths: Record<string, string[]> = {};
   const missing: string[] = [];
 
   for (const [key, entry] of Object.entries(exportsMap)) {
-    const types =
-      typeof entry === 'string'
-        ? entry
-        : (entry.require?.types ?? entry.import?.types);
+    const types = resolveTypes(entry);
     if (!types || !types.endsWith('.d.ts')) continue; // skip non-type conditions (css, etc.)
-    const specifier = key === '.' ? '@objectstack/spec' : `@objectstack/spec/${key.slice(2)}`;
-    const abs = path.resolve(SPEC_DIR, types);
+    const specifier = key === '.' ? pkg.name : `${pkg.name}/${key.slice(2)}`;
+    const abs = path.resolve(pkgDir, types);
     paths[specifier] = [abs];
     if (!fs.existsSync(abs)) missing.push(rel(abs));
   }
   return { paths, missing };
 }
 
+/** `packagePaths()` merged across every self-package a surface declares. */
+function surfacePaths(pkgDirs: string[]): { paths: Record<string, string[]>; missing: string[] } {
+  const paths: Record<string, string[]> = {};
+  const missing: string[] = [];
+  for (const dir of pkgDirs) {
+    const r = packagePaths(dir);
+    Object.assign(paths, r.paths);
+    missing.push(...r.missing);
+  }
+  return { paths, missing };
+}
+
 // ── tsc harness ──────────────────────────────────────────────────────────────
 
-function writeBuildDir(examples: Example[], paths: Record<string, string[]>): void {
-  fs.rmSync(BUILD_DIR, { recursive: true, force: true });
-  fs.mkdirSync(BUILD_DIR, { recursive: true });
+function writeBuildDir(buildDir: string, examples: Example[], paths: Record<string, string[]>): void {
+  fs.rmSync(buildDir, { recursive: true, force: true });
+  fs.mkdirSync(buildDir, { recursive: true });
 
   for (const ex of examples) {
     // Written verbatim (no prepended wrapper) so a tsc line N maps to source
@@ -374,7 +592,7 @@ function writeBuildDir(examples: Example[], paths: Record<string, string[]>): vo
     // line of any real diagnostic.
     const isModule = /^\s*(import|export)\b/m.test(ex.code);
     fs.writeFileSync(
-      path.join(BUILD_DIR, ex.fileName),
+      path.join(buildDir, ex.fileName),
       ex.code + (isModule ? '' : '\nexport {};\n'),
     );
   }
@@ -388,6 +606,10 @@ function writeBuildDir(examples: Example[], paths: Record<string, string[]>): vo
       module: 'ESNext',
       moduleResolution: 'bundler',
       lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+      // React examples (#10969) need JSX; harmless for plain-`.ts` surfaces —
+      // a `.ts` file cannot contain JSX syntax regardless of this option, so
+      // one shared profile covers every surface without branching on it.
+      jsx: 'react-jsx',
       types: [],
       strict: true,
       skipLibCheck: true,
@@ -400,10 +622,10 @@ function writeBuildDir(examples: Example[], paths: Record<string, string[]>): vo
       // sidesteps TS 6.0's `baseUrl` deprecation (TS5101).
       paths,
     },
-    include: ['*.ts'],
+    include: ['*.ts', '*.tsx'],
   };
   fs.writeFileSync(
-    path.join(BUILD_DIR, 'tsconfig.json'),
+    path.join(buildDir, 'tsconfig.json'),
     JSON.stringify(tsconfig, null, 2),
   );
 }
@@ -432,12 +654,12 @@ function parseDiagnostics(output: string): Diagnostic[] {
   return diags;
 }
 
-function runTsc(): { code: number; output: string } {
+function runTsc(buildDir: string): { code: number; output: string } {
   const tscBin = require.resolve('typescript/bin/tsc');
   const res = spawnSync(
     process.execPath,
-    [tscBin, '--noEmit', '--pretty', 'false', '-p', path.join(BUILD_DIR, 'tsconfig.json')],
-    { cwd: BUILD_DIR, encoding: 'utf-8' },
+    [tscBin, '--noEmit', '--pretty', 'false', '-p', path.join(buildDir, 'tsconfig.json')],
+    { cwd: buildDir, encoding: 'utf-8' },
   );
   return { code: res.status ?? 1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
@@ -601,6 +823,101 @@ function selfTest(): never {
           `Nested \`any\`, \`'any'\` string literals and the word "any" in prose all occur in the real corpus.`,
       );
     }
+
+    // ── commentPrefixed roots (#10969): the JSDoc-gutter-stripping and
+    //    tsx-fence-language logic the client SDK surface depends on. Every
+    //    check above exercises free-standing markdown; nothing above would
+    //    catch the gutter stripping being dormant (every real `.tsx` fixture
+    //    line starts with ` * `, so a regex that forgot to strip it would
+    //    simply never match a fence-open line and would silently extract
+    //    ZERO blocks — the exact failure mode the vacuous-green guard in
+    //    `main()` exists to catch, but only once a REAL corpus is at stake). ──
+    const tsxRoot: SourceRoot = {
+      dir,
+      ext: '.tsx',
+      label: 'client-react',
+      marker: '<!-- os:check -->',
+      commentPrefixed: true,
+    };
+
+    // RED: a `.tsx` file, JSDoc-wrapped, fenced ```tsx (not ```ts — #10969's
+    // whole corpus is tsx), with the block body written the way a real
+    // source file's Prettier-formatted docblock writes it: every line
+    // prefixed ` * `, including a blank continuation line as bare ` *`.
+    const redHook = path.join(dir, 'red-hook.tsx');
+    fs.writeFileSync(
+      redHook,
+      [
+        '// Copyright', // 1
+        '', // 2
+        '/**', // 3
+        ' * Hook for querying data', // 4
+        ' *', // 5
+        ' * <!-- os:check -->', // 6
+        ' * ```tsx', // 7
+        ' * function TaskList() {', // 8
+        ' *   const ctx: any = useQuery();', // 9  ← the defect, gutter still on
+        ' *   return <div>{ctx}</div>;', // 10
+        ' * }', // 11
+        ' * ```', // 12
+        ' */', // 13
+        'export function useQuery() {}', // 14
+      ].join('\n'),
+      'utf8',
+    );
+    const redTsx = extractFromFile(redHook, tsxRoot);
+    check(
+      redTsx.examples.length === 1,
+      `tsx fixture: extracted ${redTsx.examples.length} block(s), expected 1 — gutter-stripped fence detection is DORMANT`,
+    );
+    check(redTsx.orphans.length === 0, `tsx fixture: reported ${redTsx.orphans.length} orphan marker(s), expected 0`);
+    if (redTsx.examples.length === 1) {
+      const ex = redTsx.examples[0];
+      check(
+        !ex.code.includes(' * ') && !ex.code.startsWith('*'),
+        `tsx fixture: extracted body still carries a JSDoc gutter — ${JSON.stringify(ex.code.split('\n')[0])}`,
+      );
+      check(
+        ex.fileName.endsWith('.tsx'),
+        `tsx fixture: build file name "${ex.fileName}" does not end in .tsx — a \`\`\`tsx fence must build as tsx, not ts, or JSX in the body is a syntax error`,
+      );
+      const hits = findBareAny(ex.code, ex.fileName);
+      check(hits.length === 1, `tsx fixture: found ${hits.length} bare \`any\`, expected 1 — the guard is DORMANT on tsx`);
+      if (hits.length === 1) {
+        const pageLine = ex.bodyStartLine + hits[0].line - 1;
+        check(pageLine === 9, `tsx fixture: reported page line ${pageLine}, expected 9`);
+      }
+    }
+
+    // RED: a marker present but NOT directly above a fence (a blank JSDoc
+    // continuation line — ` *` — sits between them) must still be caught as
+    // an orphan once its gutter is stripped, not silently ignored because
+    // the raw line (`" *   <!-- os:check -->"`... ) never equals the raw
+    // marker text.
+    const orphanHook = path.join(dir, 'orphan-hook.tsx');
+    fs.writeFileSync(
+      orphanHook,
+      [
+        '/**', // 1
+        ' * <!-- os:check -->', // 2
+        ' *', // 3  ← blank gutter line breaks marker/fence adjacency
+        ' * ```tsx', // 4
+        ' * const x = 1;', // 5
+        ' * ```', // 6
+        ' */', // 7
+      ].join('\n'),
+      'utf8',
+    );
+    const orphanTsx = extractFromFile(orphanHook, tsxRoot);
+    check(
+      orphanTsx.examples.length === 0,
+      `orphan fixture: extracted ${orphanTsx.examples.length} block(s), expected 0 — the marker is not adjacent to the fence`,
+    );
+    check(
+      orphanTsx.orphans.length === 1,
+      `orphan fixture: reported ${orphanTsx.orphans.length} orphan marker(s), expected 1 — a misplaced gutter-wrapped ` +
+        `marker must not be silently ignored`,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -612,57 +929,82 @@ function selfTest(): never {
   }
   console.log(
     '✅  self-test: flags a bare `any` parameter / variable / property / return / alias / cast in a\n' +
-      '    marked block at the right page line, and flags nothing in an honestly typed one.',
+      '    marked block at the right page line, and flags nothing in an honestly typed one; a\n' +
+      '    JSDoc-gutter-wrapped ```tsx block (client SDK surface) extracts, strips and maps lines\n' +
+      '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan.',
   );
   process.exit(0);
+}
+
+/** A package.json's own `name` field — used to look its self-entry up in the
+ *  `paths` map `surfacePaths()` derived from it. */
+function pkgName(pkgDir: string): string {
+  return JSON.parse(fs.readFileSync(path.resolve(pkgDir, 'package.json'), 'utf-8')).name as string;
 }
 
 function main() {
   if (SELF_TEST) selfTest();
 
-  console.log('🧪 Type-checking prose TypeScript examples (skills + docs)...\n');
+  console.log(`🧪 Type-checking prose TypeScript examples (${SURFACES.map((s) => s.name).join(' · ')})...\n`);
 
-  const files = sourceFiles();
-  const examples: Example[] = [];
-  const orphans: string[] = [];
-  for (const { file, root } of files) {
-    const { examples: found, orphans: bad } = extractFromFile(file, root);
-    examples.push(...found);
-    for (const line of bad) orphans.push(`${rel(file)}:${line}`);
-  }
+  const bySurface = SURFACES.map((surface) => {
+    const examples: Example[] = [];
+    const orphans: string[] = [];
+    for (const { file, root } of sourceFiles(surface.roots)) {
+      const { examples: found, orphans: bad } = extractFromFile(file, root);
+      examples.push(...found);
+      for (const line of bad) orphans.push(`${rel(file)}:${line}`);
+    }
+    return { surface, examples, orphans };
+  });
 
-  // A marker that is not directly above a ```ts fence checks nothing. Fail loudly
-  // rather than let it read as covered — a placed-but-inert marker is worse than
-  // no marker, because it looks intentional.
-  if (orphans.length > 0) {
+  // A marker that is not directly above a ```ts/```tsx fence checks nothing.
+  // Fail loudly rather than let it read as covered — a placed-but-inert
+  // marker is worse than no marker, because it looks intentional. Checked
+  // across every surface up front, before any surface's zero-block or
+  // compile verdict, so a misplaced marker is never masked by an unrelated
+  // surface's failure.
+  const allOrphans = bySurface.flatMap((s) => s.orphans);
+  if (allOrphans.length > 0) {
     fail(
-      `Found an os:check marker not directly above a \`\`\`ts / \`\`\`typescript fence\n` +
-        `(or written in the wrong comment syntax for its file type):\n\n` +
-        orphans.map((o) => `  - ${o}`).join('\n') +
+      `Found an os:check marker not directly above a \`\`\`ts / \`\`\`tsx / \`\`\`typescript fence\n` +
+        `(or written in the wrong comment syntax for its file type — inside a JSDoc block\n` +
+        `comment a blank gutter line between the marker and the fence breaks adjacency too):\n\n` +
+        allOrphans.map((o) => `  - ${o}`).join('\n') +
         `\n\n  The marker must be the line IMMEDIATELY above the code fence (no blank\n` +
         `  line between). Move it, or remove it if the block should not be checked.`,
     );
   }
 
-  // Vacuous-green guard: opt-in tagging means "zero blocks" is far more likely
-  // to be "the marker got renamed / stripped" than "no examples worth checking".
-  // A gate that checks nothing must not report success.
-  if (examples.length === 0) {
-    fail(
-      `No prose examples are marked for type-checking.\n\n` +
-        `  Mark a self-contained, compilable block by putting\n\n` +
-        SOURCE_ROOTS.map((r) => `    ${r.marker}   (in ${rel(r.dir)}/**/*${r.ext})`).join('\n') + `\n\n` +
-        `  on the line directly above its \`\`\`ts fence in ${SOURCE_ROOTS.map((r) => `${rel(r.dir)}/**/*${r.ext}`).join(' or ')}.\n` +
-        `  (If you just removed the last marker, that is almost certainly a mistake.)`,
-    );
+  // Vacuous-green guard, PER SURFACE (#10969 strengthens this from a single
+  // global total): opt-in tagging means "zero blocks on this surface" is far
+  // more likely to be "the marker got renamed / stripped on just this
+  // surface" than "no examples worth checking" — and a global total would
+  // hide exactly that behind a healthy count from an unrelated surface. Each
+  // surface must independently prove it found something.
+  for (const { surface, examples } of bySurface) {
+    if (examples.length === 0) {
+      fail(
+        `No marked examples found for surface "${surface.name}".\n\n` +
+          `  Mark a self-contained, compilable block by putting\n\n` +
+          surface.roots
+            .map((r) => `    ${r.marker}   (in ${rel(r.dir)}/**/*${Array.isArray(r.ext) ? r.ext.join('|') : r.ext})`)
+            .join('\n') +
+          `\n\n  on the line directly above its \`\`\`ts / \`\`\`tsx fence.\n` +
+          `  (If you just removed the last marker on this surface, that is almost certainly a mistake.)`,
+      );
+    }
   }
 
+  const allExamples = bySurface.flatMap((s) => s.examples);
+
   // Third anti-idle assertion (#5943): a marked block that annotates anything
-  // `any` compiles by definition and proves nothing about it. Runs BEFORE the
+  // `any` compiles by definition and proves nothing about it. Runs BEFORE any
   // build dir is written, so the author reads one crisp verdict instead of a
-  // clean `tsc` run that silently covered nothing.
+  // clean `tsc` run that silently covered nothing. Across every surface —
+  // the defect this closes (#5720, #5605) is not surface-specific.
   const anyHits: string[] = [];
-  for (const ex of examples) {
+  for (const ex of allExamples) {
     for (const f of findBareAny(ex.code, ex.fileName)) {
       anyHits.push(`  ${rel(ex.source)}:${ex.bodyStartLine + f.line - 1}:${f.col}  ${f.where}`);
     }
@@ -673,100 +1015,121 @@ function main() {
         `"this compiles" while every property access on that value goes unchecked:\n\n` +
         anyHits.join('\n') +
         `\n\n  Fix it one of two ways:\n` +
-        `    1. Annotate the real type (import it from @objectstack/spec) — that is the\n` +
-        `       whole point of marking the block, and it is what catches the drift:\n` +
+        `    1. Annotate the real type (import it from the surface's own package) — that is\n` +
+        `       the whole point of marking the block, and it is what catches the drift:\n` +
         `       \`(ctx: any)\` hid a hook example reading a \`ctx.services\` that no hook\n` +
         `       context has (#5720), and a \`ctx.session?.positions\` before it (#5605).\n` +
         `    2. Remove the os:check marker if the block is an illustrative fragment\n` +
-        `       that cannot be typed against the spec (generated third-party code, a\n` +
-        `       partial subtree). An unmarked block is honest; a marked \`any\` is not.\n\n` +
+        `       that cannot be typed against the real declarations (generated third-party\n` +
+        `       code, a partial subtree). An unmarked block is honest; a marked \`any\` is not.\n\n` +
         `  Nested \`any\` (\`Record<string, any>\`, \`any[]\`, \`Promise<any>\`) is NOT flagged\n` +
         `  — only an annotation, cast or alias that IS \`any\`.`,
     );
   }
 
-  // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
-  //
-  // Placement differs from the two sibling gates on purpose, because the ROUTE to
-  // the dist differs: those resolve entry points in-process with
-  // `ts.createProgram`, so their first `.d.ts` read is their first statement of
-  // work. Here the declarations are reached indirectly — `specPaths()` turns the
-  // exports map into a tsconfig `paths` table and a spawned `tsc` follows it — and
-  // everything above this line (extraction, the orphan-marker guard, the zero-block
-  // guard, the bare-`any` guard) is dist-independent and worth reporting even when
-  // the build is stale. So the guard sits at the boundary rather than at the top:
-  // no verdict below it is computed, and no honest finding above it is suppressed.
-  //
-  // The `missing` check immediately following is NOT redundant. It answers "was
-  // the package built at all", which this also covers via `state: 'missing'`; but
-  // it stays because it is the one that survives a PARTIAL dist — a subpath whose
-  // `.d.ts` was never emitted while the newest declaration on disk is still newer
-  // than `src/`, which the mtime rule reads as fresh.
-  const freshness = inspectDistFreshness(
-    SPEC_DIR,
-    'check',
-    'pnpm --filter @objectstack/spec check:skill-examples',
-  );
-  if (!freshness.fresh) {
-    console.error(freshness.message);
-    process.exit(1);
-  }
-
-  const { paths, missing } = specPaths();
-  if (missing.some((m) => m.endsWith('index.d.ts')) && !fs.existsSync(paths['@objectstack/spec']?.[0] ?? '')) {
-    fail(
-      `@objectstack/spec is not built — no declarations to check examples against:\n\n` +
-        missing.map((m) => `  - ${m} (missing)`).join('\n') +
-        `\n\n  Build the spec first (CI does this in the "Build workspace packages" step):\n\n` +
-        `    pnpm --filter @objectstack/spec build`,
-    );
-  }
-
-  console.log(`   ${examples.length} marked example(s) across ${new Set(examples.map((e) => e.source)).size} file(s):`);
-  for (const ex of examples) {
-    console.log(`     • ${rel(ex.source)}:${ex.bodyStartLine} → ${ex.fileName}`);
+  console.log(`   ${allExamples.length} marked example(s) across ${new Set(allExamples.map((e) => e.source)).size} file(s), ${bySurface.length} surface(s):`);
+  for (const { surface, examples } of bySurface) {
+    console.log(`     • ${surface.name}: ${examples.length} block(s)`);
   }
   console.log('');
 
-  writeBuildDir(examples, paths);
-  const { code, output } = runTsc();
+  // Per-surface compile pass. Each surface owns its own throwaway build dir
+  // (so bare specifiers like `react` resolve against ITS resolutionDir's
+  // node_modules — see the header comment's "SURFACES" section) and its own
+  // `paths` map (so it can self-import its own package(s)), but diagnostics
+  // from every surface are collected and reported together at the end —
+  // one gate, one verdict, whichever surfaces broke named in it.
+  const buildDirs: string[] = [];
+  let anyDiags = false;
+  const diagBlocks: string[] = [];
 
-  const byFile = new Map(examples.map((e) => [e.fileName, e]));
-  const diags = parseDiagnostics(output);
+  for (const { surface, examples } of bySurface) {
+    // BEFORE any declaration is resolved (#7181, adopting #7122's primitive).
+    //
+    // Placement differs from the two sibling gates on purpose, because the ROUTE to
+    // the dist differs: those resolve entry points in-process with
+    // `ts.createProgram`, so their first `.d.ts` read is their first statement of
+    // work. Here the declarations are reached indirectly — `surfacePaths()` turns
+    // each self-package's exports map into a tsconfig `paths` table and a spawned
+    // `tsc` follows it — and everything above this loop (extraction, the
+    // orphan-marker guard, the zero-block guard, the bare-`any` guard) is
+    // dist-independent and worth reporting even when a build is stale. So the
+    // guard sits at the boundary rather than at the top: no verdict below it is
+    // computed for a stale surface, and no honest finding above it is suppressed.
+    let staleMessage: string | null = null;
+    for (const pkgDir of surface.selfPackages) {
+      const freshness = inspectDistFreshness(pkgDir, 'check', 'pnpm --filter @objectstack/spec check:skill-examples');
+      if (!freshness.fresh) {
+        staleMessage = freshness.message;
+        break;
+      }
+    }
+    if (staleMessage) {
+      console.error(`\n[${surface.name}]`);
+      console.error(staleMessage);
+      process.exit(1);
+    }
 
-  if (code === 0 && diags.length === 0) {
-    console.log(`✅ ${examples.length} prose examples type-check against @objectstack/spec`);
-    if (!KEEP) fs.rmSync(BUILD_DIR, { recursive: true, force: true });
+    const { paths, missing } = surfacePaths(surface.selfPackages);
+    // NOT redundant with the freshness check above. That answers "is dist
+    // OLDER than src"; this is the one that survives a PARTIAL dist — a
+    // self-package whose `.d.ts` was never emitted at all while the newest
+    // declaration elsewhere on disk is still newer than `src/`, which the
+    // mtime rule alone would read as fresh.
+    const unbuiltSelfPackages = surface.selfPackages.filter((dir) => !fs.existsSync(paths[pkgName(dir)]?.[0] ?? ''));
+    if (unbuiltSelfPackages.length > 0) {
+      fail(
+        `[${surface.name}] not built — no declarations to check examples against:\n\n` +
+          missing.map((m) => `  - ${m} (missing)`).join('\n') +
+          `\n\n  Build first (CI does this in the "Build workspace packages" step):\n\n` +
+          unbuiltSelfPackages.map((d) => `    pnpm --filter ${pkgName(d)} build`).join('\n'),
+      );
+    }
+
+    const buildDir = path.join(surface.resolutionDir, '.examples-build');
+    buildDirs.push(buildDir);
+    writeBuildDir(buildDir, examples, paths);
+    const { code, output } = runTsc(buildDir);
+
+    const byFile = new Map(examples.map((e) => [e.fileName, e]));
+    const diags = parseDiagnostics(output);
+
+    if (code === 0 && diags.length === 0) continue;
+
+    anyDiags = true;
+    diagBlocks.push(`\n✗ [${surface.name}] examples do not compile:\n`);
+    // Remap every diagnostic back to the source page:<real line> so the author
+    // reads the error against the file they actually edit, not the throwaway copy.
+    const grouped = new Map<string, string[]>();
+    for (const d of diags) {
+      const ex = byFile.get(d.file);
+      const loc = ex ? `${rel(ex.source)}:${ex.bodyStartLine + d.line - 1}:${d.col}` : d.file;
+      const key = ex ? rel(ex.source) : d.file;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(`  ${loc}\n      ${d.text}`);
+    }
+    for (const [, entries] of grouped) diagBlocks.push(...entries);
+
+    // A non-zero exit with no parseable diagnostics (e.g. a tsconfig error) must
+    // still surface — print the raw tail so it is never a silent failure.
+    if (diags.length === 0) {
+      diagBlocks.push(`\n  tsc exited ${code} but produced no parseable diagnostics. Raw output:\n`);
+      diagBlocks.push(output.split('\n').map((l) => `    ${l}`).join('\n'));
+    }
+  }
+
+  if (!anyDiags) {
+    console.log(`✅ ${allExamples.length} prose examples type-check across ${bySurface.length} surface(s)`);
+    if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
     return;
   }
 
-  // Remap every diagnostic back to the source page:<real line> so the author
-  // reads the error against the file they actually edit, not the throwaway copy.
-  console.error(`\n✗ Prose TypeScript examples do not compile against @objectstack/spec:\n`);
-  const grouped = new Map<string, string[]>();
-  for (const d of diags) {
-    const ex = byFile.get(d.file);
-    const loc = ex ? `${rel(ex.source)}:${ex.bodyStartLine + d.line - 1}:${d.col}` : d.file;
-    const key = ex ? rel(ex.source) : d.file;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(`  ${loc}\n      ${d.text}`);
-  }
-  for (const [, entries] of grouped) {
-    for (const e of entries) console.error(e);
-  }
-
-  // A non-zero exit with no parseable diagnostics (e.g. a tsconfig error) must
-  // still surface — print the raw tail so it is never a silent failure.
-  if (diags.length === 0) {
-    console.error(`\n  tsc exited ${code} but produced no parseable diagnostics. Raw output:\n`);
-    console.error(output.split('\n').map((l) => `    ${l}`).join('\n'));
-  }
-
+  console.error(diagBlocks.join('\n'));
   console.error(
     `\n  These are examples an AI copies verbatim. Fix the example to match the\n` +
-      `  current spec, or drop its os:check marker if it is an intentional fragment.\n`,
+      `  current declarations, or drop its os:check marker if it is an intentional fragment.\n`,
   );
-  if (!KEEP) fs.rmSync(BUILD_DIR, { recursive: true, force: true });
+  if (!KEEP) for (const d of buildDirs) fs.rmSync(d, { recursive: true, force: true });
   process.exit(1);
 }
 

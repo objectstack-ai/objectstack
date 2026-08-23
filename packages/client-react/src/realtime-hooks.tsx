@@ -30,7 +30,11 @@ import { useEventCallback } from './internal-deps';
  * @returns Latest metadata event or null
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useEffect } from 'react';
+ * import { useMetadataSubscription } from '@objectstack/client-react';
+ *
  * function ObjectList() {
  *   const event = useMetadataSubscription('object');
  *
@@ -77,7 +81,11 @@ export function useMetadataSubscription(
  * @returns Latest data event or null
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useEffect } from 'react';
+ * import { useDataSubscription } from '@objectstack/client-react';
+ *
  * function TaskDetail({ taskId }: { taskId: string }) {
  *   const event = useDataSubscription('project_task', { recordId: taskId });
  *
@@ -128,9 +136,12 @@ export function useDataSubscription(
  * @param options - Optional filters
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useQuery, useMetadataSubscriptionCallback } from '@objectstack/client-react';
+ *
  * function ObjectList() {
- *   const { refetch } = useQuery(...);
+ *   const { refetch } = useQuery('todo_task', {});
  *
  *   useMetadataSubscriptionCallback('object', () => {
  *     refetch(); // Refetch list when objects change
@@ -175,9 +186,12 @@ export function useMetadataSubscriptionCallback(
  * @param options - Optional filters
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useQuery, useDataSubscriptionCallback } from '@objectstack/client-react';
+ *
  * function TaskList() {
- *   const { refetch } = useQuery(...);
+ *   const { refetch } = useQuery('project_task', {});
  *
  *   useDataSubscriptionCallback('project_task', () => {
  *     refetch(); // Refetch list when tasks change
@@ -232,7 +246,11 @@ export function useDataSubscriptionCallback(
  * @returns Latest bulk data event or null
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useEffect } from 'react';
+ * import { useBulkDataSubscription } from '@objectstack/client-react';
+ *
  * function TaskList() {
  *   const bulk = useBulkDataSubscription('project_task');
  *
@@ -273,9 +291,12 @@ export function useBulkDataSubscription(object: string): BulkDataEvent | null {
  * @param callback - Callback to invoke on events
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useQuery, useBulkDataSubscriptionCallback } from '@objectstack/client-react';
+ *
  * function TaskList() {
- *   const { refetch } = useQuery(...);
+ *   const { refetch } = useQuery('project_task', {});
  *
  *   useBulkDataSubscriptionCallback('project_task', () => {
  *     refetch(); // a predicate write touched an unknown set of rows
@@ -311,7 +332,10 @@ export function useBulkDataSubscriptionCallback(
  * @returns Whether realtime is connected
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useRealtimeConnection } from '@objectstack/client-react';
+ *
  * function ConnectionIndicator() {
  *   const connected = useRealtimeConnection();
  *
@@ -363,13 +387,16 @@ export function useRealtimeConnection(): boolean {
  * @param options - Optional filters
  *
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useQuery, useAutoRefresh } from '@objectstack/client-react';
+ *
  * function TaskList() {
  *   const { data, refetch } = useQuery('project_task', {});
  *
  *   useAutoRefresh('project_task', refetch);
  *
- *   return <div>{data.map(...)}</div>;
+ *   return <div>{data?.records.map(task => <div key={task.id}>{task.subject}</div>)}</div>;
  * }
  * ```
  */

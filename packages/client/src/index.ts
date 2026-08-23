@@ -1745,7 +1745,12 @@ export class ObjectStackClient {
    * and rely on hostname / `X-Environment-Id` header / session resolution.
    *
    * @example
+   * <!-- os:check -->
    * ```ts
+   * import type { ObjectStackClient } from '@objectstack/client';
+   *
+   * declare const client: ObjectStackClient;
+   *
    * const scoped = client.project('00000000-0000-0000-0000-000000000001');
    * const tasks = await scoped.data.find('task', { top: 10 });
    * const objects = await scoped.meta.getItems('object');

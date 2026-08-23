@@ -36,9 +36,18 @@ export const ObjectStackLocaleContext = createContext<string | undefined>(undefi
  * Provider component that makes ObjectStackClient available to all child components
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { ObjectStackClient } from '@objectstack/client';
+ * import { ObjectStackProvider } from '@objectstack/client-react';
+ *
  * const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000' });
- * 
+ * const language = 'en';
+ *
+ * function YourComponents() {
+ *   return <div>Your app</div>;
+ * }
+ *
  * function App() {
  *   return (
  *     <ObjectStackProvider client={client} locale={language}>
@@ -90,7 +99,10 @@ export function useObjectStackLocale(): string | undefined {
  * @throws Error if used outside of ObjectStackProvider
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useClient } from '@objectstack/client-react';
+ *
  * function MyComponent() {
  *   const client = useClient();
  *   // Use client.data.find(), etc.

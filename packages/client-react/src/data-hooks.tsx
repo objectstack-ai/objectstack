@@ -66,17 +66,20 @@ export interface UseQueryResult<T = any> {
  * Hook for querying ObjectStack data with automatic caching and refetching
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useQuery } from '@objectstack/client-react';
+ *
  * function TaskList() {
  *   const { data, isLoading, error, refetch } = useQuery('todo_task', {
  *     fields: ['id', 'subject', 'priority'],
  *     orderBy: ['-created_at'],
  *     limit: 20
  *   });
- * 
+ *
  *   if (isLoading) return <div>Loading...</div>;
  *   if (error) return <div>Error: {error.message}</div>;
- * 
+ *
  *   return (
  *     <div>
  *       {data?.records.map(task => (
@@ -241,19 +244,22 @@ export interface UseMutationResult<TData = any, TVariables = any> {
  * Hook for creating, updating, or deleting ObjectStack data
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useMutation } from '@objectstack/client-react';
+ *
  * function CreateTaskForm() {
  *   const { mutate, isLoading, error } = useMutation('todo_task', 'create', {
  *     onSuccess: (data) => {
  *       console.log('Task created:', data);
  *     }
  *   });
- * 
- *   const handleSubmit = (formData) => {
+ *
+ *   const handleSubmit = (formData: Record<string, unknown>) => {
  *     mutate(formData);
  *   };
- * 
- *   return <form onSubmit={handleSubmit}>...</form>;
+ *
+ *   return <button onClick={() => handleSubmit({ subject: 'New task' })}>Create</button>;
  * }
  * ```
  */
@@ -384,7 +390,10 @@ export interface UsePaginationResult<T = any> extends UseQueryResult<T> {
  * Hook for paginated data queries
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { usePagination } from '@objectstack/client-react';
+ *
  * function PaginatedTaskList() {
  *   const {
  *     data,
@@ -399,7 +408,7 @@ export interface UsePaginationResult<T = any> extends UseQueryResult<T> {
  *     pageSize: 10,
  *     orderBy: ['-created_at']
  *   });
- * 
+ *
  *   return (
  *     <div>
  *       {data?.records.map(task => <div key={task.id}>{task.subject}</div>)}
@@ -495,7 +504,10 @@ export interface UseInfiniteQueryResult<T = any> {
  * Hook for infinite scrolling / load more functionality
  * 
  * @example
+ * <!-- os:check -->
  * ```tsx
+ * import { useInfiniteQuery } from '@objectstack/client-react';
+ *
  * function InfiniteTaskList() {
  *   const {
  *     flatData,
@@ -507,7 +519,7 @@ export interface UseInfiniteQueryResult<T = any> {
  *     pageSize: 20,
  *     orderBy: ['-created_at']
  *   });
- * 
+ *
  *   return (
  *     <div>
  *       {flatData.map(task => <div key={task.id}>{task.subject}</div>)}
