@@ -144,6 +144,17 @@ const EXAMPLES_DIR = 'examples';
 const PACKAGES_DIR = 'packages';
 const BASELINE_PATH = 'scripts/i18n-coverage-baseline.json';
 
+// ⛔ Neither root above is declared to the dispatch derivation, and that is a
+// recorded REFUSAL rather than an omission. Both populations are FILENAME
+// filters — one `objectstack.config.ts` per example directory (3 of 240), and
+// files named `i18n-extract.config.ts` beneath a `scripts` segment (9 of 5035).
+// The `ROOT_DIR_WATCH_HINTS` idiom can only name a whole subtree, so the only
+// spellable claim here would name this gate for 5035 files to reach 9 — the
+// costlier error, per `hintCovers`. Both verdicts are recorded as
+// REFUSE-UNSPELLABLE in the triage that `scripts/pm/bare-root-worklist.mjs`
+// self-tests on every PR; giving `PACKAGES_DIR` a population-constant name is
+// what made this root visible to that sweep at all.
+
 /** A repo-relative path, resolved against the module-derived root. */
 const at = (rel) => join(REPO_ROOT, rel);
 /** The one command this gate invokes per config, as oclif topic/command parts. */

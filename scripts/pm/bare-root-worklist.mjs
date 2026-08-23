@@ -210,6 +210,15 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named config file per child directory — 3 of 238 (1.3%)',
   }],
+  ['check:i18n-coverage PACKAGES_DIR packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5035 (0.18%), the '
+      + 'narrowest row on this list. Same filename-filter shape as its EXAMPLES_DIR sibling above, '
+      + 'and refused with it rather than split: a subtree hint would name this gate for 5035 files '
+      + 'to reach 9. The root was ALWAYS this invisible — it reached the sweep only once the fix '
+      + 'for #10907 gave the literal a population-constant name, so this row records a population '
+      + 'that was previously unnameable rather than one the fix introduced',
+  }],
   ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
