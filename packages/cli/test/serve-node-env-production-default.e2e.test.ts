@@ -85,10 +85,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+
+/** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
+type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint. See the file header for why this one, not `run-dev.js`. */
@@ -136,7 +140,7 @@ export default {
 }
 
 let dir: string;
-const children: ChildProcessWithoutNullStreams[] = [];
+const children: ProbeChild[] = [];
 
 /** A random high port, so a run never contends with another agent's dev server on this host. */
 function randomPort(): number {
@@ -198,7 +202,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       TEST: undefined,
       ...env,
     },
-  }) as ChildProcessWithoutNullStreams;
+  }) as ProbeChild;
   children.push(child);
 
   let out = '';
@@ -241,7 +245,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   }
 }
 
-async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stop(child: ProbeChild): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((done) => {
     const give = setTimeout(() => {
