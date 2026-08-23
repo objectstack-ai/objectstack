@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
+import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import { SettingsService } from '../settings-service.js';
 import type { CryptoAdapter } from '../crypto-adapter.js';
 import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest.js';
@@ -269,5 +270,79 @@ describe('aiSettingsManifest — embedder section', () => {
       method: 'POST',
       url: '/api/settings/ai/test_embedder',
     });
+  });
+});
+
+/**
+ * #11318 — the live-call hint an operator reads under "Test connection" in
+ * Settings -> AI must carry the edition boundary the platform's own capability
+ * roster already records. `PLATFORM_CAPABILITY_PROVIDERS.ai` declares
+ * `edition: 'cloud'` ("no installable version in the open edition"), while the
+ * hint used to say only "Mount @objectstack/service-ai to exercise live calls"
+ * on all three real-provider branches.
+ *
+ * Pinned as a PROPERTY, not as a literal sentence: these assertions read the
+ * roster entry here and require the message to carry its `package` and its
+ * `note`, so the wording stays free to improve, but strip the note from spec —
+ * or stop interpolating it — and they fail. A sentence copied into this file
+ * would be one more hand-written copy of the very claim this card is about,
+ * free to drift from spec with the test still green. Same shape PR #11266
+ * established for the CLI's enterprise hint.
+ */
+describe('aiTestActionHandler — live-call hint carries the cloud boundary (#11318)', () => {
+  const ai = PLATFORM_CAPABILITY_PROVIDERS.ai;
+
+  it('the roster still answers this question — the premise the rest rests on', () => {
+    expect(ai, 'PLATFORM_CAPABILITY_PROVIDERS must still carry an `ai` entry').toBeTruthy();
+    expect(ai.package).toBe('@objectstack/service-ai');
+    expect(ai.edition).toBe('cloud');
+    expect(ai.note, 'the cloud entry must carry an edition note to surface').toBeTruthy();
+  });
+
+  // All three branches that print the hint, each exercised separately so a fix
+  // applied to one cannot stand in for the others.
+  const branches: Array<[string, Record<string, unknown>]> = [
+    ['the Vercel AI Gateway branch', { provider: 'gateway', gateway_model: 'openai/gpt-4o' }],
+    [
+      'the Cloudflare AI Gateway branch',
+      { provider: 'cloudflare', cloudflare_account_id: 'acct-1', cloudflare_api_key: 'cf-key' },
+    ],
+    [
+      'the plain SDK-provider branch',
+      { provider: 'openai', openai_api_key: 'sk-test', openai_model: 'gpt-4o' },
+    ],
+  ];
+
+  for (const [label, values] of branches) {
+    it(`states the boundary on ${label}`, async () => {
+      const r = await runTest(values);
+      // Unchanged outcome: this is a boundary added to an advisory message,
+      // not a new refusal.
+      expect(r.ok).toBe(true);
+      expect(r.severity).toBe('info');
+      const message = String(r.message);
+      // The instruction is KEPT — an operator may well have a cloud tier.
+      expect(message).toContain(ai.package);
+      // ...and now carries spec's own note, verbatim rather than re-typed.
+      expect(message).toContain(ai.note!);
+      expect(message).toMatch(/no open-edition version to install/);
+      // The un-followable form this card retired: the package named, bare.
+      expect(message).not.toMatch(/Mount @objectstack\/service-ai to exercise live calls/);
+    });
+  }
+
+  // Contrast control, so the assertions above cannot be satisfied by blanket-
+  // rewording every hint in this file: the embedder hint names
+  // `@objectstack/embedder-openai`, which IS built in this repo (8 path hits
+  // under `git ls-tree -r --name-only HEAD | grep -cF /embedder-openai/`, against
+  // 0 for `/service-ai/`), so that instruction is followable as written and stays
+  // a plain mount line. Asserted here, deliberately not edited — #11318 fences
+  // this site out by name.
+  it('leaves the embedder hint a plain mount line — its package IS built here', async () => {
+    const r = await runTestEmbedder({ embedder_provider: 'openai', embedder_api_key: 'sk-test' });
+    expect(r.ok).toBe(true);
+    expect(String(r.message)).toContain(
+      'Mount @objectstack/embedder-openai + a knowledge adapter to exercise live calls',
+    );
   });
 });

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { SettingsManifest } from '@objectstack/spec/system';
+import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import type { SettingsActionHandler } from '../settings-service.types.js';
 
 // Visibility expressions are written as inline strings here for
@@ -308,6 +309,54 @@ const manifest = {
 export const aiSettingsManifest = manifest as unknown as SettingsManifest;
 
 /**
+ * The live-call hint the three real-provider branches of `ai/test` end with.
+ *
+ * An operator who configures a provider here and presses "Test connection" was
+ * told, in three places, to "Mount @objectstack/service-ai to exercise live
+ * calls" — an instruction this platform's own capability roster contradicts.
+ * `PLATFORM_CAPABILITY_PROVIDERS.ai` declares `edition: 'cloud'`, which
+ * `CapabilityEdition` defines as "realized only by a cloud runtime tier; there
+ * is **no installable version in the open edition**": exactly the un-followable
+ * "add it to your dependencies" that framework#3366 exists to make legible. The
+ * instruction is kept — an operator may well have a cloud tier — and gains the
+ * boundary it was missing, so one who does not can see the path is closed.
+ *
+ * Read FROM the roster rather than hand-written a fourth time. The `note` field
+ * is documented as "surfaced verbatim inside the preflight / boot error so the
+ * message carries its own context", and `packages/cli`'s capability preflight
+ * already interpolates it this way (#10921 / PR #11266); a copy here could drift
+ * from spec with both still green. Deliberately no tolerant fallback for a
+ * missing entry: a hand-written substitute silently replacing the spec-owned
+ * claim is the very defect this card is about, and three tests across two
+ * packages pin the entry's presence.
+ *
+ * The registry half is what the roster does NOT say, and it is why the hint
+ * cannot stop at "requires cloud". Measured 2026-08-23, unauthenticated public
+ * npm registry, with `@objectstack/spec` + `@objectstack/cli` as positive
+ * controls and `@objectstack/service-ai-studio` — the sibling `edition: 'cloud'`
+ * entry — as a negative control (404, so a 200 here is not "cloud packages are
+ * published anyway"): `@objectstack/service-ai` returns **200**, 57 versions,
+ * highest **10.3.0** (2026-06-23) — entirely below the 11.3.0 cut the note
+ * names, i.e. the pre-cloud tail left on the registry. So the install does not
+ * 404; it SUCCEEDS, pinning a seven-major-old runtime, and 10.3.0 exact-pins
+ * `@objectstack/spec@10.3.0` against this repo's 17.2.0, resolving a second spec
+ * beside this one. Succeeding wrongly is worse than failing, so the hint says
+ * so. The sentence carries none of those numbers — it derives its boundary from
+ * the roster note — but re-measure before treating them as current.
+ */
+const AI_RUNTIME_HINT = (() => {
+  const ai = PLATFORM_CAPABILITY_PROVIDERS.ai;
+  const note = ai.note ? ` (${ai.note})` : '';
+  return (
+    `Live calls need ${ai.package}${note}, which this platform does not ship: it is ` +
+    'realized only by an ObjectStack Cloud tier, so there is no open-edition version to ' +
+    'install. The name does still resolve on the public npm registry, but only at ' +
+    'versions from before that cut — installing it pins a pre-cloud AI runtime and a ' +
+    'second @objectstack/spec beside this one instead of enabling AI here.'
+  );
+})();
+
+/**
  * Built-in fallback action handler for `ai/test`. The real
  * implementation that issues a live `chat()` round-trip lives in
  * `@objectstack/service-ai` and overrides this stub via
@@ -340,7 +389,7 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
     return {
       ok: true,
       severity: 'info',
-      message: `Vercel AI Gateway configured (model=${values.gateway_model}). Mount @objectstack/service-ai to exercise live calls.`,
+      message: `Vercel AI Gateway configured (model=${values.gateway_model}). ${AI_RUNTIME_HINT}`,
     };
   }
   // Cloudflare needs more than just an API key.
@@ -355,7 +404,7 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
     return {
       ok: true,
       severity: 'info',
-      message: `Cloudflare AI Gateway configured (model=${model}). Mount @objectstack/service-ai to exercise live calls.`,
+      message: `Cloudflare AI Gateway configured (model=${model}). ${AI_RUNTIME_HINT}`,
     };
   }
   const keyField = `${provider}_api_key`;
@@ -367,7 +416,7 @@ export const aiTestActionHandler: SettingsActionHandler = async ({ values, paylo
   return {
     ok: true,
     severity: 'info',
-    message: `${provider} configured (model=${model}). Mount @objectstack/service-ai to exercise live calls.`,
+    message: `${provider} configured (model=${model}). ${AI_RUNTIME_HINT}`,
   };
 };
 
