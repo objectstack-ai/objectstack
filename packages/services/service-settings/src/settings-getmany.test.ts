@@ -21,13 +21,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SettingsService } from './settings-service.js';
 
-function makeEngine(rows: Array<Record<string, unknown>>) {
-  const find = vi.fn(async (_obj: string, opts: any) => {
-    const w = opts?.where ?? {};
-    return rows.filter((r) =>
-      Object.entries(w).every(([k, v]) => (r as any)[k] === v),
-    );
+// WHERE-matcher gate: implement exactly the combinators the service emits and
+// THROW on the rest — a bare field-equality read of `$or` would silently match
+// nothing, which is how a fake matcher lies (#11228 hid behind exactly that).
+function matches(row: Record<string, unknown>, where: Record<string, unknown>): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k === '$or') {
+      return (v as Array<Record<string, unknown>>).some((b) => matches(row, b));
+    }
+    if (k.startsWith('$')) throw new Error(`fake matcher: unimplemented combinator ${k}`);
+    return (row as any)[k] === v;
   });
+}
+
+function makeEngine(rows: Array<Record<string, unknown>>) {
+  const find = vi.fn(async (_obj: string, opts: any) =>
+    rows.filter((r) => matches(r, opts?.where ?? {})),
+  );
   return {
     find,
     insert: vi.fn(), update: vi.fn(), delete: vi.fn(), count: vi.fn(),

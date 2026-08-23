@@ -2146,7 +2146,14 @@ export class SettingsService {
   private async loadRows(namespace: string, userId: string | null): Promise<SettingsRow[]> {
     if (this.engine) {
       const where: Record<string, unknown> = { namespace };
-      if (userId !== null) where.user_id = userId;
+      // A user-keyed load must still see tenant/global rows (user_id NULL):
+      // resolveKey's user→tenant→global cascade and the Phase-2 upper-scope
+      // lock check both search THIS one result set, so a bare user_id
+      // equality starves them of every upper-scope row on engine-bound
+      // deployments while the in-memory branch below includes them (#11228).
+      if (userId !== null) {
+        where.$or = [{ user_id: userId }, { scope: 'tenant' }, { scope: 'global' }];
+      }
       // Settings rows include platform-wide (`global` scope, tenant_id=null)
       // entries; bypass the tenant-scoping audit warning so loads work
       // uniformly across global/tenant/user without log noise. Per-tenant
