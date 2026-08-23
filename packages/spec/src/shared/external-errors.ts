@@ -113,7 +113,27 @@ export type SchemaDiffEntryKind =
    * rejected write: a `defaultValue` runtime token emitted as a literal DEFAULT
    * stamped the token's own spelling into every omitted insert (#4560).
    */
-  | 'default_mismatch';
+  | 'default_mismatch'
+  /**
+   * The validator COULD NOT READ what the comparison needs — remote schema
+   * introspection failed (connection refused, DNS, expired credentials, a
+   * timeout), or the object/datasource definition vanished mid-sweep — so the
+   * comparison never ran.
+   *
+   * Unlike every other kind, this entry asserts **nothing about the remote
+   * schema**: it is "validation was indeterminate", a condition that is often
+   * TRANSIENT (the remote table may be perfectly intact and the next attempt
+   * may succeed), where the other kinds each state a measured FACT about a
+   * schema that was successfully read. Consumers must keep the two apart:
+   * treating an unreachable remote as a mismatch tells an operator (or an AI)
+   * to "repair" a schema nobody has seen — e.g. recreate a table that was
+   * never dropped. The boot gate logs it loudly and continues rather than
+   * applying `onMismatch`, and drift consumers should surface it as "cannot
+   * watch", never as "schema changed" (maintainer ruling 2026-08-23).
+   *
+   * The throwing error's message is carried as free text in `actual`.
+   */
+  | 'unreachable';
 
 /**
  * A single divergence entry. Produced by the validation gate (ADR §5.2)

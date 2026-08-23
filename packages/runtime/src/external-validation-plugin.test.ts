@@ -28,6 +28,11 @@ const sampleDiffs: SchemaDiffEntry[] = [
   { kind: 'type_mismatch', remoteName: 'fact_orders', column: 'amount', expected: 'number', actual: 'text', severity: 'error' },
 ];
 
+/** [#11166] The row `validateEach` produces when the remote could not be read. */
+const unreachableDiffs: SchemaDiffEntry[] = [
+  { kind: 'unreachable', remoteName: 'fact_orders', actual: 'connect ECONNREFUSED 10.0.0.5:5432', severity: 'error' },
+];
+
 describe('ExternalValidationPlugin (ADR-0015 Gate 2)', () => {
   it('subscribes to kernel:ready in start()', () => {
     const { ctx } = makeCtx({});
@@ -80,6 +85,65 @@ describe('ExternalValidationPlugin (ADR-0015 Gate 2)', () => {
     });
     await expect(new ExternalValidationPlugin().runValidation(ctx)).rejects.toBeInstanceOf(ExternalSchemaMismatchError);
   });
+
+  /**
+   * [#11166] An `unreachable` row is not a schema mismatch: validation was
+   * indeterminate (the remote could not be read), so the default
+   * `onMismatch: 'fail'` must NOT abort boot for it — a transient outage
+   * during startup used to be a refusal to start. Loud logging instead,
+   * per the maintainer ruling of 2026-08-23.
+   */
+  it('does not abort boot for an `unreachable` row under onMismatch=fail — logs loudly instead (#11166)', async () => {
+    const { ctx, warnings, infos } = makeCtx({
+      'external-datasource': {
+        validateAll: async () => ({
+          ok: false,
+          results: [{ ok: false, datasource: 'warehouse', object: 'wh_order', diffs: unreachableDiffs }],
+        }),
+      },
+      metadata: { get: async () => ({ schemaMode: 'external', external: { validation: { onMismatch: 'fail' } } }) },
+    });
+    await expect(new ExternalValidationPlugin().runValidation(ctx)).resolves.toBeUndefined();
+    const line = warnings.find((w) => String(w[0]).includes('could not be validated'));
+    expect(line).toBeDefined();
+    // The log names the datasource, the object, and the underlying error.
+    expect(line![1]).toMatchObject({
+      datasource: 'warehouse',
+      object: 'wh_order',
+      errors: ['connect ECONNREFUSED 10.0.0.5:5432'],
+    });
+    // And it is NOT the all-clear: an unverified boot must not read as clean.
+    expect(infos.some((i) => String(i[0]).includes('match their remote schema'))).toBe(false);
+  });
+
+  it('still aborts for a measured mismatch even when another row is merely unreachable (#11166)', async () => {
+    const { ctx } = makeCtx({
+      'external-datasource': {
+        validateAll: async () => ({
+          ok: false,
+          results: [
+            { ok: false, datasource: 'warehouse', object: 'wh_down', diffs: unreachableDiffs },
+            { ok: false, datasource: 'warehouse', object: 'wh_order', diffs: sampleDiffs },
+          ],
+        }),
+      },
+    });
+    await expect(new ExternalValidationPlugin().runValidation(ctx)).rejects.toBeInstanceOf(ExternalSchemaMismatchError);
+  });
+
+  it('logs the unreachable row even under onMismatch=ignore — an outage is not a mismatch the policy covers (#11166)', async () => {
+    const { ctx, warnings } = makeCtx({
+      'external-datasource': {
+        validateAll: async () => ({
+          ok: false,
+          results: [{ ok: false, datasource: 'warehouse', object: 'wh_order', diffs: unreachableDiffs }],
+        }),
+      },
+      metadata: { get: async () => ({ schemaMode: 'external', external: { validation: { onMismatch: 'ignore' } } }) },
+    });
+    await expect(new ExternalValidationPlugin().runValidation(ctx)).resolves.toBeUndefined();
+    expect(warnings.some((w) => String(w[0]).includes('could not be validated'))).toBe(true);
+  });
 });
 
 describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.2)', () => {
@@ -121,6 +185,30 @@ describe('ExternalValidationPlugin — background drift detection (ADR-0015 §5.
       object: 'wh_order',
       diffs: sampleDiffs,
     });
+  });
+
+  /**
+   * [#11166] A briefly-unreachable remote used to raise `external.schema.drift`
+   * events whose diffs claimed `missing_table` on every tick it stayed down.
+   * The event is still emitted (audit/notification consumers see the outage)
+   * but under the distinct `unreachable` kind — and the operator-facing
+   * summary log says "could not read", never "drift detected".
+   */
+  it('runDriftCheck reports an unreachable remote under the `unreachable` kind, not as drift (#11166)', async () => {
+    const { ctx, warnings } = makeCtx({
+      'external-datasource': scopedService([
+        { ok: false, datasource: 'warehouse', object: 'wh_order', diffs: unreachableDiffs },
+      ]),
+    });
+    const emitted = await new ExternalValidationPlugin().runDriftCheck(ctx, 'warehouse');
+    expect(emitted).toBe(1);
+    expect(ctx.trigger).toHaveBeenCalledWith('external.schema.drift', {
+      datasource: 'warehouse',
+      object: 'wh_order',
+      diffs: unreachableDiffs,
+    });
+    expect(warnings.some((w) => String(w[0]).includes('could not read the remote'))).toBe(true);
+    expect(warnings.some((w) => String(w[0]).includes('drift detected'))).toBe(false);
   });
 
   it('runDriftCheck is a no-op (no throw) when the scoped validation rejects', async () => {
