@@ -289,6 +289,18 @@ export function buildReleaseBody({ entry, tagName, changelogLabel, changelogHref
 // ─────────────────────────────────────────────────────────────────────────────
 // Workspace discovery
 // ─────────────────────────────────────────────────────────────────────────────
+//
+// The gate family this script contributes is `check:release-body`, and that
+// script is `--self-test` ALONE: lint.yml runs the renderer against fixtures,
+// never against the tree. The workspace read below and the CHANGELOG reads
+// belong to the RELEASE run, which no pull request schedules. So there is no
+// card whose file surface should name this family except one editing this file,
+// and identity matching already covers that. The zero hints have a second cause
+// worth keeping straight, recorded in `isNonPathNamespace`: the one pathy
+// literal this module body used to contribute was a media type, refused as a
+// non-filesystem namespace. Both are true, and neither is a missing declaration.
+//
+// dispatch-gates: no-path-population -- check:release-body runs this renderer's --self-test against fixtures only; the workspace and CHANGELOG reads belong to the release run, which no pull request schedules
 
 /**
  * Minimal pnpm-workspace.yaml `packages:` reader. Same approach as

@@ -300,6 +300,60 @@ const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SELF = 'scripts/check-published-readme-exports.mjs';
 const BASELINE_REL = 'scripts/published-readme-exports.baseline.json';
 
+/**
+ * ⛔ THIS GATE DECLARES NO WORKSPACE POPULATION, DELIBERATELY (#10542).
+ *
+ * There is no `ROOT_DIR_WATCH_HINTS` array below, and adding one would be a
+ * regression rather than a fix. This docblock is that decision, with the
+ * measurement that made it, because the card that dispatched the work assumed
+ * the opposite and the source says otherwise.
+ *
+ * ── What #10542 expected ────────────────────────────────────────────────────
+ *
+ * `scripts/pm/dispatch-gates.mjs` names a gate for a card by scanning the
+ * gate's module body for path literals. This gate computes its population at
+ * RUNTIME (it parses pnpm-workspace.yaml, exactly as check-published-files.mjs
+ * does), so it names no workspace path and the derivation named it for no card.
+ * #10542 grouped it with check-published-files.mjs and said of the pair that
+ * they "really do read every published package's manifest, so their population
+ * genuinely is the workspace and the #10114 escape applies directly".
+ *
+ * ── What the source actually does, and the measurement that decides it ──────
+ *
+ * The two gates enumerate the same members and then diverge completely.
+ * check-published-files.mjs JUDGES every non-build file it walks — MINIMAL
+ * tests each one against FORBIDDEN — so a declaration of the workspace globs
+ * names files it really opens: 4803 of the 5263 tracked files the declaration
+ * would name, 91.3%.
+ *
+ * This gate walks the same trees and then narrows twice, to published markdown
+ * and to the manifests: `publishedMarkdown` keeps only `.md` paths the `files`
+ * whitelist admits, and the rest of the read surface is `<member>/package.json`
+ * plus the built type entry under `<member>/dist/`. Measured on the same tree,
+ * the same declaration would name 5263 tracked files to reach 149 — 2.8%.
+ *
+ * That is the `filtered` shape check-examples-live-imports.mjs refuses by name
+ * at 1.6%, and `hintCovers`' docblock prices a fabricated lead above a missing
+ * one: a `packages/**`-class declaration here would paste this gate into every
+ * dispatch prompt whose surface brushes any package source file, and 97 of
+ * every 100 of those leads would name a gate that never opens the file. The
+ * "22 leads is the same as none" failure, bought at a worse ratio than the
+ * wholesale admission the derivation already refuses.
+ *
+ * ── What this gate is left with, and why that is the honest state ───────────
+ *
+ * A card editing this script names it by identity. A card editing a published
+ * README or a manifest names it by nothing — a real blind spot, and one the
+ * instrument cannot close: a root hint covers a whole SUBTREE, and there is no
+ * spelling for "the README of each workspace member". Recorded here rather than
+ * repaired falsely; if the derivation ever grows a narrower key than a subtree
+ * root, this is the gate to revisit first.
+ *
+ * The refusal is pinned in `--self-test` rather than left in this paragraph, so
+ * a later author who adds the workspace globs meets an assertion.
+ */
+const DECLARED_WORKSPACE_POPULATION = [];
+
 // ⛔ SHRINK-ONLY. The authority token the #8435 convention requires; the
 // baseline is a maintainer's registry, never an author's escape hatch.
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
@@ -3397,6 +3451,20 @@ function selfTest() {
     failures.push(
       'the remedy must REFUSE the baseline as a fix, not merely mark it — this gate takes the ' +
         'refusal arm of the #8435 convention and the text is what carries that.',
+    );
+  }
+
+  // The dispatch-gates population refusal (#10542). Enforcement cannot hold
+  // this: the declaration is read by another tool entirely, so a wrongly-added
+  // one runs green here forever and pays itself out as a fabricated lead in
+  // every packages/** dispatch prompt. See DECLARED_WORKSPACE_POPULATION's
+  // docblock for the 2.8% measurement that refused it.
+  if (DECLARED_WORKSPACE_POPULATION.length !== 0) {
+    failures.push(
+      'this gate must declare NO workspace population: it narrows the walk to published ' +
+        'markdown and manifests, so the workspace globs would name 5263 tracked files to ' +
+        'reach 149 (2.8%). check-published-files.mjs walks the same members and judges every ' +
+        'file it finds (91.3%), which is why the declaration is honest THERE and not here.',
     );
   }
 

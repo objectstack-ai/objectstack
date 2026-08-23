@@ -479,6 +479,64 @@ export function declaredNoCheckFamiliesReason(workflowText) {
 }
 
 /**
+ * A GATE SCRIPT's own declaration that it deliberately has no path population —
+ * a whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: no-path-population -- <reason>
+ *   #  dispatch-gates: no-path-population -- <reason>      (shell gates)
+ *
+ * ## What it is for (#10542)
+ *
+ * `undetermined` is this derivation's honest bucket — "source names no path at
+ * all, NOT known irrelevant" — and it is honest precisely because it does not
+ * claim to know why. That is the right verdict and the wrong report: measured
+ * over this tree, the bucket holds gates whose emptiness has three completely
+ * different causes, and a reader cannot tell them apart:
+ *
+ *   the derivation CANNOT place it   a gate whose population is a registry,
+ *                                    not a path (the spec-liveness job)
+ *   the derivation NEED NOT place it a gate whose CI invocation is its own
+ *                                    `--self-test`, so no card's file surface
+ *                                    should ever schedule it
+ *   the derivation ALREADY places it a gate whose population is one repo-root
+ *                                    file its own workflow names in `paths:`,
+ *                                    reached through the trigger key (#9171)
+ *                                    rather than through a hint
+ *
+ * The last two are FINISHED work that reads exactly like the unexamined pile.
+ * #10542 was filed against a count of that pile, and the count could not have
+ * distinguished them — which is the failure this marker retires: a family whose
+ * emptiness has been read and explained says so, in its own source, and the
+ * residue reports it apart from the families nobody has looked at.
+ *
+ * ## Why a marker IN the gate, never a list in this script
+ *
+ * Same reason as `declaredNoCheckFamiliesReason` above, one level down: a
+ * hardcoded roster here is a second copy of a fact that belongs on the thing it
+ * describes, and it drifts silently — the gate grows a real population, or gets
+ * renamed, and the roster keeps vouching for it. A marker the gate carries is
+ * read fresh on every run.
+ *
+ * The reason is REQUIRED, not just the marker. An opt-out with no reason reads
+ * identically to a placeholder nobody will revisit, and is exactly the shape a
+ * reviewer cannot tell apart from a gate whose population was never examined.
+ *
+ * ⚠️ This marker is NOT an escape from declaring a real population. A gate that
+ * walks a subtree declares it (the `ROOT_DIR_WATCH_HINTS` idiom); a gate whose
+ * population is a repo-root file declares the subtree spelling. The marker is
+ * for the families where BOTH of those are false, and the self-test holds that
+ * line by asserting the live tree's markers are only ever on families this
+ * derivation leaves unplaced.
+ */
+const NO_PATH_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*no-path-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredNoPathPopulation(scriptSource) {
+  const m = NO_PATH_POPULATION_MARKER.exec(String(scriptSource));
+  return m ? m[1].trim() : null;
+}
+
+/**
  * The workflows (by filename) that violate the #9187 coverage invariant:
  *
  *   Every workflow that declares a `paths:` filter either discovers at least
@@ -2175,6 +2233,10 @@ export const CHANGE_KIND_GATES = [
         why: 'it walks every *.test.* file for fake engine doubles and fails when one declares delete()/update() without routing through assertEngineDeleteDispatch/assertEngineUpdateDispatch, against a shrink-only per-file baseline. A new double, or a new test file carrying one, moves it — and so does a delegating pass-through seam wrapping a real engine, which is the reading that missed it twice. Repair by fixing the double, never by raising the baseline. Cheap and whole-tree: one run answers for the whole repo and names the file and line',
       },
       {
+        name: 'check:cross-package-test-inputs',
+        why: "it walks packages/, apps/ and examples/ for tests that read or import OUTSIDE their own package, and fails when turbo.json's `inputs` for that package does not declare what the test really reads — so a new test, or a new cross-package read in an existing one, moves it. Listed as a KIND rather than by path (#10542): its walk covers 5263 tracked files to judge the 2611 test files among them, so a subtree declaration would name it at 49.6% precision, while the kind names it at the granularity it actually judges. Repair by declaring the input in turbo.json, never by moving the fixture",
+      },
+      {
         name: 'check:where-matcher',
         why: 'it walks every *.test.ts file for hand-written WHERE matchers and fails on a NEW silently-wrong one (a combinator read as a field name), against a shrink-only baseline. It rides the same test code as the double gate — one new fake engine tripped both, one round apart, because these steps run sequentially inside the ESLint job and the first failure aborts the rest. Conforming by REFUSING the unsupported shape is the convention most of the discovered matchers already follow; the suite cannot notice this class, which is why the gate exists',
       },
@@ -2505,7 +2567,10 @@ export function unreachableLines(unreachable, swept) {
 }
 
 export function residueLines(
-  { discovered, matched, undetermined, silent, unfiltered, unreachable, swept, artifactRosters, invertedRosters },
+  {
+    discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
+    artifactRosters, invertedRosters, documentedNoPopulation,
+  },
   kinds = CHANGE_KIND_GATES,
 ) {
   const placed = matched + undetermined + silent;
@@ -2549,11 +2614,30 @@ export function residueLines(
         "(the rosters whose common directory contains one of the caller's paths — a subset, never omitted)",
     );
   }
+  // Held to the same standard as the counts above, and for the same reason
+  // (#10542): this one sizes the part of `undetermined` that has been READ and
+  // explained, and a count that could go missing quietly would render the one
+  // line separating examined from unexamined as a line with `undefined` in it.
+  if (
+    !Number.isInteger(documentedNoPopulation)
+    || documentedNoPopulation < 0
+    || documentedNoPopulation > undetermined
+  ) {
+    throw new Error(
+      `documented-no-population count is not derivable: got ${String(documentedNoPopulation)} of ${undetermined} undetermined ` +
+        '(it is a subset of the undetermined families, read from each gate\'s own marker — never omitted)',
+    );
+  }
   const unplaced = undetermined + silent;
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
       ` · ${silent} silent (their sources name paths, none of which cover yours).`,
+    `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
+      ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
+      ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
+      ' (the ROOT_DIR_WATCH_HINTS idiom) and a gate whose population is a repo-root FILE declares the subtree spelling — the marker is only for the' +
+      ' families where both of those are false.',
     '  A `silent` verdict is this derivation\'s weakest claim, not a clearance, and there are two ways to earn it that have' +
       ' nothing to do with your paths: a gate that computes its own population and names only its baseline artifact scores' +
       ' silent for every card in the tree, and so does one whose population is a repo-root FILE it spells as a bare' +
@@ -2905,8 +2989,15 @@ export function discoverFamilies() {
     entry.files = files;
     for (const f of files) {
       const abs = join(ROOT, f);
-      if (existsSync(abs)) entry.hints.push(...extractWatchHints(readFileSync(abs, 'utf8')));
+      if (!existsSync(abs)) continue;
+      // ONE read, two answers — the hints and the gate's own no-population
+      // declaration — so the pair can never describe different revisions of a
+      // file, the same discipline the trigger paths take above.
+      const source = readFileSync(abs, 'utf8');
+      entry.hints.push(...extractWatchHints(source));
+      entry.noPopulationReason ??= declaredNoPathPopulation(source);
     }
+    entry.noPopulationReason ??= null;
   }
   return { byCheck, workflows };
 }
@@ -2986,6 +3077,13 @@ function derive(paths, { showResidue = false } = {}) {
           ? `   names: ${[...new Set(entry.hints)].slice(0, 3).join(', ')}${entry.hints.length > 3 ? ', …' : ''}`
           : '';
         console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]${names}`);
+        // The gate's own account of why it names nothing (#10542), printed
+        // against the family rather than only counted in the residue: a reader
+        // looking at this listing is deciding whether to go READ the gate, and
+        // that is exactly the decision this declaration answers.
+        if (entry.noPopulationReason) {
+          console.log(`      ↳ declared no path population — ${entry.noPopulationReason}`);
+        }
         // The silence split (#10784): a family that declared only ARTIFACTS
         // said the same words in this listing as one that really does not read
         // your file. The note says which, and raises its voice only where the
@@ -3016,6 +3114,7 @@ function derive(paths, { showResidue = false } = {}) {
     swept: swept.length,
     artifactRosters: rosters.length,
     invertedRosters: rosters.filter((r) => r.coversYourPath).length,
+    documentedNoPopulation: undetermined.filter(([, e]) => e.noPopulationReason).length,
   })) {
     console.log(line);
   }
@@ -4247,7 +4346,10 @@ function selfTest() {
 
   const resolved = (name) => `pnpm ${name}`;
   const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
-  t('a test path emits the convention section', kindHit.length === 6 && kindHit[0].includes('adds or edits a test file'));
+  // Seven: the kind's own heading plus its six gates (#10542 added
+  // check:cross-package-test-inputs, whose judged population is exactly this
+  // kind rather than a subtree any path hint can name).
+  t('a test path emits the convention section', kindHit.length === 7 && kindHit[0].includes('adds or edits a test file'));
   // All three halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
   // reason the i18n entry's pins below state at length: a bare `includes` is
   // satisfied by every name that merely STARTS WITH the expected one, so a
@@ -4766,12 +4868,13 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  // Six, not five, since the root-program entry joined the table: `a.test.ts`
-  // is a root-level TypeScript file, so it is BOTH a test file and inside the
-  // root tsc program and legitimately hits two kinds. The ratchet therefore
-  // renders twice, under a different `why` each time — pinned just below,
-  // because a bare count cannot tell that apart from one kind rotting away.
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 6);
+  // Seven, not six, since #10542 added check:cross-package-test-inputs to the
+  // test-file kind. `a.test.ts` is a root-level TypeScript file, so it is BOTH
+  // a test file and inside the root tsc program and legitimately hits two
+  // kinds. The ratchet therefore renders twice, under a different `why` each
+  // time — pinned just below, because a bare count cannot tell that apart from
+  // one kind rotting away.
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 7);
   t('a root-level test file hits both kinds, so the ratchet renders STALE under each', stale.filter((l) => l.includes('\u26a0 check:type-check-debt: STALE')).length === 2);
   // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
   // pair that shares one script is reported apart: a count alone stays green if
@@ -4779,6 +4882,10 @@ function selfTest() {
   // leading substring stays green through a `-v2` rename — the two ways this
   // table has actually rotted.
   t('the coverage half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-coverage: STALE')));
+  t(
+    'and so does the cross-package-inputs entry, anchored on both sides of its own name',
+    stale.some((l) => l.includes('⚠ check:cross-package-test-inputs: STALE')),
+  );
   t('the ratchet half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-debt: STALE')));
   t('the engine-double ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:engine-double-contract: STALE')));
   t('the where-matcher ratchet renders STALE under its own name', stale.some((l) => l.includes('⚠ check:where-matcher: STALE')));
@@ -4809,6 +4916,10 @@ function selfTest() {
   // — a count alone stays green if one is dropped and another added.
   t('check:engine-double-contract is a live family, so naming it in the table is not a guess', liveFamilies.has('check:engine-double-contract'));
   t('check:where-matcher is a live family too — the gate the prose never named', liveFamilies.has('check:where-matcher'));
+  t(
+    'check:cross-package-test-inputs is a live family (#10542 moved it here from a path derivation that could name it at 49.6% precision at best)',
+    liveFamilies.has('check:cross-package-test-inputs'),
+  );
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
@@ -4874,6 +4985,119 @@ function selfTest() {
     "a paths-filtered, zero-family workflow carrying the marker is NOT a gap — the declared opt-out this card's route requires",
     checkFamilyCoverageGaps([{ file: 'x.yml', text: exemptedWf }]).length === 0,
   );
+
+  // ── The gate-level no-population declaration (#10542) ─────────────────────
+  //
+  // The workflow-level marker above says "this workflow names no gate"; this
+  // one says "this gate names no path, and here is why". Both directions are
+  // pinned, and so is the live tree, because the whole value of the second is
+  // that it separates families that have been READ from families nobody has
+  // looked at — and a marker that quietly stopped parsing would merge them back
+  // together while every count still printed.
+  t(
+    'a gate-level no-population declaration reads its reason back',
+    declaredNoPathPopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n')
+      === 'CI runs the self-test only',
+  );
+  t(
+    'the shell comment spelling is read too (shell gates carry # comments, and the derivation discovers them)',
+    declaredNoPathPopulation('#!/usr/bin/env bash\n# dispatch-gates: no-path-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared no-population', declaredNoPathPopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared (an opt-out with no reason reads exactly like a placeholder nobody will revisit)',
+    declaredNoPathPopulation('// dispatch-gates: no-path-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — a mention inside prose is a discussion of the convention, not a declaration under it',
+    declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
+  );
+  // The residue count that carries it refuses a missing or impossible value in
+  // the same shape as every other count in that line: a subset that could go
+  // absent quietly renders as `undefined` in the one line a reader needs.
+  const residueArgs = {
+    discovered: 3, matched: 1, undetermined: 1, silent: 1, unfiltered: 0,
+    unreachable: 0, swept: 10, artifactRosters: 0, invertedRosters: 0,
+  };
+  t(
+    'the residue REFUSES an omitted documented-no-population count',
+    (() => {
+      try {
+        residueLines({ ...residueArgs });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+  );
+  t(
+    'and refuses one larger than the undetermined bucket it is a subset of',
+    (() => {
+      try {
+        residueLines({ ...residueArgs, documentedNoPopulation: 2 });
+        return false;
+      } catch {
+        return true;
+      }
+    })(),
+  );
+  t(
+    'and renders the count when it is derivable',
+    residueLines({ ...residueArgs, documentedNoPopulation: 1 })
+      .some((l) => /1 of those 1 undetermined famil\(ies\) DECLARE/.test(l)),
+  );
+
+  // The live half. A marker is a claim about a gate, so it is held against the
+  // real derivation: a family that DOES name paths must not be carrying one.
+  // Without this the marker rots in the direction that costs — a gate grows a
+  // real population, keeps its old declaration, and the residue keeps vouching
+  // that its emptiness was examined.
+  const liveDiscovery = discoverFamilies();
+  const declaredEmpty = [...liveDiscovery.byCheck].filter(([, e]) => e.noPopulationReason);
+  t(
+    `the live tree carries at least one no-population declaration (the guard is not vacuous; found ${declaredEmpty.length})`,
+    declaredEmpty.length > 0,
+  );
+  const contradicted = declaredEmpty.filter(([, e]) => (e.hints ?? []).length > 0).map(([c]) => c);
+  t(
+    `no family both DECLARES no path population and names paths anyway (contradicted: ${contradicted.join(', ') || 'none'})`,
+    contradicted.length === 0,
+  );
+  t(
+    'every live declaration carries a non-empty reason',
+    declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
+  );
+
+  // ── Hints come from the COMMAND's named scripts, never from their imports ──
+  //
+  // Load-bearing, and pinned here because a decision rests on it (#10542). The
+  // card proposed consolidating the dozen private pnpm-workspace.yaml parsers
+  // into one shared enumerator, on the reasoning that it would make the
+  // population declarable in ONE place. Under this derivation it would do the
+  // opposite: `resolveCheckToFiles` reads the script paths out of the npm
+  // script's COMMAND STRING, and `discoverFamilies` scans exactly those files.
+  // A module a gate imports is never opened, so moving a population declaration
+  // into a shared enumerator DELETES it from every gate that imports it — which
+  // would silently undo the very declarations #10540 and this card added.
+  //
+  // So the consolidation is blocked on teaching this derivation to follow
+  // first-party imports, not on the gates. Stated as an assertion rather than
+  // as that paragraph, so a later author measures it instead of trusting it.
+  const importingFamily = [...liveDiscovery.byCheck].find(
+    ([, e]) => (e.files ?? []).length === 1
+      && existsSync(join(ROOT, e.files[0]))
+      && /^\s*import\s[^\n]*\sfrom\s+'\.\//m.test(readFileSync(join(ROOT, e.files[0]), 'utf8')),
+  );
+  t('the live tree has a single-file family that imports a sibling module (the pin is not vacuous)', Boolean(importingFamily));
+  if (importingFamily) {
+    const [, entry] = importingFamily;
+    const ownHints = new Set(extractWatchHints(readFileSync(join(ROOT, entry.files[0]), 'utf8')));
+    t(
+      'a family\'s hints are exactly those of the scripts its COMMAND names — an imported module contributes none, so a shared enumerator cannot carry a population declaration for its callers',
+      [...new Set(entry.hints)].every((h) => ownHints.has(h)),
+    );
+  }
 
   // The live guard: every REAL paths-filtered workflow either discovers a
   // family or declares why not. This is what actually fails CI the day a new
@@ -5036,7 +5260,7 @@ function selfTest() {
   // every discovered family, and it names no gate. The second is the one that
   // rots — a hand-written list of gate names in this paragraph is exactly what
   // was wrong with it — so it is asserted directly rather than by inspection.
-  const residue = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+  const residue = residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   t('the residue summary states the discovered total', residue.some((l) => l.includes('98')));
   t('the residue summary states each bucket', residue.some((l) => l.includes('35 undetermined')) && residue.some((l) => l.includes('55 silent')));
   t('the residue summary points at the flag that lists the unplaced families', residue.some((l) => l.includes('--residue') && l.includes('90')));
@@ -5047,7 +5271,7 @@ function selfTest() {
   // constant sentence would be a line the reader learns to skip.
   t('the residue summary sizes the artifact rosters inside silent', residue.some((l) => l.includes('4 of those 55')));
   t('and calls out the ones whose roster sits where the card is', residue.some((l) => l.includes('For 1 of them') && l.includes('EITHER direction')));
-  const noInverted = residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 0 });
+  const noInverted = residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 0 });
   t('with none of them there it says THAT instead, rather than printing the warning at zero', noInverted.some((l) => l.includes('None of their rosters')) && !noInverted.join('\n').includes('EITHER direction'));
   // The same rot, one noun over (#10012). The top-level-FILE clause used to
   // illustrate the unreachable class with `README.md`, which was honest until
@@ -5072,7 +5296,7 @@ function selfTest() {
   // which is the failure class this whole card is about.
   let refused = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+    residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 54, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refused = true;
   }
@@ -5082,7 +5306,7 @@ function selfTest() {
   // a derivation rather than as the absent measurement it is.
   let refusedUnfiltered = false;
   try {
-    residueLines({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+    residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
   } catch {
     refusedUnfiltered = true;
   }
@@ -5102,34 +5326,34 @@ function selfTest() {
   };
   t(
     'an omitted unreachable count is REFUSED, never printed as undefined',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'an unreachable count with NO corpus size is REFUSED — the number is unreadable without it',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'a sweep that swept zero files is REFUSED at the summary too, not printed as a clean repo',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0, artifactRosters: 4, invertedRosters: 1 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 0, artifactRosters: 4, invertedRosters: 1 }),
   );
   t(
     'zero unreachable over a real corpus is a legitimate answer, not a refusal',
-    !refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
+    !refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 0, swept: 6000, artifactRosters: 4, invertedRosters: 1 }),
   );
   // The silence split is held to the same standard as the counts above: it is
   // a SUBSET count, so both directions of the subsetting are refused rather
   // than trusted, and an omitted one must not print as `undefined`.
   t(
     'an omitted artifact-roster count is REFUSED, never printed as undefined',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, invertedRosters: 0 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, invertedRosters: 0 }),
   );
   t(
     'a roster count larger than the silent bucket it subsets is REFUSED',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 56, invertedRosters: 0 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 56, invertedRosters: 0 }),
   );
   t(
     'and an inverted count larger than the rosters it subsets is REFUSED',
-    refusedFor({ discovered: 98, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 5 }),
+    refusedFor({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 55, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 5 }),
   );
 
   // ── The families a changeset will add (#10309) ────────────────────────────

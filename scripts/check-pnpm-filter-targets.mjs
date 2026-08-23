@@ -111,6 +111,44 @@ const HASH_COMMENT_EXTENSIONS = ['.sh', '.bash', '.yml', '.yaml'];
 const SCANNED_EXTENSIONS = [...JS_EXTENSIONS, ...HASH_COMMENT_EXTENSIONS, '.json'];
 
 /**
+ * The half of `scannedFiles`' population that `scripts/pm/dispatch-gates.mjs`
+ * could not see, written in the syntax that derivation CAN read (#10542).
+ *
+ * ── The defect this repairs ─────────────────────────────────────────────────
+ *
+ * `scannedFiles` walks THREE carriers, and the derivation saw only one of them.
+ * `.github/workflows/**` is already declared below in a spelling that carries a
+ * separator, so a workflow card names this gate. The scripts/ walk is spelled
+ * `join(root, 'scripts')` — a bare single-segment word, which `extractWatchHints`
+ * drops before `hintCovers` is ever consulted — so a card editing any script in
+ * the tree named this gate NOWHERE, including the cards most likely to add the
+ * very `--filter` spelling it exists to judge.
+ *
+ * ── Why `scripts/**` is honest here, with the measurement ───────────────────
+ *
+ * This is the `subtree` case: the walk descends the whole of scripts/ and every
+ * file carrying a scanned extension is judged. Measured on this tree, the
+ * declaration names 235 tracked files under scripts/ and this gate reads 228 of
+ * them — 97.0%. The 7 it skips are the non-code files the extension filter
+ * drops, not a subtree it never opens.
+ *
+ * ── Why the workspace manifests stay UNDECLARED ─────────────────────────────
+ *
+ * `scannedFiles` also reads every workspace member's `package.json` — a real
+ * read, and one this declaration deliberately does not reach. The instrument
+ * cannot express it: a root hint covers a whole SUBTREE, so declaring the
+ * workspace globs (the shape check-published-files.mjs legitimately takes,
+ * because it walks every file of every member) would name this gate for all
+ * 5263 tracked files under packages/, apps/ and examples/ in order to reach the
+ * ~78 manifests it actually opens — 1.5% precision, pasted into every card
+ * whose surface brushes a package. `hintCovers`' docblock prices a fabricated
+ * lead above a missing one, so the manifest half stays a documented blind spot
+ * rather than a wholesale claim. The refusal is pinned below, so a later author
+ * who adds the workspace globs meets an assertion instead of this paragraph.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**'];
+
+/**
  * Blank the regions whose `--filter` spellings are prose rather than commands.
  *
  * Line numbers are PRESERVED (spans are blanked, never deleted), so a finding
@@ -453,6 +491,33 @@ export function selfTest() {
     ['package.json', 'scripts/', '.github/workflows/'].every((prefix) =>
       scannedFiles(root).some((f) => f === prefix || f.startsWith(prefix)),
     ),
+  );
+
+  // ---- the dispatch-gates declaration (#10542) -----------------------------
+  //
+  // Enforcement cannot hold any of these: ROOT_DIR_WATCH_HINTS is read by
+  // another tool entirely, so a wrong or stale one runs green here forever and
+  // pays itself out as a dev dispatched on a scripts/ card with this gate
+  // missing from the brief. Reconciled against the LIVE sweep rather than
+  // re-spelled, so a carrier that moves cannot leave the declaration behind.
+  const sweptRoots = new Set(
+    scannedFiles(root).map((f) => f.split('/')[0]).filter((s) => s.length > 0),
+  );
+  ok(
+    'the declared subtree is one this gate really walks',
+    ROOT_DIR_WATCH_HINTS.every((h) => sweptRoots.has(h.replace(/\/\*+$/, ''))),
+  );
+  ok(
+    'scripts/ is declared in the subtree spelling (hintCovers refuses the bare word, so a tidy-up back to a directory name re-opens the blind spot silently)',
+    ROOT_DIR_WATCH_HINTS.includes('scripts/**'),
+  );
+  ok(
+    'every declared entry carries a path separator',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')),
+  );
+  ok(
+    'the workspace globs stay UNDECLARED (they would name 5263 files to reach ~78 manifests — the measurement is in the docblock)',
+    !ROOT_DIR_WATCH_HINTS.some((h) => /^(packages|apps|examples)(\/|$)/.test(h)),
   );
 
   if (failures.length === 0) {

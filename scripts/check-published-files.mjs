@@ -191,6 +191,71 @@ function matcher(pattern) {
 }
 
 /**
+ * This gate's population, written in the syntax `scripts/pm/dispatch-gates.mjs`
+ * can read (#10542).
+ *
+ * ── The defect this repairs ─────────────────────────────────────────────────
+ *
+ * The dispatch derivation names a gate for a card by scanning the gate's own
+ * module body for the path literals it operates on. This gate computes its
+ * population at RUNTIME instead — `workspaceGlobs()` below parses
+ * pnpm-workspace.yaml — so it spelled no workspace path literal anywhere, and
+ * the derivation therefore named it for NO card in the tree. Measured against
+ * the four layout specimens #10542 uses (a flat package, a nested package, an
+ * app manifest, an example manifest), `coveringKey` returned null for all four.
+ *
+ * That is a strictly worse failure than a gate with a stale hardcoded list: a
+ * runtime-computed population is invisible rather than wrong, so nothing in
+ * the output says the gate was ever considered.
+ *
+ * ── Why the glob spelling, and why it is not a second source of truth ───────
+ *
+ * `hintCovers` refuses a literal with no path separator (`packages`, `apps`,
+ * `examples`) as too generic — measured, at +139084 fabricated (gate, file)
+ * pairs if bare top-level words were admitted, because those words are path
+ * COMPONENTS in dozens of gates that never read the root. The sanctioned escape
+ * is for a gate to declare its own subtree in a spelling that carries a
+ * separator, which is what these entries do. They are the workspace globs
+ * VERBATIM, so the glob collapse reduces each back to the root it names and to
+ * nothing else.
+ *
+ * Nothing in this gate reads this array — `workspaceGlobs()` still parses the
+ * YAML, and remains the only thing the scan walks. The self-test reconciles the
+ * two in BOTH directions against that live parse, so a workspace root added to
+ * or removed from pnpm-workspace.yaml fails here rather than leaving this
+ * declaration describing a workspace that moved. A declaration that can drift
+ * from the scan is worse than none: it replaces a silent gate with a lying one.
+ *
+ * ── Why the WHOLE workspace is honest here, with the measurement ────────────
+ *
+ * This is the `subtree` case, not the `filtered` one check-examples-live-imports
+ * refuses. `walk()` below enumerates EVERY non-build file of every publishable
+ * member and MINIMAL judges each of them against FORBIDDEN, so the declaration
+ * names files this gate really opens. Measured on this tree: the declaration
+ * names 5263 tracked files and the gate judges 4803 of them — 91.3%. The 460 it
+ * does not judge are the members whose OWN manifests this gate read in order to
+ * exclude them (`private`), which is itself a read of the declared subtree, so
+ * a manifest card there is a true lead rather than a fabricated one.
+ *
+ * The contrast that sets the boundary is in check-published-readme-exports.mjs,
+ * which enumerates the same members and scores 2.8% — its refusal docblock
+ * carries that measurement and declines the same declaration.
+ */
+const ROOT_DIR_WATCH_HINTS = [
+  'packages/*',
+  'packages/adapters/*',
+  'packages/apps/*',
+  'packages/connectors/*',
+  'packages/drivers/*',
+  'packages/plugins/*',
+  'packages/qa/*',
+  'packages/services/*',
+  'packages/triggers/*',
+  'apps/*',
+  'examples/*',
+];
+
+/**
  * The `packages:` globs from pnpm-workspace.yaml. Blank lines and comments are
  * skipped rather than treated as the end of the list: stopping early would drop
  * members from the scan and report a clean run over a partial workspace, which
@@ -330,14 +395,49 @@ function selfTest() {
       failures.push(`FORBIDDEN("${path}") === ${actual}, expected ${expected}`);
     }
   }
+
+  // ── the dispatch-gates declaration (#10542) ───────────────────────────────
+  //
+  // Enforcement cannot hold any of these: ROOT_DIR_WATCH_HINTS is read by
+  // another tool entirely, so a wrong or stale one runs green here forever and
+  // pays itself out as a dev dispatched on a packaging card with this gate
+  // missing from the brief. Both directions are reconciled against the LIVE
+  // parse rather than re-spelled, so a workspace root that moves cannot leave
+  // the declaration describing the old one.
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  const liveGlobs = workspaceGlobs();
+  const liveRoots = liveGlobs.map((g) => g.replace(/\/\*+$/, ''));
+  const declarationCases = [
+    [
+      'every workspace glob this gate walks is declared (a root with no path separator is refused as too generic, so the population needs the glob spelling)',
+      liveRoots.every((r) => declaredRoots.includes(r)),
+    ],
+    [
+      'and it declares no root the workspace does not have (a declaration that can drift from the scan is worse than none — it replaces a silent gate with a lying one)',
+      declaredRoots.every((r) => liveRoots.includes(r)),
+    ],
+    [
+      'every declared entry carries a path separator (the whole point of the spelling: hintCovers refuses a bare top-level word, so a tidy-up back to directory names re-opens the blind spot silently)',
+      ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')),
+    ],
+    [
+      'no declared entry is the bare root itself (provenance, never a lookup key)',
+      ROOT_DIR_WATCH_HINTS.every((h) => !liveRoots.includes(h)),
+    ],
+  ];
+  for (const [name, ok] of declarationCases) {
+    if (!ok) failures.push(`ROOT_DIR_WATCH_HINTS: ${name}`);
+  }
+
   if (failures.length > 0) {
     console.error(`✗ check:published-files --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
   console.log(
-    `✓ check:published-files --self-test — ${cases.length} pattern case(s) and ` +
-      `${forbidden.length} classification case(s).`,
+    `✓ check:published-files --self-test — ${cases.length} pattern case(s), ` +
+      `${forbidden.length} classification case(s) and ${declarationCases.length} ` +
+      `population-declaration case(s) over ${liveGlobs.length} live workspace glob(s).`,
   );
 }
 
