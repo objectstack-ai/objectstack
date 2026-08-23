@@ -224,6 +224,29 @@ const TRIAGE = new Map([
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
       + 'through the artifact roster it names file by file, so the miss is smaller than the row',
   }],
+  ['check:runner-env-posture SCANNED_ROOTS packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'non-test source beneath a `src` SEGMENT — 1757 of 5049 (35%). The segment is what makes '
+      + 'this unspellable rather than merely wide: `packages/**/src/**` is the true population and '
+      + 'collapseHint reduces it to `packages`, so the only spellable claim also names every '
+      + 'package manifest, changelog, fixture and the 2658 test files this gate deliberately skips. '
+      + 'Its nearest neighbour check:authz-resolver is REFUSE-WIDE at a similar 39% because ITS '
+      + 'population really is every non-test source under the root; this one is not',
+  }],
+  ['check:runner-env-posture SCANNED_ROOTS examples', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: '150 of 240 (63%), the same `src`-segment filter, refused with its packages half rather '
+      + 'than split: declaring the smaller root would name the gate on example cards and stay '
+      + 'silent on the package cards where product source actually lives',
+  }],
+  ['check:runner-env-posture SCANNED_ROOTS apps', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'MEASURED AT ZERO — 0 of 35. No `src` tree exists under this root today, so a subtree '
+      + 'declaration here would not be imprecise but false: it would paste this gate into every '
+      + 'apps card to reach nothing. The root stays in SCANNED_ROOTS deliberately, so an apps '
+      + 'package that grows a src tree is covered the day it lands rather than the day someone '
+      + 'remembers — which is the same silent-coverage-loss this gate exists to prevent',
+  }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'workspace manifests only — 73 of 4903 (1.5%)',
