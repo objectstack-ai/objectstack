@@ -663,13 +663,22 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'neither is a count of administrators.',
     organizationId: 'Camel-case spelling of `organization_id` — same reason.',
     valid_from:
-      'ADR-0091 windows are not columns on `sys_member` today. The resolver calls isGrantActive '
-      + 'on membership rows only when building `accessible_org_ids` (the group posture read '
-      + 'reach); the org-administration role projection it feeds `positions` from is NOT window '
-      + 'filtered, and this guard counts org administrators by GRADE alone (isOrgAdminGrade). So '
-      + 'no reader of administrator standing consults these bounds, and writing one cannot revoke '
-      + 'a grade. If the columns ever land on `sys_member`, the resolver is where the two halves '
-      + 'have to be reconciled first — this list follows it, it does not lead.',
+      'ADR-0091 windows are still not columns on `sys_member` (`sys-member.object.ts` declares '
+      + 'neither bound, AUTH_MEMBER_SCHEMA maps neither), and the engine refuses an undeclared '
+      + 'write key on both verbs (the declared-field door) — so no stored membership row carries '
+      + 'a bound and no write can smuggle one in. Since #10982 the resolver applies isGrantActive '
+      + 'to the membership rows of the principal in BOTH derivations off one `sys_member` read — '
+      + '`accessible_org_ids` AND the org-administration role projection it feeds `positions` '
+      + 'from (maintainer ruling 2026-08-22: a lapsed membership is NO membership) — so the '
+      + 'reconciliation an earlier revision of this note deferred to the resolver is DONE, and '
+      + 'this exclusion now rests on the schema alone, not on any unfiltered read. This guard '
+      + 'still counts org administrators by GRADE alone (isOrgAdminGrade) and judges no window '
+      + 'on member rows, which stays safe exactly as long as the columns stay off the schema. '
+      + 'The day they DO land, the resolver will stop conferring the role on a lapsed row, so a '
+      + '`valid_until` write becomes a revocation shape this count cannot see: these four '
+      + 'spellings must then move into MEMBER_STANDING_KEYS and the member count must judge rows '
+      + 'with the same isGrantActive predicate the grant half already uses. The resolver led; '
+      + 'this list is now the half that has to move.',
     validFrom: 'Camel-case spelling of `valid_from` — same reason.',
     valid_until: 'Upper bound of the same absent window as `valid_from` — same reason.',
     validUntil: 'Camel-case spelling of `valid_until` — same reason.',
