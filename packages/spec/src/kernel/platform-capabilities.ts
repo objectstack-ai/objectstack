@@ -201,8 +201,17 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
  * `observability`), and `objectstack serve --preset minimal` opts out entirely.
  */
 export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-  // The first six are the pinned foundational prefix — grow the slate AFTER them.
-  'queue', 'job', 'cache', 'settings', 'email', 'storage',
+  // Order is a CONTRACT, not a count. `queue`/`job`/`cache`/`settings` are the
+  // bind TARGETS — the services other entries bind into from their own
+  // `kernel:ready` hook — so every entry that is not one of them is mounted
+  // after all of them. A new entry joins the tail; a new BIND TARGET joins the
+  // line below. Pinned as that rule (never as a prefix length) in
+  // `platform-capabilities.test.ts`.
+  'queue', 'job', 'cache', 'settings',
+  // `email`, `storage` and `sms` each read a settings namespace from their own
+  // `kernel:ready` hook, so each is mounted after `settings` and declares the
+  // edge as well (ADR-0116; `serve-settings-ordering.pin.test.ts` in the CLI).
+  'email', 'storage',
   'sms',
   'sharing',
   // `messaging` is foundational post-ADR-0030: notifications flow through a
