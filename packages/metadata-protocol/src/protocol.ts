@@ -10,6 +10,9 @@ import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError }
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
 // the posture, is what the runtime authoring gate is told.
 import { postureEnforcesWall } from '@objectstack/spec/security';
+// [#11235] The derived `version` this file's `getDiscovery()` serves as the
+// `DiscoverySchema` "System Identity" field — never a literal again.
+import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import {
@@ -5092,7 +5095,18 @@ export class ObjectStackProtocolImplementation implements
         const name = 'ObjectStack API';
 
         return {
-            version: '1.0',
+            // [#11235] The serving system's identity, DERIVED — an injected
+            // `OS_RUNTIME_VERSION` stamp, falling back to this package's own
+            // resolved version. It was the literal `'1.0'` while the other
+            // `DiscoverySchema` producer (`HttpDispatcher.getDiscoveryInfo()`
+            // in `@objectstack/runtime`) carried its own literal `'1.0.0'` —
+            // two producers of the same field disagreeing with each other,
+            // which is what proves neither constant was ever a contract value.
+            // #10993 fixed that producer the same way; see
+            // {@link resolveDiscoveryVersion} for the derivation, the fallback,
+            // and why the resolver is a package-local copy rather than an
+            // import.
+            version: resolveDiscoveryVersion(),
             name,
             /** @deprecated Use `name`. Removed in protocol 18 (#4828). */
             apiName: name,
