@@ -7033,8 +7033,8 @@ const elementFilterRemoved: MetadataConversion = {
  * enforce-or-remove at ELEMENT grain).
  *
  * The #9220 shape one element over, recorded by that card's own verdict sweep
- * and re-measured at retirement time (objectstack @c684d00cfc, objectui
- * @76ceb1e; cloud per the card's two recorded readings @5f1bf23f / @a11458b):
+ * and re-measured at retirement time (objectstack @dd84ddd796, objectui
+ * @3ece13e33; cloud per the card's two recorded readings @5f1bf23f / @a11458b):
  * NO renderer or behavior reader of `element:form` exists anywhere. objectui
  * registers no renderer (its `renderers/basic/elements.tsx` header deferred
  * the element to "owning plugins" that never materialized), Studio's designer

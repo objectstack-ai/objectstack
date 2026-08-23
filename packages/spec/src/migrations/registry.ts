@@ -6726,7 +6726,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong
@@ -6748,7 +6748,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong
@@ -6770,7 +6770,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong
@@ -6792,7 +6792,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong
@@ -6814,7 +6814,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong
@@ -6836,7 +6836,7 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // no-renderer PALETTE_EXCLUSIONS entry naming the live replacement ("no
     // renderer — use the object-bound `object-form` block"), and the 2026-06
     // page-liveness audit recorded it rendering "Unknown component type". Measured
-    // at retirement time (objectstack @c684d00cfc, objectui @76ceb1e; cloud per
+    // at retirement time (objectstack @dd84ddd796, objectui @3ece13e33; cloud per
     // the card's two recorded readings @5f1bf23f / @a11458b): zero production
     // readers of any `element:form` key — so every key, this one included, was a
     // capability claim nothing kept. Per-key retirement would have been the wrong

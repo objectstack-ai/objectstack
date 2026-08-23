@@ -12,7 +12,7 @@ registered under protocol major 18, where `os migrate meta` users will look).
 
 `element:form` never had a renderer or reader anywhere — the #9220
 (`element:filter`) shape one element over, recorded by that card's own verdict
-sweep. Measured at retirement (objectstack `c684d00cfc`, objectui `76ceb1e`;
+sweep. Measured at retirement (objectstack `dd84ddd796`, objectui `3ece13e33`;
 cloud per the origin card's two recorded readings at `5f1bf23f` and `a11458b`,
 positive controls passing): objectui registers no renderer for it — its
 `renderers/basic/elements.tsx` header deferred the element to "owning plugins"
