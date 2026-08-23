@@ -882,11 +882,12 @@ function lookupPageAttr(
  * skeleton bundle. Two hand-maintained copies of this list would drift into the
  * classic pair of failures — the extractor offering a key the resolver ignores,
  * or omitting one it reads — so there is one list and both sides import it.
- * `translation.zod.ts` declares the same six; `translation.test.ts` pins the
- * two in agreement.
+ * `translation.zod.ts` declares the same five; `translation.test.ts` pins the
+ * two in agreement. (`submitLabel` retired with its only declarer,
+ * `element:form` — #9249 / #10926.)
  */
 export const PAGE_COMPONENT_COPY_KEYS = [
-  'title', 'description', 'label', 'placeholder', 'emptyText', 'submitLabel',
+  'title', 'description', 'label', 'placeholder', 'emptyText',
 ] as const;
 
 export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
