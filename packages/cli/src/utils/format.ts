@@ -330,6 +330,24 @@ export function formatZodErrors(error: ZodError) {
 
 // ─── Metadata Statistics ────────────────────────────────────────────
 
+/**
+ * Every field here is rendered by {@link printMetadataStats}.
+ *
+ * #11172 — `translations: number` used to sit in this interface, collected by
+ * {@link collectMetadataStats} (`count(config.translations)`) on every
+ * `os validate` / `os info` / `os compile` run and then read by nothing: the
+ * printer had no `translations` fragment at any value, so a stack with 40
+ * translation bundles reported them nowhere. The maintainer ruled
+ * implementation-first (2026-08-23) — delete the unread field rather than
+ * invent a row for it; an `i18n:` summary row was explicitly NOT approved.
+ *
+ * The invariant that replaces it: this struct carries no metric the summary
+ * does not print. It is enforced from both ends — TypeScript requires
+ * `collectMetadataStats` to populate every field declared here, and the
+ * `[#11172]` pin in `print-metadata-stats-zero-row.test.ts` requires every
+ * collected field to reach the rendered output. A metric that is declared but
+ * never rendered cannot satisfy both.
+ */
 export interface MetadataStats {
   objects: number;
   objectExtensions: number;
@@ -347,7 +365,6 @@ export interface MetadataStats {
   positions: number;
   permissions: number;
   datasources: number;
-  translations: number;
   plugins: number;
   devPlugins: number;
 }
@@ -386,7 +403,6 @@ export function collectMetadataStats(config: any): MetadataStats {
     positions: count(config.positions),
     permissions: count(config.permissions),
     datasources: count(config.datasources),
-    translations: count(config.translations),
     plugins: count(config.plugins),
     devPlugins: count(config.devPlugins),
   };
@@ -842,6 +858,25 @@ export function printMetadataStats(stats: MetadataStats) {
      * items; the rationale sits at its entry below.
      */
     zeroFallback: [string, ...string[]];
+    /**
+     * How this section's surviving items become the printed line.
+     *
+     * Omitted by every section that renders the shipped #10504 shape —
+     * `<count> <Item>` with the count in white and the item name dim, joined
+     * by two spaces (`Data: 1 Objects  2 Fields`). `Runtime:` is the one row
+     * that has never rendered that way and still does not: it prints
+     * `2 plugins, 1 devPlugins`, comma-joined and fully dim, with lowercase
+     * item names. That difference is pre-existing shipped output and #11172
+     * deliberately did NOT change it — the ruling was about the row's
+     * PRESENCE at zero, not its typography, and rewriting a user-visible row's
+     * look while fixing its zero state would be an unruled widening.
+     *
+     * This hook is what let `Runtime:` join the array (see its entry) instead
+     * of getting a second, parallel no-silent-drop mechanism bolted on beside
+     * the loop. One row's formatting is data on the row; the "never dropped"
+     * guarantee stays single-sourced in the loop below.
+     */
+    render?: (shown: Array<[string, number]>) => string;
   }> = [
     {
       label: 'Data',
@@ -897,13 +932,46 @@ export function printMetadataStats(stats: MetadataStats) {
       // so it is the shipped shape rather than a second formatting concept.
       zeroFallback: ['Positions', 'Permissions'],
     },
+    {
+      // #11172 — `Runtime:` used to be rendered OUTSIDE this loop, as a
+      // standalone `if (stats.plugins > 0 || stats.devPlugins > 0)` after the
+      // loop closed, so a stack with no plugins and no devPlugins printed no
+      // `Runtime:` line at all. Same "reads as never asked, not as zero" defect
+      // #10504 and #10952 removed from the sections, and measured the same way
+      // (`bin/run-dev.js validate`, `NO_COLOR=1`, a stack declaring nothing).
+      // The maintainer ruled it in (2026-08-23): `Runtime:` renders
+      // unconditionally, joining the no-silent-drop invariant.
+      //
+      // Folded into the array rather than fixed in place. Being outside the
+      // loop was not incidental to the defect — it is why #10952's mechanism
+      // could not reach this row, and a hand-rolled zero case beside the loop
+      // would have been a SECOND copy of the invariant, un-enforced by the
+      // `zeroFallback` typing that stops the next row from being added without
+      // one. The per-item `> 0` filter this row already applied is the same
+      // filter the loop applies, so the only thing that had to be carried over
+      // was its fragment style — see `render` on the type above.
+      label: 'Runtime',
+      items: [
+        ['plugins', stats.plugins],
+        ['devPlugins', stats.devPlugins],
+      ],
+      // `plugins` is this row's signal: `devPlugins` is a dev-only overlay on
+      // it, so `Runtime: 0 devPlugins` would report the narrower fact and stay
+      // silent about the broader one.
+      zeroFallback: ['plugins'],
+      render: (shown) => chalk.dim(shown.map(([k, v]) => `${v} ${k}`).join(', ')),
+    },
   ];
+
+  /** The shipped #10504 section shape — see `render` on the type above. */
+  const countFragments = (shown: Array<[string, number]>) =>
+    shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
 
   for (const section of sections) {
     let shown = section.items.filter(([, v]) => v > 0);
     if (shown.length === 0) {
-      // Never drop the row (#10504, #10952) — the row is what says "this
-      // project has none of this"; its absence says nothing at all.
+      // Never drop the row (#10504, #10952, #11172) — the row is what says
+      // "this project has none of this"; its absence says nothing at all.
       shown = section.zeroFallback
         .map((key) => section.items.find(([itemKey]) => itemKey === key))
         .filter((item): item is [string, number] => item !== undefined);
@@ -913,14 +981,7 @@ export function printMetadataStats(stats: MetadataStats) {
       if (shown.length === 0) continue;
     }
 
-    const line = shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
+    const line = (section.render ?? countFragments)(shown);
     console.log(`  ${chalk.bold(section.label + ':')} ${line}`);
-  }
-
-  if (stats.plugins > 0 || stats.devPlugins > 0) {
-    const parts: string[] = [];
-    if (stats.plugins > 0) parts.push(`${stats.plugins} plugins`);
-    if (stats.devPlugins > 0) parts.push(`${stats.devPlugins} devPlugins`);
-    console.log(`  ${chalk.bold('Runtime:')} ${chalk.dim(parts.join(', '))}`);
   }
 }
