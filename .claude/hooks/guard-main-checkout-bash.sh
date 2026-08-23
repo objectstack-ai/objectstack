@@ -61,6 +61,11 @@
 #      in that tail put a REAL ASCII `>` in operator position, so the guard named the
 #      following JS fragment as a write "target" and blocked a pure-read command (#10247).
 #      Single quotes take no escapes: inside '…' a backslash is literal, as in a real shell.
+#      OUTSIDE quotes the same escape holds and both passes must agree that it does: a `\"`
+#      there opens no quoted region at all. Only tokenise() knew that, so segmentation read
+#      the `"` as opening a region that never closed, went inert for every separator behind
+#      it, and let a real `sed -i` through as a mere argument — the fail-OPEN mirror of the
+#      false block above (#11131). The two passes now share the rule in both directions.
 #   4. shell COMMENTS are text, not commands — both quote-aware passes stop at an unquoted
 #      `#` that starts a WORD and resume at the next newline (#10570). A comment cannot
 #      write anything, so reading one as a command is a false BLOCK: prose arrows (`->`,
@@ -181,6 +186,18 @@ split_segments() {
           continue
         fi
         seg+="$ch"                                   # foo#bar, ${x#y}, url/#frag
+        ;;
+      '\')
+        # Outside quotes a backslash escapes the NEXT character, so an escaped `\"` does NOT
+        # open a quoted region. tokenize() has always had this branch; this pass did not, and
+        # the disagreement was a fail-OPEN hole: the `"` after the backslash opened a quote
+        # here that never closed, every later separator went inert, the whole command
+        # collapsed into one `echo` segment, and a real `sed -i` behind it was just another
+        # argument (#11131). Both characters are kept verbatim — this pass only SPLITS, and
+        # tokenize() re-reads the escape when it strips quoting.
+        seg+="$ch"
+        if [ $((i + 1)) -lt "$n" ]; then i=$((i + 1)) ; seg+="${s:i:1}" ; fi
+        word=1
         ;;
       "'" | '"') q="$ch" ; seg+="$ch" ; word=1 ;;
       ';' | '|' | '&' | '(' | ')' | $'\n') segments+=("$seg") ; seg="" ; word=0 ;;

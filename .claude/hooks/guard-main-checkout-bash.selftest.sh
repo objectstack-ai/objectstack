@@ -170,6 +170,30 @@ expect allow 'grep -rn "he said \"sed -i\" once" .claude/'
 expect block 'node -e "console.log(\"hi\")" > pkg/out.json'
 expect block 'sed -i "s/\"a\"/\"b\"/" pkg/x.ts'
 
+echo "== an UNQUOTED \\\" opens no quote, so the write behind it is still seen (#11131) =="
+CWD="$MAIN"
+# The measured hole: segmentation read the escaped `"` as OPENING a quoted region that never
+# closed. Every separator behind it went inert, the command collapsed into one `echo`
+# segment, and the real in-place write was just another argument. tokenize() always had the
+# backslash branch; this is the pass agreement.
+expect block 'echo \" ; sed -i s/a/b/ pkg/x.ts'
+expect block 'echo \" ; rm -rf pkg/x.ts'
+expect block 'printf \" ; tee pkg/a.ts'
+expect block "$(printf 'echo \\"\nsed -i s/a/b/ pkg/x.ts\n')"
+# Precision twins: the escape must not manufacture a target where nothing is written, and
+# the same command aimed at a linked worktree stays allowed.
+expect allow 'echo \" ; echo hello'
+expect allow 'echo \" ; cat README.md'
+expect allow 'echo a\ b'
+expect allow 'echo \\ ; grep -n worktree README.md'
+# NOT a discriminating case for this fix, kept as a plain regression pin: a `>` target is
+# collected wherever it appears, so this blocked even while the passes disagreed. What the
+# disagreement lost was the COMMAND-NAME writers (sed -i / rm / tee) — once the command
+# collapsed into one segment the head word became `echo` and they were mere arguments.
+expect block 'echo \" && echo x > pkg/x.ts'
+CWD="$WT"
+expect allow 'echo \" ; sed -i s/a/b/ pkg/x.ts'
+
 echo "== a shell COMMENT is text, not a command (#10570) =="
 CWD="$MAIN"
 # The measured false blocks: prose in a comment put a real `>` in operator position and the
