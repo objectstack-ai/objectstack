@@ -895,7 +895,7 @@ export const SysUserObject = ObjectSchema.create({
   protection: {
     lock: 'full',
     reason: 'Core identity object — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { /* ... */ },
 });
@@ -913,7 +913,7 @@ export const SysRoleObject = ObjectSchema.create({
   protection: {
     lock: 'no-overlay',
     reason: 'RBAC schema is platform-defined — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { /* ... */ },
 });
@@ -934,7 +934,7 @@ export const SetupApp = defineApp({
   protection: {
     lock: 'full',
     reason: 'Core admin UI shipped by @objectstack/platform-objects — see ADR-0010.',
-    docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
+    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   // ...
 });
