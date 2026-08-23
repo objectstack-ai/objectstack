@@ -74,13 +74,18 @@
  *
  *    Stated conditionally because `close()` is not on the interface below;
  *    it is offered by some implementations and not others. Where it is
- *    offered, this is what it owes. Measured across today's three:
- *    `SysMetadataRepository` conforms; `InMemoryRepository` offers no
- *    repository-level shutdown at all, so its iterators end only through
- *    `return()`; `FileSystemRepository.close()` retires the filesystem watcher
- *    and the resync sweep but never reaches its event broker, so a parked
- *    iterator stays parked — the one non-conformance, filed as #11127 rather
- *    than quietly omitted from this row.
+ *    offered, this is what it owes. Measured across today's three, and there
+ *    are **no declared exceptions**: `SysMetadataRepository` conforms (#11021);
+ *    `FileSystemRepository` conforms (#11127 — its `close()` used to retire
+ *    the filesystem watcher and the resync sweep without ever reaching its
+ *    event broker, leaving a parked iterator parked for every subscription
+ *    shape, `watch({})` included; it now runs each subscription's terminator);
+ *    `InMemoryRepository` offers no repository-level shutdown at all, so its
+ *    iterators end only through `return()`.
+ *
+ *    A new implementation that offers `close()` joins that list or it does not
+ *    conform — this row carries the measurement, so an implementation added
+ *    without one is the omission, not an exception.
  */
 
 import type {
