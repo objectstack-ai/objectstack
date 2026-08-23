@@ -151,23 +151,27 @@ describe('os environments commands', () => {
  * back" (AGENTS.md, Route & surface ownership §3): a shape this pin cannot
  * parse is exactly the shape that could hide a stale command undetected.
  *
- * ## The one exclusion, and why it must self-retire
+ * ## The one exclusion, and why it self-retired
  *
  * `register.ts` / `whoami.ts` / `logout.ts` are root-level commands whose
- * `examples` say `os auth register` / `os auth whoami` / `os auth logout`,
- * though no `auth` topic has ever existed for them (confirmed via
+ * `examples` USED TO say `os auth register` / `os auth whoami` / `os auth
+ * logout`, though no `auth` topic has ever existed for them (confirmed via
  * `--help`: `Error: Command auth:whoami not found.`) — the same defect
  * class as #10967, found by scanning the whole tree, but not #10967's to
- * fix (outside its dispatched file surface). Filed as #11221. `EXCLUDED`
- * carves exactly those three files out of the main assertion below, but a
- * silent, permanent exemption is its own defect — a file excluded here
- * stops being checked by this pin forever, even after #11221 lands and the
- * excluded condition no longer holds. So a second `it.each` re-runs the
- * SAME predicate over the excluded files and asserts it still finds an
- * unresolved entry: when #11221's fix removes the last one, that assertion
- * goes red on purpose, and the failure message says to delete the entry.
- * The pattern (map-of-reason + filtered main assertion + a "still needs
- * its exclusion" retiring assertion) matches
+ * fix (outside its dispatched file surface). Filed as #11221 and fixed
+ * there, so `EXCLUDED` is now empty and all three are scanned by the main
+ * assertion like every other command source.
+ *
+ * The mechanism stays, because it is what made that handoff safe: a silent,
+ * permanent exemption is its own defect — a file excluded here stops being
+ * checked by this pin forever, even after the excluded condition no longer
+ * holds. So a second `it.each` re-runs the SAME predicate over the excluded
+ * files and asserts it still finds an unresolved entry. That is not
+ * hypothetical here: when #11221's fix removed the last unresolved entry,
+ * this assertion went red on purpose for all three files, and its message
+ * ("remove it from EXCLUDED above") is what retired them. The pattern
+ * (map-of-reason + filtered main assertion + a "still needs its exclusion"
+ * retiring assertion) matches
  * `packages/create-objectstack/src/starter-comments-self-contained.test.ts`'s
  * `EXCLUDED`, which has retired this same way before (#11022).
  */
@@ -287,15 +291,15 @@ describe('#10967 pin: examples resolve to a real command id', () => {
   }
 
   /**
-   * Files with a KNOWN, currently-live instance of this defect class this
-   * card does not own the fix for (#11221). The retiring assertion below
-   * proves each entry is still load-bearing, not decorative.
+   * Nothing is excluded — every command source is scanned. `register.ts` /
+   * `whoami.ts` / `logout.ts` each carried a self-retiring entry here while
+   * their `os auth …` examples were #11221's to fix; that fix landed, the
+   * retiring assertion below went red exactly as designed, and the map goes
+   * back to empty rather than staying around as a silent exemption over three
+   * root-level commands. The assertion stays, so the next entry added here is
+   * held to the same self-retirement.
    */
-  const EXCLUDED = new Map<string, string>([
-    ['register.ts', '#11221: examples say `os auth register`, no `auth` topic exists'],
-    ['whoami.ts', '#11221: examples say `os auth whoami`, no `auth` topic exists'],
-    ['logout.ts', '#11221: examples say `os auth logout`, no `auth` topic exists'],
-  ]);
+  const EXCLUDED = new Map<string, string>();
 
   const sourceFiles = commandSourceFiles();
   const registeredIds = registeredCommandIds();
