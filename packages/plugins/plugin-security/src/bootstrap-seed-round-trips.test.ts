@@ -429,7 +429,21 @@ describe('#10946 — a name declared twice in one batch keeps its loud refusal',
 
 // ── #11096 — declared capabilities ─────────────────────────────────────────
 
-const declaredCaps = (n: number) =>
+/**
+ * `scope` is typed rather than inferred: the "declared SCOPE changed" drift
+ * fixture below widens `'platform'` to `'org'` to simulate a package version
+ * bump, which an inferred `'platform'` literal type rejects — the same reason
+ * `DeclaredSet` above types `objects` explicitly.
+ */
+interface DeclaredCapability {
+  name: string;
+  label: string;
+  description: string;
+  scope: 'platform' | 'org';
+  _packageId: string;
+}
+
+const declaredCaps = (n: number): DeclaredCapability[] =>
   Array.from({ length: n }, (_, i) => ({
     // ⚠️ Never a curated `PLATFORM_CAPABILITY_NAMES` entry: those are refused
     // before the existence read is even consulted, so a curated fixture would
@@ -437,7 +451,7 @@ const declaredCaps = (n: number) =>
     name: `crm.cap.${i}`,
     label: `Capability ${i}`,
     description: `desc ${i}`,
-    scope: 'platform' as const,
+    scope: 'platform',
     _packageId: 'com.example.crm',
   }));
 
