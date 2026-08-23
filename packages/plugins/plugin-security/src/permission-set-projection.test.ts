@@ -36,7 +36,20 @@ import {
   type ProjectionLogger,
 } from './permission-set-projection.js';
 
-/** In-memory ql over sys_permission_set + sys_metadata. */
+/**
+ * In-memory ql over sys_permission_set + sys_metadata.
+ *
+ * [#11097] Supports the `$in` membership operator, because the real engine does
+ * — `bootstrapDeclaredPermissions` has read `sys_permission_set` with
+ * `{ name: { $in: names } }` since #10946, on this very table. A double that
+ * refused it (or, worse, quietly matched nothing and returned `[]`) would pin
+ * the double's limits rather than the projector's behaviour: `[]` is the answer
+ * "none of these names exist", so a non-matching double would make the
+ * reconciler re-create every overlay record on every boot while this suite
+ * stayed green.
+ *
+ * `calls` counts every round trip — the defect #11096/#11097 fix is a COUNT.
+ */
 function makeQl() {
   const permRows: any[] = [];
   const metaRows: any[] = [];
@@ -45,13 +58,22 @@ function makeQl() {
   const matches = (r: any, where: any) =>
     Object.entries(where ?? {}).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const inList = (v as any).$in;
+        if (Array.isArray(inList)) return inList.includes(r[k]);
+        throw new Error(`fake driver: unsupported operator ${Object.keys(v).join(',')}`);
+      }
       return v === null ? (r[k] ?? null) === null : r[k] === v;
     });
   return {
     permRows,
     metaRows,
+    /** Round trips by table, since issue order matters to the count tests. */
+    calls: { find: 0, insert: 0, update: 0 },
+    resetCalls() { (this as any).calls = { find: 0, insert: 0, update: 0 }; },
     async find(object: string, q: any) {
       const rows = tableFor(object);
+      if (object === 'sys_permission_set') (this as any).calls.find += 1;
       return rows ? rows.filter((r) => matches(r, q?.where)) : [];
     },
     async findOne(object: string, q: any) {
@@ -61,11 +83,13 @@ function makeQl() {
     async insert(object: string, data: any) {
       const rows = tableFor(object);
       if (!rows) return null;
+      if (object === 'sys_permission_set') (this as any).calls.insert += 1;
       rows.push({ ...data });
       return { id: data.id };
     },
     async update(object: string, data: any) {
       const rows = tableFor(object);
+      if (object === 'sys_permission_set') (this as any).calls.update += 1;
       const r = rows?.find((x) => x.id === data.id);
       if (r) Object.assign(r, data);
     },
@@ -1203,5 +1227,325 @@ describe('mergeRowPatchIntoBody', () => {
     const merged = mergeRowPatchIntoBody({ ...envBody(), _packageId: 'com.x', _provenance: { a: 1 } }, {});
     expect('_packageId' in merged).toBe(false);
     expect('_provenance' in merged).toBe(false);
+  });
+});
+
+// ── #11097 — boot reconciliation is O(1) round trips, and still reconciles ──
+
+/**
+ * [#11097] The env door's boot reconciler projected every env-scope `permission`
+ * overlay in a per-name loop, and each iteration issued its OWN existence
+ * `SELECT` inside `upsertEnvPermissionSet` plus an `UPDATE` that fired whether
+ * or not the record already matched. Invisible on a local file database; one
+ * sequential HTTP request per leg on the remote libsql/Turso database every
+ * hosted environment runs.
+ *
+ * ## What is measured here, and what is NOT
+ *
+ * A COUNT — every `find`/`insert`/`update` the reconciler issues against
+ * `sys_permission_set` is one round trip, counted by `makeQl().calls`. ⚠️ The
+ * slope of THIS axis has never been measured: the hosted `bootstrap-curve.mjs`
+ * rig lives in `objectstack-ai/cloud`, and its axes are permission sets /
+ * positions / objects, not env overlays. What is established is that the code
+ * shape is the one #10946 measured at 4.0000 round trips per item on the two
+ * sibling loops. Nothing here measures wall time.
+ *
+ * ## Why every counting test below is paired with a reconciliation test
+ *
+ * ⚠️ LOAD-BEARING. A reconciler that simply stopped writing would produce a
+ * perfect count while silently reconciling nothing — the loop keeping its shape
+ * and losing its purpose. So each count is paired with a drift fixture over the
+ * same data, and `customized` gets its own pair because it is written by this
+ * projector and deliberately NOT compared by `recordDiffersFromBody`.
+ */
+describe('#11097 — env overlay reconciliation: round trips', () => {
+  const overlay = (n: number) => `env_set_${n}`;
+
+  /** Seed `n` env-authored overlays and settle them into records. */
+  const seedOverlays = async (n: number) => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    for (let i = 0; i < n; i += 1) {
+      ql.metaRows.push({
+        id: `m${i}`, type: 'permission', name: overlay(i), state: 'active',
+        organization_id: null, metadata: JSON.stringify(envBody({ name: overlay(i) })),
+      });
+    }
+    await reconcilePermissionSetProjection(protocol, { ql });   // first boot: creates
+    return { ql, protocol };
+  };
+
+  it('does not grow the steady-state round-trip count with the number of overlays', async () => {
+    const measure = async (n: number) => {
+      const { ql, protocol } = await seedOverlays(n);
+      ql.resetCalls();
+      const out = await reconcilePermissionSetProjection(protocol, { ql });   // REBUILD
+      // Nothing changed, so nothing is written — and that is the whole point.
+      expect(out.projectedFromMetadata).toBe(0);
+      expect(ql.calls.update).toBe(0);
+      expect(ql.calls.insert).toBe(0);
+      return ql.calls.find;
+    };
+
+    const [n1, n5, n20, n40] = [await measure(1), await measure(5), await measure(20), await measure(40)];
+    // ONE batched `$in` existence read + the pre-existing full-record page read.
+    // The COUNT is asserted, never the wall time.
+    expect([n1, n5, n20, n40]).toEqual([2, 2, 2, 2]);
+  });
+
+  it('issues ONE batched `$in` existence read for the whole overlay set', async () => {
+    const { ql, protocol } = await seedOverlays(12);
+    const seen: any[] = [];
+    const origFind = ql.find.bind(ql);
+    (ql as any).find = async (object: string, q: any) => {
+      if (object === 'sys_permission_set') seen.push(q?.where);
+      return origFind(object, q);
+    };
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual({ name: { $in: Array.from({ length: 12 }, (_, i) => overlay(i)) } });
+  });
+
+  it('first boot costs one batched read plus one INSERT per genuinely new overlay', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    for (let i = 0; i < 10; i += 1) {
+      ql.metaRows.push({
+        id: `m${i}`, type: 'permission', name: overlay(i), state: 'active',
+        organization_id: null, metadata: JSON.stringify(envBody({ name: overlay(i) })),
+      });
+    }
+    const out = await reconcilePermissionSetProjection(protocol, { ql });
+    expect(out.projectedFromMetadata).toBe(10);
+    expect(ql.calls.insert).toBe(10);
+    expect(ql.calls.update).toBe(0);
+    expect(ql.permRows).toHaveLength(10);
+  });
+});
+
+/**
+ * ⚠️ LOAD-BEARING. Without these, an implementation that skipped every write
+ * would pass every count above while reconciling nothing at all.
+ */
+describe('#11097 — drift STILL reconciles', () => {
+  it('an overlay whose stored facets differ still gets its UPDATE', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows).toHaveLength(1);
+
+    // Someone wrote straight at the record.
+    ql.permRows[0].object_permissions = JSON.stringify({ crm_lead: { allowDelete: true } });
+
+    ql.resetCalls();
+    const out = await reconcilePermissionSetProjection(protocol, { ql });
+    expect(out.projectedFromMetadata).toBe(1);
+    expect(ql.calls.update).toBe(1);
+    expect(JSON.parse(ql.permRows[0].object_permissions)).toEqual({ crm_lead: { allowRead: true, allowEdit: true } });
+  });
+
+  it('an overlay whose label drifted still gets its UPDATE', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+    await reconcilePermissionSetProjection(protocol, { ql });
+    ql.permRows[0].label = 'Stale Label';
+
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.calls.update).toBe(1);
+    expect(ql.permRows[0].label).toBe('Organization Administrator');
+  });
+
+  it('only the DRIFTED overlay is written — the other 19 cost nothing', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    for (let i = 0; i < 20; i += 1) {
+      ql.metaRows.push({
+        id: `m${i}`, type: 'permission', name: `env_set_${i}`, state: 'active',
+        organization_id: null, metadata: JSON.stringify(envBody({ name: `env_set_${i}` })),
+      });
+    }
+    await reconcilePermissionSetProjection(protocol, { ql });
+    const target = ql.permRows.find((r: any) => r.name === 'env_set_7');
+    target.label = 'drifted';
+
+    ql.resetCalls();
+    const out = await reconcilePermissionSetProjection(protocol, { ql });
+    expect(out.projectedFromMetadata).toBe(1);
+    expect(ql.calls.update).toBe(1);
+    expect(target.label).toBe('Organization Administrator');
+  });
+});
+
+/**
+ * ⛔ [#11097] The `customized` stamp is written by this projector and is
+ * deliberately NOT part of `recordDiffersFromBody` — it is provenance, not
+ * definition, so no metadata body can declare it. That makes it the one column
+ * a naive "skip when the body matches" would stop maintaining, while the Setup
+ * list badges on it and the reset action reads it. These pin the flag's own
+ * comparison term.
+ */
+describe('#11097 — the `customized` stamp is still maintained', () => {
+  const pkgRow = (over: Record<string, any> = {}) => ({
+    id: 'ps_pkg', name: 'organization_admin', managed_by: 'package',
+    package_id: 'com.example.crm', active: true,
+    ...permissionSetRowFields(envBody()),
+    ...over,
+  });
+
+  it('an overlay appearing over a package row still STAMPS `customized` on a matching row', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    // The record's facets already equal the overlay body — only the flag differs.
+    ql.permRows.push(pkgRow({ customized: false }));
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows[0].customized).toBe(true);
+    expect(ql.calls.update).toBe(1);
+  });
+
+  it('a row that predates the flag (NULL) is still stamped, not read as already-customized', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push(pkgRow({ customized: null }));
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows[0].customized).toBe(true);
+  });
+
+  it('a package row whose flag is ALREADY true costs no write', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.permRows.push(pkgRow({ customized: true }));
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows[0].customized).toBe(true);
+    expect(ql.calls.update).toBe(0);
+  });
+
+  it('an env-authored row carrying a stale flag is still CLEARED', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    // `managed_by:'admin'` — the flag does not apply; a stale `true` must go.
+    ql.permRows.push({
+      id: 'ps_env', name: 'organization_admin', managed_by: 'admin', active: true,
+      customized: true, ...permissionSetRowFields(envBody()),
+    });
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows[0].customized).toBe(false);
+    expect(ql.calls.update).toBe(1);
+  });
+});
+
+/**
+ * ⛔ [#11097] The in-memory evaluator registry sync is NOT a database round trip,
+ * and gating it on "a write happened" is what compare-before-write would
+ * otherwise have done to it. The evaluator resolves permission sets
+ * registry-first, so a steady-state boot that skipped the sync would leave it
+ * enforcing the stale DECLARED body while the record and Setup showed the
+ * overlay.
+ */
+describe('#11097 — the evaluator registry is synced even when nothing was written', () => {
+  it('an overlay whose record already matches STILL syncs the evaluator registry', async () => {
+    const ql = makeQl();
+    const declared = { organization_admin: envBody({ label: 'Shipped Baseline' }) };
+    const protocol = makeProtocol(ql, declared);
+    const registered: any[] = [];
+    const metadata = {
+      registerInMemory: (type: string, name: string, body: any) => { registered.push({ type, name, body }); },
+    };
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody({ label: 'Overlay Wins' })),
+    });
+
+    // First boot creates the record AND syncs.
+    await reconcilePermissionSetProjection(protocol, { ql, metadata });
+    expect(registered).toHaveLength(1);
+
+    // Steady state: the record already matches, so NO update is issued — the
+    // sync must happen anyway.
+    registered.length = 0;
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql, metadata });
+    expect(ql.calls.update).toBe(0);
+    expect(registered).toHaveLength(1);
+    expect(registered[0].body.label).toBe('Overlay Wins');
+  });
+});
+
+/**
+ * ⛔ #3807's conflation class at the seam the batched read newly exposes: a read
+ * that CANNOT ANSWER is not the answer "no such record". The per-item shape was
+ * accidentally immune (a failed read fell through to an insert that failed too,
+ * for that ONE name); a batched read speaks for the whole set at once.
+ */
+describe('#11097 — a read that CANNOT ANSWER is not the answer "none exist"', () => {
+  it('a throwing existence read does NOT re-create records that are already projected', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    for (let i = 0; i < 4; i += 1) {
+      ql.metaRows.push({
+        id: `m${i}`, type: 'permission', name: `env_set_${i}`, state: 'active',
+        organization_id: null, metadata: JSON.stringify(envBody({ name: `env_set_${i}` })),
+      });
+    }
+    await reconcilePermissionSetProjection(protocol, { ql });
+    expect(ql.permRows).toHaveLength(4);
+
+    // Every sys_permission_set read now fails — batched and per-item alike.
+    const origFind = ql.find.bind(ql);
+    (ql as any).find = async (object: string, q: any) => {
+      if (object === 'sys_permission_set') throw new Error('fake driver: read unavailable');
+      return origFind(object, q);
+    };
+    const warns: string[] = [];
+    ql.resetCalls();
+    await reconcilePermissionSetProjection(protocol, { ql, logger: { warn: (m: string) => warns.push(m) } });
+
+    expect(ql.calls.insert).toBe(0);          // ⛔ no blind insert
+    expect(ql.permRows).toHaveLength(4);      // ⛔ nothing re-created
+    expect(warns.some((w) => w.includes('batched seed existence read failed'))).toBe(true);
+  });
+
+  it('an EMPTY result set is still trusted as "none exist" — the first boot depends on it', async () => {
+    const ql = makeQl();
+    const protocol = makeProtocol(ql);
+    ql.metaRows.push({
+      id: 'm1', type: 'permission', name: 'organization_admin', state: 'active',
+      organization_id: null, metadata: JSON.stringify(envBody()),
+    });
+    const out = await reconcilePermissionSetProjection(protocol, { ql });
+    expect(out.projectedFromMetadata).toBe(1);
+    expect(ql.permRows).toHaveLength(1);
   });
 });

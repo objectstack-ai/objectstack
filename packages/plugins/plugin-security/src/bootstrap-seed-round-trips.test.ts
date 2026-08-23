@@ -10,6 +10,13 @@
  * permission set and every declared position cost exactly 4 sequential database
  * round trips on every kernel boot (2 × existence `SELECT`, 1 × `UPDATE`,
  * 1 × `SELECT`), of which the `UPDATE` fired even when nothing had changed.
+ *
+ * [#11096] The declared-CAPABILITY seeder next door had the same shape and is
+ * pinned here too. ⚠️ Its own slope has never been measured — the hosted rig's
+ * axes are permission sets / positions / objects — so nothing below claims one;
+ * what is established is that the code shape is identical, and the capability
+ * set is typically the LARGEST of the identity axes because it is the union of
+ * every capability every declared package contributes.
  * On a local file database that loop is invisible; on a remote libsql/Turso
  * database — every hosted environment — each leg is its own sequential HTTP
  * request.
@@ -37,6 +44,7 @@ import { describe, it, expect } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
+import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 
 interface CountingQl {
   rows: any[];
@@ -416,5 +424,300 @@ describe('#10946 — a name declared twice in one batch keeps its loud refusal',
     expect(ql.rows).toHaveLength(1);
     expect(ql.rows[0].package_id).toBe('com.example.a');
     expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+  });
+});
+
+// ── #11096 — declared capabilities ─────────────────────────────────────────
+
+const declaredCaps = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    // ⚠️ Never a curated `PLATFORM_CAPABILITY_NAMES` entry: those are refused
+    // before the existence read is even consulted, so a curated fixture would
+    // measure the refusal path and report zero round trips for the wrong reason.
+    name: `crm.cap.${i}`,
+    label: `Capability ${i}`,
+    description: `desc ${i}`,
+    scope: 'platform' as const,
+    _packageId: 'com.example.crm',
+  }));
+
+const capabilityQl = (declared: any[], behaviour = {}) =>
+  makeCountingQl('sys_capability', 'capability', declared, behaviour);
+
+describe('#11096 — steady-state rebuild is O(1) round trips (declared capabilities)', () => {
+  it('does not grow the rebuild round-trip count with the number of declared capabilities', async () => {
+    const measure = async (n: number) => {
+      const ql = capabilityQl(declaredCaps(n));
+      await bootstrapDeclaredCapabilities(ql, undefined);     // first boot: seeds
+      ql.reset();
+      const r = await bootstrapDeclaredCapabilities(ql, undefined);  // REBUILD
+      expect(r.seeded).toBe(0);
+      expect(r.updated).toBe(0);
+      expect(r.unchanged).toBe(n);
+      // The suppression list is the whole reason this seeder reports names, and
+      // an unchanged row is still a materialized one (#4967 Part 1).
+      expect(r.materializedNames).toHaveLength(n);
+      return ql.roundTrips();
+    };
+
+    const [n1, n5, n20, n40] = [await measure(1), await measure(5), await measure(20), await measure(40)];
+    // The count is asserted, never the wall time.
+    expect([n1, n5, n20, n40]).toEqual([1, 1, 1, 1]);
+  });
+
+  it('issues ONE batched `$in` existence read for the whole declaration', async () => {
+    const ql = capabilityQl(declaredCaps(12));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+    ql.reset();
+    await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(ql.calls.find).toBe(1);
+    expect(ql.wheres[0]).toEqual({ name: { $in: declaredCaps(12).map((c) => c.name) } });
+  });
+
+  it('first boot costs one batched read plus one INSERT per genuinely new capability', async () => {
+    const ql = capabilityQl(declaredCaps(10));
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.seeded).toBe(10);
+    expect(ql.calls.find).toBe(1);
+    expect(ql.calls.insert).toBe(10);
+    expect(ql.calls.update).toBe(0);
+    expect(ql.rows).toHaveLength(10);
+  });
+});
+
+/**
+ * ⚠️ LOAD-BEARING. Without these, an implementation that skipped every write
+ * would pass every capability count above while reconciling nothing at all —
+ * the exact failure shape a round-trip suite alone cannot see.
+ */
+describe('#11096 — drift STILL reconciles (declared capabilities)', () => {
+  it('a capability row whose stored label/description differ still gets its UPDATE', async () => {
+    const ql = capabilityQl(declaredCaps(20));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+
+    // The package ships new copy for exactly ONE of the 20.
+    const upgraded = declaredCaps(20);
+    upgraded[7] = { ...upgraded[7], label: 'Renamed', description: 'new text' };
+    (ql as any).registry = { listItems: (t: string) => (t === 'capability' ? upgraded : []) };
+
+    ql.reset();
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.updated).toBe(1);
+    expect(r.unchanged).toBe(19);
+    expect(ql.calls.update).toBe(1);
+    const row = ql.rows.find((x) => x.name === 'crm.cap.7');
+    expect(row.label).toBe('Renamed');
+    expect(row.description).toBe('new text');
+  });
+
+  it('a capability whose declared SCOPE changed still gets its UPDATE', async () => {
+    const ql = capabilityQl(declaredCaps(3));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+
+    const upgraded = declaredCaps(3);
+    upgraded[1] = { ...upgraded[1], scope: 'org' as const };
+    (ql as any).registry = { listItems: (t: string) => (t === 'capability' ? upgraded : []) };
+
+    ql.reset();
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.updated).toBe(1);
+    expect(ql.rows.find((x) => x.name === 'crm.cap.1').scope).toBe('org');
+  });
+
+  it('a capability row a hand-edit drifted is healed back to the declaration', async () => {
+    const ql = capabilityQl(declaredCaps(3));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+    // Someone wrote straight at the row.
+    ql.rows[1].description = 'hand-edited';
+
+    ql.reset();
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.updated).toBe(1);
+    expect(r.unchanged).toBe(2);
+    expect(ql.rows[1].description).toBe('desc 1');
+  });
+
+  it('a re-seed still never touches the provenance columns', async () => {
+    const ql = capabilityQl([{
+      name: 'crm.cap.0', label: 'Capability v2', description: 'new', scope: 'platform',
+      _packageId: 'com.example.crm',
+    }]);
+    ql.rows.push({
+      id: 'cap_1', name: 'crm.cap.0', label: 'Capability', description: 'old', scope: 'platform',
+      active: false, managed_by: 'package', package_id: 'com.example.crm',
+    });
+    await bootstrapDeclaredCapabilities(ql, undefined);
+    const row = ql.rows[0];
+    expect(row.label).toBe('Capability v2');
+    expect(row.active).toBe(false);
+    expect(row.managed_by).toBe('package');
+    expect(row.package_id).toBe('com.example.crm');
+  });
+});
+
+describe('#11096 — a genuinely NEW declaration is still created', () => {
+  it('the batched read does not turn "absent" into "present" (capabilities)', async () => {
+    const ql = capabilityQl(declaredCaps(5));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+
+    const grown = [...declaredCaps(5), {
+      name: 'crm.cap.new', label: 'New', description: 'brand new', scope: 'platform' as const,
+      _packageId: 'com.example.crm',
+    }];
+    (ql as any).registry = { listItems: (t: string) => (t === 'capability' ? grown : []) };
+
+    ql.reset();
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.seeded).toBe(1);
+    expect(r.unchanged).toBe(5);
+    expect(ql.rows.map((x) => x.name)).toContain('crm.cap.new');
+    // one batched read + one insert — the other five cost nothing at all
+    expect(ql.roundTrips()).toBe(2);
+  });
+});
+
+/**
+ * ⛔ The provenance half of triage's clause ②: the refusal diagnostics at the
+ * top of `upsertPackageCapability` state a DIFFERENT consequence depending on
+ * whether a row was found, so the batched read has to preserve the found /
+ * not-found distinction, not merely return rows.
+ */
+describe('#11096 — the batched read preserves the provenance branches', () => {
+  it('still refuses a capability owned by ANOTHER package, loudly', async () => {
+    const ql = capabilityQl([{
+      name: 'crm.cap.0', label: 'Mine', description: 'd', scope: 'platform',
+      _packageId: 'com.example.b',
+    }]);
+    ql.rows.push({
+      id: 'cap_1', name: 'crm.cap.0', label: 'Theirs', description: 'd', scope: 'platform',
+      managed_by: 'package', package_id: 'com.example.a', active: true,
+    });
+    const warns: string[] = [];
+    const r = await bootstrapDeclaredCapabilities(ql, undefined, {
+      logger: { info: () => {}, warn: (m) => warns.push(m) },
+    });
+    expect(r.skippedForeign).toBe(1);
+    expect(r.materializedNames).toEqual(['crm.cap.0']);
+    expect(ql.rows[0].package_id).toBe('com.example.a');   // untouched
+    expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+  });
+
+  it('still CLAIMS a derived platform placeholder for an explicit declaration', async () => {
+    const ql = capabilityQl(declaredCaps(1));
+    ql.rows.push({
+      id: 'cap_1', name: 'crm.cap.0', label: 'Crm Cap 0', description: 'Capability crm.cap.0.',
+      scope: 'platform', managed_by: 'platform', active: true,
+    });
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.claimed).toBe(1);
+    expect(ql.rows[0].managed_by).toBe('package');
+    expect(ql.rows[0].package_id).toBe('com.example.crm');
+  });
+
+  it('never clobbers an admin-authored row', async () => {
+    const ql = capabilityQl(declaredCaps(1));
+    ql.rows.push({
+      id: 'cap_1', name: 'crm.cap.0', label: 'Admin Copy', description: 'admin wrote this',
+      scope: 'platform', managed_by: 'admin', active: true,
+    });
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.skippedAdmin).toBe(1);
+    expect(r.materializedNames).toEqual(['crm.cap.0']);
+    expect(ql.rows[0].label).toBe('Admin Copy');
+    expect(ql.calls.update).toBe(0);
+  });
+
+  it('an UNOWNED declaration still reports the consequence for a name WITH a row', async () => {
+    const ql = capabilityQl([{ name: 'crm.cap.0', label: 'L', description: 'd', scope: 'platform' }]);
+    ql.rows.push({
+      id: 'cap_1', name: 'crm.cap.0', label: 'L', description: 'd', scope: 'platform',
+      managed_by: 'platform', active: true,
+    });
+    const warns: string[] = [];
+    const r = await bootstrapDeclaredCapabilities(ql, undefined, {
+      logger: { info: () => {}, warn: (m) => warns.push(m) },
+    });
+    expect(r.skippedUnowned).toBe(1);
+    // A row resolves it — so the derivation must be suppressed, and the
+    // diagnostic must say so rather than promising a placeholder.
+    expect(r.materializedNames).toEqual(['crm.cap.0']);
+    expect(warns.some((w) => w.includes('already resolves it and is left as-is'))).toBe(true);
+  });
+
+  it('an UNOWNED declaration with NO row reports the OTHER consequence, and stays unsuppressed', async () => {
+    const ql = capabilityQl([{ name: 'crm.cap.0', label: 'L', description: 'd', scope: 'platform' }]);
+    const warns: string[] = [];
+    const r = await bootstrapDeclaredCapabilities(ql, undefined, {
+      logger: { info: () => {}, warn: (m) => warns.push(m) },
+      permissionSets: [{ name: 'crm_rep', systemPermissions: ['crm.cap.0'] }],
+    });
+    expect(r.skippedUnowned).toBe(1);
+    expect(r.materializedNames).toEqual([]);   // ⛔ #4967: no row ⇒ no suppression
+    expect(warns.some((w) => w.includes('falls back to the back-compat derived placeholder'))).toBe(true);
+    expect(warns.some((w) => w.includes('crm_rep'))).toBe(true);
+  });
+
+  it('a name declared twice in one batch keeps its loud refusal', async () => {
+    const ql = capabilityQl([
+      { name: 'crm.shared', label: 'A', description: 'a', scope: 'platform', _packageId: 'com.example.a' },
+      { name: 'crm.shared', label: 'B', description: 'b', scope: 'platform', _packageId: 'com.example.b' },
+    ]);
+    const warns: string[] = [];
+    const r = await bootstrapDeclaredCapabilities(ql, undefined, {
+      logger: { info: () => {}, warn: (m) => warns.push(m) },
+    });
+    expect(r.seeded).toBe(1);
+    expect(r.skippedForeign).toBe(1);
+    expect(ql.rows).toHaveLength(1);
+    expect(ql.rows[0].package_id).toBe('com.example.a');
+    expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+  });
+});
+
+/**
+ * ⛔ #3807's conflation class on the capability axis. Note the second half: a
+ * name whose row could not be read must ALSO stay out of `materializedNames`,
+ * because suppressing the back-compat derivation for a name that may have no
+ * row is precisely the #4967 hole.
+ */
+describe('#11096 — a read that CANNOT ANSWER is not the answer "none exist"', () => {
+  it('a throwing read does NOT re-create capabilities that are already seeded', async () => {
+    const ql = capabilityQl(declaredCaps(4));
+    await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(ql.rows).toHaveLength(4);
+
+    const broken = capabilityQl(declaredCaps(4), { findThrows: true });
+    broken.rows.push(...ql.rows.map((r) => ({ ...r })));
+    const warns: string[] = [];
+    const r = await bootstrapDeclaredCapabilities(broken, undefined, {
+      logger: { info: () => {}, warn: (m) => warns.push(m) },
+    });
+
+    expect(r.seeded).toBe(0);
+    expect(r.unreadable).toBe(4);
+    expect(broken.calls.insert).toBe(0);        // ⛔ no blind insert
+    expect(broken.rows).toHaveLength(4);        // ⛔ nothing re-created
+    expect(r.materializedNames).toEqual([]);    // ⛔ unknown ⇒ never suppress
+    expect(warns.some((w) => w.includes('batched seed existence read failed'))).toBe(true);
+    expect(warns.some((w) => w.includes('could not be read'))).toBe(true);
+  });
+
+  it('a read returning a non-result (undefined) is not read as "none exist"', async () => {
+    const ql = capabilityQl(declaredCaps(4), { findReturnsNonArray: true });
+    ql.rows.push(...declaredCaps(4).map((c, i) => ({
+      id: `cap_${i}`, name: c.name, label: c.label, description: c.description,
+      scope: 'platform', managed_by: 'package', package_id: 'com.example.crm', active: true,
+    })));
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.seeded).toBe(0);
+    expect(r.unreadable).toBe(4);
+    expect(ql.calls.insert).toBe(0);
+    expect(ql.rows).toHaveLength(4);
+  });
+
+  it('an EMPTY result set is still trusted as "none exist" — the first boot depends on it', async () => {
+    const ql = capabilityQl(declaredCaps(3));
+    const r = await bootstrapDeclaredCapabilities(ql, undefined);
+    expect(r.seeded).toBe(3);
   });
 });

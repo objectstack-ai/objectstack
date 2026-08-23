@@ -69,6 +69,7 @@
 
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { seedCtx } from './per-organization-catalog.js';
+import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -200,6 +201,23 @@ const parseMaybeJson = (v: any, fallback: any): any => {
 };
 
 const asBool = (v: any): boolean => !(v === false || v === 0 || v === '0' || v === 'false');
+
+/**
+ * [#11097] Read the `customized` COLUMN as a definite boolean.
+ *
+ * ⛔ Deliberately NOT {@link asBool}, which answers `true` for `undefined` and
+ * `null` because its subject (`active`) defaults to on. `customized` defaults
+ * to **off** (`Field.boolean({ defaultValue: false })` on
+ * `sys_permission_set`), and a row that predates the flag stores NULL — so
+ * `asBool` would read every such row as "already customized" and the
+ * compare-before-write below would then decline to stamp the flag on exactly
+ * the legacy rows that need it.
+ *
+ * Absent, null, 0, '0', false and 'false' are all "not customized"; everything
+ * else is customized.
+ */
+const customizedFlag = (v: any): boolean =>
+  !(v === undefined || v === null || v === false || v === 0 || v === '0' || v === 'false' || v === '');
 
 /**
  * `sys_permission_set` columns that are ROW STATE, not part of the metadata
@@ -435,7 +453,22 @@ export async function upsertEnvPermissionSet(
   ql: any,
   ps: any,
   _logger?: ProjectionLogger,
-  opts?: { customized?: boolean },
+  opts?: {
+    customized?: boolean;
+    /**
+     * [#11097] A batched existence oracle built by the CALLER over every name
+     * it is about to project, so a boot reconciliation pays one read for the
+     * whole overlay set instead of one per name.
+     *
+     * Omitted — the live single-mutation path, which has exactly one name and
+     * nothing to batch — keeps the per-item read verbatim, including its
+     * pre-existing treatment of a failed read (fall through to an insert the
+     * `name` unique index refuses). Tightening THAT path to the oracle's
+     * decline-on-unknown rule is a real behaviour change on a hot write seam
+     * and belongs to its own card, not to a round-trip fix.
+     */
+    existing?: ExistingByNameIndex;
+  },
 ): Promise<PermissionSeedOutcome> {
   const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
   if (!ql || typeof ql.find !== 'function' || !ps?.name) return out;
@@ -446,9 +479,24 @@ export async function upsertEnvPermissionSet(
   // anything (it IS the definition), so the flag only rides on package rows.
   const customized = opts?.customized;
 
-  const existing = (await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1))[0];
+  let existing: any;
+  if (opts?.existing) {
+    // ⛔ THREE outcomes, not two (`seed-name-lookup.ts`): a read that could not
+    // ANSWER is not the answer "no such record". Collapsing them here would
+    // make a boot during a brief database outage conclude that every overlay
+    // needs creating — and a batched read fails for the WHOLE set at once,
+    // where the per-item read below could only ever mislead about one name.
+    const lookup = await opts.existing.get(String(ps.name));
+    if (lookup.status === 'unknown') {
+      out.unreadable += 1;
+      return out;
+    }
+    existing = lookup.status === 'present' ? lookup.row : undefined;
+  } else {
+    existing = (await tryFind(ql, 'sys_permission_set', { name: ps.name }, 1))[0];
+  }
   if (!existing?.id) {
-    const created = await tryInsert(ql, 'sys_permission_set', {
+    const row = {
       id: genId('ps'),
       name: ps.name,
       ...permissionSetRowFields(ps),
@@ -463,9 +511,29 @@ export async function upsertEnvPermissionSet(
       // ADMIN-owned (formerly stamped 'user'). No runtime path branches on the
       // value except the 'package' guard, so this is a pure vocab rename.
       managed_by: 'admin',
-      ...(customized !== undefined ? { customized: !!customized } : {}),
-    });
-    if (created) out.seeded += 1;
+      // [#11097] `false`, not `!!customized`. This row is being CREATED, so it
+      // is `managed_by:'admin'` one line up — an env-authored definition, not a
+      // customization of a packaged one — and the update branch below already
+      // encodes exactly that rule (`existing.managed_by === 'package' ?
+      // !!customized : false`). The insert used to stamp the caller's raw
+      // opinion instead, so a new overlay-backed record was born badged
+      // "customized" in the Setup list while owning no package to be a
+      // customization OF, and the very next boot's projection cleared it. That
+      // second write is invisible while every boot re-writes every record; it
+      // stops being invisible the moment writes are skipped when nothing
+      // differs, which is why it is repaired here rather than left to make the
+      // steady state take two boots to settle.
+      ...(customized !== undefined ? { customized: false } : {}),
+    };
+    const created = await tryInsert(ql, 'sys_permission_set', row);
+    if (created) {
+      out.seeded += 1;
+      // [#11097] The oracle is a SNAPSHOT taken before the caller's loop, so it
+      // cannot see this insert. Two projections of the same name in one pass
+      // would otherwise each attempt an insert, and the second would be refused
+      // by the `name` unique index instead of taking the update branch below.
+      opts?.existing?.remember(String(ps.name), row);
+    }
     return out;
   }
 
@@ -480,6 +548,34 @@ export async function upsertEnvPermissionSet(
   if (customized !== undefined) {
     patch.customized = existing.managed_by === 'package' ? !!customized : false;
   }
+
+  // [#11097] Write only when the stored row actually differs from the patch. On
+  // every boot the reconciler re-projected each env overlay unconditionally,
+  // paying a remote `UPDATE` per overlay to store what was already there.
+  //
+  // ⛔ THE COMPARISON MUST COVER EVERY COLUMN THE PATCH WRITES, and
+  // `recordDiffersFromBody` alone does NOT: it compares the facet/display
+  // columns, and `customized` is deliberately not among them (it is provenance,
+  // not definition — no metadata body can declare it). Skipping on the facets
+  // alone would therefore stop maintaining a flag the Setup list badges on and
+  // the reset action reads — the record would keep saying "customized" after
+  // its overlay was lifted, or never say it after one appeared. So the flag
+  // gets its own term, evaluated against the SAME `existing.managed_by`
+  // condition the patch uses, and only against the patch's own value: when the
+  // caller passes no `customized` opinion the patch carries no such key and
+  // there is nothing to compare.
+  //
+  // ⚠️ EQUALITY decides, never presence. Replacing this with an unconditional
+  // `unchanged` would give the reconciler a perfect round-trip count while it
+  // silently stopped healing anything.
+  const facetsDiffer = recordDiffersFromBody(existing, ps);
+  const customizedDiffers = customized !== undefined
+    && customizedFlag(existing.customized) !== customizedFlag(patch.customized);
+  if (!facetsDiffer && !customizedDiffers) {
+    out.unchanged += 1;
+    return out;
+  }
+
   if (await tryUpdate(ql, 'sys_permission_set', patch)) {
     out.updated += 1;
   }
@@ -596,6 +692,12 @@ export async function projectPermissionMutation(
   protocol: any,
   deps: ProjectionDeps,
   evt: { type?: string; name?: string; state?: string; organizationId?: string | null } | null | undefined,
+  /**
+   * [#11097] Forwarded to {@link upsertEnvPermissionSet} so a boot pass over
+   * many overlay names pays ONE existence read for the whole set. The live
+   * mutation projector passes nothing and keeps its per-item read.
+   */
+  opts?: { existing?: ExistingByNameIndex },
 ): Promise<PermissionSeedOutcome | null> {
   if (evt?.type !== 'permission' || evt.state === 'draft' || !evt.name) return null;
   const { ql, metadata, logger } = deps;
@@ -642,8 +744,21 @@ export async function projectPermissionMutation(
     await syncEvaluatorRegistry(metadata, evt.name, null, false);
     return retirePermissionSetRecord(ql, metadata, evt.name, logger);
   }
-  const out = await upsertEnvPermissionSet(ql, body, logger, { customized: overlayBacked });
-  if (out.seeded + out.updated > 0) {
+  const out = await upsertEnvPermissionSet(ql, body, logger, {
+    customized: overlayBacked,
+    ...(opts?.existing ? { existing: opts.existing } : {}),
+  });
+  // [#11097] ⚠️ `unchanged` COUNTS HERE, and leaving it out was a real defect
+  // waiting on the write-skip above. This sync is an IN-MEMORY registry write,
+  // not a database round trip, and the evaluator resolves permission sets from
+  // that registry REGISTRY-FIRST — so on every steady-state boot (records
+  // already matching, hence no `UPDATE`) an overlay-backed name would have gone
+  // unsynced, and the evaluator would have kept enforcing the stale DECLARED
+  // body while the record and the Setup list showed the overlay. The gate is
+  // "the record is now in the desired state", which is `seeded + updated +
+  // unchanged` — never "a write happened". A FAILED write still leaves all
+  // three at zero and still skips the sync, exactly as before.
+  if (out.seeded + out.updated + out.unchanged > 0) {
     await syncEvaluatorRegistry(metadata, evt.name, body, overlayBacked);
   }
   return out;
@@ -1039,10 +1154,32 @@ export async function reconcilePermissionSetProjection(
       overlayNames.add(String(r.name));
     }
   }
+  // [#11097] ONE existence read for every overlay name, hoisted out of the loop
+  // below. Each iteration used to issue its own `SELECT … WHERE name = ? LIMIT
+  // 1` inside `upsertEnvPermissionSet` — one sequential HTTP request per overlay
+  // on the remote libsql/Turso database every hosted environment runs.
+  //
+  // ⚠️ Deliberately NOT reusing the `tryFind(ql, 'sys_permission_set', {}, 1000)`
+  // page read a few lines below, tempting though that is (it reads the same
+  // table and would cost nothing extra). That page is CAPPED at 1000 rows, and a
+  // truncated page reads as "absent" — which INSERTS. An environment past the
+  // cap would re-attempt an insert for every overlay beyond it on every boot.
+  // The chunked `$in` read has no such cap by construction.
+  const existingByName = await buildExistingByName(
+    ql,
+    'sys_permission_set',
+    [...overlayNames],
+    logger,
+  );
   for (const name of overlayNames) {
     const res = await projectPermissionMutation(protocol, deps, {
       type: 'permission', name, state: 'active', organizationId: null,
-    });
+    }, { existing: existingByName });
+    // ⚠️ `unchanged` is deliberately NOT summed in. This counter reports records
+    // this pass CREATED OR CHANGED, and now that an already-matching record is
+    // no longer re-written, a steady-state boot honestly reports 0 here where it
+    // used to report one per overlay. Reading the old number as "N overlays are
+    // healthy" was always reading a write count as a health count.
     out.projectedFromMetadata += (res?.seeded ?? 0) + (res?.updated ?? 0);
   }
 
