@@ -40,13 +40,33 @@ function makeEngine() {
   const tables: Record<string, Row[]> = {};
   const reads: string[] = [];
   let throwOnMember = false;
+  /**
+   * Plain-equality matcher, and it REFUSES anything else rather than guessing.
+   *
+   * Both predicates on these paths are flat equality (`{ id }` and
+   * `{ user_id }`). A matcher that walked `Object.entries` unconditionally
+   * would read a combinator key like `$or` as a FIELD NAME, compare it against
+   * `row['$or']`, and quietly answer "no match" — a fake looser (or here,
+   * blinder) than the drivers it stands in for, which is how a green suite
+   * ships a broken filter. Refusing is the honest failure: if one of these
+   * reads ever grows a combinator, this throws instead of returning a
+   * confidently wrong row set.
+   */
   function matches(row: Row, f: any): boolean {
     if (!f || typeof f !== 'object') return true;
     for (const [k, v] of Object.entries(f)) {
+      if (k.startsWith('$')) throw new Error(`unsupported combinator '${k}' in this fake`);
+      if (v !== null && typeof v === 'object') {
+        throw new Error(`unsupported operator object on field '${k}' in this fake`);
+      }
       if (row[k] !== v) return false;
     }
     return true;
   }
+  // ⛔ Read-only double on purpose: these paths call `find` and nothing else,
+  // so no `insert`/`update`/`delete` member is declared. Declaring unused
+  // write members would enrol this double in the engine-double dispatch
+  // contract for methods the code under test never reaches.
   return {
     _tables: tables,
     _reads: reads,
@@ -57,9 +77,6 @@ function makeEngine() {
       const predicate = options?.where ?? options?.filter ?? {};
       return (tables[object] ?? []).filter((r) => matches(r, predicate));
     },
-    async insert() { return {}; },
-    async update() { return {}; },
-    async delete() { return {}; },
   };
 }
 
