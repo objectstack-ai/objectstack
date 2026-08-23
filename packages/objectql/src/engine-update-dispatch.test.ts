@@ -21,10 +21,13 @@ import { ObjectQL } from './engine.js';
 import {
   ENGINE_UPDATE_DISPATCH_CASES,
   ENGINE_UPDATE_REJECT_MESSAGE,
+  ENGINE_UPDATE_ID_CONFLICT_CODE,
+  ENGINE_UPDATE_ID_CONFLICT_STATUS,
   resolveEngineUpdateDispatch,
   assertEngineUpdateDispatch,
   scalarUpdateId,
   engineByIdUnhonouredPredicateMessage,
+  engineUpdateIdConflictMessage,
   unhonouredByIdPredicateKeys,
 } from './engine-update-dispatch.js';
 
@@ -195,7 +198,11 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
   it('a SCALAR data.id still outranks where and multi (the common legal spelling, untouched by #5748)', () => {
     expect(resolveEngineUpdateDispatch({ id: 'rec_1' }, { where: { id: { $in: ['a'] } }, multi: true }))
       .toEqual({ kind: 'by-id', id: 'rec_1' });
-    expect(resolveEngineUpdateDispatch({ id: 'rec_1' }, { where: { id: 'rec_2' } }))
+    // [#11142] `{ id: 'rec_1' }` beside `{ where: { id: 'rec_2' } }` used to
+    // sit here as a by-id assertion; the UNEQUAL scalar pair is now refused
+    // (the reversed #5748 pin — see the #11142 describe below). The EQUAL
+    // pair stays the honoured spelling:
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1' }, { where: { id: 'rec_1' } }))
       .toEqual({ kind: 'by-id', id: 'rec_1' });
     expect(resolveEngineUpdateDispatch({ id: 42, title: 'x' }, { multi: true }))
       .toEqual({ kind: 'by-id', id: 42 });
@@ -326,5 +333,114 @@ describe('engine update dispatch — the shared predicate IS the engine (#5480)'
     // TypeError there. A double kinder than the producer about it would hide
     // the producer's behaviour.
     expect(() => resolveEngineUpdateDispatch(undefined as any, { multi: true })).toThrow(TypeError);
+  });
+});
+
+// ── [#11142] The reversed #5748 pin: a truthy scalar `where.id` naming a
+//    DIFFERENT row than the bound payload id is refused, never silently
+//    dropped. Maintainer ruling 2026-08-23 — the UNEQUAL shape only; the
+//    equal-ids spelling (REST folds the path id into the payload) stays
+//    honoured, and the falsy / non-scalar `where.id` boundaries keep their
+//    pre-existing verdicts (truthiness rule; un-reversed #5748 pin).
+describe('[#11142] a conflicting scalar where.id beside the payload id is refused', () => {
+  const data = { id: 'rec_1', title: 'x' };
+  const options = { where: { id: 'rec_2' } };
+  const message = engineUpdateIdConflictMessage('rec_1', 'rec_2');
+
+  it('the predicate refuses with the declared message, code and status', () => {
+    expect(resolveEngineUpdateDispatch(data, options)).toEqual({
+      kind: 'reject',
+      message,
+      code: ENGINE_UPDATE_ID_CONFLICT_CODE,
+      status: ENGINE_UPDATE_ID_CONFLICT_STATUS,
+    });
+    // The envelope halves are contract (ADR-0112): `code` is registered in the
+    // spec ledger, `status` rides the REST boundary's declared-status
+    // passthrough. Pinned by value so a rename or a demotion to 500 is a
+    // deliberate act here, never drift.
+    expect(ENGINE_UPDATE_ID_CONFLICT_CODE).toBe('UPDATE_ID_MISMATCH');
+    expect(ENGINE_UPDATE_ID_CONFLICT_STATUS).toBe(400);
+  });
+
+  it('assertEngineUpdateDispatch throws it carrying code + status (every pinned fake inherits this)', () => {
+    let caught: any;
+    try {
+      assertEngineUpdateDispatch(data, options);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'expected the conflicting-id refusal, but the call resolved').toBeDefined();
+    expect(caught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(caught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(caught.message).toBe(message);
+  });
+
+  it('the REAL engine throws the same envelope and NOTHING reaches the driver', async () => {
+    const { engine, calls } = await makeEngine();
+    let caught: any;
+    try {
+      await engine.update('task', data as any, options as any);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'expected the conflicting-id refusal, but the call resolved').toBeDefined();
+    expect(caught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(caught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(caught.message).toBe(message);
+    // The refused write wrote NOTHING — the entire point: the pre-#11142
+    // behaviour wrote rec_1 with the rec_2 condition silently ignored.
+    expect(calls).toEqual([]);
+  });
+
+  it('multi:true cannot rescue the conflict — the payload id outranks multi (#5748), so the contradiction stands', () => {
+    const verdict = resolveEngineUpdateDispatch(data, { where: { id: 'rec_2' }, multi: true });
+    expect(verdict.kind).toBe('reject');
+    expect((verdict as { message?: string }).message).toBe(message);
+  });
+
+  it('EQUAL ids stay by-id — the REST spelling (path id folded into the payload) is untouched', async () => {
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: 'rec_1' } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+    const observed = await observeEngine({ id: 'rec_1', title: 'x' }, { where: { id: 'rec_1' } });
+    expect(observed.kind).toBe('by-id');
+    expect(observed.boundId).toBe('rec_1');
+  });
+
+  it('identity is STRICT — a string id and a number id are two ids, and the message shows the type difference', () => {
+    const verdict = resolveEngineUpdateDispatch({ id: 42, title: 'x' }, { where: { id: '42' } });
+    expect(verdict.kind).toBe('reject');
+    // `'42'` (quoted) vs `42` (bare) — the reader can see the mismatch is one
+    // of type, not of row name. A coercing comparison here would be the
+    // lenient-consumer move Prime Directive #12 forbids.
+    expect((verdict as { message?: string }).message).toBe(engineUpdateIdConflictMessage(42, '42'));
+    expect((verdict as { message?: string }).message).toContain("'42'");
+  });
+
+  it('a FALSY scalar where.id conflicts with nothing — a falsy id identifies no row on this ladder (out of the #11142 ruled scope)', () => {
+    // NOT part of the reversal: `0` / `''` never identify a row (header
+    // point 3), so there is no second row address to contradict. Pinned so
+    // the refusal cannot creep over the truthiness boundary without a ruling.
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: 0 } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: '' } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+  });
+
+  it('a NON-SCALAR where.id keeps its #5748 verdict — the payload id wins (out of the #11142 ruled scope)', () => {
+    // The un-reversed neighbour pin, restated from the ruling's own boundary:
+    // widening the refusal over operator-object / array / null `where.id`
+    // beside a scalar payload id is a separate decision, not a rider here.
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: { $in: ['a'] } }, multi: true }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: null } }))
+      .toEqual({ kind: 'by-id', id: 'rec_1' });
+  });
+
+  it('the #11009 refusal keeps PRIORITY on a where that also carries extra keys (its message names them, unchanged)', () => {
+    // Both defects at once: `where` carries a conflicting id AND extra keys.
+    // The #11009 unhonoured-keys refusal fires first, byte-identical to
+    // before this change — no existing #11009 pin moves.
+    expect(resolveEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: 'rec_2', tenant: 't1' } }))
+      .toEqual({ kind: 'reject', message: engineByIdUnhonouredPredicateMessage('Update', ['tenant']) });
   });
 });

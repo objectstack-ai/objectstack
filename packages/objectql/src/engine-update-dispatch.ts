@@ -26,6 +26,14 @@ export {
   // once, here, so `objectql` callers can quote the refusal verbatim.
   engineByIdUnhonouredPredicateMessage,
   unhonouredByIdPredicateKeys,
+  // [#11142] The conflicting-id refusal (a truthy scalar `where.id` naming a
+  // DIFFERENT row than the bound payload id): its message composer, its
+  // declared ADR-0112 code/status, and the one reject thrower the real engine
+  // and every pinned fake share.
+  ENGINE_UPDATE_ID_CONFLICT_CODE,
+  ENGINE_UPDATE_ID_CONFLICT_STATUS,
+  engineUpdateIdConflictMessage,
+  engineUpdateDispatchRejectError,
 } from '@objectstack/metadata-core';
 
 export type {

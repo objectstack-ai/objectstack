@@ -62,7 +62,12 @@
 import { describe, it, expect } from 'vitest';
 import type { EngineUpdateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
-import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
+import {
+  assertEngineUpdateDispatch,
+  ENGINE_UPDATE_ID_CONFLICT_CODE,
+  ENGINE_UPDATE_ID_CONFLICT_STATUS,
+  engineUpdateIdConflictMessage,
+} from './engine-update-dispatch.js';
 
 interface RecordedCall {
   readonly fn: 'update' | 'updateMany';
@@ -271,15 +276,39 @@ describe('#6435 — the contrast pins: what this change deliberately does NOT to
     expect(call.data).toEqual({ id: 'rec_1', title: 'x' });
   });
 
-  it('a truthy scalar data.id that DISAGREES with where.id still wins, payload as sent', async () => {
-    // `ENGINE_UPDATE_DISPATCH_CASES`: "a SCALAR data.id still wins over a
-    // scalar where.id" ⇒ bound id `rec_1`, not `rec_2`. Unchanged here.
-    const call = await observeWrite(
-      { id: 'rec_1', title: 'x' },
-      { where: { id: 'rec_2' } },
-      { fn: 'update', boundId: 'rec_1' },
-    );
-    expect(call.data).toEqual({ id: 'rec_1', title: 'x' });
+  it('a truthy scalar data.id that DISAGREES with where.id is REFUSED — the #11142 reversal of the #5748 pin', async () => {
+    // FLIPPED, not deleted (#11142, maintainer ruling 2026-08-23). This pin
+    // read "still wins, payload as sent" — `ENGINE_UPDATE_DISPATCH_CASES`'s
+    // `a SCALAR data.id still wins over a scalar where.id`, bound id `rec_1`
+    // — from #5748 until the UNEQUAL shape was ruled a refusal: the losing
+    // `where.id` was a declared predicate the by-id path silently discarded.
+    // The refusal carries the ADR-0112 envelope halves, and NOTHING reaches
+    // the driver. The equal-ids contrast pin above is the surviving half of
+    // the old behaviour.
+    const message = engineUpdateIdConflictMessage('rec_1', 'rec_2');
+    let caught: any;
+    try {
+      assertEngineUpdateDispatch({ id: 'rec_1', title: 'x' }, { where: { id: 'rec_2' } });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught, 'expected the conflicting-id refusal, but the dispatch resolved').toBeDefined();
+    expect(caught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(caught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(caught.message).toBe(message);
+
+    const { engine, calls } = await makeEngine();
+    let engineCaught: any;
+    try {
+      await engine.update('task', { id: 'rec_1', title: 'x' }, { where: { id: 'rec_2' } });
+    } catch (e) {
+      engineCaught = e;
+    }
+    expect(engineCaught, 'expected the real engine to refuse too').toBeDefined();
+    expect(engineCaught.code).toBe(ENGINE_UPDATE_ID_CONFLICT_CODE);
+    expect(engineCaught.status).toBe(ENGINE_UPDATE_ID_CONFLICT_STATUS);
+    expect(engineCaught.message).toBe(message);
+    expect(calls, 'a refused write reaches no driver entry point').toEqual([]);
   });
 
   it('the MULTI arm is exactly as PR #6433 left it', async () => {

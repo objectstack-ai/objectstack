@@ -479,6 +479,17 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#11142] a by-id update carried a truthy scalar `options.where.id` naming
+    // a DIFFERENT row than the bound payload `data.id` — a condition that can
+    // never hold, refused 400 at dispatch instead of silently writing the
+    // payload row (the reversed #5748 pin; equal ids — the REST path-id fold —
+    // stay honoured). Stamped by `@objectstack/metadata-core`'s
+    // `engineUpdateDispatchRejectError`, thrown in production by
+    // `ObjectQL.update` (`engine.ts`), hence registered here. Not a
+    // VALIDATION_ERROR synonym: the payload parses fine — the two row
+    // addresses contradict each other, the same mismatch class as
+    // QUERY_OBJECT_MISMATCH one layer up.
+    'UPDATE_ID_MISMATCH',
     'VALIDATION_FAILED',
   ],
   '@objectstack/core': [

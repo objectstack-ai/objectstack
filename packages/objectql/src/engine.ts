@@ -194,6 +194,11 @@ import {
 import {
   resolveEngineUpdateDispatch,
   ENGINE_UPDATE_REJECT_MESSAGE,
+  // [#11142] The one reject thrower, shared with assertEngineUpdateDispatch,
+  // so a refusal that declares an ADR-0112 code/status (the conflicting-id
+  // reject) carries it identically from the real engine and from every
+  // pinned fake.
+  engineUpdateDispatchRejectError,
   type EngineUpdateDispatchData,
   type EngineUpdateDispatchInput,
 } from './engine-update-dispatch.js';
@@ -9569,7 +9574,13 @@ export class ObjectQL implements IObjectQLEngine {
            // the one non-reject way in here — a `multi` verdict against a
            // driver with no `updateMany`, which stays the generic refusal it
            // has always been.
-           throw new Error(dispatch.kind === 'reject' ? dispatch.message : ENGINE_UPDATE_REJECT_MESSAGE);
+           // [#11142] Rejects throw through the dispatch module's own
+           // thrower so a verdict carrying a declared code/status (the
+           // conflicting-id refusal) reaches the caller — and the REST
+           // boundary's status passthrough — decorated; the #5748/#11009
+           // family stays a plain Error, byte-identical to before.
+           if (dispatch.kind === 'reject') throw engineUpdateDispatchRejectError(dispatch);
+           throw new Error(ENGINE_UPDATE_REJECT_MESSAGE);
        }
 
        // [#6966] The ladder verdict, stated on the contract. Bound HERE and
@@ -9856,10 +9867,13 @@ export class ObjectQL implements IObjectQLEngine {
                //
                //  - A TRUTHY SCALAR `data.id` is left exactly as it is. There
                //    the payload's `id` IS the bound key (it outranks `where` —
-               //    same case-set), so the write is `SET id = 'rec_1' WHERE id
-               //    = 'rec_1'`: a same-value no-op, redundant rather than
-               //    damaging, and long-standing behaviour. Widening the strip
-               //    to cover it is a separate decision, not a rider here.
+               //    same case-set; since #11142 a truthy scalar `where.id`
+               //    naming a DIFFERENT row is refused at dispatch and never
+               //    reaches this branch), so the write is `SET id = 'rec_1'
+               //    WHERE id = 'rec_1'`: a same-value no-op, redundant rather
+               //    than damaging, and long-standing behaviour. Widening the
+               //    strip to cover it is a separate decision, not a rider
+               //    here.
                //  - Rejecting the call instead (#6435's route B) would reverse
                //    the `expect: 'by-id'` verdict the case-set states today —
                //    a partial rollback of #5748's ruling A, i.e. a maintainer
