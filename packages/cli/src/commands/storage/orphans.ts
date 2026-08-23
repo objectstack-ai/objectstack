@@ -15,6 +15,20 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { StrandedOrphanInventoryEngine } from '@objectstack/service-storage';
+
+/**
+ * The `objectql` slot's contract, plus the two structural bits this command
+ * uses: the inventory's read seam, and the registry probe. `getObject` is
+ * ObjectQL's own metadata surface rather than part of `IDataEngine`, so it is
+ * declared here — the lookup keeps its contract type instead of being erased
+ * to `any` (#4251).
+ */
+type OrphanInventoryEngine = IDataEngine &
+  StrandedOrphanInventoryEngine & {
+    getObject?(name: string): unknown;
+  };
 
 /**
  * `os storage orphans` — the read-only stranded-orphan inventory (#10950).
@@ -101,7 +115,11 @@ export default class StorageOrphans extends Command {
     }
 
     try {
-      const engine: any = stack.kernel.getService('objectql');
+      // Annotated rather than `getService<…>(…)`: `BootedSchemaStack.kernel` is
+      // itself untyped, so a type ARGUMENT on that call is a TS2347 error. The
+      // annotation types the binding just as tightly, which is what #4251 is
+      // after — the erasure it sweeps is an `any`-typed local, not this.
+      const engine: OrphanInventoryEngine = stack.kernel.getService('objectql');
       if (typeof engine?.getObject !== 'function' || !engine.getObject('sys_file')) {
         throw new Error(
           'sys_file is not registered on this stack — the storage service objects are required. ' +
