@@ -1,5 +1,86 @@
 # @objectstack/plugin-hono-server
 
+## 17.2.0
+
+### Patch Changes
+
+- b03a880: docs(plugin-hono-server): boot the kernel with the method it actually ships (#9870)
+  
+  `packages/plugins/plugin-hono-server/README.md` is in the package's `files` array
+  with `private` unset, so it is the page npm renders. Its Usage block ended:
+  
+  ```ts
+  const kernel = new ObjectKernel();
+  kernel.use(new HonoServerPlugin({ port: 3000, /* … */ }));
+  await kernel.start();
+  ```
+  
+  Measured against the built type surface: `ObjectKernel` (re-exported by
+  `@objectstack/runtime` from `@objectstack/core`) declares `bootstrap()` and
+  `shutdown()` and has **no** `start` member. A reader copying the block gets a
+  compile error on its last line.
+  
+  The line reads plausibly because the `IKernel` *interface* in
+  `@objectstack/types` does declare `start()` — but the concrete class the fence
+  constructs does not implement that name, and eight sibling READMEs
+  (`objectql`, `rest`, `runtime`, `service-cache`, `service-job`,
+  `service-automation`, `service-package`, `service-cluster-redis`) all spell the
+  same step `await kernel.bootstrap()`. Fixed to match.
+  
+  Found by the call-site widening in the same PR, not by hand: the receiver is
+  never import-bound, so before that widening this call site was one of the 262
+  `check:published-readme-exports` could not read.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+  - @objectstack/observability@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

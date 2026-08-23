@@ -1,5 +1,234 @@
 # @objectstack/lint
 
+## 17.2.0
+
+### Minor Changes
+
+- 78818ec: Report an unparseable source instead of scoring it CLEAN (#10653).
+  
+  Four validators parsed authored source with `ts.createSourceFile` and never read
+  `parseDiagnostics`. That call **cannot throw**, so a source with syntax errors
+  came back as a tree built by error recovery, got walked like any other, and
+  produced no findings — a source the validator could not read, reported as a
+  source with nothing to report. Two of the sites carried a `try/catch` around the
+  parse that never once ran.
+  
+  Each now reports what it could not read, as a finding the author receives rather
+  than as an exit — a publish-time validator is handed metadata by someone else,
+  so ending the process on their input is not its call. Four new advisory
+  (`warning`) rule ids, all additive: every finding these rules produce today they
+  still produce, including from a partially recovered tree.
+  
+  - `react-page-source-unparseable` — `kind:'react'` page source
+    (`validateReactPageProps`)
+  - `startup-source-unparseable` — plugin source (`findStartupRegistryVerdicts`)
+  - `hook-body-source-unparseable` — L2 hook body (`validateHookBodyWrites`)
+  - `action-body-source-unparseable` — L2 action body (`validateActionBodyWrites`)
+  
+  New exports: the four rule-id constants, plus `describeParseFailure`,
+  `PARSE_FAILURE_HINT` and the `SourceParseFailure` / `CheckedParse` /
+  `CheckedParseOptions` types. `ExtractedHookBodyWriteSet` gains an optional
+  `parseFailure`, so a consumer of the extractor can tell "wrote nothing" from
+  "could not be read" — the distinction that was missing.
+  
+  Nothing is removed or renamed, and no source that parses gains a finding. A
+  stack whose authored sources all parse lints exactly as before; one carrying a
+  source with a syntax error gains a warning that names the file, line and column
+  instead of silently skipping the checks.
+- def0d3e: Runtime publish-gate findings for collection-resident write types (`object` /
+  `permission` / `book`) now key the top-level collection entry in
+  `issues[].path` / `advisories[].path` by NAME —
+  `objects.acme_invoice.sharingModel` — instead of by the gate's private
+  per-write snapshot index (`objects[417].sharingModel`), which no caller could
+  resolve: that index numbered an in-memory array a Studio / MCP / REST receiver
+  has never seen. Single-member write types keep their trivially-stable
+  positional form (`flows[0].nodes[1]…`), and nested positions inside one named
+  item (`objects.acme_invoice.indexes[1]`) stay positional — they index the
+  author's own document. An entry with no splice-safe name falls back to the
+  positional spelling. The accepted metadata set is unchanged; only the spelling
+  of the emitted finding `path` changes, and `RuntimeAuthoringIssueSchema.path`'s
+  description now states the convention. CLI (`os validate` / `os lint`) output
+  is unchanged — there the index resolves against the author's own config file.
+- e2bb237: The SORT axis now asks the #8116 provenance question about a name the blanket
+  `SYSTEM_FIELDS` union told it not to flag — new rule `sort-field-unprovisioned`
+  (#10474), the twin of `searchable-field-unprovisioned` on the identical index
+  (#8404).
+  
+  `validate-sortable-fields` consulted the union and stopped there, so a list view
+  ordering by a registry-injected anchor on an ADR-0015 `external` object was
+  skipped in silence. The #8999 consumer census recorded that gap with the reason
+  that such an object never reaches the union branch at all — skip (2) was believed
+  to catch it. **That reason was measured wrong.** `declaredFieldTarget` returns
+  `null` on exactly one condition (`fields` missing, unreadable, or naming
+  nothing) and nothing in it tests `external`, so the shipped shape — a federated
+  object that declares a mapped field map, as `examples/app-showcase`'s
+  `showcase_ext_customer` does — is indexed like any other object and lands
+  squarely in the skip. The census ledger entry now carries the correction rather
+  than the inherited reason.
+  
+  Why the authoring gate is the only door available for it: both runtime doors on
+  this axis judge `formula` alone (`UNMATERIALIZED_SORT_TYPES`) — the REST ingress
+  `assertSortFieldsExist` (#6994) and the engine's `assertOrderByIsMaterializable`
+  (#7095). An injected anchor is a `datetime` or `lookup`, it *is* in `gate.known`
+  because the registry injected it into the served schema, and it is undotted, so
+  it clears every verdict and reaches the driver. Measured with a real `SqlDriver`
+  over better-sqlite3, the object declared exactly as the showcase declares it,
+  against a remote `customers` table carrying `[id, name, email, region,
+  lifetime_value]` and none of the seven injected anchors:
+  
+  ```
+  orderBy name       asc -> [c1,c2,c3]   desc -> [c3,c2,c1]   (a real column: reverses)
+  orderBy created_at asc -> [c1,c2,c3]   desc -> [c1,c2,c3]   asc === desc, 3 rows, no error
+  orderBy owner_id   asc -> [c1,c2,c3]   desc -> [c1,c2,c3]   asc === desc, 3 rows, no error
+  ```
+  
+  `asc` and `desc` byte-identical while the baseline reverses is what makes it a
+  dropped sort rather than a coincidence — the same signature this rule already
+  records for `formula`, reached by a second route, except that a formula sort is
+  refused at both doors and this one is not. A list view ordered by an anchor with
+  no storage answers `200` with the rows in the driver's arbitrary order, on the
+  view's first fetch and every fetch after it, which `limit`/`offset` then slice
+  into an arbitrary page.
+  
+  `warning`, never `error` and never gating (#4330's cost asymmetry, the call every
+  sibling makes): the remote schema is invisible to this pass, so the remote table
+  may genuinely carry a `created_at` of its own. Declaring that column — the first
+  remedy the shared hint prescribes — silences the finding, because
+  `unprovisionedInjectedColumnsFor` excludes an author-declared column of the same
+  name (#7859's security direction). The runtime publish gate sorts on severity, so
+  this lands as an advisory and refuses no write.
+  
+  Two deliberate narrowings, both pinned:
+  
+  - **Undotted names only** — the one place this axis departs from the SEARCH twin.
+    `resolveSearchFields` matches by exact string and drops a dotted entry like a
+    typo, but a dotted SORT name is refused by the ingress gate as its own verdict
+    (`400 INVALID_SORT`, loudly, on every fetch), so the silent degradation this
+    finding reports cannot happen there. Answering would give the SORT axis its own
+    dotted verdict, which is exactly the posture the rule shares with the FILTER
+    and PROJECTION axes (#4256 / #7532 / #7589) and declines to break.
+  - **`checkSortDeclaration`'s new anchor-index parameter is optional**, with the
+    same meaning `checkSearchableFieldList`'s carries: an out-of-repo caller that
+    never built the index keeps its pre-#10474 answers. Every in-repo caller passes
+    it.
+  
+  Also re-ruled, with fresh eyes and on evidence rather than inheritance:
+  `validate-translation-references` still correctly asks nothing. It reads the
+  union at exactly one site (the `fields.<name>` orphan test), and the key it
+  decides about is derived from the *registered* metadata, into which the registry
+  injects the anchor on a federated object just as on a local one — so the key
+  resolves and the label renders. Warning there would flag a translation that
+  works. The blank-column consequence belongs to the surface that renders the
+  anchor (`validate-page-field-bindings`, #8340), not to the bundle that names it.
+- adbcbfd: feat(lint): the two list-view field rules reach a standalone list view at the runtime publish gate — `view` writes are now judged by `validateSearchableFields` and `validateSortableFields` (#9313)
+  
+  An `active`-state `view` save through `saveMetaItem` (Studio, REST `/meta` item
+  CRUD, an MCP/AI author) is now refused with the existing 422 `invalid_metadata`
+  envelope when its list view declares a `sort` or `searchableFields` entry the
+  bound object cannot honor — an unknown field name, a virtual (`formula`) sort
+  target with no stored column to ORDER BY, or a search narrowing the #4254
+  ingress gate would refuse on every toolbar search. Both rules already gated
+  `os validate` / `os build` / `os lint`; the runtime door — the only door a
+  Studio tenant or an MCP/AI author has — ran neither, and an author writing the
+  exact declaration these rules exist to refuse got it accepted.
+  
+  Two halves, because either alone is a silent no-op: the reference-integrity
+  suite's registry entry gains `runtimeTypes: ['view']`, and both rules' metadata
+  walks gain the SELF rung — a `views[]` entry that IS a flattened standalone
+  list overlay (`ViewMetadataSchema`'s list-overlay member: `viewKind: 'list'`,
+  no nested `config`), the shape a standalone list view takes on the wire and the
+  shape the gate snapshots as `views: [item]`.
+  
+  The suite dispatches per member on this door: a `view` snapshot reaches exactly
+  the two list-view field rules (`ReferenceIntegrityRule.runtimeTypes`, default
+  `['flow']`), never the members whose resolution universe the per-write snapshot
+  does not carry — `validateActionNameRefs` resolving against `stack.actions`
+  would otherwise refuse legitimate view writes. CLI behaviour is unchanged (the
+  commands run the full suite as before); `flow` snapshots keep every member.
+  Measured before crossing: 0 refusals and 0 advisories over 50 shipped
+  view-door bodies (11 containers + 39 console-shaped personalization overlays,
+  `sort[].id` decorations included) across four authoring lineages — a lower
+  bound, as every authored corpus is. Draft saves are untouched (D1), stored rows
+  keep being served (ADR-0087 asymmetry), and
+  `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still degrades the refusal to a loud log.
+- f1b5ad3: feat(lint): a standalone ViewItem record's nested `config.sort` / `config.searchableFields` reach the runtime publish gate (#10001)
+  
+  An `active`-state `view` save through `saveMetaItem` (Studio, REST `/meta`
+  item CRUD, an MCP/AI author) whose body is a standalone ViewItem RECORD —
+  `ViewMetadataSchema`'s member 1, `{ name, object, viewKind: 'list', config }`,
+  the shape a Studio-saved view takes and the shape objectui's `updateView`
+  round-trips on every pin/reorder toggle — is now refused with the existing
+  422 `invalid_metadata` envelope when its `config.sort` / `config.searchableFields`
+  declares a field the bound object cannot honor: an unknown name, a virtual
+  (`formula`) sort target with no stored column to ORDER BY, or a search
+  narrowing the #4254 ingress gate would refuse on every toolbar search. #9313
+  closed the same gap for the flattened list overlay, one union member over;
+  the record's declarations live one level down, inside `config`, and were
+  judged by neither list-view field rule — so a record write carrying
+  `config.sort: [{ field: '' }]` published in silence and answered
+  `400 INVALID_SORT` (#6994/#7095) on the view's first fetch, every load.
+  
+  Walk-only, by design: #9313 already widened the reference-integrity suite
+  entry and exactly these two members onto `view` writes, so this change adds
+  the RECORD rung to both twin walks — recognised by the wire union's own
+  member discrimination (`viewKind: 'list'` AND a record-shaped `config`; the
+  flattened-overlay rung keeps its `no nested config` guard, a strict container
+  carries neither key, and a `form` record has no list-field surface), judged
+  against `listViewObject(config) ?? record.object` at path
+  `views[i].config.sort[…]` / `views[i].config.searchableFields[…]`. The
+  per-member granularity split is unchanged: no further suite member crosses
+  onto `view`. Measured before shipping: 0 refusals and 0 advisories over 39
+  record-shaped console round-trip bodies (one per shipped list surface,
+  `config.sort[].id` decorations and `isPinned`/`sortOrder` riding along, the
+  shape `saveMetaItem` really stores) across the four shipped stacks — a lower
+  bound, as every authored corpus is. Draft saves are untouched (D1), stored
+  rows keep being served (ADR-0087 asymmetry), and
+  `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still degrades the refusal to a loud log.
+
+### Patch Changes
+
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/sdui-parser@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

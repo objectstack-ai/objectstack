@@ -1,5 +1,111 @@
 # @objectstack/driver-memory
 
+## 17.2.0
+
+### Patch Changes
+
+- 6936d07: `engine.aggregate` honours a per-aggregation `filter` (#10576, the contract
+  half of #10413). `AggregationNodeSchema.filter` — declared since #4286 but
+  marked experimental and enforced by nothing — is now live with SQL
+  `FILTER (WHERE …)` semantics: the predicate narrows the SOURCE rows that one
+  aggregation reads while sibling aggregations in the same call keep seeing
+  every row of the group, so a measure-scoped filter (`stage: 'closed_won'`)
+  can finally reach the engine instead of being silently dropped (the #10413
+  wrong-numbers defect on the ObjectQL analytics path). The
+  `StrategyContext.executeAggregate` bridge (`@objectstack/spec/contracts`)
+  gains the same optional `filter` on its aggregation entries so analytics
+  strategies can lower measure filters into it (#10413 phase 2 consumes this
+  seam next).
+  
+  Execution is the correct-first two-tier shape date bucketing and HAVING use:
+  the engine lowers filtered aggregations in memory for every driver (unknown
+  operators refuse loudly with `INVALID_FILTER`/400 naming the aggregation
+  position; a group emptied by its filter answers the ruled empty-group values
+  — count/sum 0, avg/min/max null). No driver compiles conditional aggregation
+  natively today, so each native aggregate face (driver-sql — inherited by
+  driver-sqlite-wasm and Turso local —, the Turso remote transport,
+  driver-mongodb's pipeline builder, driver-memory's `performAggregation`)
+  refuses a directly-delivered per-aggregation filter with
+  `NOT_IMPLEMENTED`/501 instead of silently aggregating the unfiltered rows.
+  Aggregations without a `filter` are byte-identically unchanged, including
+  their native pushdown path.
+- 2095040: **Bug fix (one query, two answers):** `avg` and `sum` over a **boolean** column now answer the same numbers on `driver-memory` that every SQL face and objectql's in-memory fallback already answered, instead of `null` and `0` (#11065).
+  
+  Measured on one `AnalyticsService.queryDataset` call, one dataset, one set of rows, run twice — five `crm_case` records, four closed (three with `is_sla_violated: false`, one `true`), one open with `true`:
+  
+  ```
+  [memory] unfiltered      {"avg_sla_violated":null,  "closed_count":4}
+  [memory] closed-filter   {"avg_sla_violated":null,  "closed_count":4}
+  [sqlite] unfiltered      {"avg_sla_violated":0.4,   "closed_count":4}
+  [sqlite] closed-filter   {"avg_sla_violated":0.25,  "closed_count":4}
+  ```
+  
+  SQLite's are the arithmetically correct numbers (2/5 unfiltered, 1/4 over the closed cases). The `count` measures beside them agreed on both drivers, and so did a `derived` ratio built on those counts — the divergence was specific to averaging a boolean.
+  
+  **There were three implementations of "average a column" in play, and this driver was the lone outlier.** SQLite lowers `AVG(col)`; objectql's in-memory fallback (`in-memory-aggregation.ts`) coerces with `Number(v)`, and `Number(true) === 1`; `driver-memory` selected its aggregands with `typeof v === 'number'`, which drops every boolean, leaving `nums.length === 0` and returning `null`. So this is an alignment to the two faces that already agreed, not a new convention.
+  
+  **Both of this package's faces carried the defect independently**, and both are fixed:
+  
+  - the **data face** (`computeAggregate`, reached by `engine.aggregate` pushdown — the door the report's own repro takes) selected with `typeof v === 'number'`;
+  - the **analytics face** (`buildAggregator`) emitted a bare mingo `$avg`, and mingo ignores a non-numeric value exactly as MongoDB does — measured at `{avg: null, sum: 0}` over the same five rows.
+  
+  Fixing one alone would have left the other free to keep its own answer, which is the shape of this package's recurring defect (#5374, #6814).
+  
+  **`sum` is aligned with `avg` deliberately.** The two share the data face's arm, and `SUM(bool)` is "how many true" on every SQL face and in the objectql fallback; correcting only the function the report named would have left the identical defect alive one function over, answering `0` for a column with two `true` rows.
+  
+  **The coercion is boolean-only, and the narrowness is the point.** `null`, a missing key and a non-numeric string reach the accumulators unchanged and stay excluded. Adopting the wider half of objectql's `toNumber` — which maps a non-numeric string to `0` — would average garbage as zero rather than excluding it; whether that is right is a separate question this change does not open, and a regression row pins the exclusion on both faces so it cannot arrive by accident.
+  
+  **Why it mattered beyond the number.** Neither face errors, so a dashboard tile bound to a rate measure rendered a percentage under SQL and a blank here, indistinguishable from "no matching rows". The test-facing half is worse: a suite pinning such a measure on the in-memory driver asserted against `null` and could not fail in the direction that matters. Nothing in the repo pinned the old value — the shared cross-driver fixture (`AGGREGATION_ROWS`) carries no boolean column at all, which is why every face could disagree here unobserved.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

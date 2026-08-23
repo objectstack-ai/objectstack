@@ -1,5 +1,217 @@
 # @objectstack/plugin-webhooks
 
+## 17.2.0
+
+### Minor Changes
+
+- cdaa72f: fix(service-messaging,plugin-webhooks): the `update`-op tenant-audit surface on the delivery outboxes is classified — `ack` is a dispatcher sweep, `redeliver` threads the caller's tenant (#10740)
+  
+  **BREAKING** signature change on `IHttpOutbox.redeliver` and
+  `MessagingService.redeliverHttp`, shipped as `minor` under the repo's
+  launch-window convention for breaking changes.
+  
+  `sys_http_delivery` and `sys_notification_delivery` carry three single-record
+  (`multi: false`) writes that the SQL driver audits under the **`update`** op —
+  a different op, and a different throttle key, from the `updateMany` half
+  classified previously. Their correct classifications are **opposite**, and
+  treating them as one sweep is the dangerous reading:
+  
+  | site | reachable from | classification |
+  | --- | --- | --- |
+  | `SqlNotificationOutbox.ack` | dispatcher tick only | global sweep |
+  | `SqlHttpOutbox.ack` | dispatcher tick only | global sweep |
+  | `SqlHttpOutbox.redeliver` | `POST /api/v1/webhooks/redeliver` | request-contextual |
+  
+  **The two `ack` sites** are declared global sweeps through a new
+  `dispatcherAckOptions()` helper, sibling to `dispatcherSweepOptions()` and
+  deliberately not the same function — that one returns `& { multi: true }`, so a
+  `multi: false` site cannot borrow it by accident. The warrant was re-derived
+  against the current tree rather than inherited: `ack` has exactly two callers,
+  both inside `runPartition()` on a `setInterval` tick holding a per-partition
+  cluster lock, so no request context exists to thread; and the row being acked
+  was claimed by a sweep that crosses organizations by construction
+  (`hash(refId | notificationId | digestKey) mod N` is a load-spreading key, and
+  one outbox per environment drains the whole queue). Passing the claimed row's
+  own `organization_id` is documented at the helper as the tempting wrong answer:
+  a predicate read off the row you are about to write matches exactly that row,
+  adds no isolation, and silences the audit anyway — the appearance of scoping
+  without the substance.
+  
+  **`redeliver` is not that**, and it is the reason this shipped separately. The
+  route in front of it is served to any authenticated user, so on a walled
+  deployment (`OS_TENANCY_POSTURE=isolated|group`) an unscoped replay is an
+  authenticated user writing another organization's delivery row — the case the
+  tenant audit exists to catch. It now carries the caller's tenant, applied to
+  the rows it reads as well as the row it writes, and it must never be given
+  `bypassTenantAudit`: a scoped write and a bypassed write produce the same
+  silence in the log, so the flag would convert a detectable hole into an
+  undetectable one. The webhook route resolves the session's
+  `activeOrganizationId` and threads it.
+  
+  Behaviour change at the endpoint: a delivery row outside the caller's
+  organization is now **not found** (`RESOURCE_NOT_FOUND`, HTTP 404) rather than
+  replayed. It is deliberately invisible rather than forbidden, so the endpoint
+  is not an existence oracle for other tenants' delivery ids. An in-tenant
+  redelivery is unchanged.
+  
+  Migrating a caller: `redeliver(id, guard?)` becomes
+  `redeliver(id, { tenantId, guard? })`, and `redeliverHttp(id)` becomes
+  `redeliverHttp(id, { tenantId })`. `tenantId` is a **required** property typed
+  `string | undefined`, so omitting it does not compile — a caller with no tenant
+  has to write `tenantId: undefined` and mean it. That is the point of the shape:
+  an optional property would let the dangerous case, a request path that simply
+  forgot, type-check in silence. Passing `undefined` leaves the write unscoped
+  and the audit line still fires, which is the intended reporting behaviour on a
+  deployment that cannot resolve an organization for the caller.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-messaging/src/http-outbox.ts#IHttpOutbox, packages/services/service-messaging/src/http-outbox.ts#RedeliverOptions) The surface that changed shape is `IHttpOutbox.redeliver`, plus the new `RedeliverOptions` argument type beside it. Both are TypeScript declarations in a service package with no `packages/spec` schema behind them: no metadata author writes a `redeliver` key, there is no authorable spelling and no `retiredKey()` tombstone, so `os migrate meta` has no stack source to rewrite. The change is a required second argument on an in-process method — a compile error at every call site, which is the notification channel, not a silent runtime gap. `MessagingService.redeliverHttp` moves with it and is deliberately NOT in the list above: this gate refuses that symbol as unresolvable, because `packages/spec/src/api/protocol.zod.ts` mentions the class name in a prose comment about `MessagingService.listInbox` while neither declaring nor importing it. The claim would be true and the gate cannot check it, so it is stated here for a reviewer instead of asserted where it would read as verified. It is a thin delegate to `IHttpOutbox.redeliver` in the same package and carries no schema of its own either. -->
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+
+### Patch Changes
+
+- 047ac86: Five `Plugin` implementations now release their resources from `destroy()`, the
+  only teardown hook the kernel calls (#10772).
+  
+  `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)` and
+  `destroy?()`. `ObjectKernel.performShutdown()` and `LiteKernel.destroy()` walk
+  the plugins in reverse calling `plugin.destroy()` — and nothing anywhere calls
+  `stop()`, `dispose()`, `close()` or `shutdown()` on a plugin. Each of these five
+  spelled its teardown with one of those names instead, so what it released was
+  still held after `await kernel.shutdown()` had **resolved**:
+  
+  | package | class | was spelled | what outlived shutdown |
+  |:--|:--|:--|:--|
+  | `@objectstack/metadata` | `MetadataPlugin` | `stop` (arrow property) | artifact watcher, `manager.dispose()`, repository handle |
+  | `@objectstack/runtime` | `AppPlugin` | `stop` (arrow property) | the `app:unregistered` catalog event, never emitted |
+  | `@objectstack/runtime` | `ExternalValidationPlugin` | `stop` (arrow property) | every armed drift-check `setInterval` |
+  | `@objectstack/plugin-email` | `EmailServicePlugin` | `dispose` | two metadata subscriptions, the SMTP transport, an engine binding |
+  | `@objectstack/plugin-webhooks` | `WebhookOutboxPlugin` | `dispose` | the auto-enqueuer (2 realtime subscriptions + a refresh interval) and two engine hooks |
+  
+  `ExternalValidationPlugin` is the one with teeth: it is one of only two `Plugin`
+  implementations in the tree that own `setInterval` directly, it is mounted on
+  the real `os serve` path, and its `stop()`'s only caller anywhere was the class
+  itself re-arming. Measured against a real kernel, its drift checker performed
+  five further reads in the five intervals after a resolved shutdown — the #9371
+  mechanism verbatim. `WebhookOutboxPlugin.dispose()` had **zero** callers in the
+  entire repo, so its teardown had never run in any process at all.
+  
+  **Nothing is removed and no signature narrows.** Each old name is retained as a
+  delegating alias, because it is public API of an exported class and an embedder
+  may have learned to call it directly precisely BECAUSE the kernel never did.
+  `stop` stays an arrow property where it was one (so a detached
+  `const { stop } = plugin` keeps working) and stays synchronous on
+  `ExternalValidationPlugin` (so a non-awaiting call site is unaffected). The two
+  `stop(ctx)` aliases widen their parameter to optional.
+  
+  One behavioural note for direct callers, since `destroy()` takes no context:
+  `MetadataPlugin.stop(ctx)` and `AppPlugin.stop(ctx)` now use the context
+  captured in `init()` and ignore the argument. In a real composition these are
+  the same object. The visible difference is confined to a plugin whose `init()`
+  never ran — for `MetadataPlugin` a dropped `warn` line, for `AppPlugin` a
+  catalog event that is no longer emitted for an app that was never registered.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [8cc8401]
+- Updated dependencies [02b3b07]
+- Updated dependencies [8163a1c]
+- Updated dependencies [cdaa72f]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [900e489]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/service-messaging@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

@@ -1,5 +1,577 @@
 # Changelog
 
+## 17.2.0
+
+### Minor Changes
+
+- 4d7c564: fix(plugin-auth): the better-auth-native `/admin/` routes refuse an anonymous caller with the ADR-0112 envelope (#10349)
+  
+  **BREAKING** response-shape change on the `/api/v1/auth/admin/` namespace,
+  shipped as `minor` under the repo's launch-window convention for breaking
+  changes.
+  
+  `/api/v1/auth/admin/` is served by two implementations and answered the same
+  question in two shapes. ObjectStack's raw mounts (`create-user`,
+  `set-user-password`, `unlock-user`, `import-users`, `ban-user`, `unban-user`,
+  `oauth2/toggle-disabled`, `sso/*`) refuse an anonymous caller through
+  `judgePlatformAdmin` with the declared envelope and `code: 'UNAUTHENTICATED'`.
+  The routes better-auth serves itself refuse through the vendor's
+  `adminMiddleware` — `getAuthoritativeSessionFromCtx(ctx)` then
+  `APIError.fromStatus('UNAUTHORIZED')`, with no body argument at all.
+  
+  Measured on the installed better-auth 1.7.1, anonymous, through
+  `AuthManager.handleRequest`: ten vendor-lane routes (`impersonate-user`,
+  `set-role`, `revoke-user-sessions`, `revoke-user-session`,
+  `list-user-sessions`, `update-user`, `list-users`, `get-user`,
+  `has-permission`, `stop-impersonating`) answered `401` with a
+  `content-type: application/json` header and the **empty string** as the body.
+  A client that believes that header and parses the body throws on the refusal
+  instead of branching on it, and a client that wants to branch has to know, per
+  route, which of the two implementations happens to serve it — an
+  implementation detail, not a contract.
+  
+  `AuthManager.handleRequest` now gives those refusals the declared envelope at
+  the one seam every vendor route passes through. **Statuses are unchanged and
+  admission is unchanged**: nothing that was refused is now admitted, nothing
+  that was admitted is now refused, and no status moved. What is added is the
+  machine-readable `code`, derived from the status by ADR-0112's own
+  `standardErrorCodeForHttpStatus` map rather than spelled out again — so no new
+  error code is registered and the vendor lane's anonymous refusal is now
+  byte-identical to the ObjectStack lane's.
+  
+  Scope is the `/admin/` namespace only. Three narrowings hold the rest of the
+  surface still, and each is pinned:
+  
+  - **A refusal that already carried a body keeps it, byte for byte.** The
+    signed-in non-admin's `403` with the vendor's own
+    `YOU_ARE_NOT_ALLOWED_TO_*` vocabulary is untouched; this change fills in an
+    empty body and never rewrites a spoken one.
+  - **Only the two refusal statuses are named** (`401`, `403`). A bodyless `404`
+    such as `/admin/oauth2/*` with the `oidcProvider` plugin off, and any
+    semantic `4xx` the vendor owns, are left exactly as they are.
+  - **Nothing outside `/admin/` is touched.** `POST /sign-in/email` still answers
+    `401 {"message":"Invalid email or password","code":"INVALID_EMAIL_OR_PASSWORD"}`,
+    measured identical on both sides of the change.
+  
+  Consumers that branch on the HTTP status are unaffected. Consumers that already
+  parse the ObjectStack `/admin/*` envelope now get the same shape everywhere in
+  the namespace, with no per-route knowledge required.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing is removed, renamed or narrowed: a refusal that carried an empty body under an `application/json` header now carries the declared envelope at the same status. No consumer expression has to be rewritten — a status branch keeps working unchanged, and an envelope branch that only ever matched the ObjectStack lane now also matches the vendor lane. There is no old spelling to migrate off, so there is nothing for `os migrate meta` to rewrite and no ADR-0087 ledger entry to make. -->
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+- af1636c: The two SSO domain-verification admin routes now answer a registered ADR-0112
+  error code. `POST /admin/sso/request-domain-verification` and
+  `POST /admin/sso/verify-domain` shape their failure as
+  `code: parsed?.code || <our default>`, and the default half — the code
+  ObjectStack itself authors when @better-auth/sso returns none — was lowercase
+  (#10716, found by #10658):
+  
+  | route | wrote | writes instead |
+  | --- | --- | --- |
+  | `POST /admin/sso/request-domain-verification` | `request_domain_verification_failed` | `DOMAIN_VERIFICATION_FAILED` |
+  | `POST /admin/sso/verify-domain` | `verify_domain_failed` | `DOMAIN_VERIFICATION_FAILED` |
+  
+  If you match on either lowercase spelling, match on `DOMAIN_VERIFICATION_FAILED`
+  instead — the two routes are distinguished by their path, as they already were
+  for every other failure they can answer.
+  
+  `DOMAIN_VERIFICATION_FAILED` is reused, not invented: it is already registered
+  for `@objectstack/plugin-auth` in the error-code ledger, so this PR adds nothing
+  to `packages/spec` and the emitted vocabulary gets no new member. A new spelling
+  (`VERIFY_DOMAIN_FAILED`) would have needed a ledger registration to be a legal
+  `error.code` at all, and — measured while fixing this — an unregistered code in
+  an `||` fallback slot is currently invisible to BOTH error-code gates, so it
+  would have shipped as exactly the silent fourth state ADR-0112 D3 exists to
+  prevent.
+  
+  **The vendor pass-through arm is unchanged.** `parsed?.code` still reaches the
+  caller verbatim, so @better-auth/sso's own diagnosis (`NO_PENDING_VERIFICATION`,
+  `DOMAIN_VERIFICATION_FAILED`) is never overwritten by ours — the half that would
+  be silently lost by a handler that stamped our code unconditionally, and it is
+  pinned in both directions by
+  `packages/plugins/plugin-auth/src/sso-domain-verification-error-codes.test.ts`.
+  Statuses and messages are untouched on every path.
+  
+  ADR-0087 disposition, in prose because the marker vocabulary has no slot for
+  this shape: nothing is registered and nothing needs to be. The declared wire
+  contract is `error.code ∈ StandardErrorCode ∪ ERROR_CODE_LEDGER`, and neither
+  lowercase spelling was ever a member of it — they were undeclared values a
+  blind gate let through, so this brings the implementation onto the published
+  contract rather than changing that contract. There is no metadata surface for
+  `objectstack migrate meta` to rewrite: error codes live in responses, not in
+  stored metadata. The table above is here for anyone who matched the undeclared
+  spelling anyway, which is why this ships as `minor` rather than `patch`.
+- d9353b9: `POST /admin/sso/verify-domain` now answers the DISABLED condition the way its
+  sibling always has. When SSO domain verification is off for an environment,
+  `@better-auth/sso` never mounts the inner endpoint and answers `404` with no
+  code. Both bridge routes recognise that shape, and they used to answer it
+  differently (#10859):
+  
+  | route | answered | answers instead |
+  | --- | --- | --- |
+  | `POST /admin/sso/request-domain-verification` | `400` `DOMAIN_VERIFICATION_DISABLED` | unchanged |
+  | `POST /admin/sso/verify-domain` | `404` `DOMAIN_VERIFICATION_FAILED` | `400` `DOMAIN_VERIFICATION_DISABLED` |
+  
+  `verify-domain` rewrote only the `message` for that branch and let the code fall
+  through to its generic failure default, so the response carried "the feature is
+  off" copy under a code that means "verification failed". A caller can only act
+  on the machine-readable half, and the two halves disagreed. The status moves
+  with the code: the inner `404` describes the INNER endpoint, which is unmounted,
+  whereas this bridge route is mounted unconditionally — passing that status
+  through said "no such endpoint" about a resource that exists.
+  
+  If you match on `DOMAIN_VERIFICATION_FAILED` (or on `404`) to detect the
+  disabled case on `verify-domain`, match on `DOMAIN_VERIFICATION_DISABLED` (or on
+  `400`) instead — the same pair `request-domain-verification` has always
+  answered. The distinction is worth having: `DISABLED` means "turn on
+  `OS_SSO_DOMAIN_VERIFICATION`", `FAILED` means "the DNS TXT record is not visible
+  yet, retry".
+  
+  **No `packages/spec` change, and the emitted vocabulary gains no member.** Both
+  codes are already registered for `@objectstack/plugin-auth` in the error-code
+  ledger, with exactly these meanings (`DOMAIN_VERIFICATION_DISABLED` — "domain
+  verification is off on this deployment"). This route was emitting a *declared*
+  code whose registered meaning is a different condition, so this is
+  declared-vs-enforced restoration rather than a new contract decision.
+  
+  **A genuine verification failure still answers the failure code, and the vendor
+  pass-through arm is untouched on both routes.** The rewrite is keyed to the
+  disabled shape specifically — `404` *without* a code. A `404` that carries
+  `@better-auth/sso`'s own code is the vendor's diagnosis and reaches the caller
+  verbatim, status included, as does every non-404 failure. That direction is the
+  load-bearing one — an implementation keyed to "any 404", or to `!resp.ok`, would
+  satisfy the disabled case while destroying the diagnosis a caller acts on — and
+  it is pinned in both directions in
+  `packages/plugins/plugin-auth/src/sso-domain-verification-error-codes.test.ts`.
+  
+  Shipped as `minor`, following the same call the casing rename on these two
+  routes made (#10716). The argument for it: the vocabulary is unchanged, and the
+  old pairing was self-contradictory rather than a contract anyone could have
+  relied on deliberately. The argument against it, stated here rather than
+  settled: unlike that rename — whose old spellings were undeclared values no
+  schema admitted — `DOMAIN_VERIFICATION_FAILED` *is* a declared, registered code,
+  so a client keyed to it for this case was keyed to something the published
+  contract admitted, and both halves of the answer change. A reviewer who reads
+  that as `major` is not reading it wrong; this PR does not decide it silently.
+
+### Patch Changes
+
+- 8f04d9a: Correct a false vendor claim in the `organization/add-member` source comments:
+  `teamId` has **no** active-team fallback (#10532). Two comments — the
+  `sys_member` `add_member` action metadata (the origin) and the
+  `organization-add-member.ts` module header that cited it as authority — stated
+  that "organizationId/teamId default to the caller's active org/team when
+  omitted". Measured on the installed better-auth 1.7.1
+  (`dist/plugins/organization/routes/crud-members.mjs`, inside `addMember`), only
+  the organization half is true:
+  
+  ```js
+  const orgId = ctx.body.organizationId || session?.session.activeOrganizationId;
+  const teamId = "teamId" in ctx.body ? ctx.body.teamId : void 0;
+  ```
+  
+  `activeOrganizationId` is read 8 times in that module; `activeTeamId`, never. An
+  omitted `teamId` therefore stays `undefined` and the member joins no team — every
+  `if (teamId)` branch (team lookup, `TEAM_NOT_FOUND`, per-team limit) is skipped.
+  
+  No runtime behaviour changes, and no deployment was ever misled: the `add_member`
+  action's `params` list carries no `teamId`, so the toolbar never sent one and the
+  claim was never exercised. What the comment did mislead was the next reader of
+  the mount, which cited it as the justification for forwarding request headers —
+  forwarding buys the organization default only. Forwarding `teamId` itself remains
+  correct: pass it and it works.
+  
+  The asymmetry the docs now publish is held by a new pin,
+  `organization-add-member-team-fallback.test.ts`, which reads the fact out of the
+  installed vendor artifact (not out of our own comments) so that a future
+  better-auth bump *adding* an active-team fallback reddens instead of silently
+  putting the docs out of date.
+- 163a162: Ledger and document the ObjectStack-owned auth mounts that were in neither the route ledger nor the docs (#10534).
+  
+  `auth-plugin.ts` mounts 17 routes directly on the raw Hono app ahead of the better-auth catch-all. A census found **nine** of them in neither half of `auth-route-ledger.ts`, and **six** with no literal wire path anywhere in the hand-written docs — the state that let a mount and its documentation gap ship separately with nothing objecting.
+  
+  **Ledger:** eight mounts gain reviewed `source: 'objectstack'` rows — `/admin/import-users`, `/admin/oauth2/toggle-disabled`, `/admin/sso/register`, `/admin/sso/register-saml`, `/admin/sso/request-domain-verification`, `/admin/sso/verify-domain`, `/admin/unlock-user`, `/sys-oauth-application/register`. All are `disposition: 'server-only'`: each was measured to have zero `ObjectStackClient` callers and exactly one real caller that is a declarative metadata action target or a Console wizard. `POST /api/v1/auth/set-initial-password` is deliberately left unledgered and escalated rather than given a guessed disposition.
+  
+  **Docs:** `GET /api/v1/auth/bootstrap-status`, `POST /api/v1/auth/set-initial-password`, `POST /api/v1/auth/admin/unban-user`, `POST /api/v1/auth/admin/sso/register`, `POST /api/v1/auth/admin/sso/request-domain-verification` and `POST /api/v1/auth/admin/sso/verify-domain` are now documented with their literal wire paths, including the opt-in `OS_SSO_DOMAIN_VERIFICATION` domain-verification flow and the asymmetric way its two halves report the switch being off.
+  
+  No route's mounting, behaviour or accept/reject set changes.
+- 26dea14: A `rawApp` mount under the auth `basePath` with no ledger row now fails a gate (#10534 follow-up 4)
+  
+  `auth-plugin.ts` mounts routes **directly on the raw Hono app, ahead of the
+  better-auth catch-all**. The catch-all never sees them, so the vendor's own
+  route table cannot account for them, and `auth.api`'s enumeration — which is
+  what `auth-route-ledger.conformance.test.ts` drives — cannot see them either. A
+  mount with no row in either half of the ledger was therefore invisible to every
+  check in this tree. That is not hypothetical: it is what produced #9941
+  (`organization/add-member` mounted, ledgered nowhere) and #10050 (the same route
+  mounted and undocumented), and the #10534 census found it was not a one-off —
+  **nine of the seventeen mounts were in neither half**.
+  
+  The pin the conformance suite already carries asserts the `source: 'objectstack'`
+  set exactly, so it fails when a row **disappears**. What it structurally cannot
+  do is fail when a **mount appears** with no row, because *both* of its sides are
+  hand-written: the mount list in that assertion is a copy of the truth, not a
+  reading of it, and nobody who adds route 18 has to touch it.
+  
+  `pnpm check:auth-mount-ledger` (`scripts/check-auth-mount-ledger.mjs`) supplies
+  the missing half. It enumerates the mounts from `auth-plugin.ts` **source** and
+  diffs them against both halves of the ledger. No runtime surface is added and no
+  route's mounting, behaviour or accept/reject set changes.
+  
+  Four properties it is built to, each measured rather than assumed:
+  
+  - **The match carries a right boundary.** Accounting is exact string equality on
+    `METHOD /full/wire/path`. #10534's own census read "5 undocumented" when the
+    truth was 6, because it matched by substring and `/admin/sso/register` is a
+    strict prefix of `/admin/sso/register-saml` — the shorter route was scored
+    accounted-for on the strength of its longer sibling's URL. When an unaccounted
+    mount does stand in a prefix relation to a ledgered route, the failure text
+    **says so**, so the property is observable in the output rather than implicit
+    in a comparison operator.
+  - **`rawApp.all` and `rawApp.use` are excluded.** The better-auth catch-all is an
+    `.all()` and the IP gate is a `.use()`; both would otherwise read as unledgered
+    mounts. They are the lanes routes arrive through, not routes.
+  - **A row alone does not satisfy it.** A disposition cannot be inferred
+    mechanically, and a gate that accepts a pasted row teaches the next author to
+    paste a row. An `source: 'objectstack'` row must carry the evidence its
+    disposition claims: `client:` for `sdk`, a substantive `note:` for
+    `server-only`/`disabled`/`public`. The failure text names the peer-group
+    discriminator and the `set-initial-password` precedent, and offers
+    `PENDING_DISPOSITION` — with an issue number — as the honest answer for
+    "undecided", instead of the nearest allowed word.
+  - **A partial read is never reported as a complete one.** Any `rawApp` mounting
+    form the census cannot read per-route (an unrecognised verb such as
+    `rawApp.on(...)`, a non-literal path, an unresolved interpolation) is a
+    finding. A missing file, a moved anchor, an underivable `basePath` or a parse
+    that yields zero of anything exits **2** and prints `NOT MEASURED`.
+  
+  On `bbe643c08` the gate is green: 17 mounts, 12 accounted for by a reviewed
+  ledger row, 4 shadowing a vendor-declared path, and one —
+  `POST /api/v1/auth/set-initial-password` — declared in `PENDING_DISPOSITION`
+  against #10975, printed on every clean run so the open question stays visible.
+  That list is a shrink-only ratchet; #10975 landing deletes the entry, and the
+  gate then fails if it is still there.
+- 03bdd14: Run the break-glass last-local-credential guard after authentication
+  
+  The guard that refuses removal of the last local-password login was registered
+  as a better-auth `before` hook, which runs ahead of the endpoint middleware that
+  establishes identity. It therefore decided — and answered — a question about a
+  named user for a caller who had not been authenticated, while every neighbouring
+  route on the same lane answers with the ordinary "please log in" refusal.
+  
+  The guard now runs only once the acting user is resolved. An unauthenticated
+  caller falls through to the ordinary refusal and learns nothing about the named
+  user. For an authenticated caller nothing changes: the same lookup runs and the
+  same `LAST_LOCAL_CREDENTIAL` conflict is returned, so the lockout protection is
+  unaffected.
+- bbe643c: Gate the localhost trusted-origin substitution to non-production (#10366).
+  
+  `AuthManager`'s `trustedOrigins` block substituted a localhost wildcard trio
+  (`http://localhost:*`, `http://*.localhost:*`, `https://*.localhost:*`) whenever
+  the resolved trusted-origin list came out empty and `OS_CORS_ORIGIN` was unset
+  or `*`. Its own comment described this as a development convenience, but the
+  condition tested only emptiness — it carried no `NODE_ENV` term, no dev-mode
+  term, nothing. A production deployment that reached it with an empty list
+  CSRF-trusted every `localhost` and `*.localhost` origin. The declared boundary
+  and the enforced boundary disagreed, and only the declared one was visible in
+  the file.
+  
+  The substitution is now gated on `NODE_ENV !== 'production'`, the same dev
+  signal already used by the fallback auth secret and by the dev `Origin`
+  synthesis in the same file. The property enforced: **a development convenience
+  exists only outside production.**
+  
+  **What production receives instead.** With the trio gated off and the list
+  empty, the block's tail omits `trustedOrigins` from the better-auth config
+  entirely. That is not an absent policy. Measured against the installed
+  better-auth 1.7.1: `getTrustedOrigins`
+  (`dist/context/helpers.mjs`) unconditionally seeds the trusted set from the
+  resolved `baseURL` origin and treats `options.trustedOrigins` as purely
+  **additive**, so an omitted key and an empty array are equivalent — both leave
+  exactly the deployment's own origin trusted, and `validateOrigin`
+  (`dist/api/middlewares/origin-check.mjs`) refuses everything else with
+  `403 INVALID_ORIGIN`.
+  
+  **Who is affected.** Deployments with an explicitly configured `trustedOrigins`,
+  or one derived from `OS_CORS_ORIGIN`, are unchanged in production — the
+  substitution never fired for them. Non-production behaviour is unchanged,
+  including under `NODE_ENV=test` and when `NODE_ENV` is unset. A production
+  deployment that was relying on the substitution to reach its own login page
+  now receives a loud `403` rather than silent over-trust; the remedy is to set
+  `OS_TRUSTED_ORIGINS`, or to fix the base URL that resolved unusable (PR #10369's
+  boot diagnostic already names that condition at startup).
+  
+  Both existing pins keep their dev-only assertions verbatim; new pins cover the
+  production omission, the non-production legs, the SSO per-request-function
+  shape, and — load-bearing — that explicitly configured and `OS_CORS_ORIGIN`-derived
+  trust survives in production.
+- 5b0af2b: **Fix:** `POST /api/v1/auth/admin/impersonate-user` now admits ObjectStack **platform admins**. It previously refused every one of them with `403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS` — byte-identical to the refusal a plain member received — so the `sys_user` "Impersonate User" button was dead on every deployment (#9968).
+  
+  better-auth's `admin` plugin authorizes on the legacy `user.role === 'admin'` scalar that ADR-0068 D2 stopped synthesizing. ObjectStack's platform admin is a `sys_user_permission_set` row pointing at `admin_full_access` with `organization_id = null`, which the vendor cannot be pointed at, and re-synthesizing the scalar is permanently vetoed.
+  
+  **What an operator will now observe.** A platform admin who could not impersonate anyone can now impersonate a non-admin user, and the impersonation takes effect for cookie and bearer clients alike. Refusals are unchanged for everyone else: a signed-in non-platform-admin (including an organization owner or admin, who is **not** a platform admin under ADR-0068) still gets `403 YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`, and an anonymous caller still gets `401` from better-auth's own `adminMiddleware`.
+  
+  **One refusal is newly reachable.** The vendor refuses to impersonate an admin-grade *target* by reading that same `role` scalar against `adminRoles: ['admin']` — a column nothing writes after ADR-0068 D2, so the guard was inert. It is now asked through the ADR-0068 predicate, so impersonating a **platform-admin target** is refused with `403 YOU_CANNOT_IMPERSONATE_ADMINS` where it previously succeeded.
+  
+  Implemented as a better-auth **plugin endpoint**, replacing the vendor endpoint in place on the `admin` plugin's own `endpoints` record — not a raw Hono mount. That keeps the signed-cookie contract with `/admin/stop-impersonating` and keeps the `/admin/impersonate-user` path-keyed rotation hook attached, so bearer-client impersonation does not regress to a silent 200 no-op.
+  
+  Every other better-auth-native `/admin/*` route still gates on the legacy scalar and still refuses platform admins — unchanged here.
+- c49007a: Declare `@objectstack/plugin-hono-server` and put the published auth example in a
+  tsc program (#10869).
+  
+  `packages/plugins/plugin-auth/examples/basic-usage.ts` — the file
+  `content/docs/permissions/authentication.mdx` publishes as "Basic Auth Example" —
+  imports `HonoServerPlugin` from `@objectstack/plugin-hono-server` on line 12, and
+  this package declared that dependency in **none** of `dependencies`,
+  `devDependencies` or `peerDependencies`. (It declares `hono`, which is a different
+  package.) So the example could not resolve, compile or run for anyone who copied
+  it out of the docs:
+  
+  ```
+  examples/basic-usage.ts(12,34): error TS2307: Cannot find module
+  '@objectstack/plugin-hono-server' or its corresponding type declarations.
+  ```
+  
+  The declaration is now there (`devDependencies`, `workspace:*` — the example is
+  development material, and `files` ships only `dist`, so nothing new reaches a
+  published tarball).
+  
+  **The dependency alone would have been unverifiable, which is the other half of
+  this change.** `tsconfig.json` selects `include: ["src/**/*"]`, so `examples/` sat
+  in no tsc program at all — the type-check-coverage census's only instance of that
+  — and a manifest edit does not change an `include`. The fix would have had no
+  compile behind it and the defect could return unseen. So the directory now has a
+  program: `packages/plugins/plugin-auth/tsconfig.examples.json`, a non-emitting
+  sibling named in the package's `typecheck` script, following the precedent
+  `packages/spec/tsconfig.scripts.json` and `packages/objectql/tsconfig.scripts.json`
+  set. Strictness is inherited, not relaxed, and the directory enters with zero
+  recorded debt — the example type-checks clean under `strict`, which also measures
+  that every API it demonstrates (`ObjectKernel.use`/`bootstrap`/`getService`,
+  `HonoServerPlugin({ port })`, and every `AuthPluginOptions` key it passes) still
+  exists as written, so it is a working reference rather than a stale one.
+  
+  Because the directory is now read, `packages/plugins/plugin-auth/examples` leaves
+  `UNCHECKED_SOURCE_DEBT` in `scripts/check-type-check-coverage.mjs` — the ratchet
+  shrinks because the thing was repaired, and `RECONCILED` required the deletion in
+  the same change.
+- 86a8ec9: **Behaviour change (tightening):** registering an SSO identity provider through the direct `POST /api/v1/auth/sso/register` endpoint now requires a **platform admin**. An organization **owner or admin** who is not a platform admin can no longer register an identity provider on any surface (#10009).
+  
+  Who loses access: an org owner/admin (a `sys_member` row graded owner/admin) with no org-less `admin_full_access` grant. They previously passed the ADR-0024 before-hook on the direct endpoint and now receive `403 SSO_REGISTER_FORBIDDEN`. Platform admins — an org-less `sys_user_permission_set` link to `admin_full_access`, per ADR-0068 D2 — are unaffected, as are anonymous callers, who still fall through to better-auth's `sessionMiddleware` (`401`).
+  
+  This closes a posture divergence: the four `/admin/sso/*` bridges the `sys_sso_provider` metadata actions call have gated on the platform-admin judge since #9653, while better-auth's own endpoint kept the wider ADR-0024 admit set — so the same principal was refused at one door and admitted at the other for the same underlying registration, leaving the bridge tightening as labelling rather than a boundary. Per the 2026-08-20 maintainer ruling, ADR-0068 D4 governs: registering an identity provider is a platform-operator action. If org-scoped IdP self-serve is ever wanted, it is a deliberate future decision rather than a vendor default inherited by omission.
+  
+  The direct endpoint also gains its first test pins; the now-callerless `isOrgOrPlatformAdmin` predicate was removed rather than left dead.
+- 45204a5: `POST /api/v1/auth/two-factor/enable` no longer leaves `sys_two_factor.verified`
+  describing the enrollment *before* the secret it stores.
+  
+  better-auth's enable handler computes the row it writes as
+  `verified: existingTwoFactor != null && existingTwoFactor.verified === true`
+  (measured on the installed 1.7.1, `dist/plugins/two-factor/index.mjs`), and
+  `sys_two_factor` declares `user_id` unique — so a second `enable` on an account
+  that already has a confirmed factor rewrites that one row with a brand-new
+  secret while inheriting the old enrollment's flag. The flag then said
+  "user-confirmed" about a secret nobody had ever confirmed, and the sign-in
+  challenge honoured it.
+  
+  The vendor already gates the challenge on that flag, in both places it matters:
+  `totp/index.mjs` refuses an unconfirmed factor with `TOTP_NOT_ENABLED` before
+  any lockout bookkeeping, and the post-sign-in hook offers `totp` among
+  `twoFactorMethods` only when the flag is not `false`. That gate is exactly what
+  a *first* enrollment relies on. Re-enrollment was the one path that slipped past
+  it — not because the gate was missing, but because the value handed to it was
+  inherited. So the fix restores the flag rather than adding a second gate:
+  after a successful `method: 'totp'` enable, `verified` is set to `false`, and
+  the freshly issued secret becomes live only once the caller proves possession of
+  it through `/two-factor/verify-totp`.
+  
+  This is a tightening. The request body, the response shape and the status are
+  unchanged, a first-time enrollment is unaffected (better-auth already wrote
+  `false` there), and a rotation is still reachable and still completes — it now
+  takes the same confirmation step a first enrollment takes. What changes is that
+  a secret the endpoint hands out is no longer accepted at the next sign-in until
+  it has been confirmed. Clients that re-enroll and then rely on the new
+  authenticator working immediately at sign-in must call `/two-factor/verify-totp`
+  with the live session first, which is the flow first-time enrollment already
+  uses.
+- 9b0172d: fix(plugin-auth): a 2FA verification echoes the session it INSTALLED, not the one it deleted (#10701)
+  
+  `POST /api/v1/auth/two-factor/verify-totp` answered `200` with two credentials
+  that disagreed. The `Set-Cookie` named the caller's new session; the JSON
+  `token` named a session row the same request had just deleted.
+  
+  The cause is upstream and mechanical. better-auth's `verifyTwoFactor` helper
+  resolves the caller's session once, at entry, and closes over it:
+  
+  ```js
+  valid: async (ctx) => ctx.json({ token: session.session.token, ... })
+  ```
+  
+  On the enrolment lane — a signed-in user confirming a new TOTP factor — the
+  route rotates that session before it answers: it mints a new session, installs
+  it with `setSessionCookie`, and deletes the caller's original session row. Only
+  then does it call `valid(ctx)`, which still holds the pre-rotation session and
+  echoes the token of the row that no longer exists. (Measured on the installed
+  better-auth 1.7.1: `dist/plugins/two-factor/verify-two-factor.mjs` and
+  `dist/plugins/two-factor/totp/index.mjs`.)
+  
+  Every other auth response in this repo echoes `token` as the unsigned token of
+  a live session, and `bearer()` accepts exactly that — presented without a
+  signature it signs the value itself before verifying. Measured on
+  `/sign-up/email`, the body's `token` resolves to the user as a bearer. So a
+  client following that contract after enrolling in 2FA stored a revoked token.
+  
+  That did not merely fail to authenticate. `bearer()`'s before-hook OVERWRITES
+  the request's session cookie with whatever the `Authorization` header carries,
+  so a request presenting the still-valid rotated cookie *and* the dead token
+  resolved to nobody. Measured before the fix, on one enrolment: the cookie alone
+  resolved to the user (`get-totp-uri` `200`); the echoed token alone resolved to
+  nobody (`get-session` `200` and empty, `get-totp-uri` `401`); and the two
+  together also resolved to nobody (`401`). Fail-closed — no privilege was
+  available to gain — but a legitimate user was locked out of a session they
+  still held, which is the point of the report.
+  
+  The echoed value is now read back out of the response's own session cookie, so
+  the `token` names the session the response actually installed. This restores
+  the contract rather than changing it: the field keeps its shape (the unsigned
+  session token) and its meaning ("the session you now hold"), and only the value
+  moves, from a deleted row to the live one. Shipped as `patch` for that reason —
+  no consumer expression has to be rewritten, and the previous value was not a
+  usable credential for anything, so nothing could have depended on it.
+  
+  The repair is keyed on the mechanism, not on the enrolment branch: it applies
+  only when the response staged a session cookie whose token differs from the one
+  being echoed. On the sign-in-challenge lane, where the route mints the session
+  it echoes, the two agree and this is a no-op — pinned, along with the cookie
+  lane, so that fixing the broken lane could not quietly rewrite the others.
+  `/two-factor/verify-otp` carries the byte-identical rotate-then-answer block and
+  is covered by the same guard; `/two-factor/verify-backup-code` does not rotate
+  and is unaffected.
+  
+  Resolver precedence is deliberately untouched. Having the resolver fall back to
+  the cookie when a bearer is unusable was the other repair direction named in the
+  report, and it was ruled out of scope: it would stop an invalid credential from
+  failing loud. Two pins hold that line — anonymous is still refused, and a bogus
+  bearer still overrides a valid cookie and still fails closed — so an attempt to
+  loosen the resolver later reddens this suite instead of passing it.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [e634ecf]
+- Updated dependencies [ec79b11]
+- Updated dependencies [6ce58a7]
+- Updated dependencies [d806081]
+- Updated dependencies [9a1ed7a]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [5b39785]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [26f3588]
+- Updated dependencies [9e04c3e]
+- Updated dependencies [38cf397]
+- Updated dependencies [67630c4]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [acb4dbc]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [490879a]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [4389fe9]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/rest@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

@@ -1,5 +1,75 @@
 # @objectstack/connector-rest
 
+## 17.2.0
+
+### Patch Changes
+
+- 6d5c4fa: Release these plugins' resources from `destroy()`, the teardown hook the kernel
+  actually calls (#10371). `Plugin` declares `init()`, `start?(ctx)` and
+  `destroy?()` — and no `stop()` — so `ObjectKernel.performShutdown()` and
+  `LiteKernel.destroy()`, which walk the plugins in reverse calling
+  `plugin.destroy()`, walked straight past every plugin whose teardown was spelled
+  `stop()`. `await kernel.shutdown()` resolved with the reports dispatcher still
+  armed, the REST/OpenAPI/Slack connectors still registered on the automation
+  engine, the approvals SLA escalation job still scheduled, and the knowledge
+  event-sync subscription still open.
+  
+  Each teardown body now lives in `destroy()`. `stop()` is retained as a
+  delegating alias with its parameter made optional, so an embedder that learned
+  to call it directly — precisely because the kernel never did — keeps working
+  unchanged. No export is removed and the `Plugin` interface is untouched.
+  
+  Same defect as #9371 in `@objectstack/service-messaging`, which surfaced as
+  fully green test runs exiting 1 on `EnvironmentTeardownError` and being evicted
+  from the merge queue.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

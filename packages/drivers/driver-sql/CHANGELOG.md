@@ -1,5 +1,387 @@
 # @objectstack/driver-sql
 
+## 17.2.0
+
+### Minor Changes
+
+- 95437e7: fix(driver-sql): `introspectSchema()` emits the spec introspection contract — `primaryKey`, `dialect`, `introspectedAt` (#10676, #10998)
+  
+  **BREAKING** change to the value `SqlDriver.introspectSchema()` returns, shipped
+  as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `packages/spec/src/contracts/schema-diff-service.ts` declares one introspection
+  contract. The driver declared a second one beside it and, separately, so did
+  `packages/objectql/src/util.ts`. The three agreed on the idea and disagreed on
+  the vocabulary: the driver spelled a column's primary-key membership
+  `isPrimary`, the spec spells it `primaryKey`; the spec declares `dialect` and a
+  REQUIRED `introspectedAt` that the driver's schema type never mentioned and
+  `introspectSchema()` therefore never emitted. Nothing was type-unsound — each
+  side compiled against its own declaration and the value crossed between them
+  with no compiler in the middle.
+  
+  Measured on a live in-memory SQLite database before this change: the id column
+  of a `primary key (id)` table came back carrying `isPrimary: true` with no
+  `primaryKey` key at all, and `Object.keys()` of the schema was `["tables"]`.
+  Two consequences, both silent:
+  
+  - `ExternalDatasourceService.generateObjectDraft` reads `col.primaryKey`, so
+    every federated object drafted from a real remote table lost the remote
+    primary key — the addressing key for the federated table, dropped by the
+    codegen meant to produce it (#10676).
+  - type mapping ran with `dialect: undefined` across the whole federation path,
+    making every per-dialect alias in `suggestFieldTypeForSqlType` unreachable
+    there, and `refreshCatalog` persisted `dialect: undefined` into the
+    `external_catalog` record Studio's schema browser and the boot gate read
+    back (#10998).
+  
+  Maintainer ruling, 2026-08-22 (live session, 「同意所有」 item 9 =
+  驱动侧对齐 spec 契约): `packages/spec` is the one contract and the driver
+  aligns to it.
+  
+  What the driver now returns: every column carries the boolean `primaryKey`, the
+  schema carries `dialect` and `introspectedAt`, and the retired `isPrimary`
+  member is gone rather than emitted alongside — one spelling, so no consumer can
+  key off the wrong one again. `dialect` is the driver's canonical dialect name
+  (`sqlite`, `postgres`, `mysql`, `unknown`), which is the vocabulary the only
+  in-tree consumer keys its alias tables on; `introspectedAt` is an ISO 8601
+  instant stamped before the reads begin.
+  
+  `IntrospectedColumn`, `IntrospectedTable` and `IntrospectedSchema` in both
+  `@objectstack/driver-sql` and `@objectstack/objectql` are now derived from the
+  spec contract instead of re-declared, so a key added there fails their `tsc`
+  until the producer emits it. Two divergences are kept explicitly: `defaultValue`
+  stays `unknown` at the SQL layer because Knex reports `null`, and `indexes` is
+  omitted rather than emitted empty because this driver does not introspect
+  indexes and an empty array would tell a schema differ that a table has none.
+  
+  TypeScript consumers of the removed member are told by the compiler, precisely
+  and at every site: `Property 'isPrimary' does not exist on type
+  'IntrospectedColumn'`.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/drivers/driver-sql/src/sql-driver.ts#IntrospectedColumn, packages/drivers/driver-sql/src/sql-driver.ts#IntrospectedSchema, packages/objectql/src/util.ts#IntrospectedColumn, packages/objectql/src/util.ts#IntrospectedSchema) these are published runtime TypeScript interfaces describing a driver's introspection RESULT — not a metadata surface. There is no Zod schema, no `packages/spec` declaration of the old spelling, and no stored representation of it, so `objectstack migrate meta` has nothing to rewrite; the channel that reaches every affected consumer is the compiler. -->
+- 9cc1940: **BREAKING**: a failed primary-key / foreign-key / unique-constraint introspection read now throws instead of silently reporting absence (#11161).
+  
+  `introspectPrimaryKeys`, `introspectForeignKeys` and `introspectUniqueConstraints` wrapped their whole dialect dispatch in a bare `catch {}` and returned `[]`, so a query a live server rejected degraded to "this table has no primary key / foreign keys / unique constraints" with no diagnostic. `primaryKeys` is consumed as an addressing / upsert-conflict-target key (federated-object codegen, the persisted `external_catalog` under ADR-0015, schema-drift comparison), so the silent empty answer was a wrong answer downstream code acted on, not "we don't know".
+  
+  This extends the #7332 ruling the sibling `introspectIndexes` already carries, with the identical option shape and default: `onFailure?: 'throw' | 'partial'`, defaulting to `'throw'`. A caller whose short read is self-correcting may ask for one by name with `{ onFailure: 'partial' }`. Consequently `introspectSchema` over a partially-readable database now fails loudly instead of emitting tables whose keys silently read as absent; its in-tree callers already handle a throw (the datasource health check reports `{ ok: false }`, the REST/CLI introspection seams surface the error).
+  
+  The un-hiding immediately proved its worth: the Postgres arm of `introspectUniqueConstraints` had been invalid SQL all along (`SELECT c.column_name` with no alias `c` in scope — `missing FROM-clause entry`), so live Postgres never reported a unique constraint through this method. That query is repaired in the same change (alias fixed, and the lookup scoped to `current_schemas(false)` the way `introspectSchema`'s own table listing already is), so `isUnique` is now populated on Postgres for the first time.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) runtime error-contract change on SqlDriver's protected introspection methods; no authorable metadata key changes shape, so `objectstack migrate meta` has nothing to rewrite -->
+
+### Patch Changes
+
+- 6936d07: `engine.aggregate` honours a per-aggregation `filter` (#10576, the contract
+  half of #10413). `AggregationNodeSchema.filter` — declared since #4286 but
+  marked experimental and enforced by nothing — is now live with SQL
+  `FILTER (WHERE …)` semantics: the predicate narrows the SOURCE rows that one
+  aggregation reads while sibling aggregations in the same call keep seeing
+  every row of the group, so a measure-scoped filter (`stage: 'closed_won'`)
+  can finally reach the engine instead of being silently dropped (the #10413
+  wrong-numbers defect on the ObjectQL analytics path). The
+  `StrategyContext.executeAggregate` bridge (`@objectstack/spec/contracts`)
+  gains the same optional `filter` on its aggregation entries so analytics
+  strategies can lower measure filters into it (#10413 phase 2 consumes this
+  seam next).
+  
+  Execution is the correct-first two-tier shape date bucketing and HAVING use:
+  the engine lowers filtered aggregations in memory for every driver (unknown
+  operators refuse loudly with `INVALID_FILTER`/400 naming the aggregation
+  position; a group emptied by its filter answers the ruled empty-group values
+  — count/sum 0, avg/min/max null). No driver compiles conditional aggregation
+  natively today, so each native aggregate face (driver-sql — inherited by
+  driver-sqlite-wasm and Turso local —, the Turso remote transport,
+  driver-mongodb's pipeline builder, driver-memory's `performAggregation`)
+  refuses a directly-delivered per-aggregation filter with
+  `NOT_IMPLEMENTED`/501 instead of silently aggregating the unfiltered rows.
+  Aggregations without a `filter` are byte-identically unchanged, including
+  their native pushdown path.
+- 824a996: `updateMany()` and `upsert()`'s merge branch now advance `updated_at` (#11176).
+  
+  Two write doors were leaving "last modified" reading the row's previous value —
+  on **every** deployment, DDL-managed or not (which is what separates these from
+  #11067, whose defect needed `skipSchemaSync`):
+  
+  - **`updateMany()` stamped nothing.** No `tablesWithTimestamps` consultation, no
+    `updated_at`. `update()`, `bulkUpdate()` and `rotatedUpdateById()` all stamp;
+    this door did not, so a bulk edit left every row it touched reading its
+    creation time.
+  - **`upsert()`'s merge branch did not advance it on Postgres and MySQL.** The
+    merge set is derived from the keys of the formatted payload, and
+    `stampInsertTimestamps` — the only thing that put `updated_at` there — returns
+    early on any non-SQLite dialect, because the column DEFAULT already stores a
+    zone-aware instant on insert. A DEFAULT does not re-fire on the conflict path.
+    **SQLite was accidentally correct; Postgres and MySQL were not.**
+  
+  Measured on live PostgreSQL 16.13 and MySQL 8.0.46, through the driver's own
+  `initObjects`, with `update()` advancing the same column on the same table in
+  the same run as the contrast.
+  
+  Nothing errored before this fix, which is why it went unnoticed: list-view
+  sorts, delta/incremental sync, cache invalidation and audit answers simply read
+  a stale `updated_at`. A bulk status change and a sync/import that upserts — the
+  common shape for connector and seed writes — are exactly the operations most
+  likely to be feeding a downstream delta consumer.
+  
+  No accept-set change and no new rejection. Both doors keep #3493's opt-in
+  historical import (`preserveAudit` with an explicit `updated_at`) intact, and a
+  hand-migrated table that genuinely lacks the column keeps working: `updateMany`
+  reuses #11067's presumption-and-recovery machinery whole, and the upsert door
+  stamps only where the column has been OBSERVED, never on a presumption it has no
+  way to recover from. The SQL emitted for SQLite, and for any object with no
+  observed `updated_at` column, is unchanged.
+- 9cc1940: **Bug fix:** on Postgres, `introspectPrimaryKeys` no longer reports a covering primary key's `INCLUDE`'d columns as key members (#11162).
+  
+  For a primary key created as `CREATE UNIQUE INDEX … INCLUDE (payload)` and promoted with `ALTER TABLE … ADD CONSTRAINT … PRIMARY KEY USING INDEX`, `pg_index.indkey` holds the key columns *and* the payload columns; `indnkeyatts` counts the leading entries that are actually key members and was never consulted, so `payload` came back as part of the key. Measured on a live PostgreSQL 16.13: `indkey = '2 1 3'`, `indnkeyatts = 2`, and the introspected key was `k2, k1, payload` for a declared `(k2, k1)`.
+  
+  A key with an extra member is a different key: an upsert conflict target naming a non-key column does not match the constraint, and schema-drift comparison against a correctly-declared key reports a phantom `unexpected_key_member`. The join is now bounded with `k.ord <= i.indnkeyatts`, which preserves the declared key order established by #11101. `indnkeyatts` exists on PG 11+; no change for ordinary (non-covering) primary keys.
+- 9cc1940: **Bug fix:** `introspectColumns` (and therefore `introspectSchema`) now reports a table's columns in declared order on every dialect, read from the catalog's own ordinal (#11163).
+  
+  The column array was built from knex's `columnInfo()`, an object keyed by column name whose key-insertion order is the row order of a catalog query with no `ORDER BY`. Measured live: SQLite and PostgreSQL 16.13 happened to return declared order, MySQL 8.0.46 returned **alphabetical** order — so the same table introspected through different dialects returned different `columns` arrays, and a federated object drafted from a MySQL remote (ADR-0015) got its fields alphabetized rather than in the order the remote declares them.
+  
+  The order now comes from the catalog ordinal on all three dialects — `information_schema.COLUMNS.ORDINAL_POSITION` (MySQL), `information_schema.columns.ordinal_position` (Postgres), `PRAGMA table_info`'s `cid` (SQLite) — while `columnInfo()` remains the source of the per-column facts (`type`, `nullable`, `defaultValue`, `maxLength`), which knex already normalises per dialect.
+- 46cfa5b: **Bug fix:** on Postgres, index and schema introspection now resolve tables the way the session does, instead of assuming the `public` schema (#9350).
+  
+  `introspectIndexes` pinned `n.nspname = 'public'` and `introspectSchema` pinned `table_schema = 'public'`. For a driver whose connection carries a `searchPath` pointing anywhere else, both returned **empty** — not an error, an empty result. Measured on a live Postgres 16: for a table carrying a primary key *and* a declared unique index, `introspectIndexes` returned `[]` and `introspectSchema` listed no tables at all.
+  
+  Empty does not read as "I could not see" downstream; it reads as "there are no indexes". `assertConflictTargetHonoured` turns that into a refusal, so an `upsert` against a perfectly well-indexed table would be rejected with *no PRIMARY KEY or UNIQUE index backs them* — and index-drift detection would propose creating indexes that already exist.
+  
+  - `introspectIndexes` now resolves the table with `to_regclass(?)` and reads `pg_index` by OID. That is the same resolution every other statement in the session performs — first match along `search_path` — and it removes an ambiguity a schema list would introduce, since two schemas on the path can hold the same table name and only one of them is the one a query reaches.
+  - `introspectSchema` now lists `table_schema = ANY (current_schemas(false))`.
+  
+  **No change for a default deployment.** With the default `search_path`, `current_schemas(false)` is exactly `{public}` and `to_regclass` resolves into `public`, so both queries return what they returned before. The behaviour only differs where the old queries returned nothing.
+- 479fba5: fix(driver-sql): `updated_at` is stamped on a deployment that never runs the driver's DDL (#11067)
+  
+  `SqlDriver.update()` refreshed `updated_at` only for tables in
+  `tablesWithTimestamps`, and every one of that set's **four** fill sites is
+  downstream of DDL: `initObjects`' `createTable` branch, its "the existing table
+  already has an `updated_at` column" branch (decided from a physical
+  `columnInfo()`), its rotation branch, and `aliasShardBookkeeping`'s
+  rotation-shard copy. (The card reported three; the rotation branch inside
+  `initObjects` is the fourth.)
+  
+  So a deployment that manages DDL out-of-band — `skipSchemaSync` /
+  `OS_SKIP_SCHEMA_SYNC=1`, documented in
+  `content/docs/deployment/environment-variables.mdx` as "skip the implicit
+  `db:sync` on boot; use after running migrations manually" — booted with that set
+  empty and never stamped. The column carries only an INSERT-time `DEFAULT now()`,
+  with no `ON UPDATE` clause or trigger on any dialect, so `updated_at` recorded
+  the row's **creation** time forever. Nothing errored: list-view sorts, delta and
+  incremental sync, cache invalidation and audit answers were simply wrong.
+  Measured before the fix on SQLite, live Postgres 16.13 and live MySQL 8.0.46 —
+  a row backdated to `2020-01-01T00:00:00Z` and then updated through the driver
+  came back still reading `2020-01-01T00:00:00Z` on all three.
+  
+  The fix is a pair, and the second half is what keeps it a bug fix rather than a
+  contract change.
+  
+  1. **Inferred from the declared shape, at registration time.**
+     `registerObjectMetadata()` — the DDL-free entry point a `skipSchemaSync` boot
+     already calls — now records that a managed object's table is *expected* to
+     carry `updated_at`, because every table this driver's own DDL creates gets
+     `created_at`/`updated_at` unconditionally. That costs **zero round trips**,
+     which is the currency `skipSchemaSync` exists to save. It is kept in a new
+     `updatedAtColumnState` map rather than in `tablesWithTimestamps`, because it
+     is an inference and that set means "observed".
+  
+  2. **A lazy, one-shot fallback for the table where the inference is wrong.** On
+     a hand-migrated table that genuinely lacks the column, (1) alone would turn an
+     `update()` that succeeds today into a loud failure — a *new rejection for a
+     call that works*. Instead, the first stamped UPDATE to such a table is
+     speculative: if it fails, the driver asks the database (`columnInfo()`)
+     whether `updated_at` is really absent, and only then re-issues the caller's
+     own statement without the stamp, logging a warning naming the divergence. Any
+     other failure rethrows the **original** error untouched. Deliberately not
+     keyed to the dialect's error text: the three dialects spell it three ways
+     (`42703`, `ER_BAD_FIELD_ERROR`, `no such column`), and those strings are
+     version-dependent.
+  
+  Steady state is free in both directions. A successful stamped UPDATE proves the
+  column exists — a column named in a `SET` list that is not there is a parse/plan
+  error on every dialect here, whatever the row count — so one success settles the
+  table permanently; a resolved absence is cached and never re-probed. Tables the
+  driver's DDL built were already in `tablesWithTimestamps` and never enter the
+  speculative state at all, so the DDL path is byte-for-byte unchanged.
+  
+  When the caller has a transaction open, the speculative write is fenced in a
+  knex nested transaction (a `SAVEPOINT`) via the existing
+  `attemptWithoutPoisoning` — on Postgres any statement error aborts the whole
+  transaction (`25P02`), so an unfenced `try/catch` whose recovery issues SQL on
+  that transaction could never run there (#8269).
+  
+  Two narrowings, both deliberate:
+  
+  - **The insert path is untouched.** `stampInsertTimestamps` writes `created_at`
+    as well, and none of the evidence above says anything about `created_at`, so
+    it keeps reading `tablesWithTimestamps` exactly as before.
+  - **Federated/external objects are untouched.** `registerExternalObject` does
+    not route through managed registration, so a remote table is never presumed to
+    carry audit columns.
+  
+  Pinned by `sql-driver-timestamps-without-ddl.test.ts`, which runs the card's
+  repro sketch plus the missing-column leg, the round-trip budget, the
+  caller-transaction leg and an unrelated-failure leg across SQLite **and** live
+  Postgres / MySQL through `declareDialectCell`, so an unprovisioned dialect is
+  reported rather than omitted.
+- 927ccbb: fix(driver-sql): `introspectPrimaryKeys` returns the Postgres and MySQL composite key in DECLARED KEY ORDER (#11101)
+  
+  `SqlDriver.introspectPrimaryKeys` ordered its result on exactly one of its three
+  dialect arms. #10997 repaired SQLite (completeness *and* key ordering, by sorting
+  on the `PRAGMA table_info` ordinal); the Postgres and MySQL arms returned the key
+  in unspecified row order.
+  
+  - **Postgres**: `a.attnum = ANY(i.indkey)` is a *membership* test. `i.indkey` is
+    an `int2vector` holding the key's attnums **in key order**, but `ANY()` reads
+    the vector as a set and discards the position, and the query carried no
+    `ORDER BY`. It now joins the **ordinality** of `indkey`
+    (`unnest(i.indkey) WITH ORDINALITY`) and orders by that ordinal.
+  - **MySQL**: `KEY_COLUMN_USAGE.ORDINAL_POSITION` *is* the key ordinal and was
+    selected by neither the projection nor an order clause. It now carries
+    `ORDER BY ORDINAL_POSITION`.
+  
+  Both arms were measured returning **column order** — the key reversed — against
+  live servers before the fix: PostgreSQL 16.13 and MySQL 8.0.46, on a table
+  declared `(carrier_code, shipment_id, leg_seq)` with
+  `PRIMARY KEY (shipment_id, carrier_code)`. The MySQL result is worth naming
+  explicitly, because the received wisdom is the opposite: InnoDB did **not**
+  return ordinal order for an out-of-sequence key.
+  
+  Why the order is load-bearing rather than cosmetic: `primaryKeys` is consumed as
+  an **addressing / upsert-conflict-target** key — federated-object codegen, the
+  persisted `external_catalog` under ADR-0015, and schema-drift comparison against
+  a declared key. For those consumers a key in the wrong order is a *different*
+  key. Until now the same table introspected through different dialects could
+  disagree, since SQLite reported declared key order and the other two did not; all
+  three now agree.
+  
+  Covered by `sql-driver-primary-key-order-dialects.test.ts`, which runs the same
+  DDL on all three dialects and asserts the exact ordered array. Its live Postgres
+  and MySQL cells execute in the `Temporal Conformance (live PG + MySQL)` CI job
+  (a required check) and are reported as named skips elsewhere.
+- a037f7c: Fix JSON-field writes on Postgres deployments that manage DDL out-of-band
+  (`skipSchemaSync` / `OS_SKIP_SCHEMA_SYNC=1`): a non-empty array and a bare
+  string were rejected with a 500, and an empty array was **silently stored as an
+  empty object** (#10995).
+  
+  The SQL driver does `JSON.stringify` a JSON field's value on every non-SQLite
+  dialect — but only for fields listed in its per-object `jsonFields` registry,
+  and that registry (like the boolean / numeric / date / datetime / time /
+  auto_number registries and the tenant-isolation column) was filled **only** as
+  the first step of a DDL call. A deployment that skips boot schema sync therefore
+  served every write knowing nothing about its objects, and values reached
+  node-postgres to be encoded by its per-type defaults:
+  
+  - an **object** became JSON text — accidentally correct;
+  - an **array** became a Postgres ARRAY LITERAL (`{…}`) — `22P02 invalid input
+    syntax for type json`, a 500 on every write;
+  - **except `[]`**, whose array literal `{}` is valid JSON, so an empty array was
+    accepted and stored as an empty **object** — corruption, not an error;
+  - a **bare string** was passed raw (`x` is not JSON text, `"x"` is) — a 500,
+    while a number survived because `42` already is valid JSON.
+  
+  SQLite never showed any of it: `formatInput` ends with a bind-safety net gated
+  on that dialect, so the same empty registry is invisible there — which is why
+  tenant environments on Turso/SQLite and the suites that run on them were blind
+  to a defect live on every Postgres deployment.
+  
+  The registration is now separable from the DDL, on the ruling #7737/#10629
+  already made for federated objects — that flag is about DDL, and a binding that
+  is DDL-free must not ride on it:
+  
+  - `SqlDriver.registerObjectMetadata(objects)` installs a managed object's
+    coercion metadata with no `CREATE TABLE`, no `ALTER TABLE`, no existence probe
+    and no round-trip — the managed sibling of `registerExternalObject`, declared
+    optional on `IDataDriver` so drivers that don't need it omit it;
+  - a `skipSchemaSync` boot (and metadata reload) now takes that route instead of
+    doing nothing, keeping the cold-start budget the flag exists to protect;
+  - `initObjects` registers before the ADR-0015 DDL gate refuses, so objects on a
+    datasource ObjectStack is only a guest in are encoded from their declared
+    field types too. The refusal itself is unchanged.
+- f59035c: SQLite introspection now reports every member of a composite primary key, in
+  declared key order. `SqlDriver.introspectPrimaryKeys` filtered
+  `PRAGMA table_info` rows on `row.pk === 1`, but SQLite does not report `pk` as
+  a boolean — it is the column's **1-based position within the primary key**
+  (`0` = not part of the key, `1` = first key column, `2` = second, and so on).
+  The filter therefore kept only the first member of a composite key and silently
+  dropped the rest.
+  
+  Measured on in-memory SQLite, table declared `primary key (order_id, line_no)`:
+  
+  | signal | reported | reports instead |
+  | --- | --- | --- |
+  | `table.primaryKeys` | `['order_id']` | `['order_id', 'line_no']` |
+  | `column.isPrimary` for `line_no` | `false` | `true` |
+  
+  Both signals were wrong together and for the same reason: `introspectSchema`
+  derives `col.isPrimary` from `primaryKeys`, so a consumer could not recover the
+  dropped member by cross-checking the two. Fixing the list repairs the flag with
+  it.
+  
+  The rows are now also ordered by the `pk` ordinal rather than taken in
+  `table_info` row order (which is *column* order). The two differ whenever a key
+  is declared out of column sequence — a table with columns
+  `(carrier_code, shipment_id, leg_seq)` and `primary key (shipment_id,
+  carrier_code)` now reports `['shipment_id', 'carrier_code']` — and
+  `primaryKeys` is consumed as an addressing / upsert-conflict-target key, where
+  the order is load-bearing.
+  
+  Consumers affected: the federated-object codegen and the persisted
+  `external_catalog` (ADR-0015) recorded a partial addressing/upsert key, and
+  schema-drift comparison against a declared composite key read as drift on the
+  dropped member. `SqliteWasmDriver` and `TursoDriver` extend `SqlDriver` and
+  override neither method, so they inherit the repair. The Postgres and MySQL
+  arms did not have this defect and are unchanged.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+  - @objectstack/observability@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

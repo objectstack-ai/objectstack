@@ -1,5 +1,201 @@
 # @objectstack/core
 
+## 17.2.0
+
+### Minor Changes
+
+- ee2ff45: `ObjectKernel` no longer pre-injects the in-memory `job` fallback for the `job` core-service slot — a fallback must not fake capability (#10746, maintainer ruling 2026-08-22). `createMemoryJob()`'s `schedule()` records a job and never fires it (it owns no timer), so pre-injecting it made every "prefer the platform job service, else own a timer" consumer take the job-service branch on a kernel without `@objectstack/service-job` and then silently never run: `plugin-reports` logged `dispatcher registered with job service` and dispatched nothing, ever.
+  
+  Behavior change, FROM → TO: on an `ObjectKernel` without a registered `job` service, `getService('job')` FROM resolving a non-scheduling in-memory registry TO throwing `Service 'job' not found`. Consumers' documented no-job-service paths take over (`plugin-reports` falls through to its own `setInterval` and scheduled reports actually dispatch; schedule triggers and declarative jobs warn loudly instead of scheduling into the void), and the kernel says the absence out loud at boot: `Core service missing, functionality may be degraded: job`.
+  
+  One-line fix if you relied on the old behavior: install `@objectstack/service-job` for real scheduling, or — if you deliberately want the manual-trigger in-memory registry — register it explicitly: `kernel.registerService('job', createMemoryJob())` (the factory is still exported from `@objectstack/core`).
+
+### Patch Changes
+
+- 3b2af5e: `resolveUserAuthzGrants` issues its five independent reads (sys_user, both sys_member reads, sys_user_position, sys_user_permission_set) concurrently (#10825) — 8 sequential round trips become 4 waves on the fullest path (2 on the lightest), with byte-identical rows, filters, limits and tenancy scoping, pinned by a differential golden suite captured from the sequential implementation. No caching; nothing survives a request; authorization semantics unchanged by construction.
+- 47cd3ec: The kernel's two `Promise.race` timeout guards — the startup guard around each
+  plugin's `init`/`start`, and the shutdown guard around `performShutdown()` —
+  now reclaim **both** halves of the guard when the race settles: the timer is
+  cleared *and* the losing promise is settled (#10604).
+  
+  Neither site settled its loser, so the timeout promise and the reaction
+  `Promise.race` held on it were retained for the life of the process — four
+  leaking promises per showcase test run under `vitest --detectAsyncLeaks`, now
+  zero. The two hand-rolled copies had also drifted into doing opposite halves of
+  the same cleanup: the startup site cleared its timer and never `unref`'d, the
+  shutdown site `unref`'d and never cleared. Both now go through one internal
+  `TimeoutGuard`, so they cannot drift apart again. No exported API changes.
+  
+  **Behaviour change, at the shutdown guard:** the shutdown timer is no longer
+  `unref()`d. Two consequences for an embedding host (CLI, auth-proxy, test
+  runner):
+  
+  - After a **successful** shutdown, no timer is left armed. Previously the guard
+    survived its own race and stayed scheduled to fire against a kernel already
+    `'stopped'`. That late rejection was *handled* — `Promise.race` had attached a
+    rejection handler to it — so this was never an unhandled-rejection risk; it
+    was retained work and a wakeup after teardown.
+  - When teardown **hangs**, the guard now actually fires. An unref'd timer does
+    not keep the event loop alive, so a process with nothing else to run could
+    exit silently — status 0, teardown incomplete — before `shutdownTimeout`
+    elapsed, leaving `Shutdown timed out — forcing exit` and its `exit(1)`
+    unreachable in exactly the case they exist for. Reclaiming on settle keeps the
+    guard ref'd exactly as long as the race is undecided, which is the guarantee
+    the startup guard already had (#4813).
+  
+  If your host relied on a hung `shutdown()` letting the process fall out of the
+  event loop on its own, it will now wait up to `shutdownTimeout` (default 60s)
+  and then hard-exit with status 1. Lower `shutdownTimeout` in the kernel config
+  to shorten that window.
+- 9d7d2de: `resolveLocalizationContext` now memoizes a FAILED read's fallback per `(ql, tenantId, userId)` for 30s (#10221).
+  
+  On a fresh environment whose `sys_setting` table hasn't been created/migrated yet, every authenticated request re-ran the same `sys_setting` localization read, and every one of those reads failed the same way ("no such table"). The `#2409` batching had already collapsed the three per-key reads a single request used to issue into one query, but that one query still repeated on every subsequent request, and `driver-sql`'s `backendStatementFault` logs a `[sql-driver] DATABASE_ERROR` warning on every failed read — so the identical warning printed once per request and buried real errors in between.
+  
+  Only the case where the underlying read genuinely fails (a backend fault, e.g. the missing table) is cached; a successful read — including a legitimate "nothing configured yet" empty result — is never cached and always re-reads on the next call, so a settings write takes effect immediately. (An earlier version of this fix cached every outcome, mirroring `packages/plugins/plugin-audit/src/audit-writers.ts`'s existing TTL cache of this same read — safe there because audit-trail enrichment is best-effort, but not safe for `@objectstack/rest`'s use of this function: analytics date-bucketing reads the org timezone on every query and `packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` — the #1982/#2018 golden regression — asserts the very next read reflects a just-written timezone.) The `UTC` / `en-US` fallback behavior itself is unchanged; this only stops the failing query — and its log line — from re-running every request. The cache is keyed on the `ql` engine instance first, so two environments/tenants sharing one process never share a cached outcome, and self-heals within one TTL window once `sys_setting` exists.
+- c815c50: `resolveLocalizationContext` prefers `settings.getMany` — one grouped namespace read instead of three per-key `get()`s (#10826); older services without `getMany` keep the three parallel gets, and a thrown `getMany` lands in the same direct `$in` fallback a thrown `get` did.
+- 795ea05: A lapsed `sys_member` row now confers no org role either — one row, one answer (#10982)
+  
+  `resolveUserAuthzGrants` reads `sys_member` once and derives two facts from it:
+  `accessible_org_ids` (the `group` posture's read reach, ADR-0105 D2) and the
+  org-administration role projection into `positions` (ADR-0095 D3). Only the
+  first applied the ADR-0091 validity window. A membership outside
+  `[valid_from, valid_until)` was therefore excluded from org access while still
+  projecting its better-auth role — two answers from one read, and with
+  `role: 'owner'` the role reaches the `organization_admin` capability that
+  `derivePosture` reads for `TENANT_ADMIN`.
+  
+  The role projection now drops out-of-window rows **before** the derivation, the
+  same shape `sys_user_permission_set` already had, so an expired membership can
+  no more yield `org_owner` than an expired `admin_full_access` can yield
+  `platform_admin`. Fail-closed per ADR-0091 D2. Maintainer ruling, 2026-08-22
+  live session (item 2): a lapsed membership is *no membership*, not merely *no
+  org access*.
+  
+  **Why `patch` and not a breaking bump, argued in the open.** This is a real
+  change of authorization semantics — a membership that used to confer a role
+  stops conferring it — so the direction is a tightening, and tightenings are the
+  kind of change that normally earns a major. It is nevertheless `patch` because
+  the population it can affect is provably empty: `sys_member` declares neither
+  `valid_from` nor `valid_until` (see `sys-member.object.ts`), and `isGrantActive`
+  reads an absent bound as unbounded, so **no row any deployment can currently
+  store is lapsed** and every existing membership resolves exactly as before. That
+  is asserted directly rather than reasoned about, in
+  `resolve-authz-context.test.ts` ("a membership with NO bounds is unbounded —
+  every shipped row is unaffected"), alongside the load-bearing leg that an
+  in-window membership still projects its role. Landing it now is the cheap
+  moment: once the columns exist, the same change becomes a migration carrying
+  live semantics.
+  
+  **Not in scope, and deliberately so.** This does not add the validity columns to
+  `sys_member`, and it does not reach into `sys_user_permission_set` rows that
+  plugin-security's `reconcileOrgAdminGrant` provisioned from a membership role.
+  Such a grant is standing authority in its own right with its own ADR-0091
+  window; the role is only its provisioning source (ADR-0095 D3). The boundary is
+  pinned as a measured fact rather than left as an assumption.
+- 504c8d5: Materialize the RBAC catalog **per organization**, so a walled deployment can
+  administer positions, permission sets and sharing rules again (#10103).
+  
+  On a walled deployment (`group` / `isolated`) every principal — an organization
+  owner and a platform admin alike — listed **zero** positions, permission sets
+  and sharing rules while the tables held rows. Nothing could be bound through
+  Setup, and a declared `hierarchy-security` could never be armed by an operator
+  however loudly an app declared it.
+  
+  Every row in those three tables was organization-less. plugin-security's Layer 0
+  composes a strict `organization_id = :tenant` for a walled posture and the
+  middleware ANDs it into the read AST over the driver's
+  `(organization_id = :tenant OR organization_id IS NULL)`; the conjunction of the
+  two is the strict equality alone, so the driver's null arm was annihilated on
+  every authenticated read.
+  
+  **The wall is not changed, at either layer.** The rows get an owner instead:
+  
+  - `bootstrapDeclaredPositions`, `bootstrapBuiltinRoles`,
+    `bootstrapDeclaredPermissions` (plugin-security) and
+    `bootstrapDeclaredSharingRules` (plugin-sharing) upsert by
+    `(name, organization_id)` and run **one pass per organization** under a walled
+    posture — the framework built-ins (`platform_admin`, `org_*`, `everyone`,
+    `guest`) included, matching `sys_user_position`, which is already
+    per-organization, and matching both objects' own `unique: 'organization'` name
+    index.
+  - Seeding also fires on **organization creation**, not only at `kernel:ready`, so
+    a tenant created after startup does not administer an empty catalog until the
+    next restart.
+  - `single` posture is **unchanged**: exactly one organization-less pass, which is
+    the correct shape there.
+  
+  An organization-less row is now invalid state under a walled posture. Nothing is
+  reaped — grants (`sys_user_position`, `sys_position_permission_set`,
+  `sys_user_permission_set`, `sys_record_share`) point at these rows by id, so
+  deleting them would revoke standing access with no signal at the moment of loss.
+  Instead a per-organization pass that meets pre-fix organization-less rows for
+  names it seeds **says so loudly**, naming the rows and the remedy, and still
+  creates that organization's own copies. The failure this closes is the silent
+  no-op: a tenant-threaded pass that sees the old row through the driver's
+  compatibility arm, reads the name as already represented, and creates nothing
+  while reporting success.
+  
+  Two enforcement-plane reads are scoped in the same change, because the exposure
+  they carry only exists once per-organization copies exist:
+  
+  - `resolveUserAuthzContext`'s position name-sweep (`@objectstack/core`) resolved
+    `sys_position` by name across **every** organization, so the junction read
+    behind it collected another organization's `everyone` binding — a cross-organization
+    grant bleed, and an O(organizations) read on the per-request path. It is now
+    threaded through the driver's tenant chokepoint, keeping per-request resolution
+    O(the caller's own organization's catalog).
+  - plugin-security's permission-set `dbLoader` resolved sets by name unscoped,
+    with a `limit` equal to the number of names — correct while one row existed per
+    name, a truncation the moment copies exist. It is now scoped to the caller's
+    organization and its bound widened.
+  
+  Boot reconciliation is O(changed declarations): each pass reads what its
+  organization already has and writes only where a declaration actually differs, so
+  the common boot performs no writes at all. Steady state rides the
+  organization-creation hook.
+  
+  Cross-links #10119 / PR #10422, whose criteria-sweep scoping makes per-organization
+  sharing rules cheaper than the unscoped sweep they replace.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

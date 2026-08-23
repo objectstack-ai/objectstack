@@ -1,5 +1,287 @@
 # @objectstack/plugin-sharing
 
+## 17.2.0
+
+### Minor Changes
+
+- e222a53: **BREAKING** (compile-time only): twelve logger sink types that declared an
+  optional `error` now declare a **non-optional** `warn`, so a durability report
+  always has somewhere to land (#9754, #10556).
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` — every publishable package versions in lockstep, so a `major` would
+  promote the whole release. `patch` would be wrong in the other direction, because
+  this *can* break a consumer's build.
+  
+  `error` stays optional on every one of these types — hosts legitimately inject
+  reduced sinks, and requiring `error` was measured and rejected as #9754 option C.
+  What changes is that its *absence* now has a declared, guaranteed destination.
+  Call sites keep the `logger?.warn?.(…)` spelling as the backstop for hosts the
+  type cannot reach, so **no runtime behaviour changes**: nothing that printed
+  before stops printing, and nothing silent starts printing.
+  
+  ### Who has to change, and what to do
+  
+  Only a caller that hands one of these sinks an object with **no `warn` method** —
+  for example `{ info }` or `{ error }` alone. Add a `warn` member; there is no
+  rename, no removal, and no stored value or metadata key to rewrite. Every
+  construction site inside this repo already supplied one, so the in-repo cost was
+  zero; the compile error is reserved for the callers that were silently discarding
+  these reports.
+  
+  The affected types, by package:
+  
+  - `@objectstack/cloud-connection` — the internal `PluginContext['logger']`
+  - `@objectstack/metadata-protocol` — `IndexMigrationLogger`
+  - `@objectstack/plugin-approvals` — the internal `MinimalLogger` of `lifecycle-hooks`
+  - `@objectstack/plugin-audit` — `AuthEventAuditLogger`, `ReadAuditLogger`
+  - `@objectstack/plugin-auth` — `ReconcileMembershipDeps['logger']`, the internal
+    `LoggerLike` of `member-role-canonical`, and `AuthManagerOptions['logger']`
+  - `@objectstack/plugin-email` — `ReclaimLogger`, via `ReclaimAttachmentContentOptions`
+  - `@objectstack/plugin-reports` — `ReportServiceOptions['logger']`
+  - `@objectstack/plugin-sharing` — the internal `MinimalLogger` of `bulk-recompute`,
+    `rule-hooks` and `record-share-cascade`
+  - `@objectstack/plugin-webhooks` — `OptionalLogger`, via `AutoEnqueuerOptions`
+  - `@objectstack/service-knowledge` — `KnowledgeLogger`
+  
+  `AuthManagerOptions['logger']` is the one most likely to be reached from outside:
+  `AuthManager` is public surface, its `logger` option stays optional, and a logger
+  that *is* supplied must now carry `warn`. The only non-test construction site in
+  this repo passes the kernel `Logger`, whose `warn` is already required.
+  
+  `ReportService` and `AutoEnqueuer` additionally stopped defaulting their logger
+  field to `{}`. The field is now honestly optional rather than holding an empty
+  object that declared it could report and discarded everything. Behaviour is
+  unchanged in both directions.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/plugins/plugin-auth/src/auth-manager.ts#AuthManagerOptions, packages/plugins/plugin-auth/src/reconcile-membership.ts#ReconcileMembershipDeps, packages/metadata-protocol/src/migrations/partial-index-probe.ts#IndexMigrationLogger, packages/plugins/plugin-audit/src/auth-event-audit.ts#AuthEventAuditLogger, packages/plugins/plugin-audit/src/read-audit.ts#ReadAuditLogger, packages/plugins/plugin-reports/src/report-service.ts#ReportServiceOptions, packages/services/service-knowledge/src/knowledge-service.ts#KnowledgeLogger) every tightened type is a plain TypeScript logger interface -- no Zod projection, no metadata surface, and none is referenced by one -- so `objectstack migrate meta` has nothing to rewrite. Nothing is removed or renamed and no stored value moves; the only consumer action is adding a `warn` member at a construction site the compiler names. -->
+- 504c8d5: Materialize the RBAC catalog **per organization**, so a walled deployment can
+  administer positions, permission sets and sharing rules again (#10103).
+  
+  On a walled deployment (`group` / `isolated`) every principal — an organization
+  owner and a platform admin alike — listed **zero** positions, permission sets
+  and sharing rules while the tables held rows. Nothing could be bound through
+  Setup, and a declared `hierarchy-security` could never be armed by an operator
+  however loudly an app declared it.
+  
+  Every row in those three tables was organization-less. plugin-security's Layer 0
+  composes a strict `organization_id = :tenant` for a walled posture and the
+  middleware ANDs it into the read AST over the driver's
+  `(organization_id = :tenant OR organization_id IS NULL)`; the conjunction of the
+  two is the strict equality alone, so the driver's null arm was annihilated on
+  every authenticated read.
+  
+  **The wall is not changed, at either layer.** The rows get an owner instead:
+  
+  - `bootstrapDeclaredPositions`, `bootstrapBuiltinRoles`,
+    `bootstrapDeclaredPermissions` (plugin-security) and
+    `bootstrapDeclaredSharingRules` (plugin-sharing) upsert by
+    `(name, organization_id)` and run **one pass per organization** under a walled
+    posture — the framework built-ins (`platform_admin`, `org_*`, `everyone`,
+    `guest`) included, matching `sys_user_position`, which is already
+    per-organization, and matching both objects' own `unique: 'organization'` name
+    index.
+  - Seeding also fires on **organization creation**, not only at `kernel:ready`, so
+    a tenant created after startup does not administer an empty catalog until the
+    next restart.
+  - `single` posture is **unchanged**: exactly one organization-less pass, which is
+    the correct shape there.
+  
+  An organization-less row is now invalid state under a walled posture. Nothing is
+  reaped — grants (`sys_user_position`, `sys_position_permission_set`,
+  `sys_user_permission_set`, `sys_record_share`) point at these rows by id, so
+  deleting them would revoke standing access with no signal at the moment of loss.
+  Instead a per-organization pass that meets pre-fix organization-less rows for
+  names it seeds **says so loudly**, naming the rows and the remedy, and still
+  creates that organization's own copies. The failure this closes is the silent
+  no-op: a tenant-threaded pass that sees the old row through the driver's
+  compatibility arm, reads the name as already represented, and creates nothing
+  while reporting success.
+  
+  Two enforcement-plane reads are scoped in the same change, because the exposure
+  they carry only exists once per-organization copies exist:
+  
+  - `resolveUserAuthzContext`'s position name-sweep (`@objectstack/core`) resolved
+    `sys_position` by name across **every** organization, so the junction read
+    behind it collected another organization's `everyone` binding — a cross-organization
+    grant bleed, and an O(organizations) read on the per-request path. It is now
+    threaded through the driver's tenant chokepoint, keeping per-request resolution
+    O(the caller's own organization's catalog).
+  - plugin-security's permission-set `dbLoader` resolved sets by name unscoped,
+    with a `limit` equal to the number of names — correct while one row existed per
+    name, a truncation the moment copies exist. It is now scoped to the caller's
+    organization and its bound widened.
+  
+  Boot reconciliation is O(changed declarations): each pass reads what its
+  organization already has and writes only where a declaration actually differs, so
+  the common boot performs no writes at all. Steady state rides the
+  organization-creation hook.
+  
+  Cross-links #10119 / PR #10422, whose criteria-sweep scoping makes per-organization
+  sharing rules cheaper than the unscoped sweep they replace.
+
+### Patch Changes
+
+- df287e6: Put `plugin-sharing`'s shared `{ info?, warn? }` logger contract on the precise
+  member signature and absorb the third module onto it (#10692). Internal types
+  only — no local `MinimalLogger` was ever exported, so there is no published
+  surface change and no runtime behaviour change.
+  
+  `OptionalSharingLogger` in `logger-shapes.ts` shipped with the loose spelling
+  `(msg: any, ...rest: any[]) => void`, inherited from the two byte-identical
+  declarations it replaced. Its members are now spelled
+  `(msg: string, meta?: Record<string, any>) => void`, and
+  `sharing-rule-provenance.ts` — which already declared exactly that stricter
+  signature under its own local `MinimalLogger` — now imports the shared type
+  instead of declaring a seventh copy.
+  
+  That direction was chosen deliberately over unifying on the loose spelling.
+  `(msg: any, ...rest: any[])` documents nothing and catches nothing, which is the
+  same complaint this card levels at bare `Function`; folding the stricter module
+  onto it would have deleted real checking to buy uniformity. Taking the precise
+  spelling instead tightens the two modules that were already on the shared type,
+  and buys arity and type checking at all 12 in-module call sites — every one of
+  which already passes exactly a string message plus an optional metadata object.
+  
+  Caller cost is zero: every caller of the three affected binders passes
+  `ctx.logger as any` or `undefined`, so no caller constrains the signature.
+  
+  `check:optional-error-sink` (#9754) membership is unchanged and was verified
+  before and after: 37 sinks declare `error`, 12 required, 23 optional beside a
+  required `warn`, 2 permit silence, 2 baselined. The shared shape still declares
+  no `error` and must not grow one — that would enrol every module using it into
+  that gate's population, which is a contract decision for the #10556 family
+  rather than a side effect of de-duplication.
+  
+  `record-orphan-cleanup.ts`'s bare-`Function` members are deliberately untouched:
+  tightening them requires tightening two publicly exported option types first,
+  which moves that gate's population and remains open on #10692.
+- 93304c2: Collapse the two byte-identical `MinimalLogger` declarations in `plugin-sharing`
+  onto one shared `OptionalSharingLogger` (#10692). Internal types only — none of
+  the seven local `MinimalLogger` interfaces was exported, so no published surface
+  and no runtime behaviour changes.
+  
+  `plugin-sharing/src` declared **seven** module-local interfaces all named
+  `MinimalLogger`. The duplication was not the defect; divergence under one name
+  was. When #10556 made `bulk-recompute.ts`'s `warn` non-optional, `tsc` reported
+  the forwarding modules as:
+  
+  ```
+  Type 'MinimalLogger' is not assignable to type 'MinimalLogger'.
+    Two different types with this name exist, but they are unrelated.
+  ```
+  
+  `bu-tree-recompute.ts` and `primary-bu-projection.ts` were byte-identical, so
+  they now share one declaration in `logger-shapes.ts`. The new type is
+  deliberately given a DIFFERENT name: the next forwarding edge added between it
+  and a module that still declares its own `MinimalLogger` produces a diagnostic
+  naming two different types, instead of the same name twice.
+  
+  The other five declarations are left alone, each for a stated reason recorded in
+  `logger-shapes.ts`. Three are genuinely different contracts (`bulk-recompute.ts`
+  is the guaranteed sink; `rule-hooks.ts` and `record-share-cascade.ts` require
+  `warn` because they forward into it). Two are *not* the cheap unification the
+  card assumed:
+  
+  - `sharing-rule-provenance.ts` is `{ info?, warn? }` by optionality but carries a
+    stricter member signature, `(msg: string, meta?: Record<string, any>)`.
+    Folding it onto the `(msg: any, ...rest: any[])` spelling would delete real
+    checking; folding the others onto its spelling would tighten two modules.
+  - `record-orphan-cleanup.ts`'s bare `Function` members **cannot** be tightened
+    here: `Function` is not assignable to any concrete signature ("Type 'Function'
+    provides no match for the signature"), and the two loggers handed to it —
+    `SharingServiceOptions['logger']` and `ShareLinkServiceOptions['logger']` —
+    are themselves spelled with bare `Function`.
+  
+  `check:optional-error-sink` (#9754) membership is unchanged and was verified
+  before and after: 37 sinks declare `error`, 2 permit silence, 2 baselined. The
+  shared shape declares no `error` and must not grow one — that would enrol every
+  module using it into that gate's population, which is a contract decision for
+  the #10556 family rather than a side effect of de-duplication.
+- bc400af: **Behaviour change (narrowing):** an **org-stamped** sharing rule's criteria sweep is now scoped to that rule's own organization, where it previously swept **every** organization's records (#10119).
+  
+  `SharingRuleService.findMatchingRecords` (the whole-rule evaluation pass) and `recordMatches` (the per-record write-hook pass) ran the rule's criteria query under a bare system context carrying no tenant, for every rule. The recipient half was already org-aware — `expandRecipient` threads `rule.organization_id` into the team / business-unit / position graph services — so a rule stamped with an `organization_id` expanded recipients inside its own organization and then matched records belonging to all the others. `reconcile` materialized the cross product: `sys_record_share` rows granting one organization's users access to another organization's records.
+  
+  Measured on `main` before the change, through a real `ObjectQL` on a real `SqlDriver`: an `org_a`-stamped rule matched **the same four records as a platform-global rule** (`deal_a1`, `deal_b1`, `deal_b2`, `deal_p1`) and materialized a grant on each; the per-record hook pass minted a grant on `org_b`'s record with `grantsCreated: 1`.
+  
+  What changes, and for whom:
+  
+  - **Org-stamped rules** (`organization_id` non-null — what any org admin mints through `defineRule`) now run their criteria query with `tenantId` set to the rule's organization. The platform's existing chokepoint does the rest: `ObjectQLEngine.buildDriverOptions` threads it to `DriverOptions.tenantId` and `SqlDriver.applyTenantScope` emits `(organization_id = ? OR organization_id IS NULL)`. So such a rule matches its own organization's records **plus** platform-owned null-org records, and no other tenant's. `SharingRuleEvaluationResult.matchedRecords` falls accordingly, and the next reconcile pass **revokes** the cross-org `sys_record_share` rows it previously created, through the existing revoke-the-remainder branch — no migration is needed.
+  - **Platform-global rules** (`organization_id = null`) are unchanged: they keep the full unscoped sweep, which is their declared behaviour (documented at the `deleteRule` platform-authority guard). Both directions are pinned.
+  - **No public contract changes.** No schema, route, error code or accept/reject set moves; the system elevation on the criteria read is retained (the evaluator still sees rows no individual recipient could), only the tenant axis is added.
+  
+  The cross-org rows this stops creating were **inert** under a walled posture — the Layer-0 tenant wall AND-composes over sharing's Layer-1 widening, so such a grant could not open a read across the wall. The costs were `sys_record_share` bloat (every org-stamped rule scanning the whole table at `limit: 5000`) and a population that is wrong at rest, which any consumer reading `sys_record_share` directly, or any future softening of the wall, would inherit.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d483e1]
+- Updated dependencies [530c1df]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [8cc8401]
+- Updated dependencies [02b3b07]
+- Updated dependencies [2570ab0]
+- Updated dependencies [95437e7]
+- Updated dependencies [d23e3a0]
+- Updated dependencies [f3a8134]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [1048500]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [d29e271]
+- Updated dependencies [923c424]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+- Updated dependencies [2810695]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/objectql@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+  - @objectstack/types@17.2.0
+  - @objectstack/formula@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

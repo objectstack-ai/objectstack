@@ -1,5 +1,159 @@
 # @objectstack/metadata-core
 
+## 17.2.0
+
+### Minor Changes
+
+- 8cc8401: **BREAKING (accept-set tightening)**: a by-id `update`/`delete` whose `options.where` carries predicate keys beyond `id` is now refused loudly instead of silently dropping the predicate (#11009).
+  
+  The by-id dispatch routes to `driver.update(object, id, …)` / `driver.delete(object, id, …)`, which bind ONLY the primary key — every other `where` key was discarded with no diagnostic. A compare-and-set written as `{ where: { id, status: { $in: [...] } }, multi: false }` therefore evaluated to nothing and the write landed unconditionally, reading exactly like a working conditional write. Measured on `better-sqlite3` through a real `ObjectQL` + `SqlDriver`: `SqlHttpOutbox.redeliver`'s terminal-status guard was inert, so a delivery row claimed `in_flight` mid-redeliver was reset anyway and the redelivery reported success while the in-flight attempt kept running.
+  
+  What changes, per call shape (`resolveEngineUpdateDispatch` / `resolveEngineDeleteDispatch`, so every pinned test double inherits the same verdicts):
+  
+  - A `where` naming a scalar `id` **and nothing else** is unchanged — by-id, with or without `multi: true` (the `LifecycleService` guarded-reap idiom keeps its per-record cascade path).
+  - A `where` carrying a scalar `id` **plus other keys**, with a declared `multi: true` (id sourced from `where`): now routes to the **predicate path** (`driver.updateMany` / `driver.deleteMany`), which compiles EVERY `where` key — the compare-and-set spelling. Previously this dispatched by-id and dropped the extra keys.
+  - The same shape **without** `multi: true` — and any by-id call via a scalar `data.id` beside extra `where` keys, `multi` or not (the payload id outranks `multi` per #5748 and cannot be demoted onto the predicate path): now **throws**, naming the keys the by-id path would have dropped. Previously it succeeded with the condition ignored.
+  
+  A caller hitting the new refusal decides which of two things it meant, and each is a one-line edit at the call site: declare the predicate path (`multi: true`) so the full `where` is honoured and the result is the matched count, or drop the extra `where` keys to keep an unconditional single-row write. Flow authors reach this through `update_record` / `delete_record` nodes whose `filter` names `id` plus other keys without declaring `multi` — those configs were silently unconditional before and refuse loudly now.
+  
+  `SqlHttpOutbox.redeliver` itself now rides the predicate path, and `MemoryHttpOutbox.redeliver` re-checks terminal status after its guard, so both `IHttpOutbox` implementations agree: a row claimed between redeliver's read and its write is NOT reset, and `redeliver` reports `DELIVERY_NOT_ELIGIBLE` instead of success.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is removed or renamed — no spec key, no export, no config field changes spelling, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could serve an upgrader. The newly-refused call shapes were silently broken before this change (their declared condition was never evaluated); the refusal text itself names the two call-site choices, and choosing between them is a per-site intent decision (conditional vs unconditional write) that a mechanical rewrite must not make. -->
+- 05bc692: `runRepositoryContractTests` gains two narrow options so the shared invariant
+  table can be applied to `SysMetadataRepository` — the implementation that backs
+  every production metadata write, and the one that had never been handed to the
+  suite (#10420). Both are additive and optional; every existing call site is
+  unchanged.
+  
+  - **`primaryType` / `secondaryType`** move the suite's two *fixture* metadata
+    types (previously hard-coded `'view'` and `'object'`), defaulting to exactly
+    those. This is a fixture knob, not an invariant knob: no clause is added,
+    removed or weakened by moving it. It exists because an implementation may sit
+    behind a write-authorization door keyed on the type —
+    `SysMetadataRepository.assertAllowed()` refuses any type whose registry entry
+    lacks `allowOrgOverride`, `'object'` included — so a hard-coded fixture type
+    silently decided which implementations could be held to the table at all.
+  - **`declaredDivergences`** records an issue-tracked exception to the table.
+    It does **not** skip the clause it names — a skipped clause is
+    indistinguishable from coverage in a green run, which is the one failure a
+    shared contract suite must not have. It swaps in a clause that *pins the
+    divergent behaviour*, so the suite reds the day the implementation starts
+    conforming and whoever fixes it is told to delete the declaration in the same
+    PR. Shrink-only, audited in the fixing direction, like the repo's other
+    ledgers. The only member today is `resumableWatch` (contract invariant 6), and
+    the only declaration is `SysMetadataRepository` — see #10842.
+  
+  Publishable behaviour is otherwise untouched: `packages/metadata-protocol` gains
+  a test file only, and 32 of the suite's 34 clauses were already satisfied by
+  `SysMetadataRepository` on the first run.
+- f334d66: `MetadataRepository.watch()` — a numeric `since` now replays from the durable
+  log, and what a bare `watch(filter)` owes is written into the contract.
+  
+  **`SysMetadataRepository.watch(filter, since)`** read `since` only as a drop
+  filter on live events, so an event that had already committed was unreachable
+  through `watch()` however low `since` was set — even though the repository holds
+  a durable per-org `event_seq` log in `sys_metadata_history` and already reads it
+  org-wide in `nextEventSeq()`. Invariant 6 of the repository contract
+  ("`watch(_, since)` MUST replay all events with `seq > since` before delivering
+  live events") was therefore unimplemented in the repository backing every
+  production metadata write. It now replays through that same query, using the
+  row-to-event mapping extracted out of `history()`. The live listener is
+  registered before the durable read is issued and a set of delivered `seq`
+  numbers closes the replay-to-live seam, so an event committing mid-read arrives
+  exactly once; a failed durable read is raised to the consumer rather than
+  degraded into a silent live-only tail.
+  
+  **No behaviour change for a `watch()` with no `since`** — deliberately. Both
+  in-repo production subscribers (`MetadataManager.startRepositoryWatch()` and
+  `MetadataCache.start()`) attach that way, and replaying for them would push an
+  org's entire history through cache invalidation and HMR as "this just changed"
+  at every attach.
+  
+  **Contract text (`@objectstack/metadata-core`, `repository.ts`).** Invariant 6
+  now states its own boundary: a `watch()` with no `since` is owed **live events
+  only**; an implementation MAY additionally deliver events that had already
+  committed, but a caller MUST NOT rely on it, and a caller that needs the
+  already-committed prefix passes a numeric `since` or reads `history()`. That
+  half was previously unwritten and load-bearing — "no `since` replays
+  everything" existed only as `InMemoryRepository`'s implementation, and the
+  shared contract suite silently depended on it.
+  
+  **If you run `runRepositoryContractTests` from
+  `@objectstack/metadata-core/testing` against your own implementation**, one
+  clause changed shape. `watch filters by type and name` (which wrote twice, then
+  opened a watch and expected the match back) is replaced by `watch filters by
+  type and name — over the live stream`, which opens the subscription first and
+  writes after. FROM: an implementation passed by replaying its whole matching log
+  on a bare `watch(filter)`. TO: it passes by delivering, and filtering, the
+  events that commit after the subscription is established. An implementation that
+  replays as well still passes — the new clause asserts the floor, not the
+  maximum. If yours only replayed and never delivered live events, it was relying
+  on unspecified behaviour and now needs a live path.
+- 2810695: **BREAKING (accept-set tightening)**: a by-id `update` whose truthy scalar `options.where.id` names a DIFFERENT row than the truthy scalar payload `data.id` is now refused loudly — `UPDATE_ID_MISMATCH`, HTTP 400 — instead of silently binding the payload row and discarding the `where.id` predicate (#11142).
+  
+  `update(obj, { id: 'rec_1', title: 'x' }, { where: { id: 'rec_2' } })` used to write `rec_1` with no diagnostic: the caller declared "update rec_1 where id = rec_2" — a condition that can never hold — and the by-id path dropped the losing spelling exactly the way #11009's extra `where` keys were dropped. This was the one unhonoured-predicate shape #11009's refusal deliberately left standing, because refusing it partially reverses the #5748-pinned verdict (`a SCALAR data.id still wins over a scalar where.id`). The maintainer ruling on #11142 (2026-08-23) authorizes that reversal for the UNEQUAL truthy scalar shape only.
+  
+  What changes, per call shape (`resolveEngineUpdateDispatch`, so every pinned test double inherits the same verdict):
+  
+  - `data.id === where.id` (both truthy scalars) is **unchanged** — by-id. This is the normal REST spelling: the ingress folds the path id into the payload, so redundant-but-agreeing pairs are routine.
+  - `data.id` and `where.id` both truthy scalars and **different** — including differing only in type, e.g. `42` beside `'42'` — now **throws** `UPDATE_ID_MISMATCH` with `status: 400`, naming both ids. A declared `multi: true` does not rescue the call (the payload id outranks `multi` per #5748, so the contradiction stands). Previously the write landed on the payload row with the condition silently ignored.
+  - A **falsy** scalar `where.id` (`0`, `''`) beside a payload id is unchanged (a falsy id identifies no row on this ladder, so there is no second row address to conflict with), and a **non-scalar** `where.id` (`{ $in: [...] }`, an array, `null`) beside a payload id keeps its #5748 by-id verdict — widening over either is a separate decision, deliberately not taken here.
+  
+  A caller hitting the new refusal wrote two row addresses and meant one of them; each fix is a one-line edit at the call site: make the two ids equal (or drop `where.id`) to keep addressing the row by the payload id, or remove `id` from the payload to address the row by `where.id`. The refusal is decorated with `code: 'UPDATE_ID_MISMATCH'` and `status: 400` on the thrown error (registered in the ADR-0112 error-code ledger; the spec's `ErrorCode` union gains the member), so REST callers get a located 400 instead of a sanitised 500, and doubles pinned to `assertEngineUpdateDispatch` throw the identical envelope.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable surface is removed or renamed — no spec key, no export, no config field changes spelling, so `objectstack migrate meta` has nothing to rewrite and no ledger entry could serve an upgrader. The newly-refused call shape was a self-contradictory input whose declared condition was never evaluated; deciding which of the two ids the caller meant is a per-site intent decision a mechanical rewrite must not make, and the refusal text itself names both call-site fixes. -->
+
+### Patch Changes
+
+- 26f3588: **Fix:** the REST `/meta` doors now decide **organization scope on the folded type**, never on the raw URL spelling (#10340).
+  
+  Storage folds `/meta/:type` through `META_URL_TO_SINGULAR` — the complete spelling map — while the doors' scope predicate (`declaresOrgOverride`) tolerates only the manifest-collection spellings. For the two registry-derived spellings, `translations` and `email_templates`, the doors therefore read and wrote **env-wide** where the singular twin was org-scoped: an org-active author's `PUT /meta/translations/:name` landed an env-wide row their own org-scoped read then shadowed (persisted, receipted as live, served by nothing), and `GET` under one spelling answered a different partition than the other — one item, two namespaces, addressed by spelling (#4432 / #7894's defect one layer down).
+  
+  - All nine `/meta` org-scope call sites (list, single read, layers view, compound read, save, compound save, delete, publish, rollback) fold the segment through `canonicalMetaUrlType` **before** calling `organizationIdForMetaRead` / `organizationIdForMetaWrite`, exactly as `metadata-url-spelling.ts` mandates: folding happens at the boundary and only there.
+  - The `GET /meta/:type/:name/published` code-store fallback folds too — the smaller second site of the same class: it reads a registry keyed by canonical types, so a recognised plural of a code-published item answered 404 while the singular answered 200.
+  - **Deliberately unchanged:** `GET /meta/_drafts` still applies no fold (it filters by the draft row's *stored* type, which is canonical because the protocol folds on save), the request `type` handed to the protocol stays the raw segment (the protocol owns its own fold), and `declaresOrgOverride` does **not** absorb the URL map — a predicate below the boundary consuming the URL spelling contract is the repair #7894 forbids. `@objectstack/metadata-core` changes are documentation and pins only: the predicate's header no longer claims parity with the protocol's normalization (measured false), and new tests pin both the composed fold→predicate contract and the predicate's deliberate limit.
+  
+  No stored rows move: rows previously minted env-wide through a plural spelling stay env-wide and keep serving org-less callers (and org-active callers until an org overlay exists), which is the same layering the singular spelling always had.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

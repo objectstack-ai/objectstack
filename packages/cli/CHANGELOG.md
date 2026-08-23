@@ -1,5 +1,1327 @@
 # @objectstack/cli
 
+## 17.2.0
+
+### Minor Changes
+
+- 2866d5f: `os migrate duplicates` now reports the rows blocking the three `kernel:ready`
+  NULL-safe index tightenings, and the three migrations' conflict messages point
+  there instead of at `os migrate plan` (#8725).
+  
+  **The gap.** Three migrations replace a declared UNIQUE index with the NULL-safe
+  — and sometimes active-rows-only — form it was always meant to have, at
+  `kernel:ready` on a serving boot:
+  
+  | table | index(es) | migration |
+  | --- | --- | --- |
+  | `sys_metadata` | overlay `active` + `draft` | `ensureMetadataOverlayIndexes` |
+  | `sys_view_definition` | `idx_sys_view_def_active` | `ensureViewDefinitionActiveIndex` |
+  | `sys_setting` | the declared row identity | `ensureSysSettingIdentityIndex` |
+  
+  Each is a tightening, so rows an installation already holds can block it. The
+  migration then refuses — previous index kept, no row touched, boot continues —
+  and reports at `error` on the boot channel. That channel was the only one:
+  these indexes are invisible to `os migrate plan` **by construction**, twice
+  over. After the tightening, `isRuntimeManagedIndex` excludes the index (without
+  that exclusion a boot would propose rebuilding away the guarantee it had just
+  created); before it, each migration deliberately reuses the *declared* index's
+  name, so the reconciler's name-matched slot reads as filled whichever physical
+  form is really there. Measured with a matched control — one database carrying
+  the same duplicate damage under a declared index and under
+  `sys_view_definition`'s runtime one — `plan` named the declared one in full and
+  said nothing whatsoever about the runtime one.
+  
+  **What is new.** The report gains a `runtimeIndexPreflight` section, one entry
+  per index, each `blocked` (with every colliding key group and its row count),
+  `clear`, `table-absent` (`sys_setting` arrives with the optional settings
+  service) or `unreadable` (with the driver's own message), plus
+  `summary.runtimeIndexesBlocked` and `summary.runtimeIndexBlockingRows`.
+  `reportVersion` moves `1` → `2`. Every `1` field keeps its name, shape and
+  meaning; the bump says there is more in the document, for consumers that
+  validate it strictly.
+  
+  The probes are the migrations' own duplicate-listing statements —
+  `@objectstack/metadata-protocol` exports `collectRuntimeIndexPreflight` and
+  `runtimeIndexProbes`, which read those builders rather than restating the keys,
+  so the pre-flight and the boot report cannot describe different duplicates. On
+  MySQL the `sys_setting` probe uses the migration's MySQL spelling, where the
+  bare form is `ERROR 1064` on the reserved word `key`.
+  
+  **The referral, repointed rather than deleted** (maintainer ruling, 2026-08-22).
+  All three conflict messages told the operator to "run `os migrate plan`" as an
+  alternative way to list the blocking rows, and that instruction was false: they
+  now name `os migrate duplicates`, which answers it. The six doc comments that
+  state the same referral as part of the ADR-0120 D4 disposition are updated with
+  them.
+  
+  **Nothing about a migration's behaviour changes.** No tightening is armed,
+  deferred or altered, and `os migrate plan`'s drift contract is untouched. The
+  pre-flight only makes the refusal's evidence readable one command before the
+  restart — from a command that boots read-only and writes nothing, which is
+  pinned logically (schema plus every row, ordered) rather than by a file hash: a
+  raw hash over a SQLite file moves on any read-write open and would accuse this
+  command of mutating the install it exists to describe.
+- 1c3a46f: feat(cli): `os g skill NAME` scaffolds an AI skill, and writes it as `NAME.skill.ts` so the loader can find it (#11025)
+  
+  Completes the second half of the ADR-0063 Option A ruling whose first half
+  retired `os g agent` (#10359). That retirement left authors told to write
+  `src/skills/NAME.skill.ts` by hand because no scaffolder existed; this adds it,
+  and `os g agent`'s refusal, the CLI README and the CLI docs now name the
+  command instead of apologising for its absence.
+  
+  The filename is the point, not a detail. `DEFAULT_METADATA_TYPE_REGISTRY`
+  declares `skill`'s file convention as `*.skill.ts` / `*.skill.yml`, while this
+  harness has always written `NAME.ts`. `skill` is `allowRuntimeCreate: true` —
+  a type the platform expects to discover — so a scaffold matching no pattern
+  would type-check, validate and publish with nothing anywhere reporting that it
+  had been skipped: the silent-strip shape the `agent` retirement closed,
+  re-entering through the scaffolder that replaced it. `skill` therefore
+  overrides the harness filename through a new per-generator hook, and the
+  barrel re-export is derived from the file that was actually written rather
+  than rebuilt from the metadata name.
+  
+  **The other six generators are unchanged** and still write `NAME.ts` with a
+  `'./NAME'` barrel line, pinned by a control assertion in the new test.
+  Converging the whole scaffolder on the registry's `NAME.TYPE.ts` convention —
+  the shape the example apps already author in — moves every generator's output
+  plus the docs and examples that show it, and is deliberately left as its own
+  decision.
+  
+  Three authoring choices the template makes, each written into the generated
+  file so the next author inherits the reasoning and not just the value:
+  `tools: []`, because under ADR-0064 an agent's tool set is the union of its
+  skills' tools with no global fall-through, so an empty list grants nothing
+  while a placeholder name would resolve to nothing and be reported by
+  `os validate` as `ai-skill-tool-unresolved`; `surface: 'ask'` written out
+  rather than left to the schema default, because the affinity it declares is
+  enforced at load and a default taken in silence is invisible to whoever edits
+  the file next; and `defineSkill` rather than a bare typed literal, so the
+  object is parsed at module load. The template is **not** copied from
+  `SkillSchema`'s or `defineSkill`'s `@example` blocks — both pass
+  `triggerPhrases`, a retired-key tombstone that rejects on parse (#11026).
+- e598b1c: `os serve` refuses a relative `plugins: [...]` entry, naming the two spellings
+  that do work (#10944)
+  
+  A string entry in the served app's own `objectstack.config.ts` that is not a
+  bare package name was handed straight to `import()`, which ESM resolves against
+  the file containing the call — `@objectstack/cli/dist/commands/serve.js`. The
+  served app's root never entered the resolution, so a relative path could not
+  address anything the app owns. Measured on `origin/main`, from a fixture app
+  that really did carry `local-plugin.js` beside its `package.json`:
+  
+  ```
+  './local-plugin.js'  -> Cannot find module '<cli>/src/commands/local-plugin.js'
+                          imported from '<cli>/src/commands/serve.ts'
+  '../local-plugin.js' -> Cannot find module '<cli>/src/local-plugin.js'
+  '..'                 -> LOADED — the CLI's own command barrel
+                          (CompileCommand, ValidateCommand, ServeCommand, …)
+  ```
+  
+  The app's own file was never seen in any of them. The third row is the same
+  fact stated as a positive: a relative entry can load a module, but only ever
+  one belonging to the CLI. The boot loop then caught the failure, printed one
+  red `✗ Failed to load plugin:` line naming a path inside the CLI's install
+  directory, and served the app **without** the plugin — a deployment that looks
+  healthy while quietly missing the extension its config declared.
+  
+  Such an entry is now refused before any import is attempted, with a message
+  that names both spellings that resolve from the app:
+  
+  ```
+  Refused the plugin entry './local-plugin.js' in `plugins: [...]`: a RELATIVE path there is
+  resolved against the CLI's own installation directory, never against your app — so
+  it can never load a file from your project. This spelling has never worked; it used
+  to fail with a "Cannot find module" naming a path inside the CLI's install directory.
+  
+  Use one of the two spellings that resolve from your app:
+  
+    1. a package name your app DECLARES in its own package.json:
+           plugins: ['@mycompany/crm']        (then: pnpm add @mycompany/crm)
+  
+    2. an absolute path, or a file:// URL the config computes for itself:
+           plugins: [new URL('./local-plugin.js', import.meta.url).href]
+  ```
+  
+  **What changes for a config that carries such an entry.** The plugin was never
+  loaded before and is not loaded now, and the boot still continues past the
+  failed entry exactly as it did — the observable difference at boot is the text
+  of the one red line. The entry has *never* worked, but it failed **quietly
+  enough to be missed**: an author who read `Cannot find module …/@objectstack/
+  cli/dist/commands/local-plugin.js` had no way to tell that the spelling itself
+  was the problem, so a config could carry a dead `plugins:` entry indefinitely
+  while the deployment appeared fine. That is the silence this closes.
+  
+  `minor` rather than `patch` because one shape does change what it loads:
+  `plugins: ['.']` / `plugins: ['..']` resolved into the CLI's own package and
+  could register the CLI's command barrel as a plugin. Those are now refused.
+  Nothing in `content/docs`, `examples/` or the test suite writes any relative
+  `plugins:` spelling, so no documented usage moves.
+  
+  Scope is deliberately narrow, and every other shape that reaches this line was
+  measured rather than assumed. Untouched: bare package names (declared or not,
+  scoped or not — including a bare `local-plugin.js`, which ESM reads as a
+  package name and which keeps its existing "declare it in that app's
+  package.json" answer), absolute POSIX paths, `file://` URLs, Windows drive
+  paths (`C:\app\plugin.js`), `node:` builtins and `data:` URLs. All of those are
+  base-independent — they resolve to the same module whoever imports them — which
+  is exactly why they are none of this rule's business.
+  
+  Resolving a relative entry against the **served app's root** instead is a
+  capability addition with no measured pull today; it stays a maintainer
+  decision, and this refusal is the collection point for such a request.
+- 15b63e8: fix(cli): **BREAKING** — the `agent` generator is retired, and `os g agent` now says why and points at skills (ADR-0063 §2, #10359)
+  
+  **⛔ If a script, a Makefile or a CI step in your project runs `os g agent`, it
+  will now exit 1.** That is the intended outcome and the one way this change can
+  interrupt you: the command is gone, deliberately, and the failure is how you
+  find out. Everything it used to produce was already being discarded — read on.
+  
+  `minor`, not `major`: during the launch window this stack ships breaking changes
+  as `minor` (pre-1.0 semantics under lockstep versioning — see
+  `scripts/check-changeset-no-major.mjs`).
+  
+  **What the command actually did.** `os g agent <name>` scaffolded a typed
+  `AI.Agent` into `src/agents/`. Per ADR-0063 §2 (which reversed ADR-0040 §3) the
+  kernel ships exactly **two** agents — `ask` and `build` — bound by surface and
+  never picked from a roster, and the runtime catalog **filters out every
+  non-platform agent record**. So the scaffolded file parsed, passed
+  `os validate`, published without complaint, and then never appeared anywhere.
+  No error at any step. An author who followed the documented example got a file,
+  a green validate, a successful publish, and nothing to show for it.
+  
+  **Why the roster entry was not simply deleted.** A deleted type falls through to
+  `Unknown type: agent` plus a list of what is left, which tells the author their
+  spelling is not on the list and invites them to hunt for the right spelling of
+  something that no longer exists — the same silence, one step earlier. `agent` is
+  now a **retirement ledger entry** instead, and the refusal carries both halves:
+  the decision that withdrew the surface, and the surface to author in its place.
+  What you see:
+  
+  ```
+    ✗ `os g agent` was retired — agents are platform-internal (ADR-0063 §2).
+  
+    The kernel ships exactly two agents, `ask` and `build`, bound by surface.
+    An agent you author still parses and still publishes — and the runtime
+    catalog then filters it out, so it never appears and nothing tells you.
+    This command scaffolded exactly that file, so it is retired, not repaired.
+  
+    Author a SKILL instead. Skills (plus tools / MCP) are the third-party
+    extension primitive ADR-0063 names — the live surface this one was not.
+  
+    Scaffold one — the file lands where the loader looks for it:
+  
+        os g skill <name>    ->  src/skills/<name>.skill.ts
+  
+    It writes a `defineSkill` template with `surface` and `tools` filled in
+    and explained, ready to edit.
+  
+    Docs: https://objectstack.ai/docs/ai/agents
+  ```
+  
+  **The call is not mechanically rewritable.** A skill is a different artifact
+  with a different schema, not a renamed agent, so delete the `os g agent` call
+  rather than renaming it — then run `os g skill` and fill the template in. (This
+  message originally said no scaffolder existed; `os g skill` shipped in the same
+  release, so the text above is what the command prints today.)
+  
+  `agent` leaves the generator roster, which is `object`, `view`, `action`,
+  `flow`, `dashboard`, `app` — plus `skill`, added in this same release. The docs
+  that advertised the retired one — the `os g agent support`
+  example, the `agent` / `src/agents/` row of the Available types table, and
+  `os g agent sales-assistant` in the Typical Workflow block — are gone from
+  `content/docs/deployment/cli.mdx`, which carries the retirement note instead;
+  `packages/cli/README.md`'s type roster follows. The quick-start project-layout
+  map, which listed `src/agents` as the directory an app author writes AI metadata
+  into, now names `src/skills`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A CLI COMMAND NAME is an invocation surface, not authorable metadata. There is no authorable key, no `sys_metadata` row and no schema to tombstone here, so there is nothing for `objectstack migrate meta` to rewrite, nothing for `spec-changes.json` to project and no FROM -> TO spelling for the upgrade guide to carry: a skill is a different artifact rather than a renamed agent, so even with `os g skill` shipping in this same release there is no FROM -> TO call rewrite to prescribe — the author deletes the call and fills in a scaffolded template. Nor is the ledger the only notification channel this time, which is the difference from `http-request-errors-total-retired` (where an operator's Grafana panel silently drew a flat zero and the entry was the sole way to say so): the command itself now refuses, exits 1, names ADR-0063 and points at skills at the exact moment and place of use. Same reasoning shape as ADR-0087's D7 addendum, one surface over — there the compiler carries the notice, here the CLI does. -->
+- 7940de5: **BREAKING** Retire the `@capabilities` hook-body directive comment (#10917).
+  
+  `os build` no longer reads a `@capabilities` line out of a handler body, and the
+  docs no longer teach one. A body's capabilities are either inferred from its
+  source, or declared as data in `body.capabilities` on the hook or action — the
+  route that is measured to survive the build, and now the only way to name a token
+  the code itself does not reveal.
+  
+  **Nothing an author wrote has to change.** The directive was read off the
+  handler's stringified source, and `loadConfig` runs every config through
+  `bundle-require` and esbuild, which strips `//` line comments before the handler
+  is ever a runtime function. Measured on all four ordinary authoring shapes —
+  `objectstack.config.ts`, `.js`, `.mjs`, and a handler imported from a local
+  module — it reached the extractor from none of them: the build exited 0, printed
+  nothing, and shipped the inferred capabilities alone. A config that still carries
+  the comment builds to the same artifact before and after this release, so
+  deleting it is optional and changes no output. What is gone is the wrong
+  convention it taught, silently, to everyone who copied it out of the docs — a
+  handler asking for more than inference derived was refused by the sandbox at
+  runtime, far from the cause.
+  
+  Ruled under ADR-0049 enforce-or-remove: a capability declaration nothing parses is
+  a false promise, and this one could not even be typed wrongly-but-visibly, because
+  every authoring path deleted it before the extractor looked.
+  
+  The retirement kit: the override branch in `extract-hook-body.ts` and the two unit
+  tests that pinned it are gone; the extractor header and
+  `content/docs/automation/hook-bodies.mdx` record the removal instead of the
+  spelling; the `os build`-level test keeps pinning both halves — the comment
+  contributing nothing, and `body.capabilities` surviving — and a unit pin standing
+  on the one shape where the override ever fired now asserts it grants nothing.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The retired surface is a COMMENT inside a hand-written handler, not metadata. It has no spec schema, no defKey:name row in authorable-surface, and nothing that `objectstack migrate meta` can reach or rewrite, so no ADR-0087 ledger entry is expressible for it; inventing one would misdate a retirement the registry cannot honestly carry. It was also inert on every measured authoring path, so no consumer has a rewrite to perform at all — keeping the comment and deleting it produce the same build output. -->
+
+### Patch Changes
+
+- 02b3b07: Point every runtime-emitted documentation URL at the canonical host, and retarget the
+  metadata-protection `docsUrl` at a page that actually exists.
+  
+  Two defects, one string. The host half: `docs.objectstack.ai` is an alias that redirects
+  to `https://objectstack.ai` path-preservingly, so nothing here was a broken link — it was
+  the unratified spelling sitting in the places a user copies from. The CLI's spec-version
+  advisory, the Setup and Studio in-app overview pages (English and Chinese alike), and a
+  showcase demo action now all name the canonical host.
+  
+  The path half is the real fix. All 29 `protection.docsUrl` values on the platform's
+  system objects and apps pointed at `/adr/0010-metadata-protection`, and `/adr/...` is not
+  a route on any host: the docs site mounts `content/docs` under `/docs`, `docs/adr/` is
+  not published, and no redirect source lives outside the `/docs` space. The slug was wrong
+  too — the record is `0010-metadata-protection-model.md`. Studio renders this URL as a
+  link in the lock banner, so an operator asking why an item is locked was being sent
+  nowhere. They now point at `https://objectstack.ai/docs/references/shared/protection`,
+  the published reference for the very schema that carries the field.
+- 5a90c56: Stop claiming the `os serve` capability loop loads a "host copy first" (#10909).
+  Two module-header comments in `packages/cli/src/commands/serve.ts` — above the
+  `@objectstack/plugin-email` and `@objectstack/service-sms` imports — described
+  the capability loop (`Serve.CAPABILITY_PROVIDERS`, the `for (const cap of
+  requires)` block) as resolving `EmailServicePlugin`/`SmsServicePlugin` "host
+  copy first". Measured at head, the loop does a bare `await import(spec.pkg)` /
+  `await import(ex.pkg)` — no `importFromHost` in either path — which Node ESM
+  resolves against **this CLI's own** realpath, so the CLI's bundled copy always
+  wins; the host app's copy is never consulted. The comments described a
+  behaviour the code does not have.
+  
+  The corrected comments also name the contrast the file now actually contains:
+  `Serve.importConfigPlugin` (the served app's own `plugins: [...]` entries) IS
+  host-anchored — an app-declared package wins there — while the capability
+  loop is not. Making that split legible is the point of the fix, so the next
+  reader does not assume one resolution rule governs the whole file.
+  
+  Comment-only: no runtime path, resolution order, or accepted specifier changes.
+  All 21 `CAPABILITY_PROVIDERS` packages remain CLI-declared, so bare resolution
+  still finds every one of them today — this only corrects what the comment
+  claims about *how* that resolution happens.
+- 675ab57: **First-run polish:** a brand-new scaffold's very first `pnpm install` no longer reports two unmet peer dependencies (#10326).
+  
+  Reproduced on a clean scaffold from published `create-objectstack@17.1.0` — no lockfile, `node_modules` removed, nothing configured by the user — and again on the second scaffold path, `objectstack init`. Both printed the same two:
+  
+  ```
+  ✕ unmet peer better-call
+    Installed: 1.4.0
+    Wanted:
+      1.3.7:
+        @better-auth/scim@1.7.0-rc.1
+  
+  ✕ unmet peer better-sqlite3
+    Installed: 13.0.3
+    Wanted:
+      ^12.0.0:
+        better-auth@1.7.1
+  ```
+  
+  Nothing was broken — but it is the first screen a newcomer sees, and there is nothing they did to cause it or can do about it.
+  
+  **`better-sqlite3`: the pin is right and the upstream range is stale — so it is widened, not corrected.** better-auth 1.7.1 declares `better-sqlite3` as an **optional** peer at `^12.0.0`, and it governs exactly one configuration: a raw better-sqlite3 `Database` handed to better-auth's `database` option, which its Kysely dialect then drives. ObjectStack never takes that path — `AuthManager.createDatabaseConfig()` returns `createObjectQLAdapterFactory(dataEngine)`, and every `better-sqlite3` use under `plugin-auth` is knex's `client: 'better-sqlite3'` beneath ObjectQL. Measured anyway on the configuration the range *does* govern: better-auth 1.7.1 with `database: new Database(':memory:')`, running `getMigrations().runMigrations()`, `signUpEmail`, `signInEmail` and adapter `findOne`/`update`/`delete`, is green on **better-sqlite3 13.0.3** and byte-for-byte equivalent on **12.11.1**. The same probe with `Database.prototype.prepare` neutered fails, so that green is the driver's and not an unexercised path. Pinning our own `^13.0.3` declarations back to `^12` would downgrade a native module across the platform to satisfy a range measurement shows is simply behind.
+  
+  **`@better-auth/scim`: the rc pin stays, and one `better-call` copy is the correct tree.** `npm view @better-auth/scim dist-tags` reads `latest: '1.7.1'`, but stable 1.7.x ships the rc.2 whole-model rewrite, so adopting it is a separate migration rather than a version bump; the exact `1.7.0-rc.1` pin is deliberate. The rc peers an exact `better-call@1.3.7` while better-auth 1.7.1 depends on `1.4.0` — and a better-auth plugin has to share the **host's** better-call instance, so the single 1.4.0 copy every install already resolves is right, not a skew to repair. This declaration retires together with the rc pin.
+  
+  **What changed, and what deliberately did not.** Both remedies are pnpm `peerDependencyRules.allowedVersions` entries, scoped `<declaring package>><peer>` so each widens exactly one declaration. They ship *inside* the scaffold — the bundled `pnpm-workspace.yaml` template and the one `objectstack init` renders — because a block in this repo's own workspace file does not travel with published packages. `allowedVersions` changes what pnpm **reports**, never what it resolves: measured on both scaffold paths, the lockfile is byte-identical with and without it (0 lines of diff), and no dependency version, range or resolution moved anywhere. This repo's own resolutions are untouched.
+- 8d1fa00: Two ways to invoke the CLI wrong used to present as a crashed boot. Both now say what they are.
+  
+  `node packages/cli/dist/index.js` — the package `main`, which is a re-export barrel — ran to completion, printed nothing and exited 0. Backgrounded, that is indistinguishable from a server that came up and died. It now writes two lines to stderr, the first saying that running this file starts nothing and the second naming `bin/run.js` as the CLI entry point, and exits 1.
+  
+  A rejected invocation such as `objectstack dev --no-ui` answered with oclif's error line followed by a full usage dump, and in a background log the dump is what the eye lands on. One line now goes to stderr ahead of it:
+  
+  ```
+  objectstack: INVOCATION ERROR — Nonexistent flag: --no-ui. The command never ran: nothing was started and nothing is listening. Invoked as: objectstack dev --no-ui
+  ```
+  
+  No flag surface changed: `dev` still rejects `--no-ui` (only `serve` declares `ui` with `allowNo`). What changed is what the CLI says when it rejects an invocation.
+- eee2b65: docs(cli): drop the phantom `os codemod v2-to-v3` claim and stale `projects/` tree node (#10881)
+  
+  `packages/cli/README.md` is this package's published README, and it carried two
+  false claims about what the CLI can do.
+  
+  Its "Code Transforms" section tabled `os codemod v2-to-v3` in the exact same
+  format as the ~60 real commands above it, and the Architecture source-tree
+  listing showed a matching `src/commands/codemod/v2-to-v3.ts`. Neither the
+  command nor the file has ever existed: `packages/cli/src/commands/` has no
+  `codemod/` directory, and oclif (which resolves commands by globbing
+  `dist/commands/**/*.js`) returns `command codemod:v2-to-v3 not found` (exit 2).
+  Removed rather than marked "not yet available", because a reader-facing
+  row/node with that exact name and shape would still misdescribe the one
+  concrete plan for this space: #9591 (`os migrate meta --write`, on hold,
+  targeting v18) is a differently-scoped, differently-named command over the
+  mechanical retired-key set, not a "v2 config to v3 format" transform — so there
+  is no accurate future command to point the row at. The "not yet available"
+  information already lives in `content/docs/protocol/backward-compatibility.mdx`
+  and `docs/DX_ROADMAP.md`; this brings the package README in line with the tool
+  itself, which lost the same false prescription in #10882.
+  
+  The same source-tree listing also showed a `projects/` node under
+  `src/commands/` with `list/show/create/switch/bind` — stale since the v5.0
+  `project` → `environment` rename (ADR-0006, no aliases). Renamed to
+  `environments/`, matching the real directory; the subcommand file list was
+  already accurate and is unchanged.
+- 65c4a13: docs(cli): correct three more stale `os projects` mentions in the README prose (#10927)
+  
+  Follow-up to #10881, which renamed the Architecture source-tree node. This
+  covers the three remaining places in `packages/cli/README.md` that described
+  an `os projects` command surface as if it still resolved:
+  
+  - The Cloud command table (`:75`) claimed `os projects create` was a
+    registered **alias** of `os environments create`. It is not: none of the
+    five files in `packages/cli/src/commands/environments/` (`list.ts`,
+    `show.ts`, `create.ts`, `switch.ts`, `bind.ts`) declares an `aliases` static
+    field, and neither does the `oclif` block in `packages/cli/package.json`.
+    Reworded to name it as the pre-rename spelling instead: "was `os projects
+    create` before the v5.0 project → environment rename (ADR-0006, no
+    aliases)".
+  - The Plugin Management prose (`:98`) called `os projects bind ...` a
+    "legacy" path that "still binds" an artifact — implying a working
+    fallback. Replaced with the real current invocation, `os environments
+    bind ...`.
+  - The Typical Workflow example (`:278`) used `os projects bind ...` directly,
+    with no caveat at all. Same replacement, and the trailing comment ("Bind to
+    a Cloud Project") is updated to "Cloud environment" to match — "Project"
+    now means only the npm/monorepo sense post-rename (ADR-0006).
+  
+  Verified against the built binary (`packages/cli/bin/run.js`), matching the
+  falsification standard from triage: the old spellings still fail —
+  `Error: Command projects:create not found.` / `Error: Command projects:bind
+  not found.` (exit 2, both) — and the new spellings resolve — `os environments
+  create --help` and `os environments bind --help` both exit 0 and print their
+  real flag/argument help.
+- bde0ab9: Remove the abandoned tsup build path from `packages/cli` (#10185): the
+  `tsup.config.ts`, the orphaned `src/bin.ts` it was the only referrer of, and
+  the now-unused `tsup` devDependency.
+  
+  The package has built with `tsc -p tsconfig.build.json` since the oclif
+  migration, which also introduced `oclif.commands.target: "./dist/commands"`
+  and moved the `bin` field onto `bin/run.js`. The tsup config was left behind
+  by that commit and never invoked again — but it was not inert. It declared
+  `clean: true` with only `src/bin.ts` and `src/index.ts` as entries, so anyone
+  running the obvious `tsup` next to a `tsup.config.ts` would wipe `dist/` and
+  emit no `dist/commands/**` at all, leaving a CLI that resolves zero commands.
+  Deleting it removes the trap rather than documenting it.
+  
+  No published behaviour changes: the resolved oclif command surface is
+  identical before and after (60 commands, 68 topics). The only build-output
+  difference is that `dist/bin.js` — a re-export of `execute` from
+  `@oclif/core` that nothing imported — is no longer emitted.
+- 53428b8: Fix `os serve` failing to boot with `OS_CLUSTER_DRIVER=redis` when the app
+  declares `@objectstack/service-cluster` (#10645). The cluster gate and its
+  driver were reached through a bare dynamic `import()`, which Node ESM resolves
+  against the CLI's own realpath — inside the framework workspace — so packages
+  installed under the host app were invisible to it and boot died with
+  `Cannot find package '@objectstack/service-cluster'`. Both loads now go through
+  the host-anchored importer `serve` already uses for its other optional and
+  enterprise packages, so any package the app declares resolves the way the app
+  declares it. The host importer is now defined at the top of the boot sequence
+  rather than partway down, which is what made these two loads fall back to bare
+  resolution in the first place. No change to what `serve` accepts or refuses:
+  an undeclared package is still refused by the same declaration gate.
+- 63d603e: **Fix:** `os datasource list-tables`, `os datasource introspect` and
+  `os datasource validate` now read the response envelope the server actually
+  emits, so all three work against a live server for the first time (#10675).
+  
+  The three commands read the pre-#3843 **flat** shape — `body.tables`,
+  `body.draft`, `body.results`, and `body.error` as a string — while every REST
+  body the platform sends is the declared envelope written by `sendOk` /
+  `sendError`: `{ success: true, data: { … } }` or
+  `{ success: false, error: { code, message } }`. Nothing failed loudly, because
+  each payload simply read `undefined` and every command reported that as an
+  ordinary empty result:
+  
+  - `list-tables` printed `No remote tables found.` while the server was
+    returning two tables.
+  - `introspect` printed `Failed to generate draft` for drafts the server had
+    generated.
+  - `validate` printed `No federated objects to validate.` and exited **0**
+    against drift the server had flagged `missing_column … severity:error` — a
+    schema gate green-lighting a CI-breaking condition it had never read.
+  - An unknown datasource crashed with `TypeError: first argument must be a
+    string or instance of Error`, because the error **object** was handed to
+    oclif's `this.error()` instead of `error.message`.
+  
+  `validate`'s exit code is the behaviour change to note: a datasource whose
+  federated objects have drifted now exits **1** where it previously exited 0. If
+  you have a pipeline that treats this command as advisory, it starts failing on
+  drift that was always there.
+  
+  A body that is **not** the declared envelope is now a loud failure rather than
+  an empty payload. That distinction is the point: "nothing found" is reachable
+  only from a server that really said so, never from a response the CLI could not
+  read. The legacy flat shape is deliberately *not* also accepted — a
+  consumer-side fallback would re-create the divergence as a second de-facto
+  contract.
+- 78019bb: Stop `os dev` handing its auto-compile child an environment that activates
+  oclif's TypeScript source loader — `pnpm dev` could not boot an example app.
+  
+  `os dev` auto-compiles when `dist/objectstack.json` is absent, by spawning
+  `os compile`. That spawn set a hard-coded `NODE_ENV: 'development'`, which
+  activates oclif's tsx source loader. tsx honours the **cwd** tsconfig's
+  `paths`, and example apps map workspace packages to their TypeScript source
+  there (`@objectstack/formula` → `../../packages/formula/src/index.ts`). Those
+  packages are CommonJS, so the redirect lands on a `.ts` file and Node's CJS
+  resolver then walks its sibling imports, which it cannot resolve:
+  
+  ```
+  Cannot find module './registry'
+  Require stack:
+  - packages/formula/src/index.ts
+  ✗ Compile failed — fix errors above before starting dev server
+  ```
+  
+  A **type-resolution directive leaking into runtime resolution**. Measured, the
+  failures map 1:1 onto each app's `paths` entries: app-showcase (two entries)
+  failed on both specifiers, app-crm (one) on one, app-todo (none) on none. The
+  import spelling was never the variable — `plugin-email` already ships the
+  explicit `./email-plugin.js` extension and failed identically. The `paths`
+  blocks are correct too; they are mandated by `check:type-source-resolution`.
+  
+  `os environments bind --build` carried the identical spawn and is fixed with
+  it. `os start`'s compile spawn and `os dev`'s watch-mode recompile already
+  passed `process.env` unmodified, as did the `os serve` spawn, whose NOTE had
+  documented this hazard for months on one of the call sites that needed it.
+  
+  Patch, not minor: no flag, command, contract or output changes. `compile`
+  reads `NODE_ENV` nowhere, and the emitted artifact is identical leaf-for-leaf
+  apart from the `/runtimeModule` bundle hash, which differs between two runs of
+  the *same* command anyway because the bundle embeds `builtAt`.
+- 0d0fcaf: Read `doc.tags` from `src/docs/*.md` frontmatter, so a book group's
+  `include: { tag }` can match on the documented authoring path (#10486).
+  
+  `DocSchema.tags` was declared in 17.0.0 (#4509, ADR-0049) as the *enforce* half
+  of enforce-or-remove: the resolver side already compared against it
+  (`matchesInclude` in `book.zod.ts`) and the REST book-tree route already
+  forwarded it. But `collect-docs.ts` parsed frontmatter with `frontmatterScalar`
+  alone — single-line scalars — and had no case for `tags` at all. On the flat
+  `src/docs/*.md` path the docs actually recommend, a `tags:` block was therefore
+  dropped without a word: every doc reached `resolveBookTree` with
+  `tags === undefined`, and a group declaring `include: { tag: 'tutorial' }`
+  matched nothing and rendered as an empty section.
+  
+  Two halves:
+  
+  - **A minimal `frontmatterList`** reading the two ordinary YAML sequence
+    spellings — inline `tags: [tutorial, beginner]` and the block form of `- item`
+    lines — wired through `DocItem.tags`. The block sequence ends at the next
+    frontmatter key, so `group:` after a `tags:` block still parses. An authored
+    `tags: []` parses and means what it says: no tags.
+  
+  - **A loud `docs/frontmatter-tags` warning** whenever `tags:` is present in a
+    spelling the reader cannot parse — a bare scalar, an unterminated inline
+    sequence, a key with nothing under it. The reader is deliberately minimal and
+    is **not** growing into a YAML engine; this is what keeps that minimalism
+    honest, by converting the next unanticipated spelling from a silent drop into
+    a visible report. The same warning fires when a locale variant
+    (`<name>.<locale>.md`) declares `tags:`, since tags belong to the doc rather
+    than to one translation and a `DocTranslationItem` carries no such field.
+  
+  Warnings surface through the paths that already print `DocIssue`s: `os lint`,
+  `os validate`, and `os compile`. No schema change — `DocSchema.tags` already
+  declared the key; only the collector could not produce it.
+- 9faa9bc: `os doctor --scan-deprecations` no longer prescribes a command that does not exist. After listing its hits the report used to print ``Run `objectstack codemod v2-to-v3` to auto-fix``, but no `codemod` command has ever been registered — following the advice returned oclif's exit 2, `command codemod:v2-to-v3 not found`, after the operator had already spent time on it. The hint is not repointed at `os migrate meta` either: that command replays the protocol migration chain over an authored stack config and declines the source rewrite by design ("does not silently rewrite TS config source"), writing only an `--out` JSON snapshot, so it cannot fix the `src/**` TypeScript the scan reports on. It now names the count and the remedy that really exists — the per-finding replacement, printed under `--verbose`. The scanner is unchanged: same file:line attribution, same `→ replacement` detail, still advisory with exit 0 either way.
+- a7ea328: `os doctor` no longer prints `✓ Test coverage` / `✓ Deprecations` about a tree it
+  never examined, and no longer warns `@objectstack/spec  Not built` about a
+  workspace that is not part of the tree (#10679).
+  
+  `findMissingTests()` and `findDeprecatedUsages()` both walk
+  `<cwd>/packages/spec/src` — a path that exists in this monorepo and in no
+  application built with the framework. Both answered "that directory is not here"
+  with the same value they return for "I walked it and found nothing wrong" (an
+  empty array), so in a stock `create-objectstack -t blank` scaffold every run
+  printed, verbatim:
+  
+  ```
+    ✓ Test coverage         All *.zod.ts files have matching tests
+    ✓ Deprecations          No @deprecated tags found
+  ```
+  
+  about files doctor never opened. The command exits 0 either way, so "no problems
+  found" and "I never looked" were byte-identical to every downstream reader.
+  
+  Doctor already refuses to do this one screen down: the ADR-0120 D5e advisory's
+  `✓ Unique scope` is withheld unless `ledgerReadingIsComplete()` says the ledger
+  half was read in full. These two checks escaped that discipline; this restores
+  it, in the same shape #5413 used for the ledger — whether the tree was examined
+  is now a fact in the return type rather than an absence, so the print site
+  cannot reach the `✓` from the unexamined arm. Where the tree is absent doctor
+  prints an informational, named-reason skip instead:
+  
+  ```
+    ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)
+    ℹ Deprecations          Skipped — no packages/spec/src in this directory (monorepo-only check)
+  ```
+  
+  `--verbose` adds the resolved directory it looked for. The skip is deliberately
+  not a warning: nothing is wrong in an application that has no
+  `packages/spec/src`, and withholding a false `✓` must not manufacture a false
+  `⚠`.
+  
+  The adjacent `⚠ @objectstack/spec  Not built` probe read `<cwd>/packages/spec/dist`
+  with no check that the workspace it names exists, so in an application it warned
+  about an absent package and prescribed `pnpm --filter @objectstack/spec build`, a
+  command that cannot succeed there. It is now gated on `packages/spec/package.json`
+  being present. Inside the monorepo the row is unchanged; outside it there is no
+  row, and an application's spec dependency stays covered by the `Dependencies`
+  check and by the spec-version-gap advisory.
+  
+  Exit codes are untouched — 1 exactly when an error row exists, warnings never
+  flip it. One visible consequence: a stock scaffold with no other findings now
+  ends on `✅ Environment is healthy and ready for development!` instead of
+  `⚠️  Environment is functional but has some warnings`, because the warning it
+  used to carry was about a workspace that was never there.
+- e4a71d4: fix(cli): `environments/*.ts` command sources no longer spell `os projects` in live `--help` output (#10967)
+  
+  `static override examples` is printed verbatim as part of oclif's `--help`, and all five
+  commands under `packages/cli/src/commands/environments/` (`bind`, `create`, `list`, `show`,
+  `switch`) still spelled the pre-v5.0-rename `os projects <cmd>` there — a user copy-pasting
+  straight from `os environments bind --help` hit `Error: Command projects:bind not found.`
+  (exit 2), the same dead command #10927 fixed in `packages/cli/README.md`, this time sourced
+  from the CLI binary itself.
+  
+  `examples` arrays and JSDoc headers now say `os environments <cmd>`. The exported default
+  class on each file is renamed to match its real, file-path-derived command id
+  (`ProjectsBind` → `EnvironmentsBind`, etc.) — oclif's pattern-strategy loader derives a
+  command's id purely from its file path, never from the class name, so this rename changes
+  no runtime resolution; verified by building the CLI and running `--help` on all five
+  commands, plus one real invocation, after the rename. `environments.test.ts`'s imports and
+  `describe` title are updated to match, and gain a pin: every `examples` entry on these five
+  commands is checked against the CLI's actual file-tree-derived command-id set, so a future
+  topic rename that misses an `examples` string fails a test instead of shipping.
+- 9990319: Make the hook-body build gates report only what they establish (#10678). Three
+  defects, one shape — a gate reporting something it never established. The
+  enforcement net was never the gap and is unchanged: no forbidden body ever
+  shipped as `body.source`, and every forbidden or free-identifier hook is still
+  refused under `--strict-body`, at the same exit codes as before.
+  
+  **The default build no longer warn-and-bundles in silence.** A hook body
+  containing a forbidden pattern made `os build` exit 0 with no output at all: the
+  extraction failure was recorded in `bodyExtractionWarnings` and then printed
+  nowhere, so the only way to learn a handler had *not* become a metadata body was
+  to diff the artifact. The recorded warnings now reach a human — on stdout,
+  naming the hook and the pattern, with a pointer at `--strict-body` — and in
+  `--json` under a new `bodyExtractionWarnings` key. That key is separate from
+  `warnings` on purpose: `warnings` carries author-time rule advisories in the
+  shape `os validate --json` also reports, and these are a different record
+  (`{origin, reason}`). It is an empty array on a clean build, so a CI consumer can
+  read it unconditionally.
+  
+  The build still exits 0 in this case. Making a forbidden pattern fatal by default
+  would change what `os build` accepts and is not part of this change.
+  
+  **The `require()` refusal reason now fires on the real authoring path.** A
+  TypeScript config is loaded through `bundle-require` → esbuild, whose ESM interop
+  shim rewrites `require('node:os')` to `__require("node:os")` before `String(fn)`
+  runs — so the `require()`-specific reason could never match, and the refusal
+  arrived instead as the generic free-identifier message naming `__require`, an
+  identifier the author never typed. Both spellings now carry the one reason, which
+  also explains the rewrite. Accept behaviour is unchanged: the body was already
+  refused, already bundled, at the same exit code; only the wording moved.
+  
+  **The `// @capabilities` directive is documented at its real reach.** It is read
+  off `String(fn)`, and esbuild strips `//` line comments before the handler is ever
+  a runtime function — so through `os build` it reaches the extractor from no
+  ordinary authoring shape. Measured on all four: `objectstack.config.ts`, `.js`,
+  `.mjs`, and a handler imported from a local `./handlers.js` all silently drop it
+  and ship the inferred capabilities alone. `hook-bodies.mdx` and the extractor
+  header now say so, and point at `body.capabilities` — data rather than a comment —
+  as the escape hatch that does survive. Whether the directive should gain a real
+  authorable surface or be retired is left open.
+  
+  The extractor header claimed a forbidden pattern "makes the build **fail** …
+  no silent fallback"; docs described warn-and-bundle. The code agreed with the
+  docs, so the header was the outlier and has been rewritten to describe both
+  outcomes.
+  
+  A new `os build`-level test (`hook-body-build-reach.e2e.test.ts`) spawns the real
+  CLI and pins all three behaviours against the artifact and the shell's exit code.
+  The existing extractor unit tests could not have caught any of this: they feed raw
+  JS function literals, which keep their comments and their `require(` spelling
+  because nothing transformed them.
+- 0d4bd93: `os validate` no longer drops a summary section that happens to be empty — every section prints its zero state
+  
+  The metadata summary shared by `os validate`, `os info` and `os compile` skipped any section whose every item was `0`. #10504 fixed that for `UI:` only; `Data:`, `Logic:` and `Security:` still vanished. Measured against the real CLI: a stack with one object and nothing else printed `Data:` and `UI: 0 Apps` and no `Logic:` or `Security:` line at all, so "this project declares no automation" was indistinguishable from "this summary does not report on automation". A stack declaring no objects printed the single line `UI: 0 Apps`.
+  
+  All four rows now always print, in the shipped `UI: 0 Apps` shape: `Data: 0 Objects`, `Logic: 0 Flows`, and `Security: 0 Positions  0 Permissions` (both peers — `Security:` has no single canonical signal the way `UI:` has `Apps`).
+  
+  Patch, not minor: no API, flag, exit code or `--json` payload changes — this is the human-readable summary printing rows it previously omitted. Anything scraping the text summary for the absence of a section row will now see it present.
+- 818e027: Fix `objectstack init`'s closing "Created files" summary omitting `pnpm-lock.yaml` / `package-lock.json` and `node_modules/` (#10557).
+  
+  The summary used to be printed from a list accumulated while the template
+  files were written — before `<pm> install` ran — so it could never name what
+  the package manager wrote. `init` now prints it after the install attempt
+  (succeeded or failed) from a walk of the finished project directory, reusing
+  `create-objectstack`'s `created-summary.ts` (now published as the
+  `create-objectstack/created-summary` subpath) instead of a second copy of the
+  same renderer.
+- 13fa51e: `objectstack init` now writes both build-approval keys into the scaffolded
+  `pnpm-workspace.yaml`, so a brand-new project's first `pnpm install` succeeds
+  on pnpm 11 (#10405).
+  
+  The renderer emitted only `onlyBuiltDependencies`. pnpm 11 does not read that
+  key at all, and it turned an unapproved dependency build script from a warning
+  into a hard error — so `objectstack init my-app && cd my-app && pnpm install`
+  exited 1 with `ERR_PNPM_IGNORED_BUILDS`, on the very first command after
+  scaffolding. The rendered file now also carries `allowBuilds`, built from the
+  same source list, which is the only key pnpm 11 reads. Measured one clean
+  install per pnpm version, each with its own store: pnpm 10.0.0-10.25.0 read
+  `onlyBuiltDependencies`, 10.26.0-10.34.x read either key, and 11.x reads
+  `allowBuilds` only — so both keys are load-bearing and neither is redundant.
+  
+  Build permission is still granted to exactly the two packages that need it and
+  nothing else: `esbuild` (a `postinstall` that installs its platform binary,
+  used to compile `objectstack.config.ts`) and `better-sqlite3` (ships a
+  `binding.gyp`, which pnpm treats as a native build; without it `objectstack
+  serve` can fail with "Could not locate the bindings file"). No wildcard.
+  
+  Existing scaffolds are unaffected — `init` never overwrites a
+  `pnpm-workspace.yaml` that is already there. To fix a project scaffolded by an
+  earlier CLI, add to its `pnpm-workspace.yaml`:
+  
+  ```yaml
+  allowBuilds:
+    better-sqlite3: true
+    esbuild: true
+  ```
+- 18d5fec: `objectstack init` no longer writes ADR identifiers into the user's project (#11023). Five comments rendered by `packages/cli/src/commands/init.ts`'s built-in templates (`app`, `plugin`, `empty`) cited `ADR-0087` and `ADR-0090 D1` — addressed to a reader with this monorepo open. A project scaffolded by `os init` ships no `docs/adr/`, so the identifier named something unfollowable.
+  
+  Each comment is rewritten self-contained, keeping the rationale it carried, and links a public docs page instead of the internal identifier — the same wording #10324 settled on for `create-objectstack`'s bundled templates:
+  
+  - protocol compatibility range → https://objectstack.ai/docs/upgrading
+  - org-wide default (`sharingModel`) → https://objectstack.ai/docs/permissions/sharing-rules
+- 3a7ec2d: `os migrate duplicates` no longer reports a clean bill of health over a driver it
+  could not query (#10677). The `no_sql_seam` refusal #8928 mandated was dead code
+  for the memory driver, so the exact outcome the ruling exists to forbid was
+  reachable:
+  
+  ```
+  os migrate duplicates --database-url memory://qa
+    -> exit 0   {"duplicates":[],"skipped":[],"counters":{"status":"read"}}
+  ```
+  
+  `InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver`
+  and returns `null` — it neither throws nor is absent. The seam resolver asks
+  whether the driver has the SHAPE of a seam (`typeof d.execute === 'function'`),
+  which that satisfies, so the `if (!exec)` guard never fired; and
+  `normalizeRows(null)` is `[]`, which is also what a real driver returns for a
+  SELECT that matched nothing. Three statements were swallowed and the report said
+  the install was clean.
+  
+  The command now separates the two cases the guard used to conflate: **a seam
+  that cannot answer is absent, not empty.** It asks the resolved seam one trivial
+  statement before the scan starts and refuses when the answer is not a result
+  set, and it holds every individual probe to the same standard, so a probe that
+  returns no result set becomes a `skipped` entry with its reason instead of zero
+  findings.
+  
+  ```
+  os migrate duplicates --database-url memory://qa
+    -> exit 1   {"error":"no_sql_seam","detail":"The active driver exposes no
+                 usable raw SQL seam — it is either absent, or present but
+                 returning no result set — …"}
+  ```
+  
+  Nothing here names a driver: a seam is judged by what it returns, so any host
+  with the same no-op shape is covered without an allowlist to maintain. No driver
+  package was modified.
+  
+  Two behaviours are deliberately unchanged. A seam that **throws** is a driver
+  present and refusing loudly, and the per-probe `skipped` path already reports
+  that honestly — claiming it here would swallow a transient connection error as
+  "no seam" and would invent a refusal #8928 never mandated. And a real SQL driver
+  is unaffected: every shape the new check rejects is one `normalizeRows` already
+  flattened to `[]`, so no row that used to be reported can be lost.
+- be30ca7: Correct a false verb in `os migrate meta`'s own source comments: the `--from`
+  arm **lists** the mechanical edits an author's source needs; it rewrites no file
+  (#10831).
+  
+  The `pendingDataMigrations` docblock in
+  `packages/cli/src/commands/migrate/meta.ts` opened with "this command rewrites an
+  author's source" — 74 lines above the command header that says the opposite
+  ("The command does not silently rewrite TS config source (that AST rewrite is
+  unsafe and lossy)"). Both `writeFileSync` calls in the file are guarded by
+  `if (flags.out)`, so the only file the `--from` arm ever writes is the `--out`
+  JSON snapshot. The in-place codemod is a separate, unbuilt piece of work.
+  
+  The contrast the docblock was drawing — metadata migration's subject is the
+  author's *source*, the two data migrations' subject is a deployment's *rows* —
+  is correct and is preserved; only the verb on the first half changed. The
+  `--stored` arm genuinely does rewrite `sys_metadata` rows and its wording is
+  untouched.
+  
+  No runtime behaviour changes: comment-only.
+- c2b97c2: `os package publish` now prints the reason a publish was refused instead of the
+  literal `[object Object]` (#10763).
+  
+  Both request helpers in `package/publish.ts` built their failure text the same
+  way:
+  
+  ```ts
+  const errMsg = parsed?.error ?? response.statusText ?? `HTTP ${response.status}`;
+  return { ok: false, status: response.status, body: parsed, error: String(errMsg) };
+  ```
+  
+  In the declared envelope `error` is an **object** — `{ code, message }` — so
+  `String(errMsg)` stringified the object. The `??` chain never reached
+  `statusText`, because an object is not nullish; there was no useful fallback to
+  reach. Every failed publish printed the same seven characters no matter what the
+  control plane had refused, at all three call sites: package registration,
+  version publish, and the icon upload.
+  
+  Both sites now read through a new `readErrorMessage` in
+  `packages/cli/src/utils/response-envelope.ts`, which returns the declared
+  envelope's `error.message`, degrades to `error.code` when a refusal carries no
+  message, and falls back to a non-blank `statusText` and then the status line. A
+  blank `statusText` counts as absent — HTTP/2 carries no reason phrase, and the
+  old `??` chain kept the empty string and printed nothing after the status code.
+  
+  The reader also accepts the flat `error: '<sentence>'` shape, deliberately and
+  temporarily. That is a **measured** property of these routes rather than an
+  assumption: `/api/v1/cloud/**` is served by the sibling `cloud` repo, and the
+  closest first-hand reader of that same `service-cloud` family — objectui's
+  `readApiError` — records that it answers failures in both shapes while cloud#944
+  converts it. A strict envelope-only read (the `readEnvelope` landed by #10675
+  for the in-repo `/api/v1/datasources/**` routes) would have replaced today's
+  live flat dialect with a different unreadable failure, so it is not reused here;
+  the reasoning, and the condition under which the flat branch is deleted, are
+  recorded on the function.
+  
+  No request the CLI sends changes, and the server sends exactly what it sent
+  before — this is only how a failure is read and shown.
+- afe1c4e: fix(cli): declare the four `@better-auth/utils` peer skews a freshly scaffolded project reports (#10931)
+  
+  Both scaffold paths emit a `peerDependencyRules.allowedVersions` block whose
+  stated purpose is that a brand-new project's first `pnpm install` does not open
+  with a peer-skew report. It declared two skews and left four showing:
+  
+  ```
+  ├─┬ @better-auth/core 1.7.1
+  │ └── ✕ unmet peer @better-auth/utils@0.4.2: found 0.5.0
+          ├─┬ @better-auth/scim 1.7.0-rc.1
+          │ └── ✕ unmet peer @better-auth/utils@0.4.2: found 0.5.0
+          ├─┬ @better-auth/oauth-provider 1.7.1
+          │ └── ✕ unmet peer @better-auth/utils@0.4.2: found 0.5.0
+          └─┬ @better-auth/sso 1.7.1
+            └── ✕ unmet peer @better-auth/utils@0.4.2: found 0.5.0
+  ```
+  
+  `@better-auth/core`, `/oauth-provider`, `/scim` and `/sso` each peer an **exact**
+  `@better-auth/utils@0.4.2`. The 0.5.0 they are handed comes from
+  `better-call@1.4.0` — better-auth's own HTTP layer — which *depends* on
+  `^0.5.0`; `@objectstack/plugin-auth` names the four as direct dependencies
+  without naming utils, so pnpm satisfies their peer from better-call's copy
+  instead of better-auth's own exact 0.4.2 dependency.
+  
+  **Measured compatible before widening, not assumed.** Those four import three
+  symbols in total: `base64`/`base64Url` (`@better-auth/utils/base64`),
+  `createHash` (`/hash`) and, in core only, `createRandomStringGenerator`
+  (`/random`). 0.5.0 declares all three with identical signatures; `/random` is
+  unchanged apart from formatting, `/base64` swaps `new Uint8Array(data)` for a
+  helper that *is* `new Uint8Array(data)` on non-strings, and `/hash` only widens
+  its input coercion for views not backed by a plain `ArrayBuffer`. Run against
+  the input shapes those call sites actually pass, the two versions agree on every
+  value; run end to end — better-auth with the `sso`, `oauth-provider` and `scim`
+  plugins — a tree where the four resolve 0.5.0 and one where they resolve 0.4.2
+  produce the same transcript: sign-up, sign-in, session, both OAuth metadata
+  documents, the RFC 7636 PKCE challenge, and the SCIM and SSO endpoint outcomes.
+  
+  A resolution change was measured too, and rejected: pinning utils back to 0.4.2
+  clears the four lines only by dragging `better-call@1.4.0` off its own declared
+  `^0.5.0` — manufacturing one real range violation to silence four benign ones.
+  
+  Four scoped entries, one per declaring package, matching the block's convention
+  that each rule widens exactly one declaration. `allowedVersions` suppresses the
+  report only: the lockfile a scaffold resolves is byte-identical with and without
+  the block. The version is spelled `0.5.0` exactly rather than `0.5`, so a future
+  `0.6.0` reports again instead of inheriting this finding.
+  
+  Both scaffold paths — `objectstack init` (rendered by the CLI) and
+  `npx create-objectstack` (a copied template file) — are changed together, and
+  `packages/cli/test/scaffold-workspace-consistency.test.ts` gains a limb that
+  compares the peer maps the two produce, so they cannot drift apart again.
+- 568de19: Scaffolded projects declare an explicit empty `packages: []` in their
+  `pnpm-workspace.yaml` (#10933). Both scaffold paths render it —
+  `renderPnpmWorkspaceYaml` in `objectstack init`, and the bundled `blank`
+  template `npx create-objectstack` copies.
+  
+  The file was deliberately keyless so it would act purely as a settings file.
+  That intent is now written down rather than inferred from a missing key, and
+  writing it down is what fixes a first-command failure: pnpm 9.x and 10.0–10.4
+  parse `pnpm-workspace.yaml` **before** they read `engines`, so they refused a
+  brand-new project outright with
+  
+  ```
+   ERROR  packages field missing or empty
+  ```
+  
+  naming a file the user never wrote and giving no hint that the cause is their
+  pnpm version — and no `engines.pnpm` floor could reach them, because they never
+  got as far as the engines check. Measured, one clean install per pnpm version,
+  each with its own store:
+  
+  | pnpm | before | after |
+  |---|---|---|
+  | 9.15.9, 10.0.0, 10.4.0 | `ERROR packages field missing or empty` | `ERR_PNPM_UNSUPPORTED_ENGINE`, naming `>=10.15` |
+  | 10.5.0–10.14.0 | `ERR_PNPM_UNSUPPORTED_ENGINE` | unchanged |
+  | 10.15.0, 10.34.5, 11.22.0 | installs | installs, byte-identical `pnpm-lock.yaml` |
+  
+  So every unsupported pnpm now reports the same actionable cause, and supported
+  pnpm is unaffected: the empty key was measured equivalent to omission on
+  10.15.0, 10.34.5 and 11.22.0 — identical lockfile bytes, identical
+  `node_modules/.modules.yaml` once the run-local `prunedAt`/`storeDir` fields are
+  dropped, identical `pnpm ls -r --depth -1`, and an identical second-install
+  "Already up to date".
+  
+  The declaration is an **empty** list on purpose. `packages: ['.']` satisfies the
+  same parsers but declares the project root a workspace *member* — a monorepo
+  root — which a single-package scaffold is not, and which reads to the next
+  author (human or AI) as an invitation to add member packages to an app.
+  
+  `engines.pnpm` is unchanged at `>=10.15`.
+- 9d101d2: Declare a pnpm floor (`engines.pnpm: ">=10.15"`) in the `package.json` both
+  scaffolders write, so an unsupported pnpm reports its own version instead of an
+  error about a file the user never wrote.
+  
+  Both scaffold paths emit a settings-only `pnpm-workspace.yaml` with no
+  `packages:` key. Early pnpm 10 refuses that file outright — `pnpm install` exits
+  1 with `ERROR packages field missing or empty` before resolving a single
+  dependency, so a brand-new project could not be installed at all. Measured on
+  the rendered shape, one clean install per pnpm version, each with its own store:
+  
+  | pnpm | before | after |
+  | --- | --- | --- |
+  | 10.0.0 – 10.4.0 | `packages field missing or empty` | unchanged — see below |
+  | 10.5.0 – 10.14.0 | `packages field missing or empty` | `ERR_PNPM_UNSUPPORTED_ENGINE`, naming the expected range |
+  | >= 10.15.0 | installs | installs |
+  
+  The floor is a diagnosis, not a repair: pnpm 10.0.0–10.4.0 parse
+  `pnpm-workspace.yaml` *before* they read `engines`, so they still print the raw
+  workspace error. Closing that remaining sliver requires deciding what a
+  single-package scaffold should declare under `packages:`, which is tracked
+  separately and deliberately not decided here.
+  
+  `engines.pnpm` rather than a `packageManager` stamp: npm, yarn and bun ignore
+  `engines.pnpm` entirely, so the scaffold keeps working for all four package
+  managers `objectstack init` hands off to. A `packageManager: "pnpm@x.y.z"` stamp
+  would declare the project pnpm-only (corepack-driven yarn refuses to run in such
+  a project) and pin one exact version that goes stale on every pnpm release — and
+  it buys nothing on 10.0–10.4, which reach the workspace error before reading
+  that field either.
+  
+  No existing project is affected; this only changes what a newly scaffolded
+  `package.json` contains.
+- 621a487: **Bug fix (silent failure made loud):** `serve` now prints a boot-time diagnostic when the configured auth base URL cannot be parsed, instead of discarding the failure in an empty `catch` (#10202).
+  
+  The base URL was resolved through a `??` chain and parsed inside `try { new URL(baseUrl) } catch { /* ignore malformed baseUrl */ }`. That catch was the only place in the boot that learned the value was unusable, and it threw the knowledge away: the deployment's own origin never reached the `trustedOrigins` allow-list, boot continued normally, and the operator's first news of it was a browser-side `403 INVALID_ORIGIN` that names neither the variable nor the value.
+  
+  The shape that reaches it is ordinary env plumbing. `readEnvWithDeprecation` returns the preferred variable whenever it is `!== undefined`, so a **present-but-empty** variable resolves to `''` rather than `undefined`; `??` falls through only on `null`/`undefined`, so `OS_AUTH_URL=` on its own line in an env file (or a Helm/systemd/CI template rendering an absent key) consults neither `OS_BASE_URL` nor the `http://localhost:<port>` default; and `new URL('')` throws.
+  
+  Measured on a real `os serve` boot with `NODE_ENV=production`, `OS_AUTH_URL=` set-but-empty and `OS_TRUSTED_ORIGINS` / `OS_ROOT_DOMAIN` / preview mode unset, probing `POST /api/v1/auth/sign-in/email` so a trusted origin answers `401 INVALID_EMAIL_OR_PASSWORD` and an untrusted one `403 INVALID_ORIGIN`:
+  
+  | Origin | `OS_AUTH_URL=` (empty) | `OS_AUTH_URL=https://app.example.com` | unset |
+  | --- | --- | --- | --- |
+  | `https://app.example.com` | 403 | **401** | 403 |
+  | `http://localhost:<port>` | **401** | 403 | **401** |
+  | `http://tenant.localhost:<port>` | **401** | 403 | 403 |
+  | `/api/v1/health`, `/api/v1/ready` | 200 | 200 | 200 |
+  
+  Two corrections to how this was expected to behave, both from that table. The allow-list does **not** come out empty: `serve` passes `trustedOrigins.length ? trustedOrigins : undefined`, and `AuthManager` substitutes a localhost wildcard trio for an absent list — so better-auth receives a non-empty list and localhost origins are trusted. Which makes set-but-empty strictly **more permissive than unset**: `http://tenant.localhost:<port>` is trusted in the empty case and refused in the unset case, so an env template that renders an absent key to the empty string silently widens a production CSRF allow-list.
+  
+  **What changed is only what is said, never what is resolved.** The precedence chain, its order, and the `${protocol}//${host}` origin spelling are byte-for-byte identical; a set-but-empty `OS_AUTH_URL` still stops the chain exactly as before. Treating empty as unset inside the shared `readEnvWithDeprecation` would change behaviour for every caller of that helper and remains a separate, deliberate decision. The diagnostic is a warning, not a refusal to boot: a deployment running set-but-empty today keeps starting, and now says why authentication will not work.
+  
+  The resolution is exported as a seam — `resolveAuthBaseUrl()` and `formatUnusableAuthBaseUrlDiagnostic()`, alongside this file's sibling helpers — so the behaviour is reachable from tests without booting a server.
+- 22f6629: **Bug fix (wrong address printed):** the `os serve` / `os dev` ready banner now builds its API, Console and MCP links from the origin an operator can actually reach, instead of composing `http://localhost:<port>` from the port the process happens to bind (#10646).
+  
+  Measured on the EE 4.1.0 published-image compose stack (moved from cloud#1507). The app container `expose`s `:3000` with no `ports:` mapping — unreachable from the host, and less so still under `--scale app=N` — while the published entry point is Caddy on `:80`, and compose has already resolved `OS_AUTH_URL` to `http://localhost`. The banner printed the container-internal address anyway:
+  
+  ```
+    ➜  API:       http://localhost:3000/
+    ➜  Console:   http://localhost:3000/_console/
+    ➜  MCP:       http://localhost:3000/api/v1/mcp
+        connect an AI client (Claude Code, Cursor, …) · skill: http://localhost:3000/api/v1/mcp/skill
+  ```
+  
+  Following the Console link failed outright; after moving the deployment to a domain the banner still said `localhost:3000`; and the `MCP:` line is the address customers paste into an AI client, where a wrong absolute URL never fails loudly — it just never connects.
+  
+  **The origin is the runtime own answer, not a second one.** The banner resolves it through `resolveAuthBaseUrl` — the same function whose `baseOrigin` is pushed onto the CSRF allow-list a few hundred lines earlier in the same boot — so the banner and the origin the deployment actually trusts cannot drift apart. That chain is `OS_AUTH_URL` → legacy `BETTER_AUTH_URL` → `OS_BASE_URL` → `http://localhost:<port>`; the legacy name sits in the middle and is easy to miss when the chain is restated from memory, which is one reason it is read rather than restated. Nothing about what the server listens on, binds to, or advertises to a client changed: the resolver reads `process.env` and the bound port, and this fix changes only printed text.
+  
+  **When no origin can be determined, the banner prints no absolute URL at all.** The chain yields nothing usable when a variable is set-but-empty (`OS_AUTH_URL=` stops the chain rather than falling through) or carries no scheme. The banner then prints the paths bare —
+  
+  ```
+    ➜  API:       /
+    ➜  Console:   /_console/
+    ➜  MCP:       /api/v1/mcp
+        connect an AI client (Claude Code, Cursor, …) · skill: /api/v1/mcp/skill
+        paths only — this deployment external base URL could not be resolved;
+        set OS_AUTH_URL to its public origin (e.g. https://app.example.com)
+  ```
+  
+  — because a missing address sends the operator to look one up, while a confident wrong one gets copied. `http://localhost:3000` was never a neutral default here; it was the wrong answer that shipped.
+  
+  The local dev loop is unchanged: with nothing set, the tail of the chain is still `http://localhost:<port>` on the port that was actually bound (past any dev auto-shift), so `os dev` keeps its clickable Console link.
+  
+  Structurally, `ServerReadyOptions.port` is replaced by a required `externalBaseOrigin: string | null`. The banner no longer knows the port, so it cannot compose an address from one, and a caller that fails to resolve an origin is a compile error rather than a plausible-looking line of output.
+- 9cc6777: `os serve` now resolves a `plugins: [...]` entry the served app **declares** from
+  that app, instead of from the CLI (#10908).
+  
+  `plugins: [...]` in the app's own `objectstack.config.ts` is the documented way
+  to extend a deployment, but its string entries were loaded with a bare
+  `import()`, which Node ESM resolves against the CLI's realpath. An app that
+  wrote `plugins: ['@acme/my-plugin']` and declared `@acme/my-plugin` in its own
+  `package.json` could therefore only be served where that package happened to be
+  hoisted somewhere the CLI could see it — true in a dev checkout, absent on a
+  real distribution layout. Same mechanism as the cluster and organizations loads
+  fixed earlier.
+  
+  Only the **declared** case moves. A specifier the app does not declare still
+  resolves from the CLI exactly as before, and a path or `file://` URL keeps the
+  base it always had, so no deployment loses a plugin it is loading today. Which
+  plugins are *accepted* is unchanged — the declaration gate is untouched.
+  
+  One user-facing message changes: when a declared plugin cannot be loaded, the
+  `Failed to import plugin '<name>'` error now carries the declaration remedy
+  ("declare it in that app's `package.json`", or the install-problem text when the
+  app declares it but it is not installed) instead of a bare `Cannot find package`.
+- 3d7deb7: `os serve` now resolves **every** app-declarable optional package from the app
+  being served, not from the CLI, and the ordering hazard that broke it twice is
+  gone by construction (#10769).
+  
+  `serve.ts` reaches optional and enterprise packages through `createHostImporter`,
+  which anchors resolution at the host app. The helper was bound as a `const`
+  partway down one very long boot method, so it existed only *below* its own
+  binding — and a load written above that point was **not** a compile error. The
+  author simply wrote a bare `import()`, which resolves against the CLI's own
+  realpath and works fine in a dev checkout where everything is hoisted into one
+  `node_modules`. It breaks only in a real distribution layout, at boot, in
+  production. That shipped twice:
+  
+  - **cloud#1013** — the binding sat below the auth block, so the enterprise
+    `@objectstack/organizations` load resolved in the framework workspace, never
+    found the cloud-private package, and every walled-posture deployment hit the
+    ADR-0093 D5 fail-fast and exited 1.
+  - **#10645** — the binding sat below the cluster block, so on the published EE
+    image `OS_CLUSTER_DRIVER=redis` died at boot with `Cannot find package
+    '@objectstack/service-cluster'`, and compose's `service_completed_successfully`
+    took the whole stack down with it.
+  
+  Each was fixed by hoisting the binding, which left the class open: the next load
+  added above the new line reproduces it exactly, and no author has any reason to
+  know where that line is. `importFromHost` is now a **module-scope function
+  declaration**, hoisted over the whole module, so "above the definition" is no
+  longer a state the file can be in — every line of `serve.ts` reaches the same
+  host-anchored importer, in any order.
+  
+  Sweeping the file for the class then turned up one live instance:
+  `@objectstack/service-i18n` was loaded with a bare `import()`. `packages/cli`
+  does not declare it, so an app that declares its own copy could only be found by
+  accident of workspace hoisting — green in a dev checkout, absent on a real
+  install layout. It is now host-anchored like the rest. An app that does not
+  declare the package still falls back to the CLI's own resolution, so the quiet
+  "i18n not installed, use the kernel fallback" path is unchanged.
+  
+  Nothing about what `serve` binds, listens on, advertises, or *accepts* moves:
+  this changes only where a module resolves **from**. The `#4719` declaration gate
+  is untouched — a package the app has not declared is still refused rather than
+  picked up from a hoisted store.
+  
+  `serve-cluster-host-resolution.test.ts` is widened from the cluster pair to every
+  app-declarable optional load, classifying mechanically (a package is
+  app-declarable exactly when `packages/cli`'s own manifest does not declare it) so
+  a newly added optional package is covered without anyone remembering the test
+  exists.
+- be7262e: Carry the four structural advisories in `os validate --json` (#10953)
+  
+  `--json` exists so CI can gate on the advisories `os validate` computes, and
+  four of them could never reach it. In `commands/validate.ts` the JSON payload
+  was emitted and the command `return`ed **above** the block that computes them,
+  so these four were printed for a human and structurally unreachable for the
+  machine:
+  
+  - `No objects defined — this stack has no data model`
+  - `No apps or plugins defined — this stack may not do much`
+  - `Missing manifest.id — required for deployment`
+  - `Missing manifest.namespace — required for multi-app hosting`
+  
+  Measured before the fix on a config with no manifest, no objects and no apps —
+  the text face printed all four; `os validate --json` reported `"warnings": []`
+  for the byte-identical config. The documented purpose of the flag was defeated.
+  
+  The four conditions now compute once, above the `if (flags.json)` branch, and
+  both faces consume that one list — the same move this file already made for
+  `unknownKeyWarnings`, for the same reason: a single list cannot drift from
+  itself. The text face's warning order is unchanged.
+  
+  **Declared shape is unchanged; content is not.** `warnings` was already a
+  heterogeneous array — registry and package-doc findings ride as objects,
+  unknown-key advisories as strings — so the four arriving as strings introduces
+  no new element type and no new key. What changes is reachability: a pipeline
+  gating on `warnings.length === 0` will now see these four where it previously
+  saw an empty array. That is the defect being corrected rather than a new
+  signal, which is why this is a patch and matches the bump this repo used for
+  the previous fix of the same class (readonly flow-write warnings missing from
+  the same array).
+  
+  Pinned by `test/validate-json-warning-parity.e2e.test.ts`, which asserts the
+  two faces carry the same warning **set** for the same config — both sides
+  derived from their own real output — so the class stays closed rather than
+  just these four instances.
+- ff5733e: `os validate`'s summary now prints `UI: 0 Apps` instead of dropping the whole
+  `UI:` row when a stack declares zero apps (#10504).
+  
+  Measured on the `blank` scaffold (`create-objectstack my-app -t blank`,
+  published 17.1.0, reproduced unchanged at this branch's head): a project with
+  no navigable UI and a project whose summary simply does not report on UI at
+  all printed identically — the `UI:` row was *absent*, not printed as `0`, so
+  a newcomer whose Console comes up empty had no way to tell which of the two
+  they were looking at. Both cases exited `0`.
+  
+  `printMetadataStats` (`packages/cli/src/utils/format.ts`, shared by
+  `os validate`, `os info` and `os compile`) gains an opt-in `zeroFallback` per
+  summary section — the one item to force-print at `0` instead of dropping the
+  whole row when every item in that section is zero. It is set only on `UI`
+  (`Apps`), matching the triage ruling on #10504: the `blank`/`crud`/`full`
+  templates all ship zero apps deliberately, so a *warning* would fire on every
+  clean scaffold's first run. This is a legibility fix only — nothing about
+  what `validate` accepts, rejects, or exits with has changed, and `Data:`,
+  `Logic:`, `Security:` keep their existing drop-at-zero behavior (tracked
+  separately in #10952).
+  
+  The `--json` path already reported `"apps": 0` explicitly at zero — no change
+  needed there; a separate, unrelated `--json` warnings gap is tracked in
+  #10953.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [4d7c564]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [07bd1ca]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [b47ba2c]
+- Updated dependencies [f0d7647]
+- Updated dependencies [7d483e1]
+- Updated dependencies [530c1df]
+- Updated dependencies [da891e0]
+- Updated dependencies [a38c3ff]
+- Updated dependencies [76deca2]
+- Updated dependencies [163a162]
+- Updated dependencies [26dea14]
+- Updated dependencies [128684d]
+- Updated dependencies [cec9d23]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [5337ef1]
+- Updated dependencies [3a3f209]
+- Updated dependencies [7d2d112]
+- Updated dependencies [03bdd14]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [8cc8401]
+- Updated dependencies [7bf3fb7]
+- Updated dependencies [02b3b07]
+- Updated dependencies [dd41df3]
+- Updated dependencies [675ab57]
+- Updated dependencies [7d81c88]
+- Updated dependencies [2570ab0]
+- Updated dependencies [208bd22]
+- Updated dependencies [e85182d]
+- Updated dependencies [5886ee6]
+- Updated dependencies [aea1e64]
+- Updated dependencies [bbe643c]
+- Updated dependencies [e634ecf]
+- Updated dependencies [8163a1c]
+- Updated dependencies [cdaa72f]
+- Updated dependencies [2d8b92f]
+- Updated dependencies [02d56b4]
+- Updated dependencies [ff9da91]
+- Updated dependencies [17bad12]
+- Updated dependencies [ec79b11]
+- Updated dependencies [222d06f]
+- Updated dependencies [95437e7]
+- Updated dependencies [824a996]
+- Updated dependencies [9cc1940]
+- Updated dependencies [9cc1940]
+- Updated dependencies [9cc1940]
+- Updated dependencies [46cfa5b]
+- Updated dependencies [479fba5]
+- Updated dependencies [82cb6e8]
+- Updated dependencies [b20c8d2]
+- Updated dependencies [d25f700]
+- Updated dependencies [f76fe42]
+- Updated dependencies [4257e4e]
+- Updated dependencies [3e26359]
+- Updated dependencies [6ce58a7]
+- Updated dependencies [d806081]
+- Updated dependencies [d23e3a0]
+- Updated dependencies [9a1ed7a]
+- Updated dependencies [f3a8134]
+- Updated dependencies [98ea344]
+- Updated dependencies [b03a880]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [5b0af2b]
+- Updated dependencies [818e027]
+- Updated dependencies [927ccbb]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [5b39785]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [1048500]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [78818ec]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [13f533a]
+- Updated dependencies [795ea05]
+- Updated dependencies [2095040]
+- Updated dependencies [900e489]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [26f3588]
+- Updated dependencies [9e04c3e]
+- Updated dependencies [38cf397]
+- Updated dependencies [67630c4]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [2866d5f]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [57e4571]
+- Updated dependencies [112a8c6]
+- Updated dependencies [13a3dca]
+- Updated dependencies [ab47f69]
+- Updated dependencies [5acb58d]
+- Updated dependencies [a16ff50]
+- Updated dependencies [e222a53]
+- Updated dependencies [acb4dbc]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [c49007a]
+- Updated dependencies [047ac86]
+- Updated dependencies [6d5c4fa]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [0c24898]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [490879a]
+- Updated dependencies [c74aefe]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [145ba75]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [d29e271]
+- Updated dependencies [4389fe9]
+- Updated dependencies [13a6cb4]
+- Updated dependencies [9f483d9]
+- Updated dependencies [afe1c4e]
+- Updated dependencies [21756b3]
+- Updated dependencies [568de19]
+- Updated dependencies [8d21f7a]
+- Updated dependencies [9d101d2]
+- Updated dependencies [6d441e4]
+- Updated dependencies [5a616d5]
+- Updated dependencies [923c424]
+- Updated dependencies [b419135]
+- Updated dependencies [88e32a8]
+- Updated dependencies [38bc74e]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [ba6c9ed]
+- Updated dependencies [a24b7fa]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [df287e6]
+- Updated dependencies [93304c2]
+- Updated dependencies [bc400af]
+- Updated dependencies [9e93fc6]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [e2bb237]
+- Updated dependencies [189373b]
+- Updated dependencies [f59035c]
+- Updated dependencies [af1636c]
+- Updated dependencies [86a8ec9]
+- Updated dependencies [d9353b9]
+- Updated dependencies [35ad101]
+- Updated dependencies [ecd06f6]
+- Updated dependencies [502dc6f]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [aa765b9]
+- Updated dependencies [c5d0c2f]
+- Updated dependencies [6439f8b]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [45204a5]
+- Updated dependencies [9b0172d]
+- Updated dependencies [f34f56b]
+- Updated dependencies [24ba050]
+- Updated dependencies [f399618]
+- Updated dependencies [adbcbfd]
+- Updated dependencies [f1b5ad3]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+- Updated dependencies [2810695]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/plugin-auth@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/objectql@17.2.0
+  - @objectstack/driver-sql@17.2.0
+  - @objectstack/driver-turso@17.2.0
+  - @objectstack/driver-mongodb@17.2.0
+  - @objectstack/driver-memory@17.2.0
+  - @objectstack/client@17.2.0
+  - @objectstack/plugin-approvals@17.2.0
+  - @objectstack/service-storage@17.2.0
+  - @objectstack/plugin-audit@17.2.0
+  - @objectstack/runtime@17.2.0
+  - create-objectstack@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/plugin-security@17.2.0
+  - @objectstack/service-messaging@17.2.0
+  - @objectstack/service-analytics@17.2.0
+  - @objectstack/service-automation@17.2.0
+  - @objectstack/service-cache@17.2.0
+  - @objectstack/service-job@17.2.0
+  - @objectstack/setup@17.2.0
+  - @objectstack/metadata-protocol@17.2.0
+  - @objectstack/console@17.2.0
+  - @objectstack/rest@17.2.0
+  - @objectstack/service-datasource@17.2.0
+  - @objectstack/plugin-webhooks@17.2.0
+  - @objectstack/plugin-email@17.2.0
+  - @objectstack/service-package@17.2.0
+  - @objectstack/plugin-hono-server@17.2.0
+  - @objectstack/types@17.2.0
+  - @objectstack/verify@17.2.0
+  - @objectstack/observability@17.2.0
+  - @objectstack/lint@17.2.0
+  - @objectstack/cloud-connection@17.2.0
+  - @objectstack/plugin-reports@17.2.0
+  - @objectstack/plugin-sharing@17.2.0
+  - @objectstack/metadata@17.2.0
+  - @objectstack/trigger-schedule@17.2.0
+  - @objectstack/trigger-record-change@17.2.0
+  - @objectstack/driver-sqlite-wasm@17.2.0
+  - @objectstack/service-settings@17.2.0
+  - @objectstack/service-sms@17.2.0
+  - @objectstack/mcp@17.2.0
+  - @objectstack/account@17.2.0
+  - @objectstack/service-queue@17.2.0
+  - @objectstack/service-realtime@17.2.0
+  - @objectstack/formula@17.2.0
+  - @objectstack/trigger-api@17.2.0
+  - @objectstack/plugin-pinyin-search@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

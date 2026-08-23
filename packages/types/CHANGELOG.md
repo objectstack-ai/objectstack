@@ -1,5 +1,90 @@
 # @objectstack/types
 
+## 17.2.0
+
+### Minor Changes
+
+- 46d34ab: `createHostImporter`: resolve the undeclared fallback from the CALLER, not from `@objectstack/types`
+  
+  The helper's documented contract said the undeclared case "falls back to the importing
+  package's own resolution". It did not. The fallback was a bare `import()` written inside
+  `@objectstack/types`, and Node ESM resolves a bare specifier against the module that
+  CONTAINS the call — so it resolved from `@objectstack/types`, which under a pnpm-isolated
+  layout can see only its own single dependency, `@objectstack/spec`. Measured from an app
+  declaring nothing: `@objectstack/plugin-auth`, `@objectstack/plugin-audit` and `chalk` all
+  resolve from `packages/cli` and all failed through the helper. Under a hoisted npm/yarn
+  layout the same fallback usually does find the caller's dependencies, so the claim was
+  green in some installs and absent in others.
+  
+  `createHostImporter(hostRoot, options)` now takes the caller's resolution base as
+  `options.fallbackImport` — the caller's own `import()`, written in the calling module:
+  
+  ```ts
+  createHostImporter(hostRoot, { fallbackImport: (s) => import(s) })
+  ```
+  
+  **minor, not patch, and not major.** New exported API (`HostImporterOptions`,
+  `FallbackImport`, a second parameter) makes it additive rather than a fix-only patch. It
+  is not a breaking change because the parameter is optional and omitting it keeps the
+  previous resolution base exactly — an existing caller compiles and behaves as before. The
+  `undeclared` failure text now names that retained default when a caller has not passed a
+  base, so the gap reports itself instead of being rediscovered by measurement.
+  
+  `@objectstack/verify` (patch) passes its own base from `bootStack`. Measured: this changes
+  nothing for `@objectstack/organizations`, the only specifier it routes through the helper —
+  that package is cloud-private and resolves from nowhere in the framework workspace. It is
+  what stops the next app-supplied package added to that path from silently missing
+  `packages/verify`'s own dependencies.
+  
+  A string `parentURL` / `import.meta.url` base was measured on Node v22.22.2 and rejected in
+  both spellings: `import.meta.resolve`'s parent argument is silently ignored without
+  `--experimental-import-meta-resolve` (a change that would have compiled, run, and pinned
+  green while ignoring the base), and `createRequire(parentURL)` is CJS resolution, which
+  honours `NODE_PATH` — the hole the declaration gate exists to close, re-opened on the
+  fallback path.
+
+### Patch Changes
+
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

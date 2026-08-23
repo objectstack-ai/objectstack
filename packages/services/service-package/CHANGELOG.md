@@ -1,5 +1,183 @@
 # @objectstack/service-package
 
+## 17.2.0
+
+### Patch Changes
+
+- d25f700: Unwrap the mysql2 `[rows, fields]` tuple in the package service's row flattener
+  
+  On a MySQL/MariaDB-backed deployment (`OS_DATABASE_URL=mysql://…`, which builds a
+  `SqlDriver` on the `mysql2` client as the default driver), `PackageService.get()` and
+  `PackageService.list()` reported **"this package is not installed"** and **"no packages
+  are installed"** over a database that had just returned the rows.
+  
+  `ObjectQLEngine.execute()` and `SqlDriver.execute()` both pass the underlying client's
+  result through verbatim, so mysql2's `[rows, fields]` tuple reached the service's local
+  `normalizeRows` unflattened. The tuple is an array, so it was returned whole; `get()`
+  then read index 0 — the row *array* rather than a row — and `JSON.parse(undefined)` threw
+  into the method's own catch, which answers `null`. `list()` failed the same way into `[]`.
+  Boot-time package hydration read the same empty answer and silently installed nothing.
+  
+  The flattener now unwraps the tuple, matching the three-dialect coverage its own docblock
+  already claimed and the `metadata-protocol` sibling already implemented. The bare row
+  array (better-sqlite3 through knex, Turso) and `{ rows, rowCount }` (pg) shapes are
+  unchanged, and an empty result in any of the three still answers "no rows" rather than
+  raising the seam refusal.
+- ab47f69: `get()` and `list()` no longer report "not installed" / "nothing installed" over a storage seam they never queried.
+  
+  A driver that cannot run raw SQL returns no result set rather than throwing (`InMemoryDriver.execute()` logs `Raw execution not supported in InMemory driver` and returns `null`), and the service's row flattener mapped that to `[]` — the same value a working driver returns when a package genuinely is not installed. Both read paths then handed that back as a product answer, and the boot-time `sys_packages` rehydration skipped silently because of it.
+  
+  Reads now establish that the seam ANSWERED before reading emptiness as a fact. A seam that returns no result set is refused with `SERVICE_UNAVAILABLE` / 503 and a message saying the answer is unknown; boot logs the skipped rehydration at `warn` instead of passing over it. A seam that answers with genuinely zero rows is unchanged: `get()` still returns `null` and `list()` still returns `[]`.
+- 6ceaa4b: docs: name packages that exist in seven published documents, and gate the class (#10893)
+  
+  A published README ships inside the npm tarball, so an install instruction in one
+  reaches every reader of the package. Nine `@objectstack/` names across seven
+  published documents named a package that is in **no directory of this repo**, and
+  five of those sat on `import` lines inside runnable fences.
+  
+  `check:published-readme-exports` could not see any of it, by construction. It
+  resolves a documented import against the package's built type surface through the
+  workspace member map, so a specifier that is not a member has no type entry to
+  compare against and the gate reads no further — strict about a member that exists,
+  silent about one that does not. The gate now makes the member-existence claim
+  first: an `@objectstack/`-scoped specifier that names no workspace member is a
+  finding, and the run header prints the scoped population as `N/N` so a recogniser
+  that stops matching shows up as a denominator that fell.
+  
+  What each dead claim now says, and why:
+  
+  - **`@objectstack/trigger-schedule`** and **`@objectstack/trigger-record-change`**
+    each misnamed **themselves**. Both READMEs — including their `# ` titles and
+    every fenced import — said `@objectstack/plugin-trigger-…`, a name that has
+    never been published. The exported class names (`ScheduleTriggerPlugin`,
+    `TimeRelativeTriggerPlugin`, `RecordChangeTriggerPlugin`) were correct all
+    along; only the package name was wrong, so this is a rename pinned by each
+    package's own `name` field.
+  - **`@objectstack/plugin-security`** told readers to `install
+    @objectstack/plugin-org-scoping` and register an `OrgScopingPlugin` from it. No
+    such package exists. The organization wall ships as the enterprise
+    `@objectstack/organizations` runtime, whose `OrganizationsPlugin` registers the
+    `org-scoping` service this plugin probes — the name `objectstack serve` and
+    `objectstack doctor` both print. Asking for the wall without it is a refusal to
+    boot (ADR-0093 D5), not a silent downgrade, and the page now says so. The
+    tenant-isolation bullet pointed at `@objectstack/service-tenant`, which is the
+    cloud control-plane runtime from the separate `cloud` repository and not where
+    the wall comes from either.
+  - **`@objectstack/service-package`** described packages being "delivered to
+    runtime kernels that load them through `@objectstack/service-marketplace`". That
+    package was never built: ADR-0003, ADR-0016 and ADR-0025 all name it as future
+    work. The loading half that does exist here is
+    `@objectstack/cloud-connection`'s `MarketplaceInstallLocalPlugin`.
+  - **`@objectstack/embedder-openai`** had a fenced example importing
+    `KnowledgeTursoPlugin` from `@objectstack/knowledge-turso` — the worst shape,
+    because a reader pastes it. No knowledge adapter in this repository consumes an
+    `IEmbedder` at all: `knowledge-memory` and `knowledge-ragflow` take no embedder
+    option, and the adapters the contract is written for are not here. The example
+    is now the `embed()` surface that does exist, with the gap stated rather than
+    papered over with a substitute package name.
+  - **`@objectstack/driver-sqlite-wasm`**'s "When to use" table compared it against
+    `@objectstack/driver-sqlite` and `@objectstack/driver-postgres`. Neither has
+    ever existed; `@objectstack/driver-sql` covers PostgreSQL, MySQL and SQLite
+    through Knex, choosing the client from its optional peers.
+  - **`@objectstack/spec`**'s published `prompts/architecture.md` instructed code
+    generators to write `import { User } from '@objectstack/protocol'`. The package
+    is `@objectstack/spec`, which the same sentence names as the path being
+    replaced.
+  
+  Four `@objectstack/` names that are **not** in this repo are deliberately left as
+  they are, because prose may name a package this repo does not build and a runnable
+  import may not: `@objectstack/security-enterprise` (the enterprise edition, whose
+  install hint the CLI prints and a CLI test pins), `@objectstack/service-tenant`
+  (the cloud runtime), `@objectstack/framework` (the umbrella install name), and the
+  two names `service-datasource`'s README recalls as its own past.
+- 145ba75: docs: repair the dead repo-relative targets in four published READMEs (#10813)
+  
+  A published README ships inside the npm tarball, so a dead relative link in one
+  is shipped to every reader who installs the package. Nine of them were measured
+  across four packages, and nothing read them: `check:published-readme-links`
+  checked docs-site URLs, `check:published-readme-exports` checked fenced import
+  lines, and the lychee lane never sees `packages/**/README.md`.
+  
+  `@objectstack/runtime` carried six dead targets. Each was traced to where the
+  content actually went rather than deleted:
+  
+  - `MINI_KERNEL_GUIDE.md`, `MINI_KERNEL_ARCHITECTURE.md` and
+    `MINI_KERNEL_IMPLEMENTATION.md` were deleted from the repo root in January as
+    "redundant markdown files" (d709ecce68 — 14 files, 5051 deletions, nothing
+    added). The kernel reference they described is the docs site now, so the
+    Documentation section is the same footer eight sibling READMEs already use.
+  - `examples/host/` was renamed to `examples/app-host`, then `apps/server`, then
+    `apps/objectos`, and finally split out to `objectstack-ai/cloud`. In-repo, an
+    HTTP server in front of the runtime is `@objectstack/plugin-hono-server` plus
+    the `@objectstack/hono` adapter, so the bullet points there.
+  - `examples/msw-react-crud/` became `examples/app-react-crud`, then
+    `apps/console`, and now ships as `@object-ui/console` from another repo.
+  - `test-mini-kernel.ts` was a root-level scratch script; this package's suite is
+    179 test files under `src/`.
+  - The section also ended on a truncated bullet with an unterminated backtick
+    (`` - `packages/runtime/src/ ``), which is now a real pointer to that suite.
+  
+  The other three packages: `@objectstack/hono` and `@objectstack/service-package`
+  still spelled `@objectstack/driver-sql` as `../../plugins/driver-sql`, stale
+  since the driver moved to `packages/drivers/` (#5618). `@objectstack/plugin-security`
+  and `@objectstack/service-package` linked three packages that are in no directory
+  of this repo (`plugin-org-scoping`, `service-tenant`, `service-marketplace`);
+  those links are dropped and the names kept as code spans, which is the spelling
+  those same files already use for a package they cannot point at in-tree. Whether
+  those three packages exist at all is a separate question, filed separately.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [8cc8401]
+- Updated dependencies [02b3b07]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [26f3588]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [05bc692]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [f334d66]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/metadata-core@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

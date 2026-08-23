@@ -1,5 +1,118 @@
 # @objectstack/service-sms
 
+## 17.2.0
+
+### Patch Changes
+
+- a24b7fa: Make the settings ordering contract **declared and enforced**, and make the
+  residual pre-bind READ audible (#10250).
+  
+  `SettingsServicePlugin` binds its data engine from a `kernel:ready` hook
+  registered in its `start()`. Three shipped plugins read a settings namespace
+  from a `kernel:ready` hook registered in *their* `start()` — `plugin-email`
+  (`mail`: SMTP/provider/from-address), `service-sms` (`sms`: provider
+  credentials and the daily cost ceiling) and `service-storage` (`storage`:
+  backend and credentials). Hooks fire in registration order, so a reader that
+  started before the settings plugin read `SettingsService`'s in-memory fallback,
+  which is empty at boot: the caller received the manifest **default** with
+  `source: 'default'` and `locked: false`, no diagnostic anywhere, while the
+  operator's saved row sat unread in `sys_setting`.
+  
+  Nothing constrained that order. None of the three declared any dependency on
+  `com.objectstack.service.settings`, so their position was pure `kernel.use()`
+  order. It was correct under `os serve` only because the always-on slate happens
+  to list `settings` first — and `serve` *prepends* an app's declared `requires`,
+  so an ordinary `requires: ['email']` produced email-before-settings and bypassed
+  that; cloud's per-tenant runtime mounts the slate from its own wiring.
+  
+  Three changes, one contract:
+  
+  - **Declared order.** Each of the three plugins now declares
+    `optionalDependencies: ['com.objectstack.service.settings']`. The kernel
+    resolves both the init and the start phase from that graph
+    (`resolvePluginOrder`, ADR-0116), so the bind is ordered ahead of the read
+    wherever the plugin is composed, in any host. Soft, not hard: a kernel with
+    no settings service still boots these plugins unchanged.
+  - **The residual is audible.** A settings read issued while a bind is
+    *declared but pending* now emits one operator-actionable `warn` per namespace
+    naming the repair. Deliberately not a refusal — an in-window read of a
+    setting with genuinely no persisted row must answer the manifest default, and
+    refusing would turn a correct startup sequence into an error. It stays silent
+    in every case that is not the window: after `bindEngine`, on a kernel with no
+    `objectql` at all (`settleWithoutEngine`), for a directly constructed
+    `SettingsService`, and for a read satisfied by an `OS_*` env override.
+  - **The slate pin now derives its boundary.** The foundational-prefix
+    assertion covered `slice(0, 6)` while `sms` — a settings reader — sits at
+    index 6, one past the end. The new pin
+    (`packages/cli/src/commands/serve-settings-ordering.pin.test.ts`) states the
+    rule instead of the count: every always-on entry that is not one of the
+    services others bind into at `kernel:ready` must be mounted after all of
+    them. An entry added tomorrow is covered wherever it lands.
+  
+  No behaviour changes for a deployment whose order was already correct.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [4d7c564]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [163a162]
+- Updated dependencies [26dea14]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [03bdd14]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [bbe643c]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [5b0af2b]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [e222a53]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [c49007a]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [af1636c]
+- Updated dependencies [86a8ec9]
+- Updated dependencies [d9353b9]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [45204a5]
+- Updated dependencies [9b0172d]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/plugin-auth@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes

@@ -1,5 +1,208 @@
 # @objectstack/service-external-datasource
 
+## 17.2.0
+
+### Patch Changes
+
+- e634ecf: fix(rest): `POST /datasources/:name/external/validate` does URL-scoped work (#10537)
+  
+  The route asked the `external-datasource` service for `validateAll()` — every
+  federated object on every federated datasource, each validation driving a live
+  `introspect(datasource)` remote-schema read — and then kept only the rows whose
+  `datasource` matched the URL. The rows it kept were correct; the *work* was not
+  scoped, so one datasource's health check paid for N datasources' remote
+  round-trips and threw most of the measurement away. An unreachable *unrelated*
+  remote slowed the answer for the datasource actually asked about (and produced
+  rows that were then filtered off).
+  
+  Measured at the branch point, through the real Hono adapter and the real
+  `ExternalDatasourceService` over a recording introspector: a request for one of
+  three federated datasources introspected `['wh_a', 'wh_b', 'wh_c']`. A request
+  naming a datasource that does not exist introspected all three as well, to
+  answer the empty report it already answered.
+  
+  `ExternalDatasourceService` now carries `validateDatasource(datasource)`, the
+  scoped twin of the sweep composed from the same primitives (`listObjects` →
+  filter → `validateObject`) and the same per-object catch, and the route calls
+  it. Same request answers `['wh_a']`; an unknown name answers `[]`.
+  
+  **No response change.** The rows the post-filter used to keep are the rows the
+  scoped composition returns — same objects, same diffs, same `data.ok` verdict,
+  same `200`, the same `400 EXTERNAL_DATASOURCE_ERROR` when the service refuses,
+  the same `503 SERVICE_UNAVAILABLE` when federation is not wired in, and an
+  unknown `:name` still answers an empty, vacuously `ok` report rather than a
+  `404`. The selection is keyed on `o.datasource ?? 'default'`, which is exactly
+  the value `validateObject` reports back as `result.datasource`, so "the rows the
+  sweep would have kept" and "the objects this selects" are the same set — pinned
+  directly, in both packages, by comparing the scoped answer against the
+  sweep-then-filter answer rather than against a remembered body.
+  
+  Because the output was already right, the pins that matter here are about the
+  CALL RECORD, not the body: `external-datasource-validate-scope.test.ts` asserts
+  which datasources were introspected and that `validateAll()` is not called at
+  all, over a fixture carrying three federated datasources so the assertion can
+  actually fail. A body-only test passes on both sides of this change.
+  
+  `validateDatasource` is **not** on `IExternalDatasourceService`: the contract
+  offers `validateObject(objectName)` and `validateAll()`, and adding a
+  per-datasource spelling to it is a spec-surface decision to take on its own
+  terms. The composition therefore lives in the service — the only registrant of
+  the `external-datasource` slot — and the REST registrar probes for it. A wired
+  service with no scoped spelling takes the same `503` arm every other route in
+  this family takes when the service cannot serve it, deliberately *not* a silent
+  fallback to the fan-out: a fallback would leave the old behaviour reachable on a
+  path no test drives.
+  
+  Unchanged: `validateAll()` itself, and the boot-validation sweep in
+  `packages/runtime` that legitimately validates every federated object.
+- f76fe42: Restore the introspected primary key in the persisted `external_catalog`
+  (#10676). `ExternalDatasourceService` reads `column.primaryKey` — the
+  `packages/spec` `IntrospectedColumn` spelling — but `plugin.ts` hands it the
+  driver's `introspectSchema()` result unmodified, and `SqlDriver` (and
+  `SqliteWasmDriver`, which extends it) speaks the other `IntrospectedColumn`
+  contract, from `packages/objectql/src/util.ts`: it sets `column.isPrimary` and
+  fills `table.primaryKeys`, never `column.primaryKey`.
+  
+  Measured against a live SQLite database: for a table declared
+  `primary key (id)`, the driver's `id` column carries `isPrimary: true` and the
+  table carries `primaryKeys: ['id']`, while `primaryKey` is `undefined`. Because
+  `ExternalCatalogSchema` defaults `primaryKey` to `false`, `refreshCatalog`
+  persisted a catalog in which **every** column of **every** remote table claimed
+  not to be part of the remote key — so Studio's schema browser and the boot gate
+  read a catalog that shows no primary keys at all.
+  
+  The seam now reads the union of all three signals (`primaryKey`, `isPrimary`,
+  `table.primaryKeys`) rather than any one of them. No in-tree producer uses a
+  `false` to negate a key another signal asserts, and taking the union means a
+  producer that fills only the table-level list — or only the per-column flag —
+  cannot lose half a composite key. No response or record shape changes: a field
+  that should always have carried the introspected value starts carrying it.
+  
+  The regression pin drives the service off a **real** `SqlDriver.introspectSchema()`
+  result rather than a hand-written fixture. The pre-existing suite could not see
+  this defect precisely because it hand-wrote its fixture in the spec spelling, so
+  no test ever fed the service what a driver actually emits.
+  
+  Not fixed here: `generateObjectDraft` still drops the key from the generated
+  object definition. Its destination is an open contract question rather than a
+  missing read — `fields.<name>.primaryKey` is **not** an authorable spec field
+  key (an object literal carrying it fails `tsc` against `ServiceObject` with
+  TS2353, and `ObjectSchema.safeParse` with `unrecognized_keys`), and there is no
+  key on `ObjectExternalBindingSchema` to hold a remote primary key either. See
+  #10676 for the routing decision.
+- 4257e4e: `os datasource introspect --primary-key` (and `POST /object-draft` with
+  `primaryKey`) now generates an object draft that compiles and parses (#11000).
+  
+  The generator emitted a field-level `primaryKey: true` — into the definition
+  and onto the rendered field line. `primaryKey` is **not a key of the spec field
+  schema**, so the `*.object.ts` the review-before-commit flow handed the user was
+  refused by both instruments the file is annotated for:
+  
+  - `tsc --noEmit` against `ServiceObject` — `TS2353: Object literal may only
+    specify known properties, and 'primaryKey' does not exist in type …`;
+  - `ObjectSchema.safeParse` — `unrecognized_keys` at `["fields","<f>"]`.
+  
+  This was the last reason the `opts.primaryKey` path did not build. With #10712's
+  namespace/`sharingModel` repairs already landed, **both** paths — `primaryKey`
+  set and unset — now clear `defineStack()`'s namespace check, the
+  `authoringRulesFor('build')` rule set, and `tsc --noEmit` over the rendered
+  source.
+  
+  The introspected key is not discarded: it is preserved as a comment above the
+  `fields` block, naming the column(s) the draft was given as the key —
+  
+  ```ts
+    // Remote primary key: order_id, line_no
+  ```
+  
+  — with the reason it is a comment rather than a field key, and an explicit
+  caveat that for a composite key some drivers report only the first column
+  (#10997), so the list is a lower bound rather than a verified complete key. A
+  table with no reported key gets no comment at all.
+  
+  Per the maintainer ruling of 2026-08-22, an authorable spelling for a federated
+  object's remote key (`external.primaryKey: string[]` on the binding schema) is
+  **deferred, not rejected** — it returns as its own `packages/spec` change when
+  federated upsert has a live runtime consumer to justify the surface.
+- 3e26359: `os datasource introspect` now generates an object draft that `os build`
+  accepts (#10712). The review-before-commit flow was handing the user a
+  `*.object.ts` the platform's own validator refuses, on two independent counts:
+  
+  - **The object name carried no `${namespace}_` prefix**, so `defineStack()`
+    refused it outright (ADR-0028) — measured as
+    `Object 'customers' is missing the package namespace prefix.` The prefix is
+    now derived from the datasource's OWN owning package (`_packageId` →
+    that package's `manifest.namespace`), and applied through
+    `validateObjectNamespacePrefix` — the same function `defineStack()` and the
+    runtime publish gate call, so an already-prefixed remote table
+    (`wh_accounts` under namespace `wh`) is not double-prefixed.
+  - **No `sharingModel` was emitted**, so the author-time rule set refused it
+    (`security-owd-unset`, ADR-0090 D1) — the same rule family #9666 hit for the
+    `os init` template. The draft now declares `sharingModel: 'private'`
+    explicitly, following the shape #9666 settled on for generated scaffolds:
+    the rule's own recommended default, rendered with the reason attached.
+  
+  When no namespace can be resolved (a datasource with no package provenance, or
+  a package that declares none) the draft keeps the bare remote-table name and
+  the rendered source carries a loud `TODO(namespace)`. It does not invent a
+  prefix — mirroring `defineStack`, which skips the check entirely rather than
+  inventing one, and avoiding an `_customers` that would trade one invalid draft
+  for another.
+  
+  At the time this landed, the `opts.primaryKey` path still did not build: it
+  emitted `fields.<f>.primaryKey`, which is not an authorable spec field key.
+  That was #11000, and it is fixed separately in this same release — both paths
+  build now. See that changeset for what replaced the key.
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [7d2d112]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [02b3b07]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [5acb58d]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [923c424]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [f34f56b]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/spec@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/types@17.2.0
+
 ## 17.1.0
 
 ### Minor Changes

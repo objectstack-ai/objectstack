@@ -1,5 +1,177 @@
 # @objectstack/verify
 
+## 17.2.0
+
+### Patch Changes
+
+- 46d34ab: `createHostImporter`: resolve the undeclared fallback from the CALLER, not from `@objectstack/types`
+  
+  The helper's documented contract said the undeclared case "falls back to the importing
+  package's own resolution". It did not. The fallback was a bare `import()` written inside
+  `@objectstack/types`, and Node ESM resolves a bare specifier against the module that
+  CONTAINS the call — so it resolved from `@objectstack/types`, which under a pnpm-isolated
+  layout can see only its own single dependency, `@objectstack/spec`. Measured from an app
+  declaring nothing: `@objectstack/plugin-auth`, `@objectstack/plugin-audit` and `chalk` all
+  resolve from `packages/cli` and all failed through the helper. Under a hoisted npm/yarn
+  layout the same fallback usually does find the caller's dependencies, so the claim was
+  green in some installs and absent in others.
+  
+  `createHostImporter(hostRoot, options)` now takes the caller's resolution base as
+  `options.fallbackImport` — the caller's own `import()`, written in the calling module:
+  
+  ```ts
+  createHostImporter(hostRoot, { fallbackImport: (s) => import(s) })
+  ```
+  
+  **minor, not patch, and not major.** New exported API (`HostImporterOptions`,
+  `FallbackImport`, a second parameter) makes it additive rather than a fix-only patch. It
+  is not a breaking change because the parameter is optional and omitting it keeps the
+  previous resolution base exactly — an existing caller compiles and behaves as before. The
+  `undeclared` failure text now names that retained default when a caller has not passed a
+  base, so the gap reports itself instead of being rediscovered by measurement.
+  
+  `@objectstack/verify` (patch) passes its own base from `bootStack`. Measured: this changes
+  nothing for `@objectstack/organizations`, the only specifier it routes through the helper —
+  that package is cloud-private and resolves from nowhere in the framework workspace. It is
+  what stops the next app-supplied package added to that path from silently missing
+  `packages/verify`'s own dependencies.
+  
+  A string `parentURL` / `import.meta.url` base was measured on Node v22.22.2 and rejected in
+  both spellings: `import.meta.resolve`'s parent argument is silently ignored without
+  `--experimental-import-meta-resolve` (a change that would have compiled, run, and pinned
+  green while ignoring the base), and `createRequire(parentURL)` is CJS resolution, which
+  honours `NODE_PATH` — the hole the declaration gate exists to close, re-opened on the
+  fallback path.
+- Updated dependencies [8f04d9a]
+- Updated dependencies [4d7c564]
+- Updated dependencies [6936d07]
+- Updated dependencies [59eb04d]
+- Updated dependencies [9f05b7d]
+- Updated dependencies [7d483e1]
+- Updated dependencies [530c1df]
+- Updated dependencies [163a162]
+- Updated dependencies [26dea14]
+- Updated dependencies [128684d]
+- Updated dependencies [3b2af5e]
+- Updated dependencies [5337ef1]
+- Updated dependencies [7d2d112]
+- Updated dependencies [03bdd14]
+- Updated dependencies [5fa0d72]
+- Updated dependencies [8cc8401]
+- Updated dependencies [7bf3fb7]
+- Updated dependencies [02b3b07]
+- Updated dependencies [2570ab0]
+- Updated dependencies [5886ee6]
+- Updated dependencies [bbe643c]
+- Updated dependencies [e634ecf]
+- Updated dependencies [ec79b11]
+- Updated dependencies [222d06f]
+- Updated dependencies [95437e7]
+- Updated dependencies [b20c8d2]
+- Updated dependencies [f76fe42]
+- Updated dependencies [4257e4e]
+- Updated dependencies [3e26359]
+- Updated dependencies [6ce58a7]
+- Updated dependencies [d806081]
+- Updated dependencies [d23e3a0]
+- Updated dependencies [9a1ed7a]
+- Updated dependencies [f3a8134]
+- Updated dependencies [98ea344]
+- Updated dependencies [b03a880]
+- Updated dependencies [46d34ab]
+- Updated dependencies [914c413]
+- Updated dependencies [55809a0]
+- Updated dependencies [5b0af2b]
+- Updated dependencies [ee2ff45]
+- Updated dependencies [5b39785]
+- Updated dependencies [47cd3ec]
+- Updated dependencies [1048500]
+- Updated dependencies [52db1d1]
+- Updated dependencies [5649efb]
+- Updated dependencies [9d7d2de]
+- Updated dependencies [c815c50]
+- Updated dependencies [795ea05]
+- Updated dependencies [2306a76]
+- Updated dependencies [e5ea701]
+- Updated dependencies [26f3588]
+- Updated dependencies [9e04c3e]
+- Updated dependencies [38cf397]
+- Updated dependencies [67630c4]
+- Updated dependencies [a40dcc1]
+- Updated dependencies [def0d3e]
+- Updated dependencies [8d0bb79]
+- Updated dependencies [57e4571]
+- Updated dependencies [112a8c6]
+- Updated dependencies [13a3dca]
+- Updated dependencies [5acb58d]
+- Updated dependencies [a16ff50]
+- Updated dependencies [e222a53]
+- Updated dependencies [acb4dbc]
+- Updated dependencies [2e3cf95]
+- Updated dependencies [4c93387]
+- Updated dependencies [d728325]
+- Updated dependencies [504c8d5]
+- Updated dependencies [a037f7c]
+- Updated dependencies [c49007a]
+- Updated dependencies [047ac86]
+- Updated dependencies [3ee8ddf]
+- Updated dependencies [16cef97]
+- Updated dependencies [a79bd35]
+- Updated dependencies [490879a]
+- Updated dependencies [6ceaa4b]
+- Updated dependencies [145ba75]
+- Updated dependencies [15ea214]
+- Updated dependencies [de19489]
+- Updated dependencies [c684d00]
+- Updated dependencies [d29e271]
+- Updated dependencies [4389fe9]
+- Updated dependencies [13a6cb4]
+- Updated dependencies [9f483d9]
+- Updated dependencies [923c424]
+- Updated dependencies [b419135]
+- Updated dependencies [88e32a8]
+- Updated dependencies [0ab81d1]
+- Updated dependencies [ba6c9ed]
+- Updated dependencies [a24b7fa]
+- Updated dependencies [1ec36b7]
+- Updated dependencies [df287e6]
+- Updated dependencies [93304c2]
+- Updated dependencies [bc400af]
+- Updated dependencies [5f2e54c]
+- Updated dependencies [189373b]
+- Updated dependencies [af1636c]
+- Updated dependencies [86a8ec9]
+- Updated dependencies [d9353b9]
+- Updated dependencies [35ad101]
+- Updated dependencies [ceb33a9]
+- Updated dependencies [dccbcec]
+- Updated dependencies [6439f8b]
+- Updated dependencies [73d9795]
+- Updated dependencies [8012960]
+- Updated dependencies [266654d]
+- Updated dependencies [45204a5]
+- Updated dependencies [9b0172d]
+- Updated dependencies [f34f56b]
+- Updated dependencies [24ba050]
+- Updated dependencies [f399618]
+- Updated dependencies [75e9301]
+- Updated dependencies [2810695]
+  - @objectstack/platform-objects@17.2.0
+  - @objectstack/plugin-auth@17.2.0
+  - @objectstack/spec@17.2.0
+  - @objectstack/objectql@17.2.0
+  - @objectstack/runtime@17.2.0
+  - @objectstack/core@17.2.0
+  - @objectstack/plugin-security@17.2.0
+  - @objectstack/service-analytics@17.2.0
+  - @objectstack/service-automation@17.2.0
+  - @objectstack/rest@17.2.0
+  - @objectstack/service-datasource@17.2.0
+  - @objectstack/plugin-hono-server@17.2.0
+  - @objectstack/types@17.2.0
+  - @objectstack/plugin-sharing@17.2.0
+  - @objectstack/service-settings@17.2.0
+
 ## 17.1.0
 
 ### Patch Changes
