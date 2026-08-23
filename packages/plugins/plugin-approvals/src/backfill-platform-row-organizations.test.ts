@@ -22,6 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   planPlatformRowOrganizationBackfill,
   runPlatformRowOrganizationBackfill,
@@ -61,24 +62,34 @@ interface FakeEngine extends BackfillEngine {
   failUpdates: boolean;
 }
 
+/**
+ * The double's WHERE matcher, at module scope and closing over nothing — it is
+ * judged on its own by `scripts/check-where-matcher-conformance.mjs`, and a
+ * matcher it cannot lift is a matcher nobody has checked.
+ */
+function matches(row: Row, where: any): boolean {
+  if (!where || typeof where !== 'object') return true;
+  for (const [key, expected] of Object.entries(where)) {
+    // REFUSE the combinators this double does not implement, rather than
+    // reading `$or` as a field name and silently matching nothing — the sweep
+    // must never pass a filter shape its fixture answers wrongly.
+    if (key.startsWith('$')) throw new Error(`fake engine: unsupported WHERE combinator '${key}'`);
+    const actual = row[key] ?? null;
+    if (expected && typeof expected === 'object' && '$in' in (expected as any)) {
+      if (!(expected as any).$in.includes(actual)) return false;
+      continue;
+    }
+    if (expected === null) {
+      if (actual !== null && actual !== undefined) return false;
+      continue;
+    }
+    if (actual !== expected) return false;
+  }
+  return true;
+}
+
 function makeEngine(tables: Record<string, Row[]>, opts: { withSchema?: boolean } = {}): FakeEngine {
   const withSchema = opts.withSchema !== false;
-  const matches = (row: Row, where: any): boolean => {
-    if (!where || typeof where !== 'object') return true;
-    for (const [key, expected] of Object.entries(where)) {
-      const actual = row[key] ?? null;
-      if (expected && typeof expected === 'object' && '$in' in (expected as any)) {
-        if (!(expected as any).$in.includes(actual)) return false;
-        continue;
-      }
-      if (expected === null) {
-        if (actual !== null && actual !== undefined) return false;
-        continue;
-      }
-      if (actual !== expected) return false;
-    }
-    return true;
-  };
   const engine: FakeEngine = {
     tables,
     updates: [],
@@ -97,7 +108,11 @@ function makeEngine(tables: Record<string, Row[]>, opts: { withSchema?: boolean 
       const limit = typeof options?.limit === 'number' ? options.limit : rows.length;
       return rows.slice(offset, offset + limit).map(r => ({ ...r }));
     },
-    async update(object: string, data: any) {
+    async update(object: string, data: any, options?: any) {
+      // Hold the double to ObjectQL.update's own dispatch contract — a fake
+      // looser than the engine is how a write path ships dead with its suite
+      // green (scripts/check-engine-double-contract.mjs).
+      assertEngineUpdateDispatch(data, options);
       if (engine.failUpdates) throw new Error(`fake engine: update('${object}') must not be reached in a dry run`);
       engine.updates.push({ object, data: { ...data } });
       const table = tables[object] ?? [];
@@ -326,9 +341,9 @@ describe('platform-row organization backfill — write', () => {
   it('reports a row that failed to write instead of aborting the sweep', async () => {
     const dry = await planPlatformRowOrganizationBackfill(engine);
     const realUpdate = engine.update.bind(engine);
-    engine.update = async (object: string, data: any) => {
+    engine.update = async (object: string, data: any, options?: any) => {
       if ((data as any).id === 'areq_1') throw new Error('driver: constraint violation');
-      return realUpdate(object, data);
+      return realUpdate(object, data, options);
     };
     const applied = await runPlatformRowOrganizationBackfill(engine, { dryRun: false });
     expect(applied.totals.written).toBe(dry.totals.planned - 1);
