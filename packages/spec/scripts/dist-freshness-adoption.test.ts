@@ -63,7 +63,54 @@ function sandboxSpec(): { root: string; spec: string } {
   fs.symlinkSync(path.join(PKG, 'node_modules'), path.join(spec, 'node_modules'), 'dir');
   // The real exports map: every gate here derives the `.d.ts` it reads from it.
   fs.copyFileSync(path.join(PKG, 'package.json'), path.join(spec, 'package.json'));
+  // #10969 added `packages/client-react` + `packages/client` as check-skill-examples's
+  // second surface, so a "repo-shaped" tree needs both to exist too -- otherwise the
+  // surface's own zero-block guard fires on a directory this sandbox never populated,
+  // which is a different fact than "the markers rotted" and would drown out whatever
+  // this file's spec-staleness cases are actually probing. Seeded ALWAYS FRESH and
+  // decoupled from the `distMtime`/`srcMtime` knobs `seed()` takes for `tree.spec` --
+  // these tests are about spec's own staleness ordering, not the client surface's.
+  seedClientSdkSurface(root);
   return { root, spec };
+}
+
+/**
+ * One self-contained, marked, always-fresh example per client-SDK package, so
+ * `check-skill-examples`'s second surface (#10969) never itself becomes the
+ * reason a case in this file passes or fails. `.tsx` for client-react (its real
+ * source extension — the fence itself can still be plain ` ```ts `, no JSX
+ * needed) and `.ts` for client, matching `CLIENT_SDK_ROOTS`.
+ */
+function seedClientSdkSurface(root: string): void {
+  for (const { dir, name, ext } of [
+    { dir: 'client-react', name: '@objectstack/client-react', ext: '.tsx' },
+    { dir: 'client', name: '@objectstack/client', ext: '.ts' },
+  ]) {
+    const pkgDir = path.join(root, 'packages', dir);
+    fs.mkdirSync(path.join(pkgDir, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, 'src', `index${ext}`),
+      ['/**', ' * @example', ' * <!-- os:check -->', ' * ```ts', ' * export const ok = 1;', ' * ```', ' */', 'export const marker = 1;', ''].join('\n'),
+      'utf8',
+    );
+    fs.utimesSync(path.join(pkgDir, 'src', `index${ext}`), OLD, OLD);
+    fs.writeFileSync(
+      path.join(pkgDir, 'package.json'),
+      JSON.stringify(
+        {
+          name,
+          version: '0.0.0',
+          exports: { '.': { types: './dist/index.d.ts', import: './dist/index.mjs', require: './dist/index.js' } },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    fs.mkdirSync(path.join(pkgDir, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'dist', 'index.d.ts'), 'export {};\n', 'utf8');
+    fs.utimesSync(path.join(pkgDir, 'dist', 'index.d.ts'), NEW, NEW);
+  }
 }
 
 /** Every `dist/**.d.ts` the exports map points the gates at. */
@@ -256,7 +303,10 @@ describe('check:skill-examples refuses a stale dist (#7181)', () => {
 
     const run = runGate(tree.spec, SKILL);
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain('type-check against @objectstack/spec');
+    // #10969: the surface-parameterised success message names surface COUNT,
+    // not any one package -- it now covers this skills+docs surface AND the
+    // client-SDK one `seedClientSdkSurface` populates in every case in this file.
+    expect(run.stdout).toContain('prose examples type-check across 2 surface(s)');
     expect(run.stderr).not.toContain('OLDER than');
   }, 60_000);
 
@@ -266,7 +316,7 @@ describe('check:skill-examples refuses a stale dist (#7181)', () => {
 
     const run = runGate(tree.spec, SKILL);
     expectRefusal(run, 'pnpm --filter @objectstack/spec check:skill-examples');
-    expect(run.stdout).not.toContain('type-check against @objectstack/spec');
+    expect(run.stdout).not.toContain('prose examples type-check across');
   }, 60_000);
 
   it('lets the dist-independent guards above it speak first, even on a stale dist', () => {

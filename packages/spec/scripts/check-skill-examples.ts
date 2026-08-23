@@ -171,7 +171,6 @@ import { inspectDistFreshness } from './lib/dist-freshness';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const SPEC_DIR = path.resolve(__dirname, '..');
-const SPEC_PKG_JSON = path.resolve(SPEC_DIR, 'package.json');
 const CLIENT_REACT_DIR = path.resolve(REPO_ROOT, 'packages/client-react');
 const CLIENT_DIR = path.resolve(REPO_ROOT, 'packages/client');
 
