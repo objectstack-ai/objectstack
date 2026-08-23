@@ -70,7 +70,12 @@ function baseProtocol(overrides: Record<string, any> = {}) {
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn().mockResolvedValue([]),
         getMetaItem: vi.fn(async ({ type, name }: any) => ({
-            type, name,
+            // The real producer folds the plural URL spelling to the canonical
+            // singular (#4432) — mirror it, so the plural-spelling host below
+            // exercises the server against the envelope the producer actually
+            // speaks rather than against a double that skipped the fold.
+            type: ({ objects: 'object', views: 'view' } as Record<string, string>)[type] ?? type,
+            name,
             item: name === 'opportunity_all' ? LIST_VIEW : OPPORTUNITY,
             lock: 'none', editable: true, deletable: true, resettable: false,
         })),

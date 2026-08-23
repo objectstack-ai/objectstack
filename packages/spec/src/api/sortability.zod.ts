@@ -135,7 +135,10 @@ export const FieldSortabilitySchema = lazySchema(() => z.object({
   ),
 }));
 
-export type FieldSortability = z.infer<typeof FieldSortabilitySchema>;
+// ADR-0122: the bare alias names the AUTHOR (input) state. This schema has no
+// defaults or transforms, so input and parsed coincide — the bare name is the
+// only alias the surface needs.
+export type FieldSortability = z.input<typeof FieldSortabilitySchema>;
 
 /**
  * The per-column sortability projection for one object — served on the
@@ -152,7 +155,8 @@ export const ObjectSortabilitySchema = lazySchema(() => z.object({
   ),
 }));
 
-export type ObjectSortability = z.infer<typeof ObjectSortabilitySchema>;
+// ADR-0122: bare = input state; no transforms here, so it is also the wire shape.
+export type ObjectSortability = z.input<typeof ObjectSortabilitySchema>;
 
 /** Tolerant field-map reader — accepts both served `fields` shapes. */
 function fieldEntriesOf(doc: unknown): Array<[string, SearchFieldMeta | undefined]> {
