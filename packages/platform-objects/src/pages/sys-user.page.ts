@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { P } from '@objectstack/spec/shared';
 import type { Page } from '@objectstack/spec/ui';
 
 /**
@@ -59,23 +60,32 @@ export const SysUserDetailPage: Page = {
     alerts: [
       // The gate is the ADR-0089 canonical, component-NODE `visibleWhen` — a
       // sibling of `properties`, never a key inside it. `record:alert` also
-      // DECLARES `properties.visible`, but the page metadata serves that bag
-      // verbatim (`properties` is an opaque record on `PageComponentSchema`),
-      // so a bare string there reaches the renderer's LEGACY JS evaluator,
-      // which has no `has()`. The node key is `ExpressionInputSchema`,
-      // normalized to `{ dialect: 'cel', source }` before it is served, so it
-      // runs on CEL — where an absent key is a FAULT and the surface is
-      // fail-soft, i.e. an unguarded predicate would leave "Email not verified"
-      // permanently shown, even beside the page's own "Email Verified: Yes"
-      // chip. Hence the `has()` guards (the same shape the sibling
-      // `resend_verification_email` action predicate already carries), and
+      // DECLARES `properties.visible`, but `PageComponentSchema.properties` is
+      // an opaque record served verbatim, so a predicate there never reaches
+      // `ExpressionInputSchema` and is evaluated by the console's LEGACY JS
+      // evaluator, which has no `has()`.
+      //
+      // ⚠️ The envelope is load-bearing, and `P` is not decoration. This page is
+      // authored as a RAW `Page` object literal, so — unlike a page built with
+      // `definePage()` — nothing runs `ExpressionInputSchema`'s transform over
+      // it and whatever is written here reaches the wire verbatim. Measured in
+      // the real console at the pinned objectui SHA: a BARE string in
+      // `visibleWhen` also stays on that legacy evaluator ("bare strings and
+      // `${…}` templates stay on the legacy path … only an explicit
+      // `{ dialect: 'cel' }` envelope is rerouted"), so `has()` throws, the
+      // surface is fail-soft, and the banner shows on EVERY user — including
+      // other people's profiles. `P` emits the `{ dialect: 'cel', source }`
+      // envelope that routes to CEL, where `has()` is a real function.
+      //
+      // On CEL an absent key is a FAULT and that face is fail-soft too, hence
+      // the `has()` guards (the same shape the sibling
+      // `resend_verification_email` action predicate already carries). And
       // hence no `visible` beside it: a node `visibleWhen` and
       // `properties.visible` compose as AND, so leaving both would keep the
       // legacy predicate load-bearing.
       {
         type: 'record:alert',
-        visibleWhen:
-          'has(record.id) && has(record.email_verified) && record.id == ctx.user.id && record.email_verified == false',
+        visibleWhen: P`has(record.id) && has(record.email_verified) && record.id == ctx.user.id && record.email_verified == false`,
         properties: {
           severity: 'warning',
           icon: 'mail',
