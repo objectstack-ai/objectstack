@@ -379,7 +379,9 @@ describe('lintLivenessProperties', () => {
         schedule: { type: 'cron', expression: '0 0 * * *' },
         handler: 'syncAll',
       }],
-      translations: [{ name: 'zh_cn', locale: 'zh-CN', messages: { 'common.save': '保存' } }],
+      // Bundle-shaped since #11288: `stack.translations` is locale-keyed, so the
+      // item shape this fixture used to carry was never what the collection holds.
+      translations: [{ 'zh-CN': { messages: { 'common.save': '保存' } } }],
       apps: [{ name: 'crm', label: 'CRM', navigation: [] }],
     });
     expect(findings).toEqual([]);
@@ -649,6 +651,108 @@ describe('lintLivenessProperties', () => {
         navItem('nav_leads', { viewName: 'hot_leads' }),
       ]));
       expect(findings).toEqual([]);
+    });
+  });
+
+  // ── #11288: `stack.translations` is a locale-keyed BUNDLE, not an item ──────
+  //
+  // Every other collection in `TYPE_COLLECTIONS` is a flat array of items whose
+  // TOP-LEVEL keys are the ledger's props. `translations` is not: an item of
+  // `stack.translations` is a `TranslationBundle` — `z.record(LocaleSchema,
+  // TranslationDataSchema)` (`packages/spec/src/stack.zod.ts:275`) — so every
+  // warned group sits one level down, under a locale code. Walked flat, the
+  // lookup read `bundle['flows']`, which a bundle has at no depth reachable
+  // that way, and the ENTIRE translation ledger warned nobody for file-authored
+  // bundles — the only way apps author translations today. Measured on a real
+  // app as a zero-delta ablation: an injected `flows:` section produced 0 new
+  // findings (91 issues before and after).
+  //
+  // ⚠️ These fixtures are locale-keyed ON PURPOSE, and the anti-fixture at the
+  // bottom of the block is why. A `TranslationItem`-shaped fixture warns on the
+  // BROKEN walk, so it would have been green from the day the bug shipped and
+  // pinned nothing.
+  describe('translation bundles are locale-keyed (#11288)', () => {
+    /** `flows` is the one `authorWarn` row on the shipped `translation` ledger. */
+    const flowsGroup = { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } };
+
+    it('warns on a warned group authored under a locale entry', () => {
+      const findings = lintLivenessProperties({
+        translations: [{ 'zh-CN': { flows: flowsGroup } }],
+      });
+      expect(paths(findings).some((m) => m.includes('`flows`'))).toBe(true);
+      expect(findings.map((f) => f.where)).toEqual(["translation bundle #0 · locale 'zh-CN'"]);
+      expect(findings[0]?.hint).toContain('screen-flow runner');
+    });
+
+    // The walk has two levels and both can stop early. Authored on the SECOND
+    // locale of the SECOND bundle, so neither an outer nor an inner walk that
+    // visits only index 0 can pass this.
+    it('reaches every locale of every bundle, not just the first of each', () => {
+      const findings = lintLivenessProperties({
+        translations: [
+          { en: { messages: { 'common.save': 'Save' } } },
+          {
+            ja: { messages: { 'common.save': '保存' } },
+            'zh-CN': { flows: flowsGroup },
+          },
+        ],
+      });
+      expect(findings.map((f) => f.where)).toEqual(["translation bundle #1 · locale 'zh-CN'"]);
+    });
+
+    it('stays silent on a bundle that authors only live groups', () => {
+      const findings = lintLivenessProperties({
+        translations: [{
+          'zh-CN': {
+            objects: { crm_lead: { label: '线索' } },
+            messages: { 'common.save': '保存' },
+          },
+        }],
+      });
+      expect(findings).toEqual([]);
+    });
+
+    // Anti-vacuity guard for the silence pin above — the shape the dashboard and
+    // navigation blocks use. `lintLivenessProperties` returns [] both when a walk
+    // is broken and when it cannot resolve the shipped ledgers at all, so the
+    // silence needs a witness that the ledgers ARE loaded in the same call. Pairs
+    // the clean bundle with `object.externalSharingModel`, still `authorWarn` in
+    // tree: same process, same ledger load, one warning and not two.
+    it('the translation silence is a real verdict, not a lint that stopped loading ledgers', () => {
+      const findings = lintLivenessProperties({
+        objects: [{ name: 'widget', externalSharingModel: 'read' }],
+        translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' } } } }],
+      });
+      const messages = findings.map((f) => f.message);
+      expect(messages.some((m) => m.includes('externalSharingModel'))).toBe(true);
+      expect(messages.some((m) => m.includes('flows'))).toBe(false);
+    });
+
+    // THE ANTI-FIXTURE, and the reason every pin above is bundle-shaped. This is
+    // the shape the broken walk assumed: a `TranslationItem` — `locale` plus the
+    // same groups at the TOP level — which is the RUNTIME metadata door
+    // (`packages/spec/src/kernel/metadata-type-schemas.ts:158`), not this
+    // collection. It warns on the broken walk and must not here:
+    // `stack.translations` is `z.record(LocaleSchema, TranslationDataSchema)`, so
+    // this object would have to mean a locale named `flows` whose value is
+    // `TranslationData` — a parse error two tiers before this advisory ever runs.
+    // Runtime-authored items reach this lint through no door at all: no stack
+    // collection carries them, and the rule is `surfaces: CLI_ONLY`, so it does
+    // not run at the runtime publish gate either.
+    it('does not treat a runtime `TranslationItem` shape as a bundle', () => {
+      const findings = lintLivenessProperties({
+        translations: [{ name: 'zh_cn', locale: 'zh-CN', flows: flowsGroup }],
+      });
+      expect(findings).toEqual([]);
+    });
+
+    // "Advisory only — returns findings, never throws" is the function's own
+    // contract, and a bundle walk adds two levels that can be malformed.
+    it('never throws on a malformed bundle, and keeps walking past it', () => {
+      const findings = lintLivenessProperties({
+        translations: [null, { 'zh-CN': null }, { en: { flows: flowsGroup } }],
+      });
+      expect(findings.map((f) => f.where)).toEqual(["translation bundle #2 · locale 'en'"]);
     });
   });
 });

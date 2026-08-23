@@ -672,6 +672,157 @@ describe('validateDatasource', () => {
   });
 });
 
+/**
+ * [#10962] Per-sweep introspection memo — the CALL COUNT is the deliverable.
+ *
+ * `validateObject` reads the live remote schema on every call, so a sweep over
+ * M federated objects on one datasource used to perform M concurrent
+ * `introspect(datasource)` round-trips against the same remote. The fix
+ * threads a per-call memo through `validateAll`/`validateDatasource`: one live
+ * read per datasource per sweep.
+ *
+ * The memo's LIFETIME is the other half of the contract, and the harder one:
+ * per call, never per instance. A `Map` cached on the service would pass every
+ * counting assertion a per-call memo passes — only the second-sweep cases
+ * below (a fresh read per sweep, and a remote change visible to the next
+ * sweep) tell them apart. Do not weaken those to "at least once".
+ */
+describe('per-sweep introspection memo [#10962]', () => {
+  const M_DATASOURCE = 'wh';
+  const SIDE_DATASOURCE = 'wh_b';
+
+  /** M > 1 objects on one datasource — the population the memo collapses. */
+  const OBJECTS: ObjectLike[] = [
+    ...['wh_orders_a', 'wh_orders_b', 'wh_orders_c'].map((name) => ({
+      name,
+      datasource: M_DATASOURCE,
+      external: { remoteName: 'orders' },
+      fields: { order_id: { type: 'text' } },
+    })),
+    {
+      name: 'side_orders',
+      datasource: SIDE_DATASOURCE,
+      external: { remoteName: 'orders' },
+      fields: { order_id: { type: 'text' } },
+    },
+  ];
+
+  function makeCounting(opts: { unreachable?: readonly string[] } = {}) {
+    const introspected: string[] = [];
+    const unreachable = new Set(opts.unreachable ?? []);
+    let tables: IntrospectedSchema['tables'] = {
+      orders: {
+        name: 'orders',
+        indexes: [],
+        columns: [{ name: 'order_id', type: 'text', nullable: false, primaryKey: true }],
+      },
+    };
+    const svc = new ExternalDatasourceService({
+      introspect: async (datasource: string) => {
+        introspected.push(datasource);
+        if (unreachable.has(datasource)) throw new Error(`connect ECONNREFUSED (${datasource})`);
+        return { dialect: 'postgres', introspectedAt: '2026-08-23T00:00:00.000Z', tables };
+      },
+      getDatasource: async (name: string) =>
+        [M_DATASOURCE, SIDE_DATASOURCE].includes(name) ? { name, schemaMode: 'external' } : undefined,
+      getObject: async (name: string) => OBJECTS.find((o) => o.name === name),
+      listObjects: async () => OBJECTS,
+      logger: { warn: () => {} },
+    });
+    return {
+      svc,
+      introspected,
+      /** Simulate the remote dropping its tables between sweeps. */
+      dropRemoteTables: () => {
+        tables = {};
+      },
+    };
+  }
+
+  it('validateAll reads each datasource once per sweep — M objects, one live read', async () => {
+    // The claim is only non-vacuous when M really exceeds 1.
+    expect(OBJECTS.filter((o) => o.datasource === M_DATASOURCE).length).toBeGreaterThan(1);
+    const { svc, introspected } = makeCounting();
+
+    const report = await svc.validateAll();
+
+    expect([...introspected].sort()).toEqual([M_DATASOURCE, SIDE_DATASOURCE]);
+    expect(report.ok).toBe(true);
+    expect(report.results).toHaveLength(OBJECTS.length);
+  });
+
+  it('validateDatasource reads its datasource once for M objects', async () => {
+    const { svc, introspected } = makeCounting();
+
+    const report = await svc.validateDatasource(M_DATASOURCE);
+
+    expect(introspected).toEqual([M_DATASOURCE]);
+    expect(report.ok).toBe(true);
+    expect(report.results).toHaveLength(3);
+  });
+
+  it('a second sweep reads live again — the memo is per call, not a service-instance cache', async () => {
+    const { svc, introspected, dropRemoteTables } = makeCounting();
+
+    const first = await svc.validateAll();
+    expect(first.ok).toBe(true);
+    expect(introspected.filter((d) => d === M_DATASOURCE)).toHaveLength(1);
+
+    // The remote changes between sweeps. A per-instance cache would keep the
+    // counting pin above green while answering this sweep from last sweep's
+    // schema — stale `ok: true` — which is exactly what this case refuses.
+    dropRemoteTables();
+    const second = await svc.validateAll();
+
+    expect(introspected.filter((d) => d === M_DATASOURCE)).toHaveLength(2);
+    expect(second.ok).toBe(false);
+    for (const r of second.results) {
+      expect(r.ok).toBe(false);
+      expect(r.diffs[0]).toMatchObject({ kind: 'missing_table', severity: 'error' });
+    }
+  });
+
+  it('direct validateObject stays live: two calls are two reads, and a remote change is seen', async () => {
+    const { svc, introspected, dropRemoteTables } = makeCounting();
+
+    const before = await svc.validateObject('wh_orders_a');
+    expect(before.ok).toBe(true);
+
+    dropRemoteTables();
+    const after = await svc.validateObject('wh_orders_a');
+
+    expect(introspected).toEqual([M_DATASOURCE, M_DATASOURCE]);
+    expect(after.ok).toBe(false);
+    expect(after.diffs[0]).toMatchObject({ kind: 'missing_table', severity: 'error' });
+  });
+
+  it('one unreachable remote costs ONE connection attempt and still yields a failure row per object', async () => {
+    const { svc, introspected } = makeCounting({ unreachable: [M_DATASOURCE] });
+
+    const report = await svc.validateDatasource(M_DATASOURCE);
+
+    expect(introspected).toEqual([M_DATASOURCE]);
+    expect(report.ok).toBe(false);
+    expect(report.results).toHaveLength(3);
+    for (const r of report.results) {
+      expect(r).toMatchObject({
+        ok: false,
+        datasource: M_DATASOURCE,
+        diffs: [
+          expect.objectContaining({
+            // [#11166] A throw out of introspect is `unreachable`, never an
+            // invented `missing_table` — this pin is about the COUNT (one
+            // shared connection attempt), and rides the kind ruling as-is.
+            kind: 'unreachable',
+            severity: 'error',
+            actual: `connect ECONNREFUSED (${M_DATASOURCE})`,
+          }),
+        ],
+      });
+    }
+  });
+});
+
 describe('refreshCatalog', () => {
   it('produces a snapshot with suggested field types', async () => {
     const svc = makeService();

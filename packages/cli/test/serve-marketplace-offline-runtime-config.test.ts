@@ -429,3 +429,88 @@ describe('#8389: the identities and options the arm mounts with are the real one
     expect(Object.isFrozen(Serve.RUNTIME_CONFIG_OPTIONS)).toBe(true);
   });
 });
+
+/**
+ * #10805 — the same offline arm must also serve the SPA telemetry refusal.
+ *
+ * This is cloud#1508's acceptance expressed on the server side: on a
+ * composed / air-gapped posture, a Console build that DOES carry a Sentry DSN
+ * must be told not to send, through a switch that needs no rebuild.
+ *
+ * It belongs here rather than only in the plugin's own suite because of one
+ * measured property of this wiring: `Serve.RUNTIME_CONFIG_OPTIONS` hands the
+ * plugin `controlPlaneUrl: ''` on BOTH arms, so on the real product path the
+ * constructor argument carries no posture information whatsoever and only
+ * `OS_CLOUD_URL` does. A posture read built on the resolved URL would pass
+ * every hand-built fixture and be wrong exactly here. The correspondence this
+ * pins is exact: `resolveCloudUrl()` maps an unset env var to the PUBLIC
+ * default (truthy), so this arm is reached if and only if `OS_CLOUD_URL` is
+ * one of the decline spellings — the same condition the refusal reads.
+ *
+ * The env var is set for real, not simulated by `marketplaceUrl: ''` as the
+ * blocks above do, because that simulation is precisely the half that would
+ * hide the defect.
+ */
+describe('#10805: the offline arm refuses client telemetry on a real OS_CLOUD_URL=off boot', () => {
+  const GRANT_ENV = 'OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED';
+
+  async function bootAirGapped(run: (body: any) => void | Promise<void>): Promise<void> {
+    const savedCloudUrl = process.env.OS_CLOUD_URL;
+    const savedGrant = process.env[GRANT_ENV];
+    const dir = tempStorageDir();
+    try {
+      process.env.OS_CLOUD_URL = 'off';
+      const { app } = await bootOfflineArm({ storageDir: dir });
+      await run(await readConfig(app));
+    } finally {
+      if (savedCloudUrl === undefined) delete process.env.OS_CLOUD_URL;
+      else process.env.OS_CLOUD_URL = savedCloudUrl;
+      if (savedGrant === undefined) delete process.env[GRANT_ENV];
+      else process.env[GRANT_ENV] = savedGrant;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('THE ACCEPTANCE — an air-gapped boot tells the Console not to send, with zero configuration', async () => {
+    await bootAirGapped((body) => {
+      expect(
+        body.telemetry.allowClientErrorReporting,
+        'an operator who has never heard of Sentry must be safe without configuring anything',
+      ).toBe(false);
+    });
+  });
+
+  it('...and refuses even an explicit grant, because this runtime declared its control plane off', async () => {
+    process.env[GRANT_ENV] = 'true';
+    await bootAirGapped(async (body) => {
+      const { isClientErrorReportingAllowed } = await import('@objectstack/cloud-connection');
+      expect(body.telemetry.allowClientErrorReporting).toBe(false);
+      // Read through the exported contract too: what the SPA will actually do
+      // with this payload is the thing under test, not the raw boolean.
+      expect(isClientErrorReportingAllowed(body)).toBe(false);
+    });
+  });
+
+  it('POSITIVE CONTROL — the same grant on the CLOUD arm is honoured', async () => {
+    // Without this, the refusal above could be an artifact of the fixture
+    // rather than a posture reading, and the pin would stay green on a build
+    // that denies everything unconditionally.
+    const savedCloudUrl = process.env.OS_CLOUD_URL;
+    const savedGrant = process.env[GRANT_ENV];
+    try {
+      process.env.OS_CLOUD_URL = 'https://cloud.objectos.ai';
+      process.env[GRANT_ENV] = 'true';
+      const { RuntimeConfigPlugin } = await import('@objectstack/cloud-connection');
+      const app = createApp();
+      // The cloud arm's own mount, verbatim — same shared frozen options.
+      await startOn(app, new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
+      const body = await readConfig(app);
+      expect(body.telemetry.allowClientErrorReporting).toBe(true);
+    } finally {
+      if (savedCloudUrl === undefined) delete process.env.OS_CLOUD_URL;
+      else process.env.OS_CLOUD_URL = savedCloudUrl;
+      if (savedGrant === undefined) delete process.env[GRANT_ENV];
+      else process.env[GRANT_ENV] = savedGrant;
+    }
+  });
+});

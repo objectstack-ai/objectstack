@@ -1552,3 +1552,100 @@ describe('FieldSchema — `maskingRule` is a DECLARED key (#8993, ruled Option A
     expect(prop!.description).toMatch(/FieldMasker/);
   });
 });
+
+describe('Polymorphic pointer pair — referenceVia (#11339, ADR-0052 §5)', () => {
+  it('accepts referenceVia on a text field (the ActivityPointer id half)', () => {
+    const field: Field = {
+      name: 'record_id',
+      label: 'Record ID',
+      type: 'text',
+      referenceVia: 'object_name',
+    };
+    const result = FieldSchema.parse(field);
+    expect(result.referenceVia).toBe('object_name');
+  });
+
+  it('rejects referenceVia on a non-text field, naming the fix', () => {
+    const result = FieldSchema.safeParse({
+      name: 'record_id',
+      label: 'Record ID',
+      type: 'lookup',
+      referenceVia: 'object_name',
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'referenceVia');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(/text/);
+    expect(issue!.message).toMatch(/lookup/);
+  });
+
+  it('rejects referenceVia combined with reference — a static and a per-row target contradict', () => {
+    const result = FieldSchema.safeParse({
+      name: 'record_id',
+      label: 'Record ID',
+      type: 'text',
+      reference: 'crm_lead',
+      referenceVia: 'object_name',
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'referenceVia');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(/reference/);
+  });
+
+  it('rejects a non-machine-name sibling spelling', () => {
+    const result = FieldSchema.safeParse({
+      name: 'record_id',
+      label: 'Record ID',
+      type: 'text',
+      referenceVia: 'Object Name',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('ObjectSchema.create refuses a referenceVia whose sibling is not declared, listing the declared fields', () => {
+    expect(() =>
+      ObjectSchema.create({
+        name: 'sys_pointer_test',
+        fields: {
+          summary: { type: 'text', label: 'Summary' },
+          record_id: { type: 'text', label: 'Record ID', referenceVia: 'object_name' },
+        },
+      }),
+    ).toThrow(/no field named "object_name"/);
+  });
+
+  it('ObjectSchema.create refuses a referenceVia pointing at itself', () => {
+    expect(() =>
+      ObjectSchema.create({
+        name: 'sys_pointer_test',
+        fields: {
+          record_id: { type: 'text', label: 'Record ID', referenceVia: 'record_id' },
+        },
+      }),
+    ).toThrow(/ITSELF/);
+  });
+
+  it('ObjectSchema.create accepts the canonical declared pair', () => {
+    const obj = ObjectSchema.create({
+      name: 'sys_pointer_test',
+      fields: {
+        object_name: { type: 'text', label: 'Object' },
+        record_id: { type: 'text', label: 'Record ID', referenceVia: 'object_name' },
+      },
+    });
+    expect((obj.fields as Record<string, { referenceVia?: unknown }>).record_id.referenceVia).toBe('object_name');
+  });
+
+  it('the `.describe()` prose states the seed-time contract and the non-goals (feeds the reference page)', () => {
+    const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
+      unrepresentable: 'any',
+      io: 'input',
+    }) as { properties?: Record<string, { description?: string }> };
+    const prop = js.properties?.referenceVia;
+    expect(prop).toBeDefined();
+    expect(prop!.description).toMatch(/sibling/i);
+    expect(prop!.description).toMatch(/seed/i);
+    expect(prop!.description).toMatch(/referential integrity/);
+  });
+});

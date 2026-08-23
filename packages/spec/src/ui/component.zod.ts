@@ -275,9 +275,11 @@ const COMPONENT_NODE_VISIBILITY_GUIDANCE: KeySetGuidance =
     prescription:
       'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '
       + 'component node\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '
-      + '`id`. Inside `properties` it is hoisted onto the node by the renderer but evaluated by '
-      + 'nothing — the component renders unconditionally, which is a visibility gate that '
-      + 'silently does not gate.',
+      + '`id` — one canonical spelling per layer, not because the props-level form is inert. '
+      + 'Since objectui#5505 (`c86185eb5`, merged 2026-08-21) the hoisted form IS evaluated by '
+      + 'the node-level gate: the two gates evaluate the same value and compose as an '
+      + 'idempotent AND, so leaving it in `properties` duplicates the canonical key rather '
+      + 'than silently failing to gate.',
   };
 
 const COMPONENT_NODE_KEYS_GUIDANCE: KeySetGuidance =

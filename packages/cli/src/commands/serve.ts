@@ -295,10 +295,11 @@ function servedAppRootOrCwd(): string {
  * MEASURED. Before: hostRoot was the CWD, so `declared` was true and
  * `hostRequire.resolve` found the package under the CWD's `node_modules`.
  * After: hostRoot is the served app, `declared` is false, and the load goes to
- * `createHostImporter`'s fallback — which is a bare `import()` physically
- * inside `@objectstack/types`, because `importFromHost` passes no
- * `fallbackImport` (#11157's residue). Node ESM walks `node_modules` UPWARD
- * from there, so the common shape survives: in a hoisted monorepo whose ROOT
+ * `createHostImporter`'s fallback — which is a bare `import()` written in THIS
+ * file, because `importFromHost` now hands the helper its own resolution base
+ * (`fallbackImport`, #11157; it used to resolve from `@objectstack/types`
+ * instead). Node ESM walks `node_modules` UPWARD from there, so the common
+ * shape survives: in a hoisted monorepo whose ROOT
  * manifest declares the package while the served `apps/foo/package.json` does
  * not, that walk reaches the same hoisted store and boot is what it always
  * was — only the leg changed. It genuinely refuses only where the walk cannot
@@ -374,6 +375,41 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  * `serve-cluster-host-resolution.test.ts` is the detection backstop: it scans
  * this file for every app-declarable optional load and fails on a bare one.
  *
+ * ── What the UNDECLARED leg resolves from, and why it is stated here (#11157) ─
+ *
+ * `createHostImporter` has two legs. The DECLARED one resolves out of the served
+ * app's own `node_modules`, anchored by `hostRoot`. The UNDECLARED one falls back
+ * to "the importing package's own resolution" — and which package that IS depends
+ * entirely on where the `import()` is physically WRITTEN, because Node ESM
+ * resolves a bare specifier against the module containing the call.
+ *
+ * Omit `fallbackImport` and that call is the default one inside
+ * `@objectstack/types`, so the fallback sees only what THAT package declares.
+ * MEASURED in this checkout, `import.meta.resolve` from each base:
+ *
+ *     specifier                    from packages/cli   from packages/types
+ *     @objectstack/plugin-auth     OK                  MISS
+ *     @objectstack/plugin-audit    OK                  MISS
+ *     chalk                        OK                  MISS
+ *     @objectstack/spec            OK                  OK    ← types' one dep
+ *
+ * #10943 made the base an explicit parameter for exactly that reason, and its
+ * other two callers (`@objectstack/verify`'s `bootStack`, the `packages/qa/
+ * dogfood` enterprise probe) pass theirs. This file was the one that did not, so
+ * its undeclared leg resolved from a package it has nothing to do with. That was
+ * harmless only by accident — every specifier reaching it today is app-supplied
+ * and resolves from NEITHER base — and the next CLI-declared package loaded here
+ * would have silently missed the CLI's own dependencies. Passing the base widens
+ * the undeclared leg's reach to exactly what `packages/cli` itself declares, and
+ * to nothing else: the #4719 declaration gate on the DECLARED leg is untouched,
+ * so no app gains a way to load something it has not declared.
+ *
+ * The base is a FUNCTION and not a `parentURL` string because both string
+ * spellings were measured wrong — `import.meta.resolve`'s parent argument is
+ * silently ignored without a flag, and `createRequire().resolve` re-opens the
+ * `NODE_PATH` hole #4719 closed. `@objectstack/types/node` carries both
+ * measurements; do not re-derive them here.
+ *
  * @param hostRoot Directory holding the served app's `package.json`. Defaults to
  * {@link servedAppRootOrCwd} — the directory `serve` read the app's
  * `objectstack.config.ts` from, which is the app's own root and NOT necessarily
@@ -386,7 +422,12 @@ function importFromHost(specifier: string, hostRoot: string = servedAppRootOrCwd
   // one mid-function `const` did before it was hoisted out here.
   let importer = hostImporters.get(hostRoot);
   if (!importer) {
-    importer = createHostImporter(hostRoot);
+    importer = createHostImporter(hostRoot, {
+      // THIS module's own resolver, written HERE (#10943/#11157) — see the
+      // "what the undeclared leg resolves from" note above for why it has to be
+      // a function in the calling module and not a URL string.
+      fallbackImport: (fallbackSpecifier) => import(/* webpackIgnore: true */ fallbackSpecifier),
+    });
     hostImporters.set(hostRoot, importer);
   }
   return importer(specifier);
@@ -580,49 +621,67 @@ export default class Serve extends Command {
    * distribution layout. Same mechanism as cloud#1013 and #10645, but on the
    * surface users are explicitly told to use.
    *
-   * ── Why this is three branches and not `await importFromHost(specifier)` ────
+   * ── Why this WAS three branches, and why it is now two (#10908 → #11157) ────
    *
-   * The obvious repair is to hand every specifier to `importFromHost`. MEASURED,
-   * that is NOT a superset of what this line does today — in two ways, both of
-   * which would take working deployments away:
+   * The three-branch shape existed because handing every specifier to
+   * `importFromHost` was MEASURED not to be a superset of a bare `import()` —
+   * in two ways, both of which would have taken working deployments away:
    *
    *   1. A RELATIVE specifier changes base. `createHostImporter` passes a
    *      non-package specifier through to an `import()` that physically lives in
    *      `@objectstack/types`, and ESM resolves a relative specifier against the
    *      module CONTAINING the call — so `'./local-plugin.js'` would resolve
    *      against `@objectstack/types/dist/` instead of this file's directory.
-   *      Neither base is the served app's root, so no relative spelling works
-   *      the way an author would expect either way; #10944 carries that
-   *      question, and this branch is why the answer stays open rather than
-   *      being decided by a silent re-base here.
-   *   2. An UNDECLARED bare name changes base the same way, and this one bites.
+   *      STILL TRUE, and still why the non-package branch below stays here
+   *      rather than being folded into the helper. (#10944 has since RULED on
+   *      the relative spelling itself: it is refused above, before any base is
+   *      chosen. The remaining non-package spellings — an absolute path, a
+   *      `file://` URL, a `node:` builtin — mean the same module from every
+   *      base, so keeping them local costs nothing and removes the one way a
+   *      future relative spelling this file's refusal does not recognise could
+   *      be silently re-based inside `@objectstack/types`.)
+   *   2. An UNDECLARED bare name changed base the same way, and that one bit.
    *      `createHostImporter`'s fallback is documented as "the importing
-   *      package's own resolution", but the import it falls back to also lives
-   *      in `@objectstack/types`, which under a pnpm-isolated layout can see
-   *      only `@objectstack/types`'s own dependencies. Measured from an app that
-   *      declares nothing: `@objectstack/plugin-auth` and `@objectstack/plugin-
-   *      audit` resolve from THIS package and fail through the host importer.
-   *      An app that writes `plugins: ['@objectstack/plugin-auth']` without
-   *      declaring it — a spelling this repo's own fixtures use — boots today
-   *      and would stop booting. The helper's own docblock claims the opposite
-   *      ("falls back to the importing package's own resolution"); that text is
-   *      wrong, and #10943 carries the fix. Until it lands, a caller that needs
-   *      its own resolution has to ask the declaration itself, as below.
+   *      package's own resolution", but the import it fell back to also lived
+   *      in `@objectstack/types`, which under a pnpm-isolated layout sees only
+   *      `@objectstack/types`'s own dependencies. Measured from an app that
+   *      declares nothing: `@objectstack/plugin-auth`, `@objectstack/plugin-
+   *      audit` and `chalk` resolve from THIS package and failed through the
+   *      host importer. An app that writes `plugins: ['@objectstack/plugin-
+   *      auth']` without declaring it — a spelling this repo's own fixtures use
+   *      — booted, and would have stopped booting. So this method asked the
+   *      declaration itself and kept a local `import()` for the undeclared leg.
    *
-   * So the declaration is what selects the resolver, exactly as #4719 says it
-   * should, and each branch keeps the resolution it already had:
+   *      ⇒ NO LONGER TRUE. #10943 made the base a parameter and #11157 made
+   *      `importFromHost` pass it, so the helper's undeclared leg now runs THIS
+   *      file's own `import()` — the identical call this method used to make
+   *      inline. The workaround's reason is gone, so the workaround is gone with
+   *      it, and the declaration has ONE owner again (`readHostDeclaration`,
+   *      inside the helper) instead of being asked here and again there.
    *
-   *   • not a package name (path, `file://` URL, `node:` builtin) → unchanged;
-   *     nothing a package.json can declare, so the gate has no opinion.
-   *   • DECLARED by the served app → `importFromHost`: the app's own copy wins.
-   *     This is the repair — the whole card is this branch.
-   *   • UNDECLARED → this CLI's own resolution, byte-identical to the bare
-   *     `import()` that has always been here. No app loses a plugin it does not
-   *     declare but the CLI ships.
+   * The collapse was measured case by case before it was written, and every case
+   * lands on the same module and the same error as the three-branch shape did:
    *
-   * Nothing about WHICH plugins are accepted changes: this only moves where a
-   * declared one resolves FROM. The #4719 declaration gate is untouched, and no
-   * undeclared package gains a way in that it did not already have.
+   *   • app DECLARES it, resolvable there  → the app's copy (unchanged leg).
+   *   • app DECLARES it, not installed     → `declared-unresolvable`, the
+   *     "repair the INSTALL" remedy — never a fallback (unchanged leg).
+   *   • app does NOT declare it, resolvable from this CLI → the CLI's copy, via
+   *     `fallbackImport`, which is `import()` written in this module. Byte-for-
+   *     byte the resolution the deleted branch performed.
+   *   • app does NOT declare it, present but throwing while it evaluates → the
+   *     crash propagates untouched. Both the deleted branch and the helper gate
+   *     on the SAME predicate (`isModuleNotFoundError`, one owner in
+   *     `@objectstack/types`), so "present but broken" is still never
+   *     reinterpreted as an absence.
+   *   • app does NOT declare it, resolvable nowhere → the #4719 "declare it in
+   *     that app's package.json" text. The deleted shape reached that by failing
+   *     a local `import()` and then RE-ENTERING the helper purely for the
+   *     wording; one call now does both, so the specifier is attempted once
+   *     instead of twice.
+   *
+   * Nothing about WHICH plugins are accepted changes, in either edit: this only
+   * moves where one resolves FROM. The #4719 declaration gate is untouched, and
+   * no undeclared package gains a way in that it did not already have.
    *
    * ── The relative branch is REFUSED, not resolved (#10944) ──────────────────
    *
@@ -665,20 +724,7 @@ export default class Serve extends Command {
       if (packageNameFromSpecifier(pluginSpecifier) === undefined) {
         return await import(/* webpackIgnore: true */ pluginSpecifier);
       }
-      if (isDeclaredByHost(pluginSpecifier, root)) {
-        return await importFromHost(pluginSpecifier, root);
-      }
-      try {
-        return await import(/* webpackIgnore: true */ pluginSpecifier);
-      } catch (cliError: unknown) {
-        // Present but broken is a crash, not an absence — never reinterpret it.
-        if (!Serve.isModuleNotFoundError(cliError)) throw cliError;
-        // Undeclared AND unresolvable anywhere. Re-enter the host importer for
-        // the failure alone: it owns the #4719 "declare it in that app's
-        // package.json" remedy, and having one owner of that wording is why
-        // this does not compose the message itself.
-        return await importFromHost(pluginSpecifier, root);
-      }
+      return await importFromHost(pluginSpecifier, root);
     } catch (importError: any) {
       // The wrapper lives with the load it describes, so the composed
       // user-facing string is testable rather than assembled at the call site

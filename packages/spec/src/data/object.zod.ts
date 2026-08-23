@@ -2420,6 +2420,48 @@ function assertSystemDataIsWritable(
 }
 
 /**
+ * [#11339] A field's `referenceVia` must name a DECLARED sibling field —
+ * the type half of a polymorphic pointer pair (ADR-0052 §5; `record_id` with
+ * `referenceVia: 'object_name'` on `sys_activity` is the canonical pair).
+ *
+ * Why here: `FieldSchema` sees one field at a time, so "the sibling exists"
+ * is only checkable at the object level. A pointer whose declared sibling is
+ * missing can never resolve — every seed row would fail at load time with a
+ * per-row error, far from the one-line declaration mistake that caused it.
+ * Refusing at `create()` puts the error where the fix is.
+ *
+ * Lives at `create()` — the authoring surface (ADR-0077) — beside
+ * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
+ * `.parse()`/`.safeParse()`: metadata already at rest must keep loading; the
+ * seed loader independently reports an un-addressable pointer per row.
+ */
+function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+  const fieldMap = fields as Record<string, { referenceVia?: unknown } | undefined>;
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const via = fieldDef?.referenceVia;
+    if (typeof via !== 'string') continue;
+    if (via === fieldName) {
+      throw new Error(
+        `ObjectSchema.create('${name}'): field "${fieldName}" declares \`referenceVia: '${via}'\` — `
+        + 'pointing at ITSELF. `referenceVia` names the sibling field that holds the target OBJECT '
+        + "machine name (the type half of the pointer pair), e.g. `record_id` with `referenceVia: "
+        + "'object_name'`; a field cannot be both halves.",
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(fieldMap, via)) {
+      throw new Error(
+        `ObjectSchema.create('${name}'): field "${fieldName}" declares \`referenceVia: '${via}'\`, but `
+        + `this object declares no field named "${via}". \`referenceVia\` names the sibling field that `
+        + 'holds the target object machine name per row (ADR-0052 §5 pointer pair) — declare that '
+        + `sibling, or fix the spelling. Declared fields: ${Object.keys(fieldMap).join(', ')}.`,
+      );
+    }
+  }
+}
+
+/**
  * [#9138 — #8772 maintainer ruling, Direction 2 / ADR-0055] Under
  * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
  * on every `master_detail` reference, and REFUSES an explicit
@@ -2608,6 +2650,10 @@ export const ObjectSchema = lazySchema(() => {
     // contradiction with no honest reading — refuse it here, where it is cheap
     // to fix, rather than shipping a bucket whose name lies again.
     assertSystemDataIsWritable(cfg.name, cfg.managedBy, cfg.userActions);
+    // [#11339] A `referenceVia` pointer pair whose type-half sibling is not
+    // declared can never resolve — refuse at the authoring seam, beside its
+    // sibling assertions, rather than one error per seeded row at load time.
+    assertReferenceViaSiblingDeclared(cfg.name, cfg.fields);
     // [#9138 — #8772 ruling, Direction 2] A `controlled_by_parent` object's
     // `master_detail` reference is forced `required: true` (an explicit
     // `required: false` throws, loudly) so the unsafe shape cannot be newly
