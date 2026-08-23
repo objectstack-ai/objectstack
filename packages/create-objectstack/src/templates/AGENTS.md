@@ -96,6 +96,6 @@ Skills are triggered automatically based on task context:
 
 ## Learn More
 
-- [ObjectStack Documentation](https://objectstack.com/docs)
+- [ObjectStack Documentation](https://objectstack.ai/docs)
 - [GitHub: objectstack-ai/objectstack](https://github.com/objectstack-ai/objectstack)
 - [Skills CLI](https://skills.sh/) — Manage AI skills across agents
