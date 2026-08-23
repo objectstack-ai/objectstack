@@ -298,6 +298,37 @@ function applyNamespacePrefix(objectName: string, namespace: string | undefined)
     : `${namespace}_${objectName}`;
 }
 
+/**
+ * The refusal `importObject` answers when an explicit `opts.name` violates the
+ * ADR-0028 namespace-prefix rule.
+ *
+ * REFUSED, never silently rewritten: the derived path above may prefix its own
+ * invention (`applyNamespacePrefix` adjusts a name the service itself derived),
+ * but an override is the caller's explicit input, and every other gate on this
+ * rule — `defineStack()` at compile time, the publish pre-flight at runtime
+ * (`NAMESPACE_PREFIX`) — refuses a violating name rather than editing it.
+ * Persisting a rewritten name behind a 201 would leave the caller holding a
+ * name that does not exist, which is worse than the 400 (and exactly the
+ * tolerant-consumer accommodation Prime Directive #12 forbids).
+ *
+ * `message` is `validateObjectNamespacePrefix`'s own authored text, verbatim —
+ * the same prescription the publish gate serves for the identical violation,
+ * so one rule keeps one message everywhere it fires.
+ *
+ * The throw carries its own `status`/`code` — the #8016 declaration shape
+ * (`resolveThrownHttpError` reads them): this is a *refusal*, not a fault.
+ * `EXTERNAL_IMPORT_ERROR` is the ledger's registered code for a refused
+ * federated import, and 400 + that code is also exactly what the REST import
+ * route answers for any `importObject` throw, so the declaration and the
+ * served envelope agree by construction.
+ */
+function importNameRefusedError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = 'EXTERNAL_IMPORT_ERROR';
+  err.status = 400;
+  return err;
+}
+
 /** snake_case → Title Case label. */
 function toLabel(name: string): string {
   return name
@@ -469,6 +500,24 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
           `(datasource '${datasource}'). This deployment may be GitOps-only — ` +
           `use 'os datasource introspect' and commit the generated *.object.ts instead.`,
       );
+    }
+
+    // ADR-0028 invariant on the OVERRIDE path. The derived path below resolves
+    // the datasource's package namespace and prefixes the name it generates;
+    // `opts.name` used to be taken verbatim, so a caller could persist an
+    // unprefixed federated object through the one runtime write path no gate
+    // looks at (`metadata.register` applies no namespace check — the checks
+    // live at `defineStack()` and the publish pre-flight, and an imported
+    // object passes through neither). Same normalisation, same validator, so
+    // the override answers to exactly the rule the derived name already obeys;
+    // when no namespace resolves the rule is skipped, mirroring `defineStack`.
+    // Checked BEFORE the draft on purpose: the verdict needs only the injected
+    // namespace read, and a doomed request should not cost a live remote
+    // introspection round trip.
+    if (opts.name !== undefined) {
+      const namespace = normaliseNamespace(await this.config.getNamespace?.(datasource));
+      const violation = validateObjectNamespacePrefix(opts.name, namespace);
+      if (violation) throw importNameRefusedError(violation);
     }
 
     // Reuse the draft pipeline (type mapping, review notes, external binding).

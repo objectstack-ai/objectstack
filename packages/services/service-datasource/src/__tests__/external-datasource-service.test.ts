@@ -2,6 +2,10 @@
 
 import { describe, it, expect } from 'vitest';
 import type { IntrospectedSchema } from '@objectstack/spec/contracts';
+// The prefix rule's ONE authored message source — refusal pins below compute
+// their expected text from it rather than copying strings, so the assertion
+// can never drift from the rule (#11061).
+import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 import {
   ExternalDatasourceService,
   type DatasourceLike,
@@ -216,6 +220,106 @@ describe('importObject', () => {
     const { svc, persisted } = makeImporter();
     await expect(svc.importObject('warehouse', 'ghost')).rejects.toThrow(/not found/);
     expect(persisted).toHaveLength(0);
+  });
+});
+
+/**
+ * ADR-0028 namespace prefix on the `opts.name` OVERRIDE path (#11061).
+ *
+ * The derived path resolves the datasource's package namespace and prefixes
+ * the generated name; `opts.name` used to be taken verbatim, so a caller could
+ * persist an unprefixed federated object through `metadata.register` — the one
+ * runtime write path with no namespace gate. The override now answers to the
+ * SAME rule (loud refusal — the publish pre-flight's treatment of the
+ * identical violation — never a silent rewrite).
+ *
+ * Refusal pins assert the ADR-0112 envelope declaration (`status` + `code`,
+ * the #8016 thrown-refusal shape) AND that nothing was persisted or
+ * introspected; the message is asserted byte-equal to
+ * `validateObjectNamespacePrefix`'s own return, computed — not copied — so the
+ * rule keeps exactly one authored message everywhere it fires.
+ */
+describe('importObject — namespace prefix on the name override (#11061)', () => {
+  function makeNamespacedImporter(namespace?: string) {
+    const persisted: Array<{ name: string; def: Record<string, unknown> }> = [];
+    let introspectCalls = 0;
+    const svc = new ExternalDatasourceService({
+      introspect: async () => {
+        introspectCalls += 1;
+        return warehouseSchema();
+      },
+      getDatasource: async () => ({ name: 'warehouse', schemaMode: 'external' }),
+      getObject: async () => undefined,
+      listObjects: async () => [],
+      persistObject: async (name, def) => { persisted.push({ name, def }); },
+      getNamespace: async () => namespace,
+    });
+    return { svc, persisted, introspectCalls: () => introspectCalls };
+  }
+
+  it('refuses an unprefixed override with the rule\'s own message — 400 EXTERNAL_IMPORT_ERROR, nothing persisted, nothing introspected', async () => {
+    const { svc, persisted, introspectCalls } = makeNamespacedImporter('wh');
+    const err = await svc.importObject('warehouse', 'fact_orders', { name: 'orders' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { status?: number }).status).toBe(400);
+    expect((err as { code?: string }).code).toBe('EXTERNAL_IMPORT_ERROR');
+    // Byte-equal to the validator's own authored prescription — one rule, one
+    // message, at this gate and the publish gate alike.
+    expect((err as Error).message).toBe(validateObjectNamespacePrefix('orders', 'wh'));
+    expect((err as Error).message).toContain("Rename it to 'wh_orders'");
+    // The service was never persuaded: no persist, and no remote round trip —
+    // the verdict needs only the injected namespace read.
+    expect(persisted).toHaveLength(0);
+    expect(introspectCalls()).toBe(0);
+  });
+
+  it('refuses the legacy FQN form (ns__short) with the validator\'s legacy-form message', async () => {
+    const { svc, persisted } = makeNamespacedImporter('wh');
+    const err = await svc.importObject('warehouse', 'fact_orders', { name: 'wh__orders' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { status?: number }).status).toBe(400);
+    expect((err as { code?: string }).code).toBe('EXTERNAL_IMPORT_ERROR');
+    expect((err as Error).message).toBe(validateObjectNamespacePrefix('wh__orders', 'wh'));
+    expect(persisted).toHaveLength(0);
+  });
+
+  it('accepts a compliant override verbatim — no double prefixing, persisted as asked', async () => {
+    const { svc, persisted } = makeNamespacedImporter('wh');
+    const result = await svc.importObject('warehouse', 'fact_orders', { name: 'wh_orders' });
+    expect(result.name).toBe('wh_orders');
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].name).toBe('wh_orders');
+  });
+
+  it('accepts a sys_* override — the platform-reserved carve-out every gate on this rule shares', async () => {
+    const { svc, persisted } = makeNamespacedImporter('wh');
+    const result = await svc.importObject('warehouse', 'fact_orders', { name: 'sys_orders' });
+    expect(result.name).toBe('sys_orders');
+    expect(persisted).toHaveLength(1);
+  });
+
+  it('skips the rule when no namespace resolves — an unprefixed override stays accepted (mirrors defineStack)', async () => {
+    const { svc, persisted } = makeNamespacedImporter(undefined);
+    const result = await svc.importObject('warehouse', 'fact_orders', { name: 'orders' });
+    expect(result.name).toBe('orders');
+    expect(persisted).toHaveLength(1);
+  });
+
+  it('treats a blank namespace as absent — same normalisation as the derived path', async () => {
+    const { svc, persisted } = makeNamespacedImporter('   ');
+    const result = await svc.importObject('warehouse', 'fact_orders', { name: 'orders' });
+    expect(result.name).toBe('orders');
+    expect(persisted).toHaveLength(1);
+  });
+
+  it('still prefixes the DERIVED name under a namespace when no override is passed', async () => {
+    const { svc, persisted } = makeNamespacedImporter('wh');
+    const result = await svc.importObject('warehouse', 'fact_orders');
+    expect(result.name).toBe('wh_fact_orders');
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].name).toBe('wh_fact_orders');
   });
 });
 
