@@ -64,6 +64,8 @@ import type {
   MetadataProtocol,
   GetMetaItemLayeredRequest,
   GetMetaItemLayeredResponse,
+  PublishMetaItemRequest,
+  PublishMetaItemResponse,
 } from './protocol.zod';
 
 describe('ObjectStack Protocol', () => {
@@ -1648,5 +1650,135 @@ describe('MetadataProtocol declares getMetaItemLayered (#9740)', () => {
     expectTypeOf<GetMetaItemLayeredResponse['lockSource']>().toEqualTypeOf<
       'artifact' | 'package' | 'env-forced' | undefined
     >();
+  });
+});
+
+import { PublishMetaItemRequestSchema } from './protocol.zod';
+
+describe('PublishMetaItemRequestSchema mirrors the implementation parameter type (#11006)', () => {
+  // #7294 declared the RESPONSE side of `POST /meta/:type/:name/publish`; the
+  // request shape stayed undeclared — the half-declared door. Maintainer
+  // ruling 2026-08-22 (option B): declare the request and the interface
+  // member. The measure is the implementation's parameter type in
+  // `@objectstack/metadata-protocol` — `{ type, name, organizationId?,
+  // actor?, message?, packageId? }` — and the REST door's actual reads;
+  // nothing else is declared because nothing else is enforced.
+  // As in the #9726/#9741 blocks above, accept-pins assert the parsed VALUE:
+  // this is a non-strict object, so `success` alone is exactly the
+  // silent-strip state this family of cards closes.
+
+  const base = { type: 'view', name: 'account_list' } as const;
+
+  it('accepts the full request and PRESERVES every member through parse', () => {
+    const full = {
+      ...base,
+      organizationId: 'org_alpha',
+      actor: 'admin',
+      message: 'publish from designer',
+      packageId: 'pkg_crm',
+    };
+    const result = PublishMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual(full);
+    }
+  });
+
+  it('requires type AND name — the promotion addresses one item', () => {
+    expect(PublishMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    expect(PublishMetaItemRequestSchema.safeParse({ type: 'view' }).success).toBe(false);
+    expect(PublishMetaItemRequestSchema.safeParse({ name: 'account_list' }).success).toBe(false);
+  });
+
+  it('packageId accepts null AND preserves it apart from absent — the unbound-row pin', () => {
+    // `null` pins the lookup to the package-UNBOUND row; an ABSENT key means
+    // "match any package". Two different resolutions, so the parse must keep
+    // them distinguishable.
+    const withNull = PublishMetaItemRequestSchema.safeParse({ ...base, packageId: null });
+    expect(withNull.success).toBe(true);
+    if (withNull.success) {
+      expect('packageId' in (withNull.data as object)).toBe(true);
+      expect((withNull.data as { packageId?: string | null }).packageId).toBeNull();
+    }
+    const absent = PublishMetaItemRequestSchema.safeParse(base);
+    expect(absent.success).toBe(true);
+    if (absent.success) {
+      expect('packageId' in (absent.data as object)).toBe(false);
+    }
+    expect(PublishMetaItemRequestSchema.safeParse({ ...base, packageId: 42 }).success).toBe(false);
+  });
+
+  it('the three optional strings stay optional and reject non-strings — values, not bags', () => {
+    for (const key of ['organizationId', 'actor', 'message'] as const) {
+      const absent = PublishMetaItemRequestSchema.safeParse(base);
+      expect(absent.success).toBe(true);
+      if (absent.success) {
+        expect(key in (absent.data as object)).toBe(false);
+      }
+      expect(PublishMetaItemRequestSchema.safeParse({ ...base, [key]: 42 }).success).toBe(false);
+      expect(PublishMetaItemRequestSchema.safeParse({ ...base, [key]: { v: 'x' } }).success).toBe(false);
+    }
+  });
+
+  it('does not declare environmentId — transport-level by the #9741 ruling, stripped and shape-absent', () => {
+    // Same regression guard as the meta-read block above: if someone declares
+    // the member, the parse stops stripping it and this test names the ruling
+    // they are overturning (2026-08-18 on #9741: `environmentId` is the
+    // multi-kernel ROUTING key; `packages/rest` layers it on top via
+    // `TransportScopedMetaRequest`).
+    const result = PublishMetaItemRequestSchema.safeParse({ ...base, environmentId: 'env_alpha' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('environmentId' in (result.data as object)).toBe(false);
+    }
+    const shape = (PublishMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('environmentId');
+  });
+
+  it('does not declare _skipSeedApply — internal batch coordination, not wire contract', () => {
+    const result = PublishMetaItemRequestSchema.safeParse({ ...base, _skipSeedApply: true });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect('_skipSeedApply' in (result.data as object)).toBe(false);
+    }
+    const shape = (PublishMetaItemRequestSchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape)).not.toContain('_skipSeedApply');
+  });
+});
+
+describe('MetadataProtocol declares publishMetaItem (#11006)', () => {
+  // Type-level pins (compiled by the spec test typecheck, the
+  // translation-typegen.test.ts pattern — same as the #9740 block above).
+  // Before this declaration the cast at the REST call site carried
+  // MEMBER-EXISTENCE weight (deleting it answered TS2339, not TS2353), so a
+  // request literal there was typed by nothing. These pins are what turns
+  // red if the member is dropped again or drifts off the publish schemas.
+
+  it('declares the member optional, against the publish request/response schemas', () => {
+    // Optional like its `deleteMetaItem` / `getMetaItemLayered` siblings:
+    // additive to a shipped contract, implementation predating declaration.
+    expectTypeOf<MetadataProtocol['publishMetaItem']>().toEqualTypeOf<
+      ((request: PublishMetaItemRequest) => Promise<PublishMetaItemResponse>) | undefined
+    >();
+    // `{}` satisfies the member's slot exactly because it is optional — an
+    // implementation without the verb still type-checks against the
+    // interface. This line is the "implementation without it still
+    // type-checks" pin, as a real assignment rather than a matcher.
+    const absent: Pick<MetadataProtocol, 'publishMetaItem'> = {};
+    expect('publishMetaItem' in absent).toBe(false);
+  });
+
+  it('refuses an undeclared key at the member call shape — the #9612-gate class this card exists for', () => {
+    // Excess-property check on a fresh literal at the declared parameter
+    // type: the compile-time teeth the ruling asked for. Before the
+    // declaration any key sailed through the `(p as any)` cast.
+    const good: PublishMetaItemRequest = { type: 'view', name: 'account_list', packageId: 'pkg_crm' };
+    expect(good.type).toBe('view');
+    // @ts-expect-error `environmentId` is transport-level (#9741) — not a declared request member.
+    const withEnv: PublishMetaItemRequest = { type: 'view', name: 'account_list', environmentId: 'env_a' };
+    expect(withEnv.name).toBe('account_list');
+    // @ts-expect-error an undeclared (here: misspelt) key is refused at the call shape.
+    const misspelt: PublishMetaItemRequest = { type: 'view', name: 'account_list', packageID: 'pkg_crm' };
+    expect(misspelt.name).toBe('account_list');
   });
 });

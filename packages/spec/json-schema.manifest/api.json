@@ -304,6 +304,7 @@
     "api/PresenceStatus",
     "api/PresenceUpdate",
     "api/PresignedUrlResponse",
+    "api/PublishMetaItemRequest",
     "api/PublishMetaItemResponse",
     "api/PublishPackageDraftsResponse",
     "api/QueryAdapterConfig",

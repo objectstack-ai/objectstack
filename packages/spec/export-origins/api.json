@@ -736,6 +736,8 @@
     "PresignedUrlResponse": "src/api/storage.zod.ts#PresignedUrlResponse (type)",
     "PresignedUrlResponseParsed": "src/api/storage.zod.ts#PresignedUrlResponseParsed (type)",
     "PresignedUrlResponseSchema": "src/api/storage.zod.ts#PresignedUrlResponseSchema (const)",
+    "PublishMetaItemRequest": "src/api/protocol.zod.ts#PublishMetaItemRequest (type)",
+    "PublishMetaItemRequestSchema": "src/api/protocol.zod.ts#PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse": "src/api/protocol.zod.ts#PublishMetaItemResponse (type)",
     "PublishMetaItemResponseSchema": "src/api/protocol.zod.ts#PublishMetaItemResponseSchema (const)",
     "PublishPackageDraftsResponse": "src/api/protocol.zod.ts#PublishPackageDraftsResponse (type)",

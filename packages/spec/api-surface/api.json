@@ -736,6 +736,8 @@
     "PresignedUrlResponse (type)",
     "PresignedUrlResponseParsed (type)",
     "PresignedUrlResponseSchema (const)",
+    "PublishMetaItemRequest (type)",
+    "PublishMetaItemRequestSchema (const)",
     "PublishMetaItemResponse (type)",
     "PublishMetaItemResponseSchema (const)",
     "PublishPackageDraftsResponse (type)",
