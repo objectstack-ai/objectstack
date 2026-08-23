@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
+import type { ImportRequest } from './export.zod';
 import {
   ExportFormat,
   ExportJobStatus,
@@ -772,5 +773,91 @@ describe('ImportRequestSchema — runAutomations declared default (#6704)', () =
       .description ?? '';
     expect(described).not.toMatch(/off by default/i);
     expect(described).toMatch(/ON by default/);
+  });
+});
+
+/**
+ * `mappingName` declared on the contract (#10330).
+ *
+ * The wire accepted it long before the schema declared it: both import routes
+ * read `body.mappingName` off the raw body in `prepareImportRequest`
+ * (`packages/rest/src/import-prepare.ts`), while `ImportRequestSchema`
+ * declared fifteen other keys — so the typed SDK could not express the one
+ * request parameter the `mapping` metadata kind exists for (its ADR-0088
+ * admission consumer, #2611). Enforced-but-undeclared, the mirror of the
+ * declared-but-unenforced shape.
+ *
+ * The mutual exclusion with an inline `mapping` is asserted at BOTH layers on
+ * purpose: the schema `.refine()` here rejects the pair for anyone building
+ * the body through the published schema, and the route-level
+ * `400 CONFLICTING_MAPPING` (pinned in
+ * `packages/rest/src/import-integration.test.ts`) keeps refusing it on the
+ * wire, because the route parses the raw body itself and never depends on
+ * callers having used this schema.
+ */
+describe('ImportRequestSchema — mappingName declared (#10330)', () => {
+  const base = { format: 'csv' as const, csv: 'Full Name,E-mail\nAda,ada@example.com\n' };
+
+  it('parses a body naming a registered mapping, and the value survives', () => {
+    const parsed = ImportRequestSchema.parse({ ...base, mappingName: 'showcase_inquiry_feed' });
+    expect(parsed.mappingName).toBe('showcase_inquiry_feed');
+  });
+
+  it('parses the same body through the async twin — it is the same schema object', () => {
+    // `CreateImportJobRequestSchema === ImportRequestSchema`, but both defs
+    // are PUBLISHED separately, so the async route's declaration is asserted
+    // by name rather than left to the reader to infer from the aliasing.
+    const parsed = CreateImportJobRequestSchema
+      .parse({ ...base, mappingName: 'showcase_inquiry_feed' });
+    expect(parsed.mappingName).toBe('showcase_inquiry_feed');
+  });
+
+  it('the typed SDK request can express it — the #10330 TS2353 repro, inverted', () => {
+    // Before the declaration this exact literal was a compile error
+    // (TS2353: 'mappingName' does not exist in type …). The literal itself is
+    // the pin: this file is type-checked, so the key regressing out of the
+    // schema turns this line back into that error.
+    const req: ImportRequest = {
+      format: 'csv',
+      csv: 'Full Name,E-mail\nAda,ada@example.com\n',
+      mappingName: 'showcase_inquiry_feed',
+    };
+    expect(req.mappingName).toBe('showcase_inquiry_feed');
+    expectTypeOf<ImportRequest['mappingName']>().toEqualTypeOf<string | undefined>();
+  });
+
+  it('refuses mappingName plus an inline mapping at parse, naming the conflict', () => {
+    const result = ImportRequestSchema.safeParse({
+      ...base,
+      mappingName: 'showcase_inquiry_feed',
+      mapping: { 'Full Name': 'name' },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.success ? undefined : result.error.issues[0];
+    expect(issue?.message).toBe('Provide either mappingName or an inline mapping, not both');
+    expect(issue?.path).toEqual(['mappingName']);
+  });
+
+  it('refuses the pair on the async twin too', () => {
+    const result = CreateImportJobRequestSchema.safeParse({
+      ...base,
+      mappingName: 'showcase_inquiry_feed',
+      mapping: { 'Full Name': 'name' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('keeps accepting each side alone — the refine only bites the pair', () => {
+    expect(ImportRequestSchema.safeParse({ ...base, mappingName: 'x' }).success).toBe(true);
+    expect(
+      ImportRequestSchema.safeParse({ ...base, mapping: { 'Full Name': 'name' } }).success,
+    ).toBe(true);
+  });
+
+  it('describes the exclusion — the prose ships in the reference tables', () => {
+    const described = (ImportRequestSchema.shape.mappingName as { description?: string })
+      .description ?? '';
+    expect(described).toMatch(/[Mm]utually\s+exclusive/);
+    expect(described).toMatch(/CONFLICTING_MAPPING/);
   });
 });

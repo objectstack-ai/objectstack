@@ -327,6 +327,12 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe('Worksheet name or 1-based index to read (xlsx; defaults to the first sheet)'),
   mapping: ImportMappingSchema.optional()
     .describe('Source column → target field mapping'),
+  mappingName: z.string().optional()
+    .describe(
+      'Name of a registered `mapping` metadata artifact to apply; the server resolves it '
+      + '(org-scoped rows first, then env-wide) and projects columns through it. Mutually '
+      + 'exclusive with an inline `mapping` — supplying both is refused (400 CONFLICTING_MAPPING).',
+    ),
   dryRun: z.boolean().default(false)
     .describe(
       'Validate + coerce every row without persisting. The verdict is the engine\'s own write-path ' +
@@ -359,6 +365,14 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe('Keep unmatched select values instead of failing the row'),
   skipBlankMatchKey: z.boolean().default(false)
     .describe('Skip rows whose matchFields are blank (default: upsert creates them, update skips them)'),
+}).refine((body) => !(body.mappingName && body.mapping), {
+  // Same exclusion the route enforces (400 CONFLICTING_MAPPING in
+  // `packages/rest/src/import-prepare.ts`) — surfaced at authoring time for
+  // anyone building the body through the schema. The route check stays: it
+  // parses the raw body itself, so the wire-level refusal never depends on
+  // callers having used this schema.
+  message: 'Provide either mappingName or an inline mapping, not both',
+  path: ['mappingName'],
 }));
 export type ImportRequest = z.input<typeof ImportRequestSchema>;
 /** Post-parse shape of {@link ImportRequest} — defaults applied, transforms run (ADR-0122). */

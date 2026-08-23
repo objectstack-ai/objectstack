@@ -177,13 +177,6 @@ with `xlsxBase64` — and on the asynchronous
 Add `"dryRun": true` to get the same report with nothing persisted; the verdict comes
 from the engine's own write-path validation.
 
-<Callout type="warn">
-  `mappingName` is accepted on the wire but is **not** declared on the SDK's
-  `ImportRequest` type, so `client.data.import(object, { mappingName: '…' })` does not
-  type-check today. Issue the request directly until that is closed —
-  [#10330](https://github.com/objectstack-ai/objectstack/issues/10330).
-</Callout>
-
 ### What the artifact contributes to the request
 
 | Request key | When omitted | When present |
