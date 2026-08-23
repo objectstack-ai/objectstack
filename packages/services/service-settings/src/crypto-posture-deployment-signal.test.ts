@@ -117,7 +117,7 @@ describe('#11352 — crypto posture reads the deployment signal, not the runner'
     // runner variables included — with the deployment signal set to what a real
     // `os serve` deployment carries. Before #11352 the inherited `VITEST=true`
     // won this decision and the boot SUCCEEDED on an ephemeral key.
-    const env = { ...base, NODE_ENV: 'production' };
+    const env: EnvMap = { ...base, NODE_ENV: 'production' };
     expect(env.VITEST, 'the leak is still in the map — that is the point').toBeDefined();
 
     expect(() => new LocalCryptoProvider({ env })).toThrow(/Refusing to start in production/);
