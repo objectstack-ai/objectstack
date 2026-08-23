@@ -128,7 +128,9 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
   },
   {
     id: 'cel-ui',
-    summary: 'UI visibility / routing / submit predicates',
+    // "+ submit predicates" left this summary with #9249: `element:form.onSubmit`
+    // was the one submit predicate here, and the whole element retired.
+    summary: 'UI visibility / routing predicates',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: 'console (objectui) SchemaRenderer + server celEngine (interpret)',
     covers: [
@@ -148,7 +150,12 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       'ui/view.zod.ts:condition',
       'ui/view.zod.ts:visibleWhen',
       'ui/view.zod.ts:visibleOn',
-      'ui/component.zod.ts:onSubmit',
+      // `ui/component.zod.ts:onSubmit` (element:form's submit CEL) sat here
+      // until #9249 retired the whole `element:form` element under ADR-0049
+      // (no renderer ever shipped, so nothing ever evaluated the predicate).
+      // The key is a retiredKey() tombstone now — no ExpressionInputSchema
+      // member left in source — so the cover is deleted rather than
+      // re-pointed, the mapping.zod.ts:expression (#5552) way.
       // Conditional tabs (framework#2606): `page:tabs` item-level visibility.
       // Canonical ADR-0089 `visibleWhen` from day one (no deprecated alias on
       // this new surface). Interpreted by the objectui page:tabs renderer to
