@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MessagingService } from './messaging-service.js';
+import { InboxCallerError } from './inbox-caller.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import type { Delivery, MessagingChannel, SendResult } from './channel.js';
 
@@ -1068,5 +1069,129 @@ describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window
 
         const svc = new MessagingService({ logger, getData: () => inboxEngine({ inbox: seedInbox('u1', 3) }) });
         expect(await svc.markAllRead('')).toEqual({ success: true, readCount: 0 });
+    });
+});
+
+/**
+ * [#10753] The plugin-facing inbox write door.
+ *
+ * The measured BEFORE, and it is this card's real severity: the messaging
+ * service is registered as a kernel service and the kernel hands every plugin
+ * ONE shared `PluginContext` whose `getService` carries no caller identity, so
+ * `markRead(userId, ids)`'s first parameter is a free string for an in-process
+ * caller — any plugin could mark ANY user's inbox messages read, unconstrained
+ * and undeclared, with the receipt landing context-lessly on an `engine-owned`
+ * object so no engine permission check saw it either.
+ *
+ * `markReadAsCaller` / `markAllReadAsCaller` take no target user at all. These
+ * pin that the recipient comes from the caller's authenticated `userId` and
+ * from NOTHING that merely resembles one.
+ */
+describe('MessagingService — plugin-facing inbox writes scoped to the authenticated caller (#10753)', () => {
+    const logger = silentLogger();
+
+    /** u1 and u2 each hold one unread message, so cross-user reach is visible. */
+    function twoUserInbox() {
+        return inboxEngine({
+            inbox: [
+                { id: 'm1', user_id: 'u1', notification_id: 'n1', title: 'Approve me', created_at: '1' },
+                { id: 'm2', user_id: 'u2', notification_id: 'n2', title: 'Approve me too', created_at: '2' },
+            ],
+            receipts: [
+                { id: 'r1', notification_id: 'n1', user_id: 'u1', channel: 'inbox', state: 'delivered' },
+                { id: 'r2', notification_id: 'n2', user_id: 'u2', channel: 'inbox', state: 'delivered' },
+            ],
+        });
+    }
+
+    it("marks the caller's OWN message read", async () => {
+        const engine = twoUserInbox();
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect(await svc.markReadAsCaller({ userId: 'u1' }, ['n1'])).toEqual({ success: true, readCount: 1 });
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+    });
+
+    it("cannot reach another user's read-state even when handed their notification id", async () => {
+        // The id is not secret — `sys_notification` publishes get/list and every
+        // recipient's own `listInbox` hands them out — so "holding the id" was
+        // never a capability. What makes u2 unreachable is that the receipt is
+        // keyed `(notification_id, user_id, channel)` and the user half comes
+        // from the CALLER, which this surface does not let you name.
+        const engine = twoUserInbox();
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        await svc.markReadAsCaller({ userId: 'u1' }, ['n2']);
+
+        expect((await svc.listInbox('u2')).unreadCount).toBe(1);
+        expect(engine.store.sys_notification_receipt.find((r: any) => r.user_id === 'u2').state).toBe('delivered');
+    });
+
+    it("sweeps only the caller's own inbox on markAllReadAsCaller", async () => {
+        const engine = twoUserInbox();
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        expect(await svc.markAllReadAsCaller({ userId: 'u1' })).toEqual({ success: true, readCount: 1 });
+        expect((await svc.listInbox('u1')).unreadCount).toBe(0);
+        expect((await svc.listInbox('u2')).unreadCount).toBe(1);
+    });
+
+    describe('refusals — the ADR-0112 envelope, not a silent success', () => {
+        const svc = () => new MessagingService({ logger, getData: () => twoUserInbox() });
+
+        /** Assert the declared envelope pair a boundary reads: `status` + `code`. */
+        async function expectRefusal(run: () => Promise<unknown>): Promise<InboxCallerError> {
+            const err = await run().then(
+                () => { throw new Error('expected InboxCallerError, but the call resolved'); },
+                (e: unknown) => e as InboxCallerError,
+            );
+            expect(err).toBeInstanceOf(InboxCallerError);
+            expect(err.code).toBe('UNAUTHENTICATED');
+            expect(err.status).toBe(401);
+            return err;
+        }
+
+        it('refuses an absent context', async () => {
+            await expectRefusal(() => svc().markReadAsCaller(undefined, ['n1']));
+            await expectRefusal(() => svc().markAllReadAsCaller(undefined));
+        });
+
+        it('refuses a context with no userId, and a blank one', async () => {
+            await expectRefusal(() => svc().markReadAsCaller({}, ['n1']));
+            await expectRefusal(() => svc().markReadAsCaller({ userId: '   ' }, ['n1']));
+        });
+
+        it('refuses a context carrying only attributedUserId — attribution never becomes authorization', async () => {
+            // `attributedUserId` is the real human behind a write whose
+            // authorization subject is the SYSTEM (#4586). Its own contract
+            // states the invariant — "nothing in the authorization path reads
+            // this", and a context carrying only it authorizes ANONYMOUS
+            // (ADR-0118 D2). A `userId ?? attributedUserId` fallback here would
+            // read as working and clear the wrong person's badge.
+            const engine = twoUserInbox();
+            const service = new MessagingService({ logger, getData: () => engine });
+
+            const err = await expectRefusal(() => service.markReadAsCaller({ attributedUserId: 'u1' }, ['n1']));
+            expect(err.message).toContain('attributedUserId');
+
+            // The refusal is the point, but so is this: u1's message is still unread.
+            expect((await service.listInbox('u1')).unreadCount).toBe(1);
+        });
+
+        it('refuses a service-principal label and a system context — neither owns an inbox', async () => {
+            await expectRefusal(() => svc().markReadAsCaller({ actor: 'svc:flow:nightly' }, ['n1']));
+            await expectRefusal(() => svc().markAllReadAsCaller({ isSystem: true }));
+        });
+
+        it('refuses BEFORE the empty-ids and no-data-engine short-circuits', async () => {
+            // Both of those return `{ success: true, readCount: 0 }`. Reaching
+            // one with no authenticated caller would report success for a write
+            // that was never authorized — the silent-success shape this door
+            // exists to replace, and the reason the order is pinned rather than
+            // left to reading.
+            await expectRefusal(() => svc().markReadAsCaller(undefined, []));
+            await expectRefusal(() => new MessagingService({ logger }).markReadAsCaller(undefined, ['n1']));
+            await expectRefusal(() => new MessagingService({ logger }).markAllReadAsCaller({}));
+        });
     });
 });
