@@ -249,7 +249,7 @@ export const ObjectCapabilities = strictObject({
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
 
-  /** Enable REST/GraphQL API access */
+  /** Enable REST/MCP API access */
   apiEnabled: z.boolean().default(true).describe('Expose object via automatic APIs'),
 
   /**
