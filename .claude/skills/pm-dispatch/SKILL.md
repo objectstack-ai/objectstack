@@ -503,7 +503,7 @@ issue 上(不能合 ≠ 不复核;技能面 PR 的复核席须跑在契约复审
 draft PR 上 **request review `os-zhuang`**(维护者 2026-08-19:「还是应该在 pr 的审核流程,发给
 os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日实测 draft 可点名审核且推送到达手机,
 维护者确认「推送到了」;推送通道仅此一条,同日裁定:「只有需要我审核的pr 推给我。」)—— 「等人
-合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项;④ 轮次报
+合」清单从此活在 GitHub 的 Review-requested 队列,合并自动消项。**能请审则请审;PR 作者身份即 os-zhuang 的席位,请审必失败**(GitHub 拒绝向 PR 作者请审,author-identity 422)—— 改为把 PR **assign 给 os-zhuang** 替代通知,并在轮次报告点名说明走了 assignee 兜底;④ 轮次报
 告单列「awaiting a human merge」(「等人来合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 撤回只有
 转 draft。路径面干净的才转 ready → 入队(队列是唯一被认可的落地路径,⛔ 永不队列
