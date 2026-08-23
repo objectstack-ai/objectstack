@@ -34,6 +34,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 
+/**
+ * The last recorded find. `Array.prototype.at` sits above the `lib` this
+ * package's tsc program targets, so index rather than widen the compiler
+ * configuration for a test convenience.
+ */
+const last = <T>(rows: T[]): T => rows[rows.length - 1];
+
 const HASH = 'sha256:9f2c';
 
 function makeRecordingDriver(name: string) {
@@ -106,14 +113,14 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
         key: { type: 'text', internal: true },
         conn_secret: { type: 'secret' },
       },
-    } as any);
+    } as any, '__test__');
     engine.registry.registerObject({
       name: 'sys_secret',
       fields: {
         namespace: { type: 'text' }, key: { type: 'text' }, alg: { type: 'text' },
         version: { type: 'text' }, ciphertext: { type: 'text' }, kms_key_id: { type: 'text' },
       },
-    } as any);
+    } as any, '__test__');
     primary.driver.seed('ptest_api_key', { id: 'k1', name: 'k', key: HASH, conn_secret: 'secret:s1' });
     primary.driver.seed('sys_secret', {
       id: 's1', namespace: 'ptest_api_key', key: 'conn_secret',
@@ -129,13 +136,13 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
     // REVERSE CONTROL first: outside a transaction there is no handle to thread,
     // so a driver that fabricated one would fail here.
     await engine.resolveInternalField('ptest_api_key', ['k1'], 'key');
-    expect(primary.finds.at(-1)!.transaction, 'outside a transaction: no handle').toBeUndefined();
+    expect(last(primary.finds).transaction, 'outside a transaction: no handle').toBeUndefined();
 
     let resolved: Map<string, unknown> | undefined;
     await engine.transaction(async () => {
       resolved = await engine.resolveInternalField('ptest_api_key', ['k1'], 'key');
     });
-    const inside = primary.finds.at(-1)!;
+    const inside = last(primary.finds);
     expect(inside.object).toBe('ptest_api_key');
     expect(inside.transaction, 'inside a transaction: the ambient handle').toBeTruthy();
     // Still the right answer — joining the transaction is not a degrade.
@@ -144,7 +151,7 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
 
   it('resolveSecretField', async () => {
     await engine.resolveSecretField('ptest_api_key', 'k1', 'conn_secret');
-    expect(primary.finds.at(-1)!.transaction, 'outside a transaction: no handle').toBeUndefined();
+    expect(last(primary.finds).transaction, 'outside a transaction: no handle').toBeUndefined();
 
     let plaintext: string | null = null;
     await engine.transaction(async () => {
@@ -162,12 +169,12 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
 
   it('resolveSecret — the sys_secret dereference', async () => {
     await engine.resolveSecret('secret:s1');
-    expect(primary.finds.at(-1)!.transaction, 'outside a transaction: no handle').toBeUndefined();
+    expect(last(primary.finds).transaction, 'outside a transaction: no handle').toBeUndefined();
 
     await engine.transaction(async () => {
       await engine.resolveSecret('secret:s1');
     });
-    const inside = primary.finds.at(-1)!;
+    const inside = last(primary.finds);
     expect(inside.object).toBe('sys_secret');
     expect(inside.transaction).toBeTruthy();
   });
@@ -184,7 +191,7 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
     engine.registry.registerObject({
       name: 'ptest_foreign',
       fields: { name: { type: 'text' }, key: { type: 'text', internal: true } },
-    } as any);
+    } as any, '__test__');
     other.driver.seed('ptest_foreign', { id: 'f1', name: 'f', key: HASH });
 
     await engine.transaction(async () => {
@@ -192,7 +199,7 @@ describe('privileged driver-level reads join the ambient transaction (#10792)', 
       // `other_db`, so it must arrive with NO handle.
       await engine.resolveInternalField('ptest_foreign', ['f1'], 'key');
     });
-    expect(other.finds.at(-1)!.object).toBe('ptest_foreign');
-    expect(other.finds.at(-1)!.transaction, 'a foreign driver must not receive the handle').toBeUndefined();
+    expect(last(other.finds).object).toBe('ptest_foreign');
+    expect(last(other.finds).transaction, 'a foreign driver must not receive the handle').toBeUndefined();
   });
 });

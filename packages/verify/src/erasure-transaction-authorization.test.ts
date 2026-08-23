@@ -38,7 +38,7 @@
 // refusals.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { bootStack, type VerifyStack } from './harness';
+import { bootStack, type VerifyStack } from './harness.js';
 
 const SYS = { isSystem: true };
 
