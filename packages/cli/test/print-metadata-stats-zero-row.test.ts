@@ -71,6 +71,13 @@ const ZERO_APPS_STATS: MetadataStats = {
 /** The card's "one app" run: identical, plus one app. */
 const ONE_APP_STATS: MetadataStats = { ...ZERO_APPS_STATS, apps: 1 };
 
+/**
+ * #10952's harsher fixture: a stack that declares nothing at all, so EVERY
+ * section is empty — including `Data:`, which the `blank` scaffold's one object
+ * keeps populated. Before the fix this rendered the single line `UI: 0 Apps`.
+ */
+const ALL_ZERO_STATS: MetadataStats = { ...ZERO_APPS_STATS, objects: 0, fields: 0 };
+
 describe('[#10504] printMetadataStats renders the UI: row at zero apps', () => {
   it('prints "UI: 0 Apps" — not an absent row — when apps=0', () => {
     const out = render(ZERO_APPS_STATS);
@@ -91,15 +98,83 @@ describe('[#10504] printMetadataStats renders the UI: row at zero apps', () => {
     expect(out).toContain('Data: 1 Objects  2 Fields');
   });
 
-  it('does not widen the fix to Logic:/Security: — those sections still drop the whole row at zero (tracked separately in #10952)', () => {
-    // Every Logic/Security item is 0 in ZERO_APPS_STATS. This asserts today's
-    // (still-general, unresolved) drop behavior for the sections #10504's
-    // triage ruling did NOT name, so an unrelated future change that widens
-    // zeroFallback to them fails HERE first, loudly, rather than silently
-    // drifting past this card's narrow scope. If #10952 lands the wider fix,
-    // this assertion is the deliberate one to update — name it in that PR.
+  // #10504's fourth test asserted the NARROW scope it shipped with: that
+  // `Logic:`/`Security:` still dropped their whole row at zero. That card named
+  // this assertion as "the deliberate one to update" if #10952 landed the wider
+  // fix. #10952 landed it — triage generalised the principle (a summary section
+  // is never silently dropped; every section prints its zero state) — so the
+  // assertion is replaced, deliberately and by name, with the per-section pins
+  // in the next describe block.
+});
+
+/**
+ * #10952 — the same drop, measured on the rows #10504 did not rule on.
+ *
+ * Reproduced at this branch's base against the real CLI (`bin/run-dev.js
+ * validate`, `NO_COLOR=1`) on two fixture stacks. One object, two fields and
+ * nothing else printed exactly:
+ *
+ *     Data: 1 Objects  2 Fields
+ *     UI: 0 Apps
+ *
+ * No `Logic:` line, no `Security:` line — absent, not `0`. A stack declaring no
+ * objects either printed the single line `UI: 0 Apps`, losing `Data:` too. Both
+ * exited `0`, which is why the hole stayed invisible: nothing failed, the rows
+ * just were not there, and "none of it" is indistinguishable from "not
+ * reported on".
+ *
+ * Triage (issue comment 5380549313) generalised #10504's ruling: a summary
+ * section is NEVER silently dropped; every section prints its zero state. The
+ * constraint it set is consistency with the shipped `UI: 0 Apps` shape, not a
+ * specific string.
+ *
+ * One pin PER SECTION, deliberately: each asserts only its own row, so deleting
+ * one section's zero rendering fails that section's pin and no other. A single
+ * aggregate assertion would go red for all four and could not tell you which
+ * row regressed.
+ */
+describe('[#10952] printMetadataStats prints every section\'s zero state — no row is silently dropped', () => {
+  it('Data: prints "Data: 0 Objects" when every Data item is 0', () => {
+    const out = render(ALL_ZERO_STATS);
+    // Before the fix `ALL_ZERO_STATS` rendered no `Data:` line whatsoever.
+    expect(out).toContain('Data: 0 Objects');
+  });
+
+  it('UI: still prints "UI: 0 Apps" — the shipped #10504 shape, unchanged at all-zero', () => {
+    const out = render(ALL_ZERO_STATS);
+    expect(out).toContain('UI: 0 Apps');
+  });
+
+  it('Logic: prints "Logic: 0 Flows" when every Logic item is 0', () => {
     const out = render(ZERO_APPS_STATS);
-    expect(out).not.toContain('Logic:');
-    expect(out).not.toContain('Security:');
+    // `Flows` carries this section's signal the way `Apps` carries `UI:`'s.
+    expect(out).toContain('Logic: 0 Flows');
+  });
+
+  it('Security: prints BOTH peers — "Security: 0 Positions  0 Permissions"', () => {
+    const out = render(ZERO_APPS_STATS);
+    // Two independently authorable peers and no canonical single signal, so
+    // naming one would print a zero state that silently omits the other.
+    // Printing both keeps the zero row's item set identical to its non-zero
+    // rendering — same `<count> <Item>` fragments, same two-space join as the
+    // shipped `UI: 0 Apps`.
+    expect(out).toContain('Security: 0 Positions  0 Permissions');
+  });
+
+  it('a non-zero item still suppresses its section\'s zero rendering — the fallback is the empty case only', () => {
+    // One flow: `Logic:` must report the real count and NOT fall back.
+    const out = render({ ...ZERO_APPS_STATS, flows: 1 });
+    expect(out).toContain('Logic: 1 Flows');
+    expect(out).not.toContain('Logic: 0 Flows');
+    // The peer section is untouched by that — asserted as ROW PRESENCE, not as
+    // its exact fragments, so this test stays sensitive to `Logic:` alone and
+    // the `Security:` rendering is pinned in exactly one place above.
+    expect(out).toContain('Security:');
+  });
+
+  it('a partially-populated Security: reports only its non-zero peer, not the zero fallback', () => {
+    const out = render({ ...ZERO_APPS_STATS, permissions: 3 });
+    expect(out).toContain('Security: 3 Permissions');
+    expect(out).not.toContain('0 Positions');
   });
 });

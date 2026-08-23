@@ -810,19 +810,38 @@ export function printMetadataStats(stats: MetadataStats) {
     label: string;
     items: Array<[string, number]>;
     /**
+     * The item(s) to force-print when EVERY item in the section is `0`.
+     *
      * #10504 — a section whose every item is `0` used to vanish from the
      * summary entirely, and that reads as "this summary does not report on
      * this section" rather than "this project has none of it" — exactly the
      * same output for a newcomer's freshly scaffolded project (intentionally
-     * zero apps) and for a summary that simply never covers UI. Triage ruled
-     * this narrowly for `UI:` — the newcomer-facing "is there a navigable
-     * app" signal — not as a blanket rule for every section, so this is an
-     * opt-in per section naming the one item to force-print at zero, not a
-     * change to the drop behavior of `Data:`/`Logic:`/`Security:` (those
-     * still omit the whole row when every item in them is zero — see #10952
-     * for whether that should change too).
+     * zero apps) and for a summary that simply never covers UI. That card
+     * measured the drop only through `UI:` and triage ruled narrowly on that
+     * row, so the mechanism landed opt-in and `Data:`/`Logic:`/`Security:`
+     * kept dropping.
+     *
+     * #10952 measured the same drop on the other three rows, against the real
+     * CLI (`bin/run-dev.js validate`, `NO_COLOR=1`): on a stack with one
+     * object, two fields and nothing else the entire summary was
+     *
+     *     Data: 1 Objects  2 Fields
+     *     UI: 0 Apps
+     *
+     * with no `Logic:` and no `Security:` line present at all; on a stack that
+     * also declares no objects it was the single line `UI: 0 Apps`. Both
+     * exited `0`. Triage generalised #10504's principle — a summary section is
+     * NEVER silently dropped; every section prints its zero state — so this is
+     * no longer opt-in. The field is REQUIRED and typed non-empty, and that
+     * typing is the enforcement: a section added to this array later cannot
+     * compile without naming what it prints at zero, so the dropped-row defect
+     * cannot be reintroduced one section at a time.
+     *
+     * Most sections name the single item carrying that section's signal
+     * (`Apps` for `UI:` — the shipped shape). `Security:` names both of its
+     * items; the rationale sits at its entry below.
      */
-    zeroFallback?: string;
+    zeroFallback: [string, ...string[]];
   }> = [
     {
       label: 'Data',
@@ -832,6 +851,9 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Extensions', stats.objectExtensions],
         ['Datasources', stats.datasources],
       ],
+      // `Objects` is the section's signal: a stack with no objects has no data
+      // model at all, which `validate` already warns about separately.
+      zeroFallback: ['Objects'],
     },
     {
       label: 'UI',
@@ -843,7 +865,8 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Reports', stats.reports],
         ['Actions', stats.actions],
       ],
-      zeroFallback: 'Apps',
+      // The shipped shape (#10504): `UI: 0 Apps`. Unchanged.
+      zeroFallback: ['Apps'],
     },
     {
       label: 'Logic',
@@ -853,6 +876,10 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Agents', stats.agents],
         ['APIs', stats.apis],
       ],
+      // `Flows` is this section's signal the way `Apps` is `UI:`'s — the
+      // primary automation primitive, and the one the boot banner's own
+      // automation summary counts.
+      zeroFallback: ['Flows'],
     },
     {
       label: 'Security',
@@ -860,16 +887,30 @@ export function printMetadataStats(stats: MetadataStats) {
         ['Positions', stats.positions],
         ['Permissions', stats.permissions],
       ],
+      // BOTH peers, deliberately. `Security:` has no single canonical signal
+      // the way `UI:` has `Apps`: `Positions` and `Permissions` are
+      // independently authorable, so naming one would print a zero state that
+      // silently omits the other — the very "reads as never asked" defect this
+      // mechanism exists to remove. Printing both keeps the zero row's item set
+      // identical to its non-zero rendering, built from the same
+      // `<count> <Item>` fragments and the same two-space join as `UI: 0 Apps`,
+      // so it is the shipped shape rather than a second formatting concept.
+      zeroFallback: ['Positions', 'Permissions'],
     },
   ];
 
   for (const section of sections) {
     let shown = section.items.filter(([, v]) => v > 0);
     if (shown.length === 0) {
-      if (!section.zeroFallback) continue;
-      const fallback = section.items.find(([k]) => k === section.zeroFallback);
-      if (!fallback) continue; // defensive — zeroFallback must name a real item
-      shown = [fallback];
+      // Never drop the row (#10504, #10952) — the row is what says "this
+      // project has none of this"; its absence says nothing at all.
+      shown = section.zeroFallback
+        .map((key) => section.items.find(([itemKey]) => itemKey === key))
+        .filter((item): item is [string, number] => item !== undefined);
+      // Defensive only — zeroFallback must name real items. A bare `Security:`
+      // with no counts would read worse than the drop, so this one path still
+      // omits the row.
+      if (shown.length === 0) continue;
     }
 
     const line = shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
