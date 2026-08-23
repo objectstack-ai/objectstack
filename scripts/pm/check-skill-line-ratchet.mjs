@@ -31,9 +31,10 @@
  * ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its
  * references/, the per-lane job descriptions), the four other
  * `.claude/skills/` playbook SKILL.md files, the dev-agent definition
- * `.claude/agents/os-dev.md`, and the root `AGENTS.md`. Read a file's absence
- * from the map as a fact to check, not an oversight to infer — `.claude/hooks/`,
- * `.claude/settings.json` and `CLAUDE.md` carry no ceiling either.
+ * `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md`
+ * and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not
+ * an oversight to infer — `.claude/hooks/` and `.claude/settings.json` carry no
+ * ceiling.
  *
  * The **published** `skills/` catalog — the one that ships to customer projects
  * — is deliberately OUTSIDE the ceiling. It is the omission worth stating
@@ -141,6 +142,16 @@ export const CEILINGS = new Map([
   // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
   // the next author needing a line is back to compressing.
   ['AGENTS.md', 961],
+  // #9965: root CLAUDE.md is the other repo-root instruction file — same read
+  // path (every seat session), same governance (Prime Directive #14). It is
+  // structurally growth-prone in the way the ratchet is built for: it exists to
+  // inline the rules that must never be missed, so every new must-never-miss
+  // rule is an argument for appending to it. Maintainer ruling 2026-08-20,
+  // verbatim and untranslated: 「其他接受你的建议。」 (issue #9965, comment
+  // 5353931707) — rationale on record: a one-line ceiling now prevents compound
+  // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
+  // convention as the entries above).
+  ['CLAUDE.md', 86],
 ]);
 
 /**
@@ -151,21 +162,22 @@ export const CEILINGS = new Map([
  *
  * That tool reads a gate's population out of the path literals in the gate's own
  * source, and "looks like a path" there means "carries a separator" (plus a short
- * allowlist of dotted top-level dirs). Every key above satisfies that except
- * `AGENTS.md` — a repo-root FILE has no separator to be found by. So the map's
- * eighteen entries yielded seventeen watch hints, an AGENTS.md card derived ZERO
- * gates, and the dev met this ratchet as red CI instead of as a local command.
- * That lands on the largest ceiling in the map at headroom 0, where one added
- * paragraph crosses it. CI still enforces either way (lint.yml carries no path
- * filter) — what was missing was discoverability, and this restores it.
+ * allowlist of dotted top-level dirs). Every key above satisfies that except the
+ * repo-root files — a repo-root FILE has no separator to be found by. So before
+ * this list existed an AGENTS.md card derived ZERO gates, and the dev met this
+ * ratchet as red CI instead of as a local command. That lands on the largest
+ * ceiling in the map at headroom 0, where one added paragraph crosses it. CI
+ * still enforces either way (lint.yml carries no path filter) — what was missing
+ * was discoverability, and this restores it.
  *
- * ## Why the subtree spelling, and why it covers exactly one file
+ * ## Why the subtree spelling, and why it covers exactly the root files
  *
  * `<file>/**` is the only form that reaches a repo-root file: the extractor
  * requires the separator, and dispatch-gates collapses a hint's globs before
- * comparing, which reduces this back to `AGENTS.md` and matches that path alone.
- * Nothing in the tree lives under `AGENTS.md/`, so it claims no directory —
- * measured at exactly one (gate, file) pair added, one family gaining coverage.
+ * comparing, which reduces each back to its bare filename and matches that path
+ * alone. Nothing in the tree lives under `AGENTS.md/` or `CLAUDE.md/`, so neither
+ * claims a directory — measured at exactly one (gate, file) pair added per root
+ * file, one family gaining coverage.
  *
  * The alternative was widening the extractor to accept bare top-level `*.md`
  * literals. Measured over 114 families x 6326 tracked files it is cheap by
@@ -185,7 +197,7 @@ export const CEILINGS = new Map([
  * self-test pins both halves — every separator-less ceiling is declared here,
  * and nothing declared here is a CEILINGS key.
  */
-export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
+export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
 
 export function verdict(rel, lineCount, maxLines) {
   if (lineCount === 0) return { ok: false, msg: `${rel} read as empty — refusing to treat a missing/empty input as a pass (#4690).` };
@@ -248,13 +260,14 @@ function selfTest() {
     ['all seven lane job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
+    ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],
     // The dispatch-gates declaration (#9964). Enforcement cannot hold any of
     // these: the declaration is read by another tool entirely, so a wrong or
     // missing entry runs perfectly green here and only shows up as a dev
     // dispatched on a root-file card with an empty gate brief.
     ['every separator-less ceiling declares a root-file watch hint', [...CEILINGS.keys()].filter((k) => !k.includes('/')).every((k) => ROOT_FILE_WATCH_HINTS.includes(`${k}/**`)), true],
     ['and the declaration names no file the map does not cover', ROOT_FILE_WATCH_HINTS.every((h) => CEILINGS.has(h.replace(/\/\*+$/, ''))), true],
-    ['AGENTS.md is the root file it declares', ROOT_FILE_WATCH_HINTS.includes('AGENTS.md/**'), true],
+    ['both root instruction files are declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', true],
     // Provenance, never a lookup key: `run` opens every CEILINGS key, so the
     // glob form appearing there would make the ratchet read a path that does
     // not exist — red under #4690's cannot-read rule, for a file that is fine.
