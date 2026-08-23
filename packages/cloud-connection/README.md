@@ -55,6 +55,46 @@ const plugins = [
 ];
 ```
 
+## SPA telemetry is denied unless a runtime grants it
+
+`GET /api/v1/runtime/config` carries a `telemetry` block:
+
+```json
+{ "telemetry": { "allowClientErrorReporting": false } }
+```
+
+It is the Console's **post-build off switch**. Every telemetry knob in the SPA
+is a build-time variable frozen into the bundle, so a build that opted in has
+no other way to be turned off on a deployed host — and an air-gapped
+deployment measurably shipped one that could not be (`cloud#1508`: 14 Sentry
+envelopes per session carrying IP and User-Agent PII).
+
+It is **denied by default on every posture**. Grant it explicitly:
+
+```bash
+OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED=true   # or: new RuntimeConfigPlugin({ allowClientErrorReporting: true })
+```
+
+Three properties worth knowing before you build on it:
+
+- **A permission, not a source.** The server supplies no DSN and cannot start
+  telemetry for a build that carries none. `true` means only "this deployment
+  does not object to the sink you were compiled with".
+- **A runtime that declared its control plane off cannot grant it.**
+  `OS_CLOUD_URL=off` (or `none` / `local` / `disabled`) refuses the grant and
+  says so in the boot log, so an air-gapped box stays silent even if a hosted
+  configuration is copied onto it.
+- **Absence means denied.** An older runtime, a third-party host, a 404 or a
+  failed fetch all read the same way. Consumers should use the reading that
+  ships with the contract rather than writing their own:
+
+```ts
+import { isClientErrorReportingAllowed } from '@objectstack/cloud-connection';
+
+// `payload` may be the parsed body, or undefined when the fetch failed.
+if (buildTimeDsn && isClientErrorReportingAllowed(payload)) initErrorReporting();
+```
+
 ## Boundary (open mechanism, closed intelligence)
 
 This package is **mechanism**: proxying a catalog, installing into the local
@@ -65,7 +105,8 @@ rules. Plan-derived feature flags are injected by the host via
 `RuntimeConfigPluginConfig.resolvePlanFeatures`.
 
 `OS_CLOUD_URL=off` disables every remote call; air-gapped installs keep
-working via inline manifests handed to `install-local`.
+working via inline manifests handed to `install-local`, and the SPA telemetry
+permission above cannot be granted.
 
 See `docs/adr` in the cloud repository (ADR-0008) for the full architecture
 decision.
