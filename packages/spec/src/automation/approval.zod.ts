@@ -255,9 +255,12 @@ export type ApproverOrgSymbol = (typeof APPROVER_ORG_SYMBOLS)[number];
  * `user` / `field` / `manager` name a person directly or derive one from the
  * record, so they are org-agnostic: an `organization` on them is not a narrower
  * routing, it is a misunderstanding, and the lint says so rather than silently
- * ignoring it. `team` is org-agnostic too — `sys_team_member` carries no
- * organization column and the engine never scoped it (unlike position /
- * membership-tier / department, which all do).
+ * ignoring it. `team` is org-agnostic for RETARGETING too — it consults no
+ * org-scoped directory, so an `organization` on it has nothing to redirect and
+ * is refused the same way (unlike position / membership-tier / department,
+ * which all do); its expansion is nonetheless screened to the REQUEST's
+ * organization on the team's own `sys_team.organization_id` (#10230), so this
+ * flag is about targeting, not tenancy.
  *
  * `satisfies` keeps this exhaustive for the same reason
  * {@link APPROVER_VALUE_BINDINGS} is: a new {@link ApproverType} must state
