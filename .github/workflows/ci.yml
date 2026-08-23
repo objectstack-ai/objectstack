@@ -1580,8 +1580,77 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Docs
-        run: pnpm --filter @objectstack/docs build
+      # ── This gate builds what SHIPS, not a hand-copied lookalike (#10642) ──
+      #
+      # This step used to run `pnpm --filter @objectstack/docs build`: a SECOND,
+      # hand-maintained spelling of the production build. Production runs
+      # whatever `apps/docs/vercel.json` says, and NOTHING in this repo read
+      # that file - grep over every workflow and script found no reader - so the
+      # two spellings were free to drift apart silently, and did. `Build Docs`
+      # was green on nine consecutive PRs while the production build of that
+      # same app was failing. A gate that re-implements the thing it guards can
+      # only ever test the re-implementation; its green says nothing about what
+      # ships. Note the divergence was never in the path filter: the `docs`
+      # filter already lists `content/**` and is fail-open, so those greens were
+      # real runs, not skips.
+      #
+      # So the command is READ FROM `vercel.json` rather than copied. Vercel
+      # runs `buildCommand` with the cwd set to the project's Root Directory
+      # (`apps/docs` - which is why the stored command opens with `cd ../..`),
+      # hence `working-directory` here. Changing how production builds now
+      # changes this gate in the same commit, by construction, which is the part
+      # that survives the NEXT divergence rather than pinning today's.
+      #
+      # `eval` of a repo-controlled string adds no trust boundary this job did
+      # not already have: it already runs install lifecycle scripts and
+      # `next build` from the same tree.
+      - name: Build Docs (the command production runs)
+        working-directory: apps/docs
+        env:
+          # The ONE deliberate difference from production, and it is
+          # load-bearing. `@objectstack/docs#build` inherits turbo's generic
+          # `build` task, whose inputs are the package's own files: 35 of them,
+          # NONE under `content/`. Every one of the docs site's 400+ pages lives
+          # in `content/`. Measured on 98ea344: appending a line to
+          # `content/docs/index.mdx` left the task hash at `4e0c51cb3db203a8` -
+          # a cache HIT, i.e. turbo replays the previous `.next` instead of
+          # building this tree. A content-only PR is the normal shape of a docs
+          # change and precisely the shape this gate has to be able to fail, so
+          # the gate must not be satisfiable by a replayed artifact. TURBO_FORCE
+          # re-executes the task even on a hash hit. The same hole on the
+          # PRODUCTION side, where nothing forces a rebuild, is a separate
+          # defect and is filed separately - this env var fixes the gate only.
+          TURBO_FORCE: 'true'
+        run: |
+          set -euo pipefail
+          BUILD_COMMAND="$(node -p "JSON.parse(require('node:fs').readFileSync('vercel.json','utf8')).buildCommand || ''")"
+          if [ -z "$BUILD_COMMAND" ]; then
+            echo "::error file=apps/docs/vercel.json::No buildCommand in apps/docs/vercel.json. This gate cannot know what production runs and refuses to guess: restore buildCommand, or rewrite this step against whatever now defines the production build."
+            exit 1
+          fi
+          echo "Production build command (apps/docs/vercel.json): $BUILD_COMMAND"
+          eval "$BUILD_COMMAND"
+
+      # Exit code 0 is NOT evidence that the app was built. `pnpm --filter <name>`
+      # with a filter matching no package prints "No projects matched the
+      # filters" and exits 0 (measured) - so a renamed package, or a typo in the
+      # production build command, is a silent success here and a deploy-time
+      # "No Output Directory found" on Vercel, i.e. exactly the failure mode
+      # this card exists to catch, arriving AFTER the gate reported green.
+      # Assert the artifact rather than trusting the exit code.
+      #
+      # `.next/BUILD_ID` cannot be a leftover from the cache step above: that
+      # step stores `apps/docs/.next/cache` ONLY, so nothing outside that
+      # subtree is ever restored. ⛔ Widening that cache path to
+      # `apps/docs/.next` would let this assertion pass without a build.
+      - name: Assert the docs app actually built
+        run: |
+          set -euo pipefail
+          if [ ! -f apps/docs/.next/BUILD_ID ]; then
+            echo "::error file=apps/docs/vercel.json::The production build command exited 0 but produced no apps/docs/.next/BUILD_ID - nothing was built."
+            exit 1
+          fi
+          echo "Built docs app: BUILD_ID=$(cat apps/docs/.next/BUILD_ID)"
 
   # ── The pinned objectui SHA actually builds (#4290) ───────────────────────
   #
