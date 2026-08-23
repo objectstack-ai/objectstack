@@ -16,18 +16,17 @@ export {
   installAttachmentLifecycleHooks,
   createSysFileReapGuard,
   createUploadSessionReapGuard,
-  findFileHolder,
-  hasFieldReferenceOwner,
 } from './attachment-lifecycle.js';
-export type {
-  AttachmentLifecycleEngine,
-  AttachmentLifecycleLogger,
-  FileHolder,
-} from './attachment-lifecycle.js';
+export type { AttachmentLifecycleEngine, AttachmentLifecycleLogger } from './attachment-lifecycle.js';
+// `findFileHolder` / `hasFieldReferenceOwner` / `FileHolder` stay INTERNAL: the
+// reap guard and the inventory both reach them by relative import, and nothing
+// outside this package pulls on them. Publishing an unpulled seam is surface
+// this project does not owe (implementation-first) — and the narrower the
+// ownership predicate's blast radius, the fewer places can drift weaker than
+// the guard. Export them the day a consumer exists.
 export {
   inventoryStrandedFileOrphans,
   formatStrandedOrphanInventory,
-  formatBytes,
 } from './stranded-orphan-inventory.js';
 export type {
   StrandedOrphanInventory,

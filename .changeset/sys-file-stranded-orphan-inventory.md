@@ -19,7 +19,9 @@ This ships the measurement half only, per the maintainer's ruling on #10950:
 - `inventoryStrandedFileOrphans()` — a read-only reconciliation pass that walks
   attachments-scope committed `sys_file` rows and reports how many are stranded, their
   byte magnitude, and why each excluded row was excluded. `formatStrandedOrphanInventory()`
-  renders it; both are exported from `@objectstack/service-storage`.
+  renders it; those two plus the inventory's result types are what
+  `@objectstack/service-storage` publishes — the shared ownership predicate stays internal,
+  since nothing outside the package pulls on it.
 - `os storage orphans` — the operator-invoked surface, with `--json` for a machine-readable
   payload. There is no `--apply` and no write path, deliberately.
 
