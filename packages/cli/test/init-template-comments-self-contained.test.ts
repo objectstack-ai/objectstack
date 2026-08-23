@@ -44,15 +44,14 @@
 //
 // ## The third half: a public link is only a fix while it resolves
 //
-// The two docs URLs the rewrite links (`/docs/upgrading`,
-// `/docs/permissions/sharing-rules`) are only a fix while they resolve.
-// Assertion 3 checks every canonical-origin docs URL in the rendered output
-// against `content/docs` the way Fumadocs routes it. The candidate-route
-// logic is restated here (not imported from
-// `scripts/check-published-readme-links.mjs`, which owns
-// `CANONICAL_DOCS_ORIGIN`) for the same reason #10324's version does: an
-// import would widen this suite's declared cross-package read radius to buy
-// six lines.
+// The two docs URLs the rewrite links (upgrading, permissions/sharing-rules)
+// are only a fix while they resolve. Assertion 3 checks every
+// canonical-origin docs URL in the rendered output against the docs content
+// tree the way Fumadocs routes it. The candidate-route logic is restated
+// here rather than imported from check-published-readme-links' own module
+// (which owns the canonical-origin constant), for the same reason #10324's
+// version does: an import would widen this suite's declared cross-package
+// read radius to buy six lines.
 
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
