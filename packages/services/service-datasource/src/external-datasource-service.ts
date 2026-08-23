@@ -734,13 +734,39 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   /**
    * Validate a chosen set of objects, one report.
    *
-   * A per-object throw becomes a `missing_table` row carrying the thrower's
+   * A per-object throw becomes an `unreachable` row carrying the thrower's
    * message rather than rejecting the whole report: one unreachable remote (or
    * one object whose definition vanished mid-sweep) must not erase the verdicts
    * of the objects that did validate.
    *
    * [#10962] All objects in one call share one live schema read per datasource
    * (see {@link sweepScopedIntrospect}); the memo dies with this call.
+   *
+   * ## Why the row's kind is `unreachable` for EVERY throw — no error sniffing
+   *
+   * This catch used to invent `kind: 'missing_table'`, so a refused
+   * connection, a DNS failure, an auth expiry or a timeout out of
+   * `introspect(datasource)` was indistinguishable from a genuinely dropped
+   * remote table — and the boot gate's default `onMismatch: 'fail'` turned a
+   * 30-second network blip into a refusal to start (maintainer ruling
+   * 2026-08-23: an unreachable remote is not a schema mismatch).
+   *
+   * The discrimination "connection failure or schema fact?" is STRUCTURAL
+   * here, not an error-signature question. Every schema FACT this service
+   * reports (`missing_table` included) is derived from an introspection that
+   * **returned** — `validateObject`'s `!table` branch asserts `missing_table`
+   * from a successfully read schema in which the table is absent. A throw
+   * means the comparison never ran, and per the repo's read-failure
+   * classification precedent (`READ_FAILURE_DISCRIMINATORS`,
+   * `packages/metadata/src/utils/schema-sync-errors.ts`: a fact verdict must
+   * be POSITIVELY EARNED, never defaulted to), no signature test on the thrown
+   * value can earn a claim about a remote schema nobody read. Deliberately NOT
+   * a hand-rolled `err.code` allowlist — an unrecognised connection error
+   * would fall back to the wrong fact — and deliberately not a
+   * missing-table-shaped rescue either: on this path a "no such table" error
+   * would be about the METADATA store or the introspection machinery, not the
+   * remote table this row names, so rescuing `missing_table` from it would
+   * mislabel in a second direction.
    */
   private async validateEach(objects: ObjectLike[]): Promise<SchemaValidationReport> {
     const readSchema = this.sweepScopedIntrospect();
@@ -754,9 +780,14 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
             object: o.name,
             diffs: [
               {
-                kind: 'missing_table',
+                kind: 'unreachable',
                 remoteName: o.external?.remoteName ?? o.name,
                 actual: err instanceof Error ? err.message : String(err),
+                // 'error', not 'warning': the object is NOT verified, `ok`
+                // must stay false, and interactive consumers (CLI validate,
+                // Studio) should present it at attention level. The
+                // transient-vs-fact distinction consumers act on is the KIND
+                // axis, not severity (see the kind's docblock in spec).
                 severity: 'error',
               },
             ],

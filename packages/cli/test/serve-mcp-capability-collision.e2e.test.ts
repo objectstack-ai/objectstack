@@ -48,7 +48,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomPort } from './helpers/serve-process.js';
+import { E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `bin/run.js` — the SHIPPED entrypoint, i.e. the one the card's repro names. */
@@ -109,16 +109,27 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
     const child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
+      // `childEnv`, not a bare `...process.env`: the vitest worker exports
+      // `TEST=true`, which better-auth 1.7.1 reads directly and answers by
+      // switching its own origin/CSRF validation OFF in the child — see
+      // `helpers/serve-process.ts` for the measurement (#11267). This file
+      // signs in for real, so it is a child that actually reaches that code.
+      env: childEnv({
         NO_COLOR: '1',
         OS_LOG_LEVEL: 'info',
         OS_DISABLE_CONSOLE: '1',
+        // Explicit, not minted: with `VITEST` no longer inherited (#11267),
+        // `local-crypto-provider.ts`'s detectMode answers `development` for
+        // this child instead of `test`, and development mode PERSISTS a minted
+        // key to `$HOME/.objectstack/dev-crypto-key`. Supplying one keeps this
+        // boot from writing to the runner's home directory and from coupling
+        // itself to whatever other test got there first.
+        OS_SECRET_KEY: E2E_SECRET_KEY,
         // The dev-admin seed the key mint signs in as is gated on this, and
         // vitest exports `test`.
         NODE_ENV: 'development',
         ...env,
-      },
+      }),
     }) as ChildProcessWithoutNullStreams;
     children.push(child);
 

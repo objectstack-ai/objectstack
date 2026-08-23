@@ -2812,6 +2812,7 @@ export const MANDATORY_TIER_GLOBS = [
  * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
  * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
  * constant instead of spelling a model name.
+ * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
  */
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
 

@@ -153,6 +153,18 @@
  * real consumer would, rather than relying on a same-package self-import
  * trick that may or may not resolve.
  *
+ * ── Fence-awareness in the orphan scan ────────────────────────────────────
+ * The orphan-marker guard (`extractFromFile`) is fence-aware: a marker
+ * spelling shown as example text INSIDE some other fenced block (e.g. a
+ * ```md illustration showing what `<!-- os:check -->` looks like) is not
+ * adjacent, at top level, to a real fence, so it claims nothing and must not
+ * be reported as a misplaced marker either — otherwise this gate's own
+ * convention could never be documented in the roots it governs. `fenceSpans()`
+ * tracks every top-level fence of ANY language (lifted from the #10533
+ * fence-awareness shape in `scripts/check-role-word.mjs`); a marker at true
+ * top level that is merely not adjacent to its fence is unaffected and still
+ * fails loudly.
+ *
  * Usage:
  *   tsx scripts/check-skill-examples.ts            # extract + type-check (CI)
  *   tsx scripts/check-skill-examples.ts --self-test  # pin the `any` detector, both directions
@@ -371,6 +383,43 @@ const FENCE_CLOSE_RE = /^```\s*$/;
 const JSDOC_GUTTER_RE = /^\s*\*\s?/;
 
 /**
+ * ANY CommonMark-shaped opening code fence — every language, not just the
+ * ts/tsx/typescript ones `FENCE_OPEN_RE` recognises for compilation: up to
+ * three spaces of indent, a run of three or more backticks, and an info
+ * string that cannot itself contain a backtick. Lifted from the #10533
+ * fence-awareness shape in `scripts/check-role-word.mjs`.
+ */
+const ANY_FENCE_OPEN_RE = /^ {0,3}(`{3,})([^`]*)$/;
+
+/**
+ * Every line index that lies INSIDE some top-level fenced block — of ANY
+ * language, spanning both its opening and closing fence line. This gate's own
+ * `os:check` convention has to be documentable in the very roots it governs
+ * (e.g. a ```` ```md ```` illustration showing the marker's exact spelling),
+ * and a marker shown as example text inside such a fence claims nothing — it
+ * is not adjacent to a real fence the author intends to check, so it must not
+ * be flagged as a misplaced (orphan) marker either. The closing run length
+ * must match or exceed the opener's (a `````` fence wrapping a ```ts example
+ * closes on ITS OWN fence, not the inner one), and an unclosed fence runs to
+ * the end of the document (CommonMark), so it consumes the rest of the file
+ * rather than leaving the tail ambiguous.
+ */
+function fenceSpans(lines: string[]): boolean[] {
+  const inFence = new Array<boolean>(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i++) {
+    const open = ANY_FENCE_OPEN_RE.exec(lines[i]);
+    if (!open) continue;
+    const run = open[1].length;
+    const closeFence = new RegExp(`^ {0,3}\`{${run},}[ \\t]*$`);
+    let end = i + 1;
+    while (end < lines.length && !closeFence.test(lines[end])) end++;
+    for (let s = i; s < Math.min(end + 1, lines.length); s++) inFence[s] = true;
+    i = end;
+  }
+  return inFence;
+}
+
+/**
  * The lines a root's regexes actually match against. Identical to the raw
  * file lines for markdown roots; for a `commentPrefixed` root, the JSDoc
  * gutter is stripped from every line first — so a marker, a fence, and a
@@ -390,10 +439,14 @@ function logicalLines(rawLines: string[], root: SourceRoot): string[] {
  * fence is exactly the MARKER (ignoring surrounding whitespace) — after
  * gutter-stripping, for a `commentPrefixed` root.
  *
- * Also reports `orphans`: MARKER lines that are NOT directly above a ts fence.
- * A misplaced marker (a blank line slipped in between, or it precedes a bash /
- * json block) silently checks nothing — exactly the failure mode this gate
- * exists to prevent — so the caller treats an orphan as an error, not a no-op.
+ * Also reports `orphans`: top-level MARKER lines that are NOT directly above
+ * a ts fence. A misplaced marker (a blank line slipped in between, or it
+ * precedes a bash / json block) silently checks nothing — exactly the
+ * failure mode this gate exists to prevent — so the caller treats an orphan
+ * as an error, not a no-op. A marker occurrence INSIDE some other fenced
+ * block (`fenceSpans()`) is example text illustrating the convention, not a
+ * claim, and is excluded from this scan for the same reason it is excluded
+ * from extraction above: it is not adjacent, at top level, to a real fence.
  */
 function extractFromFile(source: string, root: SourceRoot): { examples: Example[]; orphans: number[] } {
   const rawLines = fs.readFileSync(source, 'utf-8').split('\n');
@@ -424,8 +477,13 @@ function extractFromFile(source: string, root: SourceRoot): { examples: Example[
     i = close; // skip to the close fence
   }
 
+  const inFence = fenceSpans(lines);
   const orphans: number[] = [];
   for (let i = 0; i < lines.length; i++) {
+    // Top level only. A marker shown INSIDE some other fenced block (e.g. a
+    // ```md illustration of this very convention) is example text, not a
+    // claim — see `fenceSpans()`.
+    if (inFence[i]) continue;
     // Any marker spelling counts as an orphan claim — a wrong-format marker
     // checks nothing, which is precisely what this guard exists to catch.
     if (ALL_MARKERS.includes(lines[i].trim()) && !claimed.has(i)) orphans.push(i + 1); // 1-based
@@ -917,6 +975,52 @@ function selfTest(): never {
       `orphan fixture: reported ${orphanTsx.orphans.length} orphan marker(s), expected 1 — a misplaced gutter-wrapped ` +
         `marker must not be silently ignored`,
     );
+
+    // ── Fence-awareness (fenceSpans): the os:check convention has to be
+    //    documentable in the very roots it governs. A marker shown as example
+    //    text INSIDE some other fenced block (here a ```md illustration of
+    //    the marker's exact spelling) must not be reported as an orphan —
+    //    but a REAL misplaced marker at top level (not inside any fence,
+    //    just not adjacent to its fence) must still be an error: this gate's
+    //    hard-error posture must not weaken. Both live in one fixture so a
+    //    fix that over-widens the exemption (e.g. treating every marker as
+    //    "documented") is caught by the same run that proves the narrow case.
+    const fenceFixture = path.join(dir, 'fence-aware.md');
+    fs.writeFileSync(
+      fenceFixture,
+      [
+        '# Fence-awareness fixture', // 1
+        '', // 2
+        'Documenting the marker syntax itself, inside a wrapping fence:', // 3
+        '', // 4
+        '```md', // 5
+        '<!-- os:check -->', // 6  ← INSIDE the fence: example text, not a claim
+        '```', // 7
+        '', // 8
+        'A genuine misplaced marker (blank line breaks adjacency) must still fail:', // 9
+        '', // 10
+        '<!-- os:check -->', // 11 ← top-level, but NOT adjacent to the fence below
+        '', // 12
+        '```ts', // 13
+        'const x = 1;', // 14
+        '```', // 15
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const fenceAware = extractFromFile(fenceFixture, skillsRoot);
+    check(
+      fenceAware.examples.length === 0,
+      `fence-awareness fixture: extracted ${fenceAware.examples.length} block(s), expected 0 — neither marker is ` +
+        `adjacent to a real ts fence`,
+    );
+    check(
+      JSON.stringify(fenceAware.orphans) === JSON.stringify([11]),
+      `fence-awareness fixture: reported orphan line(s) ${JSON.stringify(fenceAware.orphans)}, expected [11] — line 6 ` +
+        "(inside the ```md fence) must NOT be an orphan, and line 11 (a genuine top-level misplaced marker) must " +
+        'STILL be one — a false orphan there is exactly the defect that makes this convention undocumentable, and a ' +
+        "silenced real orphan would weaken the gate's hard-error posture",
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -930,7 +1034,9 @@ function selfTest(): never {
     '✅  self-test: flags a bare `any` parameter / variable / property / return / alias / cast in a\n' +
       '    marked block at the right page line, and flags nothing in an honestly typed one; a\n' +
       '    JSDoc-gutter-wrapped ```tsx block (client SDK surface) extracts, strips and maps lines\n' +
-      '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan.',
+      '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan; a marker\n' +
+      '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
+      '    top-level misplaced marker still is.',
   );
   process.exit(0);
 }

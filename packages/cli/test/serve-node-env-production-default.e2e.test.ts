@@ -130,6 +130,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { childEnv, E2E_SECRET_KEY } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -210,8 +211,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   const child = spawn(process.execPath, [CLI, 'serve', '-p', String(port)], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
+    env: childEnv({
       NO_COLOR: '1',
       OS_LOG_LEVEL: 'warn',
       OS_DISABLE_CONSOLE: '1',
@@ -221,27 +221,47 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // "AuthPlugin.init() throws: secret is required" path regardless of
       // which NODE_ENV state this call is probing.
       OS_AUTH_SECRET: 'e2e-node-env-default-probe-secret-not-for-real-use',
+      // EXACTLY the argument the line above makes, for the sibling gate that
+      // #11267 exposed. The unset-`NODE_ENV` leg is — by this file's whole
+      // design — a PRODUCTION boot, and `LocalCryptoProvider` refuses to start
+      // in production without a stable key rather than mint one that would
+      // make every `sys_secret` value undecryptable after a restart. That
+      // refusal is a boot failure, not a signal about the origin gate this
+      // file measures, so the key is supplied explicitly.
+      //
+      // ⚠️ It was NOT needed before #11267 — and that is the finding, not an
+      // inconvenience. `local-crypto-provider.ts:133` reads
+      // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so while
+      // this fixture still inherited the vitest worker's `VITEST=true`, its
+      // crypto layer sat in TEST mode (ephemeral key, no disk, no refusal)
+      // while the rest of the boot was in production posture. The production
+      // posture this file exists to pin was genuine for auth and fake for
+      // crypto. Supplying the key is what makes it genuine for both.
+      OS_SECRET_KEY: E2E_SECRET_KEY,
       // The base default for every call: truly unset, unless overridden by
       // `env` below. Node's spawn omits an `undefined`-valued entry rather
       // than inheriting whatever this test RUNNER's own process (vitest sets
       // NODE_ENV=test) happened to have.
       NODE_ENV: undefined,
-      // MEASURED TRAP, worth stating explicitly: `...process.env` above is
-      // THIS FILE's own process env — the vitest WORKER's — and vitest's
-      // worker carries `TEST=true` (and `VITEST=true`) regardless of
-      // `NODE_ENV`. better-auth 1.7.1 reads `TEST` directly, independent of
-      // `NODE_ENV`: `create-context.mjs` defaults
+      // MEASURED TRAP, and the reason the base above is `childEnv()` rather
+      // than `...process.env`: this file's own process env is the vitest
+      // WORKER's, and that worker carries `TEST=true` (and `VITEST=true`)
+      // regardless of `NODE_ENV`. better-auth 1.7.1 reads `TEST` directly,
+      // independent of `NODE_ENV`: `create-context.mjs` defaults
       // `skipOriginCheck: … isTest() ? true : false`, and
       // `isTest = () => nodeENV === 'test' || toBoolean(env.TEST)`. Left
       // alone, that inherited `TEST=true` makes better-auth skip origin
       // validation ENTIRELY — a false GREEN that has nothing to do with
       // `serve.ts`'s own gate and stays green with the fix reverted, which is
       // exactly the vacuity this card's anti-vacuity section warns against,
-      // one layer further down than the one it names. Unset it the same way
-      // `NODE_ENV` is unset above, for the same reason.
-      TEST: undefined,
+      // one layer further down than the one it names. This file used to unset
+      // `TEST` by hand right here; #11267 moved that into `childEnv()` so
+      // every spawner in this directory gets it without having to know, and
+      // widened it to the whole `VITEST*` family. The behaviour of this
+      // fixture is unchanged — `childEnv()` removes a superset of what the
+      // hand-written `TEST: undefined` removed.
       ...env,
-    },
+    }),
   }) as ProbeChild;
   children.push(child);
 

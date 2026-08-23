@@ -439,6 +439,78 @@ describe('validateAll', () => {
     expect(report.ok).toBe(true);
     expect(report.results.map((r) => r.object)).toEqual(['wh_order']);
   });
+
+  /**
+   * [#11166] The card's measured defect, reproduced: an introspector throwing
+   * `connect ECONNREFUSED 10.0.0.5:5432` used to come back as
+   * `kind: 'missing_table'` — indistinguishable from a genuinely dropped
+   * table, and an abort under the boot gate's default `onMismatch: 'fail'`.
+   * Maintainer ruling 2026-08-23: a throw is classified as the distinct
+   * `unreachable` kind. The row stays non-`ok` (silently `ok: true` for an
+   * object nobody could validate would be the invent-an-answer failure), and
+   * the connection error's text is carried in `actual`.
+   */
+  it('classifies a per-object throw as `unreachable`, never `missing_table` (#11166)', async () => {
+    const objects: ObjectLike[] = [
+      {
+        name: 'wh_a_orders',
+        datasource: 'wh_a',
+        external: { remoteName: 'orders' },
+        fields: { order_id: { type: 'text' } },
+      },
+    ];
+    const svc = new ExternalDatasourceService({
+      introspect: async () => {
+        throw new Error('connect ECONNREFUSED 10.0.0.5:5432');
+      },
+      getDatasource: async () => ({ name: 'wh_a', schemaMode: 'external' }),
+      getObject: async (n) => objects.find((o) => o.name === n),
+      listObjects: async () => objects,
+      logger: { warn: () => {} },
+    });
+
+    const report = await svc.validateAll();
+
+    expect(report.ok).toBe(false);
+    expect(report.results).toEqual([
+      {
+        ok: false,
+        datasource: 'wh_a',
+        object: 'wh_a_orders',
+        diffs: [
+          {
+            kind: 'unreachable',
+            remoteName: 'orders',
+            actual: 'connect ECONNREFUSED 10.0.0.5:5432',
+            severity: 'error',
+          },
+        ],
+      },
+    ]);
+  });
+
+  /**
+   * [#11166] The other half of the distinction: a table genuinely absent from
+   * a schema that WAS read stays `missing_table` — the classification change
+   * must not blur the measured fact into the indeterminate kind.
+   */
+  it('still reports `missing_table` for a table absent from a successfully read schema', async () => {
+    const svc = makeService({
+      objects: [
+        {
+          name: 'wh_order',
+          datasource: 'warehouse',
+          external: { remoteName: 'ghost' },
+          fields: { order_id: { type: 'text' } },
+        },
+      ],
+    });
+    const report = await svc.validateAll();
+    expect(report.ok).toBe(false);
+    expect(report.results[0].diffs).toEqual([
+      expect.objectContaining({ kind: 'missing_table', severity: 'error' }),
+    ]);
+  });
 });
 
 /**
@@ -577,6 +649,8 @@ describe('validateDatasource', () => {
 
     // The scoped path still turns a per-object throw into a row rather than
     // rejecting the whole report — the sweep's `catch`, not a second one.
+    // [#11166] The row's kind is `unreachable` (the fixture's introspector
+    // threw a connection error), no longer the invented `missing_table`.
     expect(introspected).toEqual(['wh_b']);
     expect(report.ok).toBe(false);
     expect(report.results).toEqual((await sweptThenFiltered('wh_b', opts)).results);
@@ -584,7 +658,7 @@ describe('validateDatasource', () => {
       ok: false,
       datasource: 'wh_b',
       object: 'wh_b_orders',
-      diffs: [expect.objectContaining({ kind: 'missing_table', severity: 'error' })],
+      diffs: [expect.objectContaining({ kind: 'unreachable', severity: 'error' })],
     });
   });
 
@@ -736,7 +810,10 @@ describe('per-sweep introspection memo [#10962]', () => {
         datasource: M_DATASOURCE,
         diffs: [
           expect.objectContaining({
-            kind: 'missing_table',
+            // [#11166] A throw out of introspect is `unreachable`, never an
+            // invented `missing_table` — this pin is about the COUNT (one
+            // shared connection attempt), and rides the kind ruling as-is.
+            kind: 'unreachable',
             severity: 'error',
             actual: `connect ECONNREFUSED (${M_DATASOURCE})`,
           }),

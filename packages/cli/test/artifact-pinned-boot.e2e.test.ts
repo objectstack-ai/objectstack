@@ -40,6 +40,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -122,8 +123,15 @@ function runServe(env: Record<string, string>, opts: { migrateAndExit?: boolean 
             ['--import', TSX_LOADER, CLI, 'serve'],
             {
                 cwd,
-                env: {
-                    ...process.env,
+                // `childEnv`, not a bare `...process.env`: the vitest worker
+                // exports `TEST=true`, and better-auth 1.7.1 reads it directly
+                // to switch its own origin/CSRF validation OFF in the child —
+                // see `helpers/serve-process.ts` for the measurement (#11267).
+                // This boot exits at `kernel:ready` (`OS_MIGRATE_AND_EXIT`) and
+                // never answers a request, so nothing here CHANGES; it is the
+                // hygiene half, so the next assertion added to this file starts
+                // from a child that is not lying about being a test runner.
+                env: childEnv({
                     NODE_ENV: 'production',
                     OS_HOME: home,
                     OS_DATABASE_URL: `file:${join(home, 'e2e.db')}`,
@@ -136,7 +144,7 @@ function runServe(env: Record<string, string>, opts: { migrateAndExit?: boolean 
                     // container carrying no app does not have.
                     OS_ARTIFACT_PATH: join(cwd, 'dist/objectstack.json'),
                     ...env,
-                },
+                }),
                 stdio: ['ignore', 'pipe', 'pipe'],
             },
         );
