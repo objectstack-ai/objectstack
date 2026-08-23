@@ -135,12 +135,37 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       groupBy.push({ field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
     }
 
-    // Build aggregations from measures
-    const aggregations: Array<{ field: string; method: string; alias: string }> = [];
+    // The compiled dataset's own scope (#10298 / PR #10758), read ONCE and
+    // reused below for both the per-measure aggregation filter (#10413 phase
+    // 2) and the whole-call dataset-level conjunct (#10413 phase 1).
+    // `undefined` for a cube that is not a compiled dataset, which is why an
+    // inferred or manifest cube compiles unchanged.
+    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+
+    // Build aggregations from measures.
+    //
+    // [#10413 phase 2] A measure's own `filter` (`stage: 'closed_won'`) lowers
+    // into the ONE aggregation it belongs to, via the per-aggregation `filter`
+    // #10576 added to the contract (SQL `FILTER (WHERE …)` semantics,
+    // `engine.aggregate`'s `aggregations[].filter`) — never into the whole-call
+    // filter below, which would narrow EVERY measure and trade a wrong
+    // `won_count` for a wrong `opp_count` as well. `filterNodeToCondition`
+    // returns `null` for a filter that constrains nothing (an empty object),
+    // matching the engine's own "empty filter is vacuous" convention — so a
+    // vacuous measure filter adds no `filter` key rather than an empty one.
+    const aggregations: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }> = [];
     if (query.measures && query.measures.length > 0) {
       for (const measure of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, measure);
-        aggregations.push({ field, method, alias: measure });
+        const measureFilter = datasetScope?.measureFilters?.[measure];
+        const filterCondition = measureFilter
+          ? this.filterNodeToCondition(normalizeAnalyticsFilterTree({ where: measureFilter }), cube)
+          : null;
+        aggregations.push(
+          filterCondition
+            ? { field, method, alias: measure, filter: filterCondition }
+            : { field, method, alias: measure },
+        );
       }
     }
 
@@ -170,6 +195,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // whole table, while the dashboard door — same cube, same measure names —
     // answered the scoped numbers. `undefined` for a cube that is not a compiled
     // dataset, which is why an inferred or manifest cube compiles unchanged.
+    // (`datasetScope` itself is computed once, above, and reused for the
+    // per-measure lowering the aggregations loop just did.)
     //
     // ANDed as its own conjunct rather than merged key by key, for the reason
     // `withReadScope` gives below: the caller's `where` and the dataset's scope
@@ -177,14 +204,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // other. Placed before the `$and` fold, so it travels on the cross-object
     // path (`executeCrossObject`) as well as the direct one.
     //
-    // PHASE 1 ONLY. `datasetScope.measureFilters` is deliberately NOT read here:
-    // an aggregation is `{ field, method, alias }`, so a per-measure predicate
-    // cannot be expressed on this contract at all, and folding one into this
-    // whole-call filter would narrow EVERY measure — trading a wrong `won_count`
-    // for a wrong `opp_count` as well. Widening the aggregate contract is
-    // #10576; lowering the measure filters into it is phase 2 of #10413, and
-    // `objectql-dataset-filter.test.ts` pins the gap open until then.
-    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
+    // This is the WHOLE-CALL half only — `datasetScope.measureFilters` is
+    // handled separately, above, on the aggregations themselves (#10413 phase
+    // 2 / #10576): an aggregation is `{ field, method, alias, filter? }`, and
+    // folding a measure filter into THIS whole-call filter instead would
+    // narrow EVERY measure, trading a wrong `won_count` for a wrong
+    // `opp_count` as well.
     if (datasetScope?.filter) {
       // `null` = constrains nothing, which is the AND identity — nothing to add,
       // and nothing invented for a filter that says nothing.
@@ -370,6 +395,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // invariant between two call sites, and two copies of a view can drift
     // apart while each stays individually correct — which is how they drifted.
     const plan = this.planCrossObject(cube, query, this.filterMemberView(cube, query, ctx));
+    // Read once, reused below for both the per-measure conditional aggregate
+    // (#10413 phase 2) and the dataset-scope WHERE conjunct (#10413 phase 1) —
+    // the same channel `execute()` reads it from, so the echo cannot drift
+    // from what actually ran.
+    const datasetScope = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!);
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
     const joinClauses: string[] = [];
     const dimExpr = (dim: string): string => {
@@ -400,14 +430,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       selectParts.push(`${expr} AS "${dim}"`);
       groupByParts.push(expr);
     }
+    // [#10413 phase 2] A measure carrying its own `filter` renders as a
+    // conditional aggregate — `execute()` really lowers it into the
+    // aggregation's own `filter` field now (#10576), and an echo that shows
+    // the UNCONDITIONAL form would understate what actually ran, the same
+    // #3601/#3602/#3650 lie in the direction of narrowing that never shows.
     if (query.measures) {
       for (const m of query.measures) {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
-        const aggSql = method === 'count'
-          ? 'COUNT(*)'
-          : method === 'count_distinct'
-            ? `COUNT(DISTINCT ${field})`
-            : `${method.toUpperCase()}(${field})`;
+        const measureFilter = datasetScope?.measureFilters?.[m];
+        const predicate = measureFilter
+          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params)
+          : null;
+        const aggSql = predicate
+          ? this.conditionalAggregateSql(method, field, predicate)
+          : method === 'count'
+            ? 'COUNT(*)'
+            : method === 'count_distinct'
+              ? `COUNT(DISTINCT ${field})`
+              : `${method.toUpperCase()}(${field})`;
         selectParts.push(`${aggSql} AS "${m}"`);
       }
     }
@@ -446,13 +487,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [#10413] The dataset's own scope renders too, for the reason the read
     // scope does further down: `execute()` really applies this predicate now, and
     // an echo that OMITS an applied predicate is the same lie as one that invents
-    // a predicate (#3601 / #3602 / #3650). Rendered from the same lowering
-    // `execute()` uses, so the two cannot drift.
-    const echoedDatasetFilter =
-      (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.filter;
-    if (echoedDatasetFilter) {
+    // a predicate (#3601 / #3602 / #3650). Read from `datasetScope` above — the
+    // same lowering `execute()` uses, so the two cannot drift.
+    if (datasetScope?.filter) {
       const scopeSql = this.renderFilterNodeSql(
-        normalizeAnalyticsFilterTree({ where: echoedDatasetFilter }),
+        normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
         cube,
         params,
       );
@@ -801,7 +840,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   private async executeCrossObject(
     cube: Cube,
     query: AnalyticsQuery,
-    aggregations: Array<{ field: string; method: string; alias: string }>,
+    aggregations: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>,
     filter: Record<string, unknown>,
     plan: CrossObjectPlan,
     ctx: StrategyContext,
@@ -920,6 +959,39 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       if (r.id != null) map.set(r.id, r[attr]);
     }
     return map;
+  }
+
+  /**
+   * A measure's aggregate, restricted to the rows its own `filter` admits
+   * (#10413 phase 2) — the same six functions `generateSql`'s unconditional
+   * branch renders, wrapped in a `CASE WHEN`.
+   *
+   * Spelled `CASE WHEN` rather than SQL-standard `FILTER (WHERE …)`, mirroring
+   * `NativeSQLStrategy.CONDITIONAL_AGGREGATE_SQL`: this string is DOCUMENTATION
+   * of an execution that really goes through `engine.aggregate`'s per-driver
+   * `aggregations[].filter` lowering (#10576), not a statement this class runs
+   * itself, so there is no reason to pick a dialect-restricted spelling over
+   * the portable one the SQL-executing sibling already settled on.
+   *
+   * `count` over `*` counts a constant (`COUNT(CASE WHEN p THEN 1 END)`, since
+   * `COUNT(CASE WHEN p THEN * END)` is not valid SQL); over a real column it
+   * counts that column's non-null values among the admitted rows.
+   */
+  private conditionalAggregateSql(method: string, col: string, pred: string): string {
+    const target = col === '*' ? '1' : col;
+    switch (method) {
+      case 'count': return `COUNT(CASE WHEN ${pred} THEN ${target} END)`;
+      case 'count_distinct': return `COUNT(DISTINCT CASE WHEN ${pred} THEN ${col} END)`;
+      case 'sum': return `SUM(CASE WHEN ${pred} THEN ${col} END)`;
+      case 'avg': return `AVG(CASE WHEN ${pred} THEN ${col} END)`;
+      case 'min': return `MIN(CASE WHEN ${pred} THEN ${col} END)`;
+      case 'max': return `MAX(CASE WHEN ${pred} THEN ${col} END)`;
+      // Closed vocabulary, same posture as `resolveMeasureAggregation`'s
+      // callers: `method` comes only from that function, whose own aggTypes
+      // list is exactly these six, so this default is unreachable rather than
+      // a silent fallback for a method this table forgot.
+      default: return `${method.toUpperCase()}(CASE WHEN ${pred} THEN ${col} END)`;
+    }
   }
 
   /**

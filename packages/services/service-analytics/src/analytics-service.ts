@@ -378,7 +378,16 @@ export interface AnalyticsServiceConfig {
    */
   executeAggregate?: (objectName: string, options: {
     groupBy?: string[];
-    aggregations?: Array<{ field: string; method: string; alias: string }>;
+    /**
+     * Per-aggregation `filter` (#10576, the #10413 phase-2 contract field) —
+     * kept in lockstep with `StrategyContext.executeAggregate`
+     * (`packages/spec/src/contracts/analytics-service.ts`), which this local
+     * type otherwise mirrors. A bridge that reconstructs the aggregation
+     * entries (as `AnalyticsServicePlugin`'s auto-bridge does, to rename
+     * `method` → the engine's `function`) MUST forward this field or a
+     * measure-scoped filter `ObjectQLStrategy` lowers never reaches storage.
+     */
+    aggregations?: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>;
     filter?: Record<string, unknown>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
