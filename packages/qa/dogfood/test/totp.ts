@@ -10,10 +10,11 @@
  * defaults are the RFC's (SHA-1, 6 digits, 30s), and `enable`'s own otpauth://
  * URI asserts them.
  *
- * ⚠️ `two-factor-lockout.dogfood.test.ts` still carries its own private copy of
- * these two functions — this module was extracted while adding a second caller
- * (#10681) and deliberately did NOT rewrite that file's internals, since it pins
- * an unrelated card. Consolidating it is filed separately.
+ * This is the package's SINGLE copy. It was extracted from
+ * `two-factor-lockout.dogfood.test.ts` while adding a second caller (#10681),
+ * which kept a private copy of its own until #11111 converged it here. Need a
+ * TOTP in a new fixture? Import it from this module — do not paste a third
+ * spelling of RFC 6238 into the package.
  */
 
 import { createHmac } from 'node:crypto';

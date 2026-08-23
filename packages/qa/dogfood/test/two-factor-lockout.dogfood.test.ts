@@ -44,10 +44,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createHmac } from 'node:crypto';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { assertArmed, authSettingArmed } from './armed.js';
+import { secretFromTotpUri, totp } from './totp.js';
 
 const SYS = { context: { isSystem: true } };
 const ADMIN_PASSWORD = 'admin123';
@@ -64,46 +64,6 @@ const LOCKOUT_THRESHOLD = 7;
 const LOCKOUT_DURATION_MINUTES = 40;
 /** better-auth's per-two-factor-cookie cap. Hardcoded upstream, not configurable. */
 const MAX_PER_CHALLENGE = 5;
-
-// ── RFC 6238 TOTP ──────────────────────────────────────────────────────────
-// Hand-rolled rather than imported: `@better-auth/utils/otp` is a transitive
-// dependency, and adding it as a direct one to generate six digits would tie
-// this test to an internal package's resolution. better-auth's defaults are
-// the RFC's (SHA-1, 6 digits, 30s), asserted by `enable`'s own otpauth:// URI.
-
-function base32Decode(input: string): Buffer {
-  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const clean = input.replace(/=+$/, '').toUpperCase();
-  let bits = 0;
-  let value = 0;
-  const out: number[] = [];
-  for (const char of clean) {
-    const idx = ALPHABET.indexOf(char);
-    if (idx === -1) throw new Error(`invalid base32 character: ${char}`);
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
-}
-
-/** The 6-digit TOTP for `secret` at the current 30-second step. */
-function totp(secret: Buffer): string {
-  const counter = Math.floor(Date.now() / 30_000);
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64BE(BigInt(counter));
-  const digest = createHmac('sha1', secret).update(buf).digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const code =
-    ((digest[offset] & 0x7f) << 24) |
-    ((digest[offset + 1] & 0xff) << 16) |
-    ((digest[offset + 2] & 0xff) << 8) |
-    (digest[offset + 3] & 0xff);
-  return String(code % 1_000_000).padStart(6, '0');
-}
 
 /** Collect a response's Set-Cookie values into a single request Cookie header. */
 function cookieHeader(res: Response): string {
@@ -180,9 +140,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     });
     expect(enabled.status, `two-factor/enable: ${await enabled.clone().text()}`).toBe(200);
     const { totpURI } = (await enabled.json()) as { totpURI: string };
-    const uriSecret = new URL(totpURI.replace('otpauth://', 'https://')).searchParams.get('secret');
-    expect(uriSecret, 'no secret in the otpauth URI').toBeTruthy();
-    secret = base32Decode(uriSecret as string);
+    secret = secretFromTotpUri(totpURI);
 
     // better-auth enrols with `verified: false`, and the sign-in path refuses
     // an unverified enrolment (TOTP_NOT_ENABLED) before it ever reaches the
