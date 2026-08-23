@@ -112,7 +112,10 @@ export const CEILINGS = new Map([
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 45],
-  ['.claude/agents/os-dev.md', 399],
+  // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
+  // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
+  // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
+  ['.claude/agents/os-dev.md', 405],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
