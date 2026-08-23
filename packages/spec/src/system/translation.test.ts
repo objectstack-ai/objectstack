@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { PAGE_COMPONENT_COPY_KEYS } from './i18n-resolver';
+import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS } from './i18n-resolver';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 import {
@@ -1141,6 +1141,38 @@ describe('translation unknown-key strictness (#4001)', () => {
       const flows = { lead_conversion: { screens: { s1: { title: '转化详情' } } } };
       expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows }).success).toBe(true);
       expect(TranslationItemSchema.safeParse({ locale: 'zh-CN', flows: { f: { titel: 'x' } } }).success).toBe(false);
+    });
+
+    it('declares exactly the keys the resolver and the extractor act on (#11287)', () => {
+      // `FLOW_SCREEN_COPY_KEYS` / `FLOW_SCREEN_FIELD_COPY_KEYS` drive
+      // `translateFlow`'s overlay and (downstream card) the CLI's skeleton
+      // extraction — the same one-list-both-sides rule the #6080 pin above
+      // holds for `PAGE_COMPONENT_COPY_KEYS`. If this schema declared a copy
+      // key missing from the lists the extractor would offer a slot nothing
+      // reads; if a list carried one this schema lacks, `.strict()` would
+      // reject the very key the extractor just wrote.
+      for (const key of FLOW_SCREEN_COPY_KEYS) {
+        expect(parse({ f: { screens: { s: { [key]: 'x' } } } }).success, `screen \`${key}\` must be declared`).toBe(true);
+      }
+      for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
+        expect(parse({ f: { screens: { s: { fields: { n: { [key]: 'x' } } } } } }).success, `field \`${key}\` must be declared`).toBe(true);
+      }
+      const full = (parse({
+        f: {
+          label: 'x',
+          screens: {
+            s: {
+              ...Object.fromEntries(FLOW_SCREEN_COPY_KEYS.map((k) => [k, 'x'])),
+              fields: { n: Object.fromEntries(FLOW_SCREEN_FIELD_COPY_KEYS.map((k) => [k, 'x'])) },
+            },
+          },
+        },
+      }) as { success: true; data: any }).data.flows.f;
+      // The flow face is `label` + the `screens` drill; the screen face is the
+      // copy list + the `fields` drill; the field face is its list exactly.
+      expect(Object.keys(full).sort()).toEqual(['label', 'screens']);
+      expect(Object.keys(full.screens.s).sort()).toEqual([...FLOW_SCREEN_COPY_KEYS, 'fields'].sort());
+      expect(Object.keys(full.screens.s.fields.n).sort()).toEqual([...FLOW_SCREEN_FIELD_COPY_KEYS].sort());
     });
   });
 
