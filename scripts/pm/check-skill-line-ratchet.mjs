@@ -99,6 +99,15 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
+  // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
+  // rolls to production, which the landing window (ends at MERGED) never
+  // covered: post-roll placement/latency reading with the waker-bias re-draw
+  // physics, one real user-path probe, the tourniquet rule for replayed live
+  // state, orphaned-loop resumption, and the honesty clause. Set at landed line
+  // count (headroom 0, same convention as the entries above). Its pointer from
+  // landing-operations.md rides existing slack on that file's last
+  // MERGED-tracking line, so that ceiling stays at 82 — no re-wrap, no cut.
+  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 101],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
