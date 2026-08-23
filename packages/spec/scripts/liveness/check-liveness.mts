@@ -107,6 +107,7 @@ import { WebhookSchema } from '../../src/automation/webhook.zod';
 import { QuerySchema } from '../../src/data/query.zod';
 import { ValidationRuleSchema } from '../../src/data/validation.zod';
 import { TestSuiteSchema } from '../../src/qa/testing.zod';
+import { ManifestSchema } from '../../src/kernel/manifest.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -166,7 +167,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -243,11 +244,32 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // (`suite.name`, `scenario.tags`, `scenario.requires`) are now recorded as such
 // instead of being invisible. Like `query`, there is no registry to fold it back
 // onto — the override IS its governance.
+// `manifest` is the THIRD category the override has had to reach, and the one
+// that showed the escape hatch was load-bearing rather than a webhook special
+// case. `ManifestSchema` (src/kernel/manifest.zod.ts) is what an author writes
+// as `objectstack.config.ts` / a package manifest and what `os plugin build`
+// parses with `safeParse` — ~24 top-level keys including the whole trust-tier
+// and permission declaration — yet it is not a metadata KIND and not a stack
+// collection either: the retired-key entry `17.kernel__Manifest__loading.ts`
+// records that `PLURAL_TO_SINGULAR` has no `packages` / `plugins` entry, so a
+// manifest is never walked as a stack collection member. A ratchet rooted in
+// the registry could therefore never ask who reads any of it, and a ratchet
+// extended only to unregistered KINDS would still not reach it.
+//
+// The consequence was demonstrated before this landed, twice, both times by
+// hand and after the fact: `manifest.loading` carried ten inert keys — one of
+// them (`sandboxing`) security-shaped, isolating nothing while looking like
+// isolation — and was retired at #4914; and the 11-member `contributes` block
+// turned out to have exactly ONE reader across the monorepo (#10627). No gate
+// asked either question, because the manifest was not in the denominator.
+// There is no registry to fold this one back onto — like `query` and `qa`, the
+// override IS its governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
   validation: ValidationRuleSchema,
   qa: TestSuiteSchema,
+  manifest: ManifestSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

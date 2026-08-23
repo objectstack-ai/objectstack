@@ -34,6 +34,11 @@
       "container": "view/formViews",
       "to": "view/form",
       "why": "the ViewItem container's form surface — `view.form` is the drilled coordinate for it."
+    },
+    {
+      "container": "manifest/data",
+      "to": "seed",
+      "why": "manifest.data[] IS SeedSchema — the registry entry for the `seed` metadata type is that same schema object (kernel/metadata-type-schemas.ts), so the `seed` ledger classifies every key the manifest embeds here. Deferred rather than drilled so a key added to SeedSchema cannot get a verdict on the `seed` side and not on the manifest side; the gate's equality check is what makes that hold."
     }
   ],
   "containers": [

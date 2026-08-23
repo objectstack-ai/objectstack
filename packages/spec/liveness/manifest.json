@@ -1,0 +1,300 @@
+{
+  "type": "manifest",
+  "_note": "ManifestSchema (packages/spec/src/kernel/manifest.zod.ts:132) — the plugin / package manifest an author writes as `objectstack.config.ts` or a packaged `manifest.json`, parsed by `ManifestSchema.parse` at packages/objectql/src/registry.ts:2950 and by `os plugin build` / `os plugin publish`. GOVERNED VIA THE GATE'S SPEC-ONLY OVERRIDE (SPEC_ONLY_SCHEMAS), seeded 2026-08-23. WHY THE OVERRIDE AND NOT THE REGISTRY: the manifest is not a metadata KIND (absent from BUILTIN_METADATA_TYPE_SCHEMAS) and not a stack collection either — the retired-key entry packages/spec/src/migrations/entries/retired-keys/17.kernel__Manifest__loading.ts records that `PLURAL_TO_SINGULAR` has no `packages` / `plugins` entry, so a manifest is never walked as a stack collection member. It is therefore the THIRD category the override has had to reach, after `query` (a request surface) and `qa` (a file surface): a ratchet rooted in the registry could not ask who reads any of it, and a ratchet extended to unregistered KINDS would not reach it either. Like `query` and `qa` there is no registry to fold it back onto — the override IS its governance. WHAT THAT COST BEFORE THIS FILE EXISTED, twice, both by hand and after the fact: `loading` carried ten inert keys, one of them (`sandboxing`) security-shaped — it isolated nothing while looking like isolation — retired at #4914; and the 11-member `contributes` block turned out to have exactly ONE reader monorepo-wide (#10627). No gate asked either question because the manifest was not in the denominator. MEASUREMENT PROVENANCE: the `contributes` children below are #10627's verdict table verbatim (measured on origin/main 299b85e9d), re-verified for line drift on 2026-08-23 — its cited read site moved from engine.ts:4499 to :4504. Every other row was measured for this seeding on 2026-08-23 against b9e9227e3, by per-key probe with controls: the same probe finds real reads of sibling keys (`.packaging` at cli/src/commands/plugin/build.ts:126, `.data` at runtime/src/app-plugin.ts:946, `.contributes` at objectql/src/engine.ts:4504), so a zero here is about the path, not the pattern. CROSS-REPO LEG: ../objectui walked for every `dead` row (0 property reads of these keys; control — `manifest.(id|name|namespace|version)` returns 46 hits there, so manifest reads are findable). ⚠️ CLOUD IS UNMEASURED, carried forward from #10627 unchanged: that repo could not be attached to the measuring session (`add_repo` → \"you don't have access to objectstack-ai/cloud\"), and the cloud control plane mirrors these shapes when it validates a published `.osplugin` (manifest.zod.ts:10-18). Every `dead` row below is therefore scoped to objectstack + objectui, and #10724 already carries the cloud leg as a precondition to executing any removal. WALK BOUNDARY, recorded rather than silently skipped: the gate classifies one level and this file drills six containers one more, so keys BELOW a drilled child (e.g. `contributes.kinds[].id` / `.globs` / `.description`, `navigationContributions[].items[]`) sit outside the walk; where they were measured in the same pass their verdicts are recorded in the child's `note` instead of being fanned out into rows the gate would not check. `data` is not drilled here at all — it embeds SeedSchema, which the governed `seed` type classifies in full, so it is a RESOLVED deferral in scripts/liveness/undrilled-containers.baseline.json rather than a duplicated set of rows. DISPOSITIONS ARE RECORDED AS PENDING WHERE THEY ARE PENDING: #10724 (tombstone the nine mechanically-dead `contributes` members) is OPEN and `pm:blocked` on the cloud census; #10726 (`contributes.routes`) is OPEN, recommendation B — removal rides #10724. No tombstone has merged for any of them, so no row below says `retired`; only `loading` does, because its tombstone really landed (#4914).",
+  "props": {
+    "id": {
+      "status": "live",
+      "evidence": "packages/objectql/src/registry.ts:3492 (initialDisabledPackageIds lookup), :3512-3518 (the key the installed-package collection is stored under), :3505 (namespace ownership record); packages/objectql/src/engine.ts:4378",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "The package identity the whole install path is keyed on. `installPackage` uses it as the collection key, as the namespace owner, and as the disabled-set lookup; the REST publish route refuses a manifest without it (packages/rest/src/package-routes.ts:532)."
+    },
+    "namespace": {
+      "status": "live",
+      "evidence": "packages/objectql/src/registry.ts:3473-3486 (shareable-namespace check + NamespaceConflictError), :3504-3505 (registerNamespace), :3542-3543 (unregister on removal); packages/objectql/src/engine.ts:4379",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "Enforced, not merely read: a non-shareable namespace already owned by another package raises NamespaceConflictError at install. Also the ADR-0121 carve-out segment for a stack's endpoints — packages/spec/src/api/endpoint-publish-gate.ts:175 refuses a stack that declares `apis:` without an explicit namespace."
+    },
+    "defaultDatasource": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts:6337 (packageDatasource — the package-level default an object without its own `datasource` inherits)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "version": {
+      "status": "live",
+      "evidence": "packages/rest/src/package-routes.ts:532 (publish refuses a manifest without it), :541-544 (published version echoed back); packages/services/service-package/src/index.ts:394,401; packages/cli/src/commands/plugin/publish.ts:91",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "type": {
+      "status": "live",
+      "evidence": "packages/spec/src/stack.zod.ts:855 (an app-only derivation returns [] unless the manifest type is `app`); packages/runtime/src/domains/packages.ts:275 (package listing filter)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "scope": {
+      "status": "live",
+      "evidence": "packages/services/service-settings/src/settings-service.ts:800 (the default settings scope a package's settings land in); packages/metadata-protocol/src/package-writability.ts:79 (write-path gate); packages/platform-objects/src/apps/studio.app.ts:72 (Studio hides system/cloud-scoped packages)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "Three consumers of three different kinds — a default, a writability gate and a UI filter — so the deployment scope is read on both the runtime and the admin path."
+    },
+    "name": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts:4378 (package id fallback when `id` is absent), :4467-4471 (manifest-as-app registration uses it as the app name); packages/cli/src/commands/plugin/publish.ts:92 (marketplace display name)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "description": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/plugin/publish.ts:121 (copied onto the published package body); packages/cli/src/commands/validate.ts:354-355",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "permissions": {
+      "status": "live",
+      "evidence": "packages/plugins/plugin-security/src/suggested-audience-bindings.ts:252 (declared permission strings from every enabled installed package feed the suggested audience bindings)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "cross-repo",
+      "note": "LIVE ON ONE ARM ONLY, and the split matters. `ManifestPermissionsSchema` (manifest.zod.ts:54) is a union of the legacy flat `string[]` and the structured `PluginPermissionsSchema` (services / hooks / network / fs, ADR-0025 §3.2). The single reader is guarded by `Array.isArray(manifest?.permissions)`, so it reads the LEGACY arm and skips the structured one entirely; no other reader exists in objectstack or objectui. PluginPermissionEnforcer (packages/core/src/security/plugin-permission-enforcer.ts:94-104) is not the missing consumer — it registers the set the install-time consent flow persisted to `sys_package_installation.granted_permissions`, explicitly \"independent of whatever the manifest *requested*\", and nothing in this repo feeds the manifest declaration into it. The verdict is `live` because the key is read; the structured arm's zero is filed separately rather than being flattened into this one-level row. Cloud unmeasured (see `_note`) — the consent flow ADR-0025 §3.5 describes lives there."
+    },
+    "objects": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts:4405-4420 (both the array and the map spelling are registered)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "datasources": {
+      "status": "live",
+      "evidence": "packages/objectql/src/engine.ts:4391-4394",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo"
+    },
+    "dependencies": {
+      "status": "live",
+      "evidence": "packages/metadata-protocol/src/protocol.ts:4290-4300 (the declared map drives the transitive package-closure walk)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "Read as a declaration rather than as an install instruction: an unresolvable dependency still counts toward the closure (the code says so at :4293-4296), the transitive walk just stops there."
+    },
+    "configuration": {
+      "children": {
+        "title": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Dead by container: `manifest.configuration` has ZERO reads anywhere in objectstack or objectui (repo-wide probe for `(manifest|pkg|package|entry|artifact)?.configuration`, non-test, non-comment — no hits at all), so no key beneath it can be read. The describe() promises a settings surface the plugin \"exposes to the user via UI/ENV\"; nothing renders or resolves it. The live analogue is the settings service's own declaration surface (packages/services/service-settings), which is authored separately and never sourced from here."
+        },
+        "properties": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Same zero as its sibling — the container is never read. This is the larger half of the loss: the per-setting shape declares `type` / `default` / `description` / `required` / `secret` / `enum`, and `secret: true` in particular reads as \"value is encrypted/masked (e.g. API Keys)\" while nothing encrypts, masks or even parses it. That is the false-compliance shape ADR-0049 exists for; filed rather than acted on here, because this card seeds the ledger and does not retire keys."
+        }
+      }
+    },
+    "contributes": {
+      "children": {
+        "kinds": {
+          "status": "live",
+          "evidence": "packages/objectql/src/engine.ts:4504-4518 → packages/objectql/src/registry.ts:3748 (`registerKind`)",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "THE ONLY LIVE MEMBER OF THIS BLOCK, and the entire reason the block is not uniformly dead: #10627 measured that the whole monorepo contains exactly one non-test read of `manifest.contributes` and it reads `kinds`. Line drift re-verified for this seeding — #10627 cited engine.ts:4499-4501 on 299b85e9d; on b9e9227e3 the same three lines are :4504-4506. BELOW THE WALK: `registerKind(kind: { id, globs })` (registry.ts:3748) reads `id` and `globs`; the item's third declared key `description` is not read. CAVEAT ON THE LIVE VERDICT, filed as #10729: the typed accessor `getAllKinds()` (registry.ts:3752) has zero callers, so what the registered kind is consumed FOR downstream is unclear — the registration itself is real, the consumption of the bucket is not established."
+        },
+        "events": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict. Its only in-repo author — packages/plugins/plugin-hono-server/objectstack.config.ts:233, declaring `kernel:ready` / `kernel:listening` — subscribes imperatively in plugin code; the declaration drives nothing, which makes it decorative rather than merely unused. Disposition PENDING: #10724 (tombstone route) is OPEN and `pm:blocked` on the cloud census; no tombstone has merged."
+        },
+        "menus": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict, and the tightest control in the set: the bare word `menus` has only three non-test hits monorepo-wide — this declaration, plus two alias maps that redirect the spelling to `navigation` (packages/spec/src/ui/app.zod.ts:1242, packages/spec/src/system/translation.zod.ts:428). The working surface is app `navigation` / `manifest.navigationContributions`. Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "themes": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict, re-verified there independently rather than inherited from the filer: the non-spec `themes` hits all reach the registry through TOP-LEVEL `manifest.themes` (METADATA_ARRAY_KEYS, packages/objectql/src/engine.ts:1884), never through `contributes.themes`, and the shapes differ ({id,label,path} here vs ThemeSchema there). Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "translations": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict — and documented as working: content/docs/protocol/kernel/i18n-standard.mdx carries an `os:check`-marked example stating translation files \"are registered under `contributes.translations`\". The live surface is the `translation` metadata type / stack `translations` collection (governed, packages/spec/liveness/translation.json). Disposition PENDING (#10724, open, `pm:blocked`); the doc correction rides that card."
+        },
+        "actions": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict. The live sibling is the stack `actions` collection (METADATA_ARRAY_KEYS, packages/objectql/src/engine.ts:1884) plus `engine.registerAction`. Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "drivers": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict. Its only in-repo author — packages/drivers/driver-memory/objectstack.config.ts:250 — is registered by the SERVICE path (packages/objectql/src/plugin.ts:592, `registerDriver` for services named `driver.*`), not by its declaration: the second decorative declaration in the tree, alongside `events`. Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "fieldTypes": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict, and the cleanest of the set: there is no `registerFieldType` seam anywhere — zero hits monorepo-wide — so this declares an extension point that does not exist rather than one that is merely unread. Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "functions": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict. The live spelling is `defineStack({ functions })` → packages/objectql/src/hook-binder.ts:128-143. ⚠️ docs/adr/0088-metadata-kind-admission-and-retirement.md credits `contributes.functions` as a DELIVERED form of the `function` kind; that row is wrong and its correction rides #10724. Disposition PENDING (#10724, open, `pm:blocked`)."
+        },
+        "routes": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict — zero readers, same as its siblings — but a DIFFERENT disposition, which is why it is the one member split onto its own card. Four published surfaces present it as working machinery, one of them a customer-published skill: skills/objectstack-api/SKILL.md tells authors to choose it when \"the endpoint needs real handler CODE\"; packages/spec/src/api/dispatcher.zod.ts:16 says the dispatcher \"supports dynamic route registration from plugins via contributes.routes\"; docs/adr/0088-metadata-kind-admission-and-retirement.md credits it as a delivered form of the `router` kind; content/docs/references/ui/app.mdx sends `App.apis` migrators here. So an author following the shipped skill gets a clean parse and serves nothing. Disposition PENDING: #10726 is OPEN with recommendation B (remove, correcting the four author-facing claims), and B routes the actual removal through #10724 — which is itself OPEN and `pm:blocked` on the cloud census. Nothing has merged; this row is the honest interim state, not a retirement."
+        },
+        "commands": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "#10627 verdict, and already known-superseded in-tree: packages/spec/src/kernel/cli-extension.zod.ts:58-63 states \"The previous plugin model required `contributes.commands` … The `objectstack.config.ts` plugins array no longer determines CLI commands.\" Yet manifest.zod.ts:429-462 still documents Commander.js runtime resolution as current behaviour — two spec files contradicting each other, with the stale one on the authoring surface. Disposition PENDING (#10724, open, `pm:blocked`)."
+        }
+      }
+    },
+    "data": {
+      "status": "live",
+      "evidence": "packages/runtime/src/app-plugin.ts:946-947 (manifest datasets are pushed onto the seed set applied at install)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "Deprecated in favour of `defineStack({ data })` but still read, so `live` rather than `dead`. Its subtree is SeedSchema, classified in full by the governed `seed` type — recorded as a RESOLVED deferral (`manifest/data` → `seed`) in scripts/liveness/undrilled-containers.baseline.json rather than duplicated here, so a key added to SeedSchema cannot get a verdict on one side and not the other."
+    },
+    "capabilities": {
+      "children": {
+        "implements": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Dead by container: `manifest.capabilities` (PluginCapabilityManifestSchema) has ZERO reads in objectstack or objectui. The `.capabilities` hits the probe returns belong to other surfaces entirely — driver loader contracts (packages/metadata/src/metadata-manager.ts:798), the QuickJS sandbox argument set (packages/runtime/src/sandbox/quickjs-runner.ts:120), REST discovery (packages/rest/src/rest-server.ts:3333) — none of them reached from a manifest."
+        },
+        "provides": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Same zero as its siblings — the container is never read, so no key beneath it can be. The describe() sells plugin interoperability and automatic discovery; no discovery path consults it."
+        },
+        "requires": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Same zero. Note the live analogue one level up: real dependency resolution runs off top-level `manifest.dependencies` (packages/metadata-protocol/src/protocol.ts:4290), not off this declaration."
+        },
+        "extensionPoints": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Same zero. Declares extension points nothing enumerates — the sibling of `contributes.fieldTypes`, which declares an extension point with no registration seam."
+        },
+        "extensions": {
+          "status": "dead",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "cross-repo",
+          "note": "Same zero, and not to be confused with the manifest's own top-level `extensions` key, which is separately dead below."
+        }
+      }
+    },
+    "extensions": {
+      "status": "dead",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "cross-repo",
+      "note": "`z.record(z.string(), z.unknown())` — an untyped escape hatch with zero reads in objectstack or objectui (repo-wide probe, non-test, non-comment: no hits). Worth separating from the other dead keys when a removal is cut: because the value type is `unknown`, this key is where anything the platform does not yet model gets parked, so its emptiness is evidence that authors are not parking things here either."
+    },
+    "navigationContributions": {
+      "children": {
+        "app": {
+          "status": "live",
+          "evidence": "packages/objectql/src/engine.ts:4477-4480 → packages/objectql/src/registry.ts:3659-3667 (`registerAppNavContribution` keys the contribution list on it and returns early without it)",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo",
+          "note": "The target app id — required in practice, not just in the schema: `if (!contribution || !contribution.app) return;` drops a contribution that omits it."
+        },
+        "group": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts:3663 (stored on the contribution), :3690-3691 (`applyNavContributions` merges by group id)",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo"
+        },
+        "priority": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts:3664 (`contribution.priority ?? 200` — the merge order, defaulted rather than ignored)",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo"
+        },
+        "items": {
+          "status": "live",
+          "evidence": "packages/objectql/src/registry.ts:3665 (stored), :3690 onward (merged into the target app's navigation tree, read through `getApp` / `getAllApps` and the protocol serving path)",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo",
+          "note": "BELOW THE WALK: the per-item nav shape is NavigationContributionSchema's item type (packages/spec/src/ui/app.zod.ts), merged into the app's own navigation tree — the same surface the `app` ledger governs on the owning side. The merge is lazy on read and never mutates the stored app, so registration order does not matter (ADR-0029 D7)."
+        }
+      }
+    },
+    "loading": {
+      "status": "dead",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "cross-repo",
+      "note": "RETIRED, and the row must STAY: `retiredKey()` keeps the key in the walked shape (a tombstone, not a strict removal), so the orphans direction expects a row here — see the ledger README's asymmetry note. Removed in @objectstack/spec 17.0.0 (#4914, ADR-0049), ADR-0087 D3 entry `17.plugin-manifest-loading-retired`. The whole block — strategy / preload / codeSplitting / dynamicImport / initialization / dependencyResolution / hotReload / caching / sandboxing / monitoring — had no runtime reader in ANY of the three repos, so authoring it configured nothing. `loading.sandboxing` is the reason this is recorded as a security finding rather than tidying: it ran nothing in a process, vm, iframe or worker, and its `allowedServices` gated no call, so an author relying on it for isolation had none. This retirement is also what put the manifest on the ledger's agenda — it was found and paid by hand, because no gate could ask."
+    },
+    "engine": {
+      "children": {
+        "objectstack": {
+          "status": "live",
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts:87 (the legacy range, read when `engines` is absent); packages/cli/src/commands/lint.ts:388",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo",
+          "note": "The legacy single-field compatibility range. Read only as the fallback leg of the handshake — `engines.protocol` then `engines.platform` are consulted first (protocol-handshake.ts:83-87), which is exactly the precedence manifest.zod.ts documents."
+        }
+      }
+    },
+    "engines": {
+      "children": {
+        "platform": {
+          "status": "live",
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts:85; packages/cli/src/commands/lint.ts:387",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo"
+        },
+        "protocol": {
+          "status": "live",
+          "evidence": "packages/metadata-core/src/protocol-handshake.ts:83; packages/cli/src/commands/lint.ts:386,396",
+          "verifiedAt": "2026-08-23",
+          "evidenceScope": "in-repo",
+          "note": "Checked BEFORE `platform` (ADR-0025 §3.10 #3), so a plugin keeps working across platform releases that preserve the protocol — the precedence is real in the code, not just in the describe()."
+        }
+      }
+    },
+    "runtime": {
+      "status": "dead",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "cross-repo",
+      "note": "READ TWICE, ENFORCED NOWHERE — and the two are not the same thing, so read this row before assuming zero references. The only reads of `manifest.runtime` in objectstack are two CLI progress lines that echo the value: packages/cli/src/commands/plugin/build.ts:127 and packages/cli/src/commands/plugin/publish.ts:94, both `runtime: ${manifest.runtime ?? 'unset'}`. Nothing dispatches on the tier: there is no `runtime === 'sandbox'` branch anywhere, and the QuickJS runner (packages/runtime/src/sandbox/) is the hook/action SCRIPT-BODY sandbox, reached from body-runner factories, never from a plugin's declared tier. objectui: zero reads. So the declared capability — \"in-process full PluginContext vs QuickJS-WASM capability-gated vs out-of-process\" (ADR-0025 §3.6) — is not delivered here, and echoing a string into a build log is not isolation. WHY THIS IS SECURITY-SHAPED RATHER THAN COSMETIC: the tombstone this ledger records one key above tells every upgrading author, verbatim, \"If you were relying on [loading.sandboxing] for isolation, you had none — use the plugin trust tier (`manifest.runtime`) and the permission declarations, which are enforced\" (manifest.zod.ts:527-530, and the same sentence in the shipped ADR-0087 D3 entry). Measured here, that redirection points at a key with no enforcement in this repo. ⚠️ SCOPE LIMIT, deliberately not resolved by this row: the cloud control plane is unmeasured (see `_note`), and plugin trust-tier enforcement is exactly the kind of thing that could live there — cloud mirrors these shapes when it validates a published `.osplugin`. `dead` is therefore the objectstack+objectui verdict and an enforce-or-remove worklist row, NOT a licence to delete: the cloud leg must be measured first, on the #10724 precondition. Filed separately rather than acted on here."
+    },
+    "packaging": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/plugin/build.ts:126 (read), :159-161 (`manifest-deps` keeps the declared dependencies external instead of bundling them)",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "in-repo",
+      "note": "Live on a real behavioural fork, not on a read: the value selects whether esbuild bundles dependencies into the artifact or externalizes them for install-time resolution, so the two tiers produce different artifacts. Contrast its neighbour `runtime`, which is read only to be printed."
+    },
+    "integrity": {
+      "status": "dead",
+      "verifiedAt": "2026-08-23",
+      "evidenceScope": "cross-repo",
+      "note": "Per-file content digests of the packaged artifact. ZERO reads in objectstack or objectui — nothing computes them at build time and nothing re-verifies them at unpack, although manifest.zod.ts:105-109 says the runtime \"re-verifies\" them when it unpacks the `.osplugin` (ADR-0025 §3.5 step 5). A declared integrity check that never runs is the false-compliance shape in its most literal form: the field's presence in a published manifest is indistinguishable, to a reader, from the digests having been checked. Adjacent machinery that DOES exist and is not this: packages/core/src/security/plugin-artifact-signature.ts verifies an artifact SIGNATURE (and returns `verified=false` rather than throwing when absent) — a different mechanism on a different field. ⚠️ Cloud unmeasured (see `_note`), and the install-time unpack ADR-0025 §3.5 describes is a control-plane path, so the cloud leg must be measured before any removal. Filed separately."
+    }
+  }
+}
