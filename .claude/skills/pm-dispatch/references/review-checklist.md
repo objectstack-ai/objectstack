@@ -35,7 +35,7 @@
 - **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交
   报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge
   / 入队前亲核 Lint & Repo Gates 与 TypeScript Type Check 两个 job 的 `conclusion` 已为
-  `success`(门禁族跑在其内),⛔ 不因报告写了「本地绿」跳过。收敛期转红走补丁轮
+  `success`(门禁族跑在其内),⛔ 不因报告写了「本地绿」跳过;两 job 只是 required 地板,入队资格另要求 PR 全部 check 全绿(主文件条款),各仓真绿跑法与 CI 日志看不见的门禁见 `true-green.md`。收敛期转红走补丁轮
   (SendMessage 续派原 dev —— 那是这笔交换已付过的价钱,不是 REWORK 的理由;红着
   合并才是)。重量级卡可在派发令显式写「本单等 CI」。
 - **每个门禁读数先钉到 PR 的当前 head**:先读 PR 的 `head.sha`,再比对 run 的

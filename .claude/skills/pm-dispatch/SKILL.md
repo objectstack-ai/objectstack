@@ -507,7 +507,7 @@ os-zhuang 审核。我的手机github 应该会收到推送消息吧」;当日�
 告单列「awaiting a human merge」(「等人来合」与「被忘了」在 GitHub 上长得一模一样)。混
 合 diff 一条命中就分叉,⛔ 不按比例判;要拆就让 dev 单独开 PR;已入队才读到本条 ⇒ 撤回只有
 转 draft。路径面干净的才转 ready → 入队(队列是唯一被认可的落地路径,⛔ 永不队列
-外 `--auto` 合并)。本段只适用本循环派发的 dev PR;PM 自己的工具 PR 留维护者。
+外 `--auto` 合并)。**入队资格 = PR 上每一个 check 全绿,⛔ 不是 required 子集** —— required 集是队列强制的地板,不是 PM 放行的门槛;非必查门的红要么是真缺陷要么是坏门,两者都归 PM 入队前处置(实测:一张 required 全绿、非必查类型门与一个测试分片红着的 PR 经队列落地,该仓 main 红了约一小时,逐 PR 连环红到 fix-forward 才止)。本段只适用本循环派发的 dev PR;PM 自己的工具 PR 留维护者。
 
 **入队与落地(细则见 `references/landing-operations.md`,落地窗口查阅)。** 原则:
 
