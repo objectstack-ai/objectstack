@@ -457,6 +457,85 @@ function adapterColumn(field: string): string {
 }
 
 /**
+ * Construct `@better-auth/scim` with options BOTH the pinned prerelease and the
+ * stable line accept, so this gate reaches its diff-printing stage instead of
+ * dying in collection (#11380).
+ *
+ * The gate was written down as the safety net for the `@better-auth/scim`
+ * migration (#3653): the day the pin moves off `1.7.0-rc.1`, it is supposed to
+ * name every model whose platform object is missing. It did not open at that
+ * moment. `scim({})` is legal on the pinned rc.1 — `options` is optional there
+ * and nothing is read at construction — but the stable factory's FIRST
+ * statement is `validateConnections(options)`, which reaches
+ * `options.connections.length` before any existence check. So on stable the
+ * call throws
+ *
+ *   TypeError: Cannot read properties of undefined (reading 'length')
+ *
+ * and, because the schema is read in the describe body and in the `for` header
+ * below, it throws during COLLECTION — the whole file dies and prints that
+ * TypeError instead of the model list it promises. A migrator gets an
+ * uninformative crash from the guard that exists to inform them: declared, not
+ * enforced.
+ *
+ * `connections: []` alone is not enough on stable — an empty connection list is
+ * only legal when a bearer-token verifier or the managed catalog resolves
+ * connections, otherwise `validateConnections` throws
+ * `BetterAuthError: The scim plugin requires a provisioning connection, bearer
+ * token verifier, or managed connection catalog.` The verifier below is the
+ * cheapest way to satisfy that, and is never invoked: this gate only reads the
+ * schema the plugin declares. Both keys are inert on the pinned rc.1, whose
+ * factory spreads its options and reads only the keys it knows.
+ *
+ * ⚠️ Deliberately NOT configured: `managedConnections`. The auth manager does
+ * not pass it, and it is what adds the conditional
+ * `scimManagedConnection` / `scimManagedCredential` / `scimManagedConnectionEvent`
+ * trio to the declared schema — so configuring it here would make this gate
+ * compare a model surface no ObjectStack deployment provisions.
+ */
+const SCIM_GATE_OPTIONS = {
+  connections: [],
+  authentication: { verifyBearerToken: () => null },
+};
+
+/**
+ * The scim plugin, or a failure that says which half broke.
+ *
+ * Construction happens at collection time — the `for` header below has to read
+ * the schema to emit one `it()` per model — so a constructor incompatibility
+ * can only ever be a collection failure. What it does not have to be is
+ * illegible: a raw vendor `TypeError` reads as "the gate is broken", which is
+ * how the last one cost a migration round. Re-throwing with the cause attached
+ * keeps the vendor error verbatim and says what to do with it.
+ */
+function constructScim(): { schema?: Record<string, { fields?: Record<string, unknown> }> } {
+  try {
+    return scim(SCIM_GATE_OPTIONS as never) as never;
+  } catch (cause) {
+    // The vendor error is spelled INTO the message rather than passed as the
+    // `Error` constructor's second argument: this package compiles against
+    // `lib: es2020`, where `ErrorOptions` does not exist, so `new Error(msg,
+    // { cause })` is a TS2554 that would land in plugin-auth's shrink-only
+    // TEST_DEBT count. `cause` is still attached for a reader that unwraps it.
+    const vendor = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+    throw Object.assign(
+      new Error(
+        'the installed @better-auth/scim rejected this gate\'s constructor options, so the gate '
+        + 'could not reach the model comparison it exists for (#11380). This is a CONSTRUCTOR '
+        + 'mismatch, not a parity failure: update SCIM_GATE_OPTIONS above to a shape the installed '
+        + `version accepts, then read the model diff the gate prints. Vendor error: ${vendor}`,
+      ),
+      { cause },
+    );
+  }
+}
+
+/** The models `@better-auth/scim` declares on the installed version. */
+function scimSchema(): Record<string, { fields?: Record<string, unknown> }> {
+  return constructScim().schema ?? {};
+}
+
+/**
  * SCIM models with no platform object, acknowledged rather than silently
  * skipped. These four are SCIM **group** provisioning (`/Groups` push from the
  * IdP); ObjectStack ships only the provider row today, so an IdP pushing
@@ -475,7 +554,7 @@ const KNOWN_UNMAPPED_MODELS = new Set([
 describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parity (#3653)', () => {
   const plugins: Array<{ label: string; schema: Record<string, { fields?: Record<string, unknown> }> }> = [
     { label: 'sso', schema: (sso() as any).schema },
-    { label: 'scim', schema: (scim({} as never) as any).schema },
+    { label: 'scim', schema: scimSchema() },
   ];
 
   it('are excluded from the getAuthTables() call for the reason this file states (#8122)', () => {
@@ -483,7 +562,7 @@ describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parit
     // wording expired silently under a version bump with every gate green
     // (#8224) — the drift shape the reconciliation above exists to stop, so the
     // reason these two sit outside that reconciliation is pinned here instead.
-    const derived = getAuthTables({ plugins: [sso(), scim({} as never)] } as never) as Record<
+    const derived = getAuthTables({ plugins: [sso(), constructScim()] } as never) as Record<
       string,
       { modelName?: string; fields?: Record<string, { fieldName?: string }> }
     >;
@@ -530,7 +609,7 @@ describe('@better-auth/sso + @better-auth/scim schema ↔ platform-objects parit
 
   for (const { label, schema } of [
     { label: 'sso', schema: (sso() as any).schema as Record<string, { fields?: Record<string, unknown> }> },
-    { label: 'scim', schema: (scim({} as never) as any).schema as Record<string, { fields?: Record<string, unknown> }> },
+    { label: 'scim', schema: scimSchema() },
   ]) {
     for (const [model, def] of Object.entries(schema ?? {})) {
       if (KNOWN_UNMAPPED_MODELS.has(model)) continue;
