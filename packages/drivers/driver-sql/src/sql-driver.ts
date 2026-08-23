@@ -13149,6 +13149,25 @@ export class SqlDriver implements IDataDriver {
 
     try {
       if (this.isPostgres) {
+        // `information_schema.table_constraints` spans EVERY schema the session
+        // can read, so `tc.table_name = ?` on its own merges a same-named
+        // table's foreign keys from schemas `search_path` never reaches — a
+        // wrong answer, not a missing one, and downstream (federated-object
+        // codegen, the persisted `external_catalog` under ADR-0015,
+        // schema-drift comparison) acts on it. Not theoretical here: the
+        // live-dialect isolation (#9350) gives every test FILE its own schema
+        // inside one database, so colliding table names are the normal state of
+        // a run.
+        //
+        // The pin is the family's existing one, kept spelled and placed exactly
+        // as `introspectUniqueConstraints` spells it, which in turn follows
+        // `introspectSchema`'s own table listing: `current_schemas(false)` is
+        // the session's `search_path` minus the implicit `pg_catalog`, so a
+        // bare name is scoped the way every other statement in the session
+        // resolves it. (`introspectIndexes` and `introspectPrimaryKeys` reach
+        // the same scoping from the other side — they resolve the name to an
+        // OID through `regclass` — because `pg_index` takes a relation, not a
+        // schema name.)
         const result = await this.knex.raw(
           `
           SELECT
@@ -13165,6 +13184,7 @@ export class SqlDriver implements IDataDriver {
             AND ccu.table_schema = tc.table_schema
           WHERE tc.constraint_type = 'FOREIGN KEY'
             AND tc.table_name = ?
+            AND tc.table_schema = ANY (current_schemas(false))
         `,
           [tableName],
         );
