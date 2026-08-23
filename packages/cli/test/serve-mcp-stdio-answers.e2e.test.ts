@@ -47,11 +47,27 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
+import { E2E_SECRET_KEY, TSX, childEnv, randomPort } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
-/** `bin/run.js` — the SHIPPED entrypoint, i.e. the one the card's repro names. */
-const CLI = resolve(HERE, '../bin/run.js');
+/**
+ * `bin/run-dev.js` through `tsx` — the SOURCE entrypoint, like the ~20 sibling
+ * e2e files in this directory.
+ *
+ * ⛔ NOT `bin/run.js`. This file used to spell that one and call it "the SHIPPED
+ * entrypoint"; the claim was never true here (#11317). The boot below pins
+ * `NODE_ENV=development` on the child for the `--dev` admin seed, and
+ * @oclif/core 4.13.3 skips its TypeScript path lookup only when `isProd()` —
+ * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')`. Under that
+ * value oclif rewrites the command target from the declared `./dist/commands`
+ * to `./src/commands` and transpiles, so `packages/cli/dist` is never consulted
+ * whichever stub is named. `serve-node-env-production-default.e2e.test.ts` is
+ * the file that genuinely reaches the built artifact, and it gets there by
+ * leaving `NODE_ENV` UNSET — the value that disables the reroute. Restoring
+ * `bin/run.js` here without dropping the `NODE_ENV` pin below is a no-op with a
+ * false comment attached.
+ */
+const CLI = resolve(HERE, '../bin/run-dev.js');
 
 const CONFIG = `
 export default {
@@ -101,7 +117,7 @@ interface Booted {
  */
 function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], {
+    const child = spawn(TSX, [CLI, 'serve', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, not a bare `...process.env`: the vitest worker exports
@@ -123,6 +139,9 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
         // Explicit, not inherited: the dev-admin seed this fixture signs in as
         // is hard-gated on `NODE_ENV === 'development'`, and vitest exports
         // `test`, which would leave the DB user-less and the mint unauthorized.
+        // Still passed explicitly although `bin/run-dev.js` assigns it too: the
+        // shim's assignment runs after its own static imports have evaluated,
+        // so only the child env pins the value for the whole process lifetime.
         NODE_ENV: 'development',
         ...env,
       }),
