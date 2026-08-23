@@ -101,6 +101,21 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   // capability from a call that always threw is what let `os build` bless a
   // dead body — the inference was the amplifier, not the safety net.
   { rx: /ctx\.log\.(?:info|warn|error|debug)\b/, cap: 'log' },
+  // [#11293] `ctx.title(field)` — the RELATED-record form, and only that form.
+  // `ctx.title()` resolves this record's title (formula included) from the
+  // state the hook is already firing on and performs no read at all, so it
+  // needs no capability and inferring one for it would tax the majority case
+  // with a grant it never exercises. The argument form costs exactly one
+  // `findOne` through the body's own read channel, which is the same read
+  // `ctx.api.object(...).findOne()` would do and gets the same token.
+  //
+  // `[^)\s]` after the paren is what distinguishes the two: `ctx.title()` and
+  // `ctx.title( )` do not match, `ctx.title('account_id')` does. Receiver-loose
+  // like the `.object(...)` patterns above, for the same reason — a local alias
+  // (`const t = ctx.title`) must not silently UNDER-infer, since that failure
+  // arrives as a sandbox refusal at run time, far from its cause. Over-inferring
+  // grants a token the body may not use, which the sandbox simply never checks.
+  { rx: /\.\s*title\s*\(\s*[^)\s]/, cap: 'api.read' },
 ];
 
 export interface ExtractedBody {

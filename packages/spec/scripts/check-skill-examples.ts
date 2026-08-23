@@ -42,6 +42,18 @@
  * `content/docs` (a FAQ recommending `FieldSchema.extend()`, impossible since
  * FieldSchema became a ZodPipe); everything else was fragments.
  *
+ * #10924's sweep of `packages/spec/src` re-measured both traps on a fresh
+ * corpus and is worth recording, because the numbers argue the design: 146
+ * fenced ts blocks, of which 128 carry no import of their own (fragments by
+ * construction — a `columns: [...]` subtree, a `case 'in':` excerpt of a
+ * consumer's switch). Of the 18 self-contained ones, trap 1 fired immediately:
+ * three are ellipsis-placeholder prose (`defineStack({ ... })`, `{ ... }` in
+ * argument position) whose TS1109 syntax errors suppressed the semantic pass
+ * for the entire program — the first run reported 15 "clean" blocks that had
+ * simply never been type-checked. Excluding those three and re-running turned
+ * six of the remaining fifteen red on real semantics. So: mark deliberately,
+ * and never read a run containing TS1xxx codes as evidence about rot.
+ *
  * Each marked block is written verbatim to a throwaway build dir and type-checked
  * with `tsc --noEmit` against the built `@objectstack/spec` declarations — the
  * exact surface a consumer's `import { … } from '@objectstack/spec'` resolves to.
@@ -110,8 +122,9 @@
  * prose roots, its own throwaway build dir (which package's `node_modules`
  * a bare specifier like `react` or the surface's own package name resolves
  * against), and its own package(s) to derive a `paths` map from. Adding a
- * surface — #10924's `packages/spec/src/**` TSDoc `@example` channel is the
- * next candidate — is a new `SURFACES` entry, not a fork.
+ * surface is a new `SURFACES` entry, not a fork — #10924's
+ * `packages/spec/src/**` TSDoc channel was the next candidate and landed as
+ * exactly that: one root, one surface entry, zero new extraction code.
  *
  * TWO differences from the original skills/docs surface, both load-bearing:
  *
@@ -240,6 +253,39 @@ const SKILLS_DOCS_ROOTS: SourceRoot[] = [
 const isTestFile = (name: string): boolean => /\.(test|spec)\.tsx?$/.test(name);
 
 /**
+ * `packages/spec/src` — the schema package's OWN TSDoc code blocks (#10924).
+ *
+ * This is the ADR-0033 authoring channel: a schema's `@example` sits inches
+ * from the tombstone written for the same reader, and is the text an AI author
+ * copies. Until this root landed nothing compiled it — `check:doc-formula-
+ * expressions` walks the same `@example`s but judges *formula expressions*
+ * with `@objectstack/formula`, never TypeScript — so an example could name a
+ * retired key, a renamed export or a tightened union and stay green
+ * indefinitely. The measured specimen: `AgentSchema`'s own `@example` wrote
+ * `knowledge: { … }`, a key the same file declares `retiredKey()`
+ * (`z.never()`), which surfaces as `undefined` in `z.input` and so fails
+ * `tsc` with TS2322 — a compile-only gate catches this class with no runner.
+ *
+ * Same shape as the client SDK roots above (JSDoc gutter, `commentPrefixed`),
+ * and opt-in for the same reason, only more so: of the 146 fenced ts blocks in
+ * this root, 128 do not even carry their own imports, and among the 18 that do,
+ * three are ellipsis-placeholder fragments (`defineStack({ ... })`) that are
+ * correct as prose and can never compile. A blanket sweep here would misfire on
+ * every one of them; the marker is what separates "this is a claim" from "this
+ * illustrates".
+ */
+const SPEC_SRC_ROOTS: SourceRoot[] = [
+  {
+    dir: path.resolve(SPEC_DIR, 'src'),
+    ext: '.ts',
+    label: 'spec',
+    marker: '<!-- os:check -->',
+    commentPrefixed: true,
+    excludeFile: isTestFile,
+  },
+];
+
+/**
  * `packages/client-react/src` + `packages/client/src` — the SDK's own
  * hand-written TSDoc `@example` blocks (#10969). See the header comment's
  * "SURFACES" section for the two ways this root type differs from prose
@@ -278,16 +324,37 @@ interface Surface {
   /** Where the throwaway build dir + tsconfig.json live. Module resolution
    *  for bare specifiers (react, workspace packages) walks up from here. */
   resolutionDir: string;
+  /** Basename of the throwaway build dir inside `resolutionDir`. Two surfaces
+   *  MAY share a `resolutionDir` (spec's prose and its own source both resolve
+   *  against `packages/spec`) — they must NOT share a build dir: `writeBuildDir`
+   *  wipes it on entry, so the second surface would delete the first's blocks.
+   *  Sequential execution hides that today, but `--keep` would silently retain
+   *  only the last surface's dir. Defaults to `.examples-build`; every value
+   *  needs a `.gitignore` entry. `assertDistinctBuildDirs()` enforces it. */
+  buildDirName?: string;
   /** package.json dirs whose `exports` become explicit `paths` entries —
    *  what lets a block `import` its own surface's package by name. */
   selfPackages: string[];
 }
+
+/** @see Surface.buildDirName */
+const DEFAULT_BUILD_DIR = '.examples-build';
+const buildDirOf = (s: Surface): string => path.join(s.resolutionDir, s.buildDirName ?? DEFAULT_BUILD_DIR);
 
 const SURFACES: Surface[] = [
   {
     name: 'skills + docs (@objectstack/spec)',
     roots: SKILLS_DOCS_ROOTS,
     resolutionDir: SPEC_DIR,
+    selfPackages: [SPEC_DIR],
+  },
+  {
+    name: 'spec source TSDoc (@objectstack/spec)',
+    roots: SPEC_SRC_ROOTS,
+    // Same package as the prose surface above, so the same resolution env —
+    // but its OWN build dir (see `Surface.buildDirName`).
+    resolutionDir: SPEC_DIR,
+    buildDirName: '.examples-build-src',
     selfPackages: [SPEC_DIR],
   },
   {
@@ -976,6 +1043,84 @@ function selfTest(): never {
         `marker must not be silently ignored`,
     );
 
+    // ── commentPrefixed + a ```ts fence (#10924's spec-source surface). The
+    //    tsx fixture above pins gutter-stripping against a ```tsx fence; this
+    //    root is the other combination — a `.ts` source file whose docblock
+    //    fences plain ```ts — and it is the one #10924's entire corpus uses.
+    //    Without this, a regression that recognised a gutter-wrapped fence
+    //    ONLY when its language was `tsx` would leave the whole spec-source
+    //    surface extracting zero blocks, and the per-surface vacuous-green
+    //    guard in `main()` is the only thing that would notice — a hard error
+    //    a long way from its cause. Also pins that a marker sitting between
+    //    `@example` and the fence still counts as adjacent: that is where
+    //    every marker in the real spec corpus lives.
+    const specSrcRoot: SourceRoot = {
+      dir,
+      ext: '.ts',
+      label: 'spec',
+      marker: '<!-- os:check -->',
+      commentPrefixed: true,
+      excludeFile: isTestFile,
+    };
+    const specSrc = path.join(dir, 'schema.zod.ts');
+    fs.writeFileSync(
+      specSrc,
+      [
+        '// Copyright', //                                                  1
+        '', //                                                              2
+        '/**', //                                                           3
+        ' * A schema with a documented example.', //                        4
+        ' *', //                                                            5
+        ' * @example', //                                                   6
+        ' * <!-- os:check -->', //                                          7
+        ' * ```ts', //                                                      8
+        " * import { defineSkill } from '@objectstack/spec';", //           9
+        ' *', //                                                           10
+        " * const skill = defineSkill({ name: 'a' });", //                  11
+        ' * ```', //                                                       12
+        ' */', //                                                          13
+        'export const SchemaLike = 1;', //                                 14
+      ].join('\n'),
+      'utf8',
+    );
+    const specExtract = extractFromFile(specSrc, specSrcRoot);
+    check(
+      specExtract.examples.length === 1,
+      `spec-source fixture: extracted ${specExtract.examples.length} block(s), expected 1 — a gutter-wrapped ` +
+        '```ts fence is DORMANT, and every block in the spec-source corpus is exactly that shape',
+    );
+    check(
+      specExtract.orphans.length === 0,
+      `spec-source fixture: reported ${specExtract.orphans.length} orphan marker(s), expected 0 — a marker on the ` +
+        'line between `@example` and its fence IS adjacent',
+    );
+    if (specExtract.examples.length === 1) {
+      const ex = specExtract.examples[0];
+      check(
+        ex.fileName.endsWith('.ts') && !ex.fileName.endsWith('.tsx'),
+        `spec-source fixture: build file name "${ex.fileName}" should end in .ts for a \`\`\`ts fence`,
+      );
+      check(
+        ex.code.split('\n')[0] === "import { defineSkill } from '@objectstack/spec';",
+        `spec-source fixture: extracted body still carries a JSDoc gutter — ${JSON.stringify(ex.code.split('\n')[0])}`,
+      );
+      // body[0] is source line 9; `bodyStartLine` is what every diagnostic is
+      // remapped through, and an off-by-one here points authors at prose.
+      check(
+        ex.bodyStartLine === 9,
+        `spec-source fixture: bodyStartLine ${ex.bodyStartLine}, expected 9 — diagnostics would point at the wrong line`,
+      );
+    }
+    // A `.test.ts` sibling must be skipped by `excludeFile` even when it
+    // carries a perfectly good marked block: test fixtures are not the
+    // documented surface, and extracting them would type-check assertions.
+    const specTest = path.join(dir, 'schema.test.ts');
+    fs.writeFileSync(specTest, ['/**', ' * <!-- os:check -->', ' * ```ts', ' * const x = 1;', ' * ```', ' */'].join('\n'), 'utf8');
+    check(
+      sourceFiles([specSrcRoot]).every((f) => f.file !== specTest),
+      'spec-source fixture: a `.test.ts` file was scanned — `excludeFile` is not applied to this root',
+    );
+
     // ── Fence-awareness (fenceSpans): the os:check convention has to be
     //    documentable in the very roots it governs. A marker shown as example
     //    text INSIDE some other fenced block (here a ```md illustration of
@@ -1021,6 +1166,40 @@ function selfTest(): never {
         'STILL be one — a false orphan there is exactly the defect that makes this convention undocumentable, and a ' +
         "silenced real orphan would weaken the gate's hard-error posture",
     );
+
+    // ── Build-dir distinctness (#10924). The REAL surfaces are asserted on
+    //    every run by `assertDistinctBuildDirs()`; these two fixtures pin the
+    //    predicate underneath it in both directions, because a guard that can
+    //    only ever return null is indistinguishable from a correct config —
+    //    the dormant-checker failure this file's own docblocks keep naming.
+    const surfaceStub = (name: string, resolutionDir: string, buildDirName?: string): Surface => ({
+      name,
+      roots: [],
+      resolutionDir,
+      buildDirName,
+      selfPackages: [],
+    });
+    check(
+      findDuplicateBuildDir(SURFACES) === null,
+      'build-dir fixture: the REAL surfaces share a build dir — one of them would wipe the other',
+    );
+    const clash = findDuplicateBuildDir([
+      surfaceStub('alpha', SPEC_DIR),
+      surfaceStub('beta', SPEC_DIR), // same resolutionDir, both defaulting
+    ]);
+    check(
+      clash !== null && clash.first === 'alpha' && clash.second === 'beta',
+      `build-dir fixture: two surfaces defaulting into one resolution dir were NOT reported (got ${JSON.stringify(clash)}) ` +
+        '— that is the collision the guard exists to catch',
+    );
+    check(
+      findDuplicateBuildDir([
+        surfaceStub('alpha', SPEC_DIR),
+        surfaceStub('beta', SPEC_DIR, '.examples-build-src'),
+      ]) === null,
+      'build-dir fixture: a distinct `buildDirName` on a shared resolution dir was reported as a clash — ' +
+        'sharing a resolution dir is legitimate and must stay legal',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1036,9 +1215,50 @@ function selfTest(): never {
       '    JSDoc-gutter-wrapped ```tsx block (client SDK surface) extracts, strips and maps lines\n' +
       '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan; a marker\n' +
       '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
-      '    top-level misplaced marker still is.',
+      '    top-level misplaced marker still is; a gutter-wrapped ```ts block (spec-source\n' +
+      '    surface) extracts with the right build extension, body and line mapping, its\n' +
+      '    `.test.ts` sibling is skipped, and two surfaces sharing one build dir are caught.',
   );
   process.exit(0);
+}
+
+/**
+ * No two surfaces may write into the same throwaway build dir.
+ *
+ * `writeBuildDir()` wipes its target on entry, so a shared dir means the
+ * second surface deletes the first's extracted blocks. Sequential execution
+ * makes that invisible today — each surface's `tsc` has already run by then —
+ * which is exactly why it is asserted rather than left to be noticed: the
+ * first symptom would be `--keep` retaining only the last surface's dir, and
+ * the first *real* symptom would be a surface silently type-checking another
+ * surface's blocks the day this loop is reordered or parallelised. Sharing a
+ * `resolutionDir` is legitimate and stays legal (#10924's spec-source surface
+ * resolves against `packages/spec` just as the prose surface does); sharing
+ * the dir underneath it is not.
+ */
+function findDuplicateBuildDir(
+  surfaces: Surface[],
+): { dir: string; first: string; second: string } | null {
+  const seen = new Map<string, string>();
+  for (const surface of surfaces) {
+    const dir = buildDirOf(surface);
+    const first = seen.get(dir);
+    if (first) return { dir, first, second: surface.name };
+    seen.set(dir, surface.name);
+  }
+  return null;
+}
+
+function assertDistinctBuildDirs(): void {
+  const clash = findDuplicateBuildDir(SURFACES);
+  if (clash) {
+    fail(
+      `Surfaces "${clash.first}" and "${clash.second}" both use the build dir ${rel(clash.dir)}.\n\n` +
+        `  A build dir is wiped when it is written, so the second surface would delete the\n` +
+        `  first's extracted blocks. Give one of them a distinct \`buildDirName\` (and add it\n` +
+        `  to .gitignore).`,
+    );
+  }
 }
 
 /** A package.json's own `name` field — used to look its self-entry up in the
@@ -1049,6 +1269,8 @@ function pkgName(pkgDir: string): string {
 
 function main() {
   if (SELF_TEST) selfTest();
+
+  assertDistinctBuildDirs();
 
   console.log(`🧪 Type-checking prose TypeScript examples (${SURFACES.map((s) => s.name).join(' · ')})...\n`);
 
@@ -1191,7 +1413,7 @@ function main() {
       );
     }
 
-    const buildDir = path.join(surface.resolutionDir, '.examples-build');
+    const buildDir = buildDirOf(surface);
     buildDirs.push(buildDir);
     writeBuildDir(buildDir, examples, paths);
     const { code, output } = runTsc(buildDir);

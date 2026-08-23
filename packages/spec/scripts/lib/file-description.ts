@@ -255,6 +255,32 @@ function stripDocGutter(block: string): string[] {
   });
 }
 
+/**
+ * The `check:skill-examples` opt-in marker, which must never reach the page.
+ *
+ * That gate (`../check-skill-examples.ts`, which owns this spelling — it cannot
+ * be imported from here, it is a top-level script that runs on load) opts a
+ * docblock code block into type-checking with an HTML comment on the line
+ * directly above its fence. In a `.ts` source the marker HAS to be that HTML
+ * comment form, because the MDX roots' wrapper spelling ends in the two
+ * characters star-then-slash, which terminate a block comment — it would close
+ * the JSDoc early. (This comment avoids writing that pair out for the same
+ * reason.)
+ *
+ * The marker sits ABOVE the fence, so it is a prose line, and prose is emitted
+ * verbatim — which lands the marker in the generated MDX. MDX has no HTML
+ * comments; fumadocs-mdx fails the build outright on one ("Unexpected character
+ * `!`…"), directing the author at the wrapper form instead. So a marker on any
+ * MODULE-level doc block would both publish an internal annotation to a
+ * customer-facing reference page and break the docs build. Measured on
+ * `studio/object-designer` and `studio/plugin`, the two spec modules whose
+ * marked examples live in the module block rather than on a declaration.
+ *
+ * Dropped rather than escaped: it is machinery, not content, and the reader of
+ * the rendered page has no use for it.
+ */
+const SKILL_EXAMPLE_MARKER = '<!-- os:check -->';
+
 /** What a line is, which decides which transforms may touch it. */
 type LineKind = 'prose' | 'fenced' | 'indented';
 
@@ -480,7 +506,15 @@ export function renderFileDescription(source: string, ctx: FileDescriptionContex
   const block = findModuleDocBlock(source);
   if (block === null) return '';
 
-  const lines = withTagBlocksSeparated(stripDocGutter(block));
+  // Dropped BEFORE classification, so the marker never reaches the page and
+  // never separates a fence from the `@example` tag above it. Only at prose
+  // level: the same text inside a fenced block is an author illustrating the
+  // convention, which is content (see SKILL_EXAMPLE_MARKER).
+  const gutterless = stripDocGutter(block);
+  const markerKind = classifyLines(gutterless);
+  const lines = withTagBlocksSeparated(
+    gutterless.filter((line, i) => !(markerKind[i] === 'prose' && line.trim() === SKILL_EXAMPLE_MARKER)),
+  );
   const kind = classifyLines(lines);
 
   // Prose is rendered a RUN of lines at a time, never line by line: a sentence,

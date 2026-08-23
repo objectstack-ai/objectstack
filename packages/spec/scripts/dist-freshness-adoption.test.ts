@@ -137,7 +137,33 @@ function declaredDts(spec: string): string[] {
  */
 function seed(spec: string, { distMtime, srcMtime }: { distMtime: number; srcMtime: number }): void {
   fs.mkdirSync(path.join(spec, 'src'), { recursive: true });
-  fs.writeFileSync(path.join(spec, 'src/index.ts'), 'export const live = 1;\n');
+  // #10924 added `packages/spec/src` as check-skill-examples's THIRD surface, so
+  // this seeded `src/` is now scanned for marked blocks too. Same reasoning as
+  // `seedClientSdkSurface()` above, and the same failure it prevents: without a
+  // marked block here that surface's zero-block guard fires on a directory this
+  // sandbox merely stubs, and it fires BEFORE the freshness check — so the
+  // staleness cases below would assert against "no marked examples found"
+  // instead of the refusal they exist to probe.
+  //
+  // It goes in the SAME file `srcMtime` already governs rather than a sibling:
+  // freshness compares dist against the newest source, so a second src file
+  // would be a second, ungoverned mtime knob. The block imports nothing, which
+  // is what lets it compile against the trivial `export {}` declarations
+  // `declaredDts()` seeds and keeps the fresh-dist positive control honest.
+  fs.writeFileSync(
+    path.join(spec, 'src/index.ts'),
+    [
+      '/**',
+      ' * @example',
+      ' * <!-- os:check -->',
+      ' * ```ts',
+      ' * export const ok = 1;',
+      ' * ```',
+      ' */',
+      'export const live = 1;',
+      '',
+    ].join('\n'),
+  );
   fs.utimesSync(path.join(spec, 'src/index.ts'), srcMtime, srcMtime);
 
   for (const dts of declaredDts(spec)) {
@@ -304,9 +330,13 @@ describe('check:skill-examples refuses a stale dist (#7181)', () => {
     const run = runGate(tree.spec, SKILL);
     expect(run.status).toBe(0);
     // #10969: the surface-parameterised success message names surface COUNT,
-    // not any one package -- it now covers this skills+docs surface AND the
-    // client-SDK one `seedClientSdkSurface` populates in every case in this file.
-    expect(run.stdout).toContain('prose examples type-check across 2 surface(s)');
+    // not any one package -- it now covers this skills+docs surface, the
+    // client-SDK one `seedClientSdkSurface` populates in every case in this
+    // file, and (#10924) the spec-source one `seed()` populates. The count is
+    // asserted literally, and moving it is the point: every surface added has
+    // to be seeded here deliberately, or its zero-block guard fires ahead of
+    // the refusal these cases probe.
+    expect(run.stdout).toContain('prose examples type-check across 3 surface(s)');
     expect(run.stderr).not.toContain('OLDER than');
   }, 60_000);
 

@@ -573,7 +573,17 @@ const translationDataShape = () => ({
      * | `description` | `element:text_input` |
      * | `placeholder` | `element:record_picker`, `element:text_input` |
      * | `emptyText` | `element:record_picker` |
-     * | `submitLabel` | none since #9249 retired `element:form`, its only declarer — kept pending the #10926 decision (retire vs re-anchor); the bespoke-component route below still speaks it |
+     *
+     * `submitLabel` LEFT this face in @objectstack/spec 17 (#10926, ADR-0049):
+     * its only declarer, `element:form`, retired whole (#9249), which under
+     * this table's own measured-not-mirrored rule left the key with no
+     * declared component to translate. The maintainer ruled retire over
+     * re-anchor — the live form surface's submit copy is `object-form`'s
+     * `submitText` (`I18nLabelSchema`), localizable at its own authoring site,
+     * and adding it here would be a face widening. The rejection carries the
+     * prescription (`guidance` below); the
+     * `translation-component-submit-label-removed` conversion strips the key
+     * from stored bundles.
      *
      * Two deliberate exclusions, both of which a mirror of the issue's proposed
      * shape would have got wrong:
@@ -608,14 +618,27 @@ const translationDataShape = () => ({
       // A page component's headline is `title`; the PAGE's is `label`. Same
       // document one level apart with opposite spellings — the same trap
       // `dashboards.widgets` names, so it gets the same alias table.
-      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText', submit: 'submitLabel' },
+      aliases: { name: 'title', heading: 'title', text: 'label', caption: 'description', help: 'description', helpText: 'description', empty: 'emptyText', emptyState: 'emptyText' },
+      guidance: {
+        submitLabel:
+          '`submitLabel` was removed in @objectstack/spec 17 (#10926, ADR-0049) — its only '
+          + 'spec-declared carrier, `element:form`, retired whole (#9249), so no component in '
+          + '`ComponentPropsMap` declares it and the resolver no longer overlays it. The live form '
+          + "surface's submit copy is `object-form`'s `submitText` (`I18nLabelSchema`), localizable "
+          + 'at its own authoring site. Delete the key. '
+          + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+        submit:
+          '`submit` was the alias spelling of `submitLabel`, which was removed in '
+          + '@objectstack/spec 17 (#10926, ADR-0049) — no component in `ComponentPropsMap` '
+          + 'declares a submit label since `element:form` retired whole (#9249). Delete the key; '
+          + "the live form surface's submit copy is `object-form`'s `submitText`.",
+      },
     }, {
       title: z.string().optional().describe('Translated component title (`page:card`, `record:related_list`, …)'),
       description: z.string().optional().describe('Translated component description / supporting copy'),
       label: z.string().optional().describe("Translated component label — overlays the component's own `label` when it declares one, else `properties.label`"),
       placeholder: z.string().optional().describe('Translated input placeholder (`element:record_picker`, `element:text_input`)'),
       emptyText: z.string().optional().describe('Translated empty-state text (`element:record_picker`)'),
-      submitLabel: z.string().optional().describe('Translated submit button label — no spec-declared carrier since `element:form` retired (#9249); still the route for a bespoke component speaking the same vocabulary, pending #10926'),
     })).optional().describe('Per-component copy keyed by component id (`PageComponentSchema.id`)'),
   })).optional().describe('Page translations keyed by page name'),
 
