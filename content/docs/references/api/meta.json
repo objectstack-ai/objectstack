@@ -32,6 +32,7 @@
     "plugin-rest-api",
     "storage",
     "---More---",
-    "error-code-ledger"
+    "error-code-ledger",
+    "sortability"
   ]
 }

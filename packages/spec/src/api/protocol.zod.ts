@@ -32,6 +32,9 @@ import {
   MetadataProvenanceSchema,
 } from '../kernel/metadata-protection.zod';
 import { MetadataValidationResultSchema } from '../kernel/metadata-plugin.zod';
+// [#10235] The per-column sortability projection the object read serves on its
+// envelope — computed at serve time, never authorable; see sortability.zod.ts.
+import { ObjectSortabilitySchema } from './sortability.zod';
 import {
   ListPackagesRequestSchema,
   ListPackagesResponseSchema,
@@ -395,11 +398,25 @@ const MetadataProtectionEnvelopeFields = {
  * ⚠️ This is a DECLARATION change only — zero runtime behaviour is altered. That
  * lock presence depends on a server-side cache setting is a separate, larger
  * question (#5950 says so explicitly) and is deliberately NOT decided here.
+ *
+ * [#10235] `sortability` is the one envelope key that is NOT part of the
+ * protection family: the per-column sortability projection, present exactly
+ * when the served type is `object` (every branch — cached included, unlike the
+ * protection keys — because it is computed from the served document itself,
+ * never from the lock resolver). See `sortability.zod.ts` for the category
+ * set and the consumer contract.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
   name: z.string().describe('Item name'),
   item: z.unknown().describe('Metadata item definition'),
+  sortability: ObjectSortabilitySchema.optional().describe(
+    'Per-column sortability projection (#10235) — present exactly when `type` '
+    + 'is `object`, on every serving branch. Computed at serve time from the '
+    + 'served document via the spec\'s own storage predicates; consumers render '
+    + 'sort affordances from this signal and never re-derive it from field '
+    + '`type`. See `ObjectSortabilitySchema` for the closed category set.',
+  ),
   ...MetadataProtectionEnvelopeFields,
 }));
 

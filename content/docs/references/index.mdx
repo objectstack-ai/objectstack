@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1583 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1585 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,7 +20,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 28 | 415 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 29 | 417 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 68 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 156 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **198** | **1583** | 14 protocol modules |
+| **Total** | **199** | **1585** | 14 protocol modules |
 
 ---
 
@@ -61,7 +61,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 415 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **29 pages, 417 schemas**
 
 REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -92,6 +92,7 @@ REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 | [`realtime-shared.zod.ts`](/docs/references/api/realtime-shared) | `BasePresence`, `PresenceStatus`, `RealtimeRecordAction` |
 | [`rest-server.zod.ts`](/docs/references/api/rest-server) | `BatchEndpointsConfig`, `CrudEndpointPattern`, `CrudEndpointsConfig`, `CrudOperation`, `EndpointRegistry`, `GeneratedEndpoint`, `MetadataEndpointsConfig`, `RestApiConfig`, `RestServerConfig`, `RouteGenerationConfig` |
 | [`router.zod.ts`](/docs/references/api/router) | `ConflictResolutionStrategy`, `HttpMethod`, `RouteCategory`, `RouteDefinition`, `RouterConfig` |
+| [`sortability.zod.ts`](/docs/references/api/sortability) | `FieldSortability`, `ObjectSortability` |
 | [`storage.zod.ts`](/docs/references/api/storage) | `CompleteChunkedUploadRequest`, `CompleteChunkedUploadResponse`, `CompleteUploadRequest`, `FileDownloadUrlResponse`, `FileTypeValidation`, `FileUploadResponse`, `GetPresignedUrlRequest`, `InitiateChunkedUploadRequest`, `InitiateChunkedUploadResponse`, `PresignedUrlResponse`, `RawUploadResponse`, `UploadChunkRequest`, `UploadChunkResponse`, `UploadProgress` |
 | [`versioning.zod.ts`](/docs/references/api/versioning) | `VersionDefinition`, `VersionNegotiationResponse`, `VersionStatus`, `VersioningConfig`, `VersioningStrategy` |
 | [`websocket.zod.ts`](/docs/references/api/websocket) | `AckMessage`, `CursorMessage`, `CursorPosition`, `DocumentState`, `EditMessage`, `EditOperation`, `EditOperationType`, `ErrorMessage`, `EventMessage`, `EventPattern`, `EventSubscription`, `PingMessage`, `PongMessage`, `PresenceMessage`, `PresenceState`, `PresenceUpdate`, `SimpleCursorPosition`, `SimplePresenceState`, `SubscribeMessage`, `UnsubscribeMessage`, `UnsubscribeRequest`, `WebSocketConfig`, `WebSocketEvent`, `WebSocketMessage`, `WebSocketMessageType`, `WebSocketPresenceStatus`, `WebSocketServerConfig` |

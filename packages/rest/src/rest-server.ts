@@ -78,6 +78,12 @@ import type { ErrorCode } from '@objectstack/spec/api';
 // TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
 import { IMPORT_JOB_MAX_ROWS } from '@objectstack/spec/api';
+// [#10235] The per-column sortability projection the object read serves on its
+// envelope (2026-08-23 ruling, option A): computed HERE, at the one seam every
+// single-item read path rebuilds its body through, from the spec's own storage
+// predicates — so the signal the grid reads cannot drift from what the runtime
+// doors (#6994/#7095) refuse.
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -2592,8 +2598,22 @@ export class RestServer {
         document: any,
         i18nService?: any,
     ): Promise<any> {
+        // [#10235] The per-column sortability projection, served beside the
+        // document whenever the document IS an object schema. Computed here —
+        // the one seam every single-item exit passes through (#5563: cached,
+        // uncached, compound-name) — so the signal cannot be a property of
+        // which branch answered; and computed from the FINAL document (post
+        // ADR-0106 masking), so its domain is exactly the field set this
+        // caller is served. Never inside `item`: `FieldSchema` is strict and
+        // the key must stay un-authorable (see `sortability.zod.ts`).
+        const sortability =
+            RestServer.metaTypeSingular(type) === 'object'
+                && document && typeof document === 'object' && !Array.isArray(document)
+                ? { sortability: resolveObjectSortability(document) }
+                : {};
         return {
             ...envelope,
+            ...sortability,
             item: await this.translateMetaItem(req, type, environmentId, document, i18nService),
         };
     }

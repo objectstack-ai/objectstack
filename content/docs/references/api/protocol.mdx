@@ -768,6 +768,7 @@ Enable package response
 | **type** | `string` | ✅ | Metadata type name |
 | **name** | `string` | ✅ | Item name |
 | **item** | `any` | ✅ | Metadata item definition |
+| **sortability** | `{ fields: Record<string, object> }` | optional | Per-column sortability projection (#10235) — present exactly when `type` is `object`, on every serving branch. Computed at serve time from the served document via the spec's own storage predicates; consumers render sort affordances from this signal and never re-derive it from field `type`. See `ObjectSortabilitySchema` for the closed category set. |
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Resolved lock verdict for this item (ADR-0010 §3.3). `none` means unlocked; `no-overlay` / `no-delete` / `full` refuse the corresponding write with 403 `ITEM_LOCKED`. Resolved from the document's `_lock`, with the packaged artifact winning over any org overlay. |
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |

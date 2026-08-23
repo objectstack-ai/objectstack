@@ -1,0 +1,134 @@
+---
+title: Sortability
+description: Sortability protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+[#10235] The per-column SORTABILITY projection served with object metadata —
+the one signal a grid reads to decide whether a column header offers a sort
+click, ruled 2026-08-23 (option A on #10235): the platform serves an explicit
+signal, and no consumer re-derives "virtual ⇒ unsortable" from field type.
+
+## Why a served projection, and why it is NOT an authorable key
+
+The shipped grids offered sort clicks the platform cannot honor: a sort on a
+`formula` column returned `asc` and `desc` in byte-identical order under a
+200 (#6994's measurement), and since #9313/#10234 the same click is refused
+loudly (`400 INVALID_SORT`) when the console persists it. The grid needs to
+know *before offering the click* — but teaching it "formula means
+unsortable" would re-implement the runtime's predicate one repo away, the
+shadow-copy drift this ruling exists to end.
+
+So the signal is COMPUTED at serve time from the same spec predicates the
+runtime doors and the authoring linter already read, and served beside the
+document on the `GET /meta/:type/:name` envelope. It is deliberately not a
+key inside the document: `FieldSchema` is `strictObject`, so an undeclared
+key on a served field is rejected by name — and declaring it would make it
+AUTHORABLE, handing authors a switch the runtime does not read (the exact
+declared-≠-enforced shape `resolveInjectedColumnProvenance`'s docblock
+records as deliberately rejected).
+
+## The category set, enumerated (closed against the runtime doors)
+
+"Unsortable" is judged by what the two runtime doors —
+`assertSortFieldsExist` (`@objectstack/metadata-protocol`, #6994) and
+`assertOrderByIsMaterializable` (`@objectstack/objectql`, #7095) — actually
+do with an `orderBy` over the name. Three verdicts are REFUSALS, and one
+measured degradation is not refused; the projection covers all four:
+
+1. **Unknown name** — not a field of the object. Refused (`400
+   INVALID_SORT`). Encoded as ABSENCE: the projection's domain is exactly
+   the served field map plus the always-provisioned `id`, so a name with no
+   entry has no platform sort behind it and gets no affordance.
+2. **Dotted path** (`account.name`) — crosses into a related record no
+   driver joins for. Refused. Encoded as absence too: entries are keyed by
+   whole-column field names, and a dotted name can never appear as one.
+3. **Virtual type** (`isVirtualSearchField` / `SEARCH_VIRTUAL_TYPES`
+   — exactly `formula` today) — computed on read, no driver materialises a
+   column. Refused at both doors. Encoded as `sortable: false` with
+   `reason: 'virtual-type'`. This is the ONE per-field refusal fact, and it
+   is judged by the same spec predicate the linter
+   (`validate-sortable-fields`) and the search axis read — never by a local
+   type list.
+4. **Unprovisioned injected anchor** (`unprovisionedInjectedColumns`
+   — the platform's own injected columns on an ADR-0015 `external` object,
+   which registers them and provisions no storage). NOT refused: both doors
+   key on `formula` alone, so the sort reaches the driver, finds no column,
+   and is silently dropped — measured (#10474) as `asc` === `desc` under a
+   200 while a real column reverses. The platform cannot *prove* the verdict
+   either way (the remote table may genuinely carry a column of that name),
+   so the entry stays `sortable: true` — the enforcement fact — and carries
+   `caveat: 'unprovisioned-anchor'` so a consumer can choose a conservative
+   affordance without re-deriving federation from the document.
+
+## Considered and deliberately NOT members
+
+- `summary` / `autonumber` — the other two `COMPUTED_VALUE_TYPES`. They sort
+  CORRECTLY (`summary` is an engine-maintained `table.float`, `autonumber`
+  an engine-assigned `table.string`; measured on #6924), which is exactly
+  why virtuality is judged by the storage predicate and never by the write
+  contract — widening would refuse the two types that work.
+- `encrypted` / `secret` / `json` / `vector` and the other heavy or masked
+  types — every one has a stored column, neither door refuses an ORDER BY
+  over one, and the drivers execute it. Marking them unsortable here would
+  invent a refusal the runtime does not enforce: the mirror image of the
+  declared-≠-enforced drift this signal exists to end. If any of them should
+  be refused, that is a runtime-door decision first, and this projection
+  follows it automatically through the shared predicate.
+- `created_at` / `updated_at` on an object that opted out of audit injection
+  (`systemFields: false`): the ingress gate hard-admits both names, but no
+  column is provisioned. They are simply absent from the served field map,
+  so they get no entry — the projection is allowed to be NARROWER than the
+  gate where the gate itself is known to degrade.
+
+## Contract for consumers (the objectui grid is the first)
+
+Offer a sort affordance on a column iff the projection has an entry for the
+column's field name and that entry says `sortable: true`. Absence means "no
+platform sort behind this name" — never "assume sortable". Do not recompute
+any of this from field `type` client-side; the verdicts here are derived
+from the same predicates the runtime enforces with, which is the whole
+point (the same "derived verdict — do not recompute" contract the
+protection envelope's `editable` carries).
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/sortability.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { FieldSortabilitySchema, ObjectSortabilitySchema } from '@objectstack/spec/api';
+import type { FieldSortability, ObjectSortability } from '@objectstack/spec/api';
+
+// Validate data
+const result = FieldSortabilitySchema.parse(data);
+```
+
+---
+
+## FieldSortability
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **sortable** | `boolean` | ✅ | Whether the platform honors an ORDER BY over this field. `false` means the runtime REFUSES the sort (`400 INVALID_SORT`) — render no sort affordance. `true` means the sort is accepted; see `caveat` for the one accepted-but-degradable case. A derived verdict: do not recompute it from field `type` client-side. |
+| **reason** | `'virtual-type'` | optional | Present exactly when `sortable` is false: the field's type is virtual (computed on read, no stored column), so no driver materialises anything to ORDER BY. |
+| **caveat** | `'unprovisioned-anchor'` | optional | Present only with `sortable: true`: the field is a platform-injected anchor on an ADR-0015 `external` object with no storage provisioned behind it. The runtime accepts the sort, but when the remote table carries no such column the ORDER BY is silently dropped (asc === desc under a 200). Consumers may choose a conservative affordance for these entries. |
+
+
+---
+
+## ObjectSortability
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **fields** | `Record<string, { sortable: boolean; reason?: 'virtual-type'; caveat?: 'unprovisioned-anchor' }>` | ✅ | Verdict per sortable-addressable column, keyed by field name. The domain is the served field map plus the always-provisioned `id`; a name absent from this map (an unknown field, a dotted path, an unprovisioned audit column) has no platform sort behind it and must get no sort affordance. |
+
+
+---
+
