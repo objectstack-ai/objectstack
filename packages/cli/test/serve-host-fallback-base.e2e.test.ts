@@ -85,10 +85,26 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The module under test, loaded by the child exactly as the CLI's own dist is. */
 const SERVE_TS = resolve(HERE, '../src/commands/serve.ts');
-/** The helper, so the control can build an importer with NO caller base. */
-const TYPES_NODE = resolve(HERE, '../../types/dist/node.mjs');
 /** The workspace `tsx` binary (an installed dependency, not a repo source input). */
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
+
+/**
+ * ⚠️ `@objectstack/types` is reached by SPECIFIER, resolved inside the child from
+ * `serve.ts`'s own location — never as `resolve(HERE, '../../types/dist/…')`.
+ * Both spellings land on the same file; only one of them is honest about what it
+ * is naming. `check:cross-package-test-inputs` states the rule and the reason:
+ * a filesystem climb names a repo SOURCE input that no turbo glob covers, so a
+ * change to it would not re-run this package's tests, while a bare specifier is
+ * an installed dependency — and `@objectstack/cli` already declares
+ * `@objectstack/types`, so turbo's task graph carries that edge already.
+ *
+ * The child gets the CJS twin (`dist/node.js`) because that is what
+ * `createRequire().resolve()` selects, and for THIS measurement the twins are
+ * interchangeable: both sit in `packages/types/dist/`, so the `node_modules`
+ * walk their fallback `import()` performs starts from the same directory. The
+ * control below asserts the reported origin, so a future layout change that made
+ * them differ would show up as a failure rather than as a quiet pass.
+ */
 
 /** Declared by `packages/cli`; not resolvable from `@objectstack/types`. */
 const CLI_DECLARED = 'chalk';
@@ -107,9 +123,14 @@ const SENTINEL = '===os-11157-probe===';
  * as itself rather than as a bare boolean.
  */
 const PROBE = `
-const [servePath, typesPath, appRoot] = process.argv.slice(2);
+const [servePath, appRoot] = process.argv.slice(2);
 const { pathToFileURL } = await import('node:url');
+const { createRequire } = await import('node:module');
 const { default: Serve } = await import(pathToFileURL(servePath).href);
+// The helper as SERVE.TS itself reaches it — by specifier, from serve.ts's own
+// location — so the control measures the real dependency edge and this file
+// never names a path outside its own package.
+const typesPath = createRequire(servePath).resolve('@objectstack/types/node');
 const { createHostImporter } = await import(pathToFileURL(typesPath).href);
 
 const attempt = async (fn) => {
@@ -161,7 +182,7 @@ beforeAll(async () => {
   probeFile = join(neutralCwd, 'probe.mjs');
   writeFileSync(probeFile, PROBE, 'utf8');
 
-  const { stdout } = await execFileAsync(TSX, [probeFile, SERVE_TS, TYPES_NODE, appRoot], {
+  const { stdout } = await execFileAsync(TSX, [probeFile, SERVE_TS, appRoot], {
     cwd: neutralCwd,
     env: { ...process.env, NO_COLOR: '1' },
     maxBuffer: 16 * 1024 * 1024,
@@ -183,6 +204,9 @@ describe('os serve → the undeclared fallback resolves from packages/cli (#1115
     expect(probe.controlNoBase).not.toBe('RESOLVED');
     expect(probe.controlNoBase).toContain(`Cannot find package '${CLI_DECLARED}'`);
     expect(probe.controlNoBase).toContain('does not declare it');
+    // Named, not just failed: the no-base leg really does resolve from
+    // `packages/types`, which is the sentence this whole card is about.
+    expect(probe.controlNoBase).toMatch(/imported from .*[/\\]packages[/\\]types[/\\]/);
     // …and it says exactly why, which is the branch #11157 moves `serve` off.
     expect(probe.controlNoBase).toContain('the caller did not pass `fallbackImport`');
   });
