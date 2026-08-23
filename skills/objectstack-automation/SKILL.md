@@ -279,7 +279,8 @@ Notes:
   transition, e.g. `previous.status != 'escalated' && record.status == 'escalated'`.
 - **Introspection:** `GET /api/v1/meta/object/:name/state/:field?from=:state`
   returns the legal next states so UIs/agents can read the transition table
-  instead of hard-coding it (`next: null` when no FSM governs the field).
+  instead of hard-coding it (`next: null` = no FSM governs the field, **or**
+  `?from=` was omitted — always pass `from`).
 - Predicate conditions in sibling rules evaluate against the merged record in
   the **`record.<field>`** CEL scope (bare field names do not resolve).
 

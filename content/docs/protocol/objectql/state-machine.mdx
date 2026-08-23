@@ -124,7 +124,7 @@ A `state_machine` rule has no per-transition guard. To gate a transition on a pr
 Because the transition table is data, both UIs and Agents can ask "from this state, what's legal next?" instead of parsing a formula.
 
 - **In code**, `legalNextStates(objectSchema, field, currentState)` from `@objectstack/objectql` returns the declared next states, `[]` when the state has no outgoing edges (an explicit `[]` **or** a state the table never mentions — introspection does not distinguish the two, enforcement does), or `null` when no `state_machine` rule governs the field.
-- **Over HTTP**, `GET /api/v1/meta/object/:name/state/:field?from=:state` returns `{ object, field, from, next }`, where `next` is the legal-next list (or `null`).
+- **Over HTTP**, `GET /api/v1/meta/object/:name/state/:field?from=:state` returns `{ object, field, from, next }`, where `next` is the legal-next list, or `null` for **either** of two reasons: no `state_machine` rule governs the field, **or** `?from=` was omitted (no `from` ⇒ no transition table to answer with). A `null` from a call that passed no `from` is therefore not evidence that the field has no state machine — re-ask with `?from=`.
 
 <Callout type="info">
   When an AI Agent or Flow tries to update `status` to `approved` while the record is in `draft`, the write fails with a `ValidationError` (field error code `invalid_transition`) — the AI-mistake protection the rule exists for. There is no automatic injection of per-state AI instructions into the prompt; the guardrail is the enforced transition table.
