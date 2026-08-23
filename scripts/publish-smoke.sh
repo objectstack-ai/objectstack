@@ -460,7 +460,7 @@ if [ "$SMOKE_MODE" = "pack" ]; then
   # Anything NOT in the override map (transitive deps, better-auth, hono, …)
   # resolves from the registry exactly as it would for a real user; that
   # unpinned resolution is the thing under test.
-  log "Pinning @objectstack/* to local tarballs via project-local overrides"
+  log "Pinning every publishable package to local tarballs via project-local overrides"
   node - "$SMOKE_ROOT/tarballs/overrides.json" "$APP_DIR/pnpm-workspace.yaml" <<'EOF'
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const [overridesPath, wsPath] = process.argv.slice(2);
@@ -484,7 +484,8 @@ const lines = [
   base,
   '',
   '# ── appended by scripts/publish-smoke.sh ─────────────────────────────────',
-  '# @objectstack/* pinned to the about-to-publish tarballs; everything above',
+  '# every publishable package pinned to its about-to-publish tarball (scoped',
+  '# and unscoped alike); everything above',
   '# is what the template ships, everything else resolves from the registry.',
   'overrides:',
   ...Object.entries(overrides).map(([name, spec]) => `  '${name}': '${spec}'`),
@@ -518,17 +519,50 @@ EOF
   log "Installing (pnpm, tarball-pinned)"
   (cd "$APP_DIR" && pnpm install --no-frozen-lockfile)
 
-  # Belt-and-braces: if any @objectstack/* resolved from the REGISTRY the
+  # Belt-and-braces: if any package we PINNED resolved from the REGISTRY the
   # override map has a hole and the smoke would silently test published code.
-  # Registry-resolved lockfile keys read '@objectstack/<name>@<version>';
-  # tarball-pinned ones read '@objectstack/<name>@file:…' (with possible
-  # peer suffixes containing their own @<version>, hence the [^'@] name part).
-  log "Asserting no @objectstack/* leaked to the registry"
-  if grep -En "'@objectstack/[^'@]+@[0-9]" "$APP_DIR/pnpm-lock.yaml"; then
-    fail "some @objectstack/* packages resolved from the registry (see above) — publish-smoke-pack.mjs override map is incomplete"
-  fi
-  TARBALL_COUNT=$(grep -cE "'@objectstack/[^'@]+@file:" "$APP_DIR/pnpm-lock.yaml" || true)
-  echo "  ok — $TARBALL_COUNT tarball-resolved @objectstack/* lockfile entries"
+  # Registry-resolved lockfile keys read '<name>@<version>'; tarball-pinned
+  # ones read '<name>@file:…' (with possible peer suffixes containing their
+  # own @<version>, hence the name-anchored match).
+  #
+  # The names come from the override map, NOT from a `@objectstack/*` glob.
+  # This assertion used to grep the scope, which made it blind in exactly the
+  # case it existed to catch: `create-objectstack` is unscoped, so when it went
+  # unpinned and resolved from the registry, this guard reported "ok" and the
+  # smoke died 200 lines later inside pnpm with ERR_PNPM_NO_MATCHING_VERSION.
+  # A guard whose alphabet is narrower than the set it guards is not a guard.
+  log "Asserting no pinned package leaked to the registry"
+  node - "$SMOKE_ROOT/tarballs/overrides.json" "$APP_DIR/pnpm-lock.yaml" <<'EOF'
+const { readFileSync } = require('node:fs');
+const [overridesPath, lockPath] = process.argv.slice(2);
+const names = Object.keys(JSON.parse(readFileSync(overridesPath, 'utf8')));
+const lock = readFileSync(lockPath, 'utf8').split(/\r?\n/);
+
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const leaked = [];
+let pinnedCount = 0;
+for (const name of names) {
+  // Lockfile key lines: optional quote, the exact package name, '@', spec.
+  const key = new RegExp(`^\\s*'?${esc(name)}@([^']+?)'?:\\s*$`);
+  for (const line of lock) {
+    const m = key.exec(line);
+    if (!m) continue;
+    if (m[1].startsWith('file:')) pinnedCount += 1;
+    else if (/^[0-9]/.test(m[1])) leaked.push(`${name}@${m[1]}`);
+  }
+}
+
+if (leaked.length > 0) {
+  console.error('::error::these PINNED packages resolved from the npm registry:');
+  for (const l of leaked.sort()) console.error(`  ${l}`);
+  console.error(
+    'The publish-smoke-pack.mjs override map has a hole, so the smoke tested ' +
+      'PUBLISHED code instead of the release candidate.',
+  );
+  process.exit(1);
+}
+console.log(`  ok — ${pinnedCount} tarball-resolved lockfile entries, 0 registry leaks (${names.length} names checked)`);
+EOF
 else
   log "Scaffolding $APP_NAME with published create-objectstack@latest"
   (cd "$SMOKE_ROOT" && npx -y create-objectstack@latest "$APP_NAME" --skip-install --skip-skills)

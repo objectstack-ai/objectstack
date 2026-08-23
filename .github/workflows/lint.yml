@@ -416,6 +416,16 @@ jobs:
       - name: Part-of closing-keyword guard self-test
         run: pnpm check:partof-closing-keyword
 
+      # Publish-smoke tarball pin-set self-test. The assertion it pins lives on
+      # the RELEASE path (scripts/publish-smoke-pack.mjs runs only inside the
+      # packed-tarball smoke), so without this step a regression in it would be
+      # discovered by a release candidate — which is exactly how the unscoped
+      # `create-objectstack` hole surfaced: as a red on the operator's own
+      # release run, not on the PR that opened it. Pure functions, synthetic
+      # fixtures, no pnpm/workspace/network; ~0.05s.
+      - name: Publish-smoke pin-set self-test
+        run: pnpm check:publish-smoke-pin
+
       # Single-claim path guard self-test (#9402). Same split as the step above
       # and for the same reason: the guard is a PR-scoped blocking check in its
       # own workflow, because its question is about OTHER open PRs and needs a

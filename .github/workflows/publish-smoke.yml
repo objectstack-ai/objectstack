@@ -13,8 +13,9 @@
 #
 #   pack-smoke      SMOKE_MODE=pack — `pnpm pack` every publishable package
 #                   (pack applies the same manifest rewrites as publish),
-#                   scaffold a fresh project OUTSIDE the workspace, pin
-#                   @objectstack/* to the tarballs via the project's own pnpm
+#                   scaffold a fresh project OUTSIDE the workspace, pin every
+#                   publishable package — scoped and unscoped alike — to the
+#                   tarballs via the project's own pnpm
 #                   overrides, and smoke it. This is "what 15.1.0 would have
 #                   failed": the release-candidate combination, no workspace
 #                   overrides in sight.
