@@ -394,7 +394,13 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '${toTitleCase(name)} application built with ObjectStack',
-    // Protocol major this app is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the
+    // exact migration command instead of crashing later. Scaffolding stamped
+    // it to match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
@@ -430,11 +436,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       defaultValue: 'draft',
     },
   },
-  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
-  // requires this to be an authored decision rather than an accident — the
-  // \`security-owd-unset\` author-time rule refuses an object without it, so a
-  // scaffold that omitted it could not compile. 'private' is the rule's own
-  // recommended default: owner + explicit shares.
+  // Org-wide default (OWD): who can see records they don't own. 'private' is
+  // owner-only until access is widened by a permission grant or a sharing
+  // rule. Declaring it is required, deliberately: \`objectstack build\`
+  // refuses an object that declares no OWD, so the baseline is always an
+  // authored decision rather than an accident. The other values, and how to
+  // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
 };
 
@@ -474,7 +481,14 @@ export default defineStack({
     type: 'plugin',
     name: '${toTitleCase(name)} Plugin',
     description: 'ObjectStack Plugin: ${toTitleCase(name)}',
-    // Protocol major this plugin is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this plugin
+    // is authored against. The runtime checks it before it loads anything, so
+    // a runtime outside the range refuses this plugin at the boundary with
+    // the exact migration command instead of crashing later. Scaffolding
+    // stamped it to match the ObjectStack version you installed — change it
+    // when you deliberately move to a new protocol major, not to silence a
+    // mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 
@@ -496,11 +510,12 @@ const ${toCamelCase(namespace)}Item: Data.Object = {
       required: true,
     },
   },
-  // Org-wide default (OWD): who can see records they do NOT own. ADR-0090 D1
-  // requires this to be an authored decision rather than an accident — the
-  // \`security-owd-unset\` author-time rule refuses an object without it, so a
-  // scaffold that omitted it could not compile. 'private' is the rule's own
-  // recommended default: owner + explicit shares.
+  // Org-wide default (OWD): who can see records they don't own. 'private' is
+  // owner-only until access is widened by a permission grant or a sharing
+  // rule. Declaring it is required, deliberately: \`objectstack build\`
+  // refuses an object that declares no OWD, so the baseline is always an
+  // authored decision rather than an accident. The other values, and how to
+  // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
   sharingModel: 'private',
 };
 
@@ -537,7 +552,13 @@ export default defineStack({
     type: 'app',
     name: '${toTitleCase(name)}',
     description: '',
-    // Protocol major this app is authored against (ADR-0087 load-time check).
+    // Protocol compatibility range: the metadata-protocol major this app is
+    // authored against. The runtime checks it before it loads anything, so a
+    // runtime outside the range refuses this app at the boundary with the
+    // exact migration command instead of crashing later. Scaffolding stamped
+    // it to match the ObjectStack version you installed — change it when you
+    // deliberately move to a new protocol major, not to silence a mismatch.
+    // Guide: https://objectstack.ai/docs/upgrading
     engines: { protocol: '^${PROTOCOL_MAJOR}' },
   },
 });
