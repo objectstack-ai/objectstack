@@ -204,6 +204,17 @@ const REPO_ROOT = resolve(HERE, '..');
  * Every entry names the test that justifies it, so the next person can check
  * the radius against the code rather than trusting the glob.
  *
+ * A rationale may cite a sibling path as an EXAMPLE only when that path is
+ * structurally unable to change status. The mention-shape entries below all
+ * reach for `check-nul-bytes.mjs`, which is load-bearing rather than habit:
+ * no test has a reason to READ a gate script, so "named rather than read"
+ * stays true of it for as long as the sentence exists. A path under active
+ * test does not qualify -- `sync-template-versions.mjs` was cited that way
+ * until #9763 taught the collector to see the split-segment read that
+ * `template-version-stamps.test.ts` had been making all along, and every
+ * sentence naming it went false at once, in copies that had to be retired one
+ * at a time. Cite the invariant example, or name no sibling at all.
+ *
  * `heldBy` is that sentence made CHECKABLE for the globs the roster cannot see
  * (#10566). Most globs are held mechanically: some path the tests name lands
  * inside them, and `globHolderVerdict()` finds it. A read whose path this
@@ -546,12 +557,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/runtime/src/**',
       'packages/services/service-sms/src/**',
       // The three below are NAMED in that test's prose rather than read by it —
-      // the same shape as `serve.ts` on the @objectstack/spec entry above and
-      // `realtime-protocol.mdx` on @objectstack/dogfood, and settled the same
-      // way: the literal collector takes quoted paths without parsing, so a
-      // mention forces a declaration, and declaring the file is cheaper than
-      // rewording prose to dodge the scanner. All three are low-churn, so the
-      // added cache invalidation is nominal next to the two directories above.
+      // the same shape as `check-nul-bytes.mjs` on the @objectstack/cli entry
+      // above, and settled the same way: the literal collector takes quoted
+      // paths without parsing, so a mention forces a declaration, and declaring
+      // the file is cheaper than rewording prose to dodge the scanner. All
+      // three are low-churn, so the added cache invalidation is nominal next to
+      // the two directories above.
       'scripts/check-published-files.mjs',
       'scripts/check-cross-package-test-inputs.mjs',
       'packages/types/src/node-isolation.test.ts',

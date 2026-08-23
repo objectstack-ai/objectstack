@@ -246,6 +246,7 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
  * Do not author one.
  *
  * @example
+ * <!-- os:check -->
  * ```ts
  * import { defineSkill } from '@objectstack/spec';
  *
@@ -441,6 +442,7 @@ export type SkillParsed = z.infer<typeof SkillSchema>;
  * routing in `triggerConditions`, natural-language intent in
  * `description` / `instructions`.
  *
+ * <!-- os:check -->
  * ```ts
  * import { defineSkill } from '@objectstack/spec';
  *
