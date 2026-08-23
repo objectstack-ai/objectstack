@@ -166,20 +166,55 @@ function declaresHttpAnswer(error: unknown): boolean {
 /**
  * Normalize the result of `objectql.execute()` into a row array.
  *
- * Different drivers return different shapes for raw SELECT statements:
- *   - SQL driver (knex/SQLite) and Turso remote transport return rows
- *     directly as an array.
- *   - PostgreSQL (knex/pg) returns `{ rows, rowCount, ... }`.
- *   - Some drivers may return `{ rows: [...] }` wrappers in other contexts.
+ * `ObjectQLEngine.execute()` returns what the driver returned, VERBATIM, and
+ * `SqlDriver.execute()` in turn returns `knex.raw()` verbatim — so the shape
+ * that arrives here is the underlying client's own, and there are THREE:
  *
- * This helper accepts any of those shapes and always returns an array.
+ *   1. **bare row array** — better-sqlite3 through knex, and Turso's remote
+ *      transport (which returns `@libsql/client`'s `result.rows`).
+ *   2. **`{ rows, rowCount, … }`** — PostgreSQL (knex/pg).
+ *   3. **`[rows, fields]` tuple** — mysql2. The first element is itself the
+ *      row array; the second is column metadata.
+ *
+ * ⚠️ [#11062] Shape 3 used to fall through the `Array.isArray` branch
+ * UNFLATTENED, and that was not a shape this file merely failed to support — it
+ * was a shape it MISREAD. The tuple is an array, so it satisfied both the
+ * branch below and {@link isResultSet}; `get()` then read `rows[0]`, which is
+ * the row ARRAY rather than a row, so `row.manifest` was `undefined` and
+ * `JSON.parse(undefined)` threw into `get()`'s own catch — which answers
+ * `null`, i.e. **"this package is not installed"** over a driver that had just
+ * returned the row. `list()` failed the same way into `[]`. The defect is
+ * reachable in a supported composition: `OS_DATABASE_URL=mysql://…` builds a
+ * `SqlDriver` on the `mysql2` client as the DEFAULT driver, which is the one
+ * this service's raw SELECTs land on.
+ *
+ * The tuple test is `Array.isArray(result[0])`, and it cannot misfire on shape
+ * 1: a bare row array holds row OBJECTS. Measured on `@libsql/client` 0.17.4,
+ * `result.rows` is a real array whose elements are plain objects
+ * (`Array.isArray(rows[0]) === false`), and knex/better-sqlite3 likewise maps
+ * rows to objects. Only mysql2 nests an array at index 0.
+ *
+ * ⛔ A LOCAL copy, deliberately — the same call this file's {@link isResultSet}
+ * already makes and for the same reason: `@objectstack/metadata-protocol`
+ * (whose exported `normalizeRows` is the sibling this arm is aligned with) is
+ * not a dependency of this package at all, and it resolves through `exports` to
+ * `dist/`, so value-importing it would make this package's unit pins a verdict
+ * about a build artifact (`check:test-source-alias`). Unifying the copies is
+ * its own decision, not a rider on this fix. What holds them together
+ * meanwhile is a pin: `mysql2-tuple.test.ts` asserts all three shapes recover
+ * the SAME row, so the next divergence is a red test rather than prose someone
+ * has to re-read.
  *
  * ⚠️ [#10965] It returns `[]` for EVERYTHING else too, and that is the whole
  * defect this file's seam guard exists for — see {@link isResultSet}. Flatten
  * with this only AFTER the result has been established as an answer.
  */
 function normalizeRows(result: any): any[] {
-  if (Array.isArray(result)) return result;
+  if (Array.isArray(result)) {
+    // mysql2's `[rows, fields]`: the first element is itself the row array.
+    if (result.length > 0 && Array.isArray(result[0])) return result[0];
+    return result;
+  }
   if (result && Array.isArray(result.rows)) return result.rows;
   return [];
 }
