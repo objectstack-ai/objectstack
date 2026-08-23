@@ -10715,15 +10715,44 @@ export class ObjectQL implements IObjectQLEngine {
         //
         // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
         // every other value a master_detail can declare — including an
-        // explicit `deleteBehavior: 'set_null'`, which `FieldSchema` accepts
-        // on this type — resolves to `cascade` here, silently. Measured and
-        // pinned (`engine-cascade-delete.test.ts`); whether the spec should
-        // reject the combination at publish time instead of the engine
-        // dropping it at delete time is a judgement, carded separately.
+        // explicit `deleteBehavior: 'set_null'` — resolves to `cascade` here,
+        // silently. Measured and pinned (`engine-cascade-delete.test.ts`).
         let behavior: string =
           fdef.type === 'master_detail'
             ? (fdef.deleteBehavior === 'restrict' ? 'restrict' : 'cascade')
             : (fdef.deleteBehavior || 'set_null');
+
+        // [#9689] (maintainer ruling 2026-08-19, Q3 = B): the judgement the
+        // #9625 comment above deferred is now taken — `FieldSchema` REJECTS an
+        // authored `deleteBehavior: 'set_null'` on a `master_detail` at parse
+        // time, so the value is meaningful again: one that still reaches this
+        // site came in around the parse seam (a raw `registerObject`, or a
+        // stored/artifact row written before the tightening — the two
+        // populations parse-time rejection measurably cannot catch, since the
+        // engine registers raw objects and never re-parses). The coercion
+        // itself stays: this delete is about to CASCADE children whose
+        // declaration asked for them to be kept, and that divergence must be
+        // loud and attributable, not silent. Sanctioned logger shape per
+        // PR #9750: reach for `error`, fall back to `warn` — NEVER an optional
+        // call like `logger.error?.()`, which emits nothing against a sink
+        // with no `error`. Caveat, measured (#4447): a built app artifact
+        // materializes FieldSchema defaults, so an artifact-loaded BARE
+        // master_detail also carries `set_null` and logs here — that residual
+        // imprecision is the materialized-default defect tracked as #9784, not
+        // a reason to soften this log.
+        if (fdef.type === 'master_detail' && fdef.deleteBehavior === 'set_null') {
+          const msg =
+            `[cascade-delete] ${childName}.${fieldName} declares deleteBehavior: 'set_null' on a ` +
+            `master_detail referencing '${object}' — that value is NOT honored on master_detail: the ` +
+            `delete of ${object}/${String(id)} is CASCADING these child rows, the opposite of what the ` +
+            `declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
+            `this row reached the engine around the parse seam (raw registration, or metadata stored ` +
+            `before the tightening). Re-declare the field: 'restrict' refuses the parent delete while ` +
+            `children exist (no data loss), 'cascade' (or omitting the key) accepts the cascade ` +
+            `deliberately, or make it a lookup if children must survive the parent.`;
+          if (typeof this.logger.error === 'function') this.logger.error(msg);
+          else this.logger.warn(msg);
+        }
 
         // A REQUIRED foreign key cannot be nulled — set_null would issue an
         // UPDATE clearing the FK, which the child's required-field validator

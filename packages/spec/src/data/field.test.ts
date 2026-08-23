@@ -480,6 +480,92 @@ describe('FieldSchema', () => {
       expect(result.deleteBehavior).toBe('set_null');
     });
 
+    // [#9689] (maintainer ruling 2026-08-19, Q1 = A): an AUTHORED
+    // `deleteBehavior: 'set_null'` on a `master_detail` is a named parse-time
+    // rejection — the engine resolves it to `cascade` (measured and pinned in
+    // `engine-cascade-delete.test.ts`), the opposite of what the declaration
+    // asks for. The default relocated off the property (`.optional()` +
+    // `.meta({default})` + `.overwrite()`, the #7918 Option A shape) so this
+    // check can tell authored from defaulted; everything else about
+    // `deleteBehavior` must stay byte-identical, which is what the rest of
+    // this block pins.
+    describe('[#9689] deleteBehavior: set_null on master_detail is a parse-time rejection', () => {
+      const md = (extra: Record<string, unknown> = {}) => ({
+        name: 'parent_id',
+        label: 'Parent Record',
+        type: 'master_detail',
+        reference: 'parent_object',
+        ...extra,
+      });
+
+      it('rejects an AUTHORED set_null on a master_detail, at path deleteBehavior, with the named message', () => {
+        const result = FieldSchema.safeParse(md({ deleteBehavior: 'set_null' }));
+        expect(result.success).toBe(false);
+        if (result.success) return;
+        const issue = result.error.issues.find((i) => i.path.join('.') === 'deleteBehavior');
+        expect(issue).toBeDefined();
+        // The message head is contract: it must say the declaration is NOT
+        // honored and that the children would be DELETED, so an AI author
+        // reading the rejection learns the actual outcome, not just "invalid".
+        expect(issue?.message).toContain("`deleteBehavior: 'set_null'` is not honored on a `master_detail` field");
+        expect(issue?.message).toContain('DELETED');
+        // And it must name both legal ways out.
+        expect(issue?.message).toContain("'restrict'");
+        expect(issue?.message).toContain("'cascade'");
+      });
+
+      it('still parses a BARE master_detail, and still materializes the set_null default', () => {
+        const result = FieldSchema.parse(md());
+        expect(result.deleteBehavior).toBe('set_null');
+      });
+
+      it('materializes the default at its SHAPE position, not appended at the tail (byte-identity with the .default() era)', () => {
+        // Serialized parse output is what built app artifacts ship (#4447), so
+        // key ORDER is part of the byte-identity contract. `deleteBehavior`
+        // sits between `reference` and `hidden` in the shape; a naive
+        // `{ ...field, deleteBehavior }` re-materialization would emit it last.
+        const json = JSON.stringify(FieldSchema.parse(md()));
+        expect(json).toContain('"reference":"parent_object","deleteBehavior":"set_null","hidden":false');
+      });
+
+      it('leaves an authored cascade and restrict on master_detail untouched', () => {
+        expect(FieldSchema.parse(md({ deleteBehavior: 'cascade' })).deleteBehavior).toBe('cascade');
+        expect(FieldSchema.parse(md({ deleteBehavior: 'restrict' })).deleteBehavior).toBe('restrict');
+      });
+
+      it('keeps an authored set_null legal on lookup — required or not', () => {
+        const lookup = {
+          name: 'account_id', label: 'Account', type: 'lookup',
+          reference: 'account', deleteBehavior: 'set_null',
+        };
+        expect(FieldSchema.parse(lookup).deleteBehavior).toBe('set_null');
+        expect(FieldSchema.parse({ ...lookup, required: true }).deleteBehavior).toBe('set_null');
+      });
+
+      it('keeps non-reference types accepting and defaulting the key (installed-base artifact shape, #4447)', () => {
+        // Verbatim shape from examples/app-showcase/dist/objectstack.json — a
+        // materialized datetime carrying only FieldSchema defaults. Built
+        // artifacts ship this on EVERY field type; it must stay legal.
+        const showcaseVerbatim = {
+          label: 'Created At', type: 'datetime', required: false,
+          searchable: false, multiple: false, unique: false,
+          deleteBehavior: 'set_null', hidden: false,
+          readonly: false, sortable: true, externalId: false,
+        };
+        expect(() => FieldSchema.parse(showcaseVerbatim)).not.toThrow();
+        // And a bare text field still gets the materialized default.
+        expect(FieldSchema.parse({ name: 'title', label: 'Title', type: 'text' }).deleteBehavior).toBe('set_null');
+      });
+
+      it('keeps FieldSchema.shape enumerable (no pipe degradation from the relocation)', () => {
+        // `.overwrite()` rather than `.transform()` is load-bearing: a pipe
+        // answers shape introspection with an empty set, and form generators
+        // enumerate this shape.
+        expect(Object.keys(FieldSchema.shape).length).toBeGreaterThan(50);
+        expect(Object.keys(FieldSchema.shape)).toContain('deleteBehavior');
+      });
+    });
+
     it('should accept the relatedList prominence tri-state (false | true | primary)', () => {
       for (const relatedList of [false, true, 'primary'] as const) {
         const field: Field = {

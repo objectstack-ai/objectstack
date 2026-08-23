@@ -337,7 +337,7 @@ Parent-child relationship (cascading delete by default).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target (master) object name |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
-| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'cascade'` | Behavior when parent is deleted. `restrict` is the only value that deviates: master-detail cascades on everything else, so an explicit `set_null` here is **not** honored — the child is deleted with the parent |
+| `deleteBehavior` | `'restrict' \| 'cascade'` | `'cascade'` | Behavior when parent is deleted. `restrict` refuses the parent delete while children exist; `cascade` (and omitting the key) deletes the children with the parent. An explicit `set_null` is a **parse-time rejection** on this type (#9689) — a detail row cannot outlive its master; use a `lookup` if children must survive the parent |
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Edit child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |
 | `inlineAmountField` | `string` | — | Numeric child field used for the inline running total |
