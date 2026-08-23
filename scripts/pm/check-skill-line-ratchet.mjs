@@ -110,7 +110,10 @@ export const CEILINGS = new Map([
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
   ['.claude/skills/pm-dispatch/references/decision-analysis.md', 38],
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 134],
+  // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
+  // 2026-08-23) — the three write-side sanitizer rows consolidated to one
+  // author rule + one measured-behaviour row per surface (body / comment).
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 133],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 82],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 82],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
@@ -126,16 +129,21 @@ export const CEILINGS = new Map([
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
-  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 41],
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 31],
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 37],
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 36],
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 44],
+  // Each −1: whole-text restructuring round, PR-2 (maintainer ruling
+  // 2026-08-23) — the patrol-anchor sentence was carried verbatim by all seven
+  // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
+  // cli.md pays −2 because it was carrying the map's last line of headroom.
+  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 40],
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 37],
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 45],
+  // 45 → 44: same patrol-anchor hoist deletion as the six lanes above.
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 44],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.

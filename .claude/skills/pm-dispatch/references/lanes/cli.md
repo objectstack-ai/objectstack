@@ -14,7 +14,6 @@
 
 ## 常设承诺
 
-- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - **Required checks 六个**:`TypeScript Type Check` · `Lint & Repo Gates` ·
   `Test Core` · `Dogfood Regression Gate` · `Build Core` ·
   `Temporal Conformance (live PG + MySQL)` —— 逐 job 读各自 `conclusion`,⛔ 不认
