@@ -329,6 +329,36 @@ interface RlsFilterOptions {
  * the FK's omission. Produced once per object by
  * {@link SecurityPlugin.resolveCbpRelation} and cached.
  */
+/**
+ * [#11082] How many `controlled_by_parent` hops the master-set derivation and
+ * the master-write gate will walk before they fail CLOSED.
+ *
+ * ⚠️ This is a COST ceiling, not a semantic rule, and it is deliberately not a
+ * "supported chain length". Termination is already guaranteed without it — both
+ * walks carry the set of objects already visited on the branch and refuse to
+ * re-enter one, over a finite schema registry. What the bound caps is WORK: one
+ * extra master-id `find` per hop per `controlled_by_parent` object per request,
+ * which is the per-request cost ADR-0055 already books as a known limit. A
+ * runaway generated schema should pay a bounded price, not an unbounded one.
+ *
+ * HOW THE VALUE WAS CHOSEN — no value is derivable from the tree, so the
+ * derivation is stated rather than implied. Measured on this repo: every
+ * authored `controlled_by_parent` object has a chain of exactly **one** hop
+ * (`showcase_invoice_line` → `showcase_invoice`, `showcase_expense_line` →
+ * `showcase_expense_report`, `crm_opportunity_line_item` → `crm_opportunity`)
+ * — in each case the master's own model is `public_read_write` or `private`,
+ * never derived. The consumer that motivated #11082 needs **two**
+ * (`crm_quote_line_item` → `crm_quote` → `crm_account`). 8 is four times the
+ * deepest chain any consumer has asked for, so it cannot be reached by
+ * authoring that means anything, and it still caps the walk at 8 queries.
+ *
+ * AT THE BOUND: the read derivation returns the EMPTY master set and the write
+ * gate DENIES, each logging the chain it refused. ⛔ Never "no restriction" —
+ * that is precisely the failure #11082 fixed, and a bound that widened on
+ * overflow would reintroduce it at depth 9 instead of depth 2.
+ */
+const CBP_MAX_CHAIN_DEPTH = 8;
+
 interface CbpRelation {
   /** The detail's master reference field key. */
   fk: string;
@@ -5422,13 +5452,50 @@ export class SecurityPlugin implements Plugin {
    * (defense-in-depth; spec validation should prevent authoring it). Returns null
    * when the object is not controlled_by_parent.
    *
-   * v1 scope (ADR-0055): single level — the master's OWN controlled_by_parent is
-   * NOT traversed transitively.
+   * [#11082] The derivation COMPOSES ACROSS A CHAIN. It used to resolve the
+   * master set from the two halves above and nothing else, which made a master
+   * that is ITSELF `controlled_by_parent` resolve to "no restriction" on both:
+   * its RLS half is `null` (a derived object authors no policy — that is the
+   * whole point of the declaration) and its sharing half is `null` too, because
+   * `effectiveSharingModel` maps `controlled_by_parent` to `public` and
+   * `buildReadFilter` opts out of every non-`private` model. Composed: `null`,
+   * so `find(master, {})` ran as SYSTEM and returned EVERY master row. A
+   * two-level chain was therefore enforced at level one and org-wide at level
+   * two — read and write — with metadata that reads as if it were narrowed.
+   *
+   * So the master's own derivation is now the THIRD half, AND-ed in with the
+   * other two: the master set is exactly the set a direct read of the master
+   * returns, at every level, which is the same equality #5386 established for
+   * one level. ⛔ This is NOT a blanket refusal for chained declarations — that
+   * would deny the single-level case #5386 fixed and that measurement shows
+   * correct today. A detail under a reachable master stays reachable.
+   *
+   * ⚠️ ADR-0055 records "single-level only in v1" as an honest limit and lists
+   * transitive chains under Non-goals. That scope line is what this closes; the
+   * ADR itself is a governed surface and is amended separately.
+   *
+   * Two guards bound the walk, both fail-CLOSED (an empty master set), never
+   * "no restriction" — the direction that made this a security defect:
+   *
+   *   - **Cycle protection.** `ancestors` carries the objects already being
+   *     resolved on this branch. Re-entering one is a metadata cycle (`A`'s
+   *     master is `B`, `B`'s master is `A`, or an object mastered by itself),
+   *     and it denies. Termination does not depend on the depth bound: the
+   *     ancestor set is strictly growing over a finite schema registry.
+   *   - **Depth bound** ({@link CBP_MAX_CHAIN_DEPTH}). A COST ceiling, not a
+   *     semantic rule — see the constant for how the value was chosen.
    */
   private async computeControlledByParentFilter(
     permissionSets: PermissionSet[],
     object: string,
     context: any,
+    /**
+     * [#11082] The `controlled_by_parent` objects already being resolved on
+     * this branch of the walk, outermost first. Empty at every real call site
+     * — the four are the CRUD middleware (caller and D10 delegator) and
+     * `getReadFilter` — and grown by one on each recursive hop.
+     */
+    ancestors: readonly string[] = [],
   ): Promise<Record<string, unknown> | null> {
     if (!this.ql || !context?.userId) return null;
     const schema = typeof this.ql.getSchema === 'function' ? this.ql.getSchema(object) : null;
@@ -5437,6 +5504,26 @@ export class SecurityPlugin implements Plugin {
 
     const rel = this.resolveCbpRelation(object);
     if (!rel) return { ...RLS_DENY_FILTER };
+
+    // [#11082] Chain guards, BEFORE any store work. Both answer with the empty
+    // master set — the same shape the #5386 sharing-resolution failure answers
+    // with, and the same posture: a chain this derivation cannot resolve denies,
+    // because the alternative ("no restriction") is the defect being fixed.
+    if (ancestors.includes(object)) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation found a CYCLE resolving '${object}' ` +
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
+    if (ancestors.length >= CBP_MAX_CHAIN_DEPTH) {
+      this.logger.error?.(
+        `[security] controlled_by_parent derivation exceeded the chain depth bound ` +
+          `(${CBP_MAX_CHAIN_DEPTH}) resolving '${object}' ` +
+          `(chain: ${[...ancestors, object].join(' -> ')}) — denying (fail-closed, #11082)`,
+      );
+      return { [rel.fk]: { $in: [] } };
+    }
 
     const masterRlsFilter = await this.computeRlsFilter(permissionSets, rel.master, 'find', context);
     // [#5386] The OWD / record-share half, resolved through the SAME helper
@@ -5455,7 +5542,23 @@ export class SecurityPlugin implements Plugin {
       );
       return { [rel.fk]: { $in: [] } };
     }
-    const masterFilter = andComposeLayers(masterRlsFilter, masterSharingFilter);
+    // [#11082] The THIRD half — the master's OWN `controlled_by_parent`
+    // derivation, resolved through this very method so the recursion cannot
+    // drift from the top-level answer. `null` for a master that is not derived
+    // (the single-level case, unchanged), and internally fail-closed at every
+    // level. This is the whole fix on the read side: without it both halves
+    // above are `null` for a derived master and the system `find` below
+    // returned every row.
+    const masterCbpFilter = await this.computeControlledByParentFilter(
+      permissionSets,
+      rel.master,
+      context,
+      [...ancestors, object],
+    );
+    const masterFilter = andComposeLayers(
+      andComposeLayers(masterRlsFilter, masterSharingFilter),
+      masterCbpFilter,
+    );
     let masterIds: string[] = [];
     try {
       const rows = await this.ql.find(rel.master, {
@@ -5508,8 +5611,22 @@ export class SecurityPlugin implements Plugin {
    * `sys_record_share`, `modifyAllRecords`) now reaches the master's children,
    * which is exactly the set that already reaches the master itself.
    *
+   * [#11082] The gate WALKS THE CHAIN. Its three legs used to run once, on the
+   * immediate master, and every one of them passes vacuously when that master is
+   * itself `controlled_by_parent`: it authors no write RLS, and the sharing leg
+   * asks `canEdit`, which answers `abstain` for it — `effectiveSharingModel`
+   * maps `controlled_by_parent` to `public`. ⛔ `abstain` is NOT `deny`, so
+   * `canEdit` returned `true` for every master row and a detail two levels down
+   * was writable org-wide. The legs now run on each hop until a master that
+   * governs its own rows is reached, with the same cycle protection and depth
+   * bound ({@link CBP_MAX_CHAIN_DEPTH}) the read derivation carries, and each
+   * additional refusal is an authorization verdict in #7474's own envelope.
+   * ⛔ Not a blanket refusal for chained declarations: the single-level case is
+   * the loop's first iteration and its answer is byte-for-byte the old one.
+   *
    * v1 scope: single-id writes. Bulk writes flow through the AST and are already
-   * scoped by the controlled-by-parent READ filter (to readable masters).
+   * scoped by the controlled-by-parent READ filter (to readable masters) — which
+   * since #11082 is itself chain-composed, so the two faces still agree.
    *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
@@ -5558,11 +5675,19 @@ export class SecurityPlugin implements Plugin {
     // declaration / missing row / null master FK) are not verdicts at all and
     // throw their own errors below — see `./errors.ts` for the ruling and the
     // reasoning behind each code.
-    const denyMasterEdit = (reason: string, recordId?: unknown): never => {
-      throw new PermissionDeniedError(
+    // [#11082] Split into a FACTORY plus the `never`-returning thrower it backs.
+    // Both spell the same sentence, from one place. The factory exists because
+    // TypeScript's control-flow analysis does not narrow through a `const` arrow
+    // that returns `never` — the same reason the `!rel` branch below throws
+    // directly rather than routing through the helper — and the chain walk needs
+    // real narrowing after each of its refusals.
+    const masterEditDenied = (reason: string, recordId?: unknown): PermissionDeniedError =>
+      new PermissionDeniedError(
         `[Security] Access denied: ${operation} on '${object}' requires edit access to its master record (${reason})`,
         { operation, object, recordId },
       );
+    const denyMasterEdit = (reason: string, recordId?: unknown): never => {
+      throw masterEditDenied(reason, recordId);
     };
 
     const rel = this.resolveCbpRelation(object);
@@ -5669,6 +5794,111 @@ export class SecurityPlugin implements Plugin {
       throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
     }
 
+    // [#11082] Walk the `controlled_by_parent` chain, one hop at a time, and run
+    // the SAME three master-edit legs on every hop.
+    //
+    // The three legs below used to run exactly once, on the immediate master.
+    // When that master is ITSELF `controlled_by_parent` all three pass
+    // vacuously: it authors no write RLS (a derived object does not — that IS
+    // the declaration), and `resolveSharingCanEdit` asks `canEdit`, which
+    // returns `abstain` for it because `effectiveSharingModel` maps
+    // `controlled_by_parent` to `public`. ⛔ `abstain` is not `deny` — the
+    // distinction is the entire write half of this defect — so `canEdit`
+    // answered `true` for EVERY master row and every detail under a two-level
+    // chain was writable org-wide. A read-side fix does not reach this path;
+    // it is a separate mechanism and it is pinned separately.
+    //
+    // Walking upward asks the master's own master the same question, which is
+    // the question `controlled_by_parent` on the master DECLARES. It terminates
+    // on the first master that governs its own rows.
+    //
+    // Every refusal added here is an AUTHORIZATION verdict and keeps the #7474
+    // envelope — `403 PERMISSION_DENIED`, named for the CALLER's object and
+    // operation, never for an ancestor the caller never asked about. The three
+    // non-verdict codes (422 metadata / 404 missing row / 422 null FK) stay
+    // scoped to the caller's own detail: an ancestor that is unresolvable,
+    // missing or dangling is not a defect in the request, and answering the
+    // caller "your master record does not exist" about a grandparent would be a
+    // false statement about their own write.
+    let hopRel = rel;
+    let hopMasterId: unknown = masterId;
+    const visited = new Set<string>([object]);
+    let hops = 0;
+    for (;;) {
+      await this.assertMasterRowEditable(permissionSets, hopRel, hopMasterId, context, opCtx, denyMasterEdit);
+
+      // Does this master govern its own rows? Then the chain ends here — this
+      // is the single-level case (#5386), unchanged.
+      const masterObject = hopRel.master;
+      if (!this.declaresControlledByParent(masterObject)) break;
+
+      if (visited.has(masterObject)) {
+        throw masterEditDenied(
+          `the controlled_by_parent chain from '${object}' re-enters '${masterObject}' (metadata cycle)`,
+          hopMasterId,
+        );
+      }
+      visited.add(masterObject);
+      if (++hops >= CBP_MAX_CHAIN_DEPTH) {
+        throw masterEditDenied(
+          `the controlled_by_parent chain from '${object}' exceeds the depth bound of ${CBP_MAX_CHAIN_DEPTH}`,
+          hopMasterId,
+        );
+      }
+
+      const nextRel = this.resolveCbpRelation(masterObject);
+      if (!nextRel) {
+        throw masterEditDenied(
+          `master '${masterObject}' declares controlled_by_parent with no relation to derive edit access from`,
+          hopMasterId,
+        );
+      }
+      // Read as SYSTEM — we only need this row's master FK, exactly as the
+      // detail's own FK was read above. A throw here is a store fault and
+      // propagates (#7505): an outage must not be reported as an access verdict.
+      const masterRow = await this.readRowById(masterObject, hopMasterId, { isSystem: true });
+      if (!masterRow) {
+        throw masterEditDenied(
+          `master '${masterObject}' record '${String(hopMasterId)}' is not present, so its own master ` +
+            `access cannot be derived`,
+          hopMasterId,
+        );
+      }
+      const nextMasterId = masterRow[nextRel.fk];
+      if (nextMasterId == null) {
+        throw masterEditDenied(
+          `master '${masterObject}' has no '${nextRel.fk}' master reference to derive edit access from`,
+          hopMasterId,
+        );
+      }
+      hopRel = nextRel;
+      hopMasterId = nextMasterId;
+    }
+  }
+
+  /**
+   * [#5386 / #8865 / #8679] The three legs that decide whether ONE principal may
+   * EDIT ONE master row — extracted verbatim from
+   * {@link SecurityPlugin.assertControlledByParentWrite} so that [#11082]'s
+   * chain walk can run them on every hop instead of only the first.
+   *
+   * ⚠️ Extraction, not a rewrite: the parameter is the `CbpRelation` itself, so
+   * the body still reads `rel.master` and the diff is a re-indentation. That is
+   * deliberate — this is a permission composition, and the failure mode this
+   * whole family produces is a SECOND copy of one that drifts from the first.
+   * There must stay exactly one.
+   *
+   * `denyMasterEdit` is passed in rather than rebuilt so every refusal, at every
+   * hop, keeps naming the CALLER's object and operation (#7474's envelope).
+   */
+  private async assertMasterRowEditable(
+    permissionSets: PermissionSet[],
+    rel: CbpRelation,
+    masterId: unknown,
+    context: any,
+    opCtx: any,
+    denyMasterEdit: (reason: string, recordId?: unknown) => never,
+  ): Promise<void> {
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).
     if (!this.permissionEvaluator.checkObjectPermission('update', rel.master, permissionSets)) {

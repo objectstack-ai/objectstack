@@ -218,6 +218,112 @@ type CapabilitySpec = {
 const hostImporters = new Map<string, HostImporter>();
 
 /**
+ * The root of the app this process is serving — resolved once by
+ * {@link anchorServedApp}, and the default resolution base for every
+ * host-anchored load in this file.
+ *
+ * `undefined` until `run()` has resolved the config path, and for any caller
+ * that reaches {@link importFromHost} / {@link Serve.importConfigPlugin}
+ * outside a boot (a unit test, an out-of-tree embedder). Both fall back to
+ * `process.cwd()` through {@link servedAppRootOrCwd}, which is the base this
+ * file used unconditionally before — so a load that somehow runs before the
+ * anchor is set behaves exactly as it did, never worse.
+ */
+let servedAppRoot: string | undefined;
+
+/**
+ * The served app's root, or the CWD when no boot has anchored one.
+ *
+ * Read as a FUNCTION at each use, never captured into a module-scope `const`:
+ * the value is not knowable at module-evaluation time (it comes from the
+ * command's own argument), and a captured copy would silently freeze the
+ * pre-boot answer into every load site.
+ */
+function servedAppRootOrCwd(): string {
+  return servedAppRoot ?? process.cwd();
+}
+
+/**
+ * Resolve the served app's config path **and anchor host resolution at it**.
+ *
+ * ── Why the app root is the CONFIG's directory, not the CWD (#11185) ────────
+ *
+ * `serve` takes the config as an ARGUMENT, so `objectstack serve
+ * /srv/app/objectstack.config.ts` is a supported invocation and the app being
+ * served need not be the directory the operator happened to stand in. Every
+ * host-anchored load resolved from `process.cwd()` regardless, so with that
+ * invocation the CLI read the WRONG `package.json`: an app-declared optional
+ * service — `@objectstack/service-cluster` and its driver, the enterprise
+ * organizations runtime, anything a customer installs — was classified
+ * `undeclared`, fell through to the framework-side fallback, and boot died with
+ *
+ *     Cannot find package '@objectstack/service-cluster': the host app does not
+ *     declare it.
+ *       host app: <the cwd, which is not the app at all>
+ *
+ * while the app's own `node_modules` carried the package the whole time. That
+ * is #10645's outage with the base wrong for a different reason: #10645 fixed
+ * the IMPORTER (bare `import()` → {@link importFromHost}), this fixes the BASE
+ * that importer is handed.
+ *
+ * This function is also the only place `run()` computes the config path, on
+ * purpose. The anchor cannot be "forgotten" or written too late by a future
+ * author, because the value every later line needs — the absolute config path —
+ * is produced by the same call that sets it.
+ *
+ * ── Why the fallback is conditional, and the one row that MOVES ───────────
+ *
+ * A resolution base is only useful if a `package.json` is there to be read
+ * (`readHostDeclaration` reads a MANIFEST — reachability is deliberately not
+ * the contract, #4719). So the config's directory is adopted only when it
+ * actually holds one, and otherwise the CWD is kept:
+ *
+ *   • config beside the app's manifest, CWD = that app  → unchanged (same dir)
+ *   • config beside the app's manifest, CWD = elsewhere → FIXED: the app wins
+ *   • config in a manifest-less subdirectory of the app → unchanged (CWD)
+ *   • no config at all (artifact boot, `<cwd>/dist/…`)  → unchanged (CWD)
+ *
+ * Those four rows are unchanged. A FIFTH one is NOT, and this comment will not
+ * claim otherwise — an absolute here ("no layout that resolves today resolves
+ * differently") reads to the next author as a licence to skip the check:
+ *
+ *   • config beside the app's manifest, CWD = elsewhere, the CWD's manifest
+ *     DECLARES the package and the served app's does NOT → the load moves off
+ *     the declared leg onto the fallback leg: it still succeeds wherever that
+ *     fallback can reach the package, and refuses where it cannot.
+ *
+ * MEASURED. Before: hostRoot was the CWD, so `declared` was true and
+ * `hostRequire.resolve` found the package under the CWD's `node_modules`.
+ * After: hostRoot is the served app, `declared` is false, and the load goes to
+ * `createHostImporter`'s fallback — which is a bare `import()` physically
+ * inside `@objectstack/types`, because `importFromHost` passes no
+ * `fallbackImport` (#11157's residue). Node ESM walks `node_modules` UPWARD
+ * from there, so the common shape survives: in a hoisted monorepo whose ROOT
+ * manifest declares the package while the served `apps/foo/package.json` does
+ * not, that walk reaches the same hoisted store and boot is what it always
+ * was — only the leg changed. It genuinely refuses only where the walk cannot
+ * reach the package: a global / `npx` CLI serving an app elsewhere, with the
+ * optional service installed only beside the operator. Remedy for anyone who
+ * lands there — declare the package in the SERVED app's own `package.json`,
+ * which is what #4719 asks for regardless.
+ *
+ * So this narrows one row toward the declaration #4719 already requires; it
+ * widens nothing. The app root is the directory that DECLARES — a directory
+ * with no manifest declares nothing, which is why anchoring at one is not
+ * attempted: it could only turn a working boot into an `undeclared` refusal.
+ */
+function anchorServedApp(configArg: string): { configPath: string; configExists: boolean } {
+  const configPath = path.resolve(process.cwd(), configArg);
+  const configExists = fs.existsSync(configPath);
+  const configDir = path.dirname(configPath);
+  servedAppRoot =
+    configExists && fs.existsSync(path.join(configDir, 'package.json'))
+      ? configDir
+      : process.cwd();
+  return { configPath, configExists };
+}
+
+/**
  * Host-anchored dynamic import: load a package **as the app being served
  * declares it**, falling back to the CLI's own resolution when the app does not
  * declare it (`createHostImporter`, `@objectstack/types/node`).
@@ -269,10 +375,13 @@ const hostImporters = new Map<string, HostImporter>();
  * this file for every app-declarable optional load and fails on a bare one.
  *
  * @param hostRoot Directory holding the served app's `package.json`. Defaults to
- * the process CWD — the same root `serve` reads `objectstack.config.ts` from, and
- * the value its boot path computes as `hostRoot`.
+ * {@link servedAppRootOrCwd} — the directory `serve` read the app's
+ * `objectstack.config.ts` from, which is the app's own root and NOT necessarily
+ * the process CWD (#11185). The default is what makes this helper correct from
+ * every line of the file without an author having to know a root exists: the
+ * same reason #10769 made it a hoisted declaration rather than a binding.
  */
-function importFromHost(specifier: string, hostRoot: string = process.cwd()): Promise<any> {
+function importFromHost(specifier: string, hostRoot: string = servedAppRootOrCwd()): Promise<any> {
   // Memoised per root so one boot shares a single host `require`, exactly as the
   // one mid-function `const` did before it was hoisted out here.
   let importer = hostImporters.get(hostRoot);
@@ -537,11 +646,12 @@ export default class Serve extends Command {
    * and this refusal is where that request would come from.
    *
    * @param pluginSpecifier The string as the app wrote it in `plugins: [...]`.
-   * @param hostRoot Root of the served app; defaults to the process CWD, the
-   * same value `serve`'s boot path computes.
+   * @param hostRoot Root of the served app; defaults to
+   * {@link servedAppRootOrCwd}, the same value `serve`'s boot path computes and
+   * passes explicitly at its own call site (#11185).
    */
   static async importConfigPlugin(pluginSpecifier: string, hostRoot?: string): Promise<any> {
-    const root = hostRoot ?? process.cwd();
+    const root = hostRoot ?? servedAppRootOrCwd();
     // Refused BEFORE the try, and deliberately not wrapped in the
     // `Failed to import plugin '<spec>': …` text below: nothing was imported,
     // and calling a refusal an import failure sends the author looking for a
@@ -1206,7 +1316,10 @@ export default class Serve extends Command {
 
     const isDev = flags.dev || process.env.NODE_ENV === 'development';
 
-    const absolutePath = path.resolve(process.cwd(), args.config!);
+    // Resolves the config path AND anchors every host-anchored load in this
+    // file at the app that owns it (#11185) — one call, so the anchor cannot be
+    // written too late or left out. See `anchorServedApp`.
+    const { configPath: absolutePath, configExists } = anchorServedApp(args.config!);
     const relativeConfig = path.relative(process.cwd(), absolutePath);
 
     // ── Artifact-first fallback ──────────────────────────────────────
@@ -1218,7 +1331,7 @@ export default class Serve extends Command {
     // `apps/objectos/objectstack.config.ts`, lifted into the framework
     // so any project can `objectstack start` against just a
     // `dist/objectstack.json`.
-    const configMissing = !fs.existsSync(absolutePath);
+    const configMissing = !configExists;
     let useArtifactFallback = false;
     let useEmptyBoot = false;
 
@@ -1684,14 +1797,20 @@ export default class Serve extends Command {
       // The root of the app being served: where its `package.json` and
       // `objectstack.config.ts` live. `importFromHost` (module scope, top of this
       // file) anchors every app-declarable optional load here, and defaults to
-      // this same `process.cwd()`, so a load written ANYWHERE in this method —
-      // above this line included — resolves from the app rather than the CLI.
-      // That reachability is the point: see the helper's own note for the two
-      // shipped instances (cloud#1013, #10645) that a mid-function binding cost.
+      // this same value, so a load written ANYWHERE in this method — above this
+      // line included — resolves from the app rather than the CLI. That
+      // reachability is the point: see the helper's own note for the two shipped
+      // instances (cloud#1013, #10645) that a mid-function binding cost.
+      //
+      // NOT `process.cwd()`: the config is an ARGUMENT, so the app being served
+      // is the directory that config was read from, which need not be the
+      // directory the operator stood in (#11185). `anchorServedApp` resolved it
+      // at the top of this method; this reads the same answer rather than
+      // recomputing a second one, so the file has ONE notion of the app root.
       //
       // #4719: what the host root DECLARES is the contract; being merely
       // reachable through a hoisted workspace store is not, and is refused.
-      const hostRoot = process.cwd();
+      const hostRoot = servedAppRootOrCwd();
 
       // Cluster wiring: env-driven driver selection (mirrors OS_DATABASE_URL).
       // The remote driver self-registers on import; import it dynamically so it

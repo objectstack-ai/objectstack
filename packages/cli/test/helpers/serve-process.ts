@@ -25,6 +25,139 @@ export function randomPort(): string {
   return String(40000 + Math.floor(Math.random() * 20000));
 }
 
+/**
+ * The variables vitest sets on its own WORKER process, which must never reach a
+ * spawned `os serve` child (#11267).
+ *
+ * ## Why this exists — measured, not defensive
+ *
+ * A child built with `{ ...process.env, … }` inherits the **vitest worker's**
+ * environment, and vitest sets `TEST=true` on that worker unconditionally,
+ * independent of `NODE_ENV`. better-auth 1.7.1 reads `TEST` **directly**:
+ *
+ * ```js
+ * // @better-auth/core/dist/env/env-impl.mjs:36
+ * const isTest = () => nodeENV === "test" || toBoolean(env.TEST);
+ * // better-auth/dist/context/create-context.mjs:210
+ * skipOriginCheck: options.advanced?.disableOriginCheck !== void 0
+ *   ? options.advanced.disableOriginCheck
+ *   : isTest() ? true : false,
+ * ```
+ *
+ * So an inherited `TEST=true` disables better-auth's origin/CSRF validation
+ * **entirely**, one layer below anything `serve.ts` or `plugin-auth` decide,
+ * and independent of whatever `NODE_ENV` the caller sets on the child. The
+ * dangerous direction is not a red test: it is a security-posture assertion
+ * that can never go red for the reason it exists, which reads as coverage.
+ *
+ * MEASURED on a real boot through this helper's own spawn recipe — same
+ * fixture, same code, the five variables below the only difference. Probe:
+ * `POST /api/v1/auth/sign-in/email` with `Origin: https://evil.example.com`
+ * (untrusted under every branch of `serve.ts`'s trusted-origin assembly,
+ * including the `isDev` `http://localhost:*` convenience that `run-dev.js`
+ * always turns on):
+ *
+ * | child env | answer |
+ * |---|---|
+ * | `{ ...process.env }` (this helper, before #11267) | `401 INVALID_EMAIL_OR_PASSWORD` — origin ACCEPTED, validation never ran |
+ * | family below stripped | `403 INVALID_ORIGIN` — validation ran and rejected |
+ * | only `TEST` stripped | `403 INVALID_ORIGIN` |
+ *
+ * The third row is the isolation for THAT probe: `TEST` alone is what
+ * better-auth reads.
+ *
+ * ## ⚠️ `VITEST` is NOT cosmetic either — a claim this file got wrong once
+ *
+ * The first revision of this header said the `VITEST*` entries were stripped
+ * as hygiene, "nothing in `os serve` reads them today". That was **false**, and
+ * CI found the counterexample:
+ *
+ * ```ts
+ * // packages/services/service-settings/src/local-crypto-provider.ts:133
+ * const detectMode = (env: EnvMap): CryptoMode => {
+ *   if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+ *   if (env.NODE_ENV === 'production') return 'production';
+ *   return 'development';
+ * };
+ * ```
+ *
+ * So an inherited `VITEST=true` put every spawned child's crypto layer in
+ * `test` mode — ephemeral key, never touches disk, never refuses — no matter
+ * what posture the rest of the boot was in. That is the SAME defect class as
+ * the `TEST` leak one layer over: a security-relevant gate (here, stable
+ * encryption-key enforcement) softened by a variable the child inherited from
+ * the test runner rather than by anything the code under test decided.
+ * Stripping `VITEST` is therefore load-bearing in its own right, and the
+ * `serve-node-env-production-default` pin going red the moment it stopped
+ * leaking is the gate working, not the gate misfiring: that fixture's
+ * "production posture" had been genuine for auth and fake for crypto.
+ *
+ * The consequence is why `OS_SECRET_KEY` is a default below. Once the child
+ * stops claiming to be a vitest worker, `detectMode` answers `development`
+ * for the ordinary boots here, and development mode **persists** a minted key
+ * to `$HOME/.objectstack/dev-crypto-key`. Measured: with that file absent a
+ * production-posture boot refuses to start, and with it present — put there by
+ * any earlier dev-mode boot in the same run — the same boot succeeds. That is
+ * a cross-test ordering coupling through the runner's home directory, and
+ * under vitest's parallel workers it is nondeterministic. An explicit key
+ * removes both halves: nothing is written, and nothing is depended on.
+ *
+ * ⛔ `NODE_ENV` is deliberately NOT in this family. The vitest worker exports
+ * `NODE_ENV=test` too, but every caller here already pins the child's
+ * `NODE_ENV` explicitly (`bin/run-dev.js` sets `development` before argv is
+ * even parsed; the `bin/run.js` spawners pass it in `env`), so stripping it
+ * would change which entrypoint those tests resolve through rather than remove
+ * a leak. That is a different defect with its own card (#11317) — ⛔ do not
+ * fold it in here.
+ */
+/**
+ * A fixed, obviously-synthetic 32-byte key (64 hex chars) for spawned children,
+ * so no test boot has to mint one — see `runServe()` and the header above.
+ * ⛔ Test fixtures only; it is in the repo in plaintext and encrypts nothing
+ * anyone keeps.
+ */
+export const E2E_SECRET_KEY = '0e2e'.repeat(16);
+
+export const VITEST_WORKER_ENV_KEYS = [
+  'TEST',
+  'VITEST',
+  'VITEST_WORKER_ID',
+  'VITEST_POOL_ID',
+  'VITEST_MODE',
+] as const;
+
+/** `TEST` exactly, or any `VITEST`-prefixed variable — see `childEnv()`. */
+function isVitestWorkerKey(key: string): boolean {
+  return key === 'TEST' || key === 'VITEST' || key.startsWith('VITEST_');
+}
+
+/**
+ * Build the environment for a spawned CLI child: this process's environment
+ * minus the vitest worker family above, plus `overrides`.
+ *
+ * The strip is a **class**, not the fixed list: `TEST` exactly, plus anything
+ * matching `VITEST`/`VITEST_*`. `VITEST_WORKER_ENV_KEYS` names the five that
+ * vitest 4 exports today (and is what the pin asserts against), but a future
+ * runner variable in that namespace is caught without anyone having to
+ * rediscover this trap first.
+ *
+ * `overrides` is applied AFTER the strip, so a test that genuinely wants one of
+ * these set in its child can still say so explicitly — the point is that
+ * nothing arrives by accident. An `undefined` value UNSETS a variable for the
+ * child: Node's `spawn()` omits `undefined`-valued entries rather than
+ * stringifying them, which `''` would not do.
+ */
+export function childEnv(
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (isVitestWorkerKey(key)) continue;
+    env[key] = value;
+  }
+  return { ...env, ...overrides };
+}
+
 export interface ServeRun {
   stdout: string;
   stderr: string;
@@ -56,16 +189,22 @@ export function runServe(
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {
       cwd,
-      env: {
-        ...process.env,
+      // `childEnv`, never a bare `...process.env` — see its header for the
+      // measured reason (#11267).
+      env: childEnv({
         NO_COLOR: '1',
         // Keep the fixture self-contained: no file written, no port conflict
         // with another agent's dev server, no inherited log level.
         OS_DATABASE_URL: ':memory:',
         OS_LOG_LEVEL: '',
         OS_DISABLE_CONSOLE: '1',
+        // Same "no file written" rule, extended to the crypto key — see the
+        // header. Without this the child mints one and PERSISTS it to
+        // `$HOME/.objectstack/dev-crypto-key`, which both litters the runner's
+        // home directory and couples unrelated tests to each other through it.
+        OS_SECRET_KEY: E2E_SECRET_KEY,
         ...(opts.env ?? {}),
-      },
+      }),
     });
 
     let stdout = '';

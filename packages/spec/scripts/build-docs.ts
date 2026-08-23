@@ -621,7 +621,7 @@ const ROOT_INDEX_INTRO =
  */
 const CATEGORY_BLURBS: Record<string, string> = {
   ai: 'Agents, tools, skills, RAG and knowledge sources, model registry, conversations.',
-  api: 'REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.',
+  api: 'REST contracts, endpoints, routing, realtime, batch, discovery.',
   automation: 'Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.',
   cloud: 'Environments, packages and versions, marketplace, developer portal, tenancy.',
   data: 'Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.',

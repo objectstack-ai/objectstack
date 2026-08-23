@@ -105,6 +105,27 @@ describe('renderDiffMessage', () => {
     expect(lines[2]).toContain('expected datetime');
     expect(lines[2]).toContain('actual text');
   });
+
+  /**
+   * [#11166] `unreachable` is a member of the kind vocabulary (the "could not
+   * be read" entry — a statement that validation was indeterminate, not a
+   * schema fact) and renders like every other kind: the raw kind name plus the
+   * carried error text, so an unknown-to-a-consumer entry is still loud.
+   */
+  it('renders the `unreachable` kind with the carried error text (#11166)', () => {
+    const diffs: SchemaDiffEntry[] = [
+      {
+        kind: 'unreachable',
+        remoteName: 'fact_orders',
+        actual: 'connect ECONNREFUSED 10.0.0.5:5432',
+        severity: 'error',
+      },
+    ];
+    const lines = renderDiffMessage('warehouse', 'wh_order', diffs).split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('unreachable');
+    expect(lines[1]).toContain('connect ECONNREFUSED 10.0.0.5:5432');
+  });
 });
 
 describe('ExternalSchemaMismatchError', () => {

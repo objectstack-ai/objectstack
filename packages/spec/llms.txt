@@ -2,8 +2,6 @@
 
 > **SYSTEM NOTE**: This file provides a high-level summary of the ObjectStack Protocol to help LLMs understand the codebase structure and intent.
 > **Version**: 3.0.0
-> **Schema Count**: 171 Zod schemas, 191 test files, 5,157 tests
-> **Last Updated**: 2026-02-12
 
 ## 1. Architecture Overview (The "Three-Layer Model")
 
@@ -168,7 +166,6 @@ function registerObject(rawConfig: unknown) {
 | `IAuthService` | authenticate, authorize, validateToken |
 | `IAutomationService` | executeFlow, triggerWorkflow |
 | `IUIService` | **DEPRECATED** — use IMetadataService.getView(), .listViews(), .getEffective('view', name, { userId }) |
-| `IGraphQLService` | execute, subscribe |
 
 ---
 

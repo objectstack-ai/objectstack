@@ -180,6 +180,12 @@ export interface ExternalSchemaDriftEvent {
  *   - `warn`   → logs the diff and continues,
  *   - `ignore` → does nothing.
  *
+ * `onMismatch` governs MEASURED mismatches only. A row whose diffs are
+ * `kind: 'unreachable'` (the remote could not be read, so validation was
+ * indeterminate — see the kind's docblock in `@objectstack/spec/shared`) never
+ * feeds that policy: it is logged loudly and boot continues, under every
+ * `onMismatch` value (maintainer ruling 2026-08-23, #11166).
+ *
  * No-op when the `external-datasource` service is not registered (federation
  * unused).
  */
@@ -273,18 +279,49 @@ export class ExternalValidationPlugin implements Plugin {
     }
 
     for (const r of failures) {
+      // [#11166] An `unreachable` row is NOT a schema mismatch — the remote
+      // (or the object's own definition) could not be read, so validation was
+      // indeterminate and there is no measured fact to gate on. Maintainer
+      // ruling 2026-08-23: no `onMismatch: 'fail'` abort for unreachable —
+      // loud logging instead. The log is deliberately OUTSIDE the `onMismatch`
+      // resolution: that policy governs how a measured mismatch is handled,
+      // and an outage is a different condition — even an `ignore` datasource's
+      // operator is told their boot ran unverified. `warn`, not `error`, per
+      // AGENTS.md's degradation table: this is a functional degradation (a
+      // check did not run, and says so) — nothing claims to have persisted.
+      const unreachable = r.diffs.filter((d) => d.kind === 'unreachable');
+      const schemaDiffs = r.diffs.filter((d) => d.kind !== 'unreachable');
+      if (unreachable.length > 0) {
+        ctx.logger?.warn?.(
+          '[external-validation] federated object could not be validated — the remote (or the '
+            + 'object definition) could not be read, so its schema is UNVERIFIED for this boot: no '
+            + 'mismatch abort applies because no mismatch was measured, and boot continues. The '
+            + 'remote table may be perfectly intact; do not "repair" a schema nobody has seen. Fix: '
+            + 'check the datasource connection/credentials, then re-run validation (restart, '
+            + '`os datasource validate`, or the background drift check).',
+          {
+            datasource: r.datasource,
+            object: r.object,
+            errors: unreachable.map((d) => d.actual ?? '(no error text)'),
+          },
+        );
+      }
+      // A row today carries either measured diffs or one unreachable row, but
+      // judge on what is present rather than on the producer's current shape:
+      // only MEASURED diffs reach the onMismatch policy.
+      if (schemaDiffs.length === 0) continue;
       const mode = await resolveOnMismatch(metadata, r.datasource);
       if (mode === 'ignore') continue;
       if (mode === 'warn') {
         ctx.logger?.warn?.('[external-validation] external schema drift', {
           datasource: r.datasource,
           object: r.object,
-          diffs: r.diffs,
+          diffs: schemaDiffs,
         });
         continue;
       }
       // mode === 'fail' (default)
-      throw new ExternalSchemaMismatchError(r.datasource, r.object, r.diffs);
+      throw new ExternalSchemaMismatchError(r.datasource, r.object, schemaDiffs);
     }
   }
 
@@ -447,10 +484,27 @@ export class ExternalValidationPlugin implements Plugin {
       }
     }
     if (drifted.length > 0) {
-      ctx.logger?.warn?.('[external-validation] background drift detected', {
-        datasource,
-        objects: drifted.map((r) => r.object),
-      });
+      // [#11166] Same distinction as the boot gate, one layer down: an
+      // `unreachable` row is "could not watch", not "schema changed". The
+      // event above is still emitted for it — audit/notification consumers
+      // discriminate on the entry's `kind` — but the operator-facing summary
+      // must not claim drift for a remote nobody read.
+      const changed = drifted.filter((r) => r.diffs.some((d) => d.kind !== 'unreachable'));
+      const unread = drifted.filter((r) => r.diffs.every((d) => d.kind === 'unreachable'));
+      if (changed.length > 0) {
+        ctx.logger?.warn?.('[external-validation] background drift detected', {
+          datasource,
+          objects: changed.map((r) => r.object),
+        });
+      }
+      if (unread.length > 0) {
+        ctx.logger?.warn?.(
+          '[external-validation] background drift check could not read the remote — these objects '
+            + 'are UNWATCHED this tick, not drifted; the schema was not seen. Fix: check the '
+            + 'datasource connection/credentials.',
+          { datasource, objects: unread.map((r) => r.object) },
+        );
+      }
     }
     return drifted.length;
   }

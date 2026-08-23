@@ -85,13 +85,27 @@ const REPO_ROOT = new URL('../../', import.meta.url);
 // value). Shrink-only: lower freely, raise only with a maintainer ruling
 // quoted in the raising PR (see header).
 export const CEILINGS = new Map([
-  ['.claude/skills/pm-dispatch/SKILL.md', 682],
+  // Lowered 682 → 666 by the maintainer-ordered whole-text restructuring round
+  // (ruling 2026-08-23, verbatim: 「接受你的重构提案」): the four long
+  // state-table rows and the clause-② review-chain bullets sank to the two new
+  // references below, and the report-contract JSON is single-sourced from the
+  // dev-agent definition. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/SKILL.md', 666],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
   // Lowered 244 → 243: the decision-analysis template entry became a pointer
   // to the reference file below (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 243],
+  // Lowered 243 → 242 by the restructuring round: the stale hourly-fire
+  // rationale clause collapsed into a pointer at contract-review.md.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 242],
+  // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
+  // mechanism detail extracted from SKILL.md — the four long state-table rows
+  // (state-machine.md) and the clause-② review-chain operational detail
+  // (contract-review.md). Set at landed line counts (headroom 0, same
+  // convention as the entries above).
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 43],
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 44],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
