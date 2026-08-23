@@ -831,9 +831,32 @@ describe('translation unknown-key strictness (#4001)', () => {
         kpi_revenue_won: { label: 'Revenue (Won)' },
         ai_briefing: { title: 'Ask the AI', description: 'Open the panel.' },
         lead_picker: { placeholder: 'Search…', emptyText: 'No records' },
-        new_lead_form: { submitLabel: 'Create' },
       });
       expect(result.success).toBe(true);
+    });
+
+    it('refuses `submitLabel` with the retirement prescription (#10926)', () => {
+      // Flipped, not deleted: until #10926 this case pinned `submitLabel` as
+      // an accepted copy key (latterly on a bespoke component type, after
+      // #9249 retired `element:form`, its only spec-declared carrier). The
+      // maintainer ruled retire over re-anchor, so the same authored shape now
+      // pins the rejection — and the rejection must carry the upgrade.
+      const result = parse({ new_lead_form: { submitLabel: 'Create' } });
+      expect(result.success).toBe(false);
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message;
+      expect(message).toContain('`submitLabel` was removed in @objectstack/spec 17 (#10926');
+      expect(message).toContain('`submitText`');
+    });
+
+    it('refuses the retired `submit` alias spelling with the same story', () => {
+      // `submit` was an alias (rejection-path suggestion) pointing at
+      // `submitLabel`; with the target retired the alias converts to guidance
+      // so the spelling lands on the prescription instead of a dangling
+      // rename suggestion.
+      const result = parse({ new_lead_form: { submit: 'Create' } });
+      expect(result.success).toBe(false);
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message;
+      expect(message).toContain('`submit` was the alias spelling of `submitLabel`');
     });
 
     it('stays `.strict()` — an invented key is still refused', () => {

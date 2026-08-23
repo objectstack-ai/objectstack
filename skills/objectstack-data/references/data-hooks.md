@@ -371,6 +371,7 @@ The sandbox is handed a **JSON snapshot** of these (built by
 | `ctx.api` | object | Cross-object CRUD. Gated by `api.read` / `api.write` — see below. |
 | `ctx.log` | `{ info, warn, error }` | Gated by `log`. Call **`ctx.log.info(msg, data?)`** — `ctx.log` is an **object, not** callable as `ctx.log(msg)`. Emission is **best-effort** (see Troubleshooting). |
 | `ctx.crypto` | `{ randomUUID }` | Gated by `crypto.uuid`. |
+| `ctx.title` | `(field?) => Promise<string \| null>` | **Name the record instead of printing its id.** `await ctx.title()` resolves this object's `nameField` — including when it is a **formula**, evaluated server-side, with no extra read. `await ctx.title('account_id')` resolves the related record's title through a lookup column (one `findOne`, gated by `api.read`; the no-argument form needs no capability). `null` when there is no title — it never falls back to the id. |
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
@@ -442,7 +443,7 @@ set of legal tokens (`HookBodyCapability`) is exactly five:
 
 | Token | Unlocks |
 |:--|:--|
-| `api.read` | `ctx.api.object(n).find` / `findOne` / `count` |
+| `api.read` | `ctx.api.object(n).find` / `findOne` / `count`; also `ctx.title('<lookup field>')`, which reads that related record. Plain `ctx.title()` reads nothing and needs no token. |
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` / `upsert` |
 | `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one driver transaction** (commit on return, rollback on throw). Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |

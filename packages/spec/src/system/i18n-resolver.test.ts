@@ -1078,7 +1078,6 @@ describe('translatePage', () => {
               kpi_revenue_won: { label: '已赢收入' },
               ai_briefing: { title: '询问 AI 助手', description: '从右侧边缘打开助手面板。' },
               lead_picker: { placeholder: '搜索线索…', emptyText: '暂无记录' },
-              new_lead_form: { submitLabel: '创建' },
             },
           },
         },
@@ -1103,11 +1102,11 @@ describe('translatePage', () => {
           { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
           { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
-          // Was `element:form` until #9249 retired that element whole; the
-          // resolver is id-addressed and type-agnostic, and the copy-key face
-          // documents bespoke component types as a legal route for the same
-          // vocabulary — so the `submitLabel` pin rides one of those, pending
-          // the #10926 carrier decision.
+          // Was `element:form` until #9249 retired that element whole, then a
+          // bespoke type carrying the `submitLabel` pin pending #10926. That
+          // ruling retired the key from the copy face, so the node now pins
+          // the NEGATIVE: a bespoke component's `submitLabel` is no longer
+          // overlaid, however the bundle spells it.
           { type: 'hotcrm:quick_form', id: 'new_lead_form', properties: { object: 'lead', submitLabel: 'Create' } },
           { type: 'page:card', id: 'untranslated_card', properties: { title: 'Still English' } },
         ],
@@ -1129,7 +1128,26 @@ describe('translatePage', () => {
       const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
       expect(byId(out, 'lead_picker').properties.placeholder).toBe('搜索线索…');
       expect(byId(out, 'lead_picker').properties.emptyText).toBe('暂无记录');
-      expect(byId(out, 'new_lead_form').properties.submitLabel).toBe('创建');
+    });
+
+    it('no longer overlays `submitLabel` — the key retired from the copy face (#10926)', () => {
+      // Flipped, not deleted: this used to assert the overlay ('创建'). The
+      // schema now refuses `submitLabel` in a bundle, but the resolver is
+      // deliberately schema-independent (it reads whatever object it is
+      // handed — stored rows predating the retirement reach it via the raw
+      // sync path), so the negative is worth pinning on its own: an off-spec
+      // entry carrying the retired key must be IGNORED, not overlaid.
+      const offSpecBundle = {
+        'zh-CN': {
+          pages: {
+            sales_home_page: {
+              components: { new_lead_form: { submitLabel: '创建' } },
+            },
+          },
+        },
+      } as unknown as TranslationBundle;
+      const out = translatePage(homePage(), offSpecBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'new_lead_form').properties.submitLabel).toBe('Create');
     });
 
     it('preserves non-copy properties alongside the overlay', () => {

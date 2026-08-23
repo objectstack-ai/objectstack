@@ -37,6 +37,7 @@
  * ```
  *
  * @example
+ * <!-- os:check -->
  * ```typescript
  * import {
  *   ObjectDesignerConfigSchema,

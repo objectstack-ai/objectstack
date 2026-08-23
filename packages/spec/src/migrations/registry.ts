@@ -5143,7 +5143,19 @@ const step18: MigrationStep = {
     'fails the row (`import_reference_not_found`), with or without the key. The eleven ' +
     'alias spellings convert to guidance so every spelling lands on the prescription; the ' +
     'mechanical conversion strips the four keys from stored sources (pure lossless ' +
-    'deletes — none ever had an effect to lose).',
+    'deletes — none ever had an effect to lose). ' +
+    'Finally, it retires the component-translation copy key ' +
+    '`pages.<name>.components.<id>.submitLabel` and its `submit` alias (#10926, ADR-0049; ' +
+    'maintainer ruling 2026-08-22): the face is measured, not mirrored — each copy key ' +
+    'exists because some component in `ComponentPropsMap` declares it — and ' +
+    '`submitLabel`\'s only declarer was `element:form`, retired whole above (#9249), so ' +
+    'the key had no declared component left to translate and the resolver overlay was ' +
+    'its only reader. Retire won over re-anchor because the live form surface ' +
+    '(`object-form`) speaks `submitText` (`I18nLabelSchema`), localizable at its own ' +
+    'authoring site; re-anchoring would have widened the face for one word. The ' +
+    'mechanical conversion strips the key from stored bundles and items (pure lossless ' +
+    'delete — nothing read it since #9249), at the acknowledged cost of dropping the ' +
+    'bespoke-component route for that one word.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5154,6 +5166,7 @@ const step18: MigrationStep = {
     'metric-filters-removed',
     'record-highlights-field-icon-removed',
     'mapping-lookup-params-removed',
+    'translation-component-submit-label-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

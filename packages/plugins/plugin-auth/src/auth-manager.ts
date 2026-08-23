@@ -918,8 +918,9 @@ export function normalizeAuthEmailLocale(raw: string | undefined): string | unde
  *
  * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
  * `isAPIError(err) = err instanceof APIError || err?.name === 'APIError'`
- * (better-call@1.3.7 `dist/utils.mjs:57`), consumed at `dist/router.mjs:93`,
- * where everything else takes the `console.error` + `500 / null body` branch.
+ * (better-call@1.4.0 `dist/utils.mjs:55-56`), consumed at `dist/router.mjs:92`,
+ * where everything else takes the `console.error` + `500 / null body` branch
+ * (`:93-97`; re-measured 2026-08-23 against the installed copy).
  * A plain `Error` therefore buried `TOO_MANY_REQUESTS` in a server log while the
  * per-number wall on the same endpoint ({@link AuthManager.assertPhoneOtpSendAllowed})
  * answered 429 — one endpoint, two voices.

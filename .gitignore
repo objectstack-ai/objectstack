@@ -63,8 +63,10 @@ packages/spec/json-schema/
 # Generated bundle size reports
 packages/spec/bundle-size-report.json
 
-# Throwaway build dir for `check:skill-examples` (extracted skill code blocks)
+# Throwaway build dirs for `check:skill-examples` — one per surface (a surface
+# is wiped when written, so surfaces sharing a resolution dir need their own).
 packages/spec/.examples-build/
+packages/spec/.examples-build-src/
 
 # Generated SBOM (rebuilt during release)
 sbom.json

@@ -34,6 +34,7 @@
  * ```
  * 
  * @example
+ * <!-- os:check -->
  * ```typescript
  * import { StudioPluginManifestSchema } from '@objectstack/spec/studio';
  * 
