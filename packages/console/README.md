@@ -29,10 +29,22 @@ in sync.
 | Use | Cloud overlays, advanced users, anyone consuming Console directly | What every `@objectstack/cli` install gets by default |
 
 The framework CLI's `resolveConsolePath()` (in
-`packages/cli/src/utils/console.ts`) prefers `@objectstack/console` and
-falls back to `@object-ui/console` when present — so cloud's Docker
-overlay (which `cp -r`s its build over `node_modules/@object-ui/console`)
-keeps working.
+`packages/cli/src/utils/console.ts`) resolves `@objectstack/console` and
+nothing else — `require.resolve('@objectstack/console/package.json')` from
+the app and from the CLI itself, then a direct
+`<cwd>/node_modules/@objectstack/console` check. Both require the resolved
+`package.json` to be *named* `@objectstack/console`, so there is **no**
+`node_modules` fallback to the `@object-ui/console` npm package; it is
+never consulted.
+
+`@object-ui/console` survives in the CLI in exactly one place: the
+sibling-repo dev fallback, which accepts a checked-out **source** tree at
+`../objectui/apps/console` whose `package.json` `name` is either spelling
+(objectui still names that workspace package `@object-ui/console`). That is
+a source-checkout probe for developing the framework against in-tree
+objectui edits — not a package resolution. Cloud and objectos Docker images
+overlay their own Console build into `@objectstack/console`'s `dist/` — not
+into any `@object-ui/console` directory.
 
 ## Updating
 
