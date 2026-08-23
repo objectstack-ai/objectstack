@@ -487,6 +487,17 @@ function adapterColumn(field: string): string {
  * schema the plugin declares. Both keys are inert on the pinned rc.1, whose
  * factory spreads its options and reads only the keys it knows.
  *
+ * Cheapest is not a compromise on WHAT is compared, which is the half that
+ * would have made this repair worthless. Measured 2026-08-23 against the
+ * published 1.7.1: this shape and a realistic static connection
+ * (`connections: [{ id, credentials: [{ type: 'bearer', id, token }] }]`)
+ * declare the SAME seven models with the SAME column sets, so the surface this
+ * gate compares is the one a configured deployment gets rather than an artefact
+ * of the cheapest constructor call. A connection entry is also not the smaller
+ * input it looks like: `validateConnections` goes on to read
+ * `connection.credentials.length`, so a half-specified entry throws the same
+ * TypeError one line further down.
+ *
  * ⚠️ Deliberately NOT configured: `managedConnections`. The auth manager does
  * not pass it, and it is what adds the conditional
  * `scimManagedConnection` / `scimManagedCredential` / `scimManagedConnectionEvent`
