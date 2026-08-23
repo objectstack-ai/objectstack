@@ -63,9 +63,44 @@ export function randomPort(): string {
  * | family below stripped | `403 INVALID_ORIGIN` — validation ran and rejected |
  * | only `TEST` stripped | `403 INVALID_ORIGIN` |
  *
- * The third row is the isolation: **`TEST` alone is load-bearing.** The
- * `VITEST*` entries are stripped as hygiene — nothing in `os serve` reads them
- * today, and a child that believes it is a vitest worker is a lie regardless.
+ * The third row is the isolation for THAT probe: `TEST` alone is what
+ * better-auth reads.
+ *
+ * ## ⚠️ `VITEST` is NOT cosmetic either — a claim this file got wrong once
+ *
+ * The first revision of this header said the `VITEST*` entries were stripped
+ * as hygiene, "nothing in `os serve` reads them today". That was **false**, and
+ * CI found the counterexample:
+ *
+ * ```ts
+ * // packages/services/service-settings/src/local-crypto-provider.ts:133
+ * const detectMode = (env: EnvMap): CryptoMode => {
+ *   if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+ *   if (env.NODE_ENV === 'production') return 'production';
+ *   return 'development';
+ * };
+ * ```
+ *
+ * So an inherited `VITEST=true` put every spawned child's crypto layer in
+ * `test` mode — ephemeral key, never touches disk, never refuses — no matter
+ * what posture the rest of the boot was in. That is the SAME defect class as
+ * the `TEST` leak one layer over: a security-relevant gate (here, stable
+ * encryption-key enforcement) softened by a variable the child inherited from
+ * the test runner rather than by anything the code under test decided.
+ * Stripping `VITEST` is therefore load-bearing in its own right, and the
+ * `serve-node-env-production-default` pin going red the moment it stopped
+ * leaking is the gate working, not the gate misfiring: that fixture's
+ * "production posture" had been genuine for auth and fake for crypto.
+ *
+ * The consequence is why `OS_SECRET_KEY` is a default below. Once the child
+ * stops claiming to be a vitest worker, `detectMode` answers `development`
+ * for the ordinary boots here, and development mode **persists** a minted key
+ * to `$HOME/.objectstack/dev-crypto-key`. Measured: with that file absent a
+ * production-posture boot refuses to start, and with it present — put there by
+ * any earlier dev-mode boot in the same run — the same boot succeeds. That is
+ * a cross-test ordering coupling through the runner's home directory, and
+ * under vitest's parallel workers it is nondeterministic. An explicit key
+ * removes both halves: nothing is written, and nothing is depended on.
  *
  * ⛔ `NODE_ENV` is deliberately NOT in this family. The vitest worker exports
  * `NODE_ENV=test` too, but every caller here already pins the child's
@@ -75,6 +110,14 @@ export function randomPort(): string {
  * a leak. That is a different defect with its own card (#11317) — ⛔ do not
  * fold it in here.
  */
+/**
+ * A fixed, obviously-synthetic 32-byte key (64 hex chars) for spawned children,
+ * so no test boot has to mint one — see `runServe()` and the header above.
+ * ⛔ Test fixtures only; it is in the repo in plaintext and encrypts nothing
+ * anyone keeps.
+ */
+export const E2E_SECRET_KEY = '0e2e'.repeat(16);
+
 export const VITEST_WORKER_ENV_KEYS = [
   'TEST',
   'VITEST',
@@ -155,6 +198,11 @@ export function runServe(
         OS_DATABASE_URL: ':memory:',
         OS_LOG_LEVEL: '',
         OS_DISABLE_CONSOLE: '1',
+        // Same "no file written" rule, extended to the crypto key — see the
+        // header. Without this the child mints one and PERSISTS it to
+        // `$HOME/.objectstack/dev-crypto-key`, which both litters the runner's
+        // home directory and couples unrelated tests to each other through it.
+        OS_SECRET_KEY: E2E_SECRET_KEY,
         ...(opts.env ?? {}),
       }),
     });

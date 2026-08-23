@@ -34,8 +34,13 @@
  *
  * Isolated when this was measured: stripping ONLY `TEST` (leaving `VITEST`,
  * `VITEST_WORKER_ID`, `VITEST_POOL_ID`, `VITEST_MODE` in place) also answers
- * `403 INVALID_ORIGIN`. `TEST` alone is load-bearing; the `VITEST*` entries are
- * stripped as hygiene, not because anything reads them today.
+ * `403 INVALID_ORIGIN`, so `TEST` alone is what better-auth reads.
+ *
+ * ⚠️ `VITEST` is not merely hygiene either, though this file said so in its
+ * first revision and was wrong: `local-crypto-provider.ts:133` reads it
+ * (`if (env.VITEST || env.NODE_ENV === 'test') return 'test'`) and an
+ * inherited one silently put a spawned child's crypto layer in test mode. Same
+ * class, different gate. `helpers/serve-process.ts` carries the measurement.
  *
  * ## ⚠️ The first boot deliberately builds the env the WRONG way
  *
@@ -57,7 +62,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { CLI, TSX, childEnv, randomPort, VITEST_WORKER_ENV_KEYS } from './helpers/serve-process.js';
+import { CLI, TSX, E2E_SECRET_KEY, childEnv, randomPort, VITEST_WORKER_ENV_KEYS } from './helpers/serve-process.js';
 
 /** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -95,6 +100,10 @@ const OVERRIDES = {
   // Explicit rather than leaning on serve.ts's isDev fallback secret, so a
   // change to that fallback can never turn this into a boot-failure test.
   OS_AUTH_SECRET: 'e2e-child-env-probe-secret-not-for-real-use',
+  // Explicit for the same reason, and it stays in the SHARED overrides so the
+  // two legs still differ in nothing but the vitest env family — which is the
+  // property the whole comparison rests on.
+  OS_SECRET_KEY: E2E_SECRET_KEY,
 };
 
 /**

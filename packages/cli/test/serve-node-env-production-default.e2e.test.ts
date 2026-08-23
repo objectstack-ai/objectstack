@@ -130,7 +130,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { childEnv } from './helpers/serve-process.js';
+import { childEnv, E2E_SECRET_KEY } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
 type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -221,6 +221,23 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
       // "AuthPlugin.init() throws: secret is required" path regardless of
       // which NODE_ENV state this call is probing.
       OS_AUTH_SECRET: 'e2e-node-env-default-probe-secret-not-for-real-use',
+      // EXACTLY the argument the line above makes, for the sibling gate that
+      // #11267 exposed. The unset-`NODE_ENV` leg is — by this file's whole
+      // design — a PRODUCTION boot, and `LocalCryptoProvider` refuses to start
+      // in production without a stable key rather than mint one that would
+      // make every `sys_secret` value undecryptable after a restart. That
+      // refusal is a boot failure, not a signal about the origin gate this
+      // file measures, so the key is supplied explicitly.
+      //
+      // ⚠️ It was NOT needed before #11267 — and that is the finding, not an
+      // inconvenience. `local-crypto-provider.ts:133` reads
+      // `if (env.VITEST || env.NODE_ENV === 'test') return 'test'`, so while
+      // this fixture still inherited the vitest worker's `VITEST=true`, its
+      // crypto layer sat in TEST mode (ephemeral key, no disk, no refusal)
+      // while the rest of the boot was in production posture. The production
+      // posture this file exists to pin was genuine for auth and fake for
+      // crypto. Supplying the key is what makes it genuine for both.
+      OS_SECRET_KEY: E2E_SECRET_KEY,
       // The base default for every call: truly unset, unless overridden by
       // `env` below. Node's spawn omits an `undefined`-valued entry rather
       // than inheriting whatever this test RUNNER's own process (vitest sets
