@@ -1762,8 +1762,8 @@ export class AuthPlugin implements Plugin {
     // carries the endpoint at 1.7.x): `adminUpdateOAuthClient`
     // (`dist/authorize-Crqw4_bR.mjs:2860`) declares its body schema at
     // `:2862-2889`, and `disabled` occurs zero times in that block —
-    // while occurring 35 times elsewhere in the same file, so the search
-    // reaches the text. The column exists, the runtime honours it
+    // while matching 35 other lines of the same file (`grep -c`), so the
+    // search reaches the text. The column exists, the runtime honours it
     // everywhere (introspect, token, authorize, public-client lookup),
     // but no client-facing API can flip it.
     //
