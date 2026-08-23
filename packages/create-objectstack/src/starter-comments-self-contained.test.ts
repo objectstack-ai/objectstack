@@ -39,7 +39,7 @@
 //
 // Assertion 3 only judges URLs already on the canonical origin; host
 // CONVERGENCE — is the origin the RULED one at all — is assertion 4 (#10990).
-// It could not have lived anywhere else: `scripts/check-published-readme-links.mjs`
+// It could not have lived anywhere else: the published-readme-links gate
 // prescribes the same canonical origin, but its population is publishable
 // packages' PUBLISHED markdown, which never reaches this package's templates
 // — `templates/AGENTS.md` is a template file under `src/`, not a package
@@ -231,18 +231,18 @@ describe('shipped template comments are followable by a stranger', () => {
   // ── assertion 4: no non-canonical docs host ships into a project ────────
   // #10990: three shipped lines cited `objectstack.com` (not even a
   // redirecting alias — a different, wrong domain) or `docs.objectstack.ai`
-  // (an accepted-but-unratified alias per
-  // scripts/check-published-readme-links.mjs's DOCS_HOSTS) instead of the
-  // ruled canonical origin (maintainer ruling, 2026-08-21). Full reasoning on
-  // why this population needed its own pin is in the file header above.
+  // (an accepted-but-unratified alias per the published-readme-links gate's
+  // DOCS_HOSTS) instead of the ruled canonical origin (maintainer ruling,
+  // 2026-08-21). Full reasoning on why this population needed its own pin is
+  // in the file header above.
   it.each(shippedFiles())('%s cites no non-canonical docs host', (rel) => {
     // Restated, not imported, for the same cross-package-read-radius reason
-    // assertion 3's candidate list gives above. This is every host
-    // `scripts/check-published-readme-links.mjs`'s DOCS_HOSTS classifies as
-    // this docs site (canonical + redirecting aliases) MINUS the canonical
-    // origin itself, plus `objectstack.com` — a different, wrong domain that
-    // is not in that set at all, so it is not a "host" in that gate's sense,
-    // just a mistake this population has actually shipped.
+    // assertion 3's candidate list gives above. This is every host the
+    // published-readme-links gate's DOCS_HOSTS classifies as this docs site
+    // (canonical + redirecting aliases) MINUS the canonical origin itself,
+    // plus `objectstack.com` — a different, wrong domain that is not in that
+    // set at all, so it is not a "host" in that gate's sense, just a mistake
+    // this population has actually shipped.
     const NON_CANONICAL_DOCS_HOSTS = [
       'docs.objectstack.ai',
       'www.objectstack.ai',
