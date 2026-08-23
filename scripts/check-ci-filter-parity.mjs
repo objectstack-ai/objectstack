@@ -565,19 +565,31 @@ export async function selfTest() {
   // The pre-#10015 list, as the measurement that motivated this gate: with the
   // four roots removed, the ten declarations #10015 fixed go uncovered here —
   // plus, since #10848, the one post-#10015 declaration none of those roots
-  // ever covered (the retirement skill's SKILL.md, a `.claude/` literal), so
-  // the rollback now uncovers eleven. This pin is judged over the LIVE
-  // declaration table on purpose: a declaration added under a root the
+  // ever covered (the retirement skill's SKILL.md, a `.claude/` literal) —
+  // plus, since #10178, the two @objectstack/rest declarations it added: the
+  // state-machine doc page, covered only through the `content/**` root #10015
+  // added, and the automation skill file, covered only through its own
+  // single-file `crosspkg` entry the way #10848's SKILL.md is. Ten plus one
+  // plus two: the rollback now uncovers thirteen. This pin is judged over the
+  // LIVE declaration table on purpose: a declaration added under a root the
   // rollback keeps leaves the count alone, one under a new root moves it and
   // is recorded here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 11,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 13,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     uncoveredGlobs(preFix).includes('.claude/skills/spec-property-retirement/SKILL.md'),
-    `-- and the post-#10015 member is #10848's declaration, by name`,
+    `-- and one post-#10015 member is #10848's declaration, by name`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('content/docs/protocol/objectql/state-machine.mdx'),
+    `-- and #10178 added the meta-state route doc page, by name`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('skills/objectstack-automation/SKILL.md'),
+    `-- and #10178 added the automation skill file, by name`,
   );
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
@@ -603,7 +615,8 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one, and the CI wiring read out of lint.yml.`,
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two, and the CI wiring ` +
+      `read out of lint.yml.`,
   );
   return 0;
 }
