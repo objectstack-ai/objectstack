@@ -1394,6 +1394,61 @@ function hydrateWriteFormulas(
 }
 
 /**
+ * Materialize ONE declared `formula` field against a record already in hand —
+ * the read path's own evaluation, narrowed to a single field, with no round
+ * trip (#11293).
+ *
+ * ## Why this exists rather than a second evaluator
+ *
+ * A hook body cannot reach a formula field: `ctx.previous` / `ctx.input` carry
+ * STORED columns, and a formula is computed on read, so a body that wants the
+ * record's title has to rebuild the formula inline. Measured in the exemplar
+ * app: five inline reimplementations of a record title inside hook bodies, four
+ * of them re-composing a `nameField` that is a formula. Each copy can drift
+ * from the declaration it copies, silently — which is the whole defect, so the
+ * remedy must not itself be a copy. This calls
+ * {@link planFormulaProjection} + {@link applyFormulaPlan}: the same plan
+ * builder, the same `Expression` normalization (string shorthand → CEL
+ * envelope), the same `scale` rounding and the same evaluation scope the read
+ * and write paths use. One formula semantic, not a hook-path dialect (PD #12).
+ *
+ * ## Narrowed to one field ON PURPOSE
+ *
+ * `planFormulaProjection(schema, undefined)` — the shape `find` and
+ * {@link hydrateWriteFormulas} use — plans EVERY formula field on the schema
+ * and `ExpressionEngine.compile`s each one at planning stage. Asking for one
+ * title would then throw on an unrelated malformed formula elsewhere on the
+ * object. Passing `[field]` plans exactly the requested field, so the blast
+ * radius of a title lookup is the title's own declaration.
+ *
+ * ## Read-path parity, including how it fails
+ *
+ * Both failure modes are the read path's, unchanged: a formula that does not
+ * COMPILE throws (as it does on every `find` of the object), while a formula
+ * that compiles and does not EVALUATE yields `null` — `applyFormulaPlan`'s own
+ * `r.ok ? … : null`. A caller therefore cannot mistake "this title could not be
+ * computed" for a computed value.
+ *
+ * Returns `undefined` when `field` is not a declared formula field, which is
+ * how a caller tells "read the stored column instead" from "the formula
+ * produced nothing". Evaluates against a shallow COPY: `applyFormulaPlan`
+ * writes the value onto the record it is handed, and the records reaching here
+ * are the engine's own hook payloads, observed by everything downstream.
+ */
+export function evaluateFormulaField(
+  schema: unknown,
+  record: Record<string, unknown>,
+  field: string,
+  execCtx?: ExecutionContext,
+): unknown {
+  const { plan } = planFormulaProjection(schema as any, [field]);
+  if (plan.length === 0) return undefined;
+  const scratch: Record<string, unknown> = { ...record };
+  applyFormulaPlan(plan, [scratch], execCtx);
+  return scratch[field];
+}
+
+/**
  * A hook body, as registered through {@link ObjectQL.registerHook} or bound
  * from metadata by `bindHooksToEngine`.
  *

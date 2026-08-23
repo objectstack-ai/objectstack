@@ -146,6 +146,20 @@ export { wrapDeclarativeHook, HookConditionError } from './hook-wrappers.js';
 // see the note above `HookConditionError` in `hook-wrappers.ts`. Its two members
 // described a batch-scoped `before*` dispatch that no longer exists.
 export type { WrapDeclarativeOptions } from './hook-wrappers.js';
+export { hookRecordState } from './hook-wrappers.js';
+
+// Export record-title resolution (#11293) — "what is this record called?",
+// answered from the object's own `nameField` declaration with a formula title
+// evaluated server-side. The runtime's `ctx.title()` hook-body seam is built on
+// exactly these; they are exported so it does not have to re-derive any of it.
+export {
+  resolveRecordTitle,
+  resolveRelatedTitleTarget,
+  titleFieldOf,
+  RecordTitleFieldError,
+} from './record-title.js';
+export type { RelatedTitleTarget } from './record-title.js';
+export { evaluateFormulaField } from './engine.js';
 
 // Export Validation
 export { ValidationError, validateRecord } from './validation/record-validator.js';

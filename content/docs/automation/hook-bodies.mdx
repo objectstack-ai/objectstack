@@ -99,9 +99,44 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.user` / `ctx.session` | Identity context. | none |
 | `ctx.api.object(name).find\|count\|aggregate` | Cross-object reads, scoped to current tenant. | `api.read` |
 | `ctx.api.object(name).insert\|update\|delete` | Cross-object writes. | `api.write` |
+| `ctx.title()` | This record's title — the object's `nameField`, **including when it is a `formula`** (evaluated server-side against the record already in hand, no extra read). | none |
+| `ctx.title('<lookup field>')` | The related record's title, through a lookup / master_detail / user / tree column. Costs one `findOne`. | `api.read` |
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
 | `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
+
+### Naming a record — `ctx.title()`
+
+A body composing a message needs the record's **name**, and until this accessor
+existed it could not get one: `ctx.input` / `ctx.previous` carry stored columns,
+while a `nameField` is very often a `formula` computed on read. The result was
+that every hook re-implemented the object's title inline — or, more often,
+printed `record.id`, which is the one identifier always in scope and the one
+string the UI never shows.
+
+```ts
+// this record — resolves `nameField`, formula or stored column alike
+await ctx.api.object('sys_notification').insert({
+  subject: `${await ctx.title()} was closed`,
+});
+
+// a related record, through the lookup column that holds its id
+const account = await ctx.title('account_id');
+```
+
+Three properties worth knowing:
+
+- **A formula `nameField` costs nothing extra.** It is evaluated server-side
+  against the record the hook is already firing on — the same expression, the
+  same evaluator and the same rounding a `GET` of that record would use, so the
+  title a hook writes and the title the UI shows cannot drift.
+- **The related form costs exactly one `findOne`**, through your body's own read
+  channel — so it obeys the caller's scope and joins an open
+  `ctx.api.transaction`. That is why it requires `api.read` while the bare form
+  requires nothing: the token gates the read, and there is no read to gate.
+- **It never falls back to the id.** No title resolvable ⇒ `null`. An id-shaped
+  string is a plausible-looking title to whatever renders it, so the platform
+  will not manufacture one; write your own fallback if you want one.
 
 <Callout type="warn">
 **There is no hashing capability — `crypto.hash` was removed in spec 17.** Until
@@ -318,6 +353,7 @@ The extractor scans each body for known patterns and adds the matching capabilit
 | `*.object(…).insert / update / upsert / delete / patch / remove / create` | `api.write` |
 | `ctx.crypto.randomUUID` | `crypto.uuid` |
 | `ctx.log.info / warn / error / debug` | `log` |
+| `*.title(<argument>)` — the related-record form only; bare `ctx.title()` performs no read | `api.read` |
 
 When inference does not derive what a body needs, declare the tokens yourself by
 supplying `body` on the hook or action instead of a `handler`:

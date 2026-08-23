@@ -42,6 +42,18 @@
 import type { Hook } from '@objectstack/spec/data';
 import { HookBodySchema } from '@objectstack/spec/data';
 import type { ScriptRunner, ScriptContext, ScriptResult } from './script-runner.js';
+// The record-title contract, imported rather than re-derived (#11293). The
+// object's `nameField` pointer, a formula title's server-side evaluation and
+// the "what does this reference field point at" rule all have exactly one
+// owner — `@objectstack/objectql` — and this seam is a consumer of it, not a
+// second implementation. That is the whole point: the defect being closed is a
+// title re-composed per hook drifting from the declaration it copies, so a
+// runtime-side copy of the same rules would reproduce the defect one layer up.
+import {
+  hookRecordState,
+  resolveRecordTitle,
+  resolveRelatedTitleTarget,
+} from '@objectstack/objectql';
 
 interface FactoryOptions {
   ql: any;
@@ -146,6 +158,125 @@ function buildBodyLogSurface(
   };
 }
 
+/**
+ * Build the `ctx.title(field?)` seam for one hook-body invocation (#11293).
+ *
+ * ## The measurement this shape is answering
+ *
+ * A hook body could not name a record. `ctx.previous` / `ctx.input` carry
+ * stored columns, a formula is computed on read, and nothing on `ctx` resolves
+ * the object's `nameField` — so a body composing "Case X was closed" had to
+ * re-implement the object's title inline. The exemplar app carried **five**
+ * such reimplementations, and in **four of the five** the `nameField` is a
+ * FORMULA (`display_title`, `full_name`); only one is a real column. So the
+ * formula case is the design centre here, not an extension of the column case:
+ * an accessor that only read stored columns would answer the wrong four of
+ * five, and the ruling's parenthetical — *formula evaluated server-side* — is
+ * load-bearing.
+ *
+ * What the absence actually produced was worse than duplication. The cheap
+ * thing to write with no title accessor is `record.id`, the one identifier
+ * always in scope, and it shipped into user-facing prose across four hooks. An
+ * AI writing a hook reaches for it for the same reason. Hence the whole point
+ * of this seam: put the correct answer closer to hand than the wrong one.
+ *
+ * ## Why the two forms cost different things
+ *
+ *  - **`ctx.title()`** — this record. `hookRecordState` is the state the hook
+ *    is ALREADY firing on (stored ⊕ payload, materialized over the declared
+ *    fields — the very state the declarative `condition` gate evaluates), so
+ *    the record is in hand. A formula title is evaluated against it in-process
+ *    by `resolveRecordTitle`: **zero round trips**, even for the majority
+ *    formula case. Measured cost is one CEL evaluation of one expression.
+ *  - **`ctx.title('account_id')`** — a related record. A lookup column hands
+ *    the body an id and nothing else, so this costs **exactly one `findOne`**,
+ *    and no more: the engine's read path already materializes formula fields
+ *    onto what it returns, so the related record arrives with its own
+ *    `display_title` computed. There is no second pass and no per-field
+ *    round trip.
+ *
+ * That asymmetry is why the VM-facing wire gates only the second form behind
+ * `api.read` (see `installCtx`): the token gates a read, and the first form has
+ * no read to gate.
+ *
+ * ## Why the read goes through `ctx.api` and not the engine directly
+ *
+ * `api` is handed in per call by the installer rather than closed over, so it
+ * is the transaction-scoped context whenever a body-opened
+ * `ctx.api.transaction` is in flight. A related-title read that bypassed it
+ * would ask the pool for a second connection — invisible on a roomy pool, a
+ * deadlock on `pool max=1`, which is SQLite and therefore the default
+ * datasource for `objectstack dev`. It also means the read obeys the caller's
+ * scope and field-level security exactly as the body's own
+ * `ctx.api.object(...).findOne` would: the accessor is a convenience over the
+ * read channel a body already has, never a privilege escalation around it.
+ */
+function buildTitleSurface(
+  engineCtx: any,
+  ql: any,
+  origin: { kind: 'hook' | 'action'; name: string },
+): ScriptContext['title'] {
+  const label = `ctx.title (${origin.kind} '${origin.name}')`;
+
+  return async (field: string | undefined, api: unknown): Promise<string | undefined> => {
+    const objectName = typeof engineCtx?.object === 'string' ? engineCtx.object : undefined;
+    if (!objectName || !ql || typeof ql.getObject !== 'function') {
+      throw new Error(`${label}: no object schema is reachable from this hook context`);
+    }
+    const schema = ql.getObject(objectName);
+    if (!schema) {
+      throw new Error(`${label}: object '${objectName}' is not registered`);
+    }
+    const record = hookRecordState(engineCtx);
+    const execCtx = executionContextFromHook(engineCtx);
+
+    if (field === undefined) {
+      return resolveRecordTitle(schema, record, execCtx);
+    }
+
+    const target = resolveRelatedTitleTarget(schema, record, field, label);
+    // A declared but EMPTY reference: an ordinary state, answered as absence.
+    if (!target) return undefined;
+
+    const source = (api ?? engineCtx?.api) as { object?: (n: string) => any } | undefined;
+    if (!source || typeof source.object !== 'function') {
+      throw new Error(`${label}: no read channel is available to resolve '${field}'`);
+    }
+    const related = await source.object(target.object).findOne({ where: { id: target.id } });
+    if (!related) return undefined;
+    // The read path already evaluated the related object's formula fields onto
+    // this row; `resolveRecordTitle` re-derives the SAME value from the same
+    // declaration rather than trusting whichever repo facade answered, so a
+    // minimal embedder's `findOne` cannot quietly downgrade a formula title to
+    // absence.
+    return resolveRecordTitle(ql.getObject(target.object), related as Record<string, unknown>, execCtx);
+  };
+}
+
+/**
+ * The evaluation scope a formula title is computed in, derived from what the
+ * hook context actually carries.
+ *
+ * `HookContext` declares no `timezone` and no `ExecutionContext`, so this is the
+ * closest scope reachable on this path rather than a copy of the read path's:
+ * `os.user` / `os.org` resolve from the hook session, and a timezone-sensitive
+ * formula falls back to the server default exactly as it does for every other
+ * hook-layer CEL evaluation. Stated rather than silently approximated — a
+ * `nameField` formula reading `os.user` is the realistic case and it works;
+ * one reading a localized date is the case that can differ from a REST read,
+ * and an author is owed that fact.
+ */
+function executionContextFromHook(engineCtx: any): any {
+  const session = engineCtx?.session;
+  if (!session || typeof session !== 'object') return undefined;
+  return {
+    userId: session.userId,
+    tenantId: session.organizationId,
+    positions: Array.isArray(session.positions) ? session.positions : undefined,
+    isSystem: session.isSystem,
+  };
+}
+
 export function hookBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
@@ -170,6 +301,7 @@ export function hookBodyRunnerFactory(
         engineCtx,
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
+        buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
       );
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
@@ -413,6 +545,7 @@ function buildSandboxContext(
   engineCtx: any,
   ql: any,
   log: ScriptContext['log'],
+  title?: ScriptContext['title'],
 ): ScriptContext {
   // `input` and `previous` are the engine's own spellings, and the only ones:
   // `HookContextSchema` (`packages/spec/src/data/hook.zod.ts`) declares neither a
@@ -449,6 +582,11 @@ function buildSandboxContext(
     // `HookContextSchema` never declared, so the `['log']` capability resolved
     // `undefined` and every body log line vanished. See {@link buildBodyLogSurface}.
     log,
+    // [#11293] Hook face only. The action face has its own record shape
+    // (`ctx.record`, a pre-fetched read-only snapshot) and its own dispatch
+    // sites; widening the accessor to it is a separate capability call and is
+    // deliberately not taken here — the ruling names hook bodies.
+    title,
     crypto: globalThis.crypto,
   };
 }
