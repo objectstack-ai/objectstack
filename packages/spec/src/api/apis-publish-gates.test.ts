@@ -99,6 +99,21 @@ describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
     expect(() => defineStack({ manifest, apis: [validObjectEndpoint, validFlowEndpoint] })).not.toThrow();
   });
 
+  // [#10338] The acceptance half of the ruling that made `target` optional:
+  // an `object_operation` endpoint is addressed by `objectParams.object` /
+  // `.operation`, and NO consumer reads `target` for that type (executor,
+  // OpenAPI enrichment and this gate all branch on `objectParams` alone) — so
+  // the author-facing contract stops demanding a dead string. Restoring
+  // required-ness in the vocabulary turns exactly this case red.
+  it('accepts an object_operation endpoint that omits `target` — nothing consumes it for that type', () => {
+    const { target: _dead, ...objectEndpointWithoutTarget } = validObjectEndpoint;
+    const apis = accept({ manifest, apis: [objectEndpointWithoutTarget] });
+    expect(apis).toHaveLength(1);
+    // Anti-vacuity: the endpoint parses whole, addressed by objectParams.
+    expect(apis?.[0]?.objectParams).toEqual({ object: 'showcase_task', operation: 'find' });
+    expect(apis?.[0]?.target).toBeUndefined();
+  });
+
   it('accepts an anonymous endpoint that arms its rate limit (ADR-0121 D6 satisfied)', () => {
     const apis = accept({
       manifest,
@@ -295,6 +310,17 @@ describe('[#5111] gate (a) — the supported subset (mirrors `planEndpointTarget
   it('rejects a flow endpoint with an empty `target`', () => {
     const message = reject({ manifest, apis: [{ ...validFlowEndpoint, target: '' }] });
     expect(message).toMatch(/names no target flow/);
+  });
+
+  // [#10338] `target` is optional in the VOCABULARY (an `object_operation`
+  // author no longer writes a dead string), so omission now reaches this gate
+  // instead of dying as a Zod `invalid_type` — and the gate is what holds the
+  // requirement for `type: 'flow'`. The issue path is asserted too: the author
+  // must be sent to the `target` line, not to the endpoint at large.
+  it('rejects a flow endpoint that omits `target` entirely — the gate holds the requirement now', () => {
+    const { target: _dead, ...flowWithoutTarget } = validFlowEndpoint;
+    const message = reject({ manifest, apis: [flowWithoutTarget] });
+    expect(message).toMatch(/apis\.0\.target: .*names no target flow/);
   });
 });
 

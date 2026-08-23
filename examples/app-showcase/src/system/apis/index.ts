@@ -71,7 +71,10 @@ export const TaskFeedEndpoint: ApiEndpoint = {
   summary: 'Task feed',
   description: 'Returns tasks via a declarative object_operation endpoint — no handler code.',
   type: 'object_operation',
-  target: 'showcase_task',
+  // No `target`: an object_operation endpoint is addressed by `objectParams`
+  // alone — nothing reads `target` for this type, and #10338 made the key
+  // optional so an example stops teaching a dead string (`target` is required
+  // at publish only for `type: 'flow'`, as InquiryPurgeEndpoint below shows).
   objectParams: {
     object: 'showcase_task',
     operation: 'find',

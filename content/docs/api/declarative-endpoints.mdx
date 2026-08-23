@@ -68,10 +68,10 @@ export default defineStack({
       summary: 'Lead feed',
       description: 'Open leads, for the partner portal.',
       type: 'object_operation',
-      // `target` is required on every entry by the vocabulary. An
-      // object_operation is addressed by `objectParams`, so nothing reads this
-      // one — name the object it works on and keep the two in step.
-      target: 'acme_lead',
+      // No `target` — an object_operation is addressed by `objectParams`
+      // alone, so the key is unread for this type and omitting it is the
+      // correct spelling. `target` is required (at publish) only for
+      // `type: 'flow'`, as `acme_lead_intake` below shows.
       objectParams: { object: 'acme_lead', operation: 'find' },
       // Omitting `authRequired` is the safe spelling — it defaults to `true`.
       cacheTtl: 30,
@@ -149,10 +149,13 @@ under that mount.
 | `type: 'flow'` with no `target` | rejected |
 | `type: 'script'`, `type: 'proxy'` | rejected at publish |
 
-`target` is required on **every** entry, whatever the `type`. A `flow` endpoint is executed
-by it; an `object_operation` is addressed by `objectParams` instead, so nothing reads its
-`target` — write the object name there and keep the two in step, because leaving the key
-out is a type error before it is anything else.
+`target` is **per-type**: a `flow` endpoint is executed by it, so publish requires it
+there and refuses a flow that names no target flow. An `object_operation` is addressed by
+`objectParams` instead — nothing reads its `target`, and the key is optional in the
+vocabulary precisely so you can leave it out. Do: omit it on `object_operation` entries.
+A `target` written there is a dead string nothing checks against `objectParams.object` —
+a declaration whose first line says one object while `objectParams` serves another
+publishes green, which is why the dead spelling is not worth teaching.
 
 `script` and `proxy` are **not servable declarations**. Nothing in the platform verifies
 that a script target is reachable, and forwarding to an arbitrary outbound URL is an

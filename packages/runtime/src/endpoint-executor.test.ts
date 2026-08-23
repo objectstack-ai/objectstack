@@ -529,6 +529,28 @@ describe('an unsupported declaration gets a structured 501, never invented seman
         expect((await executeEndpointTarget(ctx, deps)).status).toBe(501);
         expect(execute).not.toHaveBeenCalled();
     });
+
+    // [#10338] `target` is OPTIONAL in the vocabulary now, so a flow endpoint
+    // with the key OMITTED is a parseable declaration — the publish gate
+    // refuses it (`apis-publish-gates.test.ts`), and this is the runtime
+    // counterpart that gate mirrors (`planEndpointTarget`), for a declaration
+    // that reached the store without passing publish. Pinned as `code` AND
+    // `status` (ADR-0112): a bare status assertion would stay green on a
+    // refusal that lost its envelope.
+    it('a flow that OMITS target answers 501 NOT_IMPLEMENTED — code AND status — and calls nothing', async () => {
+        const execute = vi.fn();
+        const deps = depsWith({ automationService: { execute } });
+        const ctx = contextFor(endpoint({ type: 'flow', target: undefined, objectParams: undefined }));
+
+        const answer = await executeEndpointTarget(ctx, deps);
+
+        expect(answer.status).toBe(501);
+        const error = expectConformantError(answer);
+        expect(error.code).toBe(DispatcherErrorCode.enum.NOT_IMPLEMENTED);
+        expect(error.message).toContain('names no target flow');
+        expect(execute).not.toHaveBeenCalled();
+        expect(deps.callData).not.toHaveBeenCalled();
+    });
 });
 
 // ---------------------------------------------------------------------------

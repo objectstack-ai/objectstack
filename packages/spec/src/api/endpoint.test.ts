@@ -103,6 +103,25 @@ describe('ApiEndpointSchema', () => {
     expect(endpoint.name).toBe('get_customers');
   });
 
+  // [#10338] `target` is OPTIONAL in the vocabulary: for `object_operation` no
+  // consumer reads it (the executor, the OpenAPI enrichment and the publish
+  // gate all branch on `objectParams` alone), so the author is no longer
+  // forced to write a dead string. The per-type requirement for `type: 'flow'`
+  // lives in the publish gate (`apis-publish-gates.test.ts` pins it), not
+  // here — the vocabulary parses both types without the key.
+  it('parses an object_operation endpoint that omits `target` (#10338)', () => {
+    const endpoint = ApiEndpointSchema.parse({
+      name: 'get_customers',
+      path: '/api/v1/customers',
+      method: 'GET',
+      type: 'object_operation',
+      objectParams: { object: 'customer', operation: 'find' },
+    });
+
+    expect(endpoint.target).toBeUndefined();
+    expect(endpoint.objectParams).toEqual({ object: 'customer', operation: 'find' });
+  });
+
   it('should validate endpoint name format (snake_case)', () => {
     expect(() => ApiEndpointSchema.parse({
       name: 'valid_endpoint_name',

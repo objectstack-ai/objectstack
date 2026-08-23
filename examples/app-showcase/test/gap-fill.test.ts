@@ -130,11 +130,14 @@ describe('[#5112] showcase declares its api endpoints again (#5040 E8)', () => {
     }
   });
 
-  it('object_operation endpoints target objects that exist', () => {
-    const apis = (stack as { apis?: Array<{ type: string; target: string }> }).apis ?? [];
+  it('object_operation endpoints address objects that exist (via objectParams.object — `target` is unread for this type, #10338)', () => {
+    const apis = (stack as { apis?: Array<{ type: string; objectParams?: { object?: string } }> }).apis ?? [];
     const objectNames = ((stack as { objects?: Array<{ name: string }> }).objects ?? []).map((o) => o.name);
     for (const api of apis.filter((a) => a.type === 'object_operation')) {
-      expect(objectNames, `api endpoint targets missing object '${api.target}'`).toContain(api.target);
+      // `objectParams.object` is what the executor delegates on; `target` is
+      // unread for this type and the example no longer writes it.
+      expect(objectNames, `api endpoint addresses missing object '${api.objectParams?.object}'`)
+        .toContain(api.objectParams?.object);
     }
   });
 

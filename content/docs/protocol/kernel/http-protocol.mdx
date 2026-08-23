@@ -1186,7 +1186,9 @@ export default defineStack({
       method: 'GET',
       summary: 'Lead feed',
       type: 'object_operation',
-      target: 'acme_lead',
+      // No `target` — an object_operation endpoint is addressed by
+      // `objectParams` alone; `target` is required (at publish) only for
+      // `type: 'flow'`, where it names the flow to trigger.
       objectParams: { object: 'acme_lead', operation: 'find' },
       // Defaults to `true`. Omitting it is safe; see the policy table below.
       authRequired: true,
