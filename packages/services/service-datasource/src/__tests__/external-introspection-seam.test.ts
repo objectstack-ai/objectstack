@@ -101,10 +101,15 @@ describe('the introspection seam, as a real SqlDriver actually spells it', () =>
     // so that it would redden the moment the driver was aligned. That flip has
     // now happened (#10676/#10998), and it is pinned here in its new
     // direction: the driver emits the spec spelling and no longer emits the
-    // retired one. The union read in `primaryKeyReader` below therefore no
-    // longer has an in-tree producer needing its `isPrimary` arm; collapsing
-    // it is this lane's call to make, deliberately not made from the driver
-    // change, and until then this file keeps both arms pinned.
+    // retired one. The union read in `primaryKeyReader` therefore has no
+    // in-tree producer left for its `isPrimary` arm — and that arm stays
+    // anyway. The services lane made that call in #11123: the seam's producer
+    // population is open by design (a host builds the driver, and the handle
+    // types introspection as `Promise<unknown>`), so the compiler channel the
+    // retirement relies on cannot reach a host-built driver still emitting the
+    // old spelling. Dropping the arm is a narrowing of accepted input, not a
+    // dead-code deletion. `primaryKeyReader`'s docblock carries the full
+    // measurement; this file keeps all the arms pinned.
     expect(table.primaryKeys).toEqual(['id']);
     expect(id.primaryKey).toBe(true);
     expect(id.isPrimary).toBeUndefined();
@@ -154,13 +159,18 @@ describe('the introspection seam, as a real SqlDriver actually spells it', () =>
 describe('the seam read, where the two spellings disagree', () => {
   /**
    * No in-tree driver produces a disagreement — `SqlDriver` derives
-   * `isPrimary` FROM `primaryKeys`, so the two always agree. This case is
-   * therefore hand-built ON PURPOSE, and it is the one place in this file
-   * where that is the right instrument: it fixes the behaviour under a
-   * disagreement no live database can currently stage, so a future producer
-   * that fills only one of the two signals cannot silently lose half a
-   * composite key. The spelling seam itself is pinned above, against a real
-   * driver, where a fake would have been blind.
+   * `primaryKey` FROM `primaryKeys`, so its two signals always agree, and
+   * since #10676/#10998 it does not emit `isPrimary` at all. These two cases
+   * are therefore hand-built ON PURPOSE, and it is the one place in this file
+   * where that is the right instrument: no live in-tree database can stage
+   * this disagreement, and feeding the retired spelling is the ONLY exercise
+   * the union's `isPrimary` arm now has anywhere in the tree. They pin the
+   * behaviour a host-built driver still emitting that spelling depends on —
+   * see `primaryKeyReader`'s docblock for why the arm is kept rather than
+   * collapsed (#11123) — and they pin that a producer filling only one of the
+   * two signals cannot silently lose half a composite key. If the arm is ever
+   * retired, these two cases go with it. The spelling seam itself is pinned
+   * above, against a real driver, where a fake would have been blind.
    */
   function serviceOverRaw(table: unknown): ExternalDatasourceService {
     return serviceOver({ tables: { order_lines: table } });

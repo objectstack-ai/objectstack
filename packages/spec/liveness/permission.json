@@ -49,22 +49,30 @@
         "allowCreate": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION insert→allowCreate)"
+          "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION insert→allowCreate)",
+          "note": "Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the persona × CRUD matrix runs the create verb over real HTTP for every showcase permission set, in BOTH directions per cell — an allowed create returns an id and the row is really there, a denied one is 403 PERMISSION_DENIED and persisted nothing. Cells are judged as a UNION with the everyone-baseline set (ADR-0090 D5). One proof binds all four allow* verbs; multi-entry binding has precedent in `semantic-roles`."
         },
         "allowRead": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION find/findOne/count/aggregate→allowRead)"
+          "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION find/findOne/count/aggregate→allowRead)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the read verb of the same persona × CRUD matrix, both directions per cell (a readable list answers 200 with rows; a denied one is 403 PERMISSION_DENIED). See `allowCreate` for the binding rationale."
         },
         "allowEdit": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION update→allowEdit)"
+          "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION update→allowEdit)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the edit verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the allowed edit persisted; the denied edit changed nothing). See `allowCreate` for the binding rationale."
         },
         "allowDelete": {
           "status": "live",
           "verifiedAt": "2026-07-30",
-          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION delete→allowDelete)"
+          "proof": "packages/qa/dogfood/test/showcase-crud-persona-matrix.dogfood.test.ts#showcase-crud-persona-matrix",
+          "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:15 (OPERATION_TO_PERMISSION delete→allowDelete)",
+          "note": "Proof-bound 2026-08-23 (#10959) — the delete verb of the same persona × CRUD matrix, both directions per cell, asserted on POST-STATE (the deleted row is gone; the denied delete left the row standing). See `allowCreate` for the binding rationale."
         },
         "allowExport": {
           "status": "live",
@@ -122,8 +130,9 @@
         "readable": {
           "status": "live",
           "verifiedAt": "2026-07-30",
+          "proof": "packages/qa/dogfood/test/showcase-fls-read-mask-strip.dogfood.test.ts#showcase-fls-read-mask-strip",
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:301",
-          "note": "FLS read-mask."
+          "note": "FLS read-mask. Proof-bound 2026-08-23 (#10959, adjudicated on PR #10934): the proof AUTHORS a scratch permission set carrying `readable: false` and asserts the runtime outcome both ways on the same field, row and request — the key is ABSENT from the wire (`'budget' in record` is false, which `toBeUndefined()` cannot distinguish from a mask), while the entitled caller gets the real value. The sibling `editable` is deliberately NOT bound to this proof: that file authors the key but asserts its refusal as a consequence of unreadability, not as the write-deny axis (`showcase-permission-zoo` pins that half)."
         },
         "editable": {
           "status": "live",
@@ -135,9 +144,10 @@
     },
     "systemPermissions": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-hono-server/src/hono-plugin.ts:1222",
-      "note": "PARTIAL — app-entry/nav visibility only, not a general capability gate."
+      "verifiedAt": "2026-08-23",
+      "proof": "packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts#sharing-rule-org-less-caller",
+      "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts:267 (getSystemPermissions — ADR-0066 D3 union of the capabilities a caller's permission sets grant, into ExecutionContext.systemPermissions) + packages/plugins/plugin-sharing/src/sharing-rule-service.ts:136 (assertCanManageRules — ADR-0111 D6: every sharing-rule verb, list and get included, refuses PERMISSION_DENIED unless the caller holds `manage_sharing` OR the legacy `manage_platform_settings` admin override, with system contexts bypassing; enforced in the SERVICE so non-REST callers are covered) + packages/plugins/plugin-sharing/src/sharing-plugin.ts:993 + packages/plugins/plugin-hono-server/src/current-user-endpoints.ts:897 (/auth/me/apps — `AppSchema.requiredPermissions ⊆ ctx.systemPermissions`, the app-entry/nav half)",
+      "note": "Re-verified 2026-08-23 (#10959) and the note CORRECTED — the previous text (\"PARTIAL — app-entry/nav visibility only, not a general capability gate\") was stale in both halves. (a) Its evidence pointer `plugin-hono-server/src/hono-plugin.ts:1222` no longer exists: that file is 717 lines and contains no `systemPermissions` reference at all — the app-entry consumer moved to `current-user-endpoints.ts`. (b) The scoping claim is falsified by ADR-0111 D6 (Accepted 2026-07-30, P0 implemented): `SharingRuleService.assertCanManageRules` reads `context.systemPermissions` and refuses the whole sharing-rule surface unless the caller holds `manage_sharing` or the legacy `manage_platform_settings` admin override (system contexts bypass), which is a DATA-LAYER authorization gate, not nav visibility — the admit set is wider than one capability, but every member of it is read from `systemPermissions`, which is what this entry classifies. The bound proof measures exactly that: it authors `system_permissions: ['manage_sharing']` on a permission set and asserts the refusal it gets back is the ORG-scope refusal and explicitly NOT `/requires the manage_sharing capability/` — i.e. the authored capability really did clear the service gate — with the org-bound holder of the same grant reading its own tenant (200) as the entitled contrast, over two organizations so a single-tenant fixture cannot pass on the broken build."
     },
     "tabPermissions": {
       "status": "live",

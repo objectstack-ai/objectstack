@@ -118,50 +118,77 @@ export interface ExternalDatasourceServiceConfig {
 const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 
 /**
- * Read "is this column part of the remote primary key" across the TWO
- * introspection contracts that meet at this service.
+ * Read "is this column part of the remote primary key" across the
+ * introspection spellings that can arrive at this service.
  *
  * `plugin.ts` hands the driver's `introspectSchema()` result to this service
- * unmodified, and the driver does not speak the contract this file is typed
- * against:
+ * unmodified. There is now ONE declared contract on both sides of that
+ * handoff — `packages/spec`'s `IntrospectedColumn` — and the in-tree driver
+ * speaks it:
  *
- * | producer                                       | per-column     | table-level    |
- * | ---------------------------------------------- | -------------- | -------------- |
- * | `SqlDriver` (+ `SqliteWasmDriver`, which extends it) | `isPrimary`    | `primaryKeys`  |
- * | `packages/spec` `IntrospectedColumn` (what this file's types say) | `primaryKey`   | —              |
+ * | producer                                                              | per-column   | table-level   |
+ * | --------------------------------------------------------------------- | ------------ | ------------- |
+ * | `SqlDriver` (+ `SqliteWasmDriver` / `TursoDriver`, which extend it)    | `primaryKey` | `primaryKeys` |
+ * | `packages/spec` `IntrospectedColumn` (what this file's types say)      | `primaryKey` | —             |
  *
- * Measured against a live SQLite database at `368e7a06f`: the driver's column
- * for a `primary key (id)` table carries `isPrimary: true` and the table
- * carries `primaryKeys: ['id']`, while `primaryKey` is `undefined`. Reading
- * only `col.primaryKey` therefore reads a key no in-tree driver ever sets, and
- * the remote key is silently lost.
+ * That agreement is NEW, and this reader predates it. Measured against a live
+ * SQLite database at `368e7a06f`, the driver's column for a `primary key (id)`
+ * table carried `isPrimary: true` and no `primaryKey` key at all, so reading
+ * only `col.primaryKey` lost the remote key — the defect this reader was
+ * written for. `95437e7d2d` (#10676 / #10998) retired that spelling at the
+ * producer: `introspectSchema` now derives `col.primaryKey` FROM `primaryKeys`
+ * and emits no `isPrimary`.
  *
- * This reads the UNION of all three signals rather than picking one:
+ * This still reads the UNION of three signals rather than picking one, and
+ * each arm is here for its own reason:
  *
- *  - No in-tree producer uses `primaryKey: false` / `isPrimary: false` to
- *    NEGATE a key another signal asserts — the falses are just "not a key",
- *    written by producers that fill exactly one of the three. A precedence
- *    chain would therefore drop a real key whenever the winning signal is the
- *    one its producer left blank, which is the defect being repaired here.
- *  - A producer that fills only `table.primaryKeys` (the shape a table-level
- *    reader would naturally emit) is covered without needing a per-column flag,
- *    and vice versa.
+ *  - `col.primaryKey` — the spec spelling, what every in-tree producer writes.
+ *  - `table.primaryKeys` — LIVE and INDEPENDENT, not a legacy arm. A
+ *    per-column boolean cannot express key ORDER, and since #10997 (PR #11104)
+ *    this list reports every member of a COMPOSITE key in declared key order.
+ *    It is the only signal here that carries one. ⛔ Collapsing it away drops
+ *    composite-key handling at this seam.
+ *  - `col.isPrimary` — a RETIRED spelling, kept as a compatibility belt. See
+ *    the note below before touching it.
  *
- * When the per-column flag and the table-level list DISAGREE, the union takes
- * both. That is deliberate: for a federated table, under-reporting the key
- * costs the caller its addressing key, and no in-tree consumer treats a
- * column's PK-ness as an exclusive claim. Note that no in-tree driver produces
- * such a disagreement today — `SqlDriver` derives `isPrimary` FROM
- * `primaryKeys`, so the two always agree, including where both are wrong (a
- * SQLite composite key reports only its first column, because
- * `introspectPrimaryKeys` filters `PRAGMA table_info` on `pk === 1` while
- * SQLite numbers composite members `1, 2, ...`). That truncation is upstream
- * of this seam and is not repaired here.
+ * No producer uses `primaryKey: false` / `isPrimary: false` to NEGATE a key
+ * another signal asserts — the falses are just "not a key", written by
+ * producers that fill one signal and leave the others blank. A precedence
+ * chain would therefore drop a real key whenever the winning signal is the one
+ * its producer left blank, which is the defect being repaired here. When the
+ * per-column flag and the table-level list DISAGREE the union takes both: for
+ * a federated table, under-reporting the key costs the caller its addressing
+ * key, and no in-tree consumer treats a column's PK-ness as an exclusive
+ * claim. (The SQLite composite-key truncation this note used to disclaim is
+ * gone — #10997 repaired `introspectPrimaryKeys` upstream, so the driver's two
+ * signals now agree on the WHOLE key rather than agreeing on a truncated one.)
  *
- * Deliberately structural: the extra spellings are read off the value without
- * widening any declared contract, because reconciling
- * `packages/objectql/src/util.ts` with
- * `packages/spec/src/contracts/schema-diff-service.ts` is a spec-owned change.
+ * WHY THE `isPrimary` ARM STAYS, with no producer left in this tree — measured
+ * for #11123 on `52a41b72ee`, so the next reader need not re-derive it:
+ *
+ *  - Nothing in-tree writes it. Every surviving whole-identifier hit is prose,
+ *    and `objectql`'s `isPrimaryKeyField` merely CONTAINS the substring.
+ *  - It is still not dead code, because the producer population here is open
+ *    by design. `contracts/datasource-driver-factory.ts` says the framework
+ *    "ships no universal driver-by-id registry" — concrete drivers are built
+ *    by the HOST — and types the handle as `introspectSchema?(): Promise<unknown>`.
+ *    The retirement shipped as a BREAKING change whose stated migration
+ *    channel is the compiler, "precisely and at every site"; against an
+ *    `unknown` result that channel never fires, so a host-built driver still
+ *    emitting the old spelling is reached by nothing and would silently lose
+ *    its key here.
+ *  - The belt's clock has not run either: the union (#11001) and the
+ *    retirement (#11124) are BOTH still unconsumed changesets at `17.1.0`, so
+ *    no released version has ever emitted `primaryKey` from this driver.
+ *
+ * Dropping the arm is therefore a NARROWING OF ACCEPTED INPUT rather than a
+ * dead-code deletion, and wants the contract-review gate. Its only exercise is
+ * the staged-disagreement pair in
+ * `__tests__/external-introspection-seam.test.ts`; those cases go with it.
+ *
+ * Deliberately structural: the retired spelling is read off the value without
+ * widening any declared contract — no declared type carries it any more, so
+ * there is nothing left to read it through.
  */
 function primaryKeyReader(table: IntrospectedTable): (col: IntrospectedColumn) => boolean {
   const declared = (table as unknown as { primaryKeys?: unknown }).primaryKeys;
@@ -481,11 +508,13 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       dialect: schema.dialect,
       tables: Object.values(schema.tables).map((t) => {
         const { schema: s, name } = parseQualified(t.name);
-        // The introspection seam: a real driver spells this `isPrimary` /
-        // `primaryKeys`, never `primaryKey`. `ExternalCatalogSchema` defaults
-        // the key to `false`, so reading only `c.primaryKey` persisted a
-        // catalog in which EVERY column claimed not to be part of the remote
-        // key — including the ones that are.
+        // The introspection seam. `ExternalCatalogSchema` defaults this key to
+        // `false`, so when the in-tree driver still spelled it `isPrimary`,
+        // reading only `c.primaryKey` persisted a catalog in which EVERY column
+        // claimed not to be part of the remote key — including the ones that
+        // are. The driver has since been aligned to the spec spelling
+        // (`95437e7d2d`), but this must stay a `primaryKeyReader` call: see its
+        // docblock for the two arms that are still load-bearing.
         const isPk = primaryKeyReader(t);
         return {
           remoteSchema: s,

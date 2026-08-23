@@ -16,7 +16,7 @@ package catalog.
 
 The ObjectStack protocol defines **15 kernel services** registered via the `CoreServiceName` enum (v17 removed the never-implemented `graphql` entry and retired the never-filled `workflow` slot, #4451). Each service maps to a set of protocol methods governed by its per-domain contract (`DataProtocol`, `MetadataProtocol`, ...) — the transitional `ObjectStackProtocol` composition alias was dissolved in v17 (ADR-0076 D9); capability availability comes from the runtime discovery `services` registry.
 
-**Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for the `core` slots that have one (`metadata`, `cache`, `queue`, `job`, `i18n` — **not** `auth`). Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
+**Key architecture principle**: the kernel guarantees only **data** and **metadata**, and even those are filled by packages (`@objectstack/objectql`, `@objectstack/metadata`) rather than baked in — the kernel's own contribution is an in-memory fallback for the `core` slots that have one (`metadata`, `cache`, `queue`, `i18n` — **not** `auth`, and not `job`: an in-memory registry cannot fire a `schedule()`d job on its own, so pre-injecting one advertised a scheduler that never ran, and a fallback must not fake capability — #10746. The `job` slot stays empty, loudly, until `@objectstack/service-job` or an explicitly registered scheduler fills it). Everything else — including **auth** and **automation** — is delivered by plugins. `@objectstack/objectql` is an example kernel implementation to get the basic API running; production kernels will be rebuilt as separate plugins.
 
 <Callout type="info">
 **Legend**
@@ -79,7 +79,7 @@ The ObjectStack protocol defines **15 kernel services** registered via the `Core
 | 12 | **search** | `optional` | — | ❌ Nothing ships | — |
 | 13 | **cache** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-cache` |
 | 14 | **queue** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-queue` |
-| 15 | **job** | `core` | — | ✅ Built-in (in-memory fallback) | `@objectstack/service-job` |
+| 15 | **job** | `core` | — | ❌ Plugin Required (no pre-injected fallback since #10746 — with no job plugin, `getService('job')` throws and the boot warns) | `@objectstack/service-job` |
 
 <Callout type="info">
 The Provider column mirrors `CORE_SERVICE_PROVIDER` in
@@ -480,7 +480,7 @@ AppPlugin will:
 
 ## 11–15. Infrastructure Services
 
-`cache`, `queue`, and `job` are `core` services: like `i18n`, the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). The `optional` services (`storage`, `search`) stay disabled until a plugin provides them.
+`cache`, `queue`, and `job` are `core` services. For `cache` and `queue` — like `i18n` — the kernel auto-injects an in-memory fallback when no plugin registers them (see `CORE_FALLBACK_FACTORIES` in `packages/core/src/fallbacks/`). `job` is deliberately **not** on that list (#10746): an in-memory registry cannot fire a `schedule()`d job on its own, and a fallback must not fake capability — so with no job plugin installed, `getService('job')` throws, consumers take their documented no-scheduler paths (e.g. the reports dispatcher's own `setInterval`), and the boot warns `Core service missing, functionality may be degraded: job`. The `core` criticality itself is unchanged — it is exactly what makes the absence loud. Fill the slot with `@objectstack/service-job`, or register `createMemoryJob()` explicitly if a manual-`trigger()` registry is genuinely wanted. The `optional` services (`storage`, `search`) stay disabled until a plugin provides them.
 
 | Service | Description |
 |:--------|:------------|
@@ -488,7 +488,7 @@ AppPlugin will:
 | **search** | **Nothing ships.** `ISearchService` and the engine enum (`elasticsearch`, `meilisearch`, …) exist in `@objectstack/spec`, but no package implements the contract or registers the `search` slot, so `CORE_SERVICE_PROVIDER.search` is `null`. |
 | **cache** | General-purpose cache. In-memory fallback; memory or Redis adapter via `@objectstack/service-cache`. |
 | **queue** | Message queue. In-memory fallback; durable DB-backed adapter (`sys_job_queue`) via `@objectstack/service-queue` (no BullMQ/Redis adapter is shipped). |
-| **job** | Scheduled task execution via `@objectstack/service-job`. In-memory fallback; interval, cron, and DB-backed adapters with concurrency policy. |
+| **job** | Scheduled task execution via `@objectstack/service-job` — interval, cron, and DB-backed adapters with concurrency policy. No pre-injected fallback (#10746): install the plugin, or the slot stays empty and the boot says so. |
 
 ---
 

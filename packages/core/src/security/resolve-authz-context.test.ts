@@ -171,6 +171,60 @@ describe('resolveLocalizationContext — batched fallback read (#2409)', () => {
     expect(loc.locale).toBe('en-US');
     expect(loc.currency).toBeUndefined();
   });
+
+  // [#10826] The settings-service path prefers ONE grouped getMany over three
+  // per-key get()s; an older service without getMany keeps the three gets;
+  // a thrown getMany lands in the same direct-$in fallback a thrown get did.
+  it('prefers settings.getMany (one grouped call) and never calls per-key get', async () => {
+    const getMany = { calls: 0 };
+    const settings = {
+      get: async () => { throw new Error('per-key get must not be called'); },
+      getMany: async (ns: string, keys: readonly string[]) => {
+        getMany.calls += 1;
+        expect(ns).toBe('localization');
+        expect([...keys].sort()).toEqual(['currency', 'locale', 'timezone']);
+        return {
+          timezone: { value: 'Asia/Tokyo' },
+          locale: { value: 'ja-JP' },
+          currency: { value: 'JPY' },
+        };
+      },
+    };
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(loc).toEqual({ timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' });
+    expect(getMany.calls).toBe(1);
+    expect(ql.counts.sys_setting ?? 0).toBe(0); // service answered — no direct read
+  });
+
+  it('a service without getMany keeps the three per-key gets (older deployments)', async () => {
+    let gets = 0;
+    const settings = {
+      get: async (_ns: string, key: string) => {
+        gets += 1;
+        return { value: key === 'timezone' ? 'Asia/Tokyo' : key === 'locale' ? 'ja-JP' : 'JPY' };
+      },
+    };
+    const ql = makeCountingQl({ sys_setting: [] });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(loc).toEqual({ timezone: 'Asia/Tokyo', locale: 'ja-JP', currency: 'JPY' });
+    expect(gets).toBe(3);
+  });
+
+  it('a thrown getMany falls back to the direct $in read, same as a broken service', async () => {
+    const settings = {
+      get: async () => { throw new Error('unused'); },
+      getMany: async () => { throw new Error('store exploded'); },
+    };
+    const ql = makeCountingQl({
+      sys_setting: [
+        { namespace: 'localization', key: 'timezone', scope: 'tenant', value: 'Europe/Paris' },
+      ],
+    });
+    const loc = await resolveLocalizationContext({ ql, settings, tenantId: 'o1' });
+    expect(loc.timezone).toBe('Europe/Paris');
+    expect(ql.counts.sys_setting).toBe(1); // the batched $in fallback ran once
+  });
 });
 
 // #10221: a fresh environment's `sys_setting` table doesn't exist yet, so

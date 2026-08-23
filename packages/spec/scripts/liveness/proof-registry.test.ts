@@ -136,6 +136,29 @@ describe('registry invariants', () => {
         // without a runtime proof; its new dogfood file asserts post-state in
         // three postures (widen / independent-of-read / fail-closed seam).
         'permission/objects.writeScope',
+        // Bound 2026-08-23 (#10959) — the three proofs PR #10934 registered
+        // with a PROPOSED binding, adopted after the spec seat adjudicated
+        // them. Six paths, because two of the three are multi-entry.
+        //
+        // `showcase-fls-read-mask-strip` → the READ axis only. Its sibling
+        // `permission/fields.editable` is deliberately absent: that proof
+        // authors the key but asserts its refusal as a consequence of
+        // unreadability, not as the write-deny axis.
+        'permission/fields.readable',
+        // `showcase-crud-persona-matrix` → all four verbs. The exact allow/deny
+        // split is asserted per cell, so a narrowing sweep breaks the build
+        // rather than quietly shrinking what these four cite (`semantic-roles`
+        // is the multi-entry precedent).
+        'permission/objects.allowCreate',
+        'permission/objects.allowRead',
+        'permission/objects.allowEdit',
+        'permission/objects.allowDelete',
+        // `sharing-rule-org-less-caller` → `systemPermissions`. The card held
+        // this one back pending a measurement: its ledger note claimed
+        // "app-entry/nav visibility only". The note was stale — ADR-0111 D6
+        // makes it a data-layer gate at `SharingRuleService` — so the note was
+        // corrected and the binding adopted in the same PR.
+        'permission/systemPermissions',
       ].sort(),
     );
   });
