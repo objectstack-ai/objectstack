@@ -1402,6 +1402,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/bootstrap-platform-admin-walled-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/bootstrap-seed-round-trips.test.ts",
       "verb": "update",
       "pinned": 1

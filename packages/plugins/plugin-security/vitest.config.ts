@@ -45,6 +45,15 @@ export default defineConfig({
         find: /^@objectstack\/objectql$/,
         replacement: path.resolve(__dirname, '../../objectql/src/index.ts'),
       },
+      // [#11184] `bootstrap-platform-admin.ts` imports `@objectstack/types` as
+      // a VALUE (`resolveTenancyPosture` / `resolvePlatformOwnerEmail`), so
+      // its suites must read the producer's source in this checkout rather
+      // than `dist/` — a stale dist would run GREEN against the dependency's
+      // old behaviour (`check:test-source-alias` refuses exactly that).
+      {
+        find: /^@objectstack\/types$/,
+        replacement: path.resolve(__dirname, '../../types/src/index.ts'),
+      },
     ],
   },
 });

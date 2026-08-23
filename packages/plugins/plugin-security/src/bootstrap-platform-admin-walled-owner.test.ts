@@ -25,6 +25,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
 
 /** In-memory ql over the three objects the promotion path touches. */
@@ -51,9 +52,16 @@ function makeQl(seed: { users?: any[]; grants?: any[] } = {}) {
       tables.get(object)!.push({ ...data });
       return { id: data.id };
     },
-    async update(object: string, data: any) {
-      const r = rowsOf(object).find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
+    // Opens with the PRODUCER's own dispatch predicate, never a hand-mirrored
+    // guard (check:engine-double-contract) — a fixture drifting to a call
+    // shape ObjectQL.update would refuse fails loudly here.
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const rows = rowsOf(object);
+      const targets =
+        dispatch.kind === 'by-id' ? rows.filter((r) => r.id === dispatch.id) : [];
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
     grants(): any[] {
       return rowsOf('sys_user_permission_set');

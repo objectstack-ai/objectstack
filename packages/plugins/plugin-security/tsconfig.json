@@ -2,10 +2,32 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    // [#11184] Widened from `./src` as a CONSEQUENCE of the `paths` rule
+    // below, exactly as `packages/rest/tsconfig.json` documents (#9960):
+    // redirecting `@objectstack/types` to its source puts
+    // `packages/types/src/**` into this program, and `rootDir` is enforced
+    // over every program file even under `--noEmit`. `../..` (= `packages/`)
+    // is the directory that contains every file in the program. Emit is
+    // unaffected: this package builds with tsup, and `typecheck` passes
+    // `--noEmit`.
+    "rootDir": "../..",
     "types": [
       "node"
-    ]
+    ],
+    // [#11184] `@objectstack/types` is imported as a value by
+    // `src/bootstrap-platform-admin.ts`. Without this rule tsc resolves the
+    // specifier through the dependency's `exports` map — `dist/index.d.ts`, a
+    // BUILD ARTIFACT — so this package's typecheck would render a verdict
+    // about the last `pnpm build` rather than about the producer's source in
+    // the checkout (`check:type-source-resolution` refuses exactly that; its
+    // header states why the dangerous case is a typecheck that PASSES). ONE
+    // rule for the bare name only: this package imports no
+    // `@objectstack/types/*` subpath, and a `paths` target that matches
+    // nothing on disk would silently fall back to node resolution (see the
+    // rest package's block for the measured traps).
+    "paths": {
+      "@objectstack/types": ["../../types/src/index.ts"]
+    }
   },
   "include": [
     "src/**/*"

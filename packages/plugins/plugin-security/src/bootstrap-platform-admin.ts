@@ -380,7 +380,11 @@ export async function bootstrapPlatformAdmin(
     logger?.warn?.(`[security] failed to grant admin_full_access to first user ${target.email ?? target.id}`);
     return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
   }
-  logger?.info?.(`[security] first user promoted to platform admin: ${target.email ?? target.id}`);
+  logger?.info?.(
+    walled
+      ? `[security] declared platform owner (${PLATFORM_OWNER_EMAIL_ENV}) promoted to platform admin: ${target.email ?? target.id}`
+      : `[security] first user promoted to platform admin: ${target.email ?? target.id}`,
+  );
 
   // Hand seeded business records (owner_id NULL / usr_system) to the freshly
   // promoted admin so owner-keyed UX works out of the box. Best-effort and
