@@ -202,7 +202,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
     note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
   { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
-    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts). [#7019] gated on `manage_metadata` (ADR-0066 D1), identical to the single-name PUT — it was MEASURED that with #6603 in place the same ADR-0106 masked round trip still deleted fields through this door' },
+    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts). [#7019] gated on `manage_metadata` (ADR-0066 D1), identical to the single-name PUT — it was MEASURED that with #6603 in place the same ADR-0106 masked round trip still deleted fields through this door. [#11095] reads `?force=true` too — the fourth divergence from its single-segment twin closed on #7019\'s reason (after that capability gate, #8805\'s write-side organization and #7035\'s 501 envelope): the Phase 3a-destructive `409 DESTRUCTIVE_CHANGE` prescribes that parameter, and until this card the prescription was true of the twin and false here. Repeated `?force` is refused (#6877) in the same stroke — an array falls to `!!raw`, turning a doubled opt-OUT into force ON' },
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'sdk', client: 'meta.getView',
