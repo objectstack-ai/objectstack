@@ -721,7 +721,11 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     //     general capability gate") is falsified by ADR-0111 D6:
     //     `SharingRuleService.assertCanManageRules` reads
     //     `context.systemPermissions` and refuses every sharing-rule verb
-    //     without `manage_sharing` — a data-layer gate, not nav visibility.
+    //     unless the caller holds `manage_sharing` or the legacy
+    //     `manage_platform_settings` admin override (system contexts bypass)
+    //     — a data-layer gate, not nav visibility. The admit set is wider than
+    //     one capability, but every member of it is read from
+    //     `systemPermissions`, which is what the bound entry classifies.
     // The proof authors the key and proves the gate was CLEARED by it: the
     // refusal it asserts is the org-scope one and explicitly NOT
     // /requires the manage_sharing capability/, with the org-bound holder of
