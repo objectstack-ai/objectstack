@@ -176,7 +176,8 @@ describe('auth route ledger hygiene', () => {
     // the `source` split stays honest rather than becoming a place to park a
     // row that failed the upstream check.
     //
-    // [#10534] Grew from 3 to 11. A census of `auth-plugin.ts` found 17 such
+    // [#10534] Grew from 3 to 11, and to 12 with #10974/#10975. A census of
+    // `auth-plugin.ts` found 17 such
     // mounts, of which nine were in NEITHER half of the ledger; eight are
     // ledgered now. This pin is the thing that makes the enlarged set
     // reviewable: an ObjectStack mount added or removed without a matching
@@ -191,10 +192,17 @@ describe('auth route ledger hygiene', () => {
     // are complements rather than duplicates, and both are worth keeping: this
     // pin is a reviewed, hand-written statement of what the objectstack-sourced
     // set IS, and the gate is a reading of what the plugin actually serves.
-    // The ninth mount,
-    // `POST /api/v1/auth/set-initial-password`, is deliberately absent: its
-    // disposition is escalated on #10534 rather than guessed (see the ledger
-    // comment above these rows).
+    // The ninth mount, `POST /api/v1/auth/set-initial-password`, was
+    // deliberately absent while its disposition was escalated on #10534 rather
+    // than guessed. It is present now, and it got here by ADDITION on this
+    // pin's own terms — not by loosening the assertion, deleting the pin, or
+    // computing the list. Both terms hold for it: `auth-plugin.ts` mounts it
+    // itself (a `rawApp.post` on the `${basePath}/set-initial-password`
+    // template, ahead of the catch-all), and the `live.has(route)` loop below
+    // holds it to the same proof as the other eleven — better-auth does not
+    // publish it. Its `sdk` disposition names `auth.setInitialPassword`, which
+    // exists in the same change (#10974 / #10975, combined by the maintainer
+    // ruling of 2026-08-23).
     const own = AUTH_ROUTE_LEDGER.filter((e) => e.source === 'objectstack').map((e) => e.route).sort();
     expect(own).toEqual([
       'GET /api/v1/auth/bootstrap-status',
@@ -207,6 +215,7 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/organization/add-member',
+      'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',
     ]);
     for (const route of own) {

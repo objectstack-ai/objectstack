@@ -178,6 +178,16 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'GET /api/v1/auth/oauth2/public-client', family: 'oauth-provider', source: 'better-auth', disposition: 'sdk', client: 'oauth.applications.getPublic', requires: 'oidcProvider' },
   { route: 'GET /api/v1/auth/bootstrap-status', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.bootstrapStatus' },
   { route: 'GET /api/v1/auth/config', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.getConfig' },
+  // #10974 / #10975 — the ninth ObjectStack mount from the #10534 census,
+  // ledgered `sdk` on the maintainer's option-C ruling (2026-08-22) rather
+  // than on either word that was available before it. The two halves landed
+  // in ONE PR by the follow-up ruling of 2026-08-23: the row alone would have
+  // been the #3528 coverage lie, and the method alone matched its URL only
+  // through the dispatcher's `* /auth/**` family, which
+  // `client-url-conformance.test.ts` bounds at zero. Together they are one
+  // statement — the method exists, this row declares it, and the URL now
+  // resolves to an enumerated route.
+  { route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' },
   // ─────────────────────────────────────────────────────────────────────
   // #10534 — the remaining ObjectStack raw-app mounts, ledgered.
   //
@@ -205,15 +215,18 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   // an accommodation written to make a row fit.
   //
   // ⚠️ `POST /api/v1/auth/set-initial-password` is the ninth mount and is
-  // DELIBERATELY NOT LEDGERED HERE. It fails the test above in a way none of
-  // these do: its caller is `@object-ui/auth`'s `createAuthClient`, whose
-  // three other auth URLs (`/config`, `/get-session`, `/list-accounts`) are
-  // ALL expressed on `ObjectStackClient` — and its own sibling branch in the
-  // same Console password card, `changePassword`, is ledgered `sdk`. That
-  // shape reads as `gap` ("should be in the SDK and is not"), not as
-  // `server-only`, and `gap` is ratcheted to zero by this file's conformance
-  // suite. Writing `server-only` there would be a false declaration of intent
-  // to dodge a ratchet. It is escalated on #10534 instead.
+  // NOT in this `server-only` batch — it is ledgered `sdk` with the other two
+  // ObjectStack mounts above (#10974 / #10975). It failed the test this batch
+  // passes: its caller is `@object-ui/auth`'s `createAuthClient`, whose three
+  // other auth URLs (`/config`, `/get-session`, `/list-accounts`) are ALL
+  // expressed on `ObjectStackClient` — and its own sibling branch in the same
+  // Console password card, `changePassword`, is ledgered `sdk`. That shape
+  // read as `gap` ("should be in the SDK and is not"), not as `server-only`,
+  // and `gap` is ratcheted to zero by this file's conformance suite; writing
+  // `server-only` there would have been a false declaration of intent to
+  // dodge a ratchet. It was escalated on #10534 rather than guessed, and the
+  // maintainer resolved the `gap` at its source instead of recording it:
+  // `auth.setInitialPassword` now exists, so `sdk` is the measurement.
   //
   // `requires` follows the add-member precedent: it names the better-auth
   // plugin the route's WORK needs, not whether the mount is conditional —

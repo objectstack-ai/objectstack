@@ -1,5 +1,6 @@
 ---
 "@objectstack/client": minor
+"@objectstack/plugin-auth": patch
 ---
 
 **SDK:** `auth.setInitialPassword` binds the already-mounted `POST /api/v1/auth/set-initial-password` route, which had no client method.
@@ -10,4 +11,4 @@ The method is shaped exactly like its namespace siblings (`this.getRoute('auth')
 
 **Nothing about the route's behaviour moves.** Its accept/reject logic, its admit set and its server-side guards are untouched — this is a client binding to an existing mount, not a widening of what the mount allows.
 
-**Its `AUTH_ROUTE_LEDGER` row is deliberately not in this change**, and one consequence is visible in CI: with no exact row, `client-url-conformance.test.ts`'s final assertion sees this URL matched only by the dispatcher's `* /auth/**` wildcard family and fails, because that bound is ratcheted to zero on purpose. The row and this method have to arrive together — see the PR body.
+**Its `AUTH_ROUTE_LEDGER` row lands with it**, because the two halves are one statement and neither is true alone. `plugin-auth` gains `{ route: 'POST /api/v1/auth/set-initial-password', family: 'objectstack-mount', source: 'objectstack', disposition: 'sdk', client: 'auth.setInitialPassword' }` — the ninth mount of the #10534 census, whose disposition was escalated rather than guessed and which the maintainer ruled `sdk` (option C, 2026-08-22) and then ruled should land in one PR (2026-08-23). Without the row, the method's URL matched only the dispatcher's `* /auth/**` prefix family, and `client-url-conformance.test.ts` bounds wildcard-only matches at zero on purpose; with it, the same URL resolves to an enumerated route. The row also brings the `check:auth-mount-ledger` pending-disposition entry down — the exemption that carried this route while the question was open is deleted, which is that ratchet working rather than being relaxed.
