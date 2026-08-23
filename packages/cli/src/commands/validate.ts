@@ -247,24 +247,23 @@ export default class Validate extends Command {
         structuralWarnings.push('Missing manifest.namespace — required for multi-app hosting');
       }
 
-      if (flags.json) {
-        await emitJson({
-          valid: true,
-          manifest: config.manifest,
-          stats,
-          // One advisory list for the whole registry. This used to be a
-          // hand-maintained concatenation of per-gate arrays, and it leaked
-          // twice: warnings computed and then dropped from `--json` while the
-          // console printed them. A single list cannot drift from itself.
-          warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings],
-          conversions: conversionNotices,
-          specVersionGap: specGap,
-          duration: timer.elapsed(),
-        });
-        return;
-      }
-
-      // 5. Warnings (non-blocking)
+      // 5. Warnings (non-blocking) — assembled HERE, above the `if (flags.json)`
+      //    branch, because this is the list `--strict` gates on and the JSON
+      //    face has to reach the SAME verdict from it. It could not: the payload
+      //    was emitted and `return`ed above the only `flags.strict` reader, so
+      //    `os validate --json --strict` exited 0 on the very configs
+      //    `os validate --strict` exited 1 for. The flag was accepted,
+      //    documented (`content/docs/deployment/cli.mdx` spells the pair twice
+      //    in its CI/CD section, once as a GitHub Actions step) and inert — a
+      //    pipeline gating on the exit status of the documented invocation read
+      //    0 and called the stack clean.
+      //
+      //    Hoisting the assembly rather than restating the condition is the same
+      //    move `structuralWarnings` just above and `unknownKeyWarnings` up
+      //    beside `normalized` already made, for the third time in this file:
+      //    ONE list, consumed by both faces, so the two exit codes cannot drift
+      //    from each other by construction. The push ORDER is unchanged, so the
+      //    text face's warning output is byte-for-byte what it was.
       const warnings: string[] = [];
 
       // [#3366] Installable-provider hints — a declared capability whose provider
@@ -295,11 +294,55 @@ export default class Validate extends Command {
         warnings.push(`${w.path}: ${w.message}`);
       }
 
-      // The four structural advisories, computed above the `if (flags.json)`
-      // branch so `--json` carries them too. Appended HERE, in the position the
+      // The four structural advisories, computed further up so the `--json`
+      // payload can carry them too. Appended HERE, last, in the position the
       // four inline `if` blocks used to occupy, so the text face's warning ORDER
       // is byte-for-byte what it was.
       warnings.push(...structuralWarnings);
+
+      if (flags.json) {
+        await emitJson(
+          {
+            valid: true,
+            manifest: config.manifest,
+            stats,
+            // One advisory list for the whole registry. This used to be a
+            // hand-maintained concatenation of per-gate arrays, and it leaked
+            // twice: warnings computed and then dropped from `--json` while the
+            // console printed them. A single list cannot drift from itself.
+            warnings: [...ruleAdvisories, ...docWarnings, ...unknownKeyWarnings, ...capProviderWarnings, ...structuralWarnings],
+            conversions: conversionNotices,
+            specVersionGap: specGap,
+            duration: timer.elapsed(),
+          },
+          // `--strict` means one thing — "treat warnings as errors" — and it now
+          // means it on both faces. The gate reads `warnings`, the text face's
+          // OWN list, rather than the payload's `warnings` field: the two differ
+          // by the ADR-0087 conversion notices, which the text face folds into
+          // its `⚠` block while the payload carries them under `conversions`.
+          // Gating on the payload field would have left `--json --strict` at 0
+          // for a config whose only advisories are conversion notices — the
+          // same divergence one collection narrower. `specVersionGap` stays out
+          // on both faces; it is never gated by `--strict` (see below).
+          //
+          // `valid: true` beside a 1 is not a contradiction, it is the text
+          // face verbatim: that path prints "Validation passed" and THEN fails
+          // for strict. The stack IS schema-valid; `--strict` is what promotes
+          // its advisories to a failure.
+          //
+          // The status rides in `emitJson`'s `CliExitCode` slot rather than a
+          // following `this.exit(1)`, unlike the failure paths above: those
+          // must stop a fall-through into the text rendering, while here the
+          // payload is complete and the `return` is right there. The slot is
+          // the declared channel for pairing a `--json` document with the
+          // status the shell reads (`utils/format.ts`; pinned by
+          // `utils/format.exit-code.test.ts` and `test/migrate-exit-code.e2e.test.ts`),
+          // and it emits the one document without an ExitError unwinding
+          // through the catch below.
+          flags.strict && warnings.length > 0 ? 1 : 0,
+        );
+        return;
+      }
 
       // 6. Display results
       console.log('');
@@ -321,6 +364,10 @@ export default class Validate extends Command {
         for (const w of warnings) {
           console.log(chalk.yellow(`  ⚠ ${w}`));
         }
+        // The text face's half of the `--strict` gate. Its JSON counterpart is
+        // the `CliExitCode` argument at the `emitJson` call above, reading this
+        // same `warnings` list — change one and change the other, or the two
+        // faces start disagreeing about the exit status again.
         if (flags.strict) {
           console.log('');
           printError('Strict mode: warnings treated as errors');
