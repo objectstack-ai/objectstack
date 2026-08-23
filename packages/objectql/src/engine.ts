@@ -10744,8 +10744,8 @@ export class ObjectQL implements IObjectQLEngine {
           const msg =
             `[cascade-delete] ${childName}.${fieldName} declares deleteBehavior: 'set_null' on a ` +
             `master_detail referencing '${object}' — that value is NOT honored on master_detail: the ` +
-            `delete of ${object}/${String(id)} is CASCADING these child rows, the opposite of what the ` +
-            `declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
+            `delete of ${object}/${String(id)} CASCADES its referencing child rows, the opposite of what ` +
+            `the declaration asks (children kept). FieldSchema now rejects this combination at parse time; ` +
             `this row reached the engine around the parse seam (raw registration, or metadata stored ` +
             `before the tightening). Re-declare the field: 'restrict' refuses the parent delete while ` +
             `children exist (no data loss), 'cascade' (or omitting the key) accepts the cascade ` +

@@ -563,20 +563,24 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
         return spy as Record<'info' | 'warn' | 'debug' | 'error', ReturnType<typeof vi.fn>>;
     }
 
-    async function makeEngine(logger: Record<string, unknown>) {
+    // NOTE the registration set is per test: the log fires at the COERCION
+    // SITE — whenever the parent delete computes the child field's behavior —
+    // not only when that child holds rows. A misdeclared child object in the
+    // registry therefore logs on every parent delete (deliberate: the
+    // declaration is wrong whether or not rows exist today), so the negative
+    // control below must not register `line` at all.
+    async function makeEngine(logger: Record<string, unknown>, objects: unknown[]) {
         const engine = new ObjectQL({ logger });
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, lineExplicitSetNull, stanzaBare, verseCascade]) {
-            engine.registry.registerObject(o);
-        }
+        for (const o of objects) engine.registry.registerObject(o as any);
         return engine;
     }
 
     it('logs via logger.error when the parent delete coerces an authored set_null to cascade', async () => {
         const logger = makeSpyLogger();
-        const engine = await makeEngine(logger);
+        const engine = await makeEngine(logger, [acct, lineExplicitSetNull, stanzaBare, verseCascade]);
         const a = await engine.insert('acct', { name: 'Acme' });
         const l = await engine.insert('line', { parent: a.id });
 
@@ -591,7 +595,7 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
         expect(msg).toContain('line.parent');
         expect(msg).toContain('master_detail');
         expect(msg).toContain('NOT honored');
-        expect(msg).toContain('CASCADING');
+        expect(msg).toContain('CASCADES');
         // Actionability: both legal re-declarations are named.
         expect(msg).toContain("'restrict'");
         expect(msg).toContain("'cascade'");
@@ -600,7 +604,7 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
 
     it('falls back to logger.warn when the sink has no error method (#9750 sanctioned shape — never an optional call)', async () => {
         const logger = makeSpyLogger(false);
-        const engine = await makeEngine(logger);
+        const engine = await makeEngine(logger, [acct, lineExplicitSetNull]);
         const a = await engine.insert('acct', { name: 'Acme' });
         await engine.insert('line', { parent: a.id });
 
@@ -610,7 +614,7 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
 
     it('does NOT log for a bare master_detail or an authored cascade (same resolved behavior, no divergence)', async () => {
         const logger = makeSpyLogger();
-        const engine = await makeEngine(logger);
+        const engine = await makeEngine(logger, [acct, stanzaBare, verseCascade]);
         const a = await engine.insert('acct', { name: 'Acme' });
         const s = await engine.insert('stanza', { parent: a.id });
         const v = await engine.insert('verse', { parent: a.id });
