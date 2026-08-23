@@ -10141,6 +10141,13 @@ export class SqlDriver implements IDataDriver {
     }
 
     for (const tableName of tableNames) {
+      // All four reads take the #7332 default (`onFailure: 'throw'`): this
+      // caller cannot correct a short read, and `introspectColumns` has never
+      // swallowed — so a partially-readable database fails the whole-schema
+      // introspection loudly instead of emitting tables whose keys silently
+      // read as absent (#11161). Every in-tree caller of `introspectSchema`
+      // already handles a throw (the datasource health check reports
+      // `{ ok: false }`, the REST/CLI seams surface the error).
       const columns = await this.introspectColumns(tableName);
       const foreignKeys = await this.introspectForeignKeys(tableName);
       const primaryKeys = await this.introspectPrimaryKeys(tableName);
@@ -12877,7 +12884,26 @@ export class SqlDriver implements IDataDriver {
     return columns;
   }
 
-  protected async introspectForeignKeys(tableName: string): Promise<IntrospectedForeignKey[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without foreign keys (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]`, so a query a live server rejects degraded to "this table
+   * has no foreign keys" with no diagnostic — a positive assertion of absence
+   * that downstream consumers act on. See {@link introspectIndexes} for the
+   * full rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectForeignKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<IntrospectedForeignKey[]> {
     const foreignKeys: IntrospectedForeignKey[] = [];
 
     try {
@@ -12956,14 +12982,38 @@ export class SqlDriver implements IDataDriver {
           });
         }
       }
-    } catch {
-      // silently ignore introspection errors
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return foreignKeys;
   }
 
-  protected async introspectPrimaryKeys(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without a primary key (#7332 —
+   * the ruling {@link introspectIndexes} carries, extended to this sibling by
+   * #11161). This used to wrap the whole dialect dispatch in a bare `catch {}`
+   * and return `[]` — and `[]` does not read downstream as "the read failed":
+   * it reads as *this table has no primary key*, a legal and meaningful answer
+   * that federated-object codegen, the persisted `external_catalog`
+   * (ADR-0015) and schema-drift comparison all act on. Measured on a live
+   * PostgreSQL 16.13: a query against a non-existent relation raises
+   * `undefined_table`, which the old catch converted to a confident empty key.
+   * See {@link introspectIndexes} for the full rationale; the option shape and
+   * default are deliberately identical.
+   */
+  protected async introspectPrimaryKeys(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const primaryKeys: string[] = [];
 
     try {
@@ -13056,27 +13106,60 @@ export class SqlDriver implements IDataDriver {
           primaryKeys.push(row.name);
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return primaryKeys;
   }
 
-  protected async introspectUniqueConstraints(tableName: string): Promise<string[]> {
+  /**
+   * ⚠️ A failed read is an ERROR, not a table without unique constraints
+   * (#7332 — the ruling {@link introspectIndexes} carries, extended to this
+   * sibling by #11161). This used to wrap the whole dialect dispatch in a bare
+   * `catch {}` and return `[]`, silently converting a failed read into a
+   * positive assertion of absence. See {@link introspectIndexes} for the full
+   * rationale; the option shape and default are deliberately identical.
+   */
+  protected async introspectUniqueConstraints(
+    tableName: string,
+    opts: {
+      /**
+       * What a failed read means to THIS caller (#7332). `'throw'` (the
+       * default) surfaces it; `'partial'` returns whatever was read before the
+       * failure — correct only where a short read is self-correcting.
+       */
+      onFailure?: 'throw' | 'partial';
+    } = {},
+  ): Promise<string[]> {
     const uniqueColumns: string[] = [];
 
     try {
       if (this.isPostgres) {
+        // ⚠️ This query was INVALID until #11161: it selected `c.column_name`
+        // while the only aliases in scope were `tc` and `ccu`, so every
+        // execution raised `missing FROM-clause entry for table "c"` — and the
+        // bare `catch {}` this method carried until #11161 converted that into
+        // `[]` on every call. Live Postgres therefore NEVER reported a unique
+        // constraint through this method; the defect surfaced (as nine loud
+        // test failures) the moment the catch stopped swallowing, which is the
+        // #7332 contract doing exactly its job. The schema pin follows
+        // `introspectSchema`'s own table listing (`current_schemas(false)`,
+        // #9350's pattern): `constraint_column_usage` spans every schema the
+        // user can read, so without it the newly-working query would report a
+        // same-named table's constraints from a schema the session never
+        // reaches.
         const result = await this.knex.raw(
           `
-          SELECT c.column_name
+          SELECT ccu.column_name
           FROM information_schema.table_constraints tc
           JOIN information_schema.constraint_column_usage AS ccu
             ON tc.constraint_schema = ccu.constraint_schema
             AND tc.constraint_name = ccu.constraint_name
           WHERE tc.constraint_type = 'UNIQUE'
             AND tc.table_name = ?
+            AND tc.table_schema = ANY (current_schemas(false))
         `,
           [tableName],
         );
@@ -13122,8 +13205,9 @@ export class SqlDriver implements IDataDriver {
           }
         }
       }
-    } catch {
-      // silently ignore
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
     }
 
     return uniqueColumns;
