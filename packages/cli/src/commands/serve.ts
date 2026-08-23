@@ -1095,8 +1095,27 @@ export default class Serve extends Command {
     // time) see development mode. We deliberately do NOT inherit
     // NODE_ENV from the parent `os dev` spawn — see the note in
     // commands/dev.ts for why.
-    if (flags.dev && !process.env.NODE_ENV) {
-      process.env.NODE_ENV = 'development';
+    //
+    // The `else` branch is `os serve`'s side of #11113. `os start` already
+    // defaults NODE_ENV to 'production' on the unset case, but it does so on
+    // `localEnv` — a child environment assembled for a SPAWN (start.ts:347).
+    // `serve` runs in-process, so there is no child env to default; the
+    // equivalent has to mutate `process.env.NODE_ENV` itself. It has to
+    // happen HERE, at the same point the --dev branch above already sets it,
+    // and for the identical reason: every `await import(...)` below, and
+    // every `NODE_ENV !== 'production'` (or equivalent) gate downstream —
+    // plugin-auth's localhost trusted-origin CSRF substitution, its Origin
+    // synthesis, its auth-secret fallback and OTP-deliverability check;
+    // plugin-dev's production boot guard; the SQL driver's auto-DDL guard;
+    // service-settings' crypto-key mode; the seed loader's env scoping — must
+    // observe the default, not the raw unset value. Full survey in #11113.
+    // An operator who never exported NODE_ENV is booting a real deployment,
+    // not asking to be treated as development — this is `os serve` agreeing
+    // with `os start` on that, one line, for the whole gate family at once.
+    if (flags.dev) {
+      if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
+    } else if (!process.env.NODE_ENV) {
+      process.env.NODE_ENV = 'production';
     }
 
     const requestedPort = parseInt(flags.port);
