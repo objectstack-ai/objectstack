@@ -24,20 +24,20 @@ import type {
  * to it, and this local declaration converges on the spec import rather than
  * keeping a second contract.
  *
- * `defaultValue` stays `unknown` rather than the spec's `string`: SQL
- * introspection reports whatever the driver read (`null`, a number, a boolean
- * literal), and narrowing the declaration without normalising the value would
- * move the lie rather than remove it. `isUnique` / `maxLength` are extra facts
- * SQL introspection carries and the spec's diff-facing contract does not
- * declare.
+ * The `Omit` carve-out that used to keep `defaultValue` diverging from the
+ * spec's `string` is RETIRED (#11122): the spec itself now declares the raw
+ * `unknown` producers actually report, so the key is inherited. `isUnique` /
+ * `maxLength` are extra facts SQL introspection carries and the spec's
+ * diff-facing contract does not declare.
  */
-export interface IntrospectedColumn extends Omit<SpecIntrospectedColumn, 'defaultValue'> {
-  /** Default value if any — raw, as the driver reported it. */
-  defaultValue?: unknown;
+export interface IntrospectedColumn extends SpecIntrospectedColumn {
   /** Whether this column has a unique constraint */
   isUnique?: boolean;
-  /** Maximum length for string types */
-  maxLength?: number;
+  /**
+   * Maximum length for string types — raw as knex `columnInfo()` reports it:
+   * a number on some dialects, a STRING on SQLite (measured: `"255"`).
+   */
+  maxLength?: number | string;
 }
 
 /**
@@ -58,12 +58,13 @@ export interface IntrospectedForeignKey {
  * Table metadata from database introspection.
  *
  * DERIVED from the spec contract, like {@link IntrospectedColumn}. `indexes`
- * is `Omit`ted rather than required: SQL introspection here does not read
- * indexes, and an empty array would claim a table HAS none when it merely was
- * not asked. `foreignKeys` / `primaryKeys` are extras the spec's diff-facing
- * contract does not declare.
+ * is inherited as the spec's OPTIONAL key (#11122): a producer that did not
+ * read indexes omits the key, and an empty array is a positive claim that a
+ * table HAS none — so nothing here emits `[]` for "not asked".
+ * `foreignKeys` / `primaryKeys` are extras the spec's diff-facing contract
+ * does not declare.
  */
-export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns' | 'indexes'> {
+export interface IntrospectedTable extends SpecIntrospectedTable {
   /** List of columns */
   columns: IntrospectedColumn[];
   /** List of foreign key relationships */
@@ -80,7 +81,7 @@ export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns'
  * here and read downstream — which is how a producer shipped `{ tables }`
  * alone while consumers read two keys nobody set.
  */
-export interface IntrospectedSchema extends Omit<SpecIntrospectedSchema, 'tables'> {
+export interface IntrospectedSchema extends SpecIntrospectedSchema {
   /** Map of table name to table metadata */
   tables: Record<string, IntrospectedTable>;
 }

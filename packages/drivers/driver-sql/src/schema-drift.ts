@@ -305,7 +305,12 @@ export interface PhysicalColumn {
   name: string;
   type: string;
   nullable: boolean;
-  maxLength?: number;
+  /**
+   * Raw as knex `columnInfo()` reports it — a number on some dialects, a
+   * STRING on SQLite (measured: `"255"`). The varchar differ below narrows
+   * via `typeof` before comparing, which is the pattern for any new reader.
+   */
+  maxLength?: number | string;
   /**
    * The column's raw DEFAULT as the dialect reports it (knex `columnInfo`), or
    * `null`/`undefined` when it has none. Dialect-decorated — SQLite and Postgres

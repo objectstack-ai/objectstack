@@ -3673,24 +3673,25 @@ function nullSafeNegationOperand(node: Record<string, unknown>): Record<string, 
  * a key added to the spec contract now fails this file's `tsc` until the
  * driver emits it, which is exactly the failure that was missing.
  *
- * Two divergences remain, deliberately, and neither is a second spelling of
- * something the spec declares:
- *
- *  - the SQL layer carries EXTRA per-column facts (`isUnique`, `maxLength`)
- *    and extra per-table facts (`foreignKeys`, `primaryKeys`) that the spec's
- *    diff-facing contract does not declare;
- *  - `defaultValue` is `unknown` here rather than the spec's `string`, because
- *    that is what Knex's `columnInfo()` actually returns (measured on live
- *    SQLite: `null`). Narrowing the declaration without normalising the value
- *    would move the lie rather than remove it.
+ * The `Omit` carve-outs that used to mark two remaining divergences
+ * (`defaultValue`, `indexes`) are RETIRED (#11122, maintainer ruling
+ * 2026-08-23 option B): the spec now declares `defaultValue` as the raw
+ * `unknown` this driver actually reports and `indexes` as optional, so both
+ * keys are inherited straight from the spec contract. What this layer still
+ * adds is EXTRA facts only — per-column `isUnique` / `maxLength`, per-table
+ * `foreignKeys` / `primaryKeys` — never a second spelling of a spec key.
  */
-export interface IntrospectedColumn extends Omit<SpecIntrospectedColumn, 'defaultValue'> {
-  /** Raw driver-reported default. See the note above on why this is not `string`. */
-  defaultValue?: unknown;
+export interface IntrospectedColumn extends SpecIntrospectedColumn {
   /** SQL-introspection extra: the column carries a UNIQUE constraint. */
   isUnique?: boolean;
-  /** SQL-introspection extra: declared maximum length for string types. */
-  maxLength?: number;
+  /**
+   * SQL-introspection extra: declared maximum length for string types — raw
+   * as knex `columnInfo()` reports it, which is a NUMBER on some dialects
+   * and a STRING on SQLite (measured live, 2026-08-23: `"255"` for a
+   * `t.string(…)` column). Consumers narrow via `typeof`, as
+   * `schema-drift.ts`'s varchar differ already does.
+   */
+  maxLength?: number | string;
 }
 
 /** No spec counterpart — foreign keys are a SQL-introspection extra. */
@@ -3702,13 +3703,15 @@ export interface IntrospectedForeignKey {
 }
 
 /**
- * `indexes` is `Omit`ted from the spec table rather than emitted empty: this
- * driver does not introspect indexes, and `indexes: []` would tell a schema
- * differ that a table HAS none when it merely was not asked — a worse answer
- * than an absent key. Emitting them for real is per-dialect work over arms
- * this container cannot execute, so it is filed rather than guessed.
+ * `indexes` is inherited from the spec contract, where it is OPTIONAL and
+ * absence is meaningful (#11122): this driver does not introspect indexes,
+ * so `introspectSchema` deliberately OMITS the key — `indexes: []` would
+ * tell a schema differ that a table HAS none when it merely was not asked,
+ * a worse answer than an absent key. Wiring the real read
+ * ({@link SqlDriver.introspectIndexes} exists) is explicitly a separate
+ * decision with its own `onFailure` ruling.
  */
-export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns' | 'indexes'> {
+export interface IntrospectedTable extends SpecIntrospectedTable {
   columns: IntrospectedColumn[];
   /** SQL-introspection extra: outbound foreign keys. */
   foreignKeys: IntrospectedForeignKey[];
@@ -3722,7 +3725,7 @@ export interface IntrospectedTable extends Omit<SpecIntrospectedTable, 'columns'
  * that omits them, which is the check that was missing while this type
  * declared `{ tables }` alone.
  */
-export interface IntrospectedSchema extends Omit<SpecIntrospectedSchema, 'tables'> {
+export interface IntrospectedSchema extends SpecIntrospectedSchema {
   tables: Record<string, IntrospectedTable>;
 }
 
@@ -12925,7 +12928,9 @@ export class SqlDriver implements IDataDriver {
     for (const colName of orderedNames) {
       const info = columnInfo[colName];
       let type = 'string';
-      let maxLength: number | undefined;
+      // Raw as knex reports it: a number on some dialects, a STRING on SQLite
+      // (measured: `"255"`) — see the `maxLength` note on IntrospectedColumn.
+      let maxLength: number | string | undefined;
 
       if (this.isSqlite) {
         type = info.type?.toLowerCase() || 'string';

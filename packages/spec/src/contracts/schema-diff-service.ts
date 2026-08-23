@@ -39,8 +39,26 @@ export interface IntrospectedTable {
   name: string;
   /** Column definitions */
   columns: IntrospectedColumn[];
-  /** Index definitions */
-  indexes: IntrospectedIndex[];
+  /**
+   * Index definitions — OPTIONAL, and absence is meaningful.
+   *
+   * An ABSENT key means the producer did not read indexes (the in-tree SQL
+   * driver does not: wiring the read adds one index query per table to every
+   * `introspectSchema()` call — the whole-warehouse federation path included —
+   * and needs its own `onFailure` failure-policy ruling; see
+   * `SqlDriver.introspectIndexes`). An EMPTY ARRAY is a positive claim that
+   * the table HAS no indexes. A producer that did not look must OMIT the key
+   * rather than emit `[]`, so a schema differ can tell "not asked" from
+   * "none exist".
+   *
+   * History (#11122): declared required from the start yet emitted by no
+   * producer ever, so a consumer typed against the promise read `undefined`
+   * with no compiler complaint. Withdrawn to optional per maintainer ruling
+   * 2026-08-23 (option B — 「其他同意你的意见」); wiring the index read is
+   * explicitly NOT this change, and becomes a new card if real consumer
+   * demand appears.
+   */
+  indexes?: IntrospectedIndex[];
 }
 
 /**
@@ -53,8 +71,21 @@ export interface IntrospectedColumn {
   type: string;
   /** Whether the column is nullable */
   nullable: boolean;
-  /** Default value expression */
-  defaultValue?: string;
+  /**
+   * The column's default, RAW as the driver reported it — `unknown`, not the
+   * `string` this key used to promise (#11122).
+   *
+   * The in-tree SQL driver passes `knex.columnInfo().defaultValue` through
+   * unchanged. Measured on live in-memory SQLite (2026-08-23): `null` for a
+   * column with no default; a dialect-decorated STRING when one exists
+   * (SQLite quotes — `'abc'`, and spells a boolean default `'1'`; Postgres
+   * additionally appends a `::type` cast). Other producers report native
+   * values (an in-tree fixture carries `true` for a boolean column), and
+   * per-dialect CONTENT is deliberately not claimed here. Consumers must
+   * narrow before use — or compare through a helper such as driver-sql's
+   * `physicalDefaultIsToken` — never assume a string.
+   */
+  defaultValue?: unknown;
   /** Whether this column is a primary key */
   primaryKey: boolean;
 }
