@@ -431,14 +431,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/client': {
     // The first entry this gate DERIVED from import specifiers rather than from
     // a path-shaped read (#10452), and the reason that half was worth building:
-    // five tests here import six sibling packages' route ledgers directly by
+    // six tests here import six sibling packages' route ledgers directly by
     // relative specifier, and nothing had ever declared any of them.
     //   src/client-url-conformance.test.ts and src/route-ledger-response-schema.test.ts
     //     import runtime, rest, service-storage, service-i18n and plugin-auth;
     //   src/route-ledger-coverage.test.ts imports runtime;
     //   src/rest-route-ledger-coverage.test.ts imports rest;
     //   src/service-route-ledger-coverage.test.ts imports the three services,
-    //     service-datasource among them.
+    //     service-datasource among them;
+    //   src/auth-route-ledger-coverage.test.ts imports plugin-auth (#11359) —
+    //     the sixth ledger's client half, added last and reading a file the
+    //     five globs below already carried, so it widened no radius.
     // Each asserts this client's URL builders still agree with the ledger the
     // server side publishes, so a ledger edit changes the verdict by design.
     //
@@ -475,6 +478,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-storage/src/storage-route-ledger.conformance.test.ts',
       'packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts',
       'packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts',
+      'packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts',
       'scripts/check-route-envelope.mjs',
     ],
   },

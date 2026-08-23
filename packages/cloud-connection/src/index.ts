@@ -55,6 +55,13 @@ export { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-conn
 export type { CloudConnectionPluginConfig } from './cloud-connection-plugin.js';
 export { RuntimeConfigPlugin } from './runtime-config-plugin.js';
 export type { RuntimeConfigPluginConfig, RuntimeFeatureOverrides, RuntimeConfigPlanFeatures, PlatformStage } from './runtime-config-plugin.js';
+// #10805 — the SPA telemetry permission carried on that payload, and the
+// canonical fail-closed way to read it. The reader is exported deliberately:
+// "an absent key means do not send" is a claim about consumer code, and a
+// consumer writing its own `?.` chain is one `!== false` away from re-opening
+// the PII leak on exactly the legacy payloads the guarantee is for.
+export { isClientErrorReportingAllowed, CLIENT_ERROR_REPORTING_ENV } from './telemetry-posture.js';
+export type { RuntimeTelemetryPosture } from './telemetry-posture.js';
 // ADR-0008 consumption side — the self-hosted credential ledger (bind
 // persists the oscc_ bearer here; forwards present it to the control plane).
 export { ConnectionCredentialStore, DEFAULT_CONNECTION_CREDENTIAL_PATH } from './connection-credential-store.js';

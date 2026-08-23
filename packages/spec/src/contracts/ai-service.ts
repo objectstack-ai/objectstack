@@ -465,6 +465,28 @@ export interface ToolExecutionContext {
     /** View the user is currently viewing, if known. */
     currentViewName?: string;
     /**
+     * cloud#1610 — what the user is currently DISCUSSING, derived by the UI
+     * from its route and selection, sent fresh on every turn. Strictly richer
+     * than `currentObjectName`/`currentViewName` (which stay as their own
+     * fields for back-compat): the Studio pillar the user is on, the selected
+     * artifact WITH its type discriminator (an interfaces nav leaf may be a
+     * page, object view, dashboard or report — the type is what makes "改这个"
+     * unambiguous), an optional finer selection inside it, and the canvas mode.
+     * Consumers treat every field as optional and advisory: grounding for the
+     * agents ("当前正在讨论…"), default targets for authoring tools — never an
+     * access decision.
+     */
+    surfaceContext?: {
+        /** Studio pillar / console area, e.g. 'data' | 'automations' | 'interfaces' | 'access'. */
+        pillar?: string;
+        /** The artifact under discussion, with its metadata type (e.g. {type:'dashboard', name:'sales_overview'}). */
+        artifact?: { type: string; name: string };
+        /** Finer selection inside the artifact (e.g. {kind:'field', id:'priority'}). */
+        selection?: { kind: string; id: string };
+        /** Canvas mode where applicable: 'design' | 'run'. */
+        mode?: string;
+    };
+    /**
      * Text of the latest user message (neutral context, like currentObjectName).
      * Forwarded so a tool can detect intent — e.g. an explicit confirm/approval —
      * without re-deriving it from the transcript. Consumers own any semantics.

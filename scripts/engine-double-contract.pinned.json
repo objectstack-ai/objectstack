@@ -807,6 +807,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-pointer-pair.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-replay.test.ts",
       "verb": "delete",
       "pinned": 1

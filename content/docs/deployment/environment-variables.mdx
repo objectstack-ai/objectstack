@@ -340,6 +340,7 @@ the hosted ObjectOS Cloud control plane.
 | `OS_OTLP_ENDPOINT` | url | — | OTLP/HTTP collector endpoint. Required when `OS_OBS_EXPORTER=otlp`. |
 | `OS_OTLP_HEADERS` | csv | — | Comma-separated `key=value` pairs added to every OTLP export. |
 | `OS_OTLP_FLUSH_MS` | number | `10000` | OTLP batch flush interval. |
+| `OS_TELEMETRY_CLIENT_ERROR_REPORTING_ENABLED` | boolean | `false` | Permits the Console SPA to send client error reports to the sink its build was compiled with, via `telemetry.allowClientErrorReporting` on `/api/v1/runtime/config`. Opt-in on every posture: an unset switch, an unrecognised value, or a runtime that declared its control plane off (`OS_CLOUD_URL=off`) all deny. It is a permission, not a source — it cannot start telemetry for a build that carries no DSN. |
 
 ---
 
