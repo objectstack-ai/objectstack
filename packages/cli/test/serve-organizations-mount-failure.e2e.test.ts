@@ -134,6 +134,11 @@ afterAll(() => {
 const SERVE_ENV = {
   OS_AUTH_SECRET: 'org-mount-failure-e2e-secret',
   OS_TENANCY_POSTURE: 'isolated',
+  // [#11184] A walled posture refuses to boot unless the platform owner is
+  // env-declared; these fixtures' subject is the organizations-package
+  // resolution, so declare one (the refusal itself is pinned in
+  // plugin-auth's auth-plugin-walled-owner-boot-refusal.test.ts).
+  OS_PLATFORM_OWNER_EMAIL: 'operator@corp.example',
 };
 
 const BANNER = 'Press Ctrl+C to stop';

@@ -1097,10 +1097,21 @@ describe('AuthPlugin', () => {
 
     it('multi-org: bootstrap is NOT wired (enterprise organizations package owns it)', async () => {
       process.env.OS_MULTI_ORG_ENABLED = 'true';
-      await boot();
-      await hookCapture.trigger('kernel:ready');
-      expect(ql.tables.sys_organization).toHaveLength(0);
-      expect(ql.tables.sys_member).toHaveLength(0);
+      // [#11184] A walled posture now declares its platform owner or refuses
+      // to boot; this fixture's subject is the default-org wiring, so declare
+      // one (the boot-refusal itself is pinned in
+      // auth-plugin-walled-owner-boot-refusal.test.ts).
+      const oldOwner = process.env.OS_PLATFORM_OWNER_EMAIL;
+      process.env.OS_PLATFORM_OWNER_EMAIL = 'operator@corp.example';
+      try {
+        await boot();
+        await hookCapture.trigger('kernel:ready');
+        expect(ql.tables.sys_organization).toHaveLength(0);
+        expect(ql.tables.sys_member).toHaveLength(0);
+      } finally {
+        if (oldOwner === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+        else process.env.OS_PLATFORM_OWNER_EMAIL = oldOwner;
+      }
     });
 
     it('autoDefaultOrganization: false opts out', async () => {
