@@ -166,6 +166,19 @@ describe('shipped template comments are followable by a stranger', () => {
         { what: 'that declaring it is required rather than optional', re: /required|refuses/i },
       ],
     },
+    {
+      // #11022's two rewrites (ADR-0097 -> a public docs link; "the ObjectStack
+      // framework repo" -> the followable install form) are RATIONALE entries
+      // too, for the same reason blank/objectstack.config.ts and
+      // note.object.ts already are: assertions 1/3/4 only ever check that
+      // something UNFOLLOWABLE is absent or that a present URL resolves --
+      // none of them notice a fact quietly disappearing along the way.
+      file: 'blank/README.md',
+      facts: [
+        { what: 'that a provider-bound connector is materialized into a live, dispatchable connector at boot (not written by hand)', re: /materializ\w*[^.]*?\bat\s+boot\b/i },
+        { what: 'the followable skills install command (`npx skills add objectstack-ai/objectstack/skills`)', re: /npx skills add objectstack-ai\/objectstack\/skills/i },
+      ],
+    },
   ];
 
   for (const { file, facts } of RATIONALE) {
