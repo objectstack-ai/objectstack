@@ -2658,7 +2658,10 @@ export default class Serve extends Command {
                         "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
                         '          app, not from the framework it is linked out of. Being merely reachable\n' +
                         '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
-                        '          (#4719) — that made this wall depend on how the process was launched — or\n';
+                        '          (#4719) — that made this wall depend on how the process was launched.\n' +
+                        '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
+                        '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
+                        '          bullet is not followable, and one of the two below is your path — or\n';
                   console.error(
                     chalk.red(
                       `\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested but ` +

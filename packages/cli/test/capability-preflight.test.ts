@@ -5,7 +5,10 @@ import {
   missingProviderMessage,
   makeProviderResolver,
 } from '../src/utils/capability-preflight.js';
-import { classifyRequiredCapability } from '@objectstack/spec/kernel';
+import {
+  classifyRequiredCapability,
+  PLATFORM_CAPABILITY_PROVIDERS,
+} from '@objectstack/spec/kernel';
 
 // framework#3366 — the CLI-side resolution + message layer over the spec-owned
 // classifier. Resolution is injected so the classification is deterministic.
@@ -69,10 +72,20 @@ describe('renderCapabilityMessage (#3366)', () => {
     expect(m).toContain('pnpm add @objectstack/service-automation');
   });
 
-  it('enterprise provider hint points at plugins[] wiring', () => {
+  it('enterprise provider hint names plugins[] wiring AND carries the edition boundary', () => {
     const m = msgFor('hierarchy-security', () => false);
     expect(m).toContain('pnpm add @objectstack/security-enterprise');
     expect(m).toContain('plugins[]');
+    // #10921 — this `pnpm add` names a package this repo does not build and that
+    // is not publicly resolvable; it is followable only by a licensee. What keeps
+    // it from reading as an ordinary open-edition install is the roster's edition
+    // note, so assert the message carries that note VERBATIM instead of a literal
+    // copied into this file — the note is spec-owned, and a copy here would let
+    // the two drift apart with both still green. Strip the note from the roster
+    // entry, or stop interpolating it, and this fails.
+    const note = PLATFORM_CAPABILITY_PROVIDERS['hierarchy-security'].note;
+    expect(note, 'the enterprise roster entry must carry an edition note').toBeTruthy();
+    expect(m).toContain(note!);
   });
 
   it('unknown token reads as a typo hint', () => {

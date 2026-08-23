@@ -1,20 +1,24 @@
 # @objectstack/console
 
-**Prebuilt Console SPA, version-locked to `@objectstack/framework`.**
+**Prebuilt Console SPA, version-locked to the framework release that ships it.**
 
 This package contains nothing but a prebuilt `dist/` directory: the static
 assets of the ObjectStack runtime Console, baked at the commit of
 [`objectstack-ai/objectui`](https://github.com/objectstack-ai/objectui)
 recorded in [`.objectui-sha`](../../.objectui-sha) of this framework release.
 
-It exists so that a single
+You never install it directly. `@objectstack/cli` declares it as a
+dependency, and both ship at the same version from the Changesets `fixed`
+group (see [`.changeset/config.json`](../../.changeset/config.json)), so
+scaffolding an app
 
 ```sh
-pnpm add @objectstack/framework
+npx create-objectstack
 ```
 
-always pulls in a Console build matched to the framework version — no
-second npm dependency to keep in sync.
+— or adding `@objectstack/cli` to an existing one — always pulls in a Console
+build matched to the framework version, with no second npm dependency to keep
+in sync.
 
 ## Relationship to `@object-ui/console`
 
@@ -22,7 +26,7 @@ second npm dependency to keep in sync.
 |---|---|---|
 | Repo | [`objectstack-ai/objectui`](https://github.com/objectstack-ai/objectui) | [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack) |
 | Role | Standalone Console SPA on its own release cadence | Prebuilt SPA frozen at the SHA this framework release was tested against |
-| Use | Cloud overlays, advanced users, anyone consuming Console directly | Default install for `@objectstack/framework` consumers |
+| Use | Cloud overlays, advanced users, anyone consuming Console directly | What every `@objectstack/cli` install gets by default |
 
 The framework CLI's `resolveConsolePath()` (in
 `packages/cli/src/utils/console.ts`) prefers `@objectstack/console` and

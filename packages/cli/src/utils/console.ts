@@ -14,7 +14,9 @@
  *   1. `@objectstack/console` — the framework-vendored, version-locked
  *      build. Shipped as a dist-only npm package frozen at the objectui
  *      SHA recorded in `<framework>/.objectui-sha`. This is what a
- *      fresh `pnpm add @objectstack/framework` install gets. Cloud /
+ *      fresh `@objectstack/cli` install gets: the CLI declares this
+ *      package as a dependency and both ship at one version from the
+ *      Changesets `fixed` group, so no app installs it by hand. Cloud /
  *      objectos Docker builds overlay their own `cloud/.objectui-sha`
  *      build into this package's `dist/` so the same package name
  *      always wins regardless of who built the image.
