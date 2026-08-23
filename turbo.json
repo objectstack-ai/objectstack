@@ -56,7 +56,7 @@
       ]
     },
     "@objectstack/cli#test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["build"],
       "outputs": [],
       "inputs": [
         "$TURBO_DEFAULT$",
