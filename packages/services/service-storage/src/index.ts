@@ -12,8 +12,29 @@ export type { FileRecord, UploadSessionRecord, StorageMetadataOperation } from '
 export { registerStorageRoutes } from './storage-routes.js';
 export type { StorageRoutesOptions, FileReadVerdict } from './storage-routes.js';
 export { SystemFile, SystemUploadSession } from './objects/index.js';
-export { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard } from './attachment-lifecycle.js';
-export type { AttachmentLifecycleEngine, AttachmentLifecycleLogger } from './attachment-lifecycle.js';
+export {
+  installAttachmentLifecycleHooks,
+  createSysFileReapGuard,
+  createUploadSessionReapGuard,
+  findFileHolder,
+  hasFieldReferenceOwner,
+} from './attachment-lifecycle.js';
+export type {
+  AttachmentLifecycleEngine,
+  AttachmentLifecycleLogger,
+  FileHolder,
+} from './attachment-lifecycle.js';
+export {
+  inventoryStrandedFileOrphans,
+  formatStrandedOrphanInventory,
+  formatBytes,
+} from './stranded-orphan-inventory.js';
+export type {
+  StrandedOrphanInventory,
+  StrandedOrphanInventoryEngine,
+  StrandedOrphanInventoryOptions,
+  StrandedOrphanSample,
+} from './stranded-orphan-inventory.js';
 export {
   installFileReferenceHooks,
   FileReferenceCopyError,

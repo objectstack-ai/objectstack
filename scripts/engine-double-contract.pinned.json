@@ -1830,6 +1830,11 @@
       "file": "packages/services/service-storage/src/storage-routes.metadata-outage.test.ts",
       "verb": "delete",
       "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/stranded-orphan-inventory.test.ts",
+      "verb": "delete",
+      "pinned": 1
     }
   ]
 }

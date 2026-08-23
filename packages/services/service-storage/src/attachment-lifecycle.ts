@@ -315,6 +315,57 @@ export function installAttachmentLifecycleHooks(
 }
 
 /**
+ * Which surface still holds a file — `null` when nothing does.
+ *
+ * Two surfaces can hold one `sys_file`, and they are not interchangeable:
+ * `sys_attachment` join rows (the Attachments surface, #2727) and the
+ * `ref_*` ownership columns (field-file lineage, ADR-0104 / #3459 PR-5b).
+ * A file with ZERO join rows may still be owned through the columns.
+ */
+export type FileHolder = 'attachment' | 'field-owner' | null;
+
+/**
+ * The ownership half of the hold question: do the `ref_*` columns name an
+ * owner? Exactly the predicate the reap guard has always applied — `ref_field`
+ * is deliberately NOT consulted, because a slot is identified by (object,
+ * record) and a missing field name must not read as "unowned".
+ */
+export function hasFieldReferenceOwner(row: Record<string, unknown>): boolean {
+  return row.ref_object != null && row.ref_id != null && row.ref_id !== '';
+}
+
+/**
+ * "Is anything still holding this file?" — asked in ONE place because a second
+ * asker now exists (the stranded-orphan inventory, #10950).
+ *
+ * The reap guard asks it at sweep time before reclaiming bytes; the inventory
+ * asks it to decide whether a file with no join rows is genuinely stranded.
+ * The maintainer's ruling on #10950 requires the inventory to apply "the same
+ * `ref_*` ownership re-verification the reap guard uses — never a weaker
+ * question", and the only way to make "the same" a property of the code rather
+ * than a claim in a comment is for both callers to run this function. Two
+ * copies of an ownership test that authorises byte deletion is the drift
+ * #10171 was filed against, one seam over.
+ *
+ * ⚠️ Weakening this — dropping the `ref_*` limb, or asking only for a join-row
+ * count — makes live, field-owned files read as orphans. That is why the check
+ * is a union and not a choice.
+ */
+export async function findFileHolder(
+  engine: Pick<AttachmentLifecycleEngine, 'find'>,
+  fileId: string | number,
+  row: Record<string, unknown>,
+): Promise<FileHolder> {
+  const refs = await engine.find('sys_attachment', {
+    where: { file_id: String(fileId) },
+    limit: 1,
+    context: { ...SYSTEM_CTX },
+  });
+  if (refs?.length) return 'attachment';
+  return hasFieldReferenceOwner(row) ? 'field-owner' : null;
+}
+
+/**
  * The `sys_file` reap guard ({@link LifecycleReapGuard} shape from
  * `@objectstack/objectql`, duck-typed here to avoid the dependency).
  * Candidates arrive from the two declared policies — tombstones past the
@@ -388,20 +439,15 @@ export function createSysFileReapGuard(
 
       if (row.status === 'deleted') {
         try {
-          const refs = await engine.find('sys_attachment', {
-            where: { file_id: String(id) },
-            limit: 1,
-            context: { ...SYSTEM_CTX },
-          });
-          const owned = row.ref_object != null && row.ref_id != null && row.ref_id !== '';
-          if (refs?.length || owned) {
+          const holder = await findFileHolder(engine, id, row);
+          if (holder) {
             await engine.update(
               'sys_file',
               { id, status: 'committed', deleted_at: null },
               { context: { ...SYSTEM_CTX } },
             );
             logger.info(
-              `[storage] reap guard: sys_file ${id} regained ${refs?.length ? 'references' : 'an owner'} since tombstoning — un-tombstoned, not reaped`,
+              `[storage] reap guard: sys_file ${id} regained ${holder === 'attachment' ? 'references' : 'an owner'} since tombstoning — un-tombstoned, not reaped`,
             );
             continue;
           }
