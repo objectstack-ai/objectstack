@@ -348,3 +348,45 @@ describe('check:liveness — the evidence summary line (#5623)', () => {
     expect(line).toMatch(/; \d+ attributed to another repo \(objectui \/ cloud — not resolvable here\)\./);
   });
 });
+
+// The universe itself. Everything above asks whether the gate judges what it
+// walks correctly; this asks whether a surface is INSIDE the walk at all, which
+// is the only question the gate cannot ask about itself.
+//
+// WHY `manifest` GETS A PIN AND THE OTHER THIRTY DO NOT. The registered types
+// are already answerable to the registry — dropping one from `GOVERNED` fails
+// the `ungoverned` check, which reads `listMetadataTypeSchemaTypes()`. The four
+// `SPEC_ONLY_SCHEMAS` types have no such backstop: they are governed BY the
+// override and by nothing else, so removing the entry un-governs the surface,
+// and for `manifest` that removal has a green two-step. Dropping `'manifest'`
+// from `GOVERNED` alone does go red — but on the README row and the count
+// artifact, and both of those are repairable by deleting the row and
+// regenerating. Do the three edits together and the gate is green over a
+// ~24-key authoring surface nothing asks about again — which is precisely the
+// state this type was seeded out of (#10728), and the state in which its
+// `loading` block accumulated ten inert keys, one of them `sandboxing`, before
+// anyone noticed by hand (#4914).
+//
+// So the pin is on membership, not on verdicts: the ledger's own rows are free
+// to move as the measurement moves.
+describe('check:liveness — the manifest is inside the governed universe (#10728)', () => {
+  it('walks the plugin manifest and reports its rows', () => {
+    const { status, output } = runGate();
+    expect(status, output).toBe(0);
+    // Named in the governed set the run prints...
+    expect(output).toMatch(/governed types:.*\bmanifest\b/);
+    // ...and actually walked, rather than merely listed.
+    expect(output).toMatch(/^ {2}manifest {2,}\d+ classified/m);
+  });
+
+  it('resolves ManifestSchema through the override, not through the registry', () => {
+    // The manifest is not a metadata kind, so `getMetadataTypeSchema('manifest')`
+    // has nothing to return: `SPEC_ONLY_SCHEMAS` is the ONLY resolution path,
+    // and the gate throws by name the moment it is not. Asserting the throw
+    // message keeps the reason legible if this ever regresses — a bare "exit 1"
+    // would read like any other finding.
+    const src = readFileSync(GATE, 'utf8');
+    expect(src).toMatch(/^\s*manifest: ManifestSchema,$/m);
+    expect(src).toContain("const schema = SPEC_ONLY_SCHEMAS[type] ?? getMetadataTypeSchema(type);");
+  });
+});
