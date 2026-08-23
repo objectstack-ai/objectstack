@@ -5077,16 +5077,103 @@ async function listOpenPullRequests() {
 }
 
 /**
- * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged
- * ones only, capped at two pages — a quota decision whose consequence is
- * H8's stated boundary (a delivery older than the window is invisible). At
- * ~18 merges/day two pages reach well past the longest measured
- * unexecuted-verdict latency; `sort=updated` so a long-lived PR that merges
- * late is still in the window when it matters.
+ * How this file states a bounded window's boundary, in ONE place (#11118).
+ *
+ * Every window here is a page cap, and a page cap is meaningless until it is
+ * divided by a rate. The three windows below used to state their boundaries in
+ * prose, each derived from a rate measured whenever that item was written — and
+ * one of them (H8's) was still quoting `~18 merges/day` from a repo that had
+ * since accelerated more than sevenfold. The sentence justifying the cap was
+ * describing an ~11-day reach for a window that had become ~1.8 days, and
+ * nothing in the file said so, because nothing in the file could: the
+ * arithmetic was prose, so no reader and no test could ever disagree with it.
+ *
+ * These two helpers make the derivation executable instead. The self-test pins
+ * them; the docblocks below quote numbers these functions produce.
+ *
+ * @param {number} rows — the window's size in rows (pages × per_page).
+ * @param {number} ratePerDay — the measured production rate of those rows.
+ * @returns {number|null} days of coverage, or null when the rate cannot divide.
  */
+export function windowCoverageDays(rows, ratePerDay) {
+  if (!Number.isFinite(rows) || !Number.isFinite(ratePerDay) || ratePerDay <= 0) return null;
+  return rows / ratePerDay;
+}
+
+/** How many consecutive patrol runs see a given row before it ages out. */
+export function sweepOverlap(coverageDays, cadenceHours = PATROL_CADENCE_HOURS) {
+  if (!Number.isFinite(coverageDays) || !Number.isFinite(cadenceHours) || cadenceHours <= 0) {
+    return null;
+  }
+  return (coverageDays * 24) / cadenceHours;
+}
+
+/** The scheduled patrol's period — `cron: '37 1,7,13,19 * * *'` in the workflow. */
+export const PATROL_CADENCE_HOURS = 6;
+
+/**
+ * The default-branch merge rate, MEASURED — the divisor every window below
+ * uses, and the number the stale `~18/day` was replaced with.
+ *
+ * Window pinned as full ISO INSTANTS, deliberately: `git log --since=` is an
+ * approxidate that fills the time-of-day from *now*, and two runs twelve
+ * minutes apart returned 1,443 and 1,441 messages for what read as one window
+ * (#11118's own warning, which this re-derivation obeys rather than repeats).
+ *
+ *   read     2026-08-23T08:42:15Z, `GET /repos/{repo}/commits`, 3 pages
+ *   window   2026-08-21T04:00:19Z … 2026-08-23T08:22:47Z  (2.18 days)
+ *   rows     300 commits, 300 of them carrying the `(#N)` squash marker
+ *   rate     300 / 2.18 = ~137.5 merges/day
+ *
+ * `main` is linear (measured on the same corpus at #10942's filing: 1,975
+ * reachable = 1,975 first-parent, 0 merge commits), so the commit count and the
+ * merge count are one count. The figure agrees with the independent 2026-08-22
+ * measurement this card was filed on (1,546 commits in 11.7 days ≈ 132/day),
+ * which is what makes it a rate rather than a spike.
+ */
+export const MEASURED_MERGES_PER_DAY = 137.5;
+
+/**
+ * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged ones
+ * only, capped at four pages — a quota decision whose consequence is H8's
+ * stated boundary (a delivery older than the window is invisible).
+ * `sort=updated` so a long-lived PR that merges late is still in the window
+ * when it matters.
+ *
+ * ## The boundary, re-derived (#11118)
+ *
+ * The cap was two pages, justified by a sentence claiming they "reach well past
+ * the longest measured unexecuted-verdict latency" — true at ~18 merges/day,
+ * which is where that sentence came from, and false at the measured 137.5.
+ * Both readings, taken 2026-08-23T08:42:15Z over the live endpoint:
+ *
+ *   2 pages = 200 rows -> 197 merged, oldest merge 2026-08-21T14:00:28Z = 1.78d
+ *   4 pages = 400 rows -> 397 merged, oldest merge 2026-08-20T09:41:02Z = 2.96d
+ *
+ * (Derivation and reading agree: `windowCoverageDays(400, 137.5)` = 2.91d. The
+ * merged-only filter costs almost nothing — 397 of 400 closed PRs in the window
+ * were merged — so rows and merges are interchangeable here in practice.)
+ *
+ * Four pages is chosen over an honest restatement because this row's damage
+ * model is asymmetric in the direction that punishes a short window: H8 reports
+ * a card whose delivering PR merged while the card still says `pm:dispatched`,
+ * i.e. precisely the paired write NOBODY noticed — which correlates with age.
+ * The population most likely to age out is the population the row exists for.
+ * The measured H8 specimen (#11036) sat unreported ~22h, so a 1.78-day window
+ * left the row about 2x its own worst measured latency; 2.96 days restores the
+ * "comfortably past it" the docblock always claimed. Cost: two extra requests
+ * per sweep, four sweeps a day, against a 15,000/h core quota.
+ *
+ * At the 6-hourly cadence that is `sweepOverlap(2.96)` ≈ 11.8 consecutive runs
+ * that see a given merge — the window is a detection HORIZON, not a retry
+ * budget: past it the finding is not delayed, it is gone (H22 catches the part
+ * of that population whose card later closes; nothing catches the rest).
+ */
+export const MERGED_WINDOW_PAGES = 4;
+
 async function listRecentlyMergedPullRequests() {
   const out = [];
-  for (let page = 1; page <= 2; page++) {
+  for (let page = 1; page <= MERGED_WINDOW_PAGES; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
@@ -5111,10 +5198,39 @@ async function listRecentlyMergedPullRequests() {
  * a live duty someone remembers — and the deep tail is a backfill question,
  * not a patrol question. `state=closed` is the ONLY closed-issue read in this
  * file; every other collector stays open-only by construction.
+ *
+ * ## The boundary, re-derived — and the surprise in it (#11118)
+ *
+ * "Recent" was never measured here; it was assumed to mean roughly what H8's
+ * window meant. It did not, and the divisor is the reason: this window is
+ * ordered by `updated`, and a closed card is BUMPED by every later comment,
+ * label write and cross-reference, so the rows are consumed by issue ACTIVITY
+ * rather than by closures. Read 2026-08-23T08:42:15Z over the live endpoint:
+ *
+ *   2 pages = 200 rows -> updated 2026-08-22T17:05:44Z … 2026-08-23T08:39:14Z
+ *                         = 0.65d (~15.6 HOURS of update-recency)
+ *   4 pages = 400 rows -> updated 2026-08-21T15:44:49Z … 2026-08-23T08:39:14Z
+ *                         = 1.70d
+ *
+ * At 6-hourly runs the old cap gave `sweepOverlap(0.65)` ≈ 2.6 consecutive
+ * sweeps — and the derived floor is tighter still (200 rows / ~308 updates/day
+ * ≈ 1.30d for four pages against the 1.70d measured), because the rate is
+ * BURSTY: a triage round that touches a few hundred closed cards can eject a
+ * fresh residue card inside one cadence, and it does so exactly when residue is
+ * being produced fastest. That correlation is what makes 2.6 sweeps thin rather
+ * than merely small.
+ *
+ * Four pages restores what the anti-drowning argument above was actually
+ * choosing — a couple of days of recent residue — rather than the fifteen hours
+ * it turned out to be buying. It does NOT reopen the deep tail: the population
+ * that argument refuses is the 500+ historical carriers spanning months, and
+ * 1.7 days is not in it. Cost: two extra requests per sweep.
  */
+export const CLOSED_ISSUE_WINDOW_PAGES = 4;
+
 async function listRecentlyClosedIssues() {
   const out = [];
-  for (let page = 1; page <= 2; page++) {
+  for (let page = 1; page <= CLOSED_ISSUE_WINDOW_PAGES; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
@@ -5148,9 +5264,16 @@ async function listRecentlyClosedIssues() {
  * Measured over the corpus above: 1,546 commits in 11.7 days ≈ 132/day. Three
  * pages ≈ 300 commits ≈ 2.3 days, against a patrol that fires every 6 hours —
  * roughly a 9× overlap, so a message has to survive nine consecutive sweeps to
- * age out unseen. (The `~18 merges/day` figure in `listRecentlyMergedPullRequests`
- * predates that acceleration; nothing here depends on it, but a future reader
- * re-deriving a window from it should re-measure first.)
+ * age out unseen.
+ *
+ * RE-MEASURED 2026-08-23T08:42:15Z and unchanged, which is why this window
+ * alone kept its cap while H8's and H22's were widened (#11118): the same three
+ * pages read 300 commits spanning 2026-08-21T04:00:19Z … 2026-08-23T08:22:47Z
+ * = 2.18 days at ~137.5/day, i.e. `sweepOverlap(2.18)` ≈ 8.7 runs. This item's
+ * docblock was the only one that DERIVED its cap from a measured rate instead
+ * of quoting a remembered one, and it is the only one that survived contact
+ * with a re-measure — the argument for keeping the derivation executable
+ * (`windowCoverageDays`, `MEASURED_MERGES_PER_DAY`) rather than in prose.
  *
  * No `sha=` parameter: the endpoint defaults to the repository's own default
  * branch, which keeps this reader repo-agnostic exactly like every other listing
@@ -5162,7 +5285,7 @@ async function listRecentlyClosedIssues() {
  * commits would simply feed this row a few branch-side messages, which are a
  * surface GitHub's parser reads too — wider, never wrong.
  */
-const COMMIT_WINDOW_PAGES = 3;
+export const COMMIT_WINDOW_PAGES = 3;
 
 async function listRecentDefaultBranchCommits() {
   const out = [];
@@ -8291,6 +8414,36 @@ function selfTest() {
   t('vocabulary: H11 keeps the mechanical remedy for a BLOCKED card', h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW).includes('Restart-when'), true);
   t('vocabulary: a fresh awaiting park is still clean', h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL], { created: daysAgo(2) }), NOW), null);
   t('vocabulary: an UNimportant awaiting card is not inventory', h11ImportantParked(parkedCard([AWAITING_MAINTAINER_LABEL]), NOW), null);
+
+  // -- The window arithmetic (#11118) ----------------------------------------
+  // The derivation is executable so that a cap and the sentence justifying it
+  // cannot drift apart again: H8's docblock quoted `~18 merges/day` while the
+  // repo ran at ~132, which turned a claimed ~11-day reach into ~1.8 days with
+  // nothing able to notice.
+  t('windows: coverage is rows / rate', windowCoverageDays(400, 100), 4);
+  t('windows: H8 four pages against the measured rate', Number(windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.91);
+  t('windows: …which is what the live reading measured (2.96d), within a rounding', windowCoverageDays(MERGED_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2.5, true);
+  t('windows: the OLD two-page cap was under two days, not the ~11 its prose claimed', Number(windowCoverageDays(200, MEASURED_MERGES_PER_DAY).toFixed(2)), 1.45);
+  t('windows: …and the stale ~18/day figure is what produced the ~11-day claim', Number(windowCoverageDays(200, 18).toFixed(1)), 11.1);
+  t('windows: H23 keeps three pages', COMMIT_WINDOW_PAGES, 3);
+  t('windows: …and its re-measured coverage still clears two days', windowCoverageDays(COMMIT_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2, true);
+  t('windows: H22 widened to four pages', CLOSED_ISSUE_WINDOW_PAGES, 4);
+  t('windows: H8 widened to four pages', MERGED_WINDOW_PAGES, 4);
+  // The cadence side: a window is a detection HORIZON, and the overlap says how
+  // many runs see a row before it is gone for good.
+  t('windows: the patrol cadence is the workflow\'s', PATROL_CADENCE_HOURS, 6);
+  t('windows: overlap is coverage over cadence', sweepOverlap(1, 6), 4);
+  t('windows: H8\'s new window is seen by ~12 runs', Math.round(sweepOverlap(windowCoverageDays(400, MEASURED_MERGES_PER_DAY))), 12);
+  t('windows: H22\'s OLD 0.65d reading was ~2.6 runs (the thin one)', Number(sweepOverlap(0.65).toFixed(1)), 2.6);
+  t('windows: H22\'s measured new reading is ~6.8 runs', Number(sweepOverlap(1.7).toFixed(1)), 6.8);
+  // Degenerate inputs answer "cannot divide" rather than Infinity or NaN — a
+  // number no reading produced must never be renderable as a boundary.
+  t('windows: a zero rate cannot divide', windowCoverageDays(200, 0), null);
+  t('windows: a negative rate cannot divide', windowCoverageDays(200, -5), null);
+  t('windows: a missing rate cannot divide', windowCoverageDays(200, undefined), null);
+  t('windows: a missing row count cannot divide', windowCoverageDays(undefined, 137.5), null);
+  t('windows: a zero cadence has no overlap', sweepOverlap(2, 0), null);
+  t('windows: an unusable coverage has no overlap', sweepOverlap(null), null);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
