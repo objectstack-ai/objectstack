@@ -1198,6 +1198,20 @@ jobs:
       - name: Single authz resolver guard
         run: pnpm check:authz-resolver
 
+      # #11352. Product code may not read a test-RUNNER variable (`TEST`,
+      # `VITEST*`, `JEST_WORKER_ID`). Runner variables are INHERITED by every
+      # process the runner spawns, so a product decision keyed off one is made
+      # for spawned SERVERS too: `local-crypto-provider.ts` selected its crypto
+      # posture with `if (env.VITEST || ...)`, and `'test'` posture is the branch
+      # that never refuses to boot without a stable key. A real `os serve`
+      # spawned from a vitest worker therefore ran with production auth and test
+      # crypto — invisibly, because a gate that does not run prints nothing.
+      # `NODE_ENV` is deliberately NOT banned: it describes the deployment.
+      # Dependency-free source scan over `**/src/**`, comments and literals
+      # masked; runs its own --self-test first.
+      - name: Runner-env posture guard
+        run: pnpm check:runner-env-posture
+
       # #4093 follow-up. Discovery tells a consumer an absent capability is
       # absent AND what to install. The first half has been carefully honest
       # since #2462/#4000; the second was invented from the slot name, so ten
