@@ -5843,6 +5843,85 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#11176] Has this driver OBSERVED that `object`'s physical table carries
+   * `updated_at` — as opposed to merely presuming it from the declared shape?
+   *
+   * The stronger of the two answers {@link stampsUpdatedAt} folds together, and
+   * the only one the INSERT door may act on. `presumed` (#11067) is deliberately
+   * excluded: that state exists so an UPDATE can speculate and then RECOVER
+   * ({@link updateWithPresumedTimestamp}), and the upsert door has no such
+   * recovery — a presumption that turned out wrong there would name a column
+   * that does not exist in an INSERT column list, turning a call that works
+   * today into a hard failure. See {@link stampUpsertUpdatedAt}.
+   */
+  protected observedUpdatedAtColumn(object: string): boolean {
+    return this.tablesWithTimestamps.has(object) || this.updatedAtColumnState.get(object) === 'present';
+  }
+
+  /**
+   * [#11176] The instant an UPSERT puts in `updated_at`, in the form that column
+   * would have DEFAULTED to on this dialect.
+   *
+   * Deliberately NOT {@link updatedAtStamp}, and the difference is one digit of
+   * precision on MySQL. The audit columns are `DATETIME(3)` there and
+   * {@link createAuditTimestampColumn} defaults them with `now(3)` for exactly
+   * that reason ("`CURRENT_TIMESTAMP` has to carry matching precision for a
+   * `DATETIME(3)` default"). `updatedAtStamp`'s bare `knex.fn.now()` compiles to
+   * an unqualified `CURRENT_TIMESTAMP`, which MySQL truncates to whole seconds —
+   * harmless on the UPDATE door it was written for, but this value also lands on
+   * the INSERT branch of the same statement, where today the column DEFAULT
+   * supplies millisecond precision. Stamping the coarser value there would make
+   * a freshly inserted row's `updated_at` read up to 999 ms EARLIER than its
+   * `created_at`: a regression on the branch this fix is not about. Matching the
+   * default keeps the insert branch value-identical to what `main` stores.
+   *
+   * (The UPDATE door's own truncation on MySQL is pre-existing and is left
+   * alone here — it is a fidelity question, not the advance-or-not question this
+   * card measures.)
+   */
+  protected upsertUpdatedAtStamp(): string | Knex.Raw {
+    if (this.isSqlite) return new Date().toISOString();
+    return this.isMysql ? this.knex.fn.now(3) : this.knex.fn.now();
+  }
+
+  /**
+   * [#11176] Put a mergeable `updated_at` in an UPSERT payload — on EVERY
+   * dialect, not just SQLite.
+   *
+   * ## The asymmetry this closes
+   *
+   * `upsert`'s merge set is derived from the keys of `formatted`, so a column
+   * absent from the payload is absent from `ON CONFLICT … DO UPDATE` too. The
+   * merge site's comment claims *"Everything else (incl. `updated_at`) merges as
+   * before, so an upsert that updates a row still advances `updated_at`"* — true
+   * only where something PUT `updated_at` in the payload. On SQLite
+   * {@link stampInsertTimestamps} does; on Postgres and MySQL it returns early
+   * (`if (!this.isSqlite …) return`) because the column DEFAULT already stores a
+   * zone-aware instant on insert. But a DEFAULT does not re-fire on the conflict
+   * path, so the merged row kept the INSERT's value forever. Measured on live
+   * PostgreSQL 16.13 and MySQL 8.0.46: `update()` advanced the same column on
+   * the same table in the same run, and the upsert did not. SQLite was
+   * accidentally correct.
+   *
+   * ## Only an EMPTY slot is filled
+   *
+   * Same rule as `stampInsertTimestamps`: an explicit caller value (a seed
+   * fixture, a historical import) is preserved, and on SQLite that helper has
+   * already filled the slot — so the SQL this driver emits for SQLite is
+   * unchanged, byte for byte.
+   *
+   * ## Only an OBSERVED column is stamped
+   *
+   * {@link observedUpdatedAtColumn}, not {@link stampsUpdatedAt} — see there for
+   * why the #11067 presumption stops at the UPDATE door.
+   */
+  protected stampUpsertUpdatedAt(object: string, formatted: Record<string, any>): void {
+    if (formatted.updated_at !== undefined && formatted.updated_at !== null) return;
+    if (!this.observedUpdatedAtColumn(object)) return;
+    formatted.updated_at = this.upsertUpdatedAtStamp();
+  }
+
+  /**
    * True when the UPDATE path must KEEP a caller-supplied `updated_at` rather
    * than force-advancing it to `now` (#3493). Only for an opt-in "historical"
    * import (`DriverOptions.preserveAudit`, threaded from
@@ -6577,6 +6656,13 @@ export class SqlDriver implements IDataDriver {
 
       const formatted = this.applyWriteColumnMap(object, this.formatInput(object, toUpsert));
       this.stampInsertTimestamps(object, formatted);
+      // [#11176] …and the same slot filled on Postgres/MySQL, where the line
+      // above returns early. Without it `updated_at` is not in `formatted`, so
+      // it is not in the merge set built below, so the merge branch leaves the
+      // row reading its INSERT-time default forever. See
+      // {@link stampUpsertUpdatedAt} — no-op on SQLite (already filled) and on
+      // any object whose `updated_at` column this driver has not OBSERVED.
+      this.stampUpsertUpdatedAt(object, formatted);
 
       // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
       // effectively append-only; a cross-shard upsert would need a probe-first
@@ -6622,7 +6708,11 @@ export class SqlDriver implements IDataDriver {
       // `id` included.
       //
       // Everything else (incl. `updated_at`) merges as before, so an upsert
-      // that updates a row still advances `updated_at`.
+      // that updates a row still advances `updated_at`. [#11176] That last
+      // clause used to hold on SQLite ONLY: it needs `updated_at` to BE in
+      // `formatted`, which before this card nothing put there on Postgres or
+      // MySQL. `stampUpsertUpdatedAt` above is what now makes the sentence true
+      // on all three.
       const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
       const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
 
@@ -6633,7 +6723,10 @@ export class SqlDriver implements IDataDriver {
       // left `mergeColumns` empty and the merge-ALL fallback rewrote the row's
       // `case_no` from `0003` to `0004`, defeating #7011's exclusion. (SQLite
       // never reached it: `stampInsertTimestamps` puts a mergeable `updated_at`
-      // in the payload there.)
+      // in the payload there. [#11176] `stampUpsertUpdatedAt` now does the same
+      // on Postgres and MySQL, so a TIMESTAMPED object no longer reaches this
+      // fallback on any dialect either — it is still reachable, and still #8740's
+      // to decide, for an object with no observed `updated_at` column.)
       //
       // The remedy keeps the emitted SQL byte-identical to what `main` emits
       // for this shape. Falling back to the CONFLICT-TARGET columns present in
@@ -6938,14 +7031,58 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * Bulk UPDATE by filter.
+   *
+   * [#11176] `updated_at` is stamped here for the same reason {@link update} and
+   * {@link rotatedUpdateById} stamp it: the column means "last modified", it
+   * carries an INSERT-time `DEFAULT now()` and no `ON UPDATE` clause or trigger
+   * on any dialect this driver speaks, so a path that does not stamp leaves
+   * every row it touched reading its previous value. This door did not stamp at
+   * all — a bulk status change was invisible to every consumer that reads
+   * `updated_at` (list-view sorts, delta/incremental sync, cache invalidation,
+   * audit), without erroring.
+   *
+   * The decision is #11067's, unchanged and shared rather than re-derived:
+   * {@link stampsUpdatedAt} answers whether to stamp, {@link keepSuppliedUpdatedAt}
+   * honours an opt-in historical import, and {@link updateWithPresumedTimestamp}
+   * carries the speculative case so a hand-migrated table that genuinely lacks
+   * the column keeps working instead of gaining a new rejection.
+   *
+   * ⚠️ `data` is still passed through WITHOUT `formatInput` / `applyWriteColumnMap`,
+   * unlike every other write door. That gap is real and measured, but it is not
+   * this card's — it changes which VALUES a caller may write, not whether
+   * `updated_at` advances, and closing it belongs in its own change. The stamp
+   * added here is the literal post-map column name, matching how `created_at` is
+   * spelled everywhere else in this file.
+   */
   async updateMany(object: string, query: DriverQuery, data: any, options?: DriverOptions): Promise<number> {
     this.auditMissingTenant(object, 'updateMany', options);
+
+    const stamping = this.stampsUpdatedAt(object) && !this.keepSuppliedUpdatedAt(data ?? {}, options);
+    // Untouched when nothing is stamped, so a timestamp-less object's statement
+    // is byte-identical to the one `main` emits.
+    const payload = stamping ? { ...data, updated_at: this.updatedAtStamp() } : data;
+    // A rotation-managed object is recorded in `tablesWithTimestamps` by
+    // `initObjects` before `ensureRotation` runs, so it is never in the
+    // speculative state — the same property `rotatedUpdateById` relies on. The
+    // speculative path below therefore only ever sees the single-target loop.
+    const presumed = stamping && this.updatedAtStampIsPresumed(object);
+
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
-      const builder = this.getBuilder(target, options);
-      this.applyTenantScope(builder, object, options);
-      if (query.where) this.applyFilters(builder, query.where);
-      total += (await builder.update(data)) || 0;
+      // One definition of the statement, so the speculative attempt, the fenced
+      // retry and the plain path cannot drift in WHERE or tenant scope.
+      const issue = (candidate: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
+        const builder = this.getBuilder(target, issueOptions);
+        this.applyTenantScope(builder, object, issueOptions);
+        if (query.where) this.applyFilters(builder, query.where);
+        return builder.update(candidate) as unknown as Promise<number>;
+      };
+      total +=
+        (presumed
+          ? await this.updateWithPresumedTimestamp(object, payload, options, issue)
+          : await issue(payload, options)) || 0;
     }
     return total;
   }
