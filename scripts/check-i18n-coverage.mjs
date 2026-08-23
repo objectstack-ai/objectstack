@@ -89,9 +89,37 @@
 // converse, and one discipline serves both: measure EVERY config, then report every
 // DISTINCT cause once, with the configs it covers. A config that cannot be linted is
 // now collected (`measureI18nIssues` returns a failure), never thrown.
+//
+// Both of those are about a config that could not be MEASURED. #10907 is about
+// the population itself, and it is the failure this gate could not report at all:
+// every path here was resolved CWD-RELATIVELY — `examples`, `packages`, the
+// baseline, the CLI stub — so run from anywhere but the repo root the gate found
+// no configs, compared nothing, and printed
+//
+//     check-i18n-coverage: OK (0 config(s), 0 baselined untranslated string(s), none new).
+//     exit 0
+//
+// — the same sentence, and the same exit code, a real pass uses. What makes that
+// silent rather than merely wrong is an INTERLOCK: this is a two-sided ratchet, so
+// a config that vanishes is normally caught by the DOWN direction ("baselined
+// config is gone"). But the population and the baseline were resolved the same
+// way, so a wrong root emptied them TOGETHER and left the comparison with nothing
+// to disagree about. Anchoring one side alone would not have been a fix — it would
+// have turned the silence into twelve spurious errors.
+//
+// Two halves, and the file keeps both. (1) Every read is anchored to a root
+// derived from `import.meta.url`, as `check-skills-token-ratchet.mjs` and
+// `check-ratchet-remedy-authority.mjs` do; the repo-relative spellings stay, since
+// they are the committed baseline's KEYS and the text a reader acts on, and `at()`
+// is the one seam between the two. (2) An empty population is REFUSED rather than
+// returned — zero is a broken scan, not a repo with nothing to translate (#4690),
+// the same rule `trackedFiles` states in `scripts/pm/dispatch-gates.mjs`. Half 1
+// makes the off-root run correct; half 2 is what keeps "green over nothing"
+// unreachable by the routes half 1 does not know about.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
@@ -102,9 +130,22 @@ import {
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** This script lives in `scripts/`, so the repo root is one level up (#10907). */
+const REPO_ROOT = resolve(HERE, '..');
+
+// Repo-relative ON PURPOSE — these spellings are the committed baseline's KEYS,
+// the paths in every error message, and the commands `rerunFix` tells a reader to
+// run. Making them absolute would silently re-key all twelve baseline entries.
+// `at()` below is the ONE seam that turns a repo-relative path into a path on
+// disk, so the vocabulary stays relative while every READ is anchored (#10907).
 // NOTE: covers both `examples/*` and every package with an extract config.
 const EXAMPLES_DIR = 'examples';
+const PACKAGES_DIR = 'packages';
 const BASELINE_PATH = 'scripts/i18n-coverage-baseline.json';
+
+/** A repo-relative path, resolved against the module-derived root. */
+const at = (rel) => join(REPO_ROOT, rel);
 /** The one command this gate invokes per config, as oclif topic/command parts. */
 const LINT_COMMAND_ID = ['lint'];
 
@@ -120,13 +161,13 @@ const INSTALL_THEN_BUILD_FIX = 'pnpm install && pnpm build';
 
 const update = process.argv.includes('--update');
 
-/** Every bundled example that has a stack config. */
+/** Every bundled example that has a stack config. Root-anchored, repo-relative out. */
 function discoverExamples() {
-  if (!existsSync(EXAMPLES_DIR)) return [];
-  return readdirSync(EXAMPLES_DIR, { withFileTypes: true })
+  if (!existsSync(at(EXAMPLES_DIR))) return [];
+  return readdirSync(at(EXAMPLES_DIR), { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => join(EXAMPLES_DIR, e.name, 'objectstack.config.ts'))
-    .filter((p) => existsSync(p))
+    .filter((p) => existsSync(at(p)))
     .sort();
 }
 
@@ -139,9 +180,9 @@ function discoverExamples() {
  * Studio. Covering only `examples/` is how `platform-objects` sat on 77
  * untranslated navigation and widget labels per locale without anything saying so.
  */
-function discoverPackages(dir = 'packages', out = []) {
-  if (!existsSync(dir)) return out;
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
+function discoverPackages(dir = PACKAGES_DIR, out = []) {
+  if (!existsSync(at(dir))) return out;
+  for (const e of readdirSync(at(dir), { withFileTypes: true })) {
     if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) discoverPackages(p, out);
@@ -242,6 +283,47 @@ function packageNameFromSpecifier(specifier) {
 }
 
 /**
+ * The POPULATION classifier (#10907): is there anything to judge at all?
+ *
+ * Pure — list in, verdict out — so `--self-test` drives both directions. That
+ * matters more here than for any other classifier in this file: an empty
+ * population is the one failure that RENDERS AS A PASS, so a gate that had only
+ * ever observed its own green path could not tell the two apart. That is #4690
+ * exactly, and `trackedFiles` in `scripts/pm/dispatch-gates.mjs` refuses an empty
+ * listing on the same grounds — "zero is a broken scan, not a clean repo".
+ *
+ * Judged on the UNION, deliberately, not per half. A single vanished config is
+ * already this gate's business: the two-sided ratchet reports it as a DOWN and
+ * tells the reader to `--update`. Refusing on an empty HALF would preempt that
+ * legitimate path — the last example being retired is a real event, not a broken
+ * scan. Only a total wipe is indistinguishable from a scan that read nothing, and
+ * only a total wipe is refused here.
+ *
+ * @param {string[]} configPaths the discovered population, repo-relative
+ * @returns {{ headline: string, detail: string[] } | null} null when there is work to do
+ */
+function emptyPopulationVerdict(configPaths) {
+  if (configPaths.length > 0) return null;
+  return {
+    headline: 'the config population came back EMPTY — there is nothing to measure',
+    detail: [
+      `Neither \`${EXAMPLES_DIR}/*/objectstack.config.ts\` nor any`,
+      `\`${PACKAGES_DIR}/**/scripts/i18n-extract.config.ts\` was found under the root this`,
+      `script derives from its own location:`,
+      ``,
+      `  ${REPO_ROOT}`,
+      ``,
+      `Zero is a broken scan, not a repo with nothing to translate (#4690). Note what`,
+      `an empty population costs THIS gate specifically: it is a two-sided ratchet, so`,
+      `a config that really did vanish is caught by the DOWN direction — but the`,
+      `population and the baseline are read the same way, so a tree this script cannot`,
+      `read empties BOTH, leaving the comparison with nothing to disagree about and a`,
+      `verdict identical to a real pass. Refusing rather than reporting OK over nothing.`,
+    ],
+  };
+}
+
+/**
  * Distinct CAUSES, each carrying the configs it explains. Keyed on the CONCLUSION
  * (reason + fix) rather than the raw reading, because one unbuilt package produces
  * a different absolute path per config and those are the same fact told twelve
@@ -284,7 +366,13 @@ function measureI18nIssues(configPath) {
   try {
     let stderr = '';
     try {
+      // `CLI` and `configPath` are both REPO-RELATIVE, so the child's cwd is what
+      // resolves them — anchoring it here is what makes an off-root run measure the
+      // real population instead of failing twelve times (#10907). It also keeps
+      // `os lint`'s own workspace resolution pointed at the repo, not at wherever
+      // the caller happened to stand.
       execFileSync(process.execPath, [CLI, 'lint', configPath, '--json'], {
+        cwd: REPO_ROOT,
         stdio: ['ignore', fd, 'pipe'],
       });
     } catch (err) {
@@ -553,12 +641,84 @@ function selfTest() {
   expect('#6033 one cause is stated once', sharedCause.length === 1, `got ${sharedCause.length} cause(s) for one missing package`);
   expect('#6033 …carrying every config it covers', sharedCause[0]?.configPaths.length === 3, `got ${JSON.stringify(sharedCause[0]?.configPaths)}`);
 
+  // -------------------------------------------------------------------------
+  // Root anchoring and the population classifier (#10907). These are the only
+  // assertions in this file that can fail over a CORRECT tree in a WRONG place,
+  // and that is the whole point: every other classifier here is proven red with a
+  // recorded string, but "did this gate look at anything at all?" can only be
+  // proven by looking.
+  // -------------------------------------------------------------------------
+
+  // The derivation must land on THIS repo's root — one level off would still find
+  // a `scripts/` directory, so pin files only the root has, this gate's own two
+  // included.
+  expect(
+    '#10907 derives the repo root',
+    existsSync(at('package.json')) && existsSync(at(BASELINE_PATH)) && existsSync(at('scripts/check-i18n-coverage.mjs')),
+    `REPO_ROOT does not look like this repo's root: ${REPO_ROOT}`,
+  );
+
+  // The anchoring itself, proven the only way that means anything: from a cwd that
+  // is NOT the repo root. This single assertion is the #10907 defect — before the
+  // fix both discoveries read a bare `examples` / `packages`, came back empty from
+  // anywhere else, and the gate printed `OK (0 config(s))` and exited 0. cwd is
+  // restored in a `finally`: it is process-global state, and a self-test that
+  // leaves it moved would corrupt every measurement after it.
+  const cwdBefore = process.cwd();
+  let offRoot;
+  try {
+    process.chdir(tmpdir());
+    offRoot = [...discoverExamples(), ...discoverPackages()];
+  } finally {
+    process.chdir(cwdBefore);
+  }
+  const onRoot = [...discoverExamples(), ...discoverPackages()];
+  expect(
+    '#10907 discovery is CWD-independent',
+    offRoot.length > 0,
+    `discovery from ${tmpdir()} found ${offRoot.length} config(s) — the population is still resolved CWD-relatively, ` +
+      'which is the whole defect: an empty population renders as a pass',
+  );
+  expect(
+    '#10907 …and finds exactly the population the root does',
+    offRoot.join('\n') === onRoot.join('\n'),
+    `off-root found ${offRoot.length} config(s), on-root ${onRoot.length} — anchoring must not change WHAT is scanned`,
+  );
+  expect(
+    '#10907 …spelled repo-relative, as the baseline keys are',
+    offRoot.every((p) => !p.startsWith('/') && !p.includes(REPO_ROOT)),
+    `absolute paths would silently re-key every baseline entry; got ${JSON.stringify(offRoot.slice(0, 2))}`,
+  );
+
+  // Anti-#4690 on the population itself. Red on nothing is the assertion that
+  // matters — this is the one verdict whose failure mode is a green line.
+  expect('#10907 an empty population is refused', !!emptyPopulationVerdict([]), 'zero configs must never be a pass');
+  expect(
+    '#10907 …with a complete verdict',
+    !!emptyPopulationVerdict([])?.headline && (emptyPopulationVerdict([])?.detail?.length ?? 0) > 0,
+    `a refusal with no reading under it is not auditable; got ${JSON.stringify(emptyPopulationVerdict([]))}`,
+  );
+  expect(
+    '#10907 a real population is not refused',
+    emptyPopulationVerdict(['examples/app-crm/objectstack.config.ts']) === null,
+    'one config is work to do, not a broken scan — refusing it would preempt the ratchet-DOWN path',
+  );
+  expect(
+    '#10907 the live population is not refused',
+    emptyPopulationVerdict(onRoot) === null,
+    `the real tree resolved to ${onRoot.length} config(s) and must be judged, not refused`,
+  );
+
   if (failures.length) {
     console.error(`✗ check:i18n-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log('✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, stay distinct, and a failing config does not end the round.');
+  console.log(
+    `✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, ` +
+      `stay distinct, and a failing config does not end the round; the population resolves to ${onRoot.length} config(s) ` +
+      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK.`,
+  );
 }
 
 if (process.argv.includes('--self-test')) {
@@ -655,6 +815,35 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
 }
 
 /**
+ * The refusal for an empty population (#10907) — reached before a single CLI is
+ * spawned and before `--update` can write, which is the point on both counts.
+ *
+ * `--update` is the sharper of the two: it runs BEFORE any comparison, so over an
+ * empty population it would write `{}` and ratchet all twelve baselined configs
+ * out of existence — real, frozen debt discarded by a command whose whole purpose
+ * is to record it. Same invariant the two reports above state, and for the same
+ * reason: nothing measured, nothing written.
+ *
+ * Exits 1, the code every other verdict here uses.
+ *
+ * @param {{ headline: string, detail: string[] }} verdict
+ */
+function reportEmptyPopulation(verdict) {
+  console.error(
+    `\ncheck-i18n-coverage: POPULATION EMPTY — ${verdict.headline}\n\n` +
+      verdict.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
+      `\n\n  Fix:  run this gate from a complete checkout of the repo. \`pnpm check:i18n-coverage\`\n` +
+      `        is the invocation CI uses, and pnpm runs it from the repo root.\n\n` +
+      `  Nothing was measured: no config was linted and no count was compared, so this\n` +
+      `  result says NOTHING about whether any declared label went untranslated — and\n` +
+      `  the baseline was left exactly as committed (\`--update\` included).\n` +
+      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
+      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+  );
+  process.exit(1);
+}
+
+/**
  * Answered once, before the per-config loop — so a missing build costs one
  * verdict instead of an exception thrown from inside the first example, and
  * costs zero CLI spawns.
@@ -676,7 +865,12 @@ function checkCliBuildPrerequisite() {
     console.error(`check-i18n-coverage: ${resolved.unknown} — build prerequisite not pre-checked`);
     return;
   }
-  if (existsSync(resolved.file)) return;
+  // `resolved.file` is repo-relative (`packages/cli/dist/commands/lint.js`), so it
+  // needs the same anchoring as everything else — unanchored, an off-root run that
+  // got this far would report "the workspace CLI is not built" about a CLI that is
+  // built, which is the #5862 defect (a confident diagnosis pointing somewhere
+  // innocent) rebuilt one layer down.
+  if (existsSync(at(resolved.file))) return;
   reportPrerequisiteNotMet('the workspace CLI is not built', [
     `This gate counts what \`os lint\` reports, and it runs the BUILT CLI.`,
     `${CLI} is only a source stub that hands off to oclif, which`,
@@ -689,21 +883,24 @@ function checkCliBuildPrerequisite() {
 
 checkCliBuildPrerequisite();
 
-const { current, failures: unmeasured } = measureAllConfigs(
-  [...discoverExamples(), ...discoverPackages()],
-  measureI18nIssues,
-);
+const configPaths = [...discoverExamples(), ...discoverPackages()];
+// Before a single CLI is spawned, and before `--update` can write: a round with no
+// population has no verdict to give and no baseline to rewrite (#10907).
+const emptyPopulation = emptyPopulationVerdict(configPaths);
+if (emptyPopulation) reportEmptyPopulation(emptyPopulation);
+
+const { current, failures: unmeasured } = measureAllConfigs(configPaths, measureI18nIssues);
 // Before `--update` writes anything, and before any comparison: a round that could
 // not measure every config has no verdict to give and no baseline to rewrite.
 if (unmeasured.length) reportUnmeasuredConfigs(unmeasured, Object.keys(current).length);
 
 if (update) {
-  writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + '\n');
+  writeFileSync(at(BASELINE_PATH), JSON.stringify(current, null, 2) + '\n');
   console.log(`i18n coverage baseline updated: ${Object.keys(current).length} config(s).`);
   process.exit(0);
 }
 
-const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : {};
+const baseline = existsSync(at(BASELINE_PATH)) ? JSON.parse(readFileSync(at(BASELINE_PATH), 'utf8')) : {};
 
 const errors = [];
 for (const [file, count] of Object.entries(current)) {
