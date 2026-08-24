@@ -369,3 +369,84 @@ describe('#5588 — built-in routes come from rest, not from the static artifact
     }
   });
 });
+
+describe('GET /openapi.json — what `info.version` carries (#11546)', () => {
+  // The line under test used to read
+  //   `version: this.config.api.version || enriched.info.version`
+  // under a comment promising "the runtime version so consumers don't pin to
+  // the spec package's compile-time version". Both halves were false, and
+  // nothing pinned either one, so the document could have drifted to any of
+  // three different facts without a test noticing. These four fix what the
+  // field means.
+  //
+  // OpenAPI 3.1, Info Object: `version` is "the version of the OpenAPI
+  // document (which is distinct from the OpenAPI Specification version or the
+  // API implementation version)". The runtime version is the implementation
+  // version, so it is the one value the field's own definition excludes —
+  // which is why this is NOT the shape #11292 settled for `/discovery`, where
+  // `DiscoverySchema.version` means the serving artifact by #10993.
+
+  it('serves the declared API version identifier, not the artifact version', async () => {
+    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
+    const artifact = await (rest as any).loadOpenApiSpec();
+    const { body } = await serveOpenApiFrom(rest);
+
+    expect(body.info.version).toBe('v1');
+    // The serve path deliberately overrides the producer here, so the pin is
+    // only meaningful while the two values actually differ — if they ever
+    // converge this assertion says so instead of passing vacuously.
+    expect(
+      artifact.info.version,
+      'the artifact must carry a DIFFERENT version for the override pin above to mean anything',
+    ).not.toBe('v1');
+    expect(body.info.version).not.toBe(artifact.info.version);
+  });
+
+  it('tracks a custom `api.version`, which is also the mount segment', async () => {
+    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: 'v9' });
+    const { body } = await serveOpenApiFrom(rest, '/api/v9');
+    expect(body.info.version).toBe('v9');
+  });
+
+  it('is not the runtime version — an `OS_RUNTIME_VERSION` stamp does not reach it', async () => {
+    // The anti-regression pin for the direction this card did NOT take. Were
+    // the field re-pointed at `resolveDiscoveryVersion()`, the sentinel below
+    // would land in the served document and this goes red.
+    const SENTINEL = '9.9.9-openapi-info-version-sentinel';
+    const old = process.env.OS_RUNTIME_VERSION;
+    process.env.OS_RUNTIME_VERSION = SENTINEL;
+    try {
+      const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol);
+      const { body } = await serveOpenApiFrom(rest);
+      expect(body.info.version).toBe('v1');
+      expect(JSON.stringify(body.info)).not.toContain(SENTINEL);
+    } finally {
+      if (old === undefined) delete process.env.OS_RUNTIME_VERSION;
+      else process.env.OS_RUNTIME_VERSION = old;
+    }
+  });
+
+  it('serves a falsy `api.version` as itself rather than falling back to the artifact', async () => {
+    // The removed `|| enriched.info.version` was reachable, not dead — though
+    // not because the contract permits `''`. `RestApiConfigSchema` refuses it
+    // (`z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`); nothing parses this config
+    // against that schema, so `??` is the only guard and `''` walks past it.
+    // Measured on the pre-fix code this served the spec package's compile-time
+    // version — the exact value the old comment said the line existed to keep
+    // off the wire.
+    //
+    // An empty version is a broken deployment either way (the mount doubles its
+    // slash, below). The point of the pin is that it stays visibly broken
+    // instead of quietly publishing a different kind of fact.
+    const rest = makeRest(makeProtocol({ object: [], api: [] }).protocol, { version: '' });
+    expect(
+      (rest as any).getApiBasePath(),
+      'this pin describes the empty-version mount — if normalization starts rejecting it, retire the pin',
+    ).toBe('/api/');
+
+    const artifact = await (rest as any).loadOpenApiSpec();
+    const { body } = await serveOpenApiFrom(rest, '/api/');
+    expect(body.info.version).toBe('');
+    expect(body.info.version).not.toBe(artifact.info.version);
+  });
+});

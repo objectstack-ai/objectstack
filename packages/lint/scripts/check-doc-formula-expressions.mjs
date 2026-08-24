@@ -158,6 +158,11 @@ import {
   sqlPredicateToCel,
   isPushdownableCel,
 } from '@objectstack/formula';
+// The field-level `*When` root verdict AND its message, imported from the one
+// place that owns them (#11407). Same discipline as `validateExpression` above:
+// this gate is the SECOND consumer of that rule, and a second consumer that
+// re-derives the rule owns a dialect of it instead. See surface 3 below.
+import { fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from '@objectstack/lint';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -474,8 +479,13 @@ export function judge(source) {
 function scan(files) {
   const violations = [];
   const unextractable = [];
+  // Surface 3 (#11407) — same walk, same blocks: a second traversal would read
+  // a different population the moment either extractor's roots drift.
+  const ruleViolations = [];
+  const ruleSkips = [];
   let blocks = 0;
   let checked = 0;
+  let ruleChecked = 0;
 
   for (const file of files) {
     const rel = posix(relative(REPO_ROOT, file));
@@ -484,22 +494,381 @@ function scan(files) {
       const found = extractFormulaExpressions(b.code);
       if (found.length === 0) {
         if (looksLikeFormulaBlock(b.code)) unextractable.push(`${rel}:${b.startLine}`);
-        continue;
+      } else {
+        for (const f of found) {
+          const where = `${rel}:${b.startLine + f.line}`;
+          if (f.source === undefined) {
+            unextractable.push(`${where} (interpolated ${f.via} — source not statically knowable)`);
+            continue;
+          }
+          checked++;
+          for (const e of judge(f.source)) {
+            violations.push({ where, via: f.via, source: f.source, message: e.message });
+          }
+        }
       }
-      for (const f of found) {
-        const where = `${rel}:${b.startLine + f.line}`;
-        if (f.source === undefined) {
-          unextractable.push(`${where} (interpolated ${f.via} — source not statically knowable)`);
+
+      const sites = extractFieldRuleSites(b.code);
+      for (const s of sites.skipped) {
+        ruleSkips.push({ where: `${rel}:${b.startLine + s.line}`, slot: s.slot, reason: s.reason });
+      }
+      for (const a of sites.admitted) {
+        const where = `${rel}:${b.startLine + a.line}`;
+        if (a.source === undefined) {
+          // An interpolated source on an ADMITTED site is loud for surface 1's
+          // reason: the layer IS known, so this is a source we should have read
+          // and could not — never a silent pass.
+          unextractable.push(`${where} (interpolated ${a.slot} on ${a.via} — source not statically knowable)`);
           continue;
         }
-        checked++;
-        for (const e of judge(f.source)) {
-          violations.push({ where, via: f.via, source: f.source, message: e.message });
+        ruleChecked++;
+        for (const m of judgeFieldRule(a.slot, a.source)) {
+          ruleViolations.push({ where, via: `${a.slot} on ${a.via}`, source: a.source, message: m });
         }
       }
     }
   }
-  return { violations, unextractable, blocks, checked };
+  return { violations, unextractable, blocks, checked, ruleViolations, ruleSkips, ruleChecked };
+}
+
+// ── Surface 3: field-level `*When` conditional rules (#11407) ────────────────
+
+/**
+ * The three field-level conditional-rule slots this surface judges.
+ *
+ * ## The hole this closes
+ *
+ * A visibility predicate is authored as a bare assignment whose value is typed
+ * `string`, so an `os:check` block's `tsc --noEmit` type-checks
+ * `visibleWhen: "record.status != 'closed' && user.hasRole('admin')"` perfectly.
+ * `hasRole` is a CEL function that exists nowhere — not in `CEL_STDLIB_FUNCTIONS`,
+ * not in any registry — so at runtime the predicate FAULTS, and a field-level
+ * `visibleWhen` fault is fail-OPEN: `resolveFieldRuleState` evaluates visibility
+ * with `fallback: true`, so the element the author meant to hide is shown to
+ * EVERYONE. A shipped doc taught exactly that (#11034 fixed the instance; this
+ * closes the class).
+ *
+ * ## Why the layer must be decided FIRST, and where most of the difficulty is
+ *
+ * `visibleWhen` is one key spelling several unrelated contracts, and the binding
+ * root genuinely differs by layer. Re-measured on objectui `origin/main`
+ * @ `2aff580` (the card's table was taken at `365e334`, a sibling repo on its
+ * own cadence — the PR body records what had drifted):
+ *
+ * | Layer                                   | Binds                                     |
+ * |-----------------------------------------|-------------------------------------------|
+ * | object field / form section `*When`     | `record` + `previous` (+ `parent`)        |
+ * | per-option `visibleWhen`                | `record` + the HOST predicate scope       |
+ * | page component / app-nav `visible`      | `current_user`/`user`/`ctx`/`os`/`app`/…  |
+ * | flow-screen field `visibleWhen`         | the screen's own field names, FLATTENED   |
+ *
+ * The last row is not hypothetical and it is in this very corpus:
+ * `content/docs/automation/flows.mdx` teaches
+ * `visibleWhen: 'createOpportunity == true'` — a BARE reference, which is
+ * correct there and which the record-scoped verdict would report as the #1928
+ * defect. A gate keyed on the KEY would go red on a correct example. That is the
+ * failure this file's own header calls worse than no gate, so:
+ *
+ * **A site whose layer cannot be determined statically is SKIPPED — and the skip
+ * list is PRINTED and COUNTED on every run, never silent.** A gate that silently
+ * skips is the same false-green this surface exists to prevent, one level up.
+ *
+ * ## The discriminator, and why these two arms and no key match
+ *
+ * Both arms identify the FIELD layer — the only layer whose scope a fragment's
+ * enclosing structure pins without further context — and both are schema-backed,
+ * not guessed:
+ *
+ *   C. `Field.<anything>({ … visibleWhen … })` — a field factory call, the same
+ *      arm-A shape surface 1 uses. Every `*When` a `Field.*` factory takes is
+ *      the field-level conditional-rule slot.
+ *   D. the raw spelling: an object literal carrying a `type: '<string>'`
+ *      discriminator that sits as a VALUE inside an object-literal `fields:`
+ *      MAP — `fields: { due_date: { type: 'date', requiredWhen: … } }`.
+ *
+ * Arm D's map-vs-array test is the load-bearing half, and it is read off the
+ * schemas rather than from taste: `ObjectSchema.fields` is
+ * `z.record(name, FieldSchema)` (`object.zod.ts:1892`) — an object map — while
+ * every UI/flow layer spells `fields:` as an ARRAY: `FormFieldSchema`
+ * (`view.zod.ts:2058`) and `ScreenFieldConfigSchema`
+ * (`builtin-node-config.zod.ts:447`) are both `z.array(…)`. So an object-literal
+ * `fields:` map can be the object-field layer and nothing else, and a `fields:`
+ * array is exactly the case that cannot be told apart — form view, flow screen
+ * and action param all wear it.
+ *
+ * Both arms take the slot as a **DIRECT** property of the field object literal.
+ * That is deliberate: a `visibleWhen` nested one level down in an `options:`
+ * array is the PER-OPTION layer, which genuinely binds `current_user` and its
+ * ADR-0068 aliases (`validate-expressions.ts` judges those two surfaces
+ * differently for that exact reason). Admitting it here would false-red legal
+ * metadata.
+ *
+ * ## Why there is no `looksLike…` tripwire on this surface
+ *
+ * Surface 1 makes a failed extraction a hard ERROR, because a block that says
+ * `Field.formula({ expression })` and yields nothing is a parser failure. Here a
+ * non-extraction is the EXPECTED outcome for three of the four layers, so the
+ * same rule would fail the build on correct docs. The loudness requirement is
+ * met by the skip list instead — printed, counted, and pinned by the self-test.
+ */
+const FIELD_RULE_SLOTS = ['visibleWhen', 'readonlyWhen', 'requiredWhen'];
+
+/** The property key of a property assignment, when it is a plain name. */
+function keyText(p) {
+  if (!ts.isPropertyAssignment(p)) return undefined;
+  return ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name) ? p.name.text : undefined;
+}
+
+/**
+ * Is `obj` the object literal of a field DEFINITION — i.e. does its enclosing
+ * structure identify the field layer? Returns the `via` label, or `undefined`.
+ * See the discriminator note above for why exactly these two shapes.
+ */
+function fieldDefinitionVia(obj) {
+  const parent = obj.parent;
+  // C — an argument of a `Field.<x>(…)` factory call.
+  if (
+    parent &&
+    ts.isCallExpression(parent) &&
+    parent.arguments.includes(obj) &&
+    ts.isPropertyAccessExpression(parent.expression) &&
+    ts.isIdentifier(parent.expression.expression) &&
+    parent.expression.expression.text === 'Field'
+  ) {
+    return `Field.${parent.expression.name.text}(…)`;
+  }
+  // D — a value in an object-literal `fields:` MAP, carrying a `type:` string.
+  if (parent && ts.isPropertyAssignment(parent) && parent.initializer === obj) {
+    const map = parent.parent;
+    if (
+      map &&
+      ts.isObjectLiteralExpression(map) &&
+      map.parent &&
+      ts.isPropertyAssignment(map.parent) &&
+      keyText(map.parent) === 'fields'
+    ) {
+      const t = propOf(obj, 'type');
+      if (t && ts.isStringLiteralLike(t)) {
+        return `fields: { ${keyText(parent) ?? '?'}: { type: '${t.text}' } }`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why a `*When` site was not admitted — named as specifically as the tree
+ * allows, because "skipped" with no reason is indistinguishable from a bug in
+ * the discriminator.
+ */
+function fieldRuleSkipReason(prop) {
+  for (let n = prop.parent; n; n = n.parent) {
+    if (ts.isPropertyAssignment(n)) {
+      const k = keyText(n);
+      if (k === 'options') {
+        return {
+          rank: 3,
+          text:
+            'nested in an `options:` array — a per-option `visibleWhen` binds `record` PLUS the ' +
+            'host predicate scope (`current_user` and its ADR-0068 aliases), which the field ' +
+            'level does not bind; judging it here would false-red legal metadata',
+        };
+      }
+      if (k === 'fields' && ts.isArrayLiteralExpression(n.initializer)) {
+        return {
+          rank: 3,
+          text:
+            'nested in a `fields:` ARRAY — form-view fields, flow-screen fields and action ' +
+            'params all spell `fields:` as an array, and a flow screen FLATTENS its own field ' +
+            'names to top level (a bare reference is correct there), so the layer is ambiguous',
+        };
+      }
+    }
+    // `fields:` at STATEMENT position parses as a LabeledStatement, not a
+    // property assignment — the same structure wearing a different node type,
+    // and the array/map distinction survives it: `fields: [ … ]` keeps its
+    // ArrayLiteralExpression one node down. Read it, so this reading reaches the
+    // same rank as the parsed one instead of degrading to the generic reason.
+    if (ts.isLabeledStatement(n) && n.label.text === 'fields') {
+      const stmt = n.statement;
+      if (ts.isExpressionStatement(stmt) && ts.isArrayLiteralExpression(stmt.expression)) {
+        return {
+          rank: 3,
+          text:
+            'nested in a `fields:` ARRAY — form-view fields, flow-screen fields and action ' +
+            'params all spell `fields:` as an array, and a flow screen FLATTENS its own field ' +
+            'names to top level (a bare reference is correct there), so the layer is ambiguous',
+        };
+      }
+      return {
+        rank: 2,
+        text:
+          'under a `fields:` label read at statement position — the enclosing expression did ' +
+          'not parse, so nothing here names the layer',
+      };
+    }
+  }
+  return {
+    rank: 1,
+    text:
+      'no enclosing structure identifies the layer — the same key is authored on the field, ' +
+      'per-option, page-component, app-nav and flow-screen layers, and they do not share a scope',
+  };
+}
+
+/**
+ * `*When:` immediately followed by a quoted or tagged-template VALUE — the text
+ * shape of a predicate site. Used ONLY to make a missing parse loud, never to
+ * judge one, exactly as {@link looksLikeFormulaBlock} is used on surface 1.
+ *
+ * The value test is what keeps it honest in both directions. It admits
+ * `visibleWhen: "…"`, `requiredWhen: P\`…\``; it does NOT admit
+ * `visibleWhen: ExpressionInputSchema.optional()`, which is how
+ * `docs/adr/0089-unify-visibility-predicate-naming.md` quotes the SCHEMA rather
+ * than authoring a predicate — three text hits that are not sites at all.
+ */
+const FIELD_RULE_TEXT_RE = /\b(visibleWhen|readonlyWhen|requiredWhen)\s*:\s*(?:[A-Za-z_$][\w$]*\s*)?["'`]/g;
+
+export function textFieldRuleSites(code) {
+  const out = [];
+  for (const m of code.matchAll(FIELD_RULE_TEXT_RE)) {
+    let line = 0;
+    for (let i = 0; i < m.index; i++) if (code[i] === '\n') line++;
+    out.push({ line, slot: m[1] });
+  }
+  return out;
+}
+
+/**
+ * Every `*When` site in one block, split into the ones whose layer the enclosing
+ * structure PINS and the ones it does not. One function returns both, so the two
+ * lists can never disagree about what was admitted.
+ *
+ * ## The third population: sites the PARSER never sees (measured, not assumed)
+ *
+ * A doc fragment is very often a bare `key: value` line, and at statement
+ * position TypeScript reads `visibleWhen: "…"` as a LABELLED STATEMENT — there
+ * is no property assignment in the tree, so an AST-only walk finds nothing and
+ * says nothing. Measured on this corpus: 23 text-level `*When:` occurrences
+ * against 17 the AST could see. Of the six-way gap, three were the ADR quoting
+ * `field.zod.ts`'s schema (`visibleWhen: ExpressionInputSchema.optional()` — not
+ * predicates, correctly not sites) and three were REAL predicate examples in
+ * `content/docs/protocol/objectui/layout-dsl.mdx`, invisible to the walk.
+ *
+ * Three invisible predicate examples is precisely the silent skip this surface
+ * exists to prevent, one level up — so the text tripwire reconciles the two
+ * counts and any unaccounted text site becomes a LISTED skip. It is ranked
+ * LOWEST, so a real parse always outranks it and it can never mask a site the
+ * tree actually explains.
+ */
+export function extractFieldRuleSites(code) {
+  // One entry per (line, slot) — one property assignment, however many parse
+  // units reach it. `parseUnits` deliberately reads the same fragment twice (a
+  // doc fragment at statement position parses as a BLOCK, so the direct parse
+  // holds no object literal), and the two readings do not see the same tree.
+  // Resolution is by strength, never by arrival order:
+  //
+  //  - ADMITTED beats SKIPPED. The recovery unit is the one that can see a
+  //    `Field.*(…)` call the direct parse read as a labelled statement, so
+  //    first-wins would have SKIPPED sites this gate can actually judge —
+  //    silently, and in the direction that under-covers.
+  //  - among skips, the higher-ranked reason wins, so the skip list names the
+  //    most specific enclosing structure any reading could see.
+  const best = new Map();
+  for (const { sf, lineOffset } of parseUnits(code)) {
+    const visit = (n) => {
+      if (ts.isPropertyAssignment(n) && FIELD_RULE_SLOTS.includes(keyText(n) ?? '')) {
+        const slot = keyText(n);
+        const line = ts.getLineAndCharacterOfPosition(sf, n.getStart(sf)).line + lineOffset;
+        const owner = n.parent;
+        const via = owner && ts.isObjectLiteralExpression(owner) ? fieldDefinitionVia(owner) : undefined;
+        const key = `${line} ${slot}`;
+        const prev = best.get(key);
+        if (via) {
+          if (!prev || !prev.via) {
+            best.set(key, { line, slot, via, source: staticSource(n.initializer) });
+          }
+        } else if (!prev) {
+          best.set(key, { line, slot, reason: fieldRuleSkipReason(n) });
+        } else if (!prev.via) {
+          const r = fieldRuleSkipReason(n);
+          if (r.rank > prev.reason.rank) best.set(key, { line, slot, reason: r });
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  // Reconcile against the text shape: anything the parser never surfaced is a
+  // skip that gets NAMED, rather than a site nobody ever hears about.
+  for (const t of textFieldRuleSites(code)) {
+    const key = `${t.line} ${t.slot}`;
+    if (best.has(key)) continue;
+    best.set(key, {
+      line: t.line,
+      slot: t.slot,
+      reason: {
+        rank: 0,
+        text:
+          'the enclosing expression does not parse — a bare `key: value` line at statement ' +
+          'position is a LABELLED STATEMENT, not a property, so the tree carries no enclosing ' +
+          'structure at all and there is nothing to read the layer off',
+      },
+    });
+  }
+
+  const byLine = (a, b) => a.line - b.line;
+  const all = [...best.values()];
+  return {
+    admitted: all.filter((e) => e.via).sort(byLine),
+    skipped: all
+      .filter((e) => !e.via)
+      .map((e) => ({ line: e.line, slot: e.slot, reason: e.reason.text }))
+      .sort(byLine),
+  };
+}
+
+/**
+ * The verdict for an admitted (field-layer) `*When`, composed of exactly the two
+ * imported judgments the metadata walk applies to the same slot — nothing local:
+ *
+ *  1. `validateExpression('predicate', src, { scope: 'record' })` — syntax, the
+ *     unknown-function/overload catch that answers this card's `hasRole` case,
+ *     and the #1928 bare-reference rule. No object schema is passed: a doc
+ *     fragment declares no object, so only the object-independent half applies
+ *     (the same limit surface 1 states).
+ *  2. `fieldRuleRootIssue(slot, src)` — the closed-root rule, which is the half
+ *     that DEPENDS on the layer: `current_user.profile == 'admin'` is a correct
+ *     per-option predicate and an unbound root on the field itself.
+ *
+ * Both come from the packages that own them, in the order the metadata walk runs
+ * them, so a docs example and a real stack get the same verdict in the same
+ * words.
+ */
+export function judgeFieldRule(slot, source) {
+  const out = validateExpression('predicate', source, { scope: 'record' }).errors.map((e) => e.message);
+  const rootIssue = fieldRuleRootIssue(slot, source);
+  if (rootIssue) out.push(rootIssue.message);
+  return out;
+}
+
+/**
+ * The skip report, as a pure function so "it is printed" is pinnable. Returns
+ * the empty string only when there is genuinely nothing skipped.
+ */
+export function renderFieldRuleSkips(skips) {
+  if (skips.length === 0) return '';
+  const lines = [
+    `  ${skips.length} \`*When\` site(s) SKIPPED — layer not statically determinable, so NOT judged:`,
+  ];
+  for (const s of skips) lines.push(`    ${s.where}  [${s.slot}]\n      ${s.reason}`);
+  lines.push(
+    '  Skipping is correct here — the same key is authored on layers that do not share a scope,\n' +
+      '  and judging one layer\'s text by another\'s rule produces a red that is WRONG. The list is\n' +
+      '  printed so the skips stay visible: a gate that skips in silence is the false-green this\n' +
+      '  surface exists to prevent, one level up.',
+  );
+  return lines.join('\n');
 }
 
 // ── Surface 2: spec TSDoc `@example` (#6763) ─────────────────────────────────
@@ -1133,6 +1502,186 @@ function specSelfTest() {
   return failed;
 }
 
+/**
+ * Surface 3's cases (#11407). Both directions, and the pair that matters most is
+ * the LAYER pair: the same predicate text must go red where the field level does
+ * not bind its root and stay unjudged where another layer does. A gate that can
+ * only go red proves nothing about a corpus that is currently clean.
+ */
+const FIELD_RULE_SELF_TEST_CASES = [
+  {
+    name: "RED — the card's example: a CEL function that exists nowhere (`hasRole`)",
+    code: "status: Field.text({ visibleWhen: \"record.status != 'closed' && user.hasRole('admin')\" }),",
+    expect: { admitted: 1, errors: 2, match: /no matching overload for 'dyn\.hasRole\(string\)'/ },
+  },
+  {
+    name: 'RED — a bare reference on the field layer is the #1928 defect',
+    code: "x: Field.text({ visibleWhen: 'status == \"closed\"' }),",
+    expect: { admitted: 1, errors: 1, match: /bare reference `status`/ },
+  },
+  {
+    name: 'RED — `current_user` is UNBOUND on the field layer (the #6146 fail-open class)',
+    code: "x: Field.text({ visibleWhen: \"current_user.profile == 'admin'\" }),",
+    expect: { admitted: 1, errors: 1, match: /`current_user` is unbound here/ },
+  },
+  {
+    // Wrapped in the factory the corpus actually uses (`skills/objectstack-upgrade`).
+    // A BARE `fields: { … }` line is unreachable by design — see the third
+    // population note on `extractFieldRuleSites`: at statement position the whole
+    // fragment degrades to nested labelled statements and the parser surfaces no
+    // property at all. That case is covered by the text tripwire below, not here.
+    name: 'RED — the raw arm-D spelling reaches the same verdict as the factory',
+    code: "ObjectSchema.create({ fields: { due_date: { type: 'date', requiredWhen: 'stage == \"closed\"' } } })",
+    expect: { admitted: 1, errors: 1, match: /bare reference `stage`/ },
+  },
+  {
+    name: 'GREEN — the canonical record-scoped predicate',
+    code: "x: Field.text({ visibleWhen: \"record.status == 'closed'\" }),",
+    expect: { admitted: 1, errors: 0 },
+  },
+  {
+    name: 'GREEN — `previous` and `parent` ARE bound at the field level, so neither is a root error',
+    code: "x: Field.number({ readonlyWhen: P`parent.status == 'paid' && record.stage != previous.stage` }),",
+    expect: { admitted: 1, errors: 0 },
+  },
+  {
+    name: 'GREEN — arm D admits the raw spelling in a `fields:` MAP, and judges it clean',
+    code: "ObjectSchema.create({ fields: { due_date: { type: 'date', requiredWhen: 'record.stage == \"closed\"' } } })",
+    expect: { admitted: 1, errors: 0 },
+  },
+  {
+    // The layer pair. Same text as the `current_user` case above, one level
+    // down: per-option genuinely binds it, so a red here would be WRONG.
+    name: 'SKIPPED — the SAME `current_user` text under `options:` is a per-option predicate, '
+      + 'which binds it — the layer decides, not the key',
+    code: "x: Field.select({ options: [{ value: 'a', visibleWhen: \"current_user.profile == 'admin'\" }] }),",
+    expect: { admitted: 0, skipped: 1, skipMatch: /`options:` array/ },
+  },
+  {
+    // Live in the corpus at content/docs/automation/flows.mdx.
+    name: 'SKIPPED — a flow-screen field FLATTENS its own names, so the bare ref is correct there',
+    code: "config: { fields: [{ name: 'opportunityName', type: 'text', visibleWhen: 'createOpportunity == true' }] },",
+    expect: { admitted: 0, skipped: 1, skipMatch: /`fields:` ARRAY/ },
+  },
+  {
+    // Live in the corpus at content/docs/ui/pages.mdx:165 — a page component
+    // carrying `type:` but NOT inside a `fields:` map. Admitting it on the
+    // `type:` discriminator alone would false-red a correct example.
+    name: 'SKIPPED — a page component binds `current_user`; the `type:` key alone must not admit it',
+    code: "{ type: 'chart', id: 'c', visibleWhen: \"'sales_manager' in current_user.positions\" }",
+    expect: { admitted: 0, skipped: 1 },
+  },
+  {
+    name: 'SKIPPED — a bare field-def fragment with no `fields:` map above it is not pinned to a layer',
+    code: "{ name: 'rating', type: 'select', visibleWhen: P`record.status == 'qualified'` }",
+    expect: { admitted: 0, skipped: 1 },
+  },
+  {
+    name: 'LOUD — an interpolated source on an ADMITTED site is reported, not silently passed',
+    code: 'x: Field.text({ visibleWhen: `record.${key} == 1` }),',
+    expect: { admitted: 1, unknowable: true },
+  },
+  {
+    name: 'NOT A SITE — `visible` (the page/nav spelling) is a different key and is not this surface',
+    code: "x: Field.text({ visible: \"current_user.profile == 'admin'\" }),",
+    expect: { admitted: 0, skipped: 0 },
+  },
+  {
+    // Live in the corpus at content/docs/protocol/objectui/layout-dsl.mdx:820.
+    // Before the text tripwire this block yielded ZERO sites and printed nothing
+    // — an invisible skip, which is the exact false-green one level up.
+    name: 'SKIPPED (text tripwire) — a bare `visibleWhen: "…"` line the PARSER cannot see is '
+      + 'still listed, never invisible',
+    code: '// e.g. on a PageComponent\nvisibleWhen: "record.account_type == \'premium\'"',
+    expect: { admitted: 0, skipped: 1, skipMatch: /LABELLED STATEMENT/ },
+  },
+  {
+    // The other direction: the tripwire must not invent sites out of prose or
+    // out of a schema quotation, or the skip list stops being readable.
+    name: 'NOT A SITE — the ADR quoting `visibleWhen: ExpressionInputSchema.optional()` is the '
+      + 'SCHEMA, not a predicate, and the tripwire must not fabricate a site from it',
+    code: 'visibleWhen:  ExpressionInputSchema.optional(),  // shown when TRUE',
+    expect: { admitted: 0, skipped: 0 },
+  },
+];
+
+/**
+ * The skip list is part of the deliverable, so two things are pinned rather than
+ * assumed: that the renderer produces a report naming every skip, and that the
+ * GREEN path still prints it. The second is the one that rots — a summary line
+ * carrying only a COUNT reads like coverage while naming nothing, and deleting
+ * the print call breaks no other test in this file.
+ */
+const FIELD_RULE_REPORT_SELF_TEST_CASES = [
+  {
+    name: 'REPORT — the skip renderer names the count, the site, the slot and the reason',
+    holds: () => {
+      const out = renderFieldRuleSkips([
+        { where: 'content/docs/x.mdx:12', slot: 'visibleWhen', reason: 'because reasons' },
+      ]);
+      return out.includes('1 `*When` site(s) SKIPPED')
+        && out.includes('content/docs/x.mdx:12')
+        && out.includes('visibleWhen')
+        && out.includes('because reasons');
+    },
+  },
+  {
+    name: 'REPORT — an empty skip list renders nothing (no phantom section on a corpus with no skips)',
+    holds: () => renderFieldRuleSkips([]) === '',
+  },
+  {
+    name: 'REPORT — the GREEN summary path still PRINTS the skip list, not merely its count',
+    holds: () => {
+      const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+      // Everything after the last summary line is the green path; the error path
+      // lives above it, so finding the call here cannot be satisfied by the copy
+      // inside `if (ruleViolations.length > 0)`.
+      const green = self.slice(self.lastIndexOf('const specBreakdown'));
+      return green.includes('renderFieldRuleSkips(ruleSkips)') && green.includes('console.log(skipReport)');
+    },
+  },
+];
+
+function fieldRuleSelfTest() {
+  let failed = 0;
+  for (const c of FIELD_RULE_SELF_TEST_CASES) {
+    const { admitted, skipped } = extractFieldRuleSites(c.code);
+    const problems = [];
+    if (c.expect.admitted !== undefined && admitted.length !== c.expect.admitted) {
+      problems.push(`admitted ${admitted.length}, expected ${c.expect.admitted}`);
+    }
+    if (c.expect.skipped !== undefined && skipped.length !== c.expect.skipped) {
+      problems.push(`skipped ${skipped.length}, expected ${c.expect.skipped}`);
+    }
+    if (c.expect.skipMatch && !skipped.some((s) => c.expect.skipMatch.test(s.reason))) {
+      problems.push(`no skip reason matched ${c.expect.skipMatch}: ${skipped.map((s) => s.reason).join(' | ')}`);
+    }
+    if (c.expect.unknowable) {
+      if (admitted[0]?.source !== undefined) problems.push('expected a non-statically-knowable source');
+    } else if (admitted.length === 1 && c.expect.errors !== undefined) {
+      const errs = admitted[0].source === undefined ? [] : judgeFieldRule(admitted[0].slot, admitted[0].source);
+      if (errs.length !== c.expect.errors) {
+        problems.push(`${errs.length} error(s), expected ${c.expect.errors}` +
+          (errs.length ? `: ${errs.map((e) => e.split('\n')[0]).join(' | ')}` : ''));
+      }
+      if (c.expect.match && !errs.some((e) => c.expect.match.test(e))) {
+        problems.push(`no error matched ${c.expect.match}`);
+      }
+    }
+    if (problems.length) {
+      failed++;
+      console.error(`  ✗ ${c.name}\n      ${problems.join('\n      ')}`);
+    } else {
+      console.log(`  ✓ ${c.name}`);
+    }
+  }
+  for (const c of FIELD_RULE_REPORT_SELF_TEST_CASES) {
+    if (c.holds()) console.log(`  ✓ ${c.name}`);
+    else { failed++; console.error(`  ✗ ${c.name}`); }
+  }
+  return failed;
+}
+
 function selfTest() {
   let failed = 0;
   for (const c of SELF_TEST_CASES) {
@@ -1163,12 +1712,14 @@ function selfTest() {
     }
   }
   failed += specSelfTest();
+  failed += fieldRuleSelfTest();
   for (const c of DECLARATION_SELF_TEST_CASES) {
     if (c.holds()) console.log(`  ✓ ${c.name}`);
     else { failed++; console.error(`  ✗ ${c.name}`); }
   }
   const total = SELF_TEST_CASES.length + SPEC_SELF_TEST_CASES.length + EXEMPTION_SELF_TEST_CASES.length
-    + DECLARATION_SELF_TEST_CASES.length;
+    + DECLARATION_SELF_TEST_CASES.length + FIELD_RULE_SELF_TEST_CASES.length
+    + FIELD_RULE_REPORT_SELF_TEST_CASES.length;
   if (failed > 0) {
     console.error(`\n✗ check:doc-formula-expressions self-test: ${failed} case(s) failed`);
     process.exit(1);
@@ -1185,7 +1736,7 @@ if (process.argv.includes('--self-test')) {
 
 assertRootsResolvable();
 const files = collectFiles();
-const { violations, unextractable, blocks, checked } = scan(files);
+const { violations, unextractable, blocks, checked, ruleViolations, ruleSkips, ruleChecked } = scan(files);
 
 if (unextractable.length > 0) {
   console.error(
@@ -1216,6 +1767,28 @@ if (violations.length > 0) {
     `  These are copied verbatim by human and AI authors, so the cost of a wrong one is\n` +
       `  multiplied by every reader. The verdict above is the platform's own\n` +
       `  \`validateExpression\` — the same call \`os build\` makes — not a lookalike.`,
+  );
+  process.exit(1);
+}
+
+if (ruleViolations.length > 0) {
+  console.error(
+    `✗ check:doc-formula-expressions — ${ruleViolations.length} field-level \`*When\` example(s) in the\n` +
+      `  docs/skills corpus would be REJECTED by \`os build\` / \`os validate\` (#11407):\n`,
+  );
+  for (const v of ruleViolations) {
+    console.error(`    ${v.where}  [${v.via}]`);
+    console.error(`      source: ${JSON.stringify(v.source)}`);
+    console.error(`      ${v.message.split('\n').join('\n      ')}\n`);
+  }
+  const skipReport = renderFieldRuleSkips(ruleSkips);
+  if (skipReport) console.error(`${skipReport}\n`);
+  console.error(
+    `  A field-level \`visibleWhen\` that faults is fail-OPEN — the renderer falls back to VISIBLE —\n` +
+      `  so a wrong example does not merely not work, it shows the thing it was written to hide to\n` +
+      `  everyone who copies it. The verdict above is \`@objectstack/formula\`'s \`validateExpression\`\n` +
+      `  plus \`@objectstack/lint\`'s \`fieldRuleRootIssue\` — the same two the metadata walk applies to\n` +
+      `  this slot, imported rather than restated.`,
   );
   process.exit(1);
 }
@@ -1297,3 +1870,13 @@ console.log(
     `${specFiles.length} ${SPEC_ROOT} files — ${specBreakdown}; ` +
     `${EXEMPT_EXAMPLES.length} exempt.`,
 );
+console.log(
+  `✓ check:doc-formula-expressions (field-level \`*When\`, #11407): ${ruleChecked} predicate(s) on a ` +
+    `statically determinable field layer judged clean; ${ruleSkips.length} skipped as undeterminable.`,
+);
+// Printed on the GREEN path too, and unconditionally: the skip list is part of
+// the deliverable, not an escape hatch. A run that judged nothing and said so
+// only in a count is how a gate comes to cover nothing while still reporting
+// success (#11407).
+const skipReport = renderFieldRuleSkips(ruleSkips);
+if (skipReport) console.log(skipReport);

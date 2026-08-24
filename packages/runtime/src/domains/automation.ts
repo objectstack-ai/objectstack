@@ -297,18 +297,42 @@ const FLOW_WRITE_DENY_MESSAGE =
     `Authoring automation flows requires the \`${FLOW_AUTHORING_CAPABILITY}\` capability.`;
 
 /**
- * [#10145] Which `/automation` routes AUTHOR a flow definition.
+ * [#10145] Which `/automation` routes the `manage_metadata` write set covers.
  *
  * One predicate, for the reason {@link isRunStateRead} is one predicate: this
  * domain gets one policy per data class, and a policy spelled at three call
- * sites is three policies that happen to agree today.
+ * sites is three policies that happen to agree today. [#10243] That is why the
+ * toggle ruling below was one arm here rather than a fourth copy of the policy.
  *
- *   `POST   /`        → registerFlow    (create)
- *   `PUT    /:name`   → registerFlow    (update)
- *   `DELETE /:name`   → unregisterFlow  (deregister)
+ *   `POST   /`             → registerFlow    (create)
+ *   `PUT    /:name`        → registerFlow    (update)
+ *   `DELETE /:name`        → unregisterFlow  (deregister)
+ *   `POST   /:name/toggle` → toggleFlow      (enablement — #10243, see below)
  *
- * ⛔ The EXECUTION routes are deliberately NOT here, and the omission is the
- * ruling rather than an oversight — authoring and executing are different
+ * ## [#10243] Why `toggle` joins them — ruled, not inferred
+ *
+ * #10145 left it out and said so in the open, because whether disabling a flow
+ * is authoring or operating is a product call rather than a code call. It was
+ * filed, MEASURED over HTTP, and ruled (2026-08-23). What the measurement found
+ * is the reason the answer is not "it is engine state, so leave it":
+ *
+ *   - The bit is NOT a row, so no organization wall scopes it. `toggleFlow`
+ *     writes an in-process map keyed by flow NAME only; `getFlowRuntimeStates`
+ *     reads that same map with no caller, no organization and no argument; and
+ *     the automation service is ONE instance per environment.
+ *   - So on a real, non-degraded `isolated` posture, a tenant org owner without
+ *     this capability switched a shipped flow off and an unrelated tenant in a
+ *     DIFFERENT organization — and the platform admin — read it off, in both
+ *     directions. Environment-wide reach from an unentitled caller.
+ *   - Mitigating but not exculpating: the override is process-local, so a cold
+ *     boot reads `enabled: true` again.
+ *
+ * Disabling a shipped flow is functionally equivalent to deleting it for as
+ * long as it stays off, and `DELETE /:name` is already here. No new capability
+ * name was minted for it (option C was declined): one predicate, one policy.
+ *
+ * ⛔ The EXECUTION routes are still deliberately NOT here, and the omission is
+ * the ruling rather than an oversight — authoring and executing are different
  * questions, and sweeping a run surface into a metadata gate would lock every
  * ordinary user out of the flows built for them:
  *
@@ -318,9 +342,6 @@ const FLOW_WRITE_DENY_MESSAGE =
  *     fail-closed on the suspended node's `resumeAuthority` (#3801 / #5561) —
  *     a second, unrelated gate in front of it would refuse the very user the
  *     flow paused for, which is the mistake #7968 records for the screen read.
- *   - `POST /:name/toggle` mutates ENGINE enablement rather than a definition.
- *     Arguably an authoring write; filed separately rather than folded in here,
- *     so the decision is made in the open instead of riding a security fix.
  *
  * The reads are untouched: `GET /` and `GET /:name` serve flow definitions and
  * keep the posture the #7900 audit recorded for them.
@@ -329,7 +350,23 @@ function isFlowAuthoringWrite(parts: string[], method: string): boolean {
     // `POST /automation` — the create door. `parts` is empty only for the
     // domain root, so `POST /trigger/:name` (parts `['trigger', name]`) and
     // `POST /:name/trigger` cannot reach this arm.
-    if (method === 'POST') return parts.length === 0;
+    if (method === 'POST' && parts.length === 0) return true;
+    // [#10243] `POST /automation/:name/toggle` — the enablement door.
+    //
+    // Matched exactly as the ROUTER matches it, not approximately, because a
+    // gate narrower than its route is a bypass and a gate wider than its route
+    // is an over-block:
+    //
+    //   - No upper bound on depth. The toggle arm below tests `parts[1] ===
+    //     'toggle'` with no length check, so `/:name/toggle/anything` still
+    //     reaches `toggleFlow`; `parts.length === 2` here would leave exactly
+    //     that spelling ungated.
+    //   - `parts[0] === 'trigger'` is excluded. `POST /automation/trigger/:name`
+    //     is the LEGACY EXECUTION door and it is answered ABOVE this domain's
+    //     toggle arm, so for a flow literally named `toggle` the path
+    //     `/automation/trigger/toggle` RUNS that flow. Gating it would over-block
+    //     an execution door, which is the one thing the ruling did not do.
+    if (method === 'POST' && parts[1] === 'toggle') return parts[0] !== 'trigger';
     // `PUT /automation/:name` / `DELETE /automation/:name` — the update and
     // deregister doors. Exactly one segment: a deeper path is a run surface.
     if (method === 'PUT' || method === 'DELETE') return parts.length === 1;
@@ -751,8 +788,11 @@ async function respondToFlowTrigger(
  *                                  filter — validated, #7360)
  *   GET    /:name                → getFlow
  *   POST   /                     → createFlow (registerFlow)
+ *                                  ⚑ authoring write — `manage_metadata` (#10145)
  *   PUT    /:name                → updateFlow
+ *                                  ⚑ authoring write — `manage_metadata` (#10145)
  *   DELETE /:name                → deleteFlow (unregisterFlow)
+ *                                  ⚑ authoring write — `manage_metadata` (#10145)
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
  *                                  no start node → 422 `FLOW_NO_START_NODE`, a run that
@@ -760,6 +800,9 @@ async function respondToFlowTrigger(
  *                                  a run that PAUSED → 200 with `runId` / `screen`,
  *                                  on whichever attempt it paused — #9510)
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
+ *                                  ⚑ authoring write — `manage_metadata` (#10243):
+ *                                    enablement is environment-wide, so an
+ *                                    unentitled toggle reached every organization
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
@@ -838,7 +881,9 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // whether automation is mounted here. Ahead of every body check too — a
     // refused caller writes nothing and learns nothing about the definition
     // contract. Which routes: `isFlowAuthoringWrite` above, one predicate, with
-    // the execution surfaces deliberately outside it.
+    // the execution surfaces deliberately outside it — [#10243] `POST
+    // /:name/toggle` moved INSIDE it by ruling, and moved by editing that one
+    // predicate rather than by adding a check here.
     if (isFlowAuthoringWrite(parts, m)) {
         const refusal = refuseUngrantedFlowWrite(deps, context);
         if (refusal) return refusal;

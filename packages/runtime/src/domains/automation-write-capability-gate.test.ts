@@ -28,10 +28,35 @@
  * AUTHORING is gated; EXECUTION is not. `POST /:name/trigger`,
  * `POST /trigger/:name` and `POST /:name/runs/:runId/resume` run a flow rather
  * than author one — `resume` is additionally fail-closed through the suspended
- * node's `resumeAuthority` (#3801 / #5561) — and `POST /:name/toggle` mutates
- * engine enablement. None of them writes a flow DEFINITION, so none of them is
- * swept into a metadata gate here; the `stays ungated` block below is the audit
- * that makes any future change to those four verdicts come through this file.
+ * node's `resumeAuthority` (#3801 / #5561). None of them writes a flow
+ * DEFINITION, so none of them is swept into a metadata gate here; the
+ * `stays ungated` block below is the audit that makes any future change to
+ * those verdicts come through this file.
+ *
+ * ## [#10243] `POST /:name/toggle` CROSSED that line — deliberately, by ruling
+ *
+ * ⭐ This is the flip, recorded here rather than left to be discovered. #10145
+ * pinned toggle as ungated **in the open**, saying the verdict was a product
+ * call and not a code call, so that a change to it would land in this file and
+ * be visible. It was filed as #10243, measured over HTTP, and ruled on
+ * 2026-08-23: toggle joins the `manage_metadata` write set. One arm on the
+ * existing `isFlowAuthoringWrite`; ⛔ no new capability name (option C was
+ * declined).
+ *
+ * The measurement is why "it is engine state" did not carry the day. The bit is
+ * not a ROW, so no organization wall scopes it: `toggleFlow` writes an
+ * in-process map keyed by flow name only, `getFlowRuntimeStates()` reads it
+ * with no caller and no organization, and the automation service is one
+ * instance per environment. On a real non-degraded `isolated` posture, an
+ * unentitled tenant org owner switched a shipped flow off and an unrelated
+ * tenant in a DIFFERENT organization — plus the platform admin — read it off,
+ * symmetrically in both directions. Disabling a shipped flow is functionally
+ * equivalent to deleting it for as long as it stays off, and `DELETE /:name`
+ * was already gated. The dogfood measurement now pins the closed door:
+ * `packages/qa/dogfood/test/automation-toggle-tenant-scope.dogfood.test.ts`.
+ *
+ * ⚠️ This narrows the accept set — 200 → 403 for callers without the
+ * capability. It is a breaking change and ships as one.
  *
  * ## What the refusal cases assert
  *
@@ -147,7 +172,16 @@ const codeOf = (response: unknown): unknown => {
     return r?.body?.error?.code ?? r?.body?.error?.details?.code;
 };
 
-/** The three AUTHORING writes, each with the service method it must never reach. */
+/**
+ * The gated writes, each with the service method it must never reach.
+ *
+ * [#10243] Four, not three: `POST /:name/toggle` joined by ruling. It is listed
+ * HERE rather than given a parallel block of its own so it inherits every
+ * direction the other three are held to — the 403 + `PERMISSION_DENIED`
+ * envelope, the "the service method was never entered" spy assertion, and the
+ * anonymous-floor-answers-first loop — instead of being pinned by whichever
+ * subset someone remembered to copy.
+ */
 const AUTHORING_WRITES = [
     {
         name: 'POST /automation (createFlow)',
@@ -166,6 +200,15 @@ const AUTHORING_WRITES = [
         drive: (h: Harness, ctx: HttpProtocolContext) =>
             h.dispatcher.handleAutomation(`/${FLOW}`, 'DELETE', undefined, ctx, undefined),
         spy: (h: Harness) => h.unregisterFlow,
+    },
+    {
+        // [#10243] The enablement door. `enabled: false` deliberately — the
+        // caller trying to switch a shipped flow OFF is the one the measurement
+        // caught reaching every organization on the deployment.
+        name: 'POST /automation/:name/toggle (toggleFlow)',
+        drive: (h: Harness, ctx: HttpProtocolContext) =>
+            h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, ctx, undefined),
+        spy: (h: Harness) => h.toggleFlow,
     },
 ] as const;
 
@@ -266,12 +309,50 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             expect(h.registered()).toEqual([]);
         });
 
+        it('[#10243] POST /automation/:name/toggle still toggles, in BOTH directions', async () => {
+            // ⭐ The control that keeps the ruling from being read as "refuse
+            // everyone". A gate nobody can pass is not what was ruled — the
+            // capability holder's 200 is half of the change, and both
+            // directions are asserted because the measurement that produced
+            // the ruling was symmetric.
+            const h = boot();
+
+            const off = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, AUTHOR(), undefined);
+            expect(statusOf(off.response)).toBe(200);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, false);
+
+            const on = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: true }, AUTHOR(), undefined);
+            expect(statusOf(on.response)).toBe(200);
+            expect(h.toggleFlow).toHaveBeenLastCalledWith(FLOW, true);
+        });
+
+        it('[#10243] the gate is ahead of the body checks on toggle too', async () => {
+            // #3899 refuses `{ enable: false }` with a 400 naming the key. An
+            // unentitled caller must not get that 400 — it would teach the
+            // toggle body contract to a caller who may not use the route, the
+            // same posture `POST /` already takes for the definition contract.
+            const h = boot();
+            const { response } = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enable: false }, UNENTITLED(), undefined);
+
+            expect(statusOf(response)).toBe(403);
+            expect(codeOf(response)).toBe('PERMISSION_DENIED');
+            expect(h.toggleFlow).not.toHaveBeenCalled();
+        });
+
         it('engine self-invocation (`isSystem`) bypasses, matching every other capability gate', async () => {
             const h = boot();
             const { response } = await h.dispatcher.handleAutomation(`/${FLOW}`, 'DELETE', undefined, SYSTEM(), undefined);
 
             expect(statusOf(response)).toBe(200);
             expect(h.unregisterFlow).toHaveBeenCalledWith(FLOW);
+        });
+
+        it('[#10243] `isSystem` bypasses on toggle too — the engine disables its own flows', async () => {
+            const h = boot();
+            const { response } = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, SYSTEM(), undefined);
+
+            expect(statusOf(response)).toBe(200);
+            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
         });
     });
 
@@ -307,15 +388,57 @@ describe('#10145 — /automation authoring writes require `manage_metadata`', ()
             expect(h.execute).toHaveBeenCalled();
         });
 
-        it('POST /:name/toggle stays ungated — enablement is engine state, not a definition write', async () => {
-            // Deliberately OUT of this card's write set. Toggling is arguably an
-            // authoring write and is filed separately rather than folded in; if
-            // that verdict changes it changes here, in the open.
+        it('[#10243 FLIPPED] POST /:name/toggle is NO LONGER in this block — it is gated now', async () => {
+            // ⭐ This assertion used to read `.not.toBe(403)` and
+            // `toHaveBeenCalledWith(FLOW, false)`. It is inverted deliberately,
+            // by the 2026-08-23 ruling on #10243, and the inversion is kept in
+            // this block — rather than only added to the refusal loop above —
+            // so that the audit reads as a CHANGED verdict instead of a pin
+            // that quietly vanished. The full battery for this route (envelope,
+            // spy, anonymous floor, isSystem bypass) runs off AUTHORING_WRITES.
             const h = boot();
             const { response } = await h.dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, UNENTITLED(), undefined);
 
+            expect(statusOf(response)).toBe(403);
+            expect(codeOf(response)).toBe('PERMISSION_DENIED');
+            expect(h.toggleFlow).not.toHaveBeenCalled();
+        });
+
+        it('[#10243] the legacy EXECUTION door is not caught by the toggle arm — even for a flow named `toggle`', async () => {
+            // ⛔ The one over-block the ruling did not authorize. `POST
+            // /automation/trigger/:name` is the legacy run door, and for a flow
+            // literally named `toggle` its path is `/trigger/toggle` — the same
+            // shape the new arm matches (`parts[1] === 'toggle'`). The router
+            // answers that path with `execute` ABOVE the toggle arm, so the
+            // predicate excludes `parts[0] === 'trigger'` to match the router
+            // exactly. Without that exclusion this runs 403 and an ordinary
+            // member loses the ability to run a flow because of its NAME.
+            const h = boot();
+            // A flow actually NAMED `toggle` has to exist, or the shared
+            // existence probe (#9378) answers 404 before `execute` and the
+            // assertion below would pass for the wrong reason — `not.toBe(403)`
+            // is satisfied by a 404 just as well. Seeded through the harness's
+            // own registry rather than over HTTP, so this fixture does not
+            // depend on the gate it is measuring.
+            h.registerFlow('toggle', { ...DEFINITION, name: 'toggle' });
+
+            const { response } = await h.dispatcher.handleAutomation('/trigger/toggle', 'POST', {}, UNENTITLED(), undefined);
+
             expect(statusOf(response)).not.toBe(403);
-            expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            expect(h.execute).toHaveBeenCalled();
+            expect(h.toggleFlow).not.toHaveBeenCalled();
+        });
+
+        it('[#10243] a deeper spelling cannot slip past the arm — `/:name/toggle/anything`', async () => {
+            // The router's toggle arm tests `parts[1] === 'toggle'` with NO
+            // length check, so this path still reaches `toggleFlow`. A gate
+            // written as `parts.length === 2` would be narrower than its own
+            // route, which is a bypass rather than a style difference.
+            const h = boot();
+            const { response } = await h.dispatcher.handleAutomation(`/${FLOW}/toggle/x`, 'POST', { enabled: false }, UNENTITLED(), undefined);
+
+            expect(statusOf(response)).toBe(403);
+            expect(h.toggleFlow).not.toHaveBeenCalled();
         });
 
         it('POST /:name/runs/:runId/resume stays ungated — it is fail-closed on `resumeAuthority` (#3801/#5561)', async () => {

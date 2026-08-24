@@ -1,59 +1,63 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #10243 — the BLAST-RADIUS half of the toggle card, measured over HTTP.
+ * #10243 — the toggle card, now RULED: `POST /automation/:name/toggle` is
+ * gated on `manage_metadata`, and this file pins the closed door over HTTP.
  *
- * ## ⛔ What this file is, and what it deliberately is not
+ * ## ⭐ This file was re-pointed, and the re-pointing is the record
  *
- * It **records a measurement**. It does **not** rule. Whether
- * `POST /automation/:name/toggle` belongs in the `manage_metadata` write set is
- * a product and security decision for the maintainer, and nothing here argues
- * either way — no severity, no recommendation. When the ruling lands, this file
- * is one of the two places it lands (the other is the ungated-execution audit
- * block in `packages/runtime/src/domains/automation-write-capability-gate.test.ts`):
- * a ruling that toggle IS an authoring write flips these expectations to a 403,
- * and the flip is the point — an unrecorded verdict cannot be revisited.
+ * It first landed (PR #10996) as a pure MEASUREMENT of the open half of the
+ * card: whether one tenant's ungated toggle reached every organization. It
+ * did — and it said, in this docblock, that a ruling *"flips these expectations
+ * to a 403, and the flip is the point — an unrecorded verdict cannot be
+ * revisited."* The ruling landed on 2026-08-23 (option A: toggle joins the
+ * `manage_metadata` write set, one arm on the existing `isFlowAuthoringWrite`,
+ * ⛔ no new capability name), so the flip is now taken, deliberately and in the
+ * same PR as the predicate change rather than left to go silently red.
  *
- * ## The question, and why only half of it was open
+ * ## What was measured BEFORE the gate — the reason the ruling went this way
  *
- * #10145 gated the automation DEFINITION writes (`POST /automation`,
- * `PUT /automation/:name`, `DELETE /automation/:name`) on `manage_metadata` and
- * deliberately left `toggle` ungated, on the rule that authoring and executing
- * are different questions. Two separable facts follow from that, and only the
- * second was ever open:
+ * On this same harness, with a real non-degraded `isolated` posture and two org
+ * owners in DIFFERENT organizations: tenant A — holding `organization_admin`,
+ * demonstrably NOT `manage_metadata`, and answered 403 by `PUT /meta/...`,
+ * `POST /automation` and `DELETE /automation/:name` at the same session —
+ * switched the CRM app's shipped flow off with a 200, and tenant B and the
+ * platform admin both read it off. Symmetrically, in both directions.
  *
- *   1. `toggle` is reachable by any authenticated caller with no authoring
- *      capability — MEASURED and pinned by #10145's audit block.
- *   2. flow ENABLEMENT is environment-scoped, so one tenant's toggle reaches
- *      every organization — asserted from the scoping #10145 measured for flow
- *      DEFINITIONS, and never reproduced for enablement itself.
+ * Mitigating but not exculpating: the override is process-local, so a cold boot
+ * on the same database reads `enabled: true` again.
  *
- * This file is (2): toggle as tenant A, read the enabled state back as tenant B
- * and as the platform admin — the same three principals and the same read-back
- * table #10145's report used for definitions.
+ * ## Which legs changed, and which deliberately did NOT
  *
- * ## ⚠️ The vacuity trap this harness has to stay clear of, stated up front
+ * The cross-tenant read-back was a CONSEQUENCE of the route being reachable, so
+ * it is not what this file pins any more — the unprivileged tenant is now
+ * refused at the door and never reaches the toggle at all. What survives
+ * untouched is the leg that measures WHERE THE STATE LIVES, because that fact
+ * is unchanged by the gate and is the one that made the result independent of
+ * this harness's admitted limitation:
  *
  * `multiTenant: 'posture-only'` activates the tenancy POSTURE and no row wall
  * (see `BootOptions.multiTenant`) — the enterprise `@objectstack/organizations`
- * runtime is cloud-private and genuinely absent from this workspace. A fixture
- * that booted this way and asserted *isolation* would assert nothing and pass.
- * The mirror image is just as real and is the trap for THIS file: in a stack
- * with no wall, "tenant B saw tenant A's write" is true of everything, and
- * would prove nothing about a walled deployment.
+ * runtime is cloud-private and genuinely absent from this workspace. An
+ * organization wall scopes ROWS, and the enabled bit is not a row:
+ * `toggleFlow(name, enabled)` writes the automation engine's in-process
+ * `flowEnabled` map, keyed by flow name and nothing else, `getFlowRuntimeStates()`
+ * reads that same map with no caller, no organization and no argument at all,
+ * and the automation service is ONE instance per environment. `it('mutates
+ * ENGINE state, not the persisted definition')` below still measures exactly
+ * that discriminator over HTTP — and it is still the leg that would fail,
+ * loudly, if enablement ever became org-stamped state a wall could scope. It is
+ * simply driven by an ENTITLED caller now, since an unentitled one no longer
+ * gets that far.
  *
- * What keeps the measurement honest is that the bit under test never reaches
- * the plane a wall operates on. An organization wall scopes ROWS. The enabled
- * bit is not a row: `toggleFlow(name, enabled)` writes the automation engine's
- * in-process `flowEnabled` map, keyed by flow name and nothing else, and
- * `getFlowRuntimeStates()` reads that same map with no caller, no organization
- * and no argument at all. `it('mutates ENGINE state, not the persisted
- * definition')` below measures exactly that discriminator over HTTP — after the
- * toggle the flow's persisted `status` is still `active` while its runtime
- * `enabled` is `false` — and it is the leg that would fail, loudly, if
- * enablement ever became org-stamped state that a wall could scope. Until it
- * does, no wall has anything to scope, which is why the result does not depend
- * on the stand-in.
+ * ## ⚠️ The vacuity trap, restated for the new shape
+ *
+ * A gate test that only ever asserts refusals passes just as well when the
+ * route is broken, missing, or refusing everyone — which is not what was ruled.
+ * So the positive control is load-bearing here, not decoration: a caller WITH
+ * `manage_metadata` still toggles, 200, in both directions, and the engine
+ * state actually moves. Refusal and permission are both asserted, or neither
+ * means anything.
  *
  * ## The harness
  *
@@ -108,9 +112,13 @@ async function readEnabled(stack: VerifyStack, token: string): Promise<RuntimeFl
   return entry!;
 }
 
-describe('#10243 — cross-organization reach of POST /automation/:name/toggle', () => {
+describe('#10243 — POST /automation/:name/toggle demands `manage_metadata`', () => {
   let stack: VerifyStack;
-  /** Platform admin — the seeded first user. #10145's `founder`. */
+  /**
+   * Platform admin — the seeded first user. #10145's `founder`, and now also
+   * this file's ENTITLED principal: the positive control and the
+   * where-the-state-lives leg are driven through it.
+   */
   let adminToken: string;
   /** Tenant A org owner — the actor. #10145's `northwind`. */
   let tenantAToken: string;
@@ -193,6 +201,11 @@ describe('#10243 — cross-organization reach of POST /automation/:name/toggle',
     // The same control #10145's report used to prove the account is not
     // secretly entitled. Asserts `code` AND `status` — the repo's minimum for a
     // refusal case, since a bare "it threw" passes for the wrong reasons.
+    //
+    // ⛔ `POST /:name/toggle` is deliberately NOT in this list even though it
+    // now belongs to the same write set: this control has to be independent of
+    // the route under test, or "tenant A is unprivileged" would be established
+    // by the very gate the next test measures.
     const meta = await stack.apiAs(tenantAToken, 'PUT', '/meta/object/crm_lead', { name: 'crm_lead' });
     expect(meta.status).toBe(403);
     expect(((await meta.json()) as { error?: { code?: string } }).error?.code).toBe('FORBIDDEN');
@@ -214,25 +227,55 @@ describe('#10243 — cross-organization reach of POST /automation/:name/toggle',
     }
   });
 
-  it('MEASURED: tenant A toggles the flow off, and tenant B and the platform admin both read it off', async () => {
-    const toggle = await stack.apiAs(tenantAToken, 'POST', `/automation/${FLOW}/toggle`, { enabled: false });
-    expect(toggle.status, `toggle as tenant A: ${await toggle.clone().text()}`).toBe(200);
+  it('[#10243 FLIPPED] tenant A is REFUSED at the door — 403 PERMISSION_DENIED, in both directions', async () => {
+    // ⭐ This is the assertion the ruling inverted. It read `.toBe(200)` with a
+    // cross-organization read-back table under it; that table measured a
+    // CONSEQUENCE of the route being reachable, and the route is not reachable
+    // for this principal any more. Both directions are driven because the
+    // measurement that produced the ruling was symmetric — a gate that only
+    // refused "off" would leave the same environment-wide reach one boolean away.
+    for (const enabled of [false, true]) {
+      const res = await stack.apiAs(tenantAToken, 'POST', `/automation/${FLOW}/toggle`, { enabled });
+      expect(res.status, `toggle {enabled:${enabled}} as tenant A: ${await res.clone().text()}`).toBe(403);
+      expect(
+        ((await res.json()) as { error?: { code?: string } }).error?.code,
+        'ADR-0112 wants both halves — a 403 carrying no code satisfies exactly half the contract',
+      ).toBe('PERMISSION_DENIED');
+    }
+
+    // THE POINT, and the reason this is not a status-only assertion: the
+    // refusal has to land BEFORE the engine is touched. "Toggle first, refuse
+    // second" would satisfy the two assertions above and still be the
+    // cross-tenant defect. All three principals still read the flow ENABLED.
+    for (const [who, token] of [['tenantA', tenantAToken], ['tenantB', tenantBToken], ['admin', adminToken]] as const) {
+      expect((await readEnabled(stack, token)).enabled, `${who} after A was refused`).toBe(true);
+    }
+  });
+
+  it('[#10243] positive control: a `manage_metadata` holder still toggles, 200 — the gate does not refuse everyone', async () => {
+    // ⚠️ Load-bearing, not decoration. Every assertion in the test above passes
+    // just as well against a route that is broken, unmounted, or refusing
+    // every caller — none of which is what was ruled. The capability holder's
+    // 200 is the half that says a gate was installed rather than a door welded
+    // shut, and it is what leaves the following leg something to measure.
+    const toggle = await stack.apiAs(adminToken, 'POST', `/automation/${FLOW}/toggle`, { enabled: false });
+    expect(toggle.status, `toggle as the entitled admin: ${await toggle.clone().text()}`).toBe(200);
     expect((await toggle.json()) as unknown).toMatchObject({ data: { name: FLOW, enabled: false } });
 
-    // The read-back table. Tenant B holds no membership of tenant A's
-    // organization and the platform admin is org-less; both nevertheless
-    // observe the actor's mutation.
-    expect((await readEnabled(stack, tenantBToken)).enabled, 'tenant B after A toggled off').toBe(false);
-    expect((await readEnabled(stack, adminToken)).enabled, 'platform admin after A toggled off').toBe(false);
-    expect((await readEnabled(stack, tenantAToken)).enabled, 'tenant A after A toggled off').toBe(false);
+    expect((await readEnabled(stack, adminToken)).enabled, 'admin after the entitled toggle').toBe(false);
   });
 
   it('mutates ENGINE state, not the persisted definition — the bit an organization wall has nothing to scope', async () => {
-    // Runs after the toggle above (file order is the sequence). The persisted
-    // `status` — the flow's authored metadata, the thing an org overlay could
-    // carry — is untouched, while the runtime `enabled` bit is off. That
-    // divergence is where the state lives, and it is what makes the read-back
-    // above independent of whether a row wall is installed.
+    // ⭐ KEPT, deliberately: the gate changed WHO may toggle, not WHERE the
+    // mutated bit lives, and this leg measures the latter. It is what made the
+    // original cross-tenant result independent of this harness's missing row
+    // wall, and it is what would fail — loudly — if enablement ever became
+    // org-stamped state a wall could scope. Only its driver changed: it runs
+    // after the ENTITLED toggle above (file order is the sequence), because an
+    // unentitled caller no longer gets far enough to move anything.
+    //
+    // The persisted `status` — the flow's authored metadata, the thing an org
+    // overlay could carry — is untouched, while the runtime `enabled` bit is off.
     const state = await readEnabled(stack, adminToken);
     expect(state.enabled).toBe(false);
     expect(state.status).toBe('active');
@@ -252,11 +295,26 @@ describe('#10243 — cross-organization reach of POST /automation/:name/toggle',
     expect(fromEngine?.enabled, 'engine state after the HTTP toggle').toBe(false);
   });
 
-  it('symmetric: tenant A switches it back on, and the other two read it on again', async () => {
-    const toggle = await stack.apiAs(tenantAToken, 'POST', `/automation/${FLOW}/toggle`, { enabled: true });
+  it('symmetric: the entitled caller switches it back on, and all three read it on again', async () => {
+    const toggle = await stack.apiAs(adminToken, 'POST', `/automation/${FLOW}/toggle`, { enabled: true });
     expect(toggle.status).toBe(200);
 
-    expect((await readEnabled(stack, tenantBToken)).enabled, 'tenant B after A re-enabled').toBe(true);
-    expect((await readEnabled(stack, adminToken)).enabled, 'platform admin after A re-enabled').toBe(true);
+    // The environment-wide reach of the bit is unchanged and still visible —
+    // that was never the defect. WHO may reach it is what the ruling narrowed,
+    // so the same three-principal read-back is now evidence that an ENTITLED
+    // toggle still behaves exactly as it did.
+    for (const [who, token] of [['tenantA', tenantAToken], ['tenantB', tenantBToken], ['admin', adminToken]] as const) {
+      expect((await readEnabled(stack, token)).enabled, `${who} after the entitled re-enable`).toBe(true);
+    }
+  });
+
+  it('[#10243] the EXECUTION door beside it did not move — tenant A can still trigger', async () => {
+    // ⛔ The over-block this ruling deliberately did not make. If the gate had
+    // been spelled one segment too wide, an ordinary member would lose the
+    // ability to RUN the flows built for them — the mistake #7968 records for
+    // the paused-run screen read. Asserted as "not 403": what this pins is the
+    // authorization verdict, not the flow's business outcome.
+    const res = await stack.apiAs(tenantAToken, 'POST', `/automation/${FLOW}/trigger`, {});
+    expect(res.status, `trigger as tenant A: ${await res.clone().text()}`).not.toBe(403);
   });
 });

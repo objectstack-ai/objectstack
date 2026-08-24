@@ -5001,9 +5001,19 @@ configured` without it. Check `discovery.services` before calling, exactly as
   The retired alias spellings `visibleWhen` / `visibleOn` / `permissions` carry the
   same prescriptions rather than renaming onto keys that are themselves gone.
 
-  Run `os migrate meta --from 16` to rewrite existing sources automatically
-  (ADR-0087 D2 conversion `app-area-fail-open-gates-removed`, wired into the
-  protocol-17 D3 chain step).
+  Run `os migrate meta --from 16` to list the mechanical edits for existing
+  sources; apply them by hand (ADR-0087 D2 conversion
+  `app-area-fail-open-gates-removed`, wired into the protocol-17 D3 chain step).
+
+  > **Correction (#9734):** as published, this entry closed with "Run
+  > `os migrate meta --from 16` to rewrite existing sources automatically". The
+  > command has never rewritten an authored source file: it replays the
+  > conversion chain over the loaded stack **in memory** and prints the
+  > attributed mechanical change list, and there is no `--write` / `--fix` flag.
+  > The sentence was withdrawn class-wide in #9529, and the prescription above is
+  > the one `areas[].visible` / `areas[].requiredPermissions` carry today.
+  > Corrected post-publication — the released 17.0.0 artifact shipped the
+  > original wording.
 
   **Why they read alive — and why that made them worse than dead.** The _same key
   names_ are genuinely enforced one level up and one level down:

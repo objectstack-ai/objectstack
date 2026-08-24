@@ -25,8 +25,34 @@
 // CLI and a stale dependency are different facts with different remedies, and the
 // two signatures must not match each other's corpus.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** This module lives in `scripts/`, so the repo root is one level up (#11394). */
+const REPO_ROOT = resolve(HERE, '..');
+
+/**
+ * A repo-relative path, resolved against the module-derived root — the ONE seam
+ * between this module's vocabulary and the filesystem (#11394), the shape #10907
+ * put on `check-i18n-coverage.mjs` one file over.
+ *
+ * EXPORTED, unlike that gate's private `at()`, because the vocabulary is: this
+ * module hands its consumers a repo-relative `file`, and a consumer that then
+ * asks the filesystem about it has to reach the same disk this module read from.
+ * Identical in value to `check-i18n-coverage.mjs`'s `at()` — both files live in
+ * `scripts/` — and deliberately not imported from it: that gate imports THIS
+ * module, so taking its root would be a cycle, and the anchor is two lines.
+ */
+export const atRepoRoot = (rel) => join(REPO_ROOT, rel);
+
+// Repo-relative ON PURPOSE, and NOT to be anchored (#10907's note, restated here
+// because #11394 anchored the reads around them). These spellings are the text
+// every consumer's error messages and rerun commands are written in, and `CLI` is
+// an argv path spawned against a cwd of the repo root. `atRepoRoot` above is the
+// one seam that turns them into paths on disk, so the vocabulary stays relative
+// while every READ is anchored. Making them absolute would rewrite the commands
+// this repo tells a reader to run.
 /** The bin stub every gate spawns. A source file — its presence means nothing. */
 export const CLI = 'packages/cli/bin/run.js';
 /** The package whose `oclif` block declares where the built commands land. */
@@ -182,10 +208,33 @@ export function looksLikeStaleWorkspaceDist(text) {
 /**
  * `oclifCommandFileFor` against the real `packages/cli/package.json`.
  *
- * Both failure modes come back as one `unknown` REASON rather than a guessed
- * path, because a probe that cannot read the declaration must not turn a
- * correctly-built workspace red: the caller prints the reason and defers to its
- * in-loop signature net, which is the actual enforcement.
+ * The read is ANCHORED (#11394). It used to be `join(CLI_PKG, 'package.json')`
+ * against the cwd, so from anywhere but the repo root it ENOENTed and the probe
+ * deferred — not because the declaration was unreadable, but because it had been
+ * looked for in the wrong place. Every off-root run of either consumer was
+ * preceded by
+ *
+ *     check-i18n-coverage: could not read packages/cli/package.json (ENOENT …)
+ *       — build prerequisite not pre-checked
+ *
+ * over a workspace that was fine, and on an UNBUILT tree it cost the diagnosis
+ * outright: the one environment fact reached the in-loop net once per config
+ * instead of being named once, up front.
+ *
+ * The deferral DIRECTION is unchanged and still correct — both failure modes come
+ * back as one `unknown` REASON rather than a guessed path, because a probe that
+ * cannot read the declaration must not turn a correctly-built workspace red: the
+ * caller prints the reason and defers to its in-loop signature net, which is the
+ * actual enforcement. What #11394 changed is which facts can reach it. Only a
+ * genuinely unreadable or unshaped declaration does now; a foreign cwd does not.
+ *
+ * ⛔ Do not restore the cwd-relative read to reproduce a deferral. It was used as
+ * one once — #11395's twelve-way cause split was measured through it — and that
+ * reason discharged at `a1508766`: `groupFailuresByCause` keys a cause on a `fix`
+ * drawn from a CLOSED set of constants, and the per-config rerun command is
+ * rendered by the report, so the split cannot recur whether this probe defers or
+ * not. A deferral for testing is `oclifCommandFileFor({ oclif: {} }, …)`, which is
+ * pure and is what both consumers' `--self-test` already pins.
  *
  * @param {string[]} commandId
  * @returns {{ file: string } | { unknown: string }}
@@ -193,7 +242,10 @@ export function looksLikeStaleWorkspaceDist(text) {
 export function resolveCliCommandFile(commandId) {
   let pkgJson;
   try {
-    pkgJson = JSON.parse(readFileSync(join(CLI_PKG, 'package.json'), 'utf8'));
+    // The message stays repo-relative (it is the path a reader would `cat` from
+    // the root); only the READ is anchored. node's own ENOENT text carries the
+    // absolute path it tried, which is evidence rather than vocabulary.
+    pkgJson = JSON.parse(readFileSync(atRepoRoot(join(CLI_PKG, 'package.json')), 'utf8'));
   } catch (e) {
     return { unknown: `could not read ${CLI_PKG}/package.json (${e.message})` };
   }

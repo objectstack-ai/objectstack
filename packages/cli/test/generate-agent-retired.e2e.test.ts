@@ -37,6 +37,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -56,7 +57,7 @@ function runTsx(args: string[], cwd: string): Promise<Run> {
     execFile(
       TSX,
       args,
-      { cwd, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } },
+      { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
         resolvePromise({
           // `err.code` is the real exit status; null/undefined means the child

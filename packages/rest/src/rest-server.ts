@@ -3619,12 +3619,50 @@ export class RestServer {
                     logError('[REST] openapi.json endpoint enrichment skipped:', err?.message ?? err);
                 }
 
-                // Surface the runtime version so consumers don't pin to
-                // the spec package's compile-time version.
+                // `info.version` carries the API version identifier this
+                // deployment declares (`api.version`, which `normalizeConfig`
+                // defaults to `'v1'`) — the same value that builds the default
+                // mount (`${basePath}/${version}` -> `/api/v1`), though a
+                // deployment that sets `apiPath` moves the mount without
+                // moving this.
+                //
+                // It is deliberately NOT the runtime version, and the comment
+                // this replaces ("surface the runtime version so consumers
+                // don't pin to the spec package's compile-time version") had it
+                // backwards in both halves. OpenAPI 3.1 defines the field as
+                // "the version of the OpenAPI document (which is distinct from
+                // the OpenAPI Specification version or the API implementation
+                // version)" — the runtime version IS the implementation
+                // version, the one reading the field's own definition rules
+                // out. That fact is not lost: `{basePath}/discovery` and
+                // `/health` both answer with it, derived from
+                // `OS_RUNTIME_VERSION` (#10993/#11235/#11292), so a caller who
+                // wants the serving artifact asks a producer that means it.
+                //
+                // No `|| enriched.info.version` fallback. It was reachable,
+                // not dead — and NOT because the contract allows an empty
+                // version. `RestApiConfigSchema` declares
+                // `version: z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`, which
+                // refuses `''`. Nothing ever runs it: this config arrives
+                // through casts on both hops (`config.api as any` in
+                // `rest-api-plugin.ts`, then `as Partial<RestApiConfig>` in
+                // `normalizeConfig` below), the plugin declares no
+                // `configSchema` for the kernel's validator to parse, and the
+                // repo's only `RestApiConfigSchema.parse` parses `{}` in a QA
+                // helper. So the regex never executes on a deployment path,
+                // `??` is the only guard left, and `''` walks past it —
+                // whereupon the fallback published the spec package's
+                // compile-time version, the one value the old comment claimed
+                // this line existed to keep off the wire. A falsy
+                // `api.version` now serves itself, so a misconfigured
+                // deployment reads as misconfigured instead of silently
+                // switching this field to a different kind of fact. The
+                // unenforced regex is a defect in its own right, filed
+                // separately rather than fixed here.
                 if (enriched.info) {
                     enriched.info = {
                         ...enriched.info,
-                        version: this.config.api.version || enriched.info.version,
+                        version: this.config.api.version,
                     };
                 }
 

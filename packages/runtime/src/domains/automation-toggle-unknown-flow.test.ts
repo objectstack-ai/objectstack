@@ -53,7 +53,20 @@ function makeDispatcher(flowNames: string[] = ['welcome_flow']) {
     return { dispatcher: new HttpDispatcher(kernel), spies, enabled };
 }
 
-const CTX = { request: {}, executionContext: { userId: 'user_1' } } as any;
+/**
+ * [#10243] The caller now holds `manage_metadata`.
+ *
+ * This file is about ERROR MAPPING on `POST /:name/toggle` — that an unknown
+ * flow is a 404 rather than a 500, and that a malformed body is a 400. Its
+ * `{ userId: 'user_1' }` stub encoded the premise the 2026-08-23 ruling
+ * destroys: toggle joined the `manage_metadata` write set, so without a
+ * capability every case here would stop at the 403 in front of the behaviour it
+ * is named after — and #7535's 404 would read as "still fixed" while nothing
+ * measured it. Only the caller changes; every mechanism, assertion and expected
+ * value below is untouched. The gate itself is pinned in
+ * `automation-write-capability-gate.test.ts`.
+ */
+const CTX = { request: {}, executionContext: { userId: 'user_1', systemPermissions: ['manage_metadata'] } } as any;
 
 describe('#7535 — toggling a flow that does not exist is 404, not 500', () => {
     it('answers 404 in the house error envelope, naming the unknown flow', async () => {

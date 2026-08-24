@@ -57,6 +57,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, readdirSync }
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -75,7 +76,7 @@ function runCli(args: string[], cwd: string, env: Record<string, string>): Promi
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1', ...env } },
+      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', ...env }) },
       (err, stdout, stderr) => {
         resolvePromise({
           // The real exit status, not truthiness of `err` — a non-zero code
