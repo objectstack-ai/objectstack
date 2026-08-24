@@ -31,7 +31,18 @@ import type {
  * diff-facing contract does not declare.
  */
 export interface IntrospectedColumn extends SpecIntrospectedColumn {
-  /** Whether this column has a unique constraint */
+  /**
+   * Whether this column ALONE carries a single-column unique constraint —
+   * true iff some unique constraint covers this column and nothing else.
+   *
+   * Membership of a COMPOSITE constraint is deliberately not represented
+   * (#11202): `UNIQUE (a, b)` constrains the pair, and a per-column boolean
+   * cannot say that. The producer's declaration —
+   * `SqlDriver`'s `IntrospectedColumn.isUnique` in `@objectstack/driver-sql`
+   * — is the contract sentence; this is the consumer-side copy of the same
+   * key and must not drift from it. An absent flag on a composite member
+   * means "not single-column unique", never "no constraint".
+   */
   isUnique?: boolean;
   /**
    * Maximum length for string types — raw as knex `columnInfo()` reports it:
