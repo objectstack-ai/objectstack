@@ -19,6 +19,54 @@ concurrency:
   group: lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ⭐ GATE INVOCATION IDIOM — stated ONCE, here. The steps below point at it.
+#
+# Most gate steps in this file run their script directly:
+#
+#     run: node scripts/check-<thing>.mjs
+#
+# rather than through a `pnpm check:*` alias. That is a deliberate in-repo
+# idiom with its own justification, not a workaround:
+#
+#   * Many gate steps in this file already use it — it is the local precedent.
+#   * `scripts/pm/dispatch-gates.mjs` derives gate families from EITHER
+#     spelling, so the direct form loses no discovery.
+#   * It adds no key to the root manifest.
+#   * It is pinned rather than incidental: check-aggregator-roster,
+#     check-ci-filter-parity and check-doc-frontmatter each assert in their own
+#     self-test that `node <self>` appears in THIS file, so silently rewiring
+#     one of them to an alias reddens its gate.
+#
+# ⚠️ It is NOT because root `package.json` is off limits. This file used to say
+# that, in one shape or another, at nineteen separate sites, and it is FALSE.
+# The declared territory of the #9465 @changesets/cli v3 lane inside that file
+# is scoped by the lane's own parenthetical, verbatim from the issue body:
+#
+#     root `package.json` (the `@changesets/cli` range and the `version` script)
+#
+# That parenthetical is SCOPING, not illustrative: one dependency range and one
+# script key. It does not cover the file, and it does not cover a new `check:*`
+# key — so adding `check:<thing>` to the root manifest would have been allowed
+# all along. The steps below take the direct form on the merits listed above;
+# they are not fenced out of the alternative.
+#
+# Stated once here, and POINTED AT rather than restated, because the over-broad
+# reading propagates by copying — measured, not supposed. A dev agent wrote the
+# same sentence into a new comment and a new script's docblock and said plainly:
+# "I copied the phrasing from neighbouring comments instead of checking it."
+# The count was 15 sites when #10894 was filed on 2026-08-21 and 19 by
+# 2026-08-24, four of them added AFTER the card was filed and two of those
+# within ninety minutes of it being picked up. Nineteen CORRECTED copies would
+# re-arm the identical mechanism: a claim that reads as verified because it
+# reads exactly like the verified ones beside it. So there is one statement of
+# this idiom — this one — and every step refers to it.
+#
+# Changing this note? It is prose, and no gate can red on a wrong sentence
+# here; that is precisely how nineteen wrong ones accumulated. Check any claim
+# about the #9465 fence against #9465's own body before you write it down.
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
 
   lint:
@@ -176,11 +224,8 @@ jobs:
       #
       # What runs here is the self-tests, not the modules' callers: the callers
       # are the two gate steps below, which already run on every PR.
-      # Invoked as `node` rather than through `pnpm check:*`: those aliases
-      # belong in root package.json, declared territory of the @changesets/cli
-      # v3 migration lane (#9465) while it runs — same shape as the
-      # `node scripts/…` steps later in this lane. dispatch-gates.mjs derives
-      # gate families from either spelling.
+      # Invoked as `node` rather than through `pnpm check:*`: see the GATE
+      # INVOCATION IDIOM note at the top of this file.
       # `ts-parse` spawns ~20 real node children (~10 s measured, and the spawns
       # are the point — they pin that a caller's try/catch cannot swallow the
       # refusal); the other two are in-process fixtures, ~0.5 s combined.
@@ -297,9 +342,9 @@ jobs:
       # contract (scripts/check-required-contexts.mjs) that only a
       # maintainer-present Settings change can enrol, and an unenrolled job is
       # an advisory gate — #5617 verbatim. This job is already required.
-      # Invoked as `node` rather than `pnpm check:*` for the same reason as the
-      # other `node scripts/…` steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # Invoked as `node` rather than `pnpm check:*`, same as the other
+      # `node scripts/…` steps in this lane: see the GATE INVOCATION IDIOM note
+      # at the top of this file.
       # Runs its own comparator self-test first — 12 cases proving the
       # comparison can still REPORT, because "0 files disagree" and "the
       # comparison is broken" otherwise print the same line.
@@ -547,11 +592,9 @@ jobs:
       # from this step reddens instead of going quiet. Temp-dir fixtures, no
       # network, ~1.7 s.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
-      # belongs in root package.json, which is declared territory of the
-      # @changesets/cli v3 migration lane (#9465) while it runs. Same shape as
-      # check-links.yml's ADR-link step, and dispatch-gates.mjs derives gate
-      # families from either spelling.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Same shape as
+      # check-links.yml's ADR-link step.
       - name: Release-rehearsal clone preflight self-test
         run: node scripts/pm/release-rehearsal-clone.mjs --self-test
 
@@ -586,9 +629,8 @@ jobs:
       # until now NOTHING in this repo ran, and an unrun self-test is a phantom
       # check — the AGENTS.md rule about `@ts-expect-error` in an uncompiled
       # file, wearing a different hat. Invoked as `node`/`bash` rather than
-      # through `pnpm check:*`: that alias belongs in root package.json, which
-      # is declared territory of the @changesets/cli v3 migration lane (#9465)
-      # while it runs. Temp-dir fixtures, no network, ~6 s in total.
+      # through `pnpm check:*`: see the GATE INVOCATION IDIOM note at the top of
+      # this file. Temp-dir fixtures, no network, ~6 s in total.
       #
       # (`check-governed-merges.mjs`'s own cases run in the
       # `pnpm check:pm-governed-merges` step above, which is already its
@@ -685,19 +727,9 @@ jobs:
       # commands executing when the first fails, 3 of 3 when none does. A harness
       # that cannot reproduce the defect cannot certify the fix.
       #
-      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
-      # on the precedent this job already sets: several gate steps here are
-      # invoked directly, and dispatch-gates.mjs derives gate families from
-      # either spelling, so the direct form loses no discovery and adds no key
-      # to the root manifest.
-      #
-      # ⚠️ NOT because root package.json is off limits. The #9465 changeset lane
-      # fences that file's `@changesets/cli` range and its `version` script — the
-      # parenthetical in the issue body is scoping, not illustrative — and not
-      # the file, so a `check:step-collectors` key would have been allowed. Said
-      # plainly because the over-broad reading is easy to acquire and then
-      # propagates as a constraint nobody actually has, which is this step's own
-      # defect class wearing a different hat: a claim that reads as verified.
+      # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias:
+      # see the GATE INVOCATION IDIOM note at the top of this file, which is
+      # where the correction this comment used to carry now lives in full.
       # Temp-dir fixtures, no network, ~1 s.
       - name: Step-collector gate (self-tests that mask each other)
         run: |
@@ -918,10 +950,9 @@ jobs:
       # naming what could not be read (#4690 / #7484).
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as
-      # the aggregator-roster step below: that alias belongs in root
-      # package.json, declared territory of the @changesets/cli v3 migration
-      # lane (#9465) while it runs. Dependency-free filesystem read, sub-second
-      # over the whole corpus.
+      # the aggregator-roster step below: see the GATE INVOCATION IDIOM note at
+      # the top of this file. Dependency-free filesystem read, sub-second over
+      # the whole corpus.
       - name: Docs frontmatter parses
         run: |
           node scripts/check-doc-frontmatter.mjs --self-test
@@ -1009,8 +1040,8 @@ jobs:
       # failing step here is read by everyone — and enforcement later needs
       # only the flag flip, not a Settings change.
       # Invoked as `node` rather than a `pnpm check:*` alias, same as the
-      # frontmatter step above: the alias is a line in root package.json,
-      # inside the @changesets/cli v3 fence (#9465) while that lane runs.
+      # frontmatter step above: see the GATE INVOCATION IDIOM note at the top of
+      # this file.
       - name: Route spellings taught in prose match the ledgers (advisory)
         run: |
           node scripts/check-doc-route-spelling.mjs --self-test
@@ -1074,10 +1105,9 @@ jobs:
       # re-narrowing the scope REFUSES instead of reporting a clean corpus.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
-      # doc-frontmatter and aggregator-roster steps: that alias belongs in root
-      # package.json, declared territory of the @changesets/cli v3 migration lane
-      # (#9465) while it runs. Dependency-free filesystem read, sub-second over
-      # the whole corpus.
+      # doc-frontmatter and aggregator-roster steps: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Dependency-free filesystem read,
+      # sub-second over the whole corpus.
       #
       # Its --self-test runs FIRST and is where the rule is observed FAILING:
       # this PR swept the live corpus, so a passing run over real data cannot
@@ -1361,10 +1391,8 @@ jobs:
       # them — the #9604 precedent, re-measured.
       #
       # Invoked as `node scripts/…` rather than through a `pnpm check:*` alias,
-      # same as the other direct steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465), and the direct
-      # form loses no discovery — dispatch-gates.mjs derives gate families from
-      # either spelling. Precedent: PR #10698.
+      # same as the other direct steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Precedent: PR #10698.
       #
       # Runs its own --self-test first, and that leg is load-bearing: this gate
       # computes its own population, so a block parser that stopped matching
@@ -1812,7 +1840,8 @@ jobs:
       # instrument is fatal here in every mode. `--strict` promotes findings to
       # exit 1 for a caller that owns the remedy; nothing on a PR passes it.
       #
-      # No `pnpm check:*` alias: root package.json is inside the #9465 fence.
+      # No `pnpm check:*` alias: see the GATE INVOCATION IDIOM note at the top
+      # of this file.
       - name: Release section-coverage guard
         run: |
           node scripts/check-release-section-coverage.mjs --self-test
@@ -1935,8 +1964,8 @@ jobs:
       # entry without one.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as the
-      # other `node scripts/...` steps in this lane: that alias is a line in root
-      # package.json, inside the @changesets/cli v3 fence (#9465).
+      # other `node scripts/...` steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file.
       #
       # Its --self-test runs first and is not ceremony. The gate is GREEN OVER AN
       # EMPTY EXECUTABLE POPULATION -- every mention of the verb on this tree is
@@ -1996,11 +2025,9 @@ jobs:
       # as a fresh one, and this comment is what the next reader checks the
       # harness against. Prose classes survive an M16; a count does not.
       #
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that alias
-      # belongs in root package.json, declared territory of the @changesets/cli
-      # v3 migration lane (#9465) while it runs. Same shape as the
-      # release-rehearsal step above; dispatch-gates.mjs derives gate families
-      # from either spelling. No network, no build; ~0.2 s.
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Same shape as the
+      # release-rehearsal step above. No network, no build; ~0.2 s.
       - name: Cross-repo closer outcome contract
         run: |
           node scripts/check-cross-repo-closer-outcome.mjs --self-test
@@ -2025,10 +2052,8 @@ jobs:
       # is exactly the change that would miss one.
       #
       # Invoked as `node` rather than a `pnpm check:*` alias for the same reason
-      # as the step above: that alias belongs in root package.json, declared
-      # territory of the @changesets/cli v3 migration lane (#9465) while it
-      # runs. dispatch-gates.mjs derives gate families from either spelling.
-      # No network, no build; ~1 s, most of it the tracked-file sweep.
+      # as the step above: see the GATE INVOCATION IDIOM note at the top of this
+      # file. No network, no build; ~1 s, most of it the tracked-file sweep.
       - name: Closing-keyword parser parity
         run: |
           node scripts/check-closing-keyword-parity.mjs --self-test
@@ -2067,8 +2092,8 @@ jobs:
       # matching nothing.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same
-      # reason as the step above: root package.json is declared territory of
-      # the @changesets/cli v3 migration lane (#9465) while it runs.
+      # reason as the step above: see the GATE INVOCATION IDIOM note at the top
+      # of this file.
       - name: Merge-queue triage outcome contract
         run: |
           node scripts/check-merge-queue-triage-outcome.mjs --self-test
@@ -2114,9 +2139,8 @@ jobs:
       # state is a refusal rather than a quiet pass — no aggregator found, a
       # workflow that will not parse, or a roster that resolves to zero members
       # all exit 1 naming what could not be read (#4690).
-      # Invoked as `node` rather than through a `pnpm check:*` alias: that
-      # alias belongs in root package.json, which is declared territory of the
-      # @changesets/cli v3 migration lane (#9465) while it runs. Reads two YAML
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. Reads two YAML
       # files; sub-second.
       - name: Aggregator roster gate
         run: |
@@ -2225,10 +2249,9 @@ jobs:
       # either filter has left the OR, and reports a `crosspkg` entry that
       # covers no declaration any more.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the
-      # same reason as the steps below: that alias belongs in root package.json,
-      # declared territory of the @changesets/cli v3 lane (#9465) while it runs.
-      # dispatch-gates.mjs derives gate families from either spelling. Two YAML
-      # parses and a string comparison; milliseconds.
+      # same reason as the steps below: see the GATE INVOCATION IDIOM note at
+      # the top of this file. Two YAML parses and a string comparison;
+      # milliseconds.
       - name: CI filter parity (cross-package Layer C)
         run: |
           node scripts/check-ci-filter-parity.mjs --self-test
@@ -2247,10 +2270,8 @@ jobs:
       # and the reader-side refusal that now catches that needs a live pin of its
       # own or it rots the same way.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the same
-      # reason as the release-rehearsal self-test above: that alias belongs in
-      # root package.json, declared territory of the @changesets/cli v3 lane
-      # (#9465) while it runs. dispatch-gates.mjs derives gate families from
-      # either spelling. Pure functions, no IO, milliseconds.
+      # reason as the release-rehearsal self-test above: see the GATE INVOCATION
+      # IDIOM note at the top of this file. Pure functions, no IO, milliseconds.
       - name: Shard partitioner self-test
         run: node scripts/partition-test-shards.mjs --self-test
 
@@ -2270,10 +2291,8 @@ jobs:
       # corpus (every `scripts/**/*.d.mts`), so a third mirror added tomorrow is
       # covered by existing rather than by anyone remembering to enrol it.
       # Invoked as `node` rather than through a `pnpm check:*` alias for the
-      # same reason as the two steps above: that alias belongs in root
-      # package.json, declared territory of the @changesets/cli v3 lane (#9465)
-      # while it runs. dispatch-gates.mjs derives gate families from either
-      # spelling. Imports two small modules; milliseconds.
+      # same reason as the two steps above: see the GATE INVOCATION IDIOM note
+      # at the top of this file. Imports two small modules; milliseconds.
       - name: Hand-written declaration mirrors
         run: |
           node scripts/check-declaration-mirrors.mjs --self-test
@@ -2493,8 +2512,8 @@ jobs:
       # pointing at #10371 which owns their repair; the list refuses new members
       # outright, so nothing can join it to get CI green.
       # Invoked as `node` rather than through a `pnpm check:*` alias, same as
-      # the other `node scripts/…` steps in this lane: that alias is a line in
-      # root package.json, inside the @changesets/cli v3 fence (#9465).
+      # the other `node scripts/…` steps in this lane: see the GATE INVOCATION
+      # IDIOM note at the top of this file.
       # Runs its own --self-test first, and that leg is not decoration: this
       # gate computes its own population, so a scan that stopped matching would
       # print a confident green over a tree it never read (#4690's family). The
@@ -3215,8 +3234,8 @@ jobs:
       # SUCCESS as well as failure, which is the visibility half of #10473 — every
       # PR's log carries each file's distance from its ceiling.
       #
-      # Invoked as `node`, NOT through an npm script: root package.json is fenced
-      # (#9465), and this gate needs no wiring there — same shape as the two
+      # Invoked as `node`, NOT through an npm script — see the GATE INVOCATION
+      # IDIOM note at the top of this file; same shape as the two
       # `node scripts/…` steps earlier in this lane. Static text only, no build, so
       # it belongs in this pre-build group. No paths filter, for the standard reason:
       # a filter on skills/** would go dormant on the PR that edits the ceilings.
