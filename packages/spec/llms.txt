@@ -14,14 +14,15 @@ It is divided into three layers, reflected in the import paths:
 - **`FieldSchema`**: Defines columns with 46+ types (`text`, `number`, `lookup`, `formula`, `vector`, etc.).
 - **`QuerySchema`**: A JSON-based AST for querying data (replaces SQL).
 - **`IDataDriver`**: The authoritative contract for database adapters (SQL, NoSQL, Memory).
-- **`AnalyticsSchema`**: OLAP cubes, measures, and dimensions.
+  Exported from `@objectstack/spec/contracts` — see §6.
+- **`CubeSchema`**: OLAP cubes, measures, and dimensions.
 
 ### Layer 2: ObjectOS (`@objectstack/spec/system` & `@objectstack/spec/api`)
 **The Runtime Kernel**. Defines "How System Operates".
 - **`ManifestSchema`**: `objectstack.config.ts` configuration.
-- **`IdentitySchema`**: Users, Roles, Organizations, SCIM.
+- **`OrganizationSchema`**: Organizations, members, positions, SCIM provisioning.
 - **`EventSchema`**: System bus, DLQ, and Webhooks (6 sub-modules).
-- **`EndpointSchema`**: API Gateway configuration.
+- **`ApiEndpointSchema`**: API Gateway configuration.
 - **`PluginSchema`**: Module lifecycle, security, registry, loading.
 
 ### Layer 3: ObjectUI (`@objectstack/spec/ui`)
@@ -30,14 +31,13 @@ It is divided into three layers, reflected in the import paths:
 - **`ViewSchema`**: Layouts for data (Grid, Kanban, Calendar, Gantt).
 - **`ActionSchema`**: Buttons and triggers.
 - **`DashboardSchema`**: Widget composition.
-- **`ThemeSchema`**: Design tokens and theming.
 
 ### Layer 4: ObjectAI (`@objectstack/spec/ai`)
 **The Intelligence Layer**. Defines AI Agents and Pipelines.
 - **`AgentSchema`**: Autonomous actors with tools and permissions.
-- **`RAGPipelineSchema`**: Retrieval Augmented Generation pipelines.
+- **`KnowledgeSourceSchema`**: Retrieval sources backing RAG grounding.
 - **`ModelRegistrySchema`**: LLM configuration and routing.
-- **`MCPSchema`**: Model Context Protocol integration.
+- **`MCPServerRefSchema`**: Model Context Protocol integration.
 
 ---
 
@@ -77,23 +77,28 @@ const query = {
 
 ---
 
-## 3. Schema Inventory by Domain (171 schemas)
+## 3. Schema Inventory by Domain (207 schemas)
+
+Counted as `*.zod.ts` modules under `packages/spec/src/<domain>/` — the sources
+that ship in this tarball (`files` includes `src/**/*.zod.ts`), so every number
+here is verifiable from the installed package.
 
 | Domain | Count | Key Schemas |
 |--------|-------|-------------|
+| system | 36 | Auth, Cache, Compliance, Encryption, HTTP Server, License, Logging, Metrics |
 | kernel | 32 | Plugin, Manifest, Events (6 sub-modules), Feature, Context, Package Registry |
-| system | 27 | Auth, Cache, Compliance, Encryption, HTTP Server, License, Logging, Metrics |
-| api | 25 | Contract, Endpoint, REST Server, Discovery, GraphQL, OData, Batch, WebSocket |
-| data | 19 | Object, Field, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Hook |
-| ui | 18 | View, App, Action, Dashboard, Page, Chart, Component, Theme, Animation |
-| ai | 14 | Agent, RAG Pipeline, Model Registry, MCP, Orchestration, NLQ, Predictive |
-| automation | 8 | Flow, Workflow, Trigger, Approval, ETL, State Machine, Webhook |
-| integration | 7 | Connector (Database, File Storage, GitHub, MQ, SaaS, Vercel) |
-| shared | 6 | Enums, HTTP, Identifiers, Mapping, Metadata Types, Connector Auth |
-| security | 5 | Permission, Policy, RLS, Sharing, Territory |
-| identity | 4 | Identity, Organization, Role, SCIM |
-| cloud | 4 | Marketplace, Developer Portal, App Store, Marketplace Admin |
-| studio | 1 | Studio Plugin Manifest |
+| data | 30 | Object, Field, Query, Filter, Driver (SQL/NoSQL/Memory/Mongo/Postgres), Cube |
+| api | 29 | Endpoint, REST Server, Discovery, OData, Batch, WebSocket, Response Envelope |
+| ui | 18 | View, App, Action, Dashboard, Page, Chart, Component, Animation |
+| automation | 13 | Flow, Approval, BPMN Interop, Control Flow, State Machine, Webhook |
+| shared | 13 | Enums, HTTP, Identifiers, Mapping, Metadata Types, Connector Auth, Retry Policy |
+| ai | 11 | Agent, Conversation, Knowledge Source/Document, Model Registry, MCP, Skill, Tool |
+| cloud | 11 | Marketplace, Developer Portal, App Store, Environment, Package, Tenant |
+| identity | 5 | Identity, Organization, Position, SCIM, Eval User |
+| security | 4 | Permission, RLS, Sharing, Explain |
+| studio | 3 | Flow Builder, Object Designer, Studio Plugin |
+| integration | 1 | Connector |
+| qa | 1 | Testing |
 
 ---
 
@@ -101,29 +106,29 @@ const query = {
 
 ### `import * as Data from '@objectstack/spec/data'`
 - `ObjectSchema`, `FieldSchema`: Logic & Storage definition.
-- `QuerySchema`, `FilterSchema`: Data retrieval AST.
-- `IDataDriver`, `DatasourceSchema`: Database connectivity.
-- `AnalyticsSchema`: OLAP cubes and metrics.
+- `QuerySchema`, `FilterArraySchema`: Data retrieval AST.
+- `DatasourceSchema`, `DriverInterfaceSchema`: Database connectivity.
+- `CubeSchema`: OLAP cubes and metrics.
 
 ### `import * as UI from '@objectstack/spec/ui'`
 - `ViewSchema`: `type: 'grid' | 'kanban' | 'calendar'`.
-- `FormSchema`: `layout: 'simple' | 'tabbed'`.
+- `FormViewSchema`: Form layout and sections.
 - `DashboardSchema`: Widget composition.
-- `ThemeSchema`: Design tokens.
+- `AppSchema`, `ActionSchema`: Navigation and triggers.
 
-### `import * as System from '@objectstack/spec/system'`
-- `PluginSchema`: Module lifecycle.
+### `import * as Kernel from '@objectstack/spec/kernel'`
+- `PluginSchema`, `ManifestSchema`: Module lifecycle and configuration.
 - `EventSchema`: Pub/Sub definitions.
-- `PolicySchema`: Security rules.
+- `KernelSecurityPolicySchema`: Plugin security rules.
 
 ### `import * as AI from '@objectstack/spec/ai'`
 - `AgentSchema`: AI agent configuration.
-- `RAGPipelineSchema`: Retrieval pipelines.
+- `KnowledgeSourceSchema`, `KnowledgeDocumentSchema`: Retrieval sources.
 - `ModelRegistrySchema`: LLM routing.
 
 ### `import * as API from '@objectstack/spec/api'`
-- `EndpointSchema`: REST/GraphQL endpoints.
-- `ContractSchema`: Request/Response envelopes.
+- `ApiEndpointSchema`: REST endpoints.
+- `ResponseEnvelopeConfigSchema`, `ApiErrorSchema`: Request/Response envelopes.
 - `DiscoverySchema`: Service discovery.
 
 ---
@@ -165,11 +170,14 @@ function registerObject(rawConfig: unknown) {
 | `IAnalyticsService` | query, aggregate, timeSeries |
 | `IAuthService` | authenticate, authorize, validateToken |
 | `IAutomationService` | executeFlow, triggerWorkflow |
-| `IUIService` | **DEPRECATED** — use IMetadataService.getView(), .listViews(), .getEffective('view', name, { userId }) |
 
 ---
 
-## 7. Package Ecosystem (19 packages)
+## 7. Package Ecosystem (68 packages)
+
+The workspace publishes 68 packages under the `@objectstack` scope. The table
+below is a curated entry-point list, not the full set — drivers, connectors,
+triggers, plugins and kernel-managed services each form their own family.
 
 | Package | Description |
 |---------|-------------|
@@ -183,9 +191,9 @@ function registerObject(rawConfig: unknown) {
 | `@objectstack/client-react` | React hooks for client |
 | `@objectstack/cli` | Command-line interface |
 | `@objectstack/hono` | Hono adapter |
-| `@objectstack/nextjs` | Next.js adapter |
-| `@objectstack/nestjs` | NestJS adapter |
 | `@objectstack/driver-memory` | In-memory database driver |
+| `@objectstack/driver-sql` | SQL database driver |
+| `@objectstack/types` | Shared TypeScript utilities |
 
 ---
 

@@ -49,6 +49,9 @@
   路径,`/search/*` 被拒、`/rate_limit` 例外)钳制 —— **纯 MCP 会话撞上枯竭池 =
   重置前没有任何 list 通道**,降级读法 = 下文 git 先行与 WebFetch 两行;只有无
   REST 对应物的写才花 GraphQL,`issue_write` 连查找半边都吃 —— 配额红时认领类动作排队,评论(REST 池)先行把结论发出去。
+- **`gh` CLI 的动词按传输分两桶,池枯竭时只死一半**(2026-08-24 同一分钟实测:GraphQL remaining 0 / REST core remaining 4987):porcelain 读家族全走 GraphQL —— `gh issue view` / `gh pr list` / `gh pr checks` 当场回 `API rate limit already exceeded`(`GH_DEBUG=api` 回显 `POST /graphql`);同一批事实改走 `gh api` 的 REST 路径全部照常返回(`repos/{o}/{r}/issues/{n}` 读正文、`.../issues/{n}/labels` 读标签、`.../commits/{sha}/check-runs` 读门禁结论、`.../pulls` 列 PR)⇒ **配额红的一小时里,认领/打标/评论/读门禁这条复核链整条跑得完**,⛔ 不据一次 porcelain 限流就宣布「GitHub 通道断了」而停轮。写侧同一分法:`gh pr create` 也走 GraphQL(同分钟被拒),而开 PR 有 REST 端点 —— `gh api -X POST repos/{o}/{r}/pulls -F draft=true` 同分钟成功 ⇒ 池子为 0 时 draft PR 照开得出,交付不必等重置。边界:本条取自装有 `gh` 的本机席位;容器里没有 `gh`(见「读数陷阱」),那边的分流按 MCP 通道另判。
+- **真需要等重置的只有 merge 家族**:合并本身有 REST 端点(`PUT /repos/{o}/{r}/pulls/{n}/merge`,`gh api -X PUT` 可达);**draft 翻转与 issue transfer 没有** —— REST 的 update-a-pull-request 只收 `title`/`body`/`state`/`base`/`maintainer_can_modify`(无 `draft`),issues 端点表里没有 transfer 路由,auto-merge 挂载亦无 REST 对应物(2026-08-24 核对官方 REST 文档;未逐个实调端点)⇒ `pr ready`、`issue transfer`、auto-merge 挂载是 GraphQL-only,`until remaining > 阈值` 的守候留给这三个就够。走合并队列的仓落地必经 auto-merge ⇒ 红窗里**无退路**;直合仓有。
+- **`issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款已载明的「在目的仓重建」配方**(出处头 + 裸 `#N` 改全名 + 关源单为 moved):该配方纯 REST、配额免疫,⛔ 不为一次转移空等重置,更不因此把跨仓卡搁成半状态。
 - **两个「瘦身参数」都不省池**:`fields` 省载荷不省池 —— MCP list/search 服务器端无条件抓 Project field_values,池枯竭时**最小字段请求同样全体失败**(报错串 `failed to fetch issue field values: API rate limit already exceeded`);
   ⛔ **`minimal_output: true` 不裁 `list_issues` 的 `body`**(2026-08-22 实测:返回字段仍含 `body`,首条 3258 字符、整体 122,685 字符仍超单次工具输出上限被落盘)—— 工具描述的反向暗示是假的,**永不当省额度手段写进任何 skill**;只要 number/labels/title 时也没有任何参数能关掉 body:要么接受整表 107 点,要么换更窄接口(`search_issues` 点数未实测)。⚠️ 前后体积对比不作证据(两次调用相隔数小时、population 已变),站得住的是直接观察 `body` 在。
 - **git 先行**:本地检出 / `git log` / `ls-remote` 不花配额,断粮期分支存在性检查照常可用,PR 文件读取同走 git(REST PR files 端点实测可瞬态 404);
@@ -73,10 +76,7 @@
   —— 同一动作内重读现值合并再写(隔轮旧读数 = 无效快照,按其回写静默剥别的标签);真追加走 REST `POST /issues/{n}/labels`;写后照标签纪律回读。
 - **`list_issues` 永不返回 assignees**(`fields` 枚举无此成员,不传也没有)—— 已
   认领卡与空闲卡响应逐字节相同,清单只是**候选名单**:每条认领前必须过完整 `issue_read`(它才返回 `assignees`),⛔ 不把清单当候选集直接认领。
-- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;
-  comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)——
-  腐蚀 body 的恰是把转义读数原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整个丢弃**(不是转义,无从解码回来),判据与处置见「读数陷阱」判截断行;写侧剥除(HTML 注释、tag
-  形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
+- **MCP `issue_read` 的 body 实体转义是纯读侧伪影**(撇号/引号/尖括号成数字实体;comments 原样),存储体是明文,**先解码实体再写回**往返实测安全(无双重转义)—— 腐蚀 body 的恰是把转义读数原样回写;⚠️ 但读侧**并非一律可逆** —— 行内反引号里的尖括号片段被 MCP 读路径**整个丢弃**(不是转义,无从解码回来),判据与处置见「读数陷阱」判截断行;写侧剥除(HTML 注释、tag 形状片段 —— 细则见「读数陷阱」写侧行)是**真实存储损耗**,⛔ 两类不并成一条「API 会改 body」,写后回读因此必做;实体归属(MCP 还是 GitHub API)与 `&amp;` 类未实测。
 - **`Blocked-by:` 行归 BODY(单通道反向索引)**:追加按上条「解码后写回」执行;历
   史上寄放在评论里的行按同程序**增量**回填(⛔ 不搞批量突击 —— 限流压力);解锁扫
   描只 grep body,⛔ 不加常设评论读;旧「连评论一起扫(`in:comments`)」提示作废,扫描走直读(`list_issues` + `issue_read` 读 body)。

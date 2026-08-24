@@ -142,7 +142,25 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Record ID',
       required: true,
       maxLength: 100,
+      // [#11386] The id half of this object's pointer pair (ADR-0052 §5),
+      // adopting the #11339 carrier. VERIFIED for THIS object: the pair is not
+      // decoration but the key the approval machinery QUERIES ON —
+      // `approval-service.ts` finds a record's pending request with
+      // `where: { object_name, record_id, status: 'pending' }`, and
+      // `lifecycle-hooks.ts` holds the record LOCK on the same pair
+      // (single-record and `$in` batch forms). `submit()` writes it from
+      // `input.object` / `input.recordId`, so a stored value is always a
+      // record id of the object the sibling names.
+      //
+      // Consequence of declaring, sharper here than elsewhere: a seeded
+      // request whose `record_id` stayed a verbatim natural key locked
+      // NOTHING and appeared under no record — it looked like a pending
+      // approval while being invisible to both queries that give the row its
+      // meaning. That is now a loud seed-time refusal. Both halves are
+      // `required: true`, so the un-addressable case (id half authored, type
+      // half empty) is already unreachable on this object.
       group: 'Target',
+      referenceVia: 'object_name',
     }),
 
     submitter_id: Field.lookup('sys_user', {

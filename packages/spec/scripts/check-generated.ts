@@ -278,6 +278,19 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
     check: 'check:objectui-pin-citations',
     why: 'audits spec source prose: a citation in the asserting spelling (`.objectui-sha` = `<sha>`) must equal the root pin file — no artifact, and deliberately no `gen:`, because rewriting the sha without re-measuring the anchors beside it is the failure mode (#10274)',
   },
+  // #11344. The nearest sibling to `check:objectui-pin-citations` above, and
+  // classified NO_GENERATOR for the same reason rather than for a bookkeeping
+  // one. `llms.txt` is hand-kept prose that SHIPS in the tarball (`files`), and
+  // the obvious `gen:` — restamp each count, drop each dead symbol — is the one
+  // operation that must never be offered: the number is not the claim, the
+  // sentence beside it is. Restamping `| integration | 7 | Connector (Database,
+  // File Storage, GitHub, MQ, SaaS, Vercel) |` to `1` would leave a freshly
+  // dated row listing six connectors that do not exist, converting a loud
+  // staleness into a silent lie. A failure here is a re-read of the section.
+  {
+    check: 'check:llms-txt',
+    why: 'audits the shipped llms.txt: every advertised symbol must resolve against api-surface/, every `@objectstack/spec/x` against the manifest `exports`, and every declared count against src/ and the workspace — no artifact, and deliberately no `gen:`, because restamping a count without re-reading the prose beside it is the failure mode (#11344)',
+  },
 ];
 
 /**

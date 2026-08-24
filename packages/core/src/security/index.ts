@@ -88,6 +88,10 @@ export {
 export {
   resolveAuthzContext,
   resolveUserAuthzGrants,
+  // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2). Every
+  // surface that only knows a user id asks this instead of re-reading
+  // `sys_*_permission_set` — the prohibition resolve-authz-context.ts states.
+  hasPlatformAdminStanding,
   resolveLocalizationContext,
   type ResolvedAuthzContext,
   type ResolveAuthzInput,

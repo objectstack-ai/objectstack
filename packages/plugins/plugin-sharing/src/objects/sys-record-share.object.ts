@@ -132,7 +132,25 @@ export const SysRecordShare = ObjectSchema.create({
       required: true,
       maxLength: 100,
       description: 'Primary key of the shared record within object_name',
+      // [#11386] The id half of this object's pointer pair (ADR-0052 §5),
+      // adopting the #11339 carrier. VERIFIED for THIS object: the pair is
+      // dereferenced as a real record address, not stored as a label —
+      // `record-orphan-cleanup.ts` states the invariant for both tables in
+      // this package ("record gone ⇒ the row cannot describe any access at
+      // all") and sweeps rows by asking, per row, whether `(object_name,
+      // record_id)` still exists; `sharing-service.ts` writes it from
+      // `input.object` / `input.recordId` and gates management on the same
+      // pair.
+      //
+      // Consequence of declaring, and why it matters MORE on a grant table
+      // than on a log: an unresolved verbatim `record_id` did not merely fail
+      // to display. It named no live record, so it enforced no access while
+      // showing on Setup → Record Shares as though it did — and the orphan
+      // sweep then DELETED the row for describing a record that does not
+      // exist. Loud seed-time refusal replaces a grant that silently meant
+      // nothing and then silently disappeared.
       group: 'Target',
+      referenceVia: 'object_name',
     }),
 
     // ── Recipient (who receives access) ──────────────────────────
