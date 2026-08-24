@@ -35,6 +35,8 @@ import {
   registerPermissionSetProjection,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
+import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
+import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
   reconcileAudienceBindingSuggestions,
@@ -1177,6 +1179,20 @@ export class SecurityPlugin implements Plugin {
         resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
         logger: ctx.logger,
       };
+      // [field report — rc→GA declared≠enforced surfacing] Sanctioned overlay-
+      // discard deps — same tenant-admin resolution as the suggestion surface
+      // above. `getProtocol` is lazy (mirrors `createPermissionSetWriteThrough`'s
+      // own resolver further down): the protocol service may register after
+      // this plugin's `start()` runs.
+      const overlayDiscardDeps: PermissionSetOverlayDiscardDeps = {
+        ql,
+        metadata,
+        resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+        getProtocol: () => {
+          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
+        },
+        logger: ctx.logger,
+      };
       // Typed against the published contract so the registered surface cannot
       // drift from what cross-package consumers are promised: a renamed method,
       // a dropped one, or a changed return type fails THIS build rather than
@@ -1334,9 +1350,15 @@ export class SecurityPlugin implements Plugin {
       const registeredSecurityService = Object.assign(securityService, {
         getMetadataReadableFields: (object: string, context?: any) =>
           this.getMetadataReadableFields(object, context),
+        // [field report — rc→GA declared≠enforced surfacing] Same extension
+        // pattern as `getMetadataReadableFields` above, same reason:
+        // `ISecurityService` lives in `packages/spec` and this seat there is a
+        // separate change. Consumers feature-detect.
+        discardPermissionSetOverlay: (callerContext: any, id: string) =>
+          discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -3138,6 +3160,18 @@ export class SecurityPlugin implements Plugin {
             });
           } catch (e) {
             ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
+          }
+          // [field report — rc→GA declared≠enforced surfacing] Recompute
+          // "declared ≠ enforced" per package-declared set AFTER both doors
+          // have settled for this boot (the package door above, and the env
+          // door's reconciliation just above this line) — so `drift_status`
+          // reflects the boot's TRUE final state, not a mid-boot snapshot.
+          // Own try/catch: a failure here must never take down boot, and must
+          // never be read as "reconciliation also failed" in the log above.
+          try {
+            await runPermissionSetDriftDiagnostics(ql, { logger: ctx.logger });
+          } catch (e) {
+            ctx.logger.warn('[security] permission-set drift diagnostics failed', { error: (e as Error).message });
           }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });

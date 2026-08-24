@@ -236,6 +236,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Personalizado",
         help: "Este conjunto de permisos empaquetado tiene una superposición de personalización del entorno (ADR-0094). Reinícialo (elimínalo por la puerta de datos) para volver a la línea base distribuida."
       },
+      drift_status: {
+        label: "Declaration Drift",
+        help: "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-authored environment overlay is shadowing the packaged declaration — resync it with the Discard Overlay action. 'provenance_skip' = this row predates package provenance tracking, so boot sync treats it as environment-authored and never reconciles it with the package (no automated fix — file an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the shipped artifact, or this set is not currently package-declared.",
+        options: {
+          overlay_shadow: "Overlay shadow",
+          provenance_skip: "Provenance skip",
+          other: "Drift (other)"
+        }
+      },
+      drift_detail: {
+        label: "Drift Detail",
+        help: "Human-readable detail for `drift_status` — names the grant-count mismatch and its cause."
+      },
       id: {
         label: "ID de conjunto de permisos"
       },
@@ -255,6 +268,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       all_permsets: {
         label: "Todos"
+      },
+      drifted: {
+        label: "Needs Attention"
       }
     },
     _actions: {
@@ -266,6 +282,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Desactivar",
         confirmText: "¿Desactivar este conjunto de permisos? Las asignaciones existentes se mantienen, pero dejan de otorgar acceso hasta que se vuelva a activar.",
         successMessage: "Conjunto de permisos desactivado"
+      },
+      discard_permission_set_overlay: {
+        label: "Discard Overlay",
+        confirmText: "Discard the environment overlay shadowing this package-declared set and resync it to the shipped artifact? This only removes the customization overlay — it never touches an environment-authored set.",
+        successMessage: "Overlay discarded — the set is resynced to the shipped artifact"
       },
       clone_permission_set: {
         label: "Clonar",

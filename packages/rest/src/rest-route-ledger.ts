@@ -309,6 +309,13 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
   { route: 'POST /api/v1/security/suggested-bindings/:id/dismiss', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.dismiss',
     note: 'duplicate mount with the dispatcher /security domain' },
+  // [field report — rc→GA declared≠enforced surfacing] REST-only (no
+  // dispatcher twin, unlike the suggested-bindings family above): invoked by
+  // `sys_permission_set`'s "Discard Overlay" Setup action via a plain fetch
+  // to `target`, not through the typed SDK — see
+  // `permission-set-overlay-discard.ts`.
+  { route: 'POST /api/v1/security/permission-sets/:id/discard-overlay', family: 'security', source: 'route-manager', disposition: 'server-only',
+    note: 'Setup admin action only (sys_permission_set "Discard Overlay") — invoked via the declarative action target, not the SDK' },
 
   // ── reports ───────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.list' },

@@ -295,6 +295,49 @@ A cross-package job function needs no hand-authored cross-package set: bind
 each package's own sets to one **position** (the union model adds), and use an
 overlay where a packaged set must be narrowed.
 
+### Declared ≠ enforced — diagnosing a frozen package set
+
+A package-declared set's *enforced* grants (what `sys_permission_set` stores
+and what the evaluator resolves) can diverge from its shipped *artifact*
+(what the package currently declares) through two independent mechanisms —
+either can be live on one row, and they need different remedies:
+
+- **Overlay shadow.** An active `sys_metadata` overlay for the set's name
+  (from a Studio save made while overlaying was still permitted, or through
+  the `OS_METADATA_WRITABLE` escape hatch) is re-projected onto the record on
+  every boot, unconditionally — the overlay wins forever, regardless of what
+  the package ships next. **Remedy:** the record's **Discard Overlay** Setup
+  action (`POST /api/v1/security/permission-sets/:id/discard-overlay`,
+  tenant-admin only) removes the stale overlay and resyncs the record to the
+  current artifact immediately. It refuses on any set that is not currently
+  package-declared, so it can never destroy a genuinely environment-authored
+  set.
+- **Provenance skip.** The record's `managed_by` column predates package
+  provenance tracking (a legacy insert without `managed_by: 'package'` —
+  typically a database first initialized on an older release line), so boot
+  seeding treats it as environment-authored and never reconciles it with the
+  package — permanently. There is currently no automated adoption path for
+  this case (boot-time auto-adoption and a bulk `os meta
+  adopt-permission-sets` command were both deliberately deferred as migration
+  machinery for a customer population that does not yet exist — see the
+  discussion on the tracking issue for this section). The manual recovery is
+  the same one-time SQL a field remediation used, run against the
+  environment's database with a backup first:
+
+  ```sql
+  UPDATE sys_permission_set
+  SET managed_by = 'package', package_id = '<owning package id>'
+  WHERE name = '<permission set name>';
+  ```
+
+  Restart the environment afterward so boot seeding re-adopts the row as
+  package-owned and reconciles its grants to the shipped artifact.
+
+Both mechanisms are surfaced on the record itself: `drift_status`
+(`'overlay_shadow'` / `'provenance_skip'`) and `drift_detail` name the cause,
+recomputed every boot, and the **Needs Attention** list view collects every
+currently drifted set — an in-sync set is never listed there.
+
 ---
 
 ## See also
