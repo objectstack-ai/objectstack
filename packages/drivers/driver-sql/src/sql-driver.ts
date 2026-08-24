@@ -7807,15 +7807,17 @@ export class SqlDriver implements IDataDriver {
     // #8926 lesson applied in advance — a predicate arm that matches a WORDING
     // is an arm that silently fails to fire on the dialect nobody measured.
     //
-    // ⛔ Deliberately NOT the {@link isUnresolvableColumnError} arm that
-    // {@link SqlDriver.count} runs first. That refusal's words are "Filter on
-    // 'x' names a column that object 'o' has no column for", and THIS door
-    // names columns in three clauses — the WHERE, the `groupBy` fields and the
-    // aggregation `field`. A blanket arm would tell the author of
-    // `avg('nosuchcol')` that their FILTER was wrong, which is the
-    // unsupportable claim the #8931 ruling refuses to make. Answering it
-    // truthfully needs a classifier this card did not measure, so the gap is
-    // filed rather than guessed at.
+    // [#11541] The unresolvable-column arm that {@link SqlDriver.count} runs
+    // first is here too now — but ⛔ NOT as the blanket arm #11455 refused to
+    // add. That refusal's words are "Filter on 'x' names a column that object
+    // 'o' has no column for", and THIS door names columns in three clauses —
+    // the WHERE, the `groupBy` fields and the aggregation `field`s. A blanket
+    // arm would tell the author of `avg('nosuchcol')` that their FILTER was
+    // wrong, which is the unsupportable claim the #8931 ruling refuses to
+    // make. So the dialect-named column is attributed to the clause the
+    // CALLER'S OWN QUERY names it in — see
+    // {@link SqlDriver.aggregateBackendFault}, which holds the three arms and
+    // the reason the no-name case keeps this terminal unchanged.
     //
     // Only the EXECUTION is guarded. Every refusal this method composes —
     // {@link refuseAggregateFunction}, {@link refuseDistinctAggregateWithoutField},
@@ -7826,10 +7828,169 @@ export class SqlDriver implements IDataDriver {
     try {
       rows = await builder;
     } catch (error) {
-      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
-      throw this.backendStatementFault(object, error);
+      // [#8931, #11541] Attribute what the caller's own query supports, then
+      // fall to the terminal catch-all — see
+      // {@link SqlDriver.aggregateBackendFault}.
+      throw this.aggregateBackendFault(object, query, error);
     }
     return this.presentReadColumns(rows, presentedOutput);
+  }
+
+  /**
+   * [#11541] Which envelope a dialect error leaving {@link SqlDriver.aggregate}
+   * deserves — the #8790 unresolvable-column refusal, at last, on the third
+   * read door, without the unsupportable attribution #8931 forbids.
+   *
+   * # The condition, and why it could not ride `count()`'s arm verbatim
+   *
+   * `find()` and `count()` answer an unresolvable WHERE column with
+   * `INVALID_FILTER` / 400 naming the column (#8790, maintainer ruling
+   * 2026-08-15: one unresolvable WHERE column, one answer, on both read
+   * halves). `aggregate()` is the third read door and never received that arm,
+   * so the same predicate answered `DATABASE_ERROR` / 500 one door over — the
+   * exact split #8790 closed. But this door names columns in THREE clauses
+   * (`where`, `groupBy`, each aggregation's `field`), and the WHERE refusal's
+   * words assert the FILTER was at fault. Telling the author of
+   * `avg('nosuchcol')` that their filter was wrong is an attribution the
+   * signal cannot support — the #8931 ruling (2026-08-17 「同意 C」, restated
+   * by #11455 when it deliberately left this arm out).
+   *
+   * # The three arms — attribution comes from the CALLER'S OWN QUERY
+   *
+   * The dialect names the column; it does not name the clause. The clause is
+   * read off the query AST this driver just compiled — the same `groupBy` /
+   * `aggregations` reads the statement builder performed — so every claim the
+   * refusal makes is a fact about the caller's own request, never a guess
+   * from the backend's prose:
+   *
+   * 1. the name is a `groupBy` field or an aggregation `field` ⇒ a refusal
+   *    naming THAT clause ({@link SqlDriver.unresolvableAggregateColumnRefusal},
+   *    `INVALID_FIELD` / 400);
+   * 2. the name is in neither ⇒ the statement's only remaining column sources
+   *    are the WHERE this method compiled from `query.where` and the
+   *    tenant-scope predicate — both filters — so #8790's existing
+   *    {@link SqlDriver.unresolvableFilterColumnRefusal} applies verbatim;
+   * 3. {@link unresolvableColumnNameOf} answers `null` ⇒ the wording parsed by
+   *    nothing. Without a name there is no AST lookup, so NO attribution is
+   *    supportable — the #11455 terminal envelope stands unchanged. ⛔ Reading
+   *    `null` as license for the WHERE arm would attribute a clause on no
+   *    evidence, which is arm 2's own justification inverted.
+   *
+   * ⚠️ Arm 1 is judged by EXACT name equality against the same AST reads the
+   * builder performed. A suffix match ("`title.x` ends in `.x`") would
+   * attribute a dotted WHERE key to an aggregation over `x` — a false verdict
+   * about a clause that may be perfectly fine — and inspecting the key for a
+   * `.` is #8371's axis besides. When one column is named by BOTH the where
+   * and a groupBy/aggregation, arm 1 wins and its claim is still true: the
+   * caller's groupBy/aggregation really does name a column the table lacks.
+   *
+   * # No new dialect recognizer
+   *
+   * Both predicates this method consults ({@link isUnresolvableColumnError},
+   * {@link unresolvableColumnNameOf}) are #8790's, shared with `find()` and
+   * `count()`, untouched. MySQL's wording even names the clause position
+   * (`in 'field list'` / `'where clause'`), and it is deliberately NOT read:
+   * a per-dialect clause parser is the split-recognizer shape the #8926
+   * ruling refused, and the other two dialects could never feed it.
+   *
+   * Returns the error rather than throwing it, the shape every sibling on
+   * this path uses, so the call site spells its own `throw`.
+   */
+  protected aggregateBackendFault(object: string, query: DriverQuery, error: unknown): Error {
+    if (isUnresolvableColumnError(error)) {
+      const column = unresolvableColumnNameOf(error);
+      if (column !== null) {
+        // The same reads the statement builder performed a few lines up —
+        // string entries and structured `{ field }` entries for groupBy, the
+        // optional `field` for each aggregation. `alias` is deliberately not
+        // consulted: the backend resolves columns, and an alias is an OUTPUT
+        // name, never a column reference the statement could trip on.
+        const inGroupBy = (query.groupBy ?? []).some(
+          (g) => (typeof g === 'string' ? g : g && typeof g === 'object' ? g.field : undefined) === column,
+        );
+        const inAggregations = (query.aggregations ?? []).some(
+          (a) => a && typeof a === 'object' && a.field === column,
+        );
+        if (inGroupBy || inAggregations) {
+          return this.unresolvableAggregateColumnRefusal(object, column, { inGroupBy, inAggregations }, error);
+        }
+        return this.unresolvableFilterColumnRefusal(object, error);
+      }
+      // Arm 3: recognised class, no parsed name — fall through to the terminal.
+    }
+    // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+    return this.backendStatementFault(object, error);
+  }
+
+  /**
+   * [#11541] Compose the refusal for a `groupBy` / aggregation column the
+   * backend could not resolve, writing the dialect's own message to the
+   * SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
+   * (#7929: the dialect text inlines the statement's bound literals on two of
+   * the three dialects, so it may not travel to the caller).
+   *
+   * # `INVALID_FIELD` / 400 — the ingress door's own answer, not a new choice
+   *
+   * The protocol ingress already refuses THIS condition one layer up:
+   * `assertGroupByFieldsExist` and `assertAggregationFieldsExist`
+   * (`@objectstack/metadata-protocol`, #4254) answer a grouping or
+   * aggregation target the object does not have with `400 INVALID_FIELD`
+   * naming the field and the object — reserving `INVALID_QUERY` for entries
+   * the spec cannot READ (shape violations), which this is not. One condition
+   * refused at two layers must not carry two codes — the exact rule
+   * {@link unresolvableFilterColumnError} applied when it took the ingress
+   * door's `INVALID_FILTER` for the WHERE axis. The driver's half of the
+   * condition is the registry-backstop case: a field the metadata DECLARES
+   * (so ingress passed it) whose column the table lacks, which is why the
+   * message adds the one thing only the driver knows — run schema sync.
+   *
+   * ⛔ Not `INVALID_QUERY`: #5907's aggregate-door precedent
+   * (`undeclaredAggregateFunctionError`) is about a FUNCTION name outside the
+   * spec enum — a query no backend could run. A missing column is not a
+   * malformed query; the identical query answers rows the moment schema sync
+   * runs. ⛔ And no code is minted: `INVALID_FIELD` is a standard-catalog
+   * member (ADR-0112), already the write path's answer for an unknown column
+   * at the REST boundary.
+   *
+   * `field` / `object` ride the error the way the ingress door's refusals
+   * carry them, so `@objectstack/rest`'s `INVALID_FIELD` branch serves the
+   * same enriched envelope whichever layer refused. Both are the caller's own
+   * vocabulary — the column name equals a field their query spells, the
+   * object name is the one they passed — so neither discloses anything the
+   * caller did not write.
+   */
+  protected unresolvableAggregateColumnRefusal(
+    object: string,
+    column: string,
+    namedBy: { inGroupBy: boolean; inAggregations: boolean },
+    error: unknown,
+  ): Error {
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    this.logger.warn(
+      `[sql-driver] INVALID_FIELD — a groupBy/aggregation column could not be resolved on ` +
+        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
+        `inlines the statement bound literals (#7929, #11541): ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    const clause =
+      namedBy.inGroupBy && namedBy.inAggregations
+        ? `The groupBy and an aggregation of this query both name '${column}', a column`
+        : namedBy.inGroupBy
+          ? `The groupBy of this query names '${column}', a column`
+          : `An aggregation of this query names '${column}', a column`;
+    const err = new Error(
+      `${clause} that object '${object}' has no column for, so the aggregate never ran. ` +
+        'Grouping and aggregation run over columns that exist; over a missing one they could ' +
+        'only answer blanks, so the query was refused instead of answered with an invented ' +
+        "result. Check the name against the object's fields; if the field was declared " +
+        'recently, run schema sync so the column exists before aggregating on it.',
+    ) as Error & { code?: string; status?: number; field?: string; object?: string };
+    err.code = StandardErrorCode.enum.INVALID_FIELD;
+    err.status = 400;
+    err.field = column;
+    err.object = object;
+    return err;
   }
 
   // ===================================

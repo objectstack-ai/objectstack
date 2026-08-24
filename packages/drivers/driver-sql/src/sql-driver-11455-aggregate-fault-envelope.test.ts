@@ -74,12 +74,17 @@
  *
  * ## What is deliberately NOT here
  *
- * ⛔ No `isUnresolvableColumnError` arm, unlike `count()`. That refusal's words
- * are *"Filter on 'x' names a column that object 'o' has no column for"*, and
- * this door names columns in THREE clauses — the WHERE, the `groupBy` fields
- * and the aggregation `field`. A blanket arm would tell the author of
- * `avg('nosuchcol')` that their FILTER was wrong. Filed as its own card rather
- * than guessed at here; see the note on `SqlDriver.aggregate`.
+ * ⛔ No BLANKET `isUnresolvableColumnError` arm, unlike `count()`. That
+ * refusal's words are *"Filter on 'x' names a column that object 'o' has no
+ * column for"*, and this door names columns in THREE clauses — the WHERE, the
+ * `groupBy` fields and the aggregation `field`. A blanket arm would tell the
+ * author of `avg('nosuchcol')` that their FILTER was wrong. This suite left
+ * the gap FILED rather than guessed at; #11541 has since closed it with a
+ * clause-attributing classifier (`SqlDriver.aggregateBackendFault`, pinned by
+ * `sql-driver-11541-aggregate-unresolvable-column-refusal.test.ts`). What this
+ * suite pins is unchanged by that: an error the classifier does NOT claim — a
+ * missing table, a `42883` function fault, a wording no dialect parser reads —
+ * still leaves as this terminal envelope, never as a clause verdict.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
