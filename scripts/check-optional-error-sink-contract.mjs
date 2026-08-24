@@ -1002,6 +1002,26 @@ function selfTest() {
             console.error(`  ✗ prefilter is not derived from LOG_CHANNELS — \`${channel}\` is missing from it`);
         }
     }
+    // ⭐ And that `run` actually GOES THROUGH it. Found by ablation while
+    // writing this: replacing the call site with a literal `/\berror…/` — the
+    // exact regression #11069 repaired — restored the undercount (tally 96 → 58)
+    // while every pin above stayed green, because they all test the constant and
+    // none of them tests the scan. A pin that cannot observe the revert it
+    // exists to prevent is the same defect this card is about, one level up.
+    //
+    // This reads `run`'s source rather than its behaviour, which is a real
+    // limit: it proves the scan REFERENCES the derived prefilter, not that it
+    // uses the result correctly. That is precisely the half no other assertion
+    // here covers — the cases above already pin the semantics — and it is the
+    // half a second, hand-written copy of the vocabulary would break.
+    if (!run.toString().includes('CHANNEL_PREFILTER')) {
+        failures++;
+        console.error(
+            '  ✗ `run` does not reference CHANNEL_PREFILTER — the scan is filtering files through some other\n' +
+                '      test. Every count this gate prints is bounded by that decision; route it through the\n' +
+                '      derived prefilter, or the `noErrorMember` tally silently stops being a count (#11069).',
+        );
+    }
 
     // The ledger's own shape is part of the contract: a hand-edited entry that
     // cannot key against a finding would silently excuse nothing (or, worse,
