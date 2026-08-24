@@ -12,51 +12,62 @@
  * either, so it fell through to the catch-all's `table.string(name)`:
  * varchar(255). That width is a hard cap on both enforcing dialects, so an
  * ordinary rich-text body over 255 characters was REFUSED at write time
- * (MySQL `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, Postgres `22001`)
- * while the same body in a `markdown` field on the same table was accepted.
+ * (measured at 1000 characters on live MySQL 8.0.46 — `ER_DATA_TOO_LONG`
+ * under `STRICT_TRANS_TABLES` — and Postgres 16 — `22001`) while the same
+ * body in a `markdown` field on the same table was accepted.
  *
- * `code` / `signature` / `qrcode` moved with it — measured, not by analogy:
- * each is a `STRING_VALUE_TYPES` member storing the author's own value as an
- * unbounded plain string (field-zoo writes a data-URI PNG for `signature`
- * and the editor's contents for `code`; neither fits in 255 characters).
+ * ## Which types moved, and the test that decided it
+ *
+ * `code` moved with `richtext`. `signature` and `qrcode` did NOT, and that is
+ * the load-bearing half of this file rather than an omission.
+ *
+ * An unbounded TEXT column is correct for a type exactly when the WRITE SEAM
+ * enforces that type's declared `maxLength` — the invariant `schema-drift.ts`
+ * already states ("A TEXT column refuses nothing a `maxLength` allows … the
+ * bound is enforced at the write seam"). objectql's record-validator applies
+ * its `max_length` branch to `text` / `textarea` / `email` / `url` / `phone` /
+ * `password` / `markdown` / `html` / `richtext` / `code` — and to no other
+ * type. Measured: a `maxLength: 64` field of each of those refuses a
+ * 100-character value; the same field declared `signature` or `qrcode`
+ * ACCEPTS it. So for those two an unbounded column would accept values the
+ * declaration forbids — a physical surface WIDER than the contract, where
+ * `richtext` and `code` are a restoration of it. Their own defect (a data-URI
+ * signature capped at 255) is real and is asserted here as an open one, so
+ * this file records the state rather than hiding it.
  *
  * ## What each block is worth
  *
- * The SQLite block runs everywhere (Test Core included) and reads the
- * PHYSICAL column type back from the PRAGMA (`columnInfo()`), never the
- * emitter: the four moved types land TEXT; the `markdown` / `html` positive
- * controls were TEXT before this change and stay TEXT (the grouping was
- * already honoured for two of three); and the catch-all / string-family
- * controls (`string` / `select` / `color` / `secret`) stay varchar(255) —
- * together proving the change moved exactly what it claims and nothing else.
- *
- * The live cells are the enforcing half: the same table on a real MySQL /
- * Postgres, the column type read back from information_schema, a
- * 1000-character body accepted and round-tripped — made non-vacuous by the
- * control write, where the SAME oversized value into a column this change
- * deliberately left at varchar(255) is refused BY THE SERVER, proving the
- * cell enforces declared widths in this very run.
+ * The SQLite blocks run everywhere (Test Core included) and read the PHYSICAL
+ * column type back from the PRAGMA (`columnInfo()`), never the emitter. The
+ * live cells are the enforcing half: the same table on a real MySQL /
+ * Postgres, column types read from information_schema, a 1000-character body
+ * accepted and round-tripped — made non-vacuous by the control write, where
+ * the SAME oversized value into a column this change deliberately left at
+ * varchar(255) is refused BY THE SERVER, proving the cell enforces declared
+ * widths in this very run.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { FieldType } from '@objectstack/spec/data';
 import { SqlDriver } from '../src/index.js';
 import { MYSQL_CELL, PG_CELL, dialectCell, declareDialectCell } from './live-dialect-matrix.testkit.js';
 
 const T = 'os11794_text_family';
 
-/** The moved four, their two already-TEXT siblings, and the stay-put controls. */
+/** The two this card moves, their siblings, and the stay-put controls. */
 const FIELDS = {
   // Moved by #11794: varchar(255) → TEXT.
   body_rich: { type: 'richtext' },
   body_code: { type: 'code' },
-  body_sig: { type: 'signature' },
-  body_qr: { type: 'qrcode' },
-  // Positive controls: TEXT before and after this change.
+  // Positive controls: TEXT before and after this change — the grouping was
+  // already honoured for two of the three Rich Content members.
   body_md: { type: 'markdown' },
   body_html: { type: 'html' },
-  // Negative controls: deliberately NOT moved (see createColumn's catch-all
-  // note — `secret` stores an opaque ref, `color` a color code, and the
-  // string family sizes from its own declaration).
+  // Measured and deliberately NOT moved: no write seam enforces their
+  // `maxLength`, so TEXT would accept what the declaration forbids.
+  body_sig: { type: 'signature' },
+  body_qr: { type: 'qrcode' },
+  // Negative controls: the catch-all and the string family.
   c_string: { type: 'string' },
   c_select: { type: 'select' },
   c_color: { type: 'color' },
@@ -68,9 +79,31 @@ const OPTS = { bypassTenantAudit: true } as any;
 /** A rich-text body nobody would call exotic — four times the old cap. */
 const LONG_BODY = `<p>${'a rich-text body well past the old varchar(255) cap — '.repeat(20)}</p>`;
 
-const MOVED = ['body_rich', 'body_code', 'body_sig', 'body_qr'] as const;
+const MOVED = ['body_rich', 'body_code'] as const;
 const SIBLINGS = ['body_md', 'body_html'] as const;
-const CONTROLS = ['c_string', 'c_select', 'c_color', 'c_secret'] as const;
+const NOT_MOVED = ['body_sig', 'body_qr', 'c_string', 'c_select', 'c_color', 'c_secret'] as const;
+
+/**
+ * Every FieldType that takes an UNBOUNDED column when no index keys it —
+ * pinned as a SET rather than left to the switch.
+ *
+ * The root cause this card names is that the case list is hand-maintained, so
+ * one member of a three-member spec group diverged from the other two without
+ * anything going red. A membership pin is what makes that impossible: adding a
+ * type to `createColumn`'s text family, or to `JSON_COLUMN_TYPES`, fails here
+ * until someone states the new membership on purpose.
+ */
+const UNBOUNDED_UNKEYED = [
+  // text family (`createColumn`) — every member must satisfy the write-seam
+  // invariant in this file's header.
+  'text', 'textarea', 'html', 'markdown', 'richtext', 'code',
+  // JSON columns and the virtual/non-varchar types: not a varchar either, for
+  // reasons that have nothing to do with this card.
+  'multiselect', 'checkboxes', 'tags', 'composite', 'repeater', 'record', 'json',
+  'location', 'address', 'vector', 'image', 'file', 'avatar', 'video', 'audio',
+  'formula', 'number', 'currency', 'percent', 'rating', 'slider', 'progress',
+  'summary', 'boolean', 'toggle', 'date', 'datetime', 'time',
+].sort();
 
 /** TEXT and not any varchar — `longtext`/`mediumtext` would satisfy it too. */
 const isTexty = (t: unknown) => /text/i.test(String(t)) && !/varchar/i.test(String(t));
@@ -84,7 +117,7 @@ describe('richtext joins the TEXT family (#11794) — physical shape on SQLite',
     await driver?.disconnect().catch(() => {});
   });
 
-  it('lands richtext/code/signature/qrcode as TEXT beside markdown/html — and moves nothing else', async () => {
+  it('lands richtext/code as TEXT beside markdown/html — and moves nothing else', async () => {
     driver = new SqlDriver(dialectCell('sqlite').config());
     await driver.initObjects([{ name: T, fields: FIELDS }]);
     // The PRAGMA, not the emitter: knex's columnInfo() reads table_info.
@@ -98,8 +131,11 @@ describe('richtext joins the TEXT family (#11794) — physical shape on SQLite',
         true,
       );
     }
-    for (const still of CONTROLS) {
-      expect(/varchar/i.test(String(info[still]?.type)), `${still} landed ${String(info[still]?.type)}`).toBe(true);
+    for (const still of NOT_MOVED) {
+      expect(
+        /varchar/i.test(String(info[still]?.type)),
+        `${still} landed ${String(info[still]?.type)}`,
+      ).toBe(true);
       expect(Number(info[still]?.maxLength)).toBe(255);
     }
   });
@@ -114,6 +150,22 @@ describe('richtext joins the TEXT family (#11794) — physical shape on SQLite',
     expect(row.body_md).toBe(LONG_BODY); // the sibling that always worked
   });
 
+  it('pins the whole unbounded-when-unkeyed SET, so the case list cannot drift again', () => {
+    driver = new SqlDriver(dialectCell('sqlite').config());
+    const mirror = (type: string) =>
+      (driver as any).varcharColumnChars({ type }, undefined) as number | null;
+    const types = FieldType.options as readonly string[];
+    expect(types.length).toBeGreaterThan(40); // the registry really was read
+    const unbounded = types.filter((t) => mirror(t) === null).sort();
+    expect(unbounded.length).toBeGreaterThan(20); // and the filter really matched
+    expect(unbounded).toEqual(UNBOUNDED_UNKEYED);
+    // The card's minimum, spelled out: the spec's three-member "Rich Content"
+    // group is whole again.
+    for (const t of ['markdown', 'html', 'richtext']) expect(mirror(t)).toBeNull();
+    // And the two that measured as wideners stay bounded.
+    for (const t of ['signature', 'qrcode']) expect(mirror(t)).toBe(255);
+  });
+
   it('keeps #11374 keyed-and-bounded semantics for the new members', () => {
     driver = new SqlDriver(dialectCell('sqlite').config());
     const mirror = (field: any, keyed?: { unique: boolean }) =>
@@ -121,13 +173,13 @@ describe('richtext joins the TEXT family (#11794) — physical shape on SQLite',
     // Unkeyed: TEXT, bound or not — a column no index keys on gains nothing
     // from a width.
     expect(mirror({ type: 'richtext' })).toBeNull();
-    expect(mirror({ type: 'qrcode', maxLength: 64 })).toBeNull();
+    expect(mirror({ type: 'code', maxLength: 64 })).toBeNull();
     // Keyed and bounded: varchar(maxLength) — the #11374 rule, so a declared
-    // index on a bounded barcode still keys on MySQL.
-    expect(mirror({ type: 'qrcode', maxLength: 64 }, { unique: true })).toBe(64);
+    // index on a bounded code field still keys on MySQL.
+    expect(mirror({ type: 'code', maxLength: 64 }, { unique: true })).toBe(64);
     // Keyed and unbounded: still TEXT — MySQL then refuses the key BY NAME
     // (explainUnkeyableTextColumn), never a silently weaker constraint.
-    expect(mirror({ type: 'signature' }, { unique: true })).toBeNull();
+    expect(mirror({ type: 'richtext' }, { unique: true })).toBeNull();
   });
 });
 
@@ -156,7 +208,7 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
             true,
           );
         }
-        for (const still of CONTROLS) {
+        for (const still of NOT_MOVED) {
           expect(
             /varchar|character varying/i.test(String(info[still]?.type)),
             `${still} landed ${String(info[still]?.type)}`,
@@ -168,18 +220,12 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         // (ER_DATA_TOO_LONG / 22001), accepted now, byte-identical back.
         await driver.create(
           T,
-          {
-            id: 'r1',
-            body_rich: LONG_BODY,
-            body_code: LONG_BODY,
-            body_sig: `data:image/png;base64,${'A'.repeat(1000)}`,
-            body_md: LONG_BODY,
-          },
+          { id: 'r1', body_rich: LONG_BODY, body_code: LONG_BODY, body_md: LONG_BODY },
           OPTS,
         );
         const [row] = await driver.find(T, { where: { id: 'r1' } }, OPTS);
         expect(row.body_rich).toBe(LONG_BODY);
-        expect(String(row.body_sig).length).toBeGreaterThan(1000);
+        expect(row.body_code).toBe(LONG_BODY);
 
         // Non-vacuity control: the SAME oversized value into a column this
         // change deliberately left at varchar(255) is refused BY THE SERVER.
@@ -188,6 +234,26 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         // measuring nothing.
         const refusal = await driver
           .create(T, { id: 'r2', c_color: LONG_BODY }, OPTS)
+          .then(() => null)
+          .catch((e: unknown) => e);
+        expect(refusal).toBeInstanceOf(Error);
+        const said = `${String((refusal as { code?: string })?.code ?? '')} ${String((refusal as Error).message)}`;
+        expect(said).toMatch(/ER_DATA_TOO_LONG|22001|too long/i);
+      });
+
+      it('records the STILL-OPEN half: an oversized signature is refused by the server', async () => {
+        // ⛔ Not a wish and not a quarantine — the current, deliberate state.
+        // `signature` stays varchar(255) because nothing enforces its declared
+        // `maxLength` at the write seam, so TEXT would accept what the
+        // declaration forbids. This asserts the cost of that choice out loud:
+        // a data-URI signature IS refused today. When the write seam gains a
+        // bound for it, this test is what turns red and gets updated.
+        driver = new SqlDriver(cell.config());
+        await driver.execute(`drop table if exists ${T}`).catch(() => {});
+        await driver.initObjects([{ name: T, fields: FIELDS }]);
+        const dataUri = `data:image/png;base64,${'A'.repeat(1000)}`;
+        const refusal = await driver
+          .create(T, { id: 's1', body_sig: dataUri }, OPTS)
           .then(() => null)
           .catch((e: unknown) => e);
         expect(refusal).toBeInstanceOf(Error);
