@@ -1231,11 +1231,11 @@ function selfTest(): never {
     const unignoredSurface = surfaceStub('unignored-surface', gitDir, '.examples-build-uncovered');
 
     check(
-      isGitIgnored(buildDirOf(ignoredSurface), gitDir),
+      isGitIgnored(buildDirOf(ignoredSurface), gitDir) === true,
       'gitignore fixture: a build dir covered by .gitignore was reported as NOT ignored',
     );
     check(
-      !isGitIgnored(buildDirOf(unignoredSurface), gitDir),
+      isGitIgnored(buildDirOf(unignoredSurface), gitDir) === false,
       'gitignore fixture: a build dir with NO .gitignore coverage was reported as ignored',
     );
     check(
@@ -1261,6 +1261,41 @@ function selfTest(): never {
     fs.rmSync(gitDir, { recursive: true, force: true });
   }
 
+  // ── Non-git-repo indeterminacy (#11440, caught by the real test suite, not
+  //    this file). `dist-freshness-adoption.test.ts` runs this SAME script
+  //    against a "repo-shaped" temp tree that is deliberately NOT a real git
+  //    checkout (its own header explains why: making the real
+  //    `packages/spec/dist` stale would corrupt whatever else is running in
+  //    the container). `git check-ignore` there exits 128 ("fatal: not a git
+  //    repository"), and a FIRST version of `isGitIgnored` read any non-zero
+  //    status as "not ignored" — which made `assertGitignoredBuildDirs()` fail
+  //    first in every one of that file's cases, ahead of the dist-freshness
+  //    refusal they exist to probe. This fixture pins the fix directly: a
+  //    non-git `cwd` must read as INDETERMINATE (`null`), never as a gap.
+  const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-examples-nongit-selftest-'));
+  try {
+    check(
+      isGitIgnored(path.join(nonGitDir, '.examples-build'), nonGitDir) === null,
+      'non-git fixture: a cwd with no .git ancestor was reported as ignored/not-ignored rather than indeterminate — ' +
+        'this is the exact defect that broke dist-freshness-adoption.test.ts, which runs this script against a ' +
+        'deliberately non-git sandbox tree',
+    );
+    const surfaceStub = (name: string, resolutionDir: string): Surface => ({
+      name,
+      roots: [],
+      resolutionDir,
+      selfPackages: [],
+    });
+    check(
+      findUnignoredBuildDir([surfaceStub('sandboxed', nonGitDir)], nonGitDir) === null,
+      'non-git fixture: a surface resolved against a non-git tree was reported as an unignored gap — indeterminate ' +
+        'must not be treated as a violation, or every sandboxed caller of this script fails on an assert that has ' +
+        'nothing to do with what it is testing',
+    );
+  } finally {
+    fs.rmSync(nonGitDir, { recursive: true, force: true });
+  }
+
   if (failures.length > 0) {
     for (const f of failures) console.error(`✗ self-test: ${f}`);
     console.error(`\ncheck-skill-examples --self-test: ${failures.length} failure(s).\n`);
@@ -1274,8 +1309,9 @@ function selfTest(): never {
       '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
       '    top-level misplaced marker still is; a gutter-wrapped ```ts block (spec-source\n' +
       '    surface) extracts with the right build extension, body and line mapping, its\n' +
-      '    `.test.ts` sibling is skipped, two surfaces sharing one build dir are caught, and a\n' +
-      '    surface whose build dir is not covered by .gitignore is caught too.',
+      '    `.test.ts` sibling is skipped, two surfaces sharing one build dir are caught, a\n' +
+      '    surface whose build dir is not covered by .gitignore is caught too, and a non-git\n' +
+      '    cwd reads as indeterminate rather than as a false violation.',
   );
   process.exit(0);
 }
@@ -1320,7 +1356,9 @@ function assertDistinctBuildDirs(): void {
 }
 
 /**
- * True when `dir` (an absolute path) is covered by `.gitignore`, judged from `cwd`.
+ * Whether `dir` (an absolute path) is covered by `.gitignore`, judged from `cwd`
+ * — or `null` when `cwd` is not inside a git working tree at all, in which case
+ * the question has no answer rather than a negative one.
  *
  * Every real build dir uses a directory-only `.gitignore` pattern (a trailing
  * `/`), and git only matches those against a path it can see IS a directory —
@@ -1329,17 +1367,31 @@ function assertDistinctBuildDirs(): void {
  * on exit — that is the whole trap #11440 describes), so querying the bare
  * path reads every real surface as "not ignored" even when `.gitignore` is
  * correct: measured against all three surfaces in this file before adding the
- * trailing separator below. `git check-ignore -q` exits 0 when ignored, 1
- * when not — never throw on the "not ignored" case, it is the expected
- * negative result `findUnignoredBuildDir` below is built to see.
+ * trailing separator below.
+ *
+ * `git check-ignore -q` exits 0 when ignored, 1 when not, and — measured via
+ * this file's OWN sandboxed tests (`dist-freshness-adoption.test.ts` copies
+ * `scripts/` into a repo-SHAPED temp tree that is deliberately not a real git
+ * checkout) — 128 with "fatal: not a git repository" when `cwd` isn't one.
+ * Reading that 128 as "not ignored" is exactly the false-positive shape this
+ * file's own docblocks warn about elsewhere: it fired the NEW assert first in
+ * every one of that file's cases, ahead of the dist-freshness refusal they
+ * exist to probe, and was caught by running the real test suite rather than
+ * assumed clean from the self-test's own throwaway (and therefore real) git
+ * repo. Any status other than 0 or 1 is therefore reported as indeterminate.
  */
-function isGitIgnored(dir: string, cwd: string = REPO_ROOT): boolean {
+function isGitIgnored(dir: string, cwd: string = REPO_ROOT): boolean | null {
   const res = spawnSync('git', ['check-ignore', '-q', `${dir}${path.sep}`], { cwd, encoding: 'utf-8' });
-  return res.status === 0;
+  if (res.status === 0) return true;
+  if (res.status === 1) return false;
+  return null;
 }
 
 /**
- * The first surface whose build dir `.gitignore` does not cover, or null.
+ * The first surface whose build dir `.gitignore` DEFINITELY does not cover, or
+ * null. "Definitely" excludes `isGitIgnored`'s `null` (indeterminate — `cwd` is
+ * not a git working tree) as well as `true` (covered); only an authoritative
+ * `false` counts as a gap, so this reports nothing at all outside a real repo.
  *
  * `assertDistinctBuildDirs` above stops two surfaces from wiping each other;
  * nothing stopped a THIRD kind of mistake — a surface whose build dir nobody
@@ -1356,7 +1408,7 @@ function isGitIgnored(dir: string, cwd: string = REPO_ROOT): boolean {
 function findUnignoredBuildDir(surfaces: Surface[], cwd: string = REPO_ROOT): { dir: string; name: string } | null {
   for (const surface of surfaces) {
     const dir = buildDirOf(surface);
-    if (!isGitIgnored(dir, cwd)) return { dir, name: surface.name };
+    if (isGitIgnored(dir, cwd) === false) return { dir, name: surface.name };
   }
   return null;
 }
