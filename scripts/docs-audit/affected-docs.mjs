@@ -3814,12 +3814,35 @@ function selfTest() {
   // from would leave the pin watching a door nobody uses any more.
   check('declLead', 'and the KEY anchor is spelled once too — no call site restates it', 'affected-docs.mjs',
     0, (ownSource.match(/declLead\([^\n]*?(?:\\b|\(\?<!)/g) || []).length);
-  // BEHAVIOURAL, not merely textual: the three key spellings the eight call sites pass all
-  // come back anchored, from the one place that spells the anchor. This is what "all eight
-  // read the same anchored spelling" means when checked rather than asserted.
+  // BEHAVIOURAL, not merely textual: every key spelling the eight call sites pass comes back
+  // anchored, from the one place that spells the anchor. This is what "all eight read the same
+  // anchored spelling" means when checked rather than asserted.
+  //
+  // The spellings are READ FROM THE SOURCE, never restated here (#11737). A hand-kept list
+  // carried three of the FOUR the call sites actually pass — `client`, the one `windowClientRe`
+  // passes, was missing — so a pin labelled "every key spelling" checked three quarters of
+  // them, and nothing else could see the gap: this pin compares STRINGS, so `(route|client)`
+  // never exercises `client`, and the three pins above count call sites and spellings by TEXT
+  // without ever calling the function. A corrected list re-rots the same way the moment a
+  // ninth call site arrives, which is why it is derived rather than corrected.
+  //
+  // Measured rather than argued: a `client`-only TIGHTENING of the allowlist — `(?<![^\s{,])`
+  // narrowed to `(?<![^\s])` for that one key — leaves all of `--self-test` green against the
+  // hand-kept list and fails HERE against the derived one. No fixture defends the `{` and `,`
+  // members, and none can: the sweep below measured 0 leads preceded by either across all
+  // seven live ledgers, so they are exactly the part of the allowlist that only a string pin
+  // can hold. Widening drifts are caught either way (the #11542/#11630 `myclient:`/`$client:`
+  // fixtures see those), so tightening is the whole of what this pin adds — and it is the
+  // direction a `simplification` takes.
+  //
+  // ⛔ Only the INPUT population is derived; the EXPECTED stays a literal. Deriving both ends
+  // is what would make the comparison vacuous, for the reason the sweep below spells out.
+  const passedKeys = [...ownSource.matchAll(/new RegExp\(declLead\((['"])([^'"]*)\1\)/g)].map((m) => m[2]);
+  check('declLead', 'and all eight pass their key as a LITERAL — a computed one drops out of the list below unseen', 'affected-docs.mjs',
+    8, passedKeys.length);
   check('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',
-    String.raw`(?<![^\s{,])(route|client)\s*:\s* | (?<![^\s{,])route\s*:\s* | (?<![^\s{,])(?:route|client)\s*:\s*`,
-    ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));
+    String.raw`(?<![^\s{,])(?:route|client)\s*:\s* | (?<![^\s{,])(route|client)\s*:\s* | (?<![^\s{,])client\s*:\s* | (?<![^\s{,])route\s*:\s*`,
+    [...new Set(passedKeys)].sort().map((k) => declLead(k)).join(' | '));
   // …and BEHAVIOURALLY the allowlist is a strict TIGHTENING of BOTH anchors it has replaced,
   // which is the invariant the population pricing rests on. Swept rather than argued, and
   // swept against the anchor it ACTUALLY replaces (#11710's lookbehind) as well as against the
