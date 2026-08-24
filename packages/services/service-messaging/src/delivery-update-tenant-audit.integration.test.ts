@@ -18,6 +18,16 @@
  * tenant-classification contract this file pins (#10740) is unchanged —
  * threaded `tenantId`, never `bypassTenantAudit`.
  *
+ * [#11453] `SqlNotificationOutbox.ack` has since made the SAME move for the
+ * same reason: its new status precondition ("this row must still be
+ * `in_flight`") is a compare-and-set, and a predicate on the by-id path is
+ * silently discarded, so it rides `multi: true` too. Its audit op is
+ * `updateMany` and its spy below records `SqlDriver.updateMany`. Its
+ * CLASSIFICATION is unchanged — declared global, now via
+ * `dispatcherAckCasOptions` — which is the point of pinning the two
+ * separately: the op moved, the warrant did not. Of the three sites only
+ * `SqlHttpOutbox.ack` still writes by id.
+ *
  * The `ack` pair is declared global (`dispatcherAckOptions`, warrant in
  * `outbox-dispatcher-scope.ts`). `redeliver` is NOT: it is served to any
  * authenticated user, so it threads the caller's tenant instead. ⛔ A
@@ -74,14 +84,14 @@ let driver: SqlDriver;
 let warns: Array<{ msg: string; meta: any }>;
 /** Every `options` bag that reached `SqlDriver.update` — the `update` op only. */
 let driverUpdates: Array<{ object: string; id: unknown; options: any }>;
-/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009. */
+/** Every `options` bag that reached `SqlDriver.updateMany` — `redeliver`'s op since #11009, and the notification `ack`'s since #11453. */
 let driverUpdateManys: Array<{ object: string; where: unknown; options: any }>;
 
 /** The audit line for the SINGLE-RECORD op, matched on object + op. */
 const auditedUpdate = (object: string): boolean =>
     warns.some((w) => w.msg.includes(`[tenant-audit] update on tenant-scoped object "${object}"`));
 
-/** The audit line for the PREDICATE op — `redeliver`'s write since #11009. */
+/** The audit line for the PREDICATE op — `redeliver`'s write since #11009, the notification `ack`'s since #11453. */
 const auditedUpdateMany = (object: string): boolean =>
     warns.some((w) => w.msg.includes(`[tenant-audit] updateMany on tenant-scoped object "${object}"`));
 
@@ -211,7 +221,7 @@ async function seedDeadRow(id: string, org: string): Promise<void> {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-describe('ack — the two dispatcher sites are a classified global sweep (update op)', () => {
+describe('ack — the two dispatcher sites are a classified global sweep (update + updateMany ops)', () => {
     it('SqlHttpOutbox.ack records a REAL delivery in every organization, without a finding', async () => {
         // The gate's own precondition: this object really is tenant-scoped.
         expect((driver as any).resolveTenantField(SYS_HTTP_DELIVERY)).toBe('organization_id');
@@ -279,12 +289,23 @@ describe('ack — the two dispatcher sites are a classified global sweep (update
             'org_b:success:1',
         ]);
         // ② Declared global, for both organizations' rows.
-        const ackWrites = driverUpdates.filter((u) => u.object === DELIVERY_OBJECT);
+        //
+        // [#11453] The ack's op is `updateMany` now, so the reading moves to
+        // that spy. The claim path writes there too (its reap and its atomic
+        // claim), so the filter names what an ACK write looks like — and that
+        // predicate is not incidental: `{ id: <scalar>, status: 'in_flight' }`
+        // IS the compare-and-set, so matching on it pins that the ack reached
+        // the driver CONDITIONAL rather than as a blind by-id write.
+        const ackWrites = driverUpdateManys.filter(
+            (u) => u.object === DELIVERY_OBJECT
+                && typeof (u.where as any)?.id === 'string'
+                && (u.where as any)?.status === 'in_flight',
+        );
         expect(ackWrites).toHaveLength(2);
         expect(ackWrites.every((u) => u.options?.bypassTenantAudit === true)).toBe(true);
-        expect(auditedUpdate(DELIVERY_OBJECT)).toBe(false);
+        expect(auditedUpdateMany(DELIVERY_OBJECT)).toBe(false);
 
-        await controlUnscopedUpdate(DELIVERY_OBJECT, idA);
+        await controlUnscopedUpdateMany(DELIVERY_OBJECT, idA);
     });
 });
 

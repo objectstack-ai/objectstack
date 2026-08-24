@@ -97,6 +97,9 @@ export type {
     ClaimOptions,
     AckResult,
 } from './outbox.js';
+// [#11453] `ack()`'s status precondition refuses with this, so a caller that
+// wants to distinguish "I lost the claim" from a transport fault can catch it.
+export { NotificationAckError } from './outbox.js';
 export { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
 export type { SqlNotificationOutboxOptions } from './sql-outbox.js';
 export { MemoryNotificationOutbox } from './memory-outbox.js';

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { MessagingChannel, MessagingChannelContext, Notification, SendResult } from './channel.js';
-import type { INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
+import type { AckResult, INotificationOutbox, NotificationDeliveryRecord } from './outbox.js';
 import { classifyDeliveryAttempt } from './backoff.js';
 import { renderDigest } from './digest-render.js';
 
@@ -207,7 +207,7 @@ export class NotificationDispatcher {
         const channel = this.opts.channels.getChannel(channelName);
         if (!channel) {
             for (const row of rows) {
-                await this.opts.outbox.ack(row.id, { success: false, error: `channel '${channelName}' not registered`, dead: true });
+                await this.ackAttempt(row, { success: false, error: `channel '${channelName}' not registered`, dead: true });
                 this.opts.onAttempt?.(row, false);
             }
             return;
@@ -237,7 +237,7 @@ export class NotificationDispatcher {
         const now = this.opts.now?.() ?? Date.now();
         for (const row of rows) {
             const ack = classifyDeliveryAttempt(result, errorClass, row.attempts, now, this.opts.rng);
-            await this.opts.outbox.ack(row.id, ack);
+            await this.ackAttempt(row, ack);
             this.opts.onAttempt?.(row, result.ok);
         }
     }
@@ -246,7 +246,7 @@ export class NotificationDispatcher {
         const channel = this.opts.channels.getChannel(row.channel);
         if (!channel) {
             // No transport for this channel → terminal, observable on the row.
-            await this.opts.outbox.ack(row.id, {
+            await this.ackAttempt(row, {
                 success: false,
                 error: `channel '${row.channel}' not registered`,
                 dead: true,
@@ -283,8 +283,41 @@ export class NotificationDispatcher {
         const errorClass = !result.ok && channel.classifyError ? channel.classifyError(result.error) : undefined;
         const now = this.opts.now?.() ?? Date.now();
         const ack = classifyDeliveryAttempt(result, errorClass, row.attempts, now, this.opts.rng);
-        await this.opts.outbox.ack(row.id, ack);
+        await this.ackAttempt(row, ack);
         this.opts.onAttempt?.(row, result.ok);
+    }
+
+    /**
+     * [#11453] Record one attempt's outcome, tolerating the ONE refusal a
+     * correct dispatcher can legitimately provoke.
+     *
+     * `ack()` now refuses a row that is not `in_flight`, and this loop can meet
+     * that honestly: a send slower than `claimTtlMs` lets the visibility-timeout
+     * reap return the row to `pending` for another node, so by the time we ack,
+     * the row is not ours. That is a race we are ALLOWED to lose — the delivery
+     * is re-driven by whoever holds the row now, which is what at-least-once
+     * means — and the refusal is the outbox correctly declining to overwrite
+     * someone else's state.
+     *
+     * ⛔ What it must not do is abort the tick. The rows still validly claimed
+     * by this node are processed after this one; letting a lost race unwind the
+     * partition loop would strand every one of them `in_flight` until their own
+     * timeouts expire, turning one lost race into a batch-wide delay.
+     *
+     * Only `DELIVERY_NOT_ELIGIBLE` is absorbed. A store fault is not a lost
+     * race and still propagates to `runTick`'s handler.
+     */
+    private async ackAttempt(row: NotificationDeliveryRecord, result: AckResult): Promise<void> {
+        try {
+            await this.opts.outbox.ack(row.id, result);
+        } catch (err) {
+            if ((err as { code?: string })?.code !== 'DELIVERY_NOT_ELIGIBLE') throw err;
+            this.opts.logger?.warn?.('notification-dispatcher: ack refused, claim no longer held', {
+                nodeId: this.opts.nodeId,
+                deliveryId: row.id,
+                error: (err as Error)?.message ?? String(err),
+            });
+        }
     }
 }
 
