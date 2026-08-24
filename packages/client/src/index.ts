@@ -554,6 +554,22 @@ export interface SaveMetaItemOptions {
      * other value as publish, so emitting `?mode=publish` would put a value
      * on the wire that the server ignores. Same shape the first-party
      * `@object-ui/data-objectstack` `MetadataClient.save` already uses.
+     *
+     * ⚠️ COMPOUND NAMES DO NOT STAGE. `mode` reaches only the single-segment
+     * `PUT /meta/:type/:name`. Its compound-name twin
+     * `PUT /meta/:type/:section/:name` — the door a `name` containing a slash
+     * lands on, e.g. `saveItem('object', 'views/all_leads', item)` — never
+     * reads this parameter, so `{ mode: 'draft' }` there is IGNORED and the
+     * write is PUBLISHED LIVE, answered 200. It is not refused; there is no
+     * signal at the call site. Filed as objectstack#11712 and deliberately not
+     * repaired from this side: threading it is the route's decision, and a
+     * client-side guess would be a second place the two doors disagree.
+     *
+     * ⛔ Do not "fix" this by rejecting compound names here. `force` and
+     * `packageId` DO reach both doors (measured: the compound handler reads
+     * and threads `?force` since objectstack#11095 and `?package` alongside
+     * it), so refusing the whole bag on a compound name would break the two
+     * parameters that work in order to warn about the one that does not.
      */
     mode?: 'draft' | 'publish';
 }
@@ -808,11 +824,19 @@ export class ObjectStackClient {
         options?: SaveMetaItemOptions,
     ): Promise<SaveMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const qs = metaSaveQuery(options);
+        // Named `query`, not `qs`. Measured on this file: of 37 `const qs =`
+        // bindings, 27 hold a BARE `params.toString()` (the `?` is added at
+        // the interpolation site), 8 hold a string that CARRIES its own `?`,
+        // and 2 hold a `URLSearchParams` object. One name, three meanings —
+        // so a reader cannot tell from `${qs}` whether a `?` is already
+        // there, and picking the wrong one builds `…name??force=true` or
+        // `…nameforce=true`. This value carries its `?`; the distinct name
+        // says so without the reader having to go and look.
+        const query = metaSaveQuery(options);
         // `type`/`name` stay UNENCODED — a compound name's slash must survive
         // so the request reaches `PUT /meta/:type/:section/:name` instead of
         // collapsing onto the 3-segment route (pinned in client.test.ts).
-        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${qs}`, {
+        const res = await this.fetch(`${this.baseUrl}${route}/${type}/${name}${query}`, {
             method: 'PUT',
             body: JSON.stringify(item)
         });
@@ -5296,8 +5320,9 @@ export class ScopedProjectClient {
       item: any,
       options?: SaveMetaItemOptions,
     ): Promise<SaveMetaItemResponse> => {
-      const qs = metaSaveQuery(options);
-      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${qs}`), {
+      // `query`, not `qs` — it carries its own `?`; see the unscoped twin.
+      const query = metaSaveQuery(options);
+      const res = await this.parent._fetch(this.url(`/meta/${type}/${name}${query}`), {
         method: 'PUT',
         body: JSON.stringify(item),
       });
