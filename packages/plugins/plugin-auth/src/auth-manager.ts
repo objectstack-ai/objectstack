@@ -12,7 +12,13 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
+import {
+  readEnvWithDeprecation,
+  resolveTenancyPosture,
+  resolveOrgLimit,
+  isMcpServerEnabled,
+} from '@objectstack/types';
+import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -2390,6 +2396,20 @@ export class AuthManager {
             return false;
           }
         },
+        // How many MEMBERS one organization may hold — a different question
+        // from `organizationLimit` above, and one this platform does not limit:
+        // entitlements meter AI seats, and plain membership is not a billed
+        // axis. It must still be stated, because better-auth substitutes a
+        // vendor default of 100 for an absent `membershipLimit`
+        // (`count >= (membershipLimit || 100)`), which reaches the operator as
+        // `Organization membership limit reached` — a refusal nobody here ever
+        // chose, on an axis nothing here bills. A deployment that DOES want a
+        // ceiling sets `OS_ORG_MEMBERSHIP_LIMIT`.
+        //
+        // MAX_SAFE_INTEGER rather than Infinity: the value is compared, but it
+        // also travels through option plumbing that may assume a finite number,
+        // and nine quadrillion members is unlimited by any measure that matters.
+        membershipLimit: resolveMembershipLimitOption(),
         ...(customOrgRoles ? { roles: customOrgRoles } : {}),
         // ── Slug-change guard ─────────────────────────────────────
         // An org's slug is baked into every env hostname at creation

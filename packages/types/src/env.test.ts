@@ -9,6 +9,7 @@ import {
   resolveAllowDevPlugin,
   resolveSearchPinyinEnabled,
   resolveSandboxTimeoutMs,
+  resolveOrgMembershipLimit,
   isMcpServerEnabled,
   resolveMcpStdioAutoStart,
   stampSearchPinyinEnabled,
@@ -374,5 +375,47 @@ describe('resolveSandboxTimeoutMs (#3259)', () => {
     process.env[HOOK] = '111';
     process.env[ACTION] = '222';
     expect(resolveSandboxTimeoutMs('wallCeiling', 30_000)).toBe(60_000);
+  });
+});
+
+/**
+ * The vendor default this exists to displace: better-auth's organization plugin
+ * reads `count >= (membershipLimit || 100)`, so leaving the option unset caps
+ * every organization at 100 members and reports it as
+ * `Organization membership limit reached`. The platform meters AI seats, not
+ * membership, so "unset" here has to mean UNSET — never zero, and never a
+ * number the auth plugin would forward as a real cap.
+ */
+describe('resolveOrgMembershipLimit (OS_ORG_MEMBERSHIP_LIMIT)', () => {
+  const KEY = 'OS_ORG_MEMBERSHIP_LIMIT';
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it('is undefined when unset — the auth plugin turns that into no cap', () => {
+    delete process.env[KEY];
+    expect(resolveOrgMembershipLimit()).toBeUndefined();
+  });
+
+  it('reads a positive integer as the ceiling a deployment asked for', () => {
+    process.env[KEY] = '25';
+    expect(resolveOrgMembershipLimit()).toBe(25);
+  });
+
+  it('reads unusable values as UNSET, never as a cap — a typo must not lock an organization', () => {
+    for (const bad of ['', '   ', 'abc', '0', '-5', 'NaN']) {
+      process.env[KEY] = bad;
+      expect(resolveOrgMembershipLimit(), `value=${JSON.stringify(bad)}`).toBeUndefined();
+    }
+  });
+
+  it('is independent of OS_ORG_LIMIT, which caps a different thing', () => {
+    process.env.OS_ORG_LIMIT = '3';
+    delete process.env[KEY];
+    expect(resolveOrgMembershipLimit()).toBeUndefined();
+    delete process.env.OS_ORG_LIMIT;
   });
 });
