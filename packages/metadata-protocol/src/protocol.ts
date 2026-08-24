@@ -2149,12 +2149,24 @@ function specValidationFindings(
 ): string {
     switch (face) {
         case 'meta-envelope':
+        case 'meta-dispatch':
             // The door answers with an ADR-0112 error envelope that carries
             // `issues[]` beside the message (`@objectstack/rest`'s
             // `sendError` threads a top-level `issues`; `@objectstack/runtime`'s
             // dispatcher threads `details.issues`). The prose lives there,
             // once. Same headline grammar the seed refusal and the author-time
             // gate compose — count plus `path [zod code]` locators.
+            //
+            // ⚠️ [#11095] TWO faces, one case, on purpose. The dispatcher split
+            // off `'meta-envelope'` because the 409 needed a different REMEDY
+            // there — nothing about the 422 moved, and this door's structured
+            // channel (`details.issues`) is the very one the comment above
+            // names. Letting `'meta-dispatch'` fall to the default instead would
+            // have re-introduced the #10888 duplication on one door only, with
+            // every 409 test green: the polarity below is "declare to trim", so
+            // a face that stops declaring loses the trim SILENTLY. Pinned in
+            // `protocol.destructive-409-face-inventory.test.ts`'s [#11095]
+            // section, which asserts the 422 clause did not move under it.
             return metadataIssueHeadline(issues);
         default:
             // Byte-identical to the pre-#10888 clause: the first three findings
@@ -3304,17 +3316,39 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  * Each face therefore states the remedy it actually has.
  *
  * ⚠️ An absent `face` renders the `?force=true` wording, byte-identical to what
- * every face carried before. That default is right on the single-segment REST
- * `PUT` — but `protocol.destructive-409-face-inventory.test.ts` inventories two
- * further doors that reach this gate and never thread `force` either
- * (`@objectstack/rest`'s compound-name `PUT /meta/:type/:a/:b`, and
- * `@objectstack/runtime`'s dispatcher `PUT /meta`). Those are wrong for the
- * same reason and are deliberately NOT repaired here: unlike the duplicate
- * gesture, which has a genuine collision-free alternative to prescribe, the
- * right repair for a `PUT` that cannot acknowledge a risk may well be to thread
- * `force` on those routes — a contract question, filed as #11095 rather than
- * guessed at. Adding a face value here is one of the two candidate repairs it
- * weighs.
+ * every face carried before. That default is right on BOTH REST `PUT` doors and
+ * on nothing else that reaches this gate today — see the `[#11095]` section of
+ * `protocol.destructive-409-face-inventory.test.ts` for the full inventory.
+ *
+ * ## [#11095] The two doors #11015 left open, and why they were split
+ *
+ * #11015's note recorded two further faces that reached this gate and never
+ * threaded `force`, and filed the disposition as a contract question rather
+ * than guessing it. The ruling was a SPLIT — one door repaired by threading the
+ * parameter, the other by telling the truth — and the split is the decision,
+ * not an accident of convenience:
+ *
+ *  - `@objectstack/rest`'s compound-name `PUT /meta/:type/:a/:b` now THREADS
+ *    `?force=true`, so the default clause became TRUE there instead of being
+ *    reworded. That half is #7019's ruling applied once more, with its reason:
+ *    the compound route is "word for word the same operation" as its
+ *    single-segment twin — one generic `saveMetaItem` reached by a name spelled
+ *    in two segments — and gating only the single-segment door was MEASURED to
+ *    leave the compound one a bypass of it. Every divergence found between the
+ *    pair since has been closed for that same reason (#6603/#7019's capability
+ *    gate, #8805's write-side organization, #7035's 501 envelope). One door
+ *    reading `?force` and its literal twin ignoring it was the same shape.
+ *  - `@objectstack/runtime`'s dispatcher `PUT /meta` does NOT gain `force`, and
+ *    states `'meta-dispatch'` below instead. It has no twin precedent and a
+ *    different call shape: that branch is reached with a path, a method and a
+ *    body — there is no query string on the transport at all, so `?force=true`
+ *    names a slot that does not exist rather than one that was forgotten. Its
+ *    clause says so, and prescribes what a caller can actually do there.
+ *
+ * ⛔ Do not "harmonise" these two later by giving the dispatcher a `force`
+ * field. The compound door's parity argument is a statement about ONE pair of
+ * routes that spell one name two ways; it is not a general licence, and the
+ * dispatcher is not the third member of that pair.
  */
 /**
  * [#11015 / #10888] Which write door a `saveMetaItem` refusal is being
@@ -3334,10 +3368,21 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
  *
  * A door therefore answers both questions by naming itself once, and neither
  * switch may assume the other's default. `'meta-envelope'` deliberately keeps
- * the 409's `?force=true` wording (it is the single-segment REST `PUT`'s
- * genuine remedy) while changing the 422's clause.
+ * the 409's `?force=true` wording (it is both REST `PUT` doors' genuine remedy,
+ * since #11095 threaded the parameter on the compound-name twin) while changing
+ * the 422's clause.
+ *
+ * ⚠️ [#11095] `'meta-dispatch'` is the first face that differs from another on
+ * ONE of the two questions and agrees with it on the other: the runtime
+ * dispatcher carries `issues[]` structurally exactly as the REST doors do
+ * (`errorFromThrown` → `details.issues`), so its 422 clause is `'meta-envelope'`'s,
+ * while its 409 clause must differ because that door has no `force` to name.
+ * That is the two-switch independence this comment asserts, arriving as a real
+ * case rather than a hypothetical — which is why {@link specValidationFindings}
+ * lists the two faces on one `case` instead of letting `'meta-dispatch'` fall
+ * to a default that was never written for it.
  */
-type MetadataWriteFace = 'package-duplicate' | 'meta-envelope';
+type MetadataWriteFace = 'package-duplicate' | 'meta-envelope' | 'meta-dispatch';
 
 function destructiveChangeRemedy(
     face: MetadataWriteFace | undefined,
@@ -3352,6 +3397,22 @@ function destructiveChangeRemedy(
             return `this copy cannot be forced: the duplicate door accepts no \`force\`. `
                 + `Duplicate into a target namespace that does not already hold '${name}', `
                 + `or reconcile that item with the source first.`;
+        case 'meta-dispatch':
+            // [#11095] The runtime dispatcher's `/meta` PUT. Unlike the two REST
+            // `PUT` doors — which read `?force` off a query string and, since
+            // this card, BOTH thread it — this branch is reached with a path, a
+            // method and a body and nothing else. `?force=true` does not name a
+            // parameter this door forgot to read; it names a channel the
+            // transport does not have, which is why threading it here would be
+            // a new surface rather than a repair, and was ruled out.
+            //
+            // Both clauses are things the caller can do on THIS door: send a
+            // body that does not drop what the stored item still carries, or go
+            // and reconcile that item first. Same grammar as the duplicate face
+            // above — name the door, deny the mechanism, then prescribe.
+            return `this save cannot be forced: the dispatcher's \`PUT /meta\` accepts no \`force\`. `
+                + `Re-submit '${name}' with a body that keeps the fields and types named above, `
+                + `or reconcile that stored item first.`;
         default:
             return 're-submit with ?force=true to proceed.';
     }

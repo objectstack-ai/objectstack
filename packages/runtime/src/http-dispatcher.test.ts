@@ -144,7 +144,22 @@ describe('HttpDispatcher', () => {
                 // ever stops being stated, `saveMetaItem`'s 422 silently goes
                 // back to restating prose the envelope already carries — an
                 // exact-match assertion is what makes that visible.
-                writeFace: 'meta-envelope',
+                //
+                // [#11095] The exact-match did its job: this value CHANGED, and
+                // it changed HERE first, deliberately, rather than quietly
+                // starting to pass somewhere. `'meta-envelope'` asserted "I am
+                // one of the doors that carry `issues[]` structurally", which is
+                // still true of this one — but the same field also answers the
+                // 409's question, "which remedy exists on this door", and there
+                // the answer diverged: both REST `PUT`s read `?force` off a
+                // query string (the compound-name twin as of this card), while
+                // this branch is reached with a path, a method and a body and
+                // has no query string at all. So it names itself. The 422
+                // behaviour is unmoved — `specValidationFindings` lists the two
+                // faces on ONE `case` — and what moved is the destructive 409's
+                // remedy clause, pinned in
+                // `domains/meta-save-destructive-remedy.test.ts`.
+                writeFace: 'meta-dispatch',
             });
             expect(result.response?.body).toEqual({
                 success: true,
@@ -169,7 +184,17 @@ describe('HttpDispatcher', () => {
                 item: body,
                 // [#10888] The compound-name door states the same face — it is
                 // the same handler and the same envelope.
-                writeFace: 'meta-envelope',
+                //
+                // ⚠️ [#11095] "The compound-name door" here means the
+                // DISPATCHER's own compound arity (`/lead/views/all_leads`),
+                // which is the same `if (method === 'PUT')` branch as the case
+                // above — not `@objectstack/rest`'s `PUT /meta/:type/:a/:b`,
+                // which is a different file, a different transport, and the one
+                // that GAINED `?force` under this card. Two unrelated things
+                // called "the compound-name door" one paragraph apart is exactly
+                // how a later reader talks themselves into threading `force`
+                // here too, so: this arity has no query string either.
+                writeFace: 'meta-dispatch',
             });
         });
 

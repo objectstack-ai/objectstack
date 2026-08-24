@@ -6643,7 +6643,51 @@ export class RestServer {
                     // `?package=` to `undefined`, i.e. wrote the row as an
                     // env-local overlay instead of into the package the caller
                     // named — a silent change of where the save LANDS.
-                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                    //
+                    // [#11095] `force` joins that list in the SAME stroke as the
+                    // parameter itself, and the order is not cosmetic: #6877's
+                    // sharpest measured case is on this very parameter one route
+                    // over — `?force=false&force=false` reaches the `typeof`
+                    // ternary below as an ARRAY, falls through to `!!forceRaw`,
+                    // and a non-empty array is truthy, so a caller repeating an
+                    // explicit opt-OUT turns the destructive-change guard ON.
+                    // Threading `force` here without also naming it here would
+                    // have re-opened that inversion on a fresh door, on a
+                    // destructive verb, reported as 200.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package'])) return;
+                    // [#11095] Phase 3a-destructive: `?force=true` opts past the
+                    // destructive-change safety check — BYTE-IDENTICAL to the
+                    // single-segment `PUT /meta/:type/:name` above, truthy
+                    // spellings and all, because it is byte-identically the same
+                    // decision.
+                    //
+                    // Until this landed the request below was built field by
+                    // field with no `force` among the fields, so `saveMetaItem`'s
+                    // Phase 3a-destructive gate refused a save through this door
+                    // with `409 DESTRUCTIVE_CHANGE` and the remedy clause
+                    // `— re-submit with ?force=true to proceed.`, and a caller
+                    // who did exactly that got the identical refusal back. The
+                    // clause was true of the single-segment twin and false here.
+                    //
+                    // Threading rather than rewording is #7019's ruling applied
+                    // again, with its reason: this route is "word for word the
+                    // same operation" as its twin — one generic `saveMetaItem`
+                    // reached by a name spelled in two segments — and gating only
+                    // the single-segment door was MEASURED to leave this one a
+                    // bypass of it. #8805 (write-side organization) and #7035
+                    // (the 501 envelope) both cite that same finding. A twin pair
+                    // that disagrees about which risks a caller may acknowledge
+                    // is the same shape, one field along.
+                    //
+                    // ⛔ NOT a licence for every door that reaches this gate: the
+                    // runtime dispatcher's `PUT /meta` was ruled the other way in
+                    // the same stroke (it has no query string at all) and states
+                    // its own `writeFace` so its 409 stops prescribing a
+                    // parameter it does not have. See `destructiveChangeRemedy`.
+                    const forceRaw = req.query?.force;
+                    const force = typeof forceRaw === 'string'
+                        ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
+                        : !!forceRaw;
                     const packageRaw = req.query?.package;
                     const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
                         ? packageRaw
@@ -6676,10 +6720,20 @@ export class RestServer {
                         // Server-stated: this object is built field by field
                         // from named `req` values and never spreads the body, so
                         // a client cannot smuggle a face in.
+                        //
+                        // [#11095] The face stays `'meta-envelope'` — the same
+                        // one the single-segment twin states — and that is now
+                        // the whole point rather than an inherited default: the
+                        // 409 clause this face renders prescribes `?force=true`,
+                        // and with the line below this door finally HAS one. The
+                        // alternative repair (a face of its own, saying the
+                        // parameter is unavailable) is the option the ruling
+                        // rejected for this door and adopted for the dispatcher.
                         writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
+                        ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
                     } as any);
                     res.json(result);

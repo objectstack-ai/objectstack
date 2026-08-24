@@ -1642,6 +1642,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-published-overlay.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1703,6 +1713,16 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
       "verb": "update",
       "pinned": 1
     },

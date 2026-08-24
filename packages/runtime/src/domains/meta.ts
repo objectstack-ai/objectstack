@@ -421,9 +421,32 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // a headline rather than restating the per-key prose that
                     // already rides the envelope structurally. Not client-settable:
                     // the request object names each field explicitly.
+                    //
+                    // [#11095] …and the face is this door's OWN, not the REST
+                    // doors'. It read `'meta-envelope'` until the two switches
+                    // that consume it disagreed for the first time. The 422
+                    // answer is unchanged and shares `'meta-envelope'`'s case;
+                    // what moved is the `409 DESTRUCTIVE_CHANGE` REMEDY clause,
+                    // which used to tell a caller refused HERE to `re-submit
+                    // with ?force=true` — advice this transport cannot take. The
+                    // two REST `PUT` doors read `?force` off a query string (the
+                    // compound-name twin as of this same card, inheriting
+                    // #7019's twin-parity ruling); this branch is reached with a
+                    // path, a method and a body, so there is no query string for
+                    // an acknowledgement to arrive on.
+                    //
+                    // ⛔ This is the door the ruling deliberately did NOT give a
+                    // `force`, and the absence is settled rather than pending:
+                    // adding one — as a body key, a request field or anything
+                    // else — widens a public surface no ruling has widened, and
+                    // turns the clause into a lie in the other direction. The
+                    // request below is built field by field for exactly that
+                    // reason: `item` is data, never a channel, so a caller
+                    // cannot smuggle a `force` (or a `writeFace`) through it.
+                    // Pinned both ways in `meta-save-destructive-remedy.test.ts`.
                     const result = await protocol.saveMetaItem({
                         type, name, item, organizationId,
-                        writeFace: 'meta-envelope',
+                        writeFace: 'meta-dispatch',
                         ...(packageId ? { packageId } : {}),
                     });
                     return { handled: true, response: deps.success(result) };

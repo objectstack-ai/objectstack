@@ -843,14 +843,44 @@ const TEST_DEBT = {
   },
   '@objectstack/rest': {
     errors: 155,
-    note: 'TS2835 x67 (NodeNext extensions), TS7006 x57, TS2554 x13, TS2550 x10 (composition as counted at '
-      + '153; not re-tallied by class at the 155 below). Graduated from DEBT in #6905 -- this TEST_DEBT '
+    note: 'RE-TALLIED from tsc at the 155 below (#10821), measured at 951b025e4 with the workspace closure '
+      + 'built by the same command lint.yml runs before this gate, so the composition, the per-file split '
+      + 'and the total are ONE measurement rather than a rescale: TS2835 x72 (NodeNext extensions), '
+      + 'TS7006 x49, TS2550 x16 (`Array.prototype.at` against a `lib` older than es2022 -- all 16 are that '
+      + 'one message), TS2554 x14 (wrong arity, all 14 \'Expected 2-5 arguments, but got 1\'), plus 4 '
+      + 'singletons (TS2769 x2, TS2345, TS6133). 72+49+16+14+4 = 155, which is the recorded number '
+      + 'EXACTLY -- this entry carries no remainder clause because it no longer needs one, and RECORDED '
+      + 'still equals the measurement with no margin. '
+      + 'WHAT THIS REPLACES, and why none of it was rescaled: the old tally read \'TS2835 x67, TS7006 x57, '
+      + 'TS2554 x13, TS2550 x10 (composition as counted at 153; not re-tallied by class at the 155 '
+      + 'below)\'. It summed to 147 with no clause for the remaining 6, so a reader could not tell an '
+      + 'ABRIDGED tally from a SHORT one -- both readings were open and neither was checkable from the '
+      + 'ledger. Both halves are settled here, and only one of them was ever answerable: (a) the 6 are NOT '
+      + 'attributed and never will be. The per-class breakdown at e8db1a230 was not retained, so they are '
+      + 'retired WITH the tally that carried them rather than invented, on this ledger\'s own rule that a '
+      + 'made-up attribution is worse than an admitted gap. (b) 153-vs-155 was never one measurement '
+      + 'disagreeing with itself: 153 was measured at e8db1a230, RECORDED was later lowered onto a '
+      + 'DIFFERENT measurement (155 at 55da611, #6939), and the composition was never re-taken across that '
+      + 'move -- which is precisely what the \'not re-tallied by class\' clause was saying out loud, and '
+      + 'why it was honest rather than sloppy. Rescaling the old numbers onto 155 would have been wrong in '
+      + 'any case, and the re-tally shows it: the shape moved in BOTH directions -- TS2835 67 -> 72, '
+      + 'TS2550 10 -> 16 and TS2554 13 -> 14 rose while TS7006 57 -> 49 FELL -- and two classes the old '
+      + 'tally never named (TS2769, TS2345) are in the pile now. '
+      + 'Graduated from DEBT in #6905 -- this TEST_DEBT '
       + 'entry is now the sole gate on the package\'s test layer (src moved to `turbo run typecheck`). '
       + 'Measured '
-      + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230). Read the '
+      + '105 -> 136 (5ab08428) -> 143 (77adf29, hours later the same day) -> 153 (e8db1a230) -> 155 '
+      + '(55da611) -> still 155 (951b025e4, the re-tally above). Read the '
       + 'top-of-ledger NodeNext note before sizing this one: TS2835 and the implicit-any pile it causes '
-      + 'are 124 of the 153, and '
-      + 'they are one repair, not 124. Of the +10 that then bumped 153 to a bootstrap-margin RECORDED 163, '
+      + 'are 121 of the 155, and '
+      + 'they are 72 IMPORT-LINE repairs, not 121: the 72 TS2835 sit on 72 distinct lines across 64 files '
+      + 'but name only 11 distinct targets, and 49 of the 72 are the single `./rest-server` import. Every '
+      + 'one of the 22 files carrying a TS7006 also carries a TS2835 -- no exceptions -- so there is no '
+      + 'implicit-any in this layer without a broken import above it, and 31 of the 49 are one parameter '
+      + 'name (`r`). Budget for the cli lesson (#8612) that collapsing a cascade can EXPOSE errors as well '
+      + 'as remove them. Concentrated at the top and flat after: src/rest.test.ts x38 (TS7006 x21, '
+      + 'TS2550 x11, TS2835 x4, TS2345 x1, TS6133 x1) and no other file above x5. '
+      + 'Of the +10 that then bumped 153 to a bootstrap-margin RECORDED 163, '
       + '8 are attributable to three test files that '
       + 'window added -- rest-meta-save-receipt-envelope.test.ts x4 (#5265 / PR #5926), '
       + 'meta-item-envelope.test.ts x2 (#5563 / PR #5895), '
@@ -1697,10 +1727,15 @@ function workspacePackages() {
 //     entry is skipped. metadata-protocol quotes the misleading note #5278
 //     found ("code-tier 9, the rest config-tier and noise") and is skipped for
 //     exactly that reason -- correct entry, no verdict;
-//   * per-code tallies (`TS2835 x67, TS7006 x57, ...`) are NOT summed. They are
-//     partial by construction: plugin-rest's tally sums to 147 and says so in
-//     the same breath ("composition as counted at 153"), so summing them would
-//     red an entry whose author was being precise.
+//   * per-code tallies (`TS2835 x72, TS7006 x49, ...`) are NOT summed. They are
+//     partial by construction, and the worked example this rule was written
+//     against says why: `@objectstack/rest`'s tally summed to 147 while saying
+//     so in the same breath ("composition as counted at 153"), so summing it
+//     would have redded an entry whose author was being precise. That entry has
+//     since been RE-TALLIED and now sums to its recorded 155 exactly (#10821),
+//     which retires the example and changes nothing about the rule: a tally that
+//     happens to be complete today is still not one a gate may REQUIRE to be
+//     complete, and the next deliberately partial tally must stay writable.
 //
 // FALSE-POSITIVE DIRECTION: an entry whose opening itemisation is deliberately
 // partial, with the remainder described in words rather than digits, would fire
