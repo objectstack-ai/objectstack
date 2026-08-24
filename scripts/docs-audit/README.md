@@ -209,6 +209,9 @@ reader has to expand a fold to find is one a reader does not find. The failure #
 records was never the tool lying; it was the tool never signalling its own limits at the
 point of use.
 
+Since #11356 the same posture reaches the ✅ itself — see **The verdict when nothing names
+the anchors** below.
+
 ### Measured, before and after
 
 Ten real PRs, each re-derived at its own merge base with its own docs corpus. `docs` rows:
@@ -240,6 +243,33 @@ The two zeroes are the honest shape of the trade, not a bug: `07ad42463` derives
 run says so and points at the coarse set — where the old tool's 22 rows were every page
 mentioning `@objectstack/cli`. A CLI **command name** (`os meta resync`) is exactly the
 recall class the shape guard costs us: it is a lowercase word, so it cannot anchor.
+
+### The verdict when nothing names the anchors
+
+That state — anchors derived, nothing left unanchored, no page naming any of them — used
+to end the headline in a ✅. It no longer does (#11356). The sentence reports the **naming
+relation**, and the relation only ever lists a page that ALREADY names a changed token, so
+a PR that **widens an enumerable vocabulary** is invisible to it by construction: the new
+members' absence from the page is precisely the defect, and an absence names nothing.
+
+Measured on #11347 — six new flow-expression functions (`round`/`floor`/`ceil`/`abs`/
+`min`/`max`) — the run derived 9 anchors, matched 0 pages, and rendered the ✅, while
+`content/docs/automation/flows.mdx` carried a table enumerating the available bindings
+that the same PR had just made incomplete. A reviewing seat almost passed the PR on that
+tick.
+
+⚠️ **The narrowing does not catch that class.** Nothing in the anchor model can: anchoring
+the new members is impossible by construction, the siblings live in carriers the diff
+never touches, and the container symbol is named by no page. The authoring-mark route
+that would catch it is escalated as #11817. What the narrowing changes is that the run no
+longer **claims** it did — the verdict states only what it measured, and the clean-bill
+glyph is left to a run that earned one. The rendering is pinned in both directions by
+`check-drift-comment.mjs`, which asserts the verdict byte-exact on that state and asserts
+it ABSENT on all four neighbouring states.
+
+How often it renders, re-derived over the 40 first-parent commits ending at `e43b18fd9`:
+3 of the 17 package-touching runs (18%) — `20a452e664`, `f213793ddb`, `dd4113ec0b` — so it
+is a rare notice rather than a per-PR banner, which is what keeps it readable.
 
 **Cost** (the card's open question): the anchor derivation reads the same 178-page corpus
 the old one did, plus the 18 route-registrar/ledger sources (~875 KB) and one `git show`

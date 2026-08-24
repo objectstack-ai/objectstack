@@ -326,16 +326,25 @@ different things, so they get different lanes.
 | | **rc prerelease** | **GA** |
 |---|---|---|
 | Workflow | `.github/workflows/cut-rc.yml` | `.github/workflows/release.yml` |
-| Trigger | one `workflow_dispatch` | merge the Version Packages PR, then dispatch |
+| Trigger | one `workflow_dispatch` | merge the Version Packages PR, then approve the `release` environment |
 | objectui pin | bumped **inside** the run, to a snapshot | must already be fresh on the PR |
 | Changelog review | none (the record is generated) | human review on the PR |
 | Board-clearing / #7275-A precondition | not required | required |
 
-Both lanes are `workflow_dispatch` + `environment: release`, and neither can be
-started by a push, a bot, a merge-queue landing or a schedule. That is the
-2026-08-07 ruling (「版本发布必须是人工的」) and it is not negotiable in either
-direction — see `release.yml`'s header for the two releases that were minted
-without a human and the lane split that ended it.
+Both lanes are gated by `environment: release`, and neither publishes anything until
+a human approves the deployment there. What differs since ADR-0125 (2026-08-20) is
+the *start*: `cut-rc.yml` is still `workflow_dispatch`-only — an event no push, bot,
+merge-queue landing or schedule can synthesise — while `release.yml`'s publish lane
+**is** started by the push that lands the Version Packages PR (D1), and is then held,
+**whole**, at the environment gate until a required reviewer approves it (D2). The
+approval is the release act on that lane, so read ADR-0125 D3 before touching it: an
+environment with no required reviewers passes automatically and silently, which on a
+push-started lane is not a weakened gate but no gate at all. (`release.yml` also
+carries a 6-hourly `schedule`, added by #11233; it reaches only the bookkeeping
+`version-pr` job, which has no publish capability by construction.) That is the
+2026-08-07 ruling (「版本发布必须是人工的」) re-implemented, not relaxed, and it is not
+negotiable in either direction — see `release.yml`'s header for the two releases that
+were minted without a human and the lane split that ended it.
 
 ### Cutting an rc — the snapshot flow (#7447)
 
@@ -445,8 +454,14 @@ generated changelogs on the PR. ⚠️ There is no longer a pin-freshness gate o
 lane either (#10134) — a GA release ships the committed pin, same as an rc, and the
 judgement about which console revision that should be belongs in an issue and a bump
 PR *before* the cut. Merge the `chore: version
-packages` PR (#4935), then **Actions → Release → Run workflow** with the version
-`main` now carries. `release.yml`'s three lanes are untouched by the rc lane.
+packages` PR (#4935); that push is what starts the publish lane, and the run then
+waits at `environment: release` for a required reviewer to approve a job named
+`Publish <version> to npm (awaiting approval)` — the version read from the commit,
+never one you supply (ADR-0125 D1/D2). ⛔ **Actions → Release → Run workflow** is
+**not** the GA publish path: since ADR-0125 D4 that dispatch takes no version input at
+all, and left unchecked it starts the repair lane for a publish that died partway —
+checked, it starts the bookkeeping lane described next.
+`release.yml`'s three lanes are untouched by the rc lane.
 
 **First, check #4935 is current** (#11233). It is regenerated on a 6-hourly schedule
 rather than on every push, so at cut time it can be up to one refresh window behind

@@ -151,18 +151,19 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, relative, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
-import {
+import { requireDefaultExport, requireDependency } from '../../../scripts/import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
+const {
   validateExpression,
   isSupportedRlsExpression,
   sqlPredicateToCel,
   isPushdownableCel,
-} from '@objectstack/formula';
+} = await requireDependency('@objectstack/formula', () => import('@objectstack/formula'), import.meta.url);
 // The field-level `*When` root verdict AND its message, imported from the one
 // place that owns them (#11407). Same discipline as `validateExpression` above:
 // this gate is the SECOND consumer of that rule, and a second consumer that
 // re-derives the rule owns a dialect of it instead. See surface 3 below.
-import { fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from '@objectstack/lint';
+const { fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } = await requireDependency('@objectstack/lint', () => import('@objectstack/lint'), import.meta.url);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');

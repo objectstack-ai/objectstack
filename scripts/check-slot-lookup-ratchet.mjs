@@ -42,9 +42,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ESLint } from 'eslint';
+import { requireDependency } from './import-prerequisite.mjs';
+const { ESLint } = await requireDependency('eslint', () => import('eslint'), import.meta.url);
 
-import eslintConfig, { SLOT_LOOKUP_ANY_MESSAGE } from '../eslint.config.mjs';
+const { default: eslintConfig, SLOT_LOOKUP_ANY_MESSAGE } = await requireDependency('../eslint.config.mjs', () => import('../eslint.config.mjs'), import.meta.url);
 import { lintFilesStrict } from './eslint-fatal-guard.mjs';
 import { ensureStackHeadroom } from './eslint-stack-headroom.mjs';
 

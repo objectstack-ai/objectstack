@@ -712,8 +712,8 @@ const EXEMPT = {
 //
 // `@objectstack/trigger-record-change` GRADUATED from this ledger (entry: 9 raw
 // TS2353, re-measured 0). It is worth a line here because BOTH remedies the
-// graduation message above offers were wrong for it, and that message is what
-// the next taker will read:
+// graduation message offered at the time were wrong for it -- that message has
+// since been split per ledger (#11491), and this is the case it was split on:
 //   - "add a `typecheck` script" -- it already had one, and always had. The
 //     package was never in DEBT's hole ("src does not check"); it was in this
 //     ledger's ("src checks, tests are hidden"), which is why the message's
@@ -731,6 +731,17 @@ const EXEMPT = {
 // general lesson, which is this ledger's to carry: the two remedies are
 // interchangeable only where the excluded tests import nothing the src layer
 // does not, and that is a property to MEASURE per package, never to assume.
+//
+// SINCE MEASURED, across this whole ledger rather than on that one package
+// (#11491, at e47d5ef61, by dropping each entry's `"**/*.test.ts"` exclusion
+// and reading `check:type-source-resolution`): 14 of the 18 entries that HAVE
+// an exclusion go red the way trigger-record-change did, 4 stay green
+// (`objectql`, `lint`, `formula`, `verify`), and the 19th (`cli`) has no
+// exclusion to drop at all -- its tests are hidden by an `include` that never
+// reaches them. So that package was the majority case, not the exception, and
+// the graduation message no longer offers the exclusion route without its
+// precondition. Re-measure before relying on the split: it moves with every
+// import a test file gains.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
     errors: 348,
@@ -3077,6 +3088,9 @@ function measureLedgers(packages, rootName, state) {
       ledger: 'DEBT',
       name,
       dir,
+      // The root is a ledger member like any other and its remedy is NOT the
+      // same edit -- its `typecheck` slot is the workspace aggregator (#11491).
+      isRoot: name === rootName,
       recorded: entry.errors ?? 0,
       note: entry.note,
       compositionAt: entry.compositionAt,
@@ -3090,6 +3104,7 @@ function measureLedgers(packages, rootName, state) {
       ledger: 'TEST_DEBT',
       name,
       dir,
+      isRoot: name === rootName,
       recorded: entry.errors ?? 0,
       note: entry.note,
       compositionAt: entry.compositionAt,
@@ -3161,6 +3176,104 @@ function ratchetRemedyCarriesAuthority(message) {
   return message.includes(RATCHET_AUTHORITY_MARKER);
 }
 
+// ── The graduation remedy is a function of the LEDGER (#11491) ──────────────
+//
+// This message used to offer both ledgers' remedies in one breath -- `add a
+// "typecheck" script, OR drop the test exclusion` -- joined by an "or" that
+// says they are alternatives a reader may pick between. They are not
+// alternatives. Each one belongs to exactly one ledger, and the header three
+// screens above already states the distinction the message dropped: DEBT is
+// "src does not check", TEST_DEBT is "src checks, tests are hidden".
+//
+// The reader is, by construction, someone who does NOT already know which
+// applies -- a graduation is a once-per-package event and this note is what
+// tells them what to do about it. Measured on the ledgers as they stand at
+// e47d5ef61, both halves of the old sentence misfire, and not marginally:
+//
+//   * "add a `typecheck` script" is a NO-OP for 19 of the 19 TEST_DEBT
+//     entries. Every one of them already declares one -- that is what makes
+//     them TEST_DEBT rather than DEBT. A taker adds a script that is already
+//     there, or concludes the reading is wrong.
+//   * "drop the test exclusion" is a RED `main` for 14 of the 18 TEST_DEBT
+//     entries that have an exclusion to drop, measured by doing it: remove
+//     `"**/*.test.ts"` from the package's `tsconfig.json` and
+//     `check:type-source-resolution` goes exit 0 -> exit 1, naming the
+//     workspace packages the re-admitted tests import and the src program
+//     never held (plugin-approvals surfaces 6, runtime 9, http-conformance 5).
+//     That gate's registry is shrink-only and its own message rules that
+//     widening the entry is not the fix, so the author who followed this note
+//     arrives at a second gate with no remedy at all. The 19th entry,
+//     `@objectstack/cli`, has no exclusion to drop -- its tests are hidden by
+//     an `include` that never reaches them -- so the remedy names an edit that
+//     does not exist for it.
+//   * on DEBT the sentence misfires once more, on the entry it is easiest to
+//     get wrong: the workspace root's `typecheck` slot is the aggregator
+//     (`turbo run typecheck`), and its own TypeScript is read through
+//     `typecheck:root`. A taker following this note verbatim overwrites every
+//     other package's typecheck with a bare `tsc --noEmit`.
+//
+// `@objectstack/trigger-record-change` is the worked case behind #11491 -- it
+// graduated by the #5286 sibling route after both offered remedies proved
+// wrong for it, and the paragraph above TEST_DEBT records it. That package is
+// gone from the ledger; the shape it demonstrated is what the 19 still there
+// would each hit.
+//
+// So the fix is not more words. It is the branch: `m.ledger` is already on
+// every measurement, and each ledger's remedy prints only where it is the
+// remedy. Neither is dropped -- both are still offered, in the branch that
+// owns them. Within TEST_DEBT there IS a real choice of route, so that one
+// keeps both and names the PRECONDITION plus the command that decides it: a
+// message the reader has to open a gate's source to act on has not fixed
+// anything.
+//
+// ⛔ This changes no verdict and no number. Graduation candidates were, and
+// remain, a NOTE -- never a failure.
+
+/**
+ * The remedy for one graduation candidate, keyed on the ledger it is
+ * graduating from. Pure, and separate from the note that frames it, so the
+ * self-test can pin each branch's content AND its ANTI-content -- the DEBT
+ * branch must not carry TEST_DEBT's remedy, which is the exact defect this
+ * replaces and the one a well-meaning re-merge would reintroduce.
+ *
+ * An unrecognised ledger gets no remedy text rather than an inherited one: a
+ * third ledger silently receiving DEBT's advice is how this message became
+ * wrong in the first place.
+ *
+ * @param {{ledger: string, isRoot?: boolean}} measurement
+ * @returns {string}
+ */
+function graduationRemedy({ ledger, isRoot = false }) {
+  if (ledger === 'TEST_DEBT') {
+    return (
+      `Onboard it: put the hidden test files in front of tsc, and delete the TEST_DEBT entry in the same ` +
+      `PR. ⛔ Adding a \`typecheck\` script is NOT the remedy here -- this ledger is "src checks, tests ` +
+      `are hidden", so the package already has one.\n` +
+      `    (a) The #5286 sibling route: add a \`tsconfig.test.json\` that reaches the ` +
+      `tests and NAME it in the \`typecheck\` script. Always available -- it leaves \`tsconfig.json\` alone.\n` +
+      `    (b) Drop the \`**/*.test.ts\` entry from \`exclude\` in \`tsconfig.json\` (or widen \`include\` to ` +
+      `reach the test tree). Available ONLY while \`pnpm check:type-source-resolution\` still passes with ` +
+      `the tests re-admitted: that gate reads \`tsconfig.json\` and nothing else, the re-admitted tests ` +
+      `import workspace packages this package's src program never held, and its registry is ⛔ SHRINK-ONLY ` +
+      `-- registering the new ones is not the way out. Measured red on 14 of the 18 entries that have an ` +
+      `exclusion to drop, so assume (b) is unavailable until that gate says otherwise. Run it before you ` +
+      `commit; nothing in this gate's own verdict will tell you.`
+    );
+  }
+  if (ledger === 'DEBT') {
+    return isRoot
+      ? `Onboard it: add a \`typecheck:root\` script that invokes tsc AND the step in ` +
+          `.github/workflows/lint.yml that runs it -- this gate requires both -- then delete the DEBT ` +
+          `entry in the same PR. ⛔ NOT \`typecheck\`: the root's \`typecheck\` slot is the workspace ` +
+          `aggregator (\`turbo run typecheck\`), and overwriting it with \`tsc --noEmit\` would stop every ` +
+          `other package's typecheck from running while this gate went green.`
+      : `Onboard it: add \`"typecheck": "tsc --noEmit"\` to its package.json, and delete the DEBT entry ` +
+          `in the same PR. This ledger is "src does not check", so the package has no \`typecheck\` script ` +
+          `to begin with -- COVERED would already be red if it did.`;
+  }
+  return `Onboard it and delete the ${ledger} entry in the same PR.`;
+}
+
 /**
  * MEASURED's verdict, pure over already-taken measurements so the self-test
  * pins the semantics without running a compiler.
@@ -3201,9 +3314,9 @@ function evaluateMeasurements(measurements) {
       );
     } else if (m.actual === 0 && m.recorded > 0) {
       notes.push(
-        `${m.name}: ${m.ledger} records ${m.recorded}, and tsc now reports 0 -- graduation candidate. ` +
-          `Onboard it (add \`"typecheck": "tsc --noEmit"\`, or drop the test exclusion, and delete the ` +
-          `ledger entry in the same PR). \`--lower\` deliberately leaves this one alone: 0 is not a lower ` +
+        `${m.name}: ${m.ledger} records ${m.recorded}, and tsc now reports 0 -- graduation candidate.\n` +
+          `    ${graduationRemedy(m)}\n` +
+          `    \`--lower\` deliberately leaves this one alone: 0 is not a lower ` +
           `ceiling, it is a graduation, and an entry recording 0 fails the structural half of this gate.`,
       );
     } else if (m.actual < m.recorded) {
@@ -4321,6 +4434,101 @@ function selfTest() {
           'assertion above proves nothing.',
       );
     }
+  }
+
+  // ── The graduation remedy is a function of the LEDGER (#11491) ─────────────
+  //
+  // The defect this replaces was a message that read CORRECTLY on the ledger it
+  // happened to be written for and wrongly on the other one, so every assertion
+  // here comes in a pair: the remedy that must be present, and the remedy that
+  // must be ABSENT. A regex that only checks presence would stay green if the
+  // two branches were re-merged into one sentence -- which is precisely the
+  // state this replaces, and the state a well-meaning "simplification" returns
+  // to.
+  //
+  // The graduation note is a NOTE in every case below. None of these fixtures
+  // produces a problem, and an implementation that made a graduation red would
+  // fail the `problems.length` half of every one of them.
+  const gradNote = (m) => evaluateMeasurements([{ recorded: 7, actual: 0, name: 'a', ...m }]).notes[0];
+  const debtGrad = gradNote({ ledger: 'DEBT' });
+  const testDebtGrad = gradNote({ ledger: 'TEST_DEBT' });
+  const rootGrad = gradNote({ ledger: 'DEBT', isRoot: true });
+
+  const ADD_SCRIPT = '`"typecheck": "tsc --noEmit"`';
+  const gradCases = [
+    {
+      label: 'DEBT graduation offers the script remedy -- that ledger IS "src does not check"',
+      message: debtGrad,
+      present: [ADD_SCRIPT],
+      absent: ['drop the test exclusion'],
+      why: 'a DEBT graduate has no `typecheck` script at all; naming the test exclusion here sends the '
+        + 'author to edit a tsconfig that is not the hole.',
+    },
+    {
+      label: 'TEST_DEBT graduation does NOT tell the author to add a script it already has',
+      message: testDebtGrad,
+      present: ['put the hidden test files in front of tsc'],
+      absent: [ADD_SCRIPT],
+      why: 'measured at e47d5ef61: 19 of 19 TEST_DEBT entries already declare a `typecheck` script, so '
+        + 'that remedy is a no-op on every one of them -- the misfire #11491 was filed on.',
+    },
+    {
+      label: 'TEST_DEBT graduation names the gate that DECIDES whether the exclusion route is available',
+      message: testDebtGrad,
+      present: ['check:type-source-resolution', 'SHRINK-ONLY', 'tsconfig.test.json'],
+      absent: [],
+      why: 'the exclusion route reds that gate on 14 of the 18 entries that have an exclusion, and this '
+        + 'gate never runs it. A message the author has to read a second gate\'s SOURCE to act on is the '
+        + 'half of #11491 that a correct-but-terse rewrite would leave unfixed.',
+    },
+    {
+      label: 'the workspace root graduates through `typecheck:root`, never through `typecheck`',
+      message: rootGrad,
+      present: ['`typecheck:root`', 'aggregator'],
+      absent: [ADD_SCRIPT],
+      why: 'the root\'s `typecheck` slot is `turbo run typecheck`; an author who overwrote it with '
+        + '`tsc --noEmit` would stop every other package from being type-checked and this gate would '
+        + 'still go green.',
+    },
+    {
+      label: 'an unrecognised ledger inherits NEITHER remedy',
+      message: gradNote({ ledger: 'FUTURE_DEBT' }),
+      present: ['FUTURE_DEBT'],
+      absent: [ADD_SCRIPT, 'drop the test exclusion', 'check:type-source-resolution'],
+      why: 'a third ledger silently receiving DEBT\'s advice is how this message was wrong for TEST_DEBT '
+        + 'for its whole life. Saying less is the only safe default.',
+    },
+  ];
+  for (const c of gradCases) {
+    for (const needle of c.present) {
+      if (!c.message.includes(needle))
+        failures.push(`#11491 graduation remedy — ${c.label}: message does not contain ${needle}. ${c.why}`);
+    }
+    for (const needle of c.absent) {
+      if (c.message.includes(needle))
+        failures.push(
+          `#11491 graduation remedy — ${c.label}: message STILL contains ${needle}, which is the other `
+            + `ledger's remedy. ${c.why}`,
+        );
+    }
+  }
+
+  // THE CONTROL. Splitting the remedy must not move the half of this note that
+  // is about `--lower` rather than about either ledger: it is the same sentence
+  // for a graduation from anywhere, and it is the one that stops a graduation
+  // being auto-written into the ledger as a 0. Pinned across ALL branches, so a
+  // future branch that forgets to carry it is named here rather than noticed
+  // when someone runs `--lower` on a graduate.
+  const LOWER_CLAUSE =
+    '`--lower` deliberately leaves this one alone: 0 is not a lower ceiling, it is a graduation, and an '
+    + 'entry recording 0 fails the structural half of this gate.';
+  for (const [what, message] of [['DEBT', debtGrad], ['TEST_DEBT', testDebtGrad], ['the root', rootGrad]]) {
+    if (!message.includes(LOWER_CLAUSE))
+      failures.push(
+        `#11491 graduation remedy — the \`--lower\` clause is missing from the ${what} branch. That `
+          + 'sentence is ledger-independent and must survive the split; without it a graduate reads as '
+          + 'something `--lower` could write back as 0, which fails the structural half of this gate.',
+      );
   }
 
   // The counter is the other half that can be silently wrong: over-count and

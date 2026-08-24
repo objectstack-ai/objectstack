@@ -231,7 +231,8 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 import { parseSourceFile } from './ts-parse.mjs';
 

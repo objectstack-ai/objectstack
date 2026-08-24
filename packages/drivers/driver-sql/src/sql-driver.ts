@@ -4576,14 +4576,30 @@ export class SqlDriver implements IDataDriver {
    */
   private static readonly DIALECT_CONNECT_TIMEOUT: Record<string, { key: string; urlKey: string }> =
     Object.fromEntries<{ key: string; urlKey: string }>([
-      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb`:
-      // a separate knex dialect, but one that reaches the server through the
-      // same `pg` driver and therefore takes the same knob. Deriving the pg
-      // arm from {@link POSTGRES_EMIT_CLIENTS} is what keeps this table from
-      // drifting away from the getters again (#11550) — widening recognition
-      // now widens this with it. `redshift` still carries no entry; see the
-      // note in {@link withConnectBound} for why that absence is load-bearing.
-      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb'].map(
+      // Every spelling that means Postgres SQL, EXTENDED by `cockroachdb` and
+      // `redshift`: separate knex dialects, but ones that reach the server
+      // through the same `pg` driver and therefore take the same knob. Knex's
+      // `Client_Redshift` literally `extends Client_PG`, so the settings object
+      // it hands to `pg.Client` honours `connectionTimeoutMillis` exactly as
+      // `pg` does. Deriving the pg arm from {@link POSTGRES_EMIT_CLIENTS} is
+      // what keeps this table from drifting away from the getters again
+      // (#11550) — widening recognition now widens this with it.
+      //
+      // `redshift`'s row arrived with #11784. It had the knob and would have
+      // obeyed it, but carried no entry, so its connection attempt fell through
+      // to the strictly looser 15s `pool.createTimeoutMillis` backstop while
+      // the docblock above called 10s "the effective bound". Nothing errored
+      // and nothing was logged — the bound was simply 50% looser, for one
+      // client name.
+      //
+      // ⚠️ This arm and {@link POSTGRES_WIRE_CLIENTS} now happen to hold the
+      // same five names. That is a fact about today's membership, NOT an
+      // invariant, and must not be refactored into one: the two answer
+      // different questions (how do I spell the connect timeout vs. which npm
+      // package parses the wire), and unioning them would hand `redshift` and
+      // `cockroachdb` SQL-emission identity as a silent side effect — the open
+      // decision #11756, and #11550's subject, not this table's to make.
+      ...[...SqlDriver.POSTGRES_EMIT_CLIENTS, 'cockroachdb', 'redshift'].map(
         (c): [string, { key: string; urlKey: string }] =>
           [c, { key: 'connectionTimeoutMillis', urlKey: 'connectionString' }],
       ),
@@ -4606,10 +4622,24 @@ export class SqlDriver implements IDataDriver {
     // `!dialect` — sqlite, or a client with no connect-timeout knob — means
     // there is no TIMEOUT to inject. It deliberately does not skip the session
     // pins below: those answer a different question (what does a value MEAN on
-    // this connection), and the two lists are not the same list. Measured while
-    // fixing #11389: `redshift` speaks the pg wire protocol, and therefore
-    // needs the calendar-day pin, but carries no entry here — so a `return`
-    // placed at this point silently opted it out of a fix it needs.
+    // this connection), and the two lists are not the same list.
+    //
+    // ⚠️ The worked example that used to stand here was RETIRED by #11784,
+    // which gave `redshift` the connect-timeout row it was missing. Until then
+    // `redshift` was in {@link POSTGRES_WIRE_CLIENTS} (so it needed #11389's
+    // calendar-day pin) yet absent from {@link DIALECT_CONNECT_TIMEOUT} — so a
+    // `return` placed at this point silently opted it out of a fix it needed.
+    // That was measured, not hypothetical, which is why the example is recorded
+    // here rather than dropped.
+    //
+    // The hazard outlives the example. Every client needing a session pin
+    // happens to have a timeout row TODAY; that is current membership, not a
+    // property either table promises. The next pg-wire client added without a
+    // connect-timeout knob restores the exact bug — and it would fail the way
+    // this one did, in silence, with every test green. So: no `return` here,
+    // and the two tables stay separate. The tripwire that goes red the moment
+    // those memberships diverge again lives in
+    // `sql-driver-11389-date-tz-skew.test.ts`.
     const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
     if (dialect) {
       const conn = knexConfig.connection;

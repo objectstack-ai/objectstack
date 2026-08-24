@@ -166,6 +166,7 @@
  * shown to work by the population.
  */
 
+import { requireDependency } from './import-prerequisite.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -593,7 +594,7 @@ export function bareDiscoveryLoop(discovery) {
 // -- Entry points -------------------------------------------------------------
 
 async function loadYamlParser() {
-  const { parse } = await import('yaml');
+  const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   return parse;
 }
 

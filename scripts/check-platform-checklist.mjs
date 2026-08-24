@@ -41,7 +41,11 @@
 //     key of its own area's area-level `fixtures` block, or `<area>:<recipe>`
 //     naming one another area owns — because an item that reads as provisioned
 //     and is not costs the run the clauses the recipe was meant to unblock,
-//     mid-run and on a live boot (see the provisioning block below).
+//     mid-run and on a live boot (see the provisioning block below);
+//   - and the reverse: every area-level recipe is referenced by some item's
+//     `use`. A recipe nobody opts into is dead text a runner may still replay.
+//     Both directions together are what the trap vocabulary beside them has
+//     always had — used implies documented, documented implies used.
 //
 // It does NOT judge whether an item is testable or its oracle sufficient — no
 // static check can. It guarantees the *structure* a run can be trusted against.
@@ -252,13 +256,61 @@ function trapProblems(item, vocabulary) {
 // form stays exactly as valid as it was — every reference already written
 // resolves unchanged; the qualifier is an addition, not a migration.
 //
-// Deliberately still NOT checked: the reverse direction, a recipe no item
-// references. It was left out while cross-area reuse was unspelled, because
-// redding it would have settled that convention by accident in the direction
-// of "recipes are area-local". That reason has now expired — with a qualified
-// spelling available, an unreferenced recipe is unambiguously dead text — but
-// turning it on is a separate change with its own blast radius, tracked rather
-// than smuggled in here (#11506).
+// ── The reverse direction: a recipe no item references (#11506) ────────────
+// This was deliberately deferred, and the deferral's stated reason has since
+// been discharged rather than forgotten — which is the only thing that makes
+// turning it on now correct rather than merely overdue.
+//
+// The reason: while cross-area reuse had no spelling, a recipe whose only
+// consumer lived in another area could be referenced ONLY from that item's
+// `knownGaps` prose, invisible here. Redding the unreferenced direction would
+// then have answered the open cross-area question by accident, in the
+// direction of "recipes are area-local" — a convention ruling smuggled in as a
+// mechanical check. Discharged by the maintainer's option-A ruling of
+// 2026-08-22 (#10593 gap 2), implemented directly above: EVERY legitimate
+// consumer can now express itself as a `use`, from any area. So a recipe with
+// no `use` pointing at it is no longer "possibly referenced from prose we
+// cannot see" — it is dead text, and this check may say so.
+//
+// Three definitional edges, each decided here rather than left to the reader:
+//
+//   1. WHAT COUNTS AS A REFERENCE — a resolved `fixtures.provisioning.use`,
+//      and nothing else. A recipe NAME appearing in prose does not count, and
+//      several do appear: `automation.json` and `search.json` both open their
+//      block with "Shape copied from qa-scratch-authz", which is provenance,
+//      not consumption. Counting prose would restore exactly the invisible,
+//      un-drift-checkable pointer the qualified spelling exists to retire.
+//
+//   2. RETIRED ITEMS COUNT — "referenced" means referenced by ANY item, not
+//      by an active one. This is mechanical, not a convention call, and the
+//      forward direction is what forces it: `provisioningProblems` runs on
+//      every item regardless of `status`, so a retired item's `use` must still
+//      resolve, so its recipe must still exist. Were "referenced" active-only,
+//      a recipe whose last consumer retired would be flagged here, and
+//      deleting it to clear that flag would dangle the retired item's `use`
+//      and red the forward direction — two checks in the same gate made
+//      mutually unsatisfiable, escapable only by editing a retired item, which
+//      the append-only lifecycle forbids. Referenced-at-all is the only
+//      self-consistent reading, and it is pinned in the battery below.
+//
+//   3. IT IS SUPPRESSED WHILE ANY `use` DANGLES. An unresolved reference means
+//      the consumer graph is incomplete, so "nobody references this recipe" is
+//      not yet a statement worth making: the intended consumer may BE the
+//      broken reference. One typo would otherwise print twice — once against
+//      the item that has it, and once against the perfectly correct recipe it
+//      meant to name, inviting the author to delete live text to clear a
+//      message caused by a neighbouring typo. Nothing is hidden by waiting:
+//      the run is already red from the dangling reference, and this direction
+//      speaks on the next one.
+//
+// No waiver spelling is offered for a deliberately-kept-but-unreferenced
+// recipe, deliberately: the population needing one is zero (all four recipes
+// are referenced, by seven items) and a waiver field invented ahead of its
+// first real case is a guess at what that case will want. The failure names
+// the two remedies that exist today — give it a consumer, or delete it. A
+// genuine keep-it-anyway case is the moment to decide the spelling, on the
+// evidence of that case; #10885 (recipes carry no `revision`/`history` of
+// their own) may well answer it as a retired recipe rather than a waived one.
 //
 // `$`-prefixed keys are annotations, not recipes — every area `fixtures` block
 // opens with a `$comment` stating the block's purpose and replay rule — so
@@ -358,6 +410,62 @@ function provisioningProblems(item, ownArea, recipesByArea) {
       ` — ${parsed.qualified ? `\`${targetArea}\`` : 'this area'} offers ${[...recipes].map((k) => `\`${k}\``).join(', ')}${hint || '.'}`,
   );
   return out;
+}
+
+/**
+ * The recipe one item's `fixtures.provisioning` points at, as
+ * `{ area, recipe }` — or `null` when it opts into nothing.
+ *
+ * Deliberately status-INDEPENDENT (edge 2 above): a retired item's `use` is
+ * still a reference, because the forward direction still requires it to
+ * resolve. Deliberately shape-tolerant in the other direction: a malformed
+ * `use` names nothing and returns `null` rather than a half-parsed target, so
+ * a broken reference can never accidentally keep a recipe alive.
+ *
+ * `ownArea` supplies the area half of an unqualified spelling — the same
+ * `parsed.area ?? ownArea` resolution the forward direction performs, so the
+ * two directions cannot disagree about which recipe a `use` addresses.
+ */
+function referencedRecipe(item, ownArea) {
+  const use = item?.fixtures?.provisioning?.use;
+  if (typeof use !== 'string' || !use.trim()) return null;
+  const parsed = parseUse(use);
+  if (parsed.malformed) return null;
+  return { area: parsed.area ?? ownArea, recipe: parsed.recipe };
+}
+
+/**
+ * The recipes no item references, as `{ area, recipe }` in area-then-key order.
+ *
+ * `recipesByArea` is the recipe universe (`$…` annotations already excluded by
+ * `areaRecipeKeys`); `referencedByArea` maps an area to the set of ITS recipe
+ * keys some item addressed, collected from every area via `referencedRecipe`.
+ *
+ * `danglingRefs` is the count of items whose `use` did not resolve, and a
+ * non-zero count returns EMPTY by design (edge 3 above): with the consumer
+ * graph broken, an unreferenced verdict could name a correct recipe whose only
+ * consumer is the very reference that is misspelt.
+ */
+function unreferencedRecipes(recipesByArea, referencedByArea, danglingRefs) {
+  if (danglingRefs > 0) return [];
+  const out = [];
+  for (const [area, keys] of recipesByArea) {
+    const hit = referencedByArea.get(area);
+    for (const recipe of keys) {
+      if (!hit?.has(recipe)) out.push({ area, recipe });
+    }
+  }
+  return out;
+}
+
+/** How an unreferenced recipe is reported — one place, so the battery pins the text a reader gets. */
+function unreferencedRecipeMessage(area, recipe) {
+  return (
+    `area-level recipe "${recipe}" is referenced by no item — dead text. A recipe exists to be opted into:` +
+    ` give it a consumer (\`"use": "${recipe}"\` from an item in this area, or \`"use": "${area}${USE_SEP}${recipe}"\` from an item in any other),` +
+    ' or delete the recipe. Since the area-qualified spelling was ruled (2026-08-22, #10593 gap 2) every legitimate consumer can express itself as a `use`,' +
+    ' so an unreferenced recipe is no longer possibly-referenced-from-prose — it is a call sequence a runner may still replay for nothing.'
+  );
 }
 
 /**
@@ -536,14 +644,117 @@ function selfTestProvisioningUse() {
   return { checked, failures };
 }
 
+/**
+ * The positive control for the unreferenced-recipe direction — and the one in
+ * this file that carries the most weight, because its subject population on
+ * the real ledger is ZERO and is expected to stay that way.
+ *
+ * Every other check here is exercised by the tree it validates: 207 items
+ * carry ids, revisions and traps, so a checker that stopped firing would be
+ * caught by the next real defect. This direction validates FOUR recipes, all
+ * of them referenced, and a healthy ledger keeps them referenced — so the real
+ * data can never distinguish "this direction is working" from "this direction
+ * was deleted". Its green is informative only because the battery below fires
+ * it on every invocation, on fixtures that are unreferenced on purpose.
+ *
+ * That is the same silent-success argument the trap-vocabulary block above
+ * makes (#4690), sharpened: there, a broken parse needed a renamed heading to
+ * go quiet; here, zero output is the CORRECT output, permanently.
+ */
+function selfTestUnreferencedRecipes() {
+  const failures = [];
+  let checked = 0;
+  const t = (what, ok) => {
+    checked++;
+    if (!ok) failures.push(what);
+  };
+
+  // The same miniature ledger the resolve battery uses: two areas that own
+  // recipes, and one that owns none (the shape 12 of 15 area files have).
+  const byArea = new Map([
+    ['attachments-storage', areaRecipeKeys({ fixtures: { $comment: 'the block purpose and replay rule', 'qa-scratch-authz': {}, 'qa-media-constraints': {} } })],
+    ['search', areaRecipeKeys({ fixtures: { $comment: 'x', 'qa-contributor-bound-member': {} } })],
+    ['records-forms', areaRecipeKeys({ area: 'records-forms', items: [] })],
+  ]);
+  const item = (use, extra = {}) => ({ ...extra, fixtures: { app: 'showcase', provisioning: { use, why: 'which clauses it unblocks' } } });
+
+  // Compose the real pipeline rather than hand-building the referenced map:
+  // collection and verdict are two halves of one direction, and a battery that
+  // tested only the verdict would pass while collection dropped every
+  // cross-area reference on the floor.
+  const flag = (consumers, dangling = 0) => {
+    const referenced = new Map();
+    for (const [it, from] of consumers) {
+      const r = referencedRecipe(it, from);
+      if (!r) continue;
+      if (!referenced.has(r.area)) referenced.set(r.area, new Set());
+      referenced.get(r.area).add(r.recipe);
+    }
+    return unreferencedRecipes(byArea, referenced, dangling);
+  };
+  const ALL = [
+    [item('qa-scratch-authz'), 'attachments-storage'],
+    [item('qa-media-constraints'), 'attachments-storage'],
+    [item('qa-contributor-bound-member'), 'search'],
+  ];
+
+  // ── The direction fires. This is the assertion the whole change exists for.
+  const none = flag([]);
+  t('R1 a recipe NO item references is flagged — the direction is not vacuous', none.length === 3);
+  t('R2 every unreferenced recipe is named with the area that owns it', none.some((r) => r.area === 'search' && r.recipe === 'qa-contributor-bound-member'));
+
+  const msg = unreferencedRecipeMessage('search', 'qa-contributor-bound-member');
+  t('R3 the message names the recipe', msg.includes('"qa-contributor-bound-member"'));
+  t('R4 it offers the own-area remedy', msg.includes('`"use": "qa-contributor-bound-member"`'));
+  t('R5 it offers the cross-area remedy in the ruled spelling', msg.includes('`"use": "search:qa-contributor-bound-member"`'));
+  t('R6 and it offers deletion — the other legitimate answer, so the fix is not read as "always add a consumer"', msg.includes('delete the recipe'));
+
+  // ── It stays green on a healthy ledger. The other half of non-vacuity: a
+  // direction that flagged a referenced recipe would red a correct tree.
+  t('R7 a fully referenced ledger is clean', flag(ALL).length === 0);
+  t('R8 several items sharing one recipe is not a problem — that is what a recipe is for', flag([...ALL, [item('qa-scratch-authz'), 'attachments-storage']]).length === 0);
+
+  // ── The case the deferral was made for, now the case that proves it expired.
+  // Before the qualified spelling this reference could only be prose, so this
+  // recipe would have read as unreferenced and the flag would have been WRONG.
+  const crossOnly = flag([[item('search:qa-contributor-bound-member'), 'records-forms'], [item('qa-scratch-authz'), 'attachments-storage'], [item('qa-media-constraints'), 'attachments-storage']]);
+  t('R9 a recipe referenced ONLY from another area is not flagged — the deferral\'s reason, discharged', crossOnly.length === 0);
+  t('R10 a qualified reference is credited to the area that OWNS the recipe, not the one that wrote it', flag([[item('search:qa-contributor-bound-member'), 'records-forms']]).every((r) => r.area !== 'search'));
+
+  // ── Edge 2: retired items count. Pinned because the opposite reading is
+  // superficially attractive ("a retired item is not run") and would make this
+  // direction and the resolve above mutually unsatisfiable.
+  const retiredConsumer = flag([[item('qa-scratch-authz', { status: 'retired' }), 'attachments-storage'], [item('qa-media-constraints'), 'attachments-storage'], [item('qa-contributor-bound-member'), 'search']]);
+  t('R11 a reference from a RETIRED item still counts — its `use` must still resolve, so its recipe must still exist', retiredConsumer.length === 0);
+
+  // ── Edge 3: suppression while the graph is broken.
+  t('R12 the direction is suppressed while any `use` dangles — a typo must not also accuse the recipe it meant', flag([], 1).length === 0);
+  t('R13 and it speaks again once nothing dangles', flag([], 0).length === 3);
+
+  // ── Things that are not references.
+  t('R14 an item with no provisioning block references nothing', flag([[{ fixtures: { app: 'showcase' } }, 'search']]).length === 3);
+  t('R15 an item with no fixtures at all references nothing', referencedRecipe({}, 'search') === null);
+  t('R16 a malformed `use` references nothing — it cannot keep a recipe alive', referencedRecipe(item('a:b:c'), 'search') === null);
+  t('R17 a non-string `use` references nothing', referencedRecipe(item(42), 'search') === null);
+
+  // ── `$`-annotations are not recipes, so they are never flagged as unreferenced.
+  // Every real area block opens with one, so the opposite would red all 15 files.
+  t('R18 a `$comment` is never reported unreferenced', flag(ALL).length === 0 && none.every((r) => !r.recipe.startsWith('$')));
+  t('R19 an area that defines no recipes contributes nothing to flag', !none.some((r) => r.area === 'records-forms'));
+
+  return { checked, failures };
+}
+
 if (process.argv.slice(2).includes('--self-test')) {
   const trap = selfTestTrapVocabulary();
   const prov = selfTestProvisioningUse();
-  const failures = [...trap.failures, ...prov.failures];
+  const unref = selfTestUnreferencedRecipes();
+  const failures = [...trap.failures, ...prov.failures, ...unref.failures];
   if (failures.length === 0) {
     console.log(
-      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
-        ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes.',
+      `✓ check-platform-checklist --self-test: ${trap.checked + prov.checked + unref.checked} assertions — the trap-table extractor reads a good table and REFUSES an empty/renamed/reshaped one;` +
+        ' `fixtures.provisioning.use` resolves both spellings (own-area key and `<area>:<recipe>`) and fires on all three dangling shapes;' +
+        ' and the unreferenced-recipe direction fires on a recipe nobody uses while leaving a cross-area consumer, a retired consumer and a `$`-annotation alone.',
     );
     process.exit(0);
   }
@@ -566,6 +777,17 @@ const provisioningControl = selfTestProvisioningUse();
 if (provisioningControl.failures.length) {
   console.error("check-platform-checklist: the provisioning-resolve check's own positive control FAILED — a `use` that resolves to nothing would pass, which is the exact defect this check was added to close.\n");
   for (const f of provisioningControl.failures) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+
+// Same again for the reverse direction, and here the control is not a
+// safeguard on top of the real subject — it IS the only subject. All four
+// recipes on the real ledger are referenced, so this direction's output is
+// permanently empty and its green says nothing on its own.
+const unreferencedControl = selfTestUnreferencedRecipes();
+if (unreferencedControl.failures.length) {
+  console.error('check-platform-checklist: the unreferenced-recipe direction\'s own positive control FAILED — a recipe no item references would pass unreported, and because every real recipe IS referenced, nothing else in this gate would ever notice.\n');
+  for (const f of unreferencedControl.failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
 
@@ -599,6 +821,8 @@ const allIds = new Map(); // id -> file
 const allItems = [];
 let recipeRefs = 0; // item references that resolved to one
 let qualifiedRefs = 0; // ...of which named another area explicitly
+let danglingRefs = 0; // ...and those that resolved to nothing (suppresses the reverse direction)
+const referencedByArea = new Map(); // owning area -> the set of ITS recipe keys some item addressed
 
 // Pass 1 — parse every area file. A qualified `use` resolves against ANOTHER
 // area's block, so the recipe universe has to be complete before any item is
@@ -670,9 +894,17 @@ for (const { file, stem, doc } of parsed) {
 
     const useProblems = provisioningProblems(item, stem, recipesByArea);
     for (const msg of useProblems) where(msg);
+    if (useProblems.length) danglingRefs++;
     if (item.fixtures?.provisioning !== undefined && useProblems.length === 0) {
       recipeRefs++;
       if (parseUse(item.fixtures.provisioning.use).qualified) qualifiedRefs++;
+      // The reverse direction's input. Credited to the area that OWNS the
+      // recipe, which for a qualified `use` is not the area writing it.
+      const ref = referencedRecipe(item, stem);
+      if (ref) {
+        if (!referencedByArea.has(ref.area)) referencedByArea.set(ref.area, new Set());
+        referencedByArea.get(ref.area).add(ref.recipe);
+      }
     }
 
     if (item.status === 'retired') {
@@ -707,6 +939,15 @@ for (const { file, stem, doc } of parsed) {
       }
     }
   }
+}
+
+// The reverse direction, once every area has been walked — a recipe may be
+// referenced from any area, so like the resolve above it cannot be judged
+// until the whole ledger has been read. Reported against the file that OWNS
+// the recipe, with no item id: an unreferenced recipe is an area-level fact,
+// and the item that would fix it does not exist yet.
+for (const { area, recipe } of unreferencedRecipes(recipesByArea, referencedByArea, danglingRefs)) {
+  err(`${area}.json`, null, unreferencedRecipeMessage(area, recipe));
 }
 
 // ── Variants-freshness ratchet ──────────────────────────────────────────────
@@ -867,9 +1108,14 @@ if (errors.length) {
 
 const total = allItems.length;
 const active = allItems.filter(({ item }) => item.status === 'active').length;
+// Counted, not inferred. On this path it necessarily equals `recipeTotal` —
+// an unreferenced recipe would have exited above — but a line that RESTATES a
+// constant reports nothing, and this direction's whole risk is a green that
+// looks the same whether it ran or not.
+const recipesReferenced = [...recipesByArea].reduce((n, [area, keys]) => n + keys.filter((k) => referencedByArea.get(area)?.has(k)).length, 0);
 console.log(
   `check-platform-checklist: OK — ${files.length} areas, ${total} items (${active} active); coverage: ${mappedCount} kinds mapped, ${waivedCount} waived;` +
     ` traps: ${TRAPS.size} documented, ${usedTraps.size} in use;` +
-    ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified)` +
-    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve assertions).`,
+    ` provisioning: ${recipeTotal} area recipes, ${recipeRefs} item references resolved (${qualifiedRefs} area-qualified), ${recipesReferenced}/${recipeTotal} recipes referenced;` +
+    ` (self-checks: ${trapControl.checked} trap-vocabulary + ${provisioningControl.checked} provisioning-resolve + ${unreferencedControl.checked} unreferenced-recipe assertions).`,
 );

@@ -119,7 +119,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import Slugger from 'github-slugger';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const Slugger = await requireDefaultExport('github-slugger', () => import('github-slugger'), import.meta.url);
 
 import { stripCodeSpans, stripFencedBlocks } from './check-adr-links.mjs';
 import { isEntrypoint } from './invoked-as.mjs';

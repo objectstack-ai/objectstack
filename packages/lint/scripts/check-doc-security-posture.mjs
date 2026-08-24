@@ -123,8 +123,9 @@ import { join, relative, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
-import ts from 'typescript';
-import { validateSecurityPosture, SECURITY_CBP_NO_RELATION } from '@objectstack/lint';
+import { requireDefaultExport, requireDependency } from '../../../scripts/import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
+const { validateSecurityPosture, SECURITY_CBP_NO_RELATION } = await requireDependency('@objectstack/lint', () => import('@objectstack/lint'), import.meta.url);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
