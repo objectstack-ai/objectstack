@@ -95,6 +95,18 @@
  *   Total 6 of 11 red, as predicted. Predictions are left as written, per this
  *   repo's rule that a wrong prediction is reported rather than fitted to the
  *   measurement.
+ *
+ * ⚠️ One process note worth leaving for the next ablation in this package,
+ * because it is the exact failure the on-disk rule exists to catch: the trap's
+ * own restore confirmation was VOID on the first run. The `trap` fired with the
+ * shell's cwd inside `packages/rest`, so both the `git checkout <branch> --
+ * packages/rest/src/…` restore and the `git diff --quiet -- <same path>` check
+ * were given a pathspec relative to the WRONG directory — git matched nothing,
+ * `git diff` reported no differences, and the script printed "RESTORED" over a
+ * tree that was still mutated (and staged). It was caught only by re-running
+ * the greps from the repository root afterwards. A restore leg confirms nothing
+ * unless its pathspec resolves; anchor it with an absolute path or an explicit
+ * `-C <root>`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
