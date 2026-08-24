@@ -111,6 +111,51 @@
 //     genuine engine double out of scan scope, which is the one error this gate
 //     cannot report. One ledger row is the cheaper half.
 //
+// ## Two admission routes: sibling INFERENCE, and a DECLARED contract (#11626)
+//
+// Everything above describes discovery inferring "is this an engine?" from the
+// members a literal declares, which needs the verb plus two engine siblings to
+// separate a fake engine from every cache and router in the repo. That
+// threshold is right for inference and it had one structural consequence,
+// measured rather than argued: a double declaring ONLY the verb under test was
+// never discovered, so it could never be pinned, and this script's headline
+// number excluded the whole minimal class without saying so.
+//
+// The half that made it a defect rather than a coverage gap is what it asked
+// of an author. The only way into the ratchet was to give the double
+// `find`/`insert` siblings that exist to be COUNTED and that the test never
+// calls -- so the gate's own admission criterion rewarded padding a double with
+// ceremony, and a reader of a padded double cannot tell which verbs are
+// load-bearing. That is the property a test double exists to have.
+//
+// So there is a second route, and it is a different KIND of evidence rather
+// than a looser guess: the construct DECLARES the contract it implements
+// (`const engine: IDataEngine = …`, `… as unknown as IDataEngine`, a factory's
+// return type, `class F implements IDataEngine`). Declared means enforced. The
+// criterion, the measurement behind it and the import test that keeps it from
+// being a spelling match all live at ENGINE_CONTRACT_NAME below.
+//
+// What the second route deliberately does NOT do is relax the first. Measured
+// on the corpus this landed against: dropping the sibling threshold to zero
+// admits 74 constructs, of which 32 are HTTP routers and servers whose
+// `delete` is the HTTP verb (7 of them saying so with an explicit
+// `IHttpServer`), and most of the remaining 40 are stores and persistence
+// facades declared as some other contract entirely -- `EmailPersistence`,
+// `SettingsSecretStore` -- or as `any`. Exactly 2 declare `IDataEngine`, both single-verb
+// doubles already calling `assertEngineUpdateDispatch` and getting nothing for
+// it. Reddening correct code is the one cost this gate's ledger cannot absorb.
+//
+// ⛔ THE RESIDUAL GAP, stated because a closed-sounding section is worse than
+// an open one: a single-verb double that declares NOTHING -- `const engine =
+// { async update(o, data, opts) { … } }`, no annotation, no assertion -- is
+// still outside discovery, and this route does not reach it. Nothing in the
+// output will say so, which is the same shape as the defect this section
+// closes, one step narrower. It is left open deliberately: the only evidence
+// available for such a construct is its member names, and that is the
+// inference route, at a threshold already measured to sweep in routers by the
+// dozen. The remedy an author has is now cheap and honest -- annotate the
+// double with the contract it stands in for -- where before it was to pad it.
+//
 // ## Invariants
 //
 // Each holds PER SLICE -- a green `delete` slice says nothing about `update`,
@@ -437,6 +482,77 @@ const REPOSITORY_ONLY_MEMBERS = new Set(['updateById', 'deleteById']);
  * `object: string`).
  */
 const OBJECT_NAME_PARAM = /^_*(o|obj|object|objectName|objectname|name|table|tableName|t)$/i;
+
+/**
+ * The DECLARED engine contract: the interface a construct can name to say what
+ * it IS, rather than leaving the gate to infer it from member names (#11626).
+ *
+ * ## Why a second admission route exists at all
+ *
+ * Discovery's sibling test asks "does this literal LOOK like an engine?" and it
+ * needs two engine siblings to answer, because `{ update }` alone is also every
+ * cache, every store mock and every router in the repo. That threshold is
+ * correct for inference and it has one structural consequence: a double that
+ * declares ONLY the verb under test can never be discovered, so it can never be
+ * pinned, and the headline "N pinned" silently excludes the whole minimal class.
+ *
+ * The half that makes it a defect rather than a coverage gap is what it asks of
+ * an author. The only way into the ratchet was to give the double verbs its
+ * test never calls -- `find`/`insert` siblings that exist to be counted -- so
+ * the gate's admission criterion actively rewarded padding a double with
+ * ceremony. A reader then cannot tell which verbs are load-bearing, which is
+ * the property a double exists to have.
+ *
+ * ## Why a DECLARATION and not a looser inference
+ *
+ * Relaxing the sibling threshold was measured and is not available: on the tree
+ * this landed against, dropping it to zero admits 74 constructs, of which 32
+ * are HTTP routers and servers whose `delete` is the HTTP verb
+ * (`{ delete, get, post, routes }`, `{ close, delete, get, listen, patch, post,
+ * put, use }`). Reddening correct code is the one thing this gate's ledger
+ * cannot absorb -- its readability is its whole value -- so inference stays
+ * where it is.
+ *
+ * What a declaration adds is not a better guess, it is a different KIND of
+ * evidence: the author has written down which contract the object implements.
+ * `const engine: IDataEngine = { … }`, `… as unknown as IDataEngine`,
+ * `function make(): IDataEngine`, `class F implements IDataEngine`. That is
+ * decidable with no heuristic and no member-name guessing, and it is the repo's
+ * standing rule that declared means enforced: an object that declares itself
+ * the engine is held to the engine's dispatch contract at any sibling count.
+ *
+ * Measured on the same corpus: exactly 2 of those 74 declare `IDataEngine` --
+ * `metadata/src/loaders/database-loader-update-id-fold-wins.test.ts` and
+ * `services/service-settings/src/settings-engine-id-fold-wins.test.ts`, both
+ * single-verb doubles that were ALREADY calling `assertEngineUpdateDispatch`
+ * and getting no protection for it. The other 72 declare `IHttpServer` (7),
+ * `EmailPersistence`, `SettingsSecretStore`, `any`, or nothing at all. So this
+ * route reddens nothing on the tree it landed against and never could: it only
+ * admits constructs, and every construct it admits was already pinned.
+ *
+ * ## The import test, and why it is not optional
+ *
+ * The name alone is not the evidence -- a file-local interface that happens to
+ * be called `IDataEngine` is not this contract. So the local name must be BOUND
+ * by an import from where the contract lives, exactly as `pinnedImportsOf` does
+ * for the predicates and for the same reason: one name, one meaning, or the
+ * criterion is a spelling match wearing a criterion's costume.
+ *
+ * The module list is measured rather than guessed -- every spelling of this
+ * import in the scanned corpus on 2026-08-24: `@objectstack/spec/contracts`
+ * (36 files), `@objectstack/core` (5), and the relative `./data-engine` inside
+ * `packages/spec` itself (2). Re-derive with
+ * `grep -rhn --include=*.test.ts IDataEngine packages examples | grep -o "from '[^']*'"`
+ * before adding one.
+ */
+const ENGINE_CONTRACT_NAME = 'IDataEngine';
+
+/** Where {@link ENGINE_CONTRACT_NAME} may legitimately be imported from. */
+const ENGINE_CONTRACT_MODULES = [
+  /^@objectstack\/spec(\/contracts)?$/,
+  /^@objectstack\/core$/,
+  /(^|\/)data-engine(\.js)?$/,
+];
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 
@@ -923,6 +1039,101 @@ function pinnedImportsOf(sourceFile, slice) {
   return found;
 }
 
+/**
+ * LOCAL names in this file bound to the ENGINE CONTRACT interface by an import
+ * from one of its homes. Mirrors `pinnedImportsOf` deliberately: same keying on
+ * the local binding (so `import type { IDataEngine as Engine }` still counts),
+ * same refusal to credit a same-named local look-alike.
+ */
+function engineContractNamesOf(sourceFile) {
+  const found = new Set();
+  for (const st of sourceFile.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+    if (!ENGINE_CONTRACT_MODULES.some((re) => re.test(st.moduleSpecifier.text))) continue;
+    const named = st.importClause?.namedBindings;
+    if (!named || !ts.isNamedImports(named)) continue;
+    for (const el of named.elements) {
+      if ((el.propertyName ?? el.name).text === ENGINE_CONTRACT_NAME) found.add(el.name.text);
+    }
+  }
+  return found;
+}
+
+/**
+ * Does this TYPE NODE assert that the value IS the engine contract?
+ *
+ * An INTERSECTION counts (`IDataEngine & { rows: Map<string, any> }` is the
+ * commonest spelling in this repo -- a double that adds test-only handles to
+ * the contract it implements). A type ARGUMENT deliberately does not:
+ * `IDataEngine[]`, `Partial<IDataEngine>` and `Map<string, IDataEngine>` all
+ * MENTION the contract while asserting something else about the value, and a
+ * criterion that read a mention would be the substring match this function
+ * exists to avoid being.
+ */
+function assertsEngineContract(typeNode, names) {
+  if (!typeNode) return false;
+  if (ts.isParenthesizedTypeNode(typeNode)) return assertsEngineContract(typeNode.type, names);
+  if (ts.isIntersectionTypeNode(typeNode)) {
+    return typeNode.types.some((t) => assertsEngineContract(t, names));
+  }
+  if (ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)) {
+    return names.has(typeNode.typeName.text);
+  }
+  return false;
+}
+
+/**
+ * Does the construct DECLARE itself to be the engine contract? The second
+ * admission route documented at {@link ENGINE_CONTRACT_NAME}.
+ *
+ * Reads the four places this repo writes the declaration, and stops at the
+ * first construct that settles the question. `as unknown as IDataEngine` is why
+ * a non-matching assertion continues the walk rather than answering false: the
+ * inner `as unknown` is a real assertion whose type is not the contract, and
+ * the outer one is.
+ *
+ * Every terminator is a place where the value stops being the thing declared --
+ * an argument position, a property of some larger object, a statement in a
+ * block -- because past those the nearest annotation describes something else.
+ */
+function declaresEngineContract(node, names) {
+  if (names.size === 0) return false;
+  if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+    for (const h of node.heritageClauses ?? []) {
+      if (h.token !== ts.SyntaxKind.ImplementsKeyword) continue;
+      for (const t of h.types) {
+        if (ts.isIdentifier(t.expression) && names.has(t.expression.text)) return true;
+      }
+    }
+    return false;
+  }
+  let n = node;
+  while (n.parent) {
+    const p = n.parent;
+    if (ts.isAsExpression(p) || ts.isSatisfiesExpression(p)) {
+      if (assertsEngineContract(p.type, names)) return true;
+      n = p;
+      continue;
+    }
+    if (ts.isParenthesizedExpression(p)) { n = p; continue; }
+    if (ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isParameter(p)) {
+      return assertsEngineContract(p.type, names);
+    }
+    if (ts.isReturnStatement(p) || ts.isArrowFunction(p)) {
+      let f = p;
+      while (
+        f && !ts.isFunctionDeclaration(f) && !ts.isFunctionExpression(f)
+        && !ts.isArrowFunction(f) && !ts.isMethodDeclaration(f)
+      ) f = f.parent;
+      return f ? assertsEngineContract(f.type, names) : false;
+    }
+    if (ts.isCallExpression(p) || ts.isNewExpression(p) || ts.isPropertyAssignment(p)) return false;
+    if (ts.isBlock(p) || ts.isSourceFile(p)) return false;
+    n = p;
+  }
+  return false;
+}
+
 /** Top-level function declarations / const-arrow functions, by name. */
 function localFunctions(sourceFile) {
   const map = new Map();
@@ -958,6 +1169,7 @@ function localFunctions(sourceFile) {
 function scanSource(fileName, text, slice = SLICES[0], opts = {}) {
   const sf = parseSourceFile(fileName, text);
   const pinnedNames = pinnedImportsOf(sf, slice);
+  const contractNames = engineContractNamesOf(sf);
   const locals = localFunctions(sf);
   const doubles = [];
 
@@ -986,10 +1198,17 @@ function scanSource(fileName, text, slice = SLICES[0], opts = {}) {
     // The verb under test is never its own sibling: `{ find, update }` is two
     // pieces of engine evidence for the update slice, `{ update }` is none.
     const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
-    if (siblings.length < 2) return;
+    // Two admission routes, and the second is why a MINIMAL double no longer
+    // has to be padded with verbs its test never calls (#11626): infer from the
+    // siblings, or read the contract the author DECLARED. Everything after this
+    // line is identical for both -- a declared double is judged by the same
+    // shape test and pinned by the same predicate, never held to a looser
+    // standard for having announced itself.
+    const declared = siblings.length < 2 && declaresEngineContract(node, contractNames);
+    if (siblings.length < 2 && !declared) return;
     if (!isEngineVerbShape(target, names, opts)) return;
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-    doubles.push({ line, siblings: siblings.sort(), pinned: bodyIsPinned(target) });
+    doubles.push({ line, siblings: siblings.sort(), declared, pinned: bodyIsPinned(target) });
   };
 
   const visit = (n) => {
@@ -1111,6 +1330,7 @@ function declaredBindings(sf) {
 function censusSource(fileName, text, slice) {
   const sf = parseSourceFile(fileName, text);
   const declared = declaredBindings(sf);
+  const contractNames = engineContractNamesOf(sf);
   const unrecognised = [];
   const scopedOut = [];
 
@@ -1126,7 +1346,11 @@ function censusSource(fileName, text, slice) {
     }
     if (!member) return;
     const siblings = [...names].filter((n) => ENGINE_SIBLINGS.has(n) && n !== slice.verb);
-    if (siblings.length < 2) return;
+    // The same two-route admission `scanSource` uses, and it MUST be the same:
+    // a construct this census reports but discovery cannot reach (or the
+    // reverse) is #10175's scoping split, where the two walks disagree for a
+    // reason nowhere near the code that decides.
+    if (siblings.length < 2 && !declaresEngineContract(node, contractNames)) return;
     if (implOf(member)) return;                 // discovery read it -- in the population
     const line = sf.getLineAndCharacterOfPosition(member.getStart(sf)).line + 1;
     const row = { line, text: censusSnippet(member, sf) };
@@ -1287,6 +1511,7 @@ function fnInChainedReceiver(init) {
  */
 function objectAssignSites(sf, verbs) {
   const sites = [];
+  const contractNames = engineContractNamesOf(sf);
   const visit = (n) => {
     if (
       ts.isCallExpression(n)
@@ -1321,7 +1546,8 @@ function objectAssignSites(sf, verbs) {
           verbs: declaresVerb.sort(),
           members: [...names].filter((x) => ENGINE_SIBLINGS.has(x)).sort(),
           siblings: siblings.length,
-          counted: declaresVerb.length > 0 && siblings.length >= 2,
+          counted: declaresVerb.length > 0
+            && (siblings.length >= 2 || declaresEngineContract(arg, contractNames)),
         });
       }
     }
@@ -2980,13 +3206,22 @@ function report() {
 
   console.log('');
   let totalPinned = 0;
+  let totalDeclared = 0;
   for (const { slice, found } of slices) {
     const doubles = found.reduce((n, f) => n + f.doubles.length, 0);
     const pinned = found.reduce((n, f) => n + f.doubles.filter((d) => d.pinned).length, 0);
+    // Doubles admitted by the DECLARED contract rather than by sibling
+    // inference (#11626). Printed rather than merely counted, because this
+    // gate's headline number is a claim about how much is protected and a
+    // reader deserves to see which route each part of it came in through --
+    // the same reason the pinned population is enumerated and not counted.
+    const declared = found.reduce((n, f) => n + f.doubles.filter((d) => d.declared).length, 0);
     totalPinned += pinned;
+    totalDeclared += declared;
     console.log(
       `${slice.verb} doubles: ${doubles} in ${found.length} test file(s) — ${pinned} pinned to `
-        + `${slice.producer}'s dispatch predicate, ${doubles - pinned} in the shrink-only baseline.`,
+        + `${slice.producer}'s dispatch predicate, ${doubles - pinned} in the shrink-only baseline`
+        + ` (${declared} admitted by a DECLARED ${ENGINE_CONTRACT_NAME}).`,
     );
   }
   const shared = seamFiles.reduce((n, f) => n + f.seams.filter((s) => s.refusal === 'shared').length, 0);
@@ -3071,6 +3306,13 @@ function report() {
   // #9680 this line ended at "319 pinned" and that integer was the only trace a
   // vanished double left; a reader had no way to tell a checked count from a
   // reported one, which is what let 319 -> 318 read as success.
+  if (totalDeclared > 0) {
+    console.log(
+      `check-engine-double-contract: ${totalDeclared} of them single-verb or near-minimal doubles `
+        + `admitted because they DECLARE ${ENGINE_CONTRACT_NAME} — the class that was structurally `
+        + 'invisible before #11626, and whose only way in was to be padded with unexercised verbs.',
+    );
+  }
   console.log(
     `check-engine-double-contract: ${census.length} (file, verb) row(s) held by the RETAINED `
       + `ledger — a pin that leaves names itself.\n`,
@@ -4404,6 +4646,145 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
     + 'right, so the census does not report a double the population already holds',
     sites.length === 1 && sites[0].shape === 'VERB' && sites[0].counted === true);
 
+  // ── #11626: the DECLARED single-verb double ───────────────────────────────
+  //
+  // Every case here drives the second admission route documented at
+  // ENGINE_CONTRACT_NAME. The population fixtures deliberately carry ZERO
+  // engine siblings, which is the whole point: before this route the only way
+  // in was to pad the double with verbs its test never calls.
+  const CIMPORT = "import type { IDataEngine } from '@objectstack/spec/contracts';\n";
+  const UD = SLICES.find((sl) => sl.verb === 'update');
+  const DD = SLICES.find((sl) => sl.verb === 'delete');
+  const UPIN = "import { assertEngineUpdateDispatch } from '@objectstack/objectql';\n";
+
+  // ⭐ NON-VACUITY, the red half. A single-verb double that declares the
+  // contract and does NOT route through the producer is DISCOVERED and reported
+  // UNPINNED -- which is what makes PINNED fail on it. Without this case the
+  // whole route could admit nothing and every other assertion here would still
+  // pass.
+  let dc = scanSource('x.test.ts', CIMPORT
+    + 'const engine: IDataEngine = {\n'
+    + '  async update(o: string, data: any, opts?: any) { return data; },\n'
+    + '} as unknown as IDataEngine;\n', UD);
+  expect('#11626 — a single-verb double DECLARED as the engine contract is discovered with no '
+    + 'siblings at all, and an unpinned one is reported unpinned (the red reading)',
+    dc.length === 1 && dc[0].siblings.length === 0 && dc[0].declared === true
+      && dc[0].pinned === false);
+
+  // …and the green half: the same double, pinned, is discovered AND pinned. A
+  // route that only ever reported red would be a nuisance, not a ratchet.
+  dc = scanSource('x.test.ts', CIMPORT + UPIN
+    + 'const engine: IDataEngine = {\n'
+    + '  async update(o: string, data: any, opts?: any) { assertEngineUpdateDispatch(data, opts); return data; },\n'
+    + '} as unknown as IDataEngine;\n', UD);
+  expect('#11626 — …and the same double pinned to the producer reads as pinned, so the honest '
+    + 'minimal double is protected without being padded',
+    dc.length === 1 && dc[0].declared === true && dc[0].pinned === true);
+
+  // The four spellings this repo actually writes the declaration in. Each is
+  // driven separately because they reach `declaresEngineContract` by different
+  // branches, and a walk that handled three of them would be silent on the
+  // fourth exactly the way discovery was silent on all of them.
+  expect('#11626 — a bare variable annotation declares it',
+    scanSource('x.test.ts', CIMPORT
+      + 'const engine: IDataEngine = { async update(o: string, data: any, opts?: any) { return data; } };\n',
+      UD).length === 1);
+
+  expect('#11626 — an INTERSECTION with test-only handles declares it (the commonest spelling in '
+    + 'this repo: the contract plus a rows/tables handle the assertions read)',
+    scanSource('x.test.ts', CIMPORT
+      + 'const rows: any[] = [];\n'
+      + 'const engine: IDataEngine & { rows: any[] } = {\n'
+      + '  rows,\n'
+      + '  async update(o: string, data: any, opts?: any) { return data; },\n'
+      + '} as any;\n', UD).length === 1);
+
+  expect('#11626 — a function RETURN TYPE declares it, which is how a factory-built double says so',
+    scanSource('x.test.ts', CIMPORT
+      + 'function makeEngine(): IDataEngine {\n'
+      + '  return { async update(o: string, data: any, opts?: any) { return data; } } as unknown as IDataEngine;\n'
+      + '}\n', UD).length === 1);
+
+  expect('#11626 — `implements` declares it on the CLASS spelling',
+    scanSource('x.test.ts', CIMPORT
+      + 'class FakeEngine implements IDataEngine {\n'
+      + '  async delete(o: string, opts?: any) { return 1; }\n'
+      + '}\n', DD).length === 1);
+
+  // ⛔ The NEGATIVE half, and it is the half this card's ruling is about: a
+  // widening that reddened correct code would be the finding, not the fix.
+  //
+  // The HTTP router is the shape that dominates the sub-threshold population --
+  // 32 of the 74 constructs a zero-threshold scan admits on this tree are
+  // routers and servers whose `delete` is the HTTP verb. It must stay out.
+  expect('#11626 — an HTTP router whose `delete` is the HTTP verb is NOT admitted (no declaration, '
+    + 'and this is the shape a relaxed sibling threshold would have swept in by the dozen)',
+    scanSource('x.test.ts',
+      'const app = {\n'
+      + '  get: (p: string, h: any) => {}, post: (p: string, h: any) => {},\n'
+      + '  delete: (p: string, h: any) => {}, routes: [] as string[],\n'
+      + '};\n', DD).length === 0);
+
+  // The name is not the evidence -- the BINDING is. A file-local interface that
+  // happens to share the spelling declares nothing about this contract, and a
+  // criterion that accepted it would be a spelling match in a criterion's
+  // costume (the same property `pinnedImportsOf` holds for the predicates).
+  expect('#11626 — a file-local look-alike named IDataEngine does not declare the contract',
+    scanSource('x.test.ts',
+      'interface IDataEngine { update(o: string, data: any, opts?: any): Promise<any>; }\n'
+      + 'const engine: IDataEngine = { async update(o: string, data: any, opts?: any) { return data; } };\n',
+      UD).length === 0);
+
+  expect('#11626 — …nor does the right name imported from the wrong module',
+    scanSource('x.test.ts',
+      "import type { IDataEngine } from './local-types.js';\n"
+      + 'const engine: IDataEngine = { async update(o: string, data: any, opts?: any) { return data; } };\n',
+      UD).length === 0);
+
+  // A type ARGUMENT mentions the contract while asserting something else about
+  // the value. Both directions are driven: an array of engines is not an
+  // engine, and neither is a Partial of one.
+  expect('#11626 — a type ARGUMENT is a mention, not a declaration (an array of engines)',
+    scanSource('x.test.ts', CIMPORT
+      + 'const engines: IDataEngine[] = [{ async update(o: string, data: any, opts?: any) { return data; } } as any];\n',
+      UD).length === 0);
+
+  expect('#11626 — …and a Partial<IDataEngine> declares a value that need not have the member',
+    scanSource('x.test.ts', CIMPORT
+      + 'const engine: Partial<IDataEngine> = { async update(o: string, data: any, opts?: any) { return data; } };\n',
+      UD).length === 0);
+
+  // The declaration replaces the SIBLING THRESHOLD and nothing else. A declared
+  // construct is still put through `isEngineVerbShape`, so a driver-shaped verb
+  // is still vetoed -- announcing yourself does not buy a looser standard, and
+  // a gate that attributed a driver to the engine contract would be pointing at
+  // the wrong contract, which is the one error #5480 measured 19 times in a
+  // single file.
+  expect('#11626 — the declaration does not override the DRIVER veto: a by-id second parameter is '
+    + 'still out of scope',
+    scanSource('x.test.ts', CIMPORT
+      + 'const engine: IDataEngine = { async update(o: string, id: string, data: any) { return data; } } as any;\n',
+      UD).length === 0);
+
+  // Discovery and the census must admit the SAME constructs or they are scoped
+  // differently -- #10175's structural defect, one layer up. A declared
+  // single-verb construct whose implementation cannot be read has to appear in
+  // the census, not vanish between the two walks.
+  const cc = censusSource('x.test.ts', CIMPORT
+    + "import { update } from './fixtures.js';\n"
+    + 'const engine: IDataEngine = { update } as any;\n', UD);
+  expect('#11626 — a DECLARED construct the recogniser cannot read is UNRECOGNISED rather than '
+    + 'absent, so the two walks admit the same population',
+    cc.unrecognised.length === 1 && cc.unrecognised[0].why.includes('shorthand'));
+
+  // …and the census's own threshold moved with discovery's, in the direction
+  // that matters: an UNDECLARED single-verb construct is in neither walk, so
+  // the census did not become the noise channel for every router in the repo.
+  const cc2 = censusSource('x.test.ts', "import { update } from './fixtures.js';\n"
+    + 'const store: any = { update };\n', UD);
+  expect('#11626 — an UNDECLARED single-verb construct is in neither walk',
+    cc2.unrecognised.length === 0 && cc2.scopedOut.length === 0);
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -4441,7 +4822,11 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
       + 'CHAIN, so a shadowed name reads the nearest declaration and not a file-wide match -- '
       + 'carrying the pinned verdict and the driver veto across that hop, refusing a parameter, an '
       + 'import and a cycle, and reading one shared pre-filter that admits the shorthand spellings '
-      + 'so discovery and the census cannot be scoped differently.',
+      + 'so discovery and the census cannot be scoped differently; and admits a SINGLE-VERB '
+      + 'double (#11626) on the contract it DECLARES -- the annotation, intersection, '
+      + 'return-type and `implements` spellings alike -- reporting it unpinned when it is, '
+      + 'while refusing a router, a file-local look-alike, a wrong-module import, a type '
+      + 'argument and a driver-shaped verb, and moving discovery and the census together.',
   );
 }
 
