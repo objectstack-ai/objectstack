@@ -200,7 +200,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_user.actions.unban_user',
       'sys_user.actions.unlock_user',
       'sys_user.actions.set_user_password',
-      'sys_user.actions.set_user_role',
+      // 'sys_user.actions.set_user_role' retired (#9968) — see the removal
+      // note beside `impersonate_user` in sys-user.object.ts.
       'sys_user.actions.impersonate_user',
     ],
     notes: 'SCIM forces the admin plugin (and this flag) on — ADR-0071.',

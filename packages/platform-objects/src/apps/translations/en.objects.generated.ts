@@ -209,15 +209,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
-      set_user_role: {
-        label: "Set Platform Role",
-        successMessage: "Role updated",
-        params: {
-          role: {
-            label: "Platform Role"
-          }
-        }
-      },
       impersonate_user: {
         label: "Impersonate User",
         confirmText: "Start an impersonation session for this user? Use only for legitimate support cases — actions will be logged.",

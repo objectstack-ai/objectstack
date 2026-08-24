@@ -13,7 +13,7 @@ import type { Page } from '@objectstack/spec/ui';
  * personal profile. This page therefore optimizes for the admin
  * use case: scanning a user's signals (email/verification/2FA/role),
  * reviewing related sessions/orgs/oauth/api-keys, and triggering
- * admin actions (ban / impersonate / set_role).
+ * admin actions (ban / impersonate).
  *
  * Strategy
  * --------
@@ -21,7 +21,7 @@ import type { Page } from '@objectstack/spec/ui';
  *    `details`, `tabs` and `discussion`. Header / actions fall through
  *    to the synthesizer so the object's declared actions
  *    (`update_my_profile / change_my_password / resend_verification_email
- *    / ban_user / set_user_role / impersonate_user / …`) still appear
+ *    / ban_user / impersonate_user / …`) still appear
  *    in the header overflow menu automatically.
  *  - `highlights` promotes the four signals worth scanning at the top:
  *    email, verification state, 2FA, platform role. Highlight fields
