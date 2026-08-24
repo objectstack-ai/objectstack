@@ -196,13 +196,12 @@ describe(`[#11541] driver-sql — aggregate() attributes an unresolvable column 
 
   // ⭐ ROW 5 — the groupBy arm, in both its spellings.
   it('row 5: groupBy nosuchcol refuses INVALID_FIELD / 400 naming the column — and makes no filter claim', async () => {
-    for (const [spelling, groupBy] of [
-      ['string entry', ['nosuchcol']],
-      ['structured entry', [{ field: 'nosuchcol', alias: DISTINCTIVE_ALIAS }]],
-    ] as const) {
-      const err = await caught(() =>
-        driver.aggregate(TABLE, { groupBy: groupBy as NonNullable<DriverQuery['groupBy']> }),
-      );
+    const spellings: ReadonlyArray<{ spelling: string; groupBy: NonNullable<DriverQuery['groupBy']> }> = [
+      { spelling: 'string entry', groupBy: ['nosuchcol'] },
+      { spelling: 'structured entry', groupBy: [{ field: 'nosuchcol', alias: DISTINCTIVE_ALIAS }] },
+    ];
+    for (const { spelling, groupBy } of spellings) {
+      const err = await caught(() => driver.aggregate(TABLE, { groupBy }));
       expect(err.code, `${spelling}: code`).toBe('INVALID_FIELD');
       expect(err.status, `${spelling}: status`).toBe(400);
       expect(String(err.message), `${spelling}: names the column`).toContain('nosuchcol');
