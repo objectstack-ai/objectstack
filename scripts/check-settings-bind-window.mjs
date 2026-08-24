@@ -161,16 +161,6 @@ const KNOWN_PRE_BIND_READS = [
       'composition AuthPlugin is used() before the capability loop registers ' +
       'SettingsServicePlugin, so its hooks fire first. Repair is the #10250 declaration.',
   },
-  {
-    plugin: 'com.objectstack.mcp',
-    verdict: 'unfixable-by-declaration',
-    issue: '#11580',
-    note:
-      'MCPServerPlugin.start() resolves settings on the stdio auto-start path and immediately ' +
-      'awaits resolveLocalizationContext with it, once for the life of the transport (#7279). ' +
-      'A start()-body read is inside the window under EVERY composition order, so no ' +
-      'declaration repairs it — the read has to move or become lazy.',
-  },
 ];
 
 // ── Discovery ────────────────────────────────────────────────────────────────
