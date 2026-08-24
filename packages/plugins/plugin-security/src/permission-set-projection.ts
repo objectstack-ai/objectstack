@@ -44,14 +44,31 @@
  *    `sys_metadata` — created through the data door, or authored and
  *    published through the METADATA door (ADR-0070) — rides
  *    `allowRuntimeCreate`, still `true`, and keeps working;
- *  - that refusal is deliberately LEFT TO THE PRODUCER. This file does not
- *    pre-empt it by re-deriving artifact-backing: `isArtifactBacked` is the
- *    protocol's rule (it excludes the `'sys_metadata'` rehydration sentinel),
- *    and a second copy here would be the parallel-allowlist failure Prime
- *    Directive #8 exists to prevent. The `managed_by` column is measurably
- *    NOT that fact — `member_default`'s row is `managed_by:'admin'` and its
- *    edit is refused, `twodoors_pkgset`'s row is `managed_by:'package'` and
- *    its edit lands;
+ *  - that refusal used to be deliberately LEFT TO THE PRODUCER. **RETIRED**
+ *    by the maintainer ruling of 2026-08-24 (verbatim, untranslated: 「同意
+ *    第一步(创业阶段,Salesforce 式)」) — LOCK THE BASE, CLONE TO CUSTOMIZE.
+ *    The data door now refuses a save that targets a package-declared set
+ *    ITSELF, before translating it, with a message that names the clone path
+ *    ({@link createPermissionSetWriteThrough}'s insert and update legs; the
+ *    rule and its reasoning live in `packaged-permission-set-lock.ts`). Two
+ *    measured reasons the producer could not carry it alone: the producer's
+ *    ADR-0005 tier gate is exactly what the documented
+ *    `OS_METADATA_WRITABLE=permission` operator hatch switches off — on a
+ *    deployment running with the hatch there was no refusal at all, which is
+ *    the silent fork this ruling closes — and its message names the type's
+ *    overlay flag rather than anything an admin can act on.
+ *
+ *    That is NOT the parallel-allowlist failure Prime Directive #8 exists to
+ *    prevent: the lock does not re-derive `isArtifactBacked`, it reads the
+ *    engine SchemaRegistry — the one source this plugin already calls
+ *    "package-declared" ({@link readDeclaredBody} here,
+ *    `permission-set-overlay-discard.ts`'s eligibility test, and
+ *    `permission-set-drift.ts`'s declared sweep). The `managed_by` column
+ *    stays measurably NOT that fact and the lock still never reads it —
+ *    `member_default`'s row is `managed_by:'admin'`, `twodoors_pkgset`'s is
+ *    `managed_by:'package'`, and a `managed_by:'package'` row with no artifact
+ *    behind it (published through the METADATA door, ADR-0070) keeps editing
+ *    in place as ADR-0094 D5-R's surviving `allowRuntimeCreate` neighbour;
  *  - the two write points that CATCH a failed metadata write
  *    ({@link createPermissionSetWriteThrough}'s `restore` leg and
  *    {@link reconcilePermissionSetProjection}'s backfill) keep catching: both
@@ -70,6 +87,11 @@
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { seedCtx } from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
+import {
+  ENV_PROJECTION_MARKER,
+  assertPermissionSetNotPackageDeclared,
+  type LayeredProbe,
+} from './packaged-permission-set-lock.js';
 
 export const SYSTEM_CTX = { isSystem: true };
 
@@ -341,8 +363,13 @@ function touchesDefinition(payload: Record<string, any>): boolean {
  * indistinguishable from a real packaged artifact — and after the overlay is
  * deleted, the layered read's `code` layer would keep echoing it, turning a
  * retire into a bogus "reset" (the definition would be undeletable).
+ *
+ * [2026-08-24 ruling] The constant now LIVES in
+ * `packaged-permission-set-lock.ts` and is imported above, because the lock
+ * decides "is this a shipped artifact?" partly by the absence of this marker.
+ * Two spellings of it would let the two modules disagree about what an echo
+ * is, and only one of them guards a write door.
  */
-const ENV_PROJECTION_MARKER = '_envProjection';
 
 /** Strip layered-read / registry decorations so a re-authored body is clean. */
 function stripDecorations(body: any): any {
@@ -860,10 +887,27 @@ export function mergeRowPatchIntoBody(base: any, patch: Record<string, any>): an
   return pickSpecDeclaredKeys(body);
 }
 
-/** Effective (layered, overlay-wins) body for a record's name, else the row itself. */
-async function effectiveBodyForRow(protocol: any, ql: any, row: any): Promise<any> {
+/**
+ * Effective (layered, overlay-wins) body for a record's name, else the row
+ * itself.
+ *
+ * `preReadLayered` lets a caller that ALREADY holds the layered envelope for
+ * this name hand it over instead of paying a second round trip. The write
+ * door's package-provenance pre-pass reads exactly this envelope one step
+ * earlier, so threading it through keeps the update path at the same number of
+ * metadata reads it had before the lock existed. `undefined` means "I have
+ * none" and restores the original read verbatim, including its fallback.
+ */
+async function effectiveBodyForRow(
+  protocol: any,
+  ql: any,
+  row: any,
+  preReadLayered?: unknown,
+): Promise<any> {
   try {
-    const layered = await protocol.getMetaItemLayered({ type: 'permission', name: row.name });
+    const layered = preReadLayered !== undefined
+      ? preReadLayered as any
+      : await protocol.getMetaItemLayered({ type: 'permission', name: row.name });
     let body: any;
     if (hasSchemaRegistry(ql)) {
       body = layered?.overlay ?? readDeclaredBody(ql, row.name);
@@ -904,6 +948,31 @@ export function createPermissionSetWriteThrough(
   deps: WriteThroughDeps,
 ): (opCtx: any, next: () => Promise<void>) => Promise<void> {
   const { ql, logger } = deps;
+
+  /**
+   * Read the layered envelope for ONE name, reporting whether the read
+   * ANSWERED — never collapsing a failed read into "no artifact".
+   *
+   * The envelope is the lock's second artifact source (kernels with no readable
+   * SchemaRegistry, the same fallback `projectPermissionMutation` uses), and it
+   * is the same envelope the update leg then merges its column patch into — so
+   * this read replaces the one `effectiveBodyForRow` used to make rather than
+   * adding to it.
+   */
+  const probeLayered = async (
+    protocol: any,
+    name: string,
+  ): Promise<{ probe: LayeredProbe; envelope: unknown }> => {
+    try {
+      const envelope = await protocol.getMetaItemLayered({ type: 'permission', name });
+      return { probe: { status: 'read', envelope }, envelope };
+    } catch (e) {
+      return {
+        probe: { status: 'failed', reason: String((e as Error)?.message ?? e) },
+        envelope: undefined,
+      };
+    }
+  };
 
   const projectAndFetch = async (protocol: any, name: string): Promise<any> => {
     // The awaited projector inside saveMetaItem/deleteMetaItem normally did
@@ -1013,6 +1082,17 @@ export function createPermissionSetWriteThrough(
           err.status = 409;
           throw err;
         }
+        // [2026-08-24 ruling — lock the base, clone to customize] A name an
+        // installed package DECLARES is not available for an environment
+        // definition: with the `OS_METADATA_WRITABLE=permission` operator hatch
+        // open, `saveMetaItem` below would mint a fresh `sys_metadata` overlay
+        // of a packaged set, and `reconcilePermissionSetProjection` re-projects
+        // that overlay onto the record on every boot, unconditionally, forever.
+        // Refused here, before the write, with a message that names the clone
+        // path. Fail-closed: unresolvable provenance refuses too.
+        assertPermissionSetNotPackageDeclared(
+          name, ql, 'insert', (await probeLayered(protocol, name)).probe,
+        );
         // The metadata write is the authoritative one; spec validation
         // (PermissionSetSchema) runs inside saveMetaItem and rejects an
         // off-contract body with a structured 422.
@@ -1052,10 +1132,45 @@ export function createPermissionSetWriteThrough(
       // spurious "customization" overlay is minted on a packaged set. Routing
       // it through the metadata store is what #4001's strict schema rejects.
       if (!touchesDefinition(patch)) return next();
+      // [2026-08-24 ruling — lock the base, clone to customize] THE write door
+      // the ruling names. A Studio/API save that targets a package-declared set
+      // is refused loudly, naming the sanctioned path, so no silent overlay row
+      // is minted again. Two properties of the placement are load-bearing:
+      //
+      //  - it runs AFTER the row-state carve-out above, so the activate /
+      //    deactivate actions (a bare `{ active }` patch) keep writing their
+      //    column — switching a packaged set off is not a customization of it
+      //    (#4669), and a lock that swallowed it would break the surface it
+      //    exists to protect;
+      //  - it is a PRE-PASS over every target, not a per-row check inside the
+      //    write loop below: a filtered update spanning several rows must not
+      //    write the first few and then refuse the last, leaving the caller
+      //    with a half-applied edit and one error.
+      //
+      // This deliberately pre-empts the producer's own ADR-0005 tier gate,
+      // reversing the D5-R disposition recorded in this file's header ("that
+      // refusal is deliberately LEFT TO THE PRODUCER"). Two measured reasons:
+      // the producer's gate is exactly what the documented
+      // `OS_METADATA_WRITABLE=permission` hatch switches off — so on the
+      // deployments this card came from there is no refusal at all — and its
+      // message ("the type has not opted into per-org overlay writes") names
+      // nothing an admin can act on. It is NOT a second copy of
+      // `isArtifactBacked` (Prime Directive #8): it reads the engine
+      // SchemaRegistry, the one source this plugin already calls
+      // "package-declared" in `permission-set-overlay-discard.ts` and
+      // `readDeclaredBody` above. See `packaged-permission-set-lock.ts`.
+      const layeredByName = new Map<string, unknown>();
+      for (const row of targets) {
+        const name = String(row.name);
+        if (layeredByName.has(name)) continue;
+        const { probe, envelope } = await probeLayered(protocol, name);
+        assertPermissionSetNotPackageDeclared(name, ql, 'update', probe);
+        layeredByName.set(name, envelope);
+      }
       const rowState = pickRowStateColumns(patch);
       const results: any[] = [];
       for (const row of targets) {
-        const base = await effectiveBodyForRow(protocol, ql, row);
+        const base = await effectiveBodyForRow(protocol, ql, row, layeredByName.get(String(row.name)));
         const body = mergeRowPatchIntoBody(base, patch);
         body.name = row.name;
         await protocol.saveMetaItem({ type: 'permission', name: row.name, item: body, ...actorArg });

@@ -36,6 +36,7 @@ import {
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
 import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
+import { reportPackagedPermissionSetOverlays } from './packaged-permission-set-overlay-detection.js';
 import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
@@ -3202,6 +3203,28 @@ export class SecurityPlugin implements Plugin {
             await runPermissionSetDriftDiagnostics(ql, { logger: ctx.logger });
           } catch (e) {
             ctx.logger.warn('[security] permission-set drift diagnostics failed', { error: (e as Error).message });
+          }
+          // [maintainer ruling 2026-08-24 — 「同意 第一步(创业阶段,Salesforce
+          // 式)」, item 3] The DETECTION READING for sets that were already
+          // silently forked before the save door was locked: count + NAMES,
+          // reported loudly. ⛔ Reaps nothing, merges nothing, migrates
+          // nothing — disposition of an existing fork is a follow-up reading
+          // for the maintainer, and the per-set remedy is the explicit,
+          // audited "Discard Overlay" action a human invokes.
+          //
+          // Distinct from the drift diagnostic above and deliberately run
+          // beside it: drift reports a set whose grants ALREADY differ from
+          // the artifact, so an overlay that currently happens to match is
+          // invisible to it — while that fork is entirely real and freezes
+          // the set the moment the package ships its next version.
+          //
+          // Own try/catch, same discipline as its neighbours: a failure here
+          // must never take down boot, and must never read as "the drift
+          // diagnostics also failed".
+          try {
+            await reportPackagedPermissionSetOverlays(ql, { logger: ctx.logger });
+          } catch (e) {
+            ctx.logger.warn('[security] packaged permission-set overlay detection failed', { error: (e as Error).message });
           }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });
