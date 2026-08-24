@@ -202,7 +202,7 @@
       },
       {
         "surface": "dashboard.widgets[].responsive",
-        "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+        "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
         "conversionId": "dashboard-widget-responsive-removed",
         "toMajor": 17
       },
@@ -1350,7 +1350,7 @@
         },
         {
           "surface": "dashboard.widgets[].responsive",
-          "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; page.components[].responsive is unaffected)",
+          "to": "dashboard widget key 'responsive' removed (#4876 — no renderer ever applied per-widget breakpoint overrides; the page.components[].responsive key this entry once deferred to was itself retired at protocol 18, #11027)",
           "conversionId": "dashboard-widget-responsive-removed",
           "toMajor": 17
         },

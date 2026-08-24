@@ -922,11 +922,14 @@ const step17: MigrationStep = {
       'What kept it alive was not evidence but a hole in the instrument: the liveness ledger ',
       'declares no `children` on `dashboard.widgets`, and the walk only drills one level through ',
       'an explicit `children`, so no widget-level key has ever been classified at all (filed as ',
-      '#4956, fixed separately). The removal is deliberately narrow — it takes the widget EMBED, ',
-      'not the shape. `ResponsiveConfig` stays exported and stays live on ',
-      '`page.components[].responsive`, which objectui `useResponsiveConfig` genuinely reads, so ',
-      'no import breaks and authors who need breakpoint behaviour today have somewhere real to ',
-      'put it. Per-widget responsive layout returns if and when a renderer implements it.\n\n',
+      '#4956, fixed separately). The removal was deliberately narrow — it took the widget EMBED, ',
+      'not the shape, which at the time was believed live on `page.components[].responsive` via ',
+      'objectui `useResponsiveConfig`. CORRECTED at #11027 (2026-08): that belief measured false ',
+      '— the hook had zero callers, nothing read the page key either — so protocol 18 retires ',
+      '`page.components[].responsive` and the `ResponsiveConfig` shape with it (see the ',
+      '`page-component-responsive-removed` step-18 entry). Authors who need breakpoint behaviour ',
+      'use `responsiveStyles` (ADR-0065), the channel objectui really compiles. Per-widget ',
+      'responsive layout returns if and when a renderer implements it.\n\n',
       'Finally it CONVERGES `dashboard.widgets[].compareTo` (#5011) — the one entry in this step ',
       'that is not a removal but a vocabulary merge, and the one whose defect was worst-shaped. ',
       'The widget declared three arms with confident TSDoc; the analytics executor implements one ',
@@ -5155,7 +5158,21 @@ const step18: MigrationStep = {
     'authoring site; re-anchoring would have widened the face for one word. The ' +
     'mechanical conversion strips the key from stored bundles and items (pure lossless ' +
     'delete — nothing read it since #9249), at the acknowledged cost of dropping the ' +
-    'bespoke-component route for that one word.',
+    'bespoke-component route for that one word. ' +
+    'Finally, it retires `page.components[].responsive` and the whole `ResponsiveConfig` ' +
+    'layout vocabulary it carried (#11027, ADR-0049 D2; maintainer ruling 2026-08-22): the ' +
+    'key was the destination the `dashboard.widgets[].responsive` tombstone (#4876) ' +
+    'prescribed as the live alternative, and a two-repo measurement (tsc-probe methodology ' +
+    'with positive and negative controls) found the claim false — objectui\'s two ' +
+    'implementations of the contract (`useResponsiveConfig`, `ResponsiveProtocol`) had zero ' +
+    'callers and nothing read `.responsive` off a page component, so the prescribed ' +
+    'migration moved an inert key to an inert key while the platform\'s own error message ' +
+    'vouched for it. The same change repairs every shipped text that carried that redirect. ' +
+    '`ResponsiveConfigSchema`, its two breakpoint maps and the `BreakpointName` enum had no ' +
+    'other authorable carrier and leave with the key (RETIRED_DEFS_BY_MAJOR[18]); the live ' +
+    'per-breakpoint channel on a page component is `responsiveStyles` (ADR-0065), which ' +
+    'objectui really compiles. The mechanical conversion strips the key from stored pages ' +
+    '(pure lossless delete — it never had an effect to lose).',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5167,6 +5184,7 @@ const step18: MigrationStep = {
     'record-highlights-field-icon-removed',
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',
+    'page-component-responsive-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6916,6 +6934,32 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `element-input-target-variable-removed` (a page component IS a stack
     // collection member, unlike the `kernel/Manifest:loading` family).
     'ui/ElementTextInputProps:targetVariable',
+    // #11027 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-22, ruled B:
+    // retire + repair the redirect texts in the same change). The LAST carrier of
+    // the `ResponsiveConfig` layout block, and the destination the
+    // `dashboard.widgets[].responsive` tombstone (#4876) prescribed as the live
+    // alternative. Measured across objectstack + objectui with the tsc-probe
+    // methodology (positive and negative controls): objectui's two implementations
+    // of the contract (`useResponsiveConfig` in `@object-ui/mobile`,
+    // `ResponsiveProtocol` in `@object-ui/core`) had ZERO callers, nothing read
+    // `.responsive` off a page component, and objectui's own node interface never
+    // declared the key — so an author following the shipped prescription moved an
+    // inert key to an inert key and was told it now works. Same retirement the
+    // family already took on identical evidence: `view.responsive` (#3896),
+    // `dashboard.widgets[].responsive` (#4876). It survived the sweeps through an
+    // instrument gap, not on evidence: `page/regions` is an undrilled container,
+    // so no component-level key has ever been classified (#4956's page-side
+    // instance). The shape leaves with its last carrier — see
+    // `RETIRED_DEFS_BY_MAJOR[18]` (`ui/ResponsiveConfig` and its breakpoint maps).
+    // The live per-breakpoint channel on the same component is `responsiveStyles`
+    // (ADR-0065).
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
+    // Sources are rewritten by the D2 conversion `page-component-responsive-removed`.
+    'ui/PageComponent:responsive',
     // #10054 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-21, executing
     // the 2026-08-20 census verdict). `icon` on the object arm of
     // `RecordHighlightsField` was declared, described (`Icon name (lucide icon
@@ -7231,11 +7275,44 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/BorderRadius',
+    // #11027 — `ui/BreakpointColumnMap` (breakpoint → grid column count, 1-12)
+    // left with `ui/ResponsiveConfig`: its ONLY consumer was the retired
+    // `ResponsiveConfigSchema.columns` (the #3950 rule — an exported value schema
+    // with no consumer reads as a capability). See `18.ui__ResponsiveConfig.ts`
+    // for the retirement record and the measurement.
+    'ui/BreakpointColumnMap',
+    // #11027 — `ui/BreakpointName` (the Tailwind-style `xs…2xl` breakpoint-name
+    // enum) left with `ui/ResponsiveConfig`: its only consumers were the retired
+    // `ResponsiveConfigSchema` (`breakpoint`, `hiddenOn`) and the two retired
+    // breakpoint maps' key sets (the #3950 rule — an exported value schema with
+    // no consumer reads as a capability). The surviving `ResponsiveStyles`
+    // vocabulary is the ADR-0065 max-width buckets (`large`/`medium`/`small`/
+    // `xsmall`), a different axis by design. See `18.ui__ResponsiveConfig.ts` for
+    // the retirement record and the measurement.
+    'ui/BreakpointName',
+    // #11027 — `ui/BreakpointOrderMap` (breakpoint → display order) left with
+    // `ui/ResponsiveConfig`: its ONLY consumer was the retired
+    // `ResponsiveConfigSchema.order` (the #3950 rule — an exported value schema
+    // with no consumer reads as a capability). See `18.ui__ResponsiveConfig.ts`
+    // for the retirement record and the measurement.
+    'ui/BreakpointOrderMap',
     // #10485 — `ui/ColorPalette` (the colour palette sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
     // `18.ui__Theme.ts` for the retirement record and the ruling.
     'ui/ColorPalette',
+    // #11027 — `ui/ResponsiveConfig` (the per-breakpoint LAYOUT block: grid
+    // columns / visibility / display order on the Tailwind `xs…2xl` axis). Its
+    // last authorable carrier, `page.components[].responsive`, is tombstoned in
+    // this same major (ADR-0049 D2; the widget embed went in #4876, the view
+    // embed in #3896), and an exported value schema with no consumer reads as a
+    // capability (#3950 rule — the `PerformanceConfigSchema` precedent from the
+    // very same file). Measured before removal: zero callers of either objectui
+    // consumer implementation, zero authored instances in either repo. The live
+    // per-breakpoint channel is `responsiveStyles` (ADR-0065, `ResponsiveStyles`),
+    // which stays. The Tailwind-style layout vocabulary returns if and when a
+    // renderer implements it — in one change, with the engine (the #4834 rule).
+    'ui/ResponsiveConfig',
     // #10485 — `ui/Shadow` (the shadow scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

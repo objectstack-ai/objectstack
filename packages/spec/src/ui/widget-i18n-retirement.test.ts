@@ -105,7 +105,8 @@ describe('[#5055] ui/ widget + i18n family retirement', () => {
     'AriaPropsSchema',
     'I18nLabelSchema',
     // Neighbours a too-wide `ui/` sweep would plausibly take.
-    'ResponsiveConfigSchema',
+    // (`ResponsiveConfigSchema` stood here until #11027 retired the responsive
+    // layout surface whole — a survivor list entry follows its subject out.)
     'NotificationTypeSchema',
     'SharingConfigSchema',
     // (`ThemeSchema` stood here until #10485 retired the theme surface whole.)

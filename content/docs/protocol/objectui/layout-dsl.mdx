@@ -791,22 +791,6 @@ interface FormField {
 }
 ```
 
-### Responsive Columns
-
-{/* os:check */}
-```typescript
-// Source: packages/spec/src/ui/responsive.zod.ts (BreakpointColumnMapSchema)
-// Grid columns (1-12) per named breakpoint. All entries optional.
-interface ResponsiveColumns {
-  xs?: number;    // ~480px
-  sm?: number;    // ~640px
-  md?: number;    // ~768px
-  lg?: number;    // ~1024px
-  xl?: number;    // ~1280px
-  '2xl'?: number; // ~1536px
-}
-```
-
 ### Visibility Rule
 
 Visibility is a single **CEL expression** string, not a structured rule object.
@@ -844,8 +828,9 @@ error names the offending key and, when it looks like a visibility predicate,
 points you back at `visibleWhen`.
 
 Breakpoint-based show/hide is handled separately via the component's
-`responsive.hiddenOn` array (e.g. `hiddenOn: ['xs', 'sm']`), see
-`packages/spec/src/ui/responsive.zod.ts`.
+`responsiveStyles` scoped CSS (ADR-0065), e.g. `xsmall: { display: 'none' }` —
+see `packages/spec/src/ui/responsive.zod.ts`. (The former `responsive.hiddenOn`
+layout key was retired in v17.x; no renderer ever applied it.)
 
 #### Position-gated visibility
 
@@ -1032,4 +1017,4 @@ block. See
 
 - [Page Reference](/docs/references/ui/page) - Page, region, and component schemas
 - [View Reference](/docs/references/ui/view) - Form, list, kanban, and calendar views
-- [Responsive Reference](/docs/references/ui/responsive) - Breakpoint layout and scoped responsive styles
+- [Responsive Reference](/docs/references/ui/responsive) - Per-breakpoint scoped responsive styles (ADR-0065)

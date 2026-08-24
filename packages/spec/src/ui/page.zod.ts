@@ -8,7 +8,8 @@ import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
-import { ResponsiveConfigSchema, ResponsiveStylesSchema } from './responsive.zod';
+import { ResponsiveStylesSchema } from './responsive.zod';
+import { retiredKey } from '../shared/retired-key';
 import {
   UserActionsConfigSchema,
   AppearanceConfigSchema,
@@ -234,8 +235,32 @@ export const PageComponentSchema = lazySchema(() => strictObject({
   /** Per-element data binding, overrides page-level object context */
   dataSource: ElementDataSourceSchema.optional().describe('Per-element data binding for multi-object pages'),
 
-  /** Responsive layout overrides per breakpoint */
-  responsive: ResponsiveConfigSchema.optional().describe('Responsive layout configuration'),
+  // `responsive` REMOVED (#11027, ADR-0049 D2): authorable and inert, exactly
+  // like `view.responsive` (#3896) and `dashboard.widgets[].responsive`
+  // (#4876) before it — and it was the key the #4876 tombstone redirected
+  // authors TO. Measured across objectstack + objectui (tsc-probe methodology
+  // with positive and negative controls): objectui's two implementations of
+  // the contract (`useResponsiveConfig`, `ResponsiveProtocol`) had zero
+  // callers, nothing read `.responsive` off a page component, and objectui's
+  // own node interface never declared the key — so the "live destination" the
+  // family's tombstones prescribed applied no breakpoint behaviour at all.
+  // It escaped classification through the same instrument gap as the widget
+  // key (#4956's page-side instance): `page/regions` is an undrilled
+  // container, so no component-level key has ever been asked. The live
+  // per-breakpoint channel on this same component is `responsiveStyles`
+  // (ADR-0065, sixteen lines up), which objectui really does compile.
+  // `ResponsiveConfigSchema` and its breakpoint maps had no other authorable
+  // carrier and are removed with the key (`responsive.zod.ts`, the
+  // PerformanceConfigSchema precedent).
+  responsive: retiredKey(
+    '`page.components[].responsive` was removed in @objectstack/spec 17 (#11027, ADR-0049 D2) — ' +
+    'no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) ' +
+    'parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS ' +
+    'applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled ' +
+    "to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to " +
+    'hide a component on the narrowest screens. ' +
+    'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

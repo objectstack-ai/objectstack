@@ -546,9 +546,14 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     expect(message).toMatch(/removed in @objectstack\/spec 17\.0\.0/);
     expect(message).toMatch(/#4876/);
     expect(message).toMatch(/Delete the key/);
-    // It must point at the surviving home for the capability, or an author who
-    // really wants breakpoints reads this as "responsive layout is gone".
-    expect(message).toMatch(/page\.components\[\]\.responsive/);
+    // The redirect correction (#11027): this message used to prescribe
+    // `page.components[].responsive` as the live home of the shared shape;
+    // that key measured equally unread and is retired too, so the message
+    // must (a) say so rather than silently dropping the old promise — an
+    // author who followed it needs the correction — and (b) point at the
+    // channel that IS applied.
+    expect(message).toMatch(/page\.components\[\]\.responsive[\s\S]*#11027/);
+    expect(message).toMatch(/responsiveStyles/);
     // `.strict()` on this schema would answer a DELETED key with a generic
     // unrecognized-key error. The tombstone is what makes it a prescription —
     // if this ever regresses to the strict path, this assertion is the tripwire.
@@ -561,26 +566,22 @@ describe('[#4876] DashboardWidgetSchema — retired `responsive`', () => {
     expect(w.dataset).toBe('orders');
   });
 
-  // ── CONTROL: the shared shape is NOT retired, only this embed ──────────────
-  it('CONTROL: `ResponsiveConfigSchema` is still exported and still parses', async () => {
-    const ui = await import('./index');
-    expect(ui.ResponsiveConfigSchema).toBeTruthy();
-    const cfg = ui.ResponsiveConfigSchema.parse({
-      columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'],
-    });
-    expect(cfg.columns).toEqual({ xs: 12, lg: 4 });
-    expect(cfg.hiddenOn).toEqual(['xs']);
-  });
-
-  it('CONTROL: `page.components[].responsive` parses exactly as before', async () => {
+  // ── The former CONTROLs, inverted by #11027 ────────────────────────────────
+  // Until #11027 two controls here asserted that `ResponsiveConfigSchema`
+  // stayed exported and that `page.components[].responsive` round-tripped —
+  // the "only this embed goes" contract of #4876. The #11027 measurement
+  // falsified the premise those controls encoded (nothing ever read the page
+  // key either), so the shape left with its last carrier and the page key is
+  // a tombstone of its own, pinned in `page.test.ts`
+  // ("[#11027] PageComponentSchema — retired `responsive`"). The surviving
+  // control is the channel the corrected prescriptions point at:
+  it('CONTROL: `responsiveStyles` on a page component still parses (ADR-0065)', async () => {
     const { PageComponentSchema } = await import('./page.zod');
     const c = PageComponentSchema.parse({
       type: 'page:sidebar', properties: {},
-      responsive: { columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] },
+      responsiveStyles: { small: { display: 'none' } },
     });
-    // Round-trips untouched — the page embed is a live consumer path
-    // (objectui `useResponsiveConfig`), not a second casualty of this removal.
-    expect(c.responsive).toEqual({ columns: { xs: 12, lg: 4 }, order: { xs: 2, lg: 1 }, hiddenOn: ['xs'] });
+    expect(c.responsiveStyles).toEqual({ small: { display: 'none' } });
   });
 });
 
