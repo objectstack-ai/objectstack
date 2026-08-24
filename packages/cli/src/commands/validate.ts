@@ -23,6 +23,9 @@ import {
   printSuccess,
   printError,
   printStep,
+  printAuthoringRuleErrors,
+  printDocIssueErrors,
+  JSON_FULL_LIST_REMEDY,
   createTimer,
   formatZodErrors,
   collectMetadataStats,
@@ -137,11 +140,12 @@ export default class Validate extends Command {
         }
         console.log('');
         printError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);
-        for (const f of ruleErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
+        // [#11642] The comment above is the reason this render may not be
+        // silently capped: reporting every failing rule at once is the whole
+        // point of the block, and a cut with no notice restores a smaller
+        // version of the round-trip it removed. `--json` on this same exit
+        // publishes all of them as `errors`, so the pointer resolves.
+        printAuthoringRuleErrors(ruleErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 
@@ -209,10 +213,8 @@ export default class Validate extends Command {
         }
         console.log('');
         printError(`Package docs validation failed (${docErrors.length} issue${docErrors.length > 1 ? 's' : ''})`);
-        for (const i of docErrors.slice(0, 50)) {
-          console.log(`  • ${i.path}: ${i.message}`);
-          console.log(chalk.dim(`      rule: ${i.rule}`));
-        }
+        // [#11642] `--json` on this same exit publishes them all as `errors`.
+        printDocIssueErrors(docErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 

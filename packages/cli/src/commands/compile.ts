@@ -29,6 +29,10 @@ import {
   printStep,
   printWarning,
   printAuthoringAdvisories,
+  printAuthoringRuleErrors,
+  printDocIssueErrors,
+  printBulletList,
+  JSON_FULL_LIST_REMEDY,
   createTimer,
   formatZodErrors,
   collectMetadataStats,
@@ -142,9 +146,17 @@ export default class Compile extends Command {
           }
           console.log('');
           printError(`--strict-body: ${issues.length} callable(s) lack a metadata body`);
-          for (const w of issues.slice(0, 20)) {
-            console.log(`  • ${w.origin}: ${w.reason}`);
-          }
+          // [#11642] Caps at 20, not 50, which is the only reason a sweep
+          // anchored on the literal `slice(0, 50)` could not see this one. The
+          // shape is the defect either way: the header states the true total
+          // and the body shows 20, with nothing saying the rest exist. The cap
+          // stays; the silence does not. The pointer is honest here — the
+          // `--json` branch immediately above this block publishes the whole
+          // list as `issues`.
+          printBulletList(
+            issues.map((w) => `${w.origin}: ${w.reason}`),
+            { noun: 'callable(s)', limit: 20, remedy: JSON_FULL_LIST_REMEDY },
+          );
           this.exit(1);
         }
       }
@@ -233,11 +245,9 @@ export default class Compile extends Command {
         }
         console.log('');
         printError(`Author-time rules failed (${ruleErrors.length} issue${ruleErrors.length > 1 ? 's' : ''})`);
-        for (const f of ruleErrors.slice(0, 50)) {
-          console.log(`  • ${f.where}: ${f.message}`);
-          console.log(chalk.dim(`      ${f.hint}`));
-          console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-        }
+        // [#11642] `--json` on this same exit publishes every one of them as
+        // `issues`, so the pointer resolves to a complete view of THIS list.
+        printAuthoringRuleErrors(ruleErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
 
@@ -303,9 +313,15 @@ export default class Compile extends Command {
       ].map(formatUnknownAuthoringKey);
       if (unknownKeyWarnings.length > 0 && !flags.json) {
         printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
-        for (const w of unknownKeyWarnings.slice(0, 50)) {
-          console.log(`  • ${w}`);
-        }
+        // [#11642] The header already states the true total, so before this
+        // notice the block printed two numbers that disagreed and explained
+        // neither. The pointer is honest because #11643 put this exact list
+        // into the `--json` payload (`warnings`) a few lines below; it would
+        // have been a dead end before that landed.
+        printBulletList(unknownKeyWarnings, {
+          noun: 'undeclared authoring key(s)',
+          remedy: JSON_FULL_LIST_REMEDY,
+        });
       }
 
       // 3e. [ADR-0090 D6] Access-matrix snapshot gate. Opt-in per app: when
@@ -343,7 +359,12 @@ export default class Compile extends Command {
               }
               console.log('');
               printError(`Access matrix drift (${drift.length} change${drift.length > 1 ? 's' : ''}) — capability changes must be reviewed`);
-              for (const line of drift.slice(0, 50)) console.log(`  • ${line}`);
+              // [#11642] `--json` on this same exit publishes the whole diff
+              // as `changes`, so the pointer resolves for this list too.
+              printBulletList(drift, {
+                noun: 'access-matrix change(s)',
+                remedy: JSON_FULL_LIST_REMEDY,
+              });
               console.log(chalk.dim('  If intended, re-run with --update-access-matrix and commit the snapshot — its diff IS the review artifact.'));
               this.exit(1);
             }
@@ -370,10 +391,8 @@ export default class Compile extends Command {
         }
         console.log('');
         printError(`Package docs validation failed (${docErrors.length} issue${docErrors.length > 1 ? 's' : ''})`);
-        for (const i of docErrors.slice(0, 50)) {
-          console.log(`  • ${i.path}: ${i.message}`);
-          console.log(chalk.dim(`      rule: ${i.rule}`));
-        }
+        // [#11642] `--json` on this same exit publishes them all as `issues`.
+        printDocIssueErrors(docErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
       }
       if (docWarnings.length > 0 && !flags.json) {

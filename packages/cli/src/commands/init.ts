@@ -6,7 +6,18 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { printHeader, printSuccess, printError, printStep, printKV, printInfo, formatZodErrors } from '../utils/format.js';
+import {
+  printHeader,
+  printSuccess,
+  printError,
+  printStep,
+  printKV,
+  printInfo,
+  formatZodErrors,
+  printAuthoringAdvisories,
+  printAuthoringRuleErrors,
+  AUTHORING_ADVISORY_PRINT_LIMIT,
+} from '../utils/format.js';
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
 
@@ -890,11 +901,17 @@ export default class Init extends Command {
         try {
           const report = await validateScaffold(targetDir);
 
-          for (const f of report.advisories.slice(0, 50)) {
-            printWarning(`${f.where}: ${f.message}`);
-            if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
-            console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
-          }
+          // [#11642] The SAME printer `os build` renders its advisories with
+          // — this block was a byte-for-byte copy of it, cap included — so the
+          // two cannot drift, and the remainder now gets named here too.
+          //
+          // ⛔ …but with NO pointer, and that is the point of the third
+          // argument. `os build`'s notice ends "re-run with --json for the
+          // full list"; `os init` declares no `--json` flag at all (see
+          // `static override flags` above), so offering it here would name a
+          // remedy that does not exist and send the author to a dead end.
+          // Stating the remainder without a pointer is the honest form.
+          printAuthoringAdvisories(report.advisories, AUTHORING_ADVISORY_PRINT_LIMIT, null);
 
           if (report.schemaError) {
             printError('Scaffold validation failed: rendered config does not satisfy the protocol schema');
@@ -905,11 +922,12 @@ export default class Init extends Command {
             printError(
               `Scaffold validation failed: author-time rules rejected the generated project (${report.errors.length} issue${report.errors.length > 1 ? 's' : ''})`,
             );
-            for (const f of report.errors.slice(0, 50)) {
-              console.log(`  • ${f.where}: ${f.message}`);
-              if (f.hint) console.log(chalk.dim(`      ${f.hint}`));
-              console.log(chalk.dim(`      rule: ${f.rule}  at ${f.path}`));
-            }
+            // [#11642] Same printer as `os build` / `os validate`, and again
+            // with no `--json` pointer — this command has no such flag. The
+            // remedy this site DOES have is the line printed below: a scaffold
+            // its own generator's rules reject is a CLI bug, so the action is
+            // to report it, not to read a longer list.
+            printAuthoringRuleErrors(report.errors, { remedy: null });
             scaffoldRejected = true;
           } else {
             printSuccess(
