@@ -72,6 +72,23 @@ import {
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
+// [#11350] Emitted-specifier pin. This module's inferred public declarations
+// structurally mention `FormFieldInput` (FormView `sections[].fields`), and
+// this file imports BOTH `@objectstack/spec` (root, for
+// `applyConversionsToStoredItem` above) and `@objectstack/spec/ui`. Once
+// #11350 made `FormFieldInput` nameable from the root entry, tsc's
+// declaration emitter switched its synthesized reference from the `/ui` slice
+// to the root — both are portable, but the root specifier drags spec's ENTIRE
+// root module graph into every downstream tsc program that reads this
+// package's dts (measured on PR #11716: +190k types, +805k instantiations,
+// +~560MB on the debt-ledger re-measure of @objectstack/http-conformance —
+// past a 4GB heap). An IMPORT (not a bare re-export — that creates no local
+// binding) makes the emitter reuse this binding, keeping the emitted
+// reference on the narrow `/ui` entry; the export statement is what keeps
+// no-unused-locals green. index.ts deliberately does not re-export it
+// (curated entry, unchanged).
+import { type FormFieldInput } from '@objectstack/spec/ui';
+export type { FormFieldInput };
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
