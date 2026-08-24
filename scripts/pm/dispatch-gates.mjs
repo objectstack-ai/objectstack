@@ -152,6 +152,7 @@ import {
   readFileSync,
   readdirSync,
   existsSync,
+  statSync,
   mkdtempSync,
   mkdirSync,
   writeFileSync,
@@ -160,7 +161,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -832,6 +833,128 @@ export function extractWatchHints(scriptSource) {
 }
 
 /**
+ * The FIRST-PARTY MODULES a gate script IMPORTS, resolved one level down: the
+ * relative specifiers that land inside the repo's own scripts/ tree (#11190).
+ *
+ * ## The blind spot this closes
+ *
+ * resolveCheckToFiles reads a family's script paths out of the npm script's
+ * COMMAND STRING, and discoverFamilies scanned exactly those files. A module a
+ * gate IMPORTS was never opened, so a population declaration MOVED out of a
+ * gate and into a shared module stopped contributing hints to every gate that
+ * imports it — the tidy-up that centralises a declaration DELETED it, with
+ * every gate still green and nothing in the output saying so. That was pinned
+ * here as an invariant rather than left as prose; it is pinned in its widened
+ * form now (search the self-test for the first-party import section), and
+ * closing it is what unblocks consolidating the fifteen private
+ * pnpm-workspace.yaml parsers behind one enumerator.
+ *
+ * ## What it costs, measured (the deliverable, not the code)
+ *
+ * Over 140 discovered families x 6460 tracked files, on this tree:
+ *
+ *   watch-hint (gate, file) pairs   51848 -> 52741   (+893, and ZERO lost)
+ *   families gaining coverage       6
+ *   existing matches re-attributed  0 — imported hints are appended AFTER
+ *                                   every own hint, so a path already matched
+ *                                   keeps the exact key and via label it had
+ *
+ * For scale, hintCovers' docblock prices the bare-top-level-word admission it
+ * refuses at +139084 pairs on the same corpus. This widening is 0.6% of that.
+ *
+ * The six: check:i18n and check:i18n-coverage (+285 each, through
+ * cli-build-prerequisite.mjs, which declares the CLI build both gates require),
+ * check:merge-driver (+264, through regen-artifacts.mjs, which declares the
+ * artifacts the driver regenerates — the specimen this whole change is for),
+ * check:adr-anchors (+53, through adr-anchors.mjs), check:slot-lookup and
+ * check:query-options-erasure (+3 each, through the two eslint helpers).
+ *
+ * ## Every narrowing below is a measurement, not a preference
+ *
+ * ONE LEVEL, as dispatched. Not a compromise on this tree: re-run at depth 2
+ * and depth 3 the sweep adds exactly ZERO further pairs, because every module
+ * reached from a followed module (invoked-as.mjs, js-comment-mask.mjs,
+ * ts-parse.mjs) declares no path literals at all. One level is the mandate AND
+ * the measured fixpoint; if a future helper chain makes depth 2 pay, that is a
+ * measurement to bring back, not a widening to assume.
+ *
+ * RELATIVE specifiers only. A bare specifier is a package: it resolves through
+ * node_modules (workspace links included), and an installed dependency is not
+ * a repo source input — the same boundary check:cross-package-test-inputs
+ * draws for test reads, for the same reason (no glob in this repo can name it).
+ *
+ * INSIDE scripts/ only, which is what makes the specifier first-party rather
+ * than merely relative. Live specimen for the refusal: check:slot-lookup and
+ * check:query-options-erasure both import ../eslint.config.mjs, whose globs
+ * describe what the LINT reads, not what either ratchet reads. Admitting the
+ * class costs +2517 pairs on top of the +893, measured, to hand two gates a
+ * population neither one opens. Measured cost of the refusal today: zero — the
+ * only two family scripts outside scripts/ (packages/lint/scripts/*.mjs) carry
+ * no relative first-party import at all.
+ *
+ * STATIC declarations only — import/export ... from, and the side-effect
+ * import form. A dynamic import() is a load edge too, and admitting it was
+ * measured: +0 pairs, because both live dynamic edges (check-governed-prose ->
+ * check-governed-merges, check-governed-merges -> check-audit-scope) point at
+ * modules the next rule excludes anyway. It also costs precision that is not
+ * hypothetical — a module body carrying import of a ../<rel> placeholder, or
+ * of a ./local.js that documentation invents, resolves to nothing today only
+ * because the existence check below catches it. Zero gain, real hazard, so
+ * the class stays out.
+ *
+ * NEVER a module that is ITSELF a discovered gate file, and this is the one
+ * narrowing that changes the number. Without it the sweep reads +4907 rather
+ * than +893, and 3660 of the extra 4014 pairs are two families importing one
+ * module — scripts/check-cross-package-test-inputs.mjs, whose module body
+ * carries the CROSS_PACKAGE_TEST_INPUTS declaration table. What
+ * check:examples-live-imports imports from it is globToRegExp, a string
+ * utility; the gate reads examples/. It would have inherited that table's
+ * packages-wide globs — 3065 pairs of population it never opens, a fabricated
+ * lead in the column a dispatch prompt pastes. That is the trade this file
+ * refuses on provenance rather than on volume (#9964 refused an admission
+ * worth 17 pairs because 8 of them were fabricated). The refusal costs recall
+ * in one direction and that is worth naming: where an importer really does
+ * read the imported gate's population (check-ci-filter-parity.mjs imports
+ * CROSS_PACKAGE_TEST_INPUTS itself, +595 pairs), the lead is now missing, and
+ * a missing lead costs one card one CI round — the side this file's header
+ * errs on everywhere. The card is not blind either way: the imported gate's
+ * OWN family already matches those paths, because it is discovered too.
+ *
+ * A hint from a followed module is a different CLAIM from one the gate spells
+ * itself, so it does not travel unlabelled: entry.hintOrigin records which
+ * module contributed it and coveringKey prints that in the via column.
+ */
+const IMPORT_FROM_SPECIFIER = /(?:^|[;\n])[ \t]*(?:import|export)\b[^;]*?\bfrom[ \t]*(['"])([^'"\n]+)\1/g;
+const SIDE_EFFECT_IMPORT = /(?:^|[;\n])[ \t]*import[ \t]*(['"])([^'"\n]+)\1/g;
+
+export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}) {
+  // The same masking hint extraction uses, for the same reason: an import
+  // written out in a docblock, or one inside a self-test fixture, is a
+  // specifier this script NAMES rather than one it loads.
+  const body = maskSelfTests(maskComments(String(source)));
+  const specifiers = new Set();
+  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
+  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
+  const here = dirname(join(root, scriptPath));
+  const targets = new Set();
+  for (const specifier of specifiers) {
+    if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
+    const rel = relative(root, resolve(here, specifier));
+    // One test, three refusals: a path that escapes the repo, one that lands
+    // at the root, and one in any other tree all fail to start with scripts/.
+    if (!rel.startsWith('scripts/')) continue;
+    if (rel.split('/').includes('node_modules')) continue;
+    const abs = join(root, rel);
+    // A specifier that resolves to nothing is a specifier, not a module: the
+    // extension-less spellings ESM does not resolve, and the ../<rel> shapes a
+    // module body carries as illustration, both land here.
+    if (!existsSync(abs) || !statSync(abs).isFile()) continue;
+    targets.add(rel);
+  }
+  return [...targets].sort();
+}
+
+/**
  * Render an invocation a dev can paste and run, from the same parse the
  * workflow line produced. The script NAME alone is not runnable for a
  * package-scoped check: `check:doc-formula-expressions` lives in
@@ -1154,7 +1277,12 @@ export function coveringKey(entry, inputPath) {
   const trigger = coveringTrigger(entry, inputPath);
   if (trigger) return { key: trigger.pattern, via: `CI trigger in ${trigger.workflow}` };
   const hint = (entry.hints ?? []).find((h) => hintCovers(h, inputPath));
-  return hint ? { key: hint, via: 'gate source' } : null;
+  if (!hint) return null;
+  // A hint a gate spells itself and one it inherits from a module it imports
+  // are different claims, so the label says which — the same reason the
+  // trigger and the identity keys carry their own provenance above.
+  const inherited = entry.hintOrigin?.get(hint);
+  return { key: hint, via: inherited ? `gate source via ${inherited}` : 'gate source' };
 }
 
 /**
@@ -2930,7 +3058,9 @@ export function tierLines(result) {
 /**
  * Discover every check family in the tree: the workflows that invoke it, the
  * `paths:` triggers that schedule it, the script files it resolves to, and the
- * watch hints those files declare.
+ * watch hints those files declare — plus the hints declared by the first-party
+ * modules those files IMPORT, one level down (`firstPartyImportTargets`), so a
+ * population declared in a shared module still reaches the gates that read it.
  *
  * Lifted out of `derive` so the escapable-literal ledger can ask the SAME
  * question the derivation asks, from the same implementation. The ledger's
@@ -2988,16 +3118,56 @@ export function discoverFamilies() {
       }
     }
     entry.files = files;
-    for (const f of files) {
+  }
+  // Which files ARE gates, settled before a single import is followed: the
+  // follow refuses to open one (firstPartyImportTargets' docblock carries the
+  // measurement that decided it). That set is not knowable while the first
+  // loop is still building it, which is the only reason there are two.
+  const gateFiles = new Set([...byCheck.values()].flatMap((e) => e.files));
+  // A followed module is scanned once however many families import it —
+  // invoked-as.mjs is imported by 79 of them.
+  const moduleHints = new Map();
+  const hintsOfModule = (rel) => {
+    if (!moduleHints.has(rel)) {
+      moduleHints.set(rel, extractWatchHints(readFileSync(join(ROOT, rel), 'utf8')));
+    }
+    return moduleHints.get(rel);
+  };
+  for (const entry of byCheck.values()) {
+    entry.imports = [];
+    entry.hintOrigin = new Map();
+    for (const f of entry.files) {
       const abs = join(ROOT, f);
       if (!existsSync(abs)) continue;
-      // ONE read, two answers — the hints and the gate's own no-population
-      // declaration — so the pair can never describe different revisions of a
-      // file, the same discipline the trigger paths take above.
+      // ONE read, three answers now — the hints, the gate's own no-population
+      // declaration, and the first-party modules it imports — so no two of
+      // them can describe different revisions of a file, the same discipline
+      // the trigger paths take above.
       const source = readFileSync(abs, 'utf8');
       entry.hints.push(...extractWatchHints(source));
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
+      for (const mod of firstPartyImportTargets(f, source)) {
+        if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
+        entry.imports.push(mod);
+      }
     }
+    // The gate's OWN hints keep their order and their place at the FRONT, so
+    // every path this derivation already matched keeps the exact key and via
+    // label it had: the widening adds leads, it never re-attributes one
+    // (measured at 0 re-attributions over the live tree).
+    const own = new Set(entry.hints);
+    for (const mod of entry.imports) {
+      for (const hint of hintsOfModule(mod)) {
+        if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
+        entry.hintOrigin.set(hint, mod);
+        entry.hints.push(hint);
+      }
+    }
+    // The marker stays a claim about THIS gate, read from its own files only.
+    // A shared helper cannot declare on a caller's behalf that the caller has
+    // no path population — and cannot withdraw it either: a gate that keeps
+    // the marker while inheriting a population is a contradiction the live
+    // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
   }
   return { byCheck, workflows };
@@ -5070,33 +5240,158 @@ function selfTest() {
     declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
   );
 
-  // ── Hints come from the COMMAND's named scripts, never from their imports ──
+  // ── Hints come from the COMMAND's named scripts AND, one level down, from
+  //    the first-party modules those scripts import (#11190) ─────────────────
   //
-  // Load-bearing, and pinned here because a decision rests on it (#10542). The
-  // card proposed consolidating the dozen private pnpm-workspace.yaml parsers
-  // into one shared enumerator, on the reasoning that it would make the
-  // population declarable in ONE place. Under this derivation it would do the
-  // opposite: `resolveCheckToFiles` reads the script paths out of the npm
-  // script's COMMAND STRING, and `discoverFamilies` scans exactly those files.
-  // A module a gate imports is never opened, so moving a population declaration
-  // into a shared enumerator DELETES it from every gate that imports it — which
-  // would silently undo the very declarations #10540 and this card added.
+  // Load-bearing, and pinned here because a decision rests on it (#10542).
+  // Until #11190 this section asserted the OPPOSITE — "a family's hints are
+  // exactly those of the scripts its COMMAND names" — and that was true:
+  // `resolveCheckToFiles` reads script paths out of the npm script's COMMAND
+  // STRING and `discoverFamilies` scanned exactly those files, so moving a
+  // population declaration into a shared enumerator DELETED it from every gate
+  // that imports it. That is the blocker #11190 removed, so the assertion is
+  // INVERTED here rather than deleted: what a later author must measure is now
+  // that imports ARE followed, exactly one level, and never into a module that
+  // is itself a gate.
   //
-  // So the consolidation is blocked on teaching this derivation to follow
-  // first-party imports, not on the gates. Stated as an assertion rather than
-  // as that paragraph, so a later author measures it instead of trusting it.
-  const importingFamily = [...liveDiscovery.byCheck].find(
-    ([, e]) => (e.files ?? []).length === 1
-      && existsSync(join(ROOT, e.files[0]))
-      && /^\s*import\s[^\n]*\sfrom\s+'\.\//m.test(readFileSync(join(ROOT, e.files[0]), 'utf8')),
+  // ⚠️ The old pin did NOT go red on the change that falsified it, and that is
+  // why every case below names its specimen with a COUNT. It took "the first
+  // single-file family that imports a sibling" as its specimen; measured on
+  // this tree, 80 families answer that description, only 3 of them would have
+  // failed it, and the one it picks (`scripts/check-adr-links.mjs`, importing
+  // `invoked-as.mjs`, which declares no path literal at all) is not among them.
+  // A pin whose specimen is chosen by iteration order can be true of the tree
+  // and silent about the rule.
+  const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
+  const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+  const liveModuleHints = (rel) => extractWatchHints(liveSource(rel));
+  const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
+
+  // The recogniser, on fixture source: one line per refusal, so a widening or
+  // a narrowing of the rule fails HERE with its reason named, rather than as a
+  // pair count nobody can attribute afterwards.
+  const importFixture = [
+    "import { isEntrypoint } from './invoked-as.mjs';", // followed
+    "export { blank } from './js-comment-mask.mjs';", // export-from is the same edge
+    "import './pm/git-history.mjs';", // so is the side-effect form
+    "import { readFileSync } from 'node:fs';", // bare: a package, not a repo path
+    "import { z } from '@objectstack/spec';", // bare, workspace link: node_modules
+    "import pkg from '../package.json';", // first-party, but outside scripts/
+    "import { x } from './does-not-exist.mjs';", // a specifier, not a module
+    '// import { y } from "./adr-anchors.mjs";', // named in a comment, loaded by nobody
+    'function selfTest() {',
+    '  const fixture = "import { z } from \'./regen-artifacts.mjs\';";',
+    '}',
+  ].join('\n');
+  t(
+    'the follow reads the three static import forms, and refuses bare, out-of-tree, unresolvable, commented and self-test spellings',
+    firstPartyImportTargets('scripts/fixture.mjs', importFixture).join(' · ') ===
+      'scripts/invoked-as.mjs · scripts/js-comment-mask.mjs · scripts/pm/git-history.mjs',
+    firstPartyImportTargets('scripts/fixture.mjs', importFixture).join(' · '),
   );
-  t('the live tree has a single-file family that imports a sibling module (the pin is not vacuous)', Boolean(importingFamily));
-  if (importingFamily) {
-    const [, entry] = importingFamily;
-    const ownHints = new Set(extractWatchHints(readFileSync(join(ROOT, entry.files[0]), 'utf8')));
+
+  // The live halves. Counts in the names: a case that can only be read as
+  // "something was found" is the shape the old pin failed in.
+  const inheriting = [...liveDiscovery.byCheck].filter(([, e]) => (e.hintOrigin?.size ?? 0) > 0);
+  const inheritedHints = inheriting.reduce((n, [, e]) => n + e.hintOrigin.size, 0);
+  t(
+    `the live tree inherits hints through imports at all (${inheriting.length} famil(ies), ${inheritedHints} hint(s):` +
+      ` ${inheriting.map(([c, e]) => `${c} +${e.hintOrigin.size}`).join(', ') || 'none'})`,
+    inheriting.length > 0,
+  );
+
+  const offReconstruction = [];
+  const deeperOnly = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    const own = [];
+    const direct = [];
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      const source = liveSource(f);
+      own.push(...extractWatchHints(source));
+      for (const mod of firstPartyImportTargets(f, source)) {
+        if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
+        direct.push(mod);
+      }
+    }
+    const expected = new Set([...own, ...direct.flatMap(liveModuleHints)]);
+    const actual = new Set(entry.hints ?? []);
+    if (expected.size !== actual.size || [...actual].some((h) => !expected.has(h))) offReconstruction.push(check);
+    // The depth bound, family by family: a module reached only through another
+    // module is not in the followed set. Non-vacuous wherever a followed
+    // module imports something the family does not import itself.
+    const twoHop = direct.flatMap((m) => liveTargets(m)).filter((m) => !direct.includes(m));
+    if (twoHop.length > 0 && (entry.imports ?? []).some((m) => twoHop.includes(m))) deeperOnly.push(check);
+  }
+  t(
+    "a family's hints are exactly those of the scripts its COMMAND names PLUS those of the first-party modules" +
+      ` those scripts import — so a shared enumerator CAN carry a population declaration for its callers (off: ${offReconstruction.join(', ') || 'none'})`,
+    offReconstruction.length === 0,
+  );
+  t(
+    `and one level only: nothing a followed module imports in turn reaches the family (offenders: ${deeperOnly.join(', ') || 'none'})`,
+    deeperOnly.length === 0,
+  );
+  const twoHopChains = [...new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.imports ?? []))]
+    .map((m) => [m, liveTargets(m)])
+    .filter(([, deeper]) => deeper.length > 0);
+  t(
+    `the depth bound is not vacuous: ${twoHopChains.length} followed module(s) import first-party modules of their own` +
+      ` (${twoHopChains.map(([m, d]) => `${m} -> ${d.join(' · ')}`).join(' | ') || 'none'})`,
+    twoHopChains.length > 0,
+  );
+
+  // The exclusion that decides the NUMBER. Measured on this tree: following
+  // gate modules too takes the sweep from +893 (gate, file) pairs to +4907,
+  // and 3065 of the extra 4014 are check:examples-live-imports inheriting the
+  // repo-wide declaration table of a gate it imports one string helper from.
+  // A gate module needs no caller to reach the tree — its own family declares
+  // that population — so the follow leaves it to that family.
+  const gateModuleEdges = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const mod of liveTargets(f)) {
+        if (liveGateFiles.has(mod) && !(entry.files ?? []).includes(mod)) gateModuleEdges.push([check, mod]);
+      }
+    }
+  }
+  t(
+    `the live tree HAS a gate script importing another gate's file, so the exclusion is not vacuous (${gateModuleEdges.length}:` +
+      ` ${gateModuleEdges.map(([c, m]) => `${c} -> ${m}`).join(' · ') || 'none'})`,
+    gateModuleEdges.length > 0,
+  );
+  t(
+    'and not one of those edges is followed — a gate module is left to its OWN family, which already declares that population',
+    gateModuleEdges.every(([check, mod]) => !(liveDiscovery.byCheck.get(check)?.imports ?? []).includes(mod)),
+  );
+
+  // Provenance travels with an inherited hint, for the reason `coveringKey`'s
+  // docblock gives for the other two keys: "this gate declares that path" and
+  // "a module this gate imports declares it" are different claims, and the
+  // column that justifies a lead has to say which.
+  // The specimen has to be a hint that DECIDES a lead. An inherited path that
+  // the family's own gate script covers answers through the IDENTITY key
+  // first, and one CI schedules answers through the TRIGGER key — both correct,
+  // both silent about this label — so the specimen is picked from the pairs
+  // where neither of those can answer.
+  const inheritedLead = inheriting
+    .flatMap(([, entry]) => [...entry.hintOrigin].map(([hint, mod]) => [entry, hint, mod]))
+    .find(
+      ([entry, hint]) =>
+        !(entry.files ?? []).some((f) => hintCovers(f, hint)) &&
+        !coveringTrigger(entry, hint) &&
+        coveringKey(entry, hint)?.key === hint,
+    );
+  t(
+    `an inherited hint reaches the matched column as a lead of its own (${inheritedLead ? `${inheritedLead[1]} from ${inheritedLead[2]}` : 'none'})`,
+    Boolean(inheritedLead),
+  );
+  if (inheritedLead) {
+    const [entry, hint, mod] = inheritedLead;
     t(
-      'a family\'s hints are exactly those of the scripts its COMMAND names — an imported module contributes none, so a shared enumerator cannot carry a population declaration for its callers',
-      [...new Set(entry.hints)].every((h) => ownHints.has(h)),
+      `…and the via column names the module it came from, not the gate (${coveringKey(entry, hint)?.via})`,
+      coveringKey(entry, hint)?.via === `gate source via ${mod}`,
     );
   }
 
