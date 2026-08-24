@@ -749,6 +749,28 @@ export class MessagingService {
         // flight) can win the (notification_id, user_id, channel) unique index
         // between our read and write. Treat that collision as "someone else
         // created it" and flip the now-present row to `read` instead of failing.
+        // [#11303] The organization this receipt belongs to, THREADED from the
+        // notification the receipt is ABOUT.
+        //
+        // Maintainer ruling, 2026-08-24, verbatim: 「11303
+        // sys_inbox_message/sys_notification/sys_email 应该写 organization_id。」
+        //
+        // The inbox channel's `delivered` receipt already stamps the
+        // organization it was handed at fan-out. This is the OTHER
+        // `sys_notification_receipt` producer — the `read` receipt, inserted
+        // when a user reads a notification whose delivered-receipt never landed
+        // — and it named no organization at all, so it wrote a NULL however
+        // well the emit path upstream was threaded. One table, two producers.
+        //
+        // The subject record's own organization is the platform's standing
+        // answer for a platform row (#8287), and here it is also the only
+        // honest one: `markRead(userId, ids)` carries no tenant of its own, and
+        // ⛔ inventing one — the reader's active organization, their first
+        // membership — would let a receipt claim an organization its own
+        // notification does not have. A null is visibly missing; a wrong value
+        // is silently authoritative.
+        const organizationId = await this.notificationOrganization(data, notificationId);
+
         try {
             await data.insert(RECEIPT_OBJECT, {
                 notification_id: notificationId,
@@ -757,12 +779,45 @@ export class MessagingService {
                 channel: 'inbox',
                 state: 'read',
                 at,
+                organization_id: organizationId,
                 created_at: at,
             });
             return 1;
         } catch (err) {
             if (isUniqueViolationError(err) && (await flipToRead())) return 1;
             throw err;
+        }
+    }
+
+    /**
+     * [#11303] The organization of the `sys_notification` a receipt is about,
+     * or `null`.
+     *
+     * Best-effort in one direction only: a read that fails or finds nothing
+     * yields `null`, which is the same value the row carried before this
+     * existed — so a degraded read can never turn into a WRONG organization,
+     * only into the missing one it already was. That asymmetry is the point:
+     * the failure mode this closes is silence, and the failure mode it must not
+     * open is confident invention.
+     */
+    private async notificationOrganization(
+        data: IDataEngine,
+        notificationId: string,
+    ): Promise<string | null> {
+        try {
+            const row = await data.findOne(NOTIFICATION_EVENT_OBJECT, {
+                where: { id: notificationId },
+                fields: ['id', 'organization_id'],
+            });
+            const org = (row as Record<string, unknown> | undefined)?.organization_id;
+            return org != null && String(org) !== '' ? String(org) : null;
+        } catch (err) {
+            this.ctx.logger.warn(
+                `[messaging] could not read the organization of notification '${notificationId}' ` +
+                `(${(err as Error).message}); its read receipt is written with organization_id = NULL ` +
+                `rather than a guessed organization`,
+            );
+            return null;
         }
     }
 
