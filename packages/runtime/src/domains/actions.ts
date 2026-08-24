@@ -432,6 +432,13 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
                 response: deps.error(`Action '${actionName}' on object '${objectName}' not found`, 404),
             };
         }
+        // [#11519] Doubled post-success navigation — the handler returned
+        // `redirectUrl` while the declaration carries `onSuccess`. The one
+        // seam holding both channels; observe LOUDLY, never rewrite the wire
+        // (the interim renderer precedence, declared wins per objectui#5933,
+        // stays the decider until the author takes the remedy).
+        const doubled = actionExec.doubledPostSuccessNavigationWarning(deps, actionDef, result, objectName);
+        if (doubled) console.warn(doubled);
         // [#3962] Single wrap: `data` is the handler's return value, exactly as
         // every other domain serializes. The former inner `{success, data}`
         // envelope existed only to carry a failure signal at HTTP 200; failures
