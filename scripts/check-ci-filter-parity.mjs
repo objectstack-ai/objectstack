@@ -382,35 +382,56 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
 // is a different file and must be named), and a declaration under a root that
 // appears nowhere at all.
 
-/** A ci.yml source carrying the two scheduling lists, in the real shape. */
-const REAL_TEST_IF =
-  "${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}";
-
-function fixtureWorkflow({ core, crosspkg, condition = REAL_TEST_IF } = {}) {
-  const list = (entries) => entries.map((e) => `              - '${e}'`).join('\n');
-  return [
-    'name: CI',
-    'jobs:',
-    '  filter:',
-    '    steps:',
-    '      - uses: dorny/paths-filter@v4',
-    '        id: changes',
-    '        with:',
-    '          filters: |',
-    '            core:',
-    list(core ?? ['packages/**', '.github/workflows/ci.yml']),
-    `            ${REMEDY_FILTER}:`,
-    list(crosspkg ?? ['scripts/**']),
-    '  test:',
-    `    if: ${JSON.stringify(condition)}`,
-    '    steps:',
-    '      - run: echo test',
-  ].join('\n');
-}
-
-const table = (globs) => ({ '@objectstack/probe': { globs } });
+// ⛔ The fixture builders below live INSIDE `selfTest()` and must stay there
+// (#10841). `scripts/pm/dispatch-gates.mjs` scans a gate's MODULE BODY for the
+// path literals it reads -- blanking comments and self-test BODIES first -- and
+// prints the gate as a local gate for every card those literals cover. A fixture
+// helper hoisted to module scope escapes that blanking, and its fixture globs are
+// then read as this gate's declared population.
+//
+// Measured on `3637731e2` before the move: this gate's hint set was
+// `.github/workflows/ci.yml` (real) plus the two subtree globs the `core`/
+// `crosspkg` defaults spell and the fixture table's package name (all three
+// fabricated), and the pair census put it in the MATCHED column for 5328 of 6511
+// tracked files. Its real population is ci.yml and its own source: 2. A
+// fabricated lead is pasted into a dispatch prompt and cannot be told apart from
+// an earned one, so the cost was paid by every card under two of the largest
+// directories in the tree.
+//
+// A fixture that must be module-scope for some other reason can still be spelled
+// safely -- assemble it from unslashed halves the way `DEFAULT_BASE_REF` does in
+// dispatch-gates.mjs, so only the joined value is pathy and it exists at runtime
+// alone.
 
 export async function selfTest() {
+  /** A ci.yml source carrying the two scheduling lists, in the real shape. */
+  const REAL_TEST_IF =
+    "${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') }}";
+
+  function fixtureWorkflow({ core, crosspkg, condition = REAL_TEST_IF } = {}) {
+    const list = (entries) => entries.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            core:',
+      list(core ?? ['packages/**', '.github/workflows/ci.yml']),
+      `            ${REMEDY_FILTER}:`,
+      list(crosspkg ?? ['scripts/**']),
+      '  test:',
+      `    if: ${JSON.stringify(condition)}`,
+      '    steps:',
+      '      - run: echo test',
+    ].join('\n');
+  }
+
+  const table = (globs) => ({ '@objectstack/probe': { globs } });
+
   const failures = [];
   let checked = 0;
   const assert = (cond, label) => {
