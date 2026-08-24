@@ -62,7 +62,10 @@
  * (`js-comment-mask.mjs`), because a `process.argv[1]` inside a string payload
  * for a spawned child is not an entry guard -- `run-with-stall-guard.mjs` really
  * does carry one, and an allowlist to excuse it would be a hole the next such
- * file falls through silently.
+ * file falls through silently. One carve-out (#11838): the bytes a `${...}`
+ * interpolation contributes are SUBTRACTED back out of the mask, because the
+ * language executes them -- a guard written inside a template literal is still
+ * a guard. `codeOnly` below states the measurement.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -107,11 +110,31 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** Code only: comments, strings, templates and regex literals all blanked. */
+/**
+ * Code only: comments, strings, templates and regex literals blanked — MINUS
+ * the bytes a `${...}` interpolation contributes, which the language runs.
+ *
+ * That subtraction is not a refinement, it is the difference between this gate
+ * seeing the worst guard in the family and not seeing it. `comment || literal`
+ * is `js-comment-mask.mjs`'s documented answer and is right for its other
+ * callers — a `process.argv[1]` inside a string payload for a spawned child is
+ * not a guard, which `run-with-stall-guard.mjs` relies on — but under it the
+ * line
+ *
+ *   import.meta.url === `file://${process.argv[1]}`
+ *
+ * is prose. Measured here on 644ad5043 (#11838): 0 findings for that spelling
+ * against 1 for the plain one, and it is the spelling `invoked-as.mjs`'s header
+ * singles out as the one that goes inert with no symlink at all. Measured
+ * downstream (objectui#6092): the straight port of this gate listed 28 of that
+ * tree's 29 hand-typed guards and omitted exactly the template-written one.
+ * `interpolation` is the third array added for this; `js-comment-mask.mjs`
+ * states what it excludes and pins it.
+ */
 export function codeOnly(source) {
-  const { comment, literal } = scanSource(source);
+  const { comment, literal, interpolation } = scanSource(source);
   const both = new Uint8Array(comment.length);
-  for (let i = 0; i < both.length; i++) both[i] = comment[i] || literal[i];
+  for (let i = 0; i < both.length; i++) both[i] = comment[i] || (literal[i] && !interpolation[i]);
   return blank(source, both);
 }
 
@@ -631,6 +654,20 @@ export function selfTest() {
   ];
   SPELLINGS.forEach((src, i) => t(`spelling ${i + 1} of ${SPELLINGS.length} is rejected`, n(src) > 0, src));
 
+  // The percent-encoding spelling lives inside a TEMPLATE, so it is only
+  // visible through the interpolation-aware view above. Pinned here because
+  // `codeOnly` reverting to `comment || literal` is a one-character change that
+  // makes this gate blind to the worst guard in the family while staying green
+  // (#11838 — measured at 0 findings before the subtraction).
+  t(
+    'the percent-encoding guard is seen THROUGH the template it is written in',
+    n('if (import.meta.url === `file://${process.argv[1]}`) {}') > 0,
+  );
+  t(
+    '...while a process.argv[1] in the template BODY, outside any interpolation, is not a guard',
+    n('const s = `node x.mjs process.argv[1]`;\n') === 0,
+  );
+
   // ── the canonical form is accepted ────────────────────────────────────────
   t('the canonical guard is accepted', n(`if (${CANONICAL}) { main(); }`) === 0);
   t('a file with no guard at all is accepted', n("console.log('hello');\n") === 0);
@@ -774,7 +811,7 @@ export function selfTest() {
     return 1;
   }
   console.log(
-    `✓ check-entry-guard self-test: ${cases.length} cases pass — all 11 measured spellings rejected, canonical form and masked prose/payloads accepted, ` +
+    `✓ check-entry-guard self-test: ${cases.length} cases pass — all 11 measured spellings rejected (the template-interpolation one included), canonical form and masked prose/payloads accepted, ` +
       `and the import-safety rule recognised on both sides (dispatch/exit/argv-branch/try rejected; declarations, non-exporters and all three guard spellings accepted) — ` +
       `plus the dispatch-gates scan surface, derived from the walked root and held apart from the baseline roster.`,
   );
