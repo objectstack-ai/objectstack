@@ -257,6 +257,85 @@ export const EXECUTED_ROOTS = ['.github/workflows', 'scripts'];
  */
 export const LOOSE_FILE_NAMES = new Set(['AGENTS.md', 'CLAUDE.md']);
 
+/**
+ * The half of this gate's population that `scripts/pm/dispatch-gates.mjs` could
+ * not see, written in the syntax that derivation CAN read (#10840).
+ *
+ * ## The defect this repairs, and how it was caught
+ *
+ * `extractWatchHints` builds a hint only from a literal that "looks pathy" —
+ * carries a separator, or starts with a dotted root. `INSTRUCTION_ROOTS` and
+ * `EXECUTED_ROOTS` spell two of their four roots as BARE single-segment words,
+ * so a card touching `scripts/**` or `skills/**` derived this gate NOWHERE. It
+ * was invisible to the very derivation that is supposed to route work to it,
+ * including the cards most likely to add the spelling it exists to judge.
+ *
+ * Measured on this tree before the declaration landed — `.claude` cleared
+ * `looksPathy` on its dotted branch and `.github/workflows` on its separator,
+ * so exactly the two bare words were blind:
+ *
+ *   scripts/foo.mjs                             misses
+ *   skills/objectstack-data/rules/indexing.md   misses
+ *   AGENTS.md                                   misses
+ *   CLAUDE.md                                   misses
+ *   .claude/agents/os-dev.md                    DERIVES
+ *   .github/workflows/ci.yml                    DERIVES
+ *
+ * `scripts/pm/bare-root-worklist.mjs --self-test` is the ratchet that caught it,
+ * and it caught it on the commit that introduced it.
+ *
+ * ## Why declaring is honest here — the measurement, from this gate's own walker
+ *
+ * ⛔ The costlier error is declaring a root the gate does not read WHOLESALE: a
+ * root hint covers a whole SUBTREE, so a declaration over a kind-filtered walk
+ * fabricates a lead in every dispatch prompt that brushes it. That is why most
+ * rows in the worklist are refusals rather than declarations. So the numbers
+ * below are numerator = files `scannedFiles()` admits, denominator = tracked
+ * files under the subtree the declaration names:
+ *
+ *   skills/**       50 of 50    100.0%   nothing under it is skipped at all
+ *   scripts/**     239 of 242    98.8%   the 3 misses are `.txt`
+ *   AGENTS.md/**     1 of 1     100.0%   the repo-root file, named exactly
+ *   CLAUDE.md/**     1 of 1     100.0%   the repo-root file, named exactly
+ *
+ * This is the `subtree` case, not the `filtered` one: the walk descends the
+ * whole of each root and every file carrying a scanned extension is read. The
+ * three files it skips are the non-code files the extension filter drops, not a
+ * subtree it never opens — the same shape `check-pnpm-filter-targets.mjs`
+ * declares `scripts/**` on at 97.0%, and `check-role-word.mjs` declares
+ * `skills/**` on. Both precedents are in this tree.
+ *
+ * The two `.md/**` entries are the escapable case the derivation's own residue
+ * names: a population that is a repo-ROOT FILE spelled as a bare filename is
+ * refused as too generic, and reaches its file by declaring the subtree
+ * spelling. `hintCovers('AGENTS.md/**', 'AGENTS.md')` is true and
+ * `hintCovers('AGENTS.md/**', 'examples/AGENTS.md')` is FALSE — both measured —
+ * so this claims the one file it reads and does not overclaim the nested ones.
+ *
+ * ## What stays UNDECLARED, and why that is not a gap
+ *
+ * `deriveVitestScripts()` reads every tracked `package.json` in the workspace —
+ * a real read, deliberately not reached here. The instrument cannot express it:
+ * the only spellable claim is `packages/**` + `apps/**` + `examples/**`, which
+ * would name this gate for every one of the ~5200 tracked files under those
+ * roots in order to reach ~80 manifests. That is the +139084 fabrication
+ * `hintCovers`' docblock prices, and it is refused.
+ *
+ * The nested `AGENTS.md` files (`examples/`, `packages/create-objectstack/`) are
+ * unreachable for the same reason and stay so. Both refusals are pinned in
+ * `--self-test`, so a later author who adds those globs meets an assertion
+ * instead of this paragraph.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * ⛔ Nothing in this gate reads this array. The glob form appearing in
+ * `INSTRUCTION_ROOTS` / `EXECUTED_ROOTS` would point the walk at a directory
+ * that does not exist, and `run()` REFUSES a missing declared root — so the
+ * mistake would turn this gate red rather than quietly shrink its population.
+ * `--self-test` pins the two apart in both directions.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['skills/**', 'scripts/**', 'AGENTS.md/**', 'CLAUDE.md/**'];
+
 const SCANNED_EXTENSIONS = new Set([
   '.md',
   '.mdx',
@@ -864,6 +943,63 @@ function selfTest() {
   t('and it is this file', RULE_OWNING_FILES[0], 'scripts/check-agent-test-spelling.mjs');
   t('every counter-example carries a reason', COUNTER_EXAMPLE_FILES.every((e) => typeof e.reason === 'string' && e.reason.trim().length > 0), true);
   t('the counter-example list stays tiny', COUNTER_EXAMPLE_FILES.length <= 3, true);
+
+  // ── The dispatch-gates declaration (#10840) ───────────────────────────────
+  //
+  // ⛔ Enforcement cannot hold any of this: the declaration is read by ANOTHER
+  // tool entirely, so a wrong or stale one runs green here forever and pays
+  // itself out as a dev dispatched on a scripts/ or skills/ card with this gate
+  // missing from the brief.
+  //
+  // ⛔ And it is pinned STRUCTURALLY — derived from the scan roots on both
+  // sides — rather than by importing `hintCovers` from the derivation. That is
+  // the precedents' choice (`check-role-word.mjs`, `check-driver-conformance.mjs`,
+  // `check-examples-live-imports.mjs`: none of them imports it) and the reason
+  // is measured, not stylistic. An earlier draft of this block DID import it,
+  // and `discoverFamilies` then treated `scripts/pm/dispatch-gates.mjs` as this
+  // gate's own source and hoisted ITS path literals into this gate's hints:
+  // `packages/spec/src/**`, `packages/plugins`, `packages/drivers`,
+  // `packages/services`. A card touching any of those would have derived this
+  // gate, which reads nothing there — the fabricated lead this declaration
+  // exists to avoid, arriving through the assertion meant to prevent it.
+  // The live `hintCovers` results are recorded in the docblock as a
+  // MEASUREMENT, taken at the command line where it costs nothing.
+  console.log('the dispatch-gates declaration — both directions, derived from the scan roots');
+  {
+    const scanRoots = [...INSTRUCTION_ROOTS, ...EXECUTED_ROOTS];
+    // A root with no separator is refused by the extractor as too generic, so
+    // it is exactly the set that NEEDS the subtree spelling. Derived, so that
+    // renaming or adding a root cannot leave the declaration describing the old
+    // population.
+    const separatorless = scanRoots.filter((r) => !r.includes('/') && !r.startsWith('.'));
+    t('every scan root the extractor cannot see has the subtree spelling declared',
+      separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)), true);
+    t('…and the set it had to cover is the two the worklist flagged',
+      [...separatorless].sort(), ['scripts', 'skills']);
+    // The repo-ROOT files are the other escapable case: a bare filename is
+    // refused as too generic and reaches its file through the same spelling.
+    t('every loose root file is declared the same way',
+      [...LOOSE_FILE_NAMES].every((n) => ROOT_DIR_WATCH_HINTS.includes(`${n}/**`)), true);
+    // The opposite direction — a declaration that can drift from the scan is
+    // worse than none, because it replaces a silent gate with a lying one.
+    t('and it declares nothing this gate does not read',
+      ROOT_DIR_WATCH_HINTS.every((h) => {
+        const bare = h.replace(/\/\*+$/, '');
+        return scanRoots.includes(bare) || LOOSE_FILE_NAMES.has(bare);
+      }), true);
+    // The refusals from the docblock, pinned so a later author who adds them
+    // meets an assertion rather than a paragraph: declaring these would name
+    // this gate for ~5200 files to reach the ~80 manifests it actually opens.
+    for (const refused of ['packages/**', 'apps/**', 'examples/**']) {
+      t(`⛔ ${refused} stays UNDECLARED — the manifest read is unspellable at honest precision`,
+        ROOT_DIR_WATCH_HINTS.includes(refused), false);
+    }
+    // Provenance, never a lookup key: the glob form must never leak into the
+    // scan roots, where it would point the walk at a directory that does not
+    // exist — and `run()` refuses a missing declared root, so it would go red.
+    t('no declared hint is itself a scan root',
+      ROOT_DIR_WATCH_HINTS.some((h) => scanRoots.includes(h)), false);
+  }
 
   console.log('the derivation reads THIS workspace, and reads it non-empty');
   const derived = deriveVitestScripts(REPO_ROOT);
