@@ -338,3 +338,46 @@ describe('rowToNormalized', () => {
     expect(() => rowToNormalized({ to_addresses: 'a@b.com', from_address: 'c@d.com', subject: 'x' })).toThrow(/body/);
   });
 });
+
+// ── #11741 — sys_email organization stamping ────────────────────────────────
+// The writer runs under a constant SYSTEM context, so the ONLY organization a
+// row can carry is the one the input carries: `SendEmailInput.organizationId`
+// is stamped onto `sys_email.organization_id` verbatim (pass-through), and its
+// absence writes nothing — never refused, never resolved, never fabricated
+// (a wrong organization is silently authoritative to every org-filtered
+// report/export, which is worse than a null).
+describe('sys_email organization stamping (#11741)', () => {
+  function makePersistence() {
+    const rows = new Map<string, Record<string, any>>();
+    const p: EmailPersistence = {
+      async insert(row) { rows.set(row.id, { ...row }); return { id: row.id }; },
+      async update(id, patch) {
+        const cur = rows.get(id);
+        if (cur) rows.set(id, { ...cur, ...patch });
+      },
+    };
+    return { p, rows };
+  }
+
+  it("send() stamps input.organizationId onto the row's organization_id (identity pin)", async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<m1@x>' })) };
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: p });
+    const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x', organizationId: 'org_apex' });
+    expect(res.status).toBe('sent');
+    const row = rows.get(res.id);
+    expect(row?.organization_id).toBe('org_apex');
+    // The stamp survives the terminal update (sent_at/status patch does not
+    // rewrite it).
+    expect(row?.status).toBe('sent');
+  });
+
+  it('over-denial control: an org-less send writes NO organization_id and is not refused', async () => {
+    const transport = { send: vi.fn(async () => ({ messageId: '<m2@x>' })) };
+    const { p, rows } = makePersistence();
+    const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', persistence: p });
+    const res = await svc.send({ to: 'a@b.com', subject: 'Hi', text: 'x' });
+    expect(res.status).toBe('sent');
+    expect(rows.get(res.id)).not.toHaveProperty('organization_id');
+  });
+});
