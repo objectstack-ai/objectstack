@@ -12596,6 +12596,87 @@ export class SqlDriver implements IDataDriver {
    * Either way the column stays TEXT and, on MySQL, the index over it is
    * refused with the diagnostic {@link explainUnkeyableTextColumn} writes.
    */
+  /**
+   * knex's `table.string(name)` default, spelled out rather than inherited
+   * (#11431). It is the width a string-family field with no usable
+   * `maxLength` keeps — unchanged behaviour, and deliberately so: a field that
+   * declares no bound has not asked for one, and inventing a narrower column
+   * would impose a truncation boundary its author never wrote.
+   */
+  protected static readonly DEFAULT_STRING_VARCHAR_CHARS = 255;
+
+  /**
+   * The widest `varchar(n)` a column may declare, across every dialect this
+   * driver speaks (#11431).
+   *
+   * Measured, not read off a doc page. MySQL 8.0.46, utf8mb4/InnoDB:
+   * `varchar(16383)` creates and `varchar(16384)` is refused with
+   * `ERROR 1074 Column length too big for column 'c' (max = 16383); use BLOB
+   * or TEXT instead` — 65535 bytes ÷ 4 bytes per utf8mb4 character. Postgres
+   * 16 accepts up to `varchar(10485760)` and refuses `10485761` with
+   * `length for type varchar cannot exceed 10485760`; SQLite records the
+   * declared type verbatim and enforces nothing.
+   *
+   * ⚠️ ONE ceiling for every dialect, deliberately, and it is the LOWEST of
+   * the three. The alternative is one declaration with three physical shapes,
+   * so the same app would take a `maxLength: 100000` url as a bounded column
+   * on Postgres and refuse to create the table at all on MySQL — the
+   * dialect-divergent enforcement this file's conformance matrices exist to
+   * close, and the same call {@link keyableTextLength}'s neighbour already
+   * made for the text family.
+   *
+   * ⚠️ What this constant is NOT: a guarantee the table will create. MySQL
+   * also caps the SUM of a row's declared byte widths at 65535 (measured:
+   * 15 × `varchar(1024)` creates, 16 × `varchar(1024)` is refused with
+   * `ERROR 1118 Row size too large`), a limit no per-column decision can see.
+   * Postgres has no such limit (it TOASTs; 40 × `varchar(4096)` creates
+   * cleanly). No platform object comes near it — the widest declared bound on
+   * a string-family field in this repo is 2000, and no object carries more
+   * than six such fields — but an authored app can, and the server's own
+   * refusal is the only thing that reports it today.
+   */
+  protected static readonly MAX_VARCHAR_CHARS = 16383;
+
+  /**
+   * The `varchar(n)` a STRING-family column should take, or `null` to make it
+   * TEXT instead (#11431).
+   *
+   * Three outcomes, each a deliberate answer rather than a fallback:
+   *
+   *   - **no usable declaration** — `maxLength` absent, or not a positive
+   *     integer — keeps {@link DEFAULT_STRING_VARCHAR_CHARS}. Unchanged
+   *     behaviour for every field that never declared a bound, which is the
+   *     overwhelming majority of them.
+   *   - **a declaration this dialect can express** returns it verbatim, in
+   *     BOTH directions. Wider than 255 is the reported defect; narrower is
+   *     the same defect's other half — `maxLength: 20` took `varchar(255)`
+   *     too, so the bound bound in neither direction.
+   *   - **a declaration wider than {@link MAX_VARCHAR_CHARS}** returns `null`
+   *     and the column becomes TEXT. Emitting `varchar(100000)` would be DDL
+   *     MySQL refuses outright, and clamping it to the ceiling would reinstate
+   *     exactly the defect being fixed — a column narrower than the
+   *     declaration, refusing writes the declaration allows. TEXT refuses
+   *     nothing the author declared; the bound is still enforced, at the
+   *     write seam where `maxLength` enforcement actually lives (the record
+   *     validator's `max_length` check), with a field-named ADR-0112 envelope
+   *     instead of a raw `ER_DATA_TOO_LONG`.
+   *
+   * ⚠️ Deliberately mirrors {@link keyableTextLength} without sharing code
+   * with it. The two families answer different questions — that one asks
+   * "can this KEY?" and returns `null` for an unbounded field, this one asks
+   * "how wide is this column?" and returns 255 — and #11374's remaining half
+   * may still reshape the text side. A shared helper would couple a settled
+   * decision to an unsettled one.
+   */
+  protected declaredVarcharLength(field: any): number | null {
+    const declared = (field as { maxLength?: unknown }).maxLength;
+    const n = typeof declared === 'string' ? Number(declared) : declared;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
+      return SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
+    }
+    return n > SqlDriver.MAX_VARCHAR_CHARS ? null : n;
+  }
+
   protected keyableTextLength(field: any): number | null {
     const declared = (field as { maxLength?: unknown }).maxLength;
     const n = typeof declared === 'string' ? Number(declared) : declared;
@@ -12677,9 +12758,42 @@ export class SqlDriver implements IDataDriver {
       case 'email':
       case 'url':
       case 'phone':
-      case 'password':
-        col = table.string(name);
+      case 'password': {
+        // #11431: the string family takes its declared `maxLength`, instead of
+        // knex's invented default of 255.
+        //
+        // The bound is the field's OWN — nothing is guessed. `schema-drift.ts`
+        // has always treated `varchar(field.maxLength)` as the EXPECTED
+        // physical shape of a bounded field (`widen_varchar` /
+        // `narrow_varchar` say so in as many words), so before this branch the
+        // differ and the emitter disagreed about every column the driver
+        // itself had just created. Measured on live MySQL 8.0.46 and Postgres
+        // 16 on the pre-fix tree: a `maxLength: 400` email, a `maxLength: 1024`
+        // url and a `maxLength: 20` phone all landed as `varchar(255)`, and the
+        // same table reported two `widen_varchar` (warning/safe) plus one
+        // `narrow_varchar` (error/DESTRUCTIVE) findings against itself, on a
+        // table with no rows in it.
+        //
+        // The write half is the reported defect. A 300-character value —
+        // legal under the declaration, and accepted by the record validator's
+        // own `max_length` check — was refused by BOTH enforcing dialects:
+        // MySQL `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, Postgres
+        // `22001 value too long for type character varying(255)`.
+        //
+        // ⚠️ Both directions, and the narrowing one is NOT a destructive
+        // migration — a point worth stating because it reads like one:
+        // `createColumn` runs on `CREATE TABLE` and on `ALTER TABLE ADD
+        // COLUMN`, so the column it sizes is always EMPTY. Narrowing an
+        // EXISTING `varchar(255)` that holds rows stays exactly where it was
+        // before this change: the `narrow_varchar` drift op, category
+        // `destructive`, behind `os migrate apply --allow-destructive`.
+        // Nothing here plans an ALTER on an existing column, and the differ is
+        // untouched. What this removes is the permanent, self-inflicted drift
+        // report a fresh table used to raise against itself.
+        const declared = this.declaredVarcharLength(field);
+        col = declared === null ? table.text(name) : table.string(name, declared);
         break;
+      }
       case 'text':
       case 'textarea':
       case 'html':
@@ -12786,6 +12900,19 @@ export class SqlDriver implements IDataDriver {
       // primitive — it shares this exact DDL path so reads/$expand/FK stay uniform.
       case 'lookup':
       case 'user':
+        // ⛔ #11431 deliberately STOPS at the string family and does not reach
+        // here, even though these branches spell the same `table.string(name)`.
+        // A lookup column does not hold the declared value — it holds the
+        // REFERENCED ROW'S ID, whose width is the parent table's `id` column,
+        // not anything this field declared. Measured on MySQL 8.0.46: the FK
+        // itself is content with mismatched widths (`varchar(20)` child →
+        // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
+        // it too), so the type system gives no warning — but the first write
+        // is refused, because a platform id is 26 characters and
+        // `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)`
+        // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
+        // the column structurally incapable of holding ANY id — a strictly
+        // worse defect than the one #11431 fixes.
         col = table.string(name);
         if (field.reference_to) {
           table.foreign(name).references('id').inTable(field.reference_to);
@@ -12796,6 +12923,17 @@ export class SqlDriver implements IDataDriver {
         break;
       case 'auto_number':
       case 'autonumber':
+        // ⛔ Also out of #11431's scope, for a different reason than `lookup`
+        // above: the value is issued by the RUNTIME from its sequence, not
+        // supplied by a caller. `maxLength` has no write-time counterpart on
+        // this type — the record validator's `max_length` check covers the
+        // textual types only, and an autonumber never reaches it at all
+        // (runtime-owned types are excluded from its door) — so binding the
+        // DDL to it would create a refusal with nothing declaring it: the
+        // platform's own generated record number rejected by a column, with no
+        // author to hand the error to. Widening `maxLength` to a second
+        // meaning ("how wide is the generated number") is a spec decision, not
+        // a driver one.
         col = table.string(name);
         break;
       case 'formula':
@@ -12806,6 +12944,16 @@ export class SqlDriver implements IDataDriver {
         // (the read-side deserializer) can never drift — the drift between them
         // is exactly what let array-valued fields reach the binder un-serialized
         // (#field-zoo). Everything else is a plain string.
+        //
+        // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
+        // what lands in it is precisely the set of types whose stored value is
+        // NOT the declared value: `secret` persists an opaque `sys_secret`
+        // ref rather than the credential it was given (ADR-0100), and
+        // `select` / `radio` / `checkboxes` / `code` / `tree` store option
+        // machine names or ids. Sizing any of those from the author's
+        // `maxLength` would size the wrong string. A type that genuinely wants
+        // the bound belongs in the string-family case above, named — never
+        // acquired by falling through to here.
         col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
     }
 
