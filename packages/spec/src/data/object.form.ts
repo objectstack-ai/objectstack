@@ -153,8 +153,44 @@ export const objectForm = defineForm({
             { field: 'lookupFilters', widget: 'json', helpText: 'Filter rules applied to the picker ({field, operator, value})', visibleWhen: "data.type in ['lookup','master_detail']" },
             // `deleteBehavior`, not a `cascadeDelete` boolean: the schema models
             // three outcomes, and only one of them is "cascade".
-            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type in ['lookup','master_detail']", options: [
+            //
+            // TWO declarations of one key, with disjoint `visibleWhen` (#11410).
+            // #9689 made `set_null` on a `master_detail` a named parse-time
+            // rejection, so a single shared option list offered a choice the
+            // publish door refuses — the author found out at the 422. The split
+            // is the narrowest shape the form DSL already supports: field-level
+            // `visibleWhen` is what the metadata-admin renderer evaluates as
+            // `evaluatePredicate(visibility, { data: row })`, exactly as it does
+            // for every other type-conditional control in this repeater.
+            //
+            // Per-option `visibleWhen` (`SelectOptionSchema`, ADR-0068) would be
+            // the tighter-looking spelling and is deliberately NOT used: the
+            // metadata-admin renderer maps `fieldSpec.options` straight to select
+            // items and never reads it, so it would ship an ADR-0049
+            // declared-but-unenforced key. And on the runtime surface that DOES
+            // honor it, the per-option evaluator binds `record`, never `data` —
+            // a `data.`-rooted predicate there is an unbound identifier, and
+            // visibility fails OPEN, keeping the option. Either way the author
+            // would still be offered "Set null".
+            //
+            // ⚠️ The predicates must stay disjoint AND total over the two types:
+            // an overlap renders two selects writing one key, a gap makes the
+            // control vanish for that type. Both are pinned in
+            // `form-delete-behavior-options.test.ts`.
+            //
+            // `helpText` is deliberately IDENTICAL on both. The i18n bundle keys
+            // form fields by field PATH (`metadataForms.<type>.fields.<path>`),
+            // so these two declarations share one translation key — divergent
+            // text here would collide silently, last writer winning.
+            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type == 'lookup'", options: [
               { label: 'Set null', value: 'set_null' },
+              { label: 'Cascade (delete children)', value: 'cascade' },
+              { label: 'Restrict (block the delete)', value: 'restrict' },
+            ] },
+            // `master_detail`: no `set_null`. A detail row without its master is
+            // the orphan the master-detail relationship exists to prevent, so
+            // the schema refuses the combination outright (#9689).
+            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type == 'master_detail'", options: [
               { label: 'Cascade (delete children)', value: 'cascade' },
               { label: 'Restrict (block the delete)', value: 'restrict' },
             ] },

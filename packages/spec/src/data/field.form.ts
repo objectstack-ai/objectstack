@@ -46,7 +46,32 @@ export const fieldForm = defineForm({
         { field: 'options', type: 'repeater', visibleWhen: "data.type == 'select' || data.type == 'multiselect'", helpText: 'Available options (label/value pairs)' },
         // Reference field options
         { field: 'reference', widget: 'ref:object', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'Referenced object name' },
-        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup' || data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted' },
+        // Two declarations of one key, with disjoint `visibleWhen` (#11410) —
+        // the same split `object.form.ts` carries, and for the same reason:
+        // #9689 made `set_null` on a `master_detail` a parse-time rejection, so
+        // one shared control offered a choice publish refuses.
+        //
+        // This file reached that defect by the OTHER route. It declares no
+        // `options`, which is not a narrower offer but the renderer's DERIVED
+        // source: with no inline list the metadata-admin form falls through to
+        // the JSON Schema `enum` — `['set_null','cascade','restrict']`, which
+        // additionally advertises `default: 'set_null'`. A Zod enum has no
+        // per-type narrowing to give, so `master_detail` can only be served by
+        // an EXPLICIT list; omitting one re-offers the refused value.
+        //
+        // `lookup` keeps deriving from that enum, untouched: all three outcomes
+        // are legal there, and leaving the source alone keeps its labels and
+        // their translation exactly as they are today. The two branches are
+        // mutually exclusive, so no author ever sees both spellings at once.
+        //
+        // `helpText` is identical on both — they share one i18n key
+        // (`metadataForms.field.fields.deleteBehavior`), so divergent text would
+        // collide silently.
+        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup'", helpText: 'What happens when referenced record is deleted' },
+        { field: 'deleteBehavior', type: 'select', visibleWhen: "data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted', options: [
+          { label: 'Cascade (delete children)', value: 'cascade' },
+          { label: 'Restrict (block the delete)', value: 'restrict' },
+        ] },
       ],
     },
     {
