@@ -62,14 +62,25 @@
 //   §2 predicted RED 5             measured 5 red — as predicted.
 //   §3 predicted GREEN             measured green — as predicted.
 //   §4 predicted RED 1             measured 1 red — as predicted.
-//   §5 predicted GREEN throughout  measured green — as predicted. These are the
-//      positive controls: a fix that stripped the wrapper by PATTERN instead of
-//      reading `.innerMessage` reddens here and nowhere else.
-//   §6 predicted GREEN throughout  measured green — as predicted.
+//   §5 predicted GREEN throughout  measured GREEN — as predicted, and these
+//      three are the real positive controls: a fix that stripped the wrapper by
+//      PATTERN instead of reading `.innerMessage` reddens here and nowhere
+//      else. A FOURTH case was originally written into this section and the
+//      prediction for it was WRONG — see §6's `userMessage` pin below.
+//   §6 predicted GREEN throughout  measured 1 RED. The prediction was wrong,
+//      recorded rather than rewritten. "a declared `userMessage` still rides"
+//      was drafted into §5 and predicted green as a control, but its fixture is
+//      a SANDBOXED refusal, so its `error` assertion reads the defect and reds
+//      pre-fix like §1 does. It is not a control and never was; it was
+//      mis-shelved, the red is the correct answer for it, and it has been moved
+//      here — to the section for "what must not move" — rather than having its
+//      prediction quietly re-fitted. Nothing about the test changed, only the
+//      shelf and the claim made about it.
 //   §7 predicted GREEN both sides  measured green — as predicted. It pins a
 //      divergence this card does NOT repair; see its own comment.
 //
-// Total 11 of 30 red pre-fix (prediction: 11).
+// Total 12 of 23 red pre-fix. Prediction: 11 of 23 — off by the one case above.
+// Measured: `Tests  12 failed | 11 passed (23)`.
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -373,16 +384,6 @@ describe('[#11588] a NON-sandboxed error\'s message is untouched, character for 
             );
         }
     });
-
-    it('⭐ a declared `userMessage` still rides, and is still the producer\'s text', () => {
-        // #9934's marked channel is orthogonal to the unwrap and must stay so.
-        const err = sandboxRefusal('this record is frozen', {
-            status: 409, code: 'RECORD_LOCKED', userMessage: '该记录已锁定',
-        });
-        const r = throughRouteDoor(err);
-        expect(r.body.error).toBe('this record is frozen');
-        expect(r.body.userMessage).toBe('该记录已锁定');
-    });
 });
 
 // ---------------------------------------------------------------------------
@@ -390,6 +391,22 @@ describe('[#11588] a NON-sandboxed error\'s message is untouched, character for 
 // ---------------------------------------------------------------------------
 
 describe('[#11588] #5437/#5582 and #5423 are exactly where they were', () => {
+    it('a declared `userMessage` still rides, beside the now-unwrapped `error`', () => {
+        // ⚠️ Drafted as a §5 positive control and predicted GREEN. It measured
+        // RED pre-fix, because the fixture is a SANDBOXED refusal: the `error`
+        // assertion reads the defect exactly as §1 does, and only the
+        // `userMessage` half is direction-insensitive. Moved here and the claim
+        // corrected rather than the prediction re-fitted — #9934's marked
+        // channel is orthogonal to the unwrap and must stay so, which is a
+        // "must not move" and not a control.
+        const err = sandboxRefusal('this record is frozen', {
+            status: 409, code: 'RECORD_LOCKED', userMessage: '该记录已锁定',
+        });
+        const r = throughRouteDoor(err);
+        expect(r.body.error).toBe('this record is frozen');
+        expect(r.body.userMessage).toBe('该记录已锁定');
+    });
+
     it('a sandbox refusal declaring a 5xx still has its prose withheld — both spellings', () => {
         // The load-bearing ordering. The 4xx arm is the only one this card
         // touched; if the unwrap had been hoisted above the passthrough instead,
