@@ -88,10 +88,10 @@ describe('REST /actions — doubled post-success navigation diagnostic (#11519)'
 
         const res = await dispatcher.handleActions('/crm_lead/open_portal', 'POST', {}, ctxFor());
 
-        expect(res.response.status).toBe(200);
+        expect(res.response?.status).toBe(200);
         const doubled = warnSpy.mock.calls
-            .map((c) => c.join(' '))
-            .filter((line) => line.includes('[action-contract]'));
+            .map((c: unknown[]) => c.join(' '))
+            .filter((line: string) => line.includes('[action-contract]'));
         expect(doubled).toHaveLength(1);
         // The warning names the action, BOTH channels, the interim winner and
         // the remedy — that is what "loud" means here.
@@ -112,7 +112,7 @@ describe('REST /actions — doubled post-success navigation diagnostic (#11519)'
         // Single wrap (#3962): `data` IS the handler's return value. The
         // diagnostic observes; the interim renderer precedence (declared wins,
         // objectui#5933) stays the decider until the remedy is taken.
-        expect(res.response.body.data).toEqual({
+        expect(res.response?.body.data).toEqual({
             redirectUrl: 'https://idp.example.com/handoff',
             ticket: 't_1',
         });
@@ -123,8 +123,8 @@ describe('REST /actions — doubled post-success navigation diagnostic (#11519)'
 
         await dispatcher.handleActions('/crm_lead/open_portal', 'POST', {}, ctxFor());
 
-        expect(warnSpy.mock.calls.map((c) => c.join(' '))
-            .filter((line) => line.includes('[action-contract]'))).toHaveLength(0);
+        expect(warnSpy.mock.calls.map((c: unknown[]) => c.join(' '))
+            .filter((line: string) => line.includes('[action-contract]'))).toHaveLength(0);
     });
 
     it('stays SILENT when only the handler-redirect channel is used (no onSuccess declared)', async () => {
@@ -136,8 +136,8 @@ describe('REST /actions — doubled post-success navigation diagnostic (#11519)'
 
         await dispatcher.handleActions('/crm_lead/open_portal', 'POST', {}, ctxFor());
 
-        expect(warnSpy.mock.calls.map((c) => c.join(' '))
-            .filter((line) => line.includes('[action-contract]'))).toHaveLength(0);
+        expect(warnSpy.mock.calls.map((c: unknown[]) => c.join(' '))
+            .filter((line: string) => line.includes('[action-contract]'))).toHaveLength(0);
     });
 });
 
