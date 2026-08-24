@@ -285,14 +285,26 @@ export default class Compile extends Command {
       //     through it; this covers the ones that skip it (a plain object
       //     default-export, `strict: false`) and would otherwise emit an
       //     artifact with the key quietly gone. Advisory, never fatal.
-      const unknownKeyFindings = [
+      //
+      //     [#11643] FORMATTED HERE, once, and consumed by BOTH faces — the
+      //     text block just below and the `--json` payload at the end of this
+      //     command. The findings used to be formatted inside that print
+      //     block, i.e. under `!flags.json`, which made them structurally
+      //     unreachable for the payload: computed, then discarded, for the one
+      //     audience `--json` exists to serve. `os validate --json` had this
+      //     exact defect and fixed it this exact way —
+      //     `.map(formatUnknownAuthoringKey)` at the computation site, beside
+      //     its own `normalized` — so hoisting the formatting rather than
+      //     restating it at the payload is what keeps the two faces from
+      //     reporting different sets. One list cannot drift from itself.
+      const unknownKeyWarnings = [
         ...lintUnknownStackKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
         ...lintUnknownAuthoringKeys(normalized as Record<string, unknown>, ObjectStackDefinitionSchema),
-      ];
-      if (unknownKeyFindings.length > 0 && !flags.json) {
-        printWarning(`Undeclared authoring keys (${unknownKeyFindings.length}) — dropped at load (#3786)`);
-        for (const f of unknownKeyFindings.slice(0, 50)) {
-          console.log(`  • ${formatUnknownAuthoringKey(f)}`);
+      ].map(formatUnknownAuthoringKey);
+      if (unknownKeyWarnings.length > 0 && !flags.json) {
+        printWarning(`Undeclared authoring keys (${unknownKeyWarnings.length}) — dropped at load (#3786)`);
+        for (const w of unknownKeyWarnings.slice(0, 50)) {
+          console.log(`  • ${w}`);
         }
       }
 
@@ -464,15 +476,39 @@ export default class Compile extends Command {
           // The whole registry's advisory set, in the shape `os validate --json`
           // reports. This key used to carry the widget rule's warnings alone —
           // one gate out of the twenty-odd that raise them.
-          warnings: ruleAdvisories,
+          //
+          // [#11643] …and then, still, only the RULE advisories: the #3786
+          // undeclared-authoring-key findings were computed above and dropped,
+          // so a CI consumer reading `warnings` off this command saw a strictly
+          // smaller set than the same consumer reading it off
+          // `os validate --json` on the same tree — missing exactly the "your
+          // key was dropped at load" members. Two costs, both real: the machine
+          // faces of two commands disagreed about one class of warning, and
+          // #11529's truncation notice points the reader at `--json` "for the
+          // full list", which was true of one advisory list and false of the
+          // other.
+          //
+          // MIXED BY DESIGN, because that is what parity means here. This list
+          // now carries the rule advisories as RECORDS and the undeclared-key
+          // findings as formatted STRINGS — byte-for-byte the shape
+          // `os validate --json` has shipped since it fixed this on its own
+          // face (`warnings: [...ruleAdvisories, ...docWarnings,
+          // ...unknownKeyWarnings, …]`, likewise a heterogeneous list). The
+          // homogeneity this key used to have was not a contract; it was the
+          // symptom of the omission.
+          warnings: [...ruleAdvisories, ...unknownKeyWarnings],
           // [#10678] Body-extraction failures that made a callable fall back to
-          // the legacy .mjs bundle. A SEPARATE key on purpose: `warnings` above
-          // is author-time RULE advisories (`{where,message,rule,path,hint}`)
-          // and is the shape `os validate --json` shares — folding a different
-          // record shape (`{origin,reason}`) into it would break that contract
-          // for every consumer that reads one shape from either command. Empty
-          // array when every callable lowered cleanly, so a CI consumer can read
-          // the key unconditionally.
+          // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
+          // parity too — the opposite way round from `unknownKeyWarnings` just
+          // above. `{origin,reason}` extraction records have NO counterpart in
+          // `os validate --json`: that command lowers no handlers, so there is
+          // no cross-command list for these to join, and folding a shape only
+          // ONE command can ever emit into the shared key would teach consumers
+          // a shape the other command never ships. The undeclared-key findings
+          // are the mirror case — validate already carries them, in `warnings`,
+          // so that is where build has to carry them too. Empty array when every
+          // callable lowered cleanly, so a CI consumer can read the key
+          // unconditionally.
           bodyExtractionWarnings: lowering.bodyExtractionWarnings,
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
