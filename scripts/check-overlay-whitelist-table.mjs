@@ -2,9 +2,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-overlay-whitelist-table (#11752) -- the "Overlay whitelist (shared-DB
- * tenancy invariant)" table in `content/docs/concepts/metadata-lifecycle.mdx`
- * must agree with `DEFAULT_METADATA_TYPE_REGISTRY`, in BOTH directions.
+ * check-overlay-whitelist-table (#11752, #11763) -- the "Overlay whitelist
+ * (shared-DB tenancy invariant)" section of
+ * `content/docs/concepts/metadata-lifecycle.mdx` must agree with
+ * `DEFAULT_METADATA_TYPE_REGISTRY`: the TABLE in both directions (legs 1-2),
+ * and the two registry-derived COUNTS in the sentence under it (leg 3).
  *
  *   node scripts/check-overlay-whitelist-table.mjs              # judge the checked-in tree
  *   node scripts/check-overlay-whitelist-table.mjs --list       # every type and where it is asserted
@@ -39,9 +41,9 @@
  * findable from the table side; the fourth was findable ONLY from the registry
  * side. A one-legged gate would have shipped 3/4 and reported clean.
  *
- * So the comparison runs as two legs, and BOTH counts are printed even when
- * both are zero -- a reader has to be able to see that the second leg exists
- * and ran:
+ * So the TABLE comparison runs as two legs, and BOTH counts are printed even
+ * when both are zero -- a reader has to be able to see that the second leg
+ * exists and ran:
  *
  *   LEG 1  table → registry: every type named in the table carries the
  *          registry's verdict for it (and is a type the registry declares).
@@ -53,6 +55,60 @@
  * `false` types whose second tier (`allowRuntimeCreate`) is worth calling out.
  * Requiring a row for all 27 types would demand a table nobody wants and would
  * be the kind of gate that gets deleted rather than obeyed.
+ *
+ * ## LEG 3: the two counts in the sentence under the table (#11763)
+ *
+ * #11750 corrected the table and, in the same PR, added a sentence under it so
+ * a human could check the completeness claim without opening the registry:
+ *
+ *   "Those five are the **complete** `allowOrgOverride: true` set: of the 27
+ *    types in `DEFAULT_METADATA_TYPE_REGISTRY`, every other one is `false`."
+ *
+ * Both numbers are derived from the registry, and both were hand-kept. That is
+ * the SAME defect class the table had -- one measurement written down twice
+ * with nothing holding the copies together -- moved one line down and left
+ * unguarded by the very gate (#11759, this file) that shipped alongside the
+ * correction. Register a 28th type and the page asserted "27" with legs 1 and 2
+ * green: leg 2 only demands a table ROW for each `true` type, and a new `false`
+ * type moves neither leg.
+ *
+ * Leg 3 reads both numbers OUT OF THE PROSE and compares them against the
+ * counts this gate already holds -- `entries.length` and the size of the `true`
+ * filter, the two numbers `--list` has printed since day one. Nothing on either
+ * side is a literal in this file. A `27` written into this script would have
+ * moved the hand-kept copy one file to the left and closed nothing.
+ *
+ * Scanned over the WHOLE page, not just the whitelist section: a claim ABOUT
+ * the registry is no less a hand-kept copy for having drifted into a
+ * neighbouring section. Both patterns are anchored on backticked identifiers
+ * (`DEFAULT_METADATA_TYPE_REGISTRY`, `allowOrgOverride: true`), so they cannot
+ * collide with ordinary English.
+ *
+ * ### "five" is a WORD, and the prose keeps it
+ *
+ * The true-set count is spelled out, not digitised. The cheap route is to
+ * rewrite the sentence to "Those 5 are ..." and match `\d+` -- but that is a
+ * docs edit made to suit a parser, and this gate's own VERDICT block already
+ * tells the next reader that a gate "fixed" by editing the thing it measures
+ * has inverted its point. So `parseCountToken` reads digits AND English
+ * number-words 0..99 (`five`, `twenty-seven`): 30 lines and two Maps, measured
+ * against the one-word docs edit it replaces. English style also spells small
+ * numbers, so a digit here would have been reverted by the next prose editor
+ * and the leg would have gone quietly red for a reason nobody wanted.
+ *
+ * The long tail people (rightly) fear from number-word parsing is bounded by
+ * REFUSING: above 99, or on any token the two Maps do not cover, the gate goes
+ * red and says to write digits or extend the Maps. It never guesses and never
+ * skips.
+ *
+ * ### An absent or reworded claim is RED, not a no-op
+ *
+ * If either pattern matches nothing, the gate refuses -- the same rule as the
+ * missing heading, for the same reason. A leg whose subject sentence was
+ * deleted must not keep printing a clean line about it. Removing the numbers
+ * from the prose is a legitimate docs decision (`"every other one is false"` is
+ * true without a count); it just has to be made HERE too, rather than silently
+ * draining this leg to vacuum.
  *
  * ## Why AST, not regex (constraint 2, and the whole reason this file is 400
  * lines instead of a grep)
@@ -480,7 +536,124 @@ export function readTable(text) {
 }
 
 // ---------------------------------------------------------------------------
-// The two legs
+// Doc side -- the registry counts stated in prose (leg 3, #11763)
+// ---------------------------------------------------------------------------
+
+/** English number-words 0..19. */
+const ONES_WORDS = new Map([
+  ['zero', 0], ['one', 1], ['two', 2], ['three', 3], ['four', 4],
+  ['five', 5], ['six', 6], ['seven', 7], ['eight', 8], ['nine', 9],
+  ['ten', 10], ['eleven', 11], ['twelve', 12], ['thirteen', 13], ['fourteen', 14],
+  ['fifteen', 15], ['sixteen', 16], ['seventeen', 17], ['eighteen', 18], ['nineteen', 19],
+]);
+
+/** The tens, 20..90. A compound is `<tens>-<ones>`: `twenty-seven`. */
+const TENS_WORDS = new Map([
+  ['twenty', 20], ['thirty', 30], ['forty', 40], ['fifty', 50],
+  ['sixty', 60], ['seventy', 70], ['eighty', 80], ['ninety', 90],
+]);
+
+/**
+ * Read a count written as digits or as an English number-word, 0..99.
+ *
+ * @returns {number | null} `null` means UNREADABLE, and every caller must turn
+ *   it into a finding. It never means zero, and it never means "skip this
+ *   claim" -- an unreadable count that read as clean would be this gate
+ *   committing the defect it was built to catch.
+ */
+export function parseCountToken(token) {
+  if (/^\d+$/.test(token)) return Number(token);
+  const t = token.toLowerCase();
+  if (ONES_WORDS.has(t)) return ONES_WORDS.get(t);
+  if (TENS_WORDS.has(t)) return TENS_WORDS.get(t);
+  const compound = /^([a-z]+)-([a-z]+)$/.exec(t);
+  if (compound !== null) {
+    const tens = TENS_WORDS.get(compound[1]);
+    const ones = ONES_WORDS.get(compound[2]);
+    if (tens !== undefined && ones !== undefined && ones >= 1 && ones <= 9) return tens + ones;
+  }
+  return null;
+}
+
+/**
+ * The two count claims this page makes about the registry.
+ *
+ * Rebuilt on every call so no `/g` regex ever carries `lastIndex` between runs
+ * -- a module-level one would make the second call in the same process read a
+ * different, shorter page than the first.
+ */
+function proseClaimPatterns() {
+  return [
+    {
+      what: 'total',
+      subject: `the number of types in \`${REGISTRY_CONST}\``,
+      re: new RegExp('\\bof the ([\\w-]+) types in `' + REGISTRY_CONST + '`', 'g'),
+    },
+    {
+      what: 'true-set',
+      subject: `the size of the \`${COL_FLAG}: true\` set`,
+      // `**complete**` is optional so dropping the bold is not a false red.
+      re: new RegExp(
+        '\\bThose ([\\w-]+) are the (?:\\*\\*)?complete(?:\\*\\*)? `' + COL_FLAG + ': true` set',
+        'g',
+      ),
+    },
+  ];
+}
+
+/**
+ * Read every registry-derived count the page states in prose.
+ *
+ * @returns {{ claims: Array<{what: string, value: number, token: string, line: number}>,
+ *             findings: Array<{kind: string, message: string, line: number}> }}
+ *   A pattern that matches NOTHING is a finding, not an empty result: see the
+ *   header's "An absent or reworded claim is RED".
+ */
+export function readProseCounts(text) {
+  const claims = [];
+  const findings = [];
+  const lineAt = (index) => text.slice(0, index).split('\n').length;
+
+  for (const pattern of proseClaimPatterns()) {
+    let hits = 0;
+    let m;
+    while ((m = pattern.re.exec(text)) !== null) {
+      hits += 1;
+      const line = lineAt(m.index);
+      const value = parseCountToken(m[1]);
+      if (value === null) {
+        findings.push({
+          kind: 'structure',
+          line,
+          message:
+            `the prose states ${pattern.subject} as ${JSON.stringify(m[1])}, which this gate ` +
+            `cannot read as a number. Digits and English number-words 0..99 (\`five\`, ` +
+            `\`twenty-seven\`) are understood; write it as digits, or extend ` +
+            `\`parseCountToken\`. An unreadable count is refused rather than skipped.`,
+        });
+        continue;
+      }
+      claims.push({ what: pattern.what, value, token: m[1], line });
+    }
+    if (hits === 0) {
+      findings.push({
+        kind: 'structure',
+        line: 1,
+        message:
+          `nothing in this page states ${pattern.subject} in the shape this gate reads ` +
+          `(/${pattern.re.source}/). The claim was there when leg 3 was written (#11763). ` +
+          `If it was reworded, re-point the pattern; if the count was removed on purpose, ` +
+          `remove this claim from \`proseClaimPatterns()\` in the same edit — a leg whose ` +
+          `subject sentence vanished must not keep printing a clean line about it.`,
+      });
+    }
+  }
+
+  return { claims, findings };
+}
+
+// ---------------------------------------------------------------------------
+// The three legs
 // ---------------------------------------------------------------------------
 
 /**
@@ -547,6 +720,41 @@ export function compare(entries, rows) {
   }
 
   return { leg1, leg2, tableTypes };
+}
+
+/**
+ * LEG 3 -- prose → registry. Every count the page states about the registry
+ * must be the count this gate parsed out of the registry.
+ *
+ * Both sides are DERIVED: `entries` comes from the AST walk, the claims come
+ * from the page. No count is written down in this file -- that is the whole
+ * point of the leg.
+ *
+ * @returns {Array<{kind: string, what: string, line: number, message: string}>}
+ */
+export function compareProse(entries, claims) {
+  const actual = new Map([
+    ['total', entries.length],
+    ['true-set', entries.filter((e) => e.allowOrgOverride).length],
+  ]);
+  const leg3 = [];
+  for (const claim of claims) {
+    const want = actual.get(claim.what);
+    if (want === undefined || claim.value === want) continue;
+    const subject =
+      claim.what === 'total'
+        ? `the number of types in \`${REGISTRY_CONST}\``
+        : `the size of the \`${COL_FLAG}: true\` set`;
+    leg3.push({
+      kind: 'count-drift',
+      what: claim.what,
+      line: claim.line,
+      message:
+        `the prose states ${subject} as ${JSON.stringify(claim.token)} (${claim.value}); ` +
+        `the registry declares ${want}.`,
+    });
+  }
+  return leg3;
 }
 
 // ---------------------------------------------------------------------------
@@ -796,16 +1004,125 @@ export function selfTest() {
     omitted.entries.some((e) => e.type === 'agent' && e.allowOrgOverride === false),
     JSON.stringify(omitted.findings));
 
+  // ---- 13. LEG 3 (#11763): the two registry counts stated in the prose.
+  //          FIXTURE_REGISTRY declares 14 entries, 5 of them `true` — so a
+  //          sentence carrying the REAL page's numbers (27 / five) is half
+  //          right against it, which makes it a ready-made one-sided control.
+  const proseSentence = (those, total) =>
+    `Those ${those} are the **complete** \`${COL_FLAG}: true\` set: of the ${total} types in ` +
+    `\`${REGISTRY_CONST}\`, every other one is \`false\`.`;
+
+  // 13a. Number-word reading: both spellings, the compound, and the refusal.
+  //      `null` is the refusal channel and must never collide with 0.
+  const tokenCases = [
+    ['0', 0], ['5', 5], ['27', 27], ['28', 28],
+    ['zero', 0], ['five', 5], ['Five', 5], ['six', 6], ['nineteen', 19], ['twenty', 20],
+    ['twenty-seven', 27], ['twenty-eight', 28], ['ninety-nine', 99],
+    ['several', null], ['many', null], ['twenty-zero', null], ['twenty-twenty', null],
+    ['one hundred', null], ['', null], ['5.5', null],
+  ];
+  for (const [token, want] of tokenCases) {
+    const got = parseCountToken(token);
+    check(
+      `prose/parseCountToken(${JSON.stringify(token)}) = ${want}`,
+      got === want,
+      `got ${JSON.stringify(got)}`,
+    );
+  }
+
+  // 13b. POSITIVE CONTROL for green: a sentence true of FIXTURE_REGISTRY
+  //      parses cleanly, yields BOTH claims, and drifts zero.
+  const proseOk = readProseCounts(proseSentence('five', 14));
+  check('prose/ok structure-clean', proseOk.findings.length === 0, JSON.stringify(proseOk.findings));
+  check(
+    'prose/ok reads both claims',
+    proseOk.claims.length === 2 &&
+      proseOk.claims.some((c) => c.what === 'total' && c.value === 14) &&
+      proseOk.claims.some((c) => c.what === 'true-set' && c.value === 5),
+    JSON.stringify(proseOk.claims.map((c) => `${c.what}=${c.value}`)),
+  );
+  const okDrift = compareProse(before.entries, proseOk.claims);
+  check('prose/ok leg3=0', okDrift.length === 0, JSON.stringify(okDrift));
+
+  // 13c. THE CARD'S SCENARIO, both halves — and each isolated by the other
+  //      staying right, so neither red can be produced by the wrong claim.
+  const staleTotal = compareProse(before.entries, readProseCounts(proseSentence('five', 27)).claims);
+  check(
+    'prose/a stale TOTAL is caught, alone',
+    staleTotal.length === 1 && staleTotal[0].what === 'total' && staleTotal[0].kind === 'count-drift',
+    JSON.stringify(staleTotal.map((f) => `${f.what}:${f.message}`)),
+  );
+  const staleTrue = compareProse(before.entries, readProseCounts(proseSentence('six', 14)).claims);
+  check(
+    'prose/a stale TRUE-SET is caught, alone',
+    staleTrue.length === 1 && staleTrue[0].what === 'true-set' && staleTrue[0].kind === 'count-drift',
+    JSON.stringify(staleTrue.map((f) => `${f.what}:${f.message}`)),
+  );
+
+  // 13d. Digits and words are interchangeable on both claims, and dropping the
+  //      bold from `**complete**` is not a false red.
+  check(
+    'prose/digit true-set accepted',
+    compareProse(before.entries, readProseCounts(proseSentence('5', 14)).claims).length === 0,
+  );
+  check(
+    'prose/spelled total accepted',
+    compareProse(before.entries, readProseCounts(proseSentence('five', 'fourteen')).claims).length === 0,
+  );
+  check(
+    'prose/unbolded "complete" still matches',
+    readProseCounts(proseSentence('five', 14).replace('**complete**', 'complete')).claims.length === 2,
+  );
+
+  // 13e. EVERY match is checked, not just the first. A second copy of the same
+  //      claim elsewhere on the page is a second hand-kept copy.
+  const twoCopies = readProseCounts(
+    `${proseSentence('five', 14)}\n\nElsewhere: of the 27 types in \`${REGISTRY_CONST}\`, most are inert.`,
+  );
+  const twoCopiesDrift = compareProse(before.entries, twoCopies.claims);
+  check(
+    'prose/a second, stale copy of the claim is caught too',
+    twoCopies.claims.length === 3 && twoCopiesDrift.length === 1 && twoCopiesDrift[0].line === 3,
+    `${twoCopies.claims.length} claims, ${JSON.stringify(twoCopiesDrift.map((f) => `${f.what}@${f.line}`))}`,
+  );
+
+  // 13f. STRUCTURAL refusals. An absent or unreadable claim is RED — draining
+  //      this leg to vacuum is precisely the failure it exists to stop.
+  const proseStructural = [
+    ['claim sentence deleted', 'The table above is the whitelist. Nothing else to say.'],
+    ['total claim missing', `Those five are the **complete** \`${COL_FLAG}: true\` set.`],
+    ['true-set claim missing', `Of the 14 types in \`${REGISTRY_CONST}\`, every other one is \`false\`.`],
+    ['unreadable total', proseSentence('five', 'several')],
+    ['unreadable true-set', proseSentence('a handful of', 14)],
+  ];
+  for (const [name, text] of proseStructural) {
+    const res = readProseCounts(text);
+    check(`prose/${name} is refused`, res.findings.length > 0, 'read clean');
+  }
+
+  // 13g. The refusals above must be refusals, not silent empties: a fixture
+  //      that refuses must also surrender no claim it could not check.
+  check(
+    'prose/an unreadable count yields NO claim (never a default of 0)',
+    readProseCounts(proseSentence('five', 'several')).claims.every((c) => c.what !== 'total'),
+  );
+
   if (failures.length > 0) {
     console.error('\n✗ check-overlay-whitelist-table self-test failed:\n');
     for (const f of failures) console.error(`  - ${f}`);
     console.error('');
     process.exit(1);
   }
+  // The refusal count is DERIVED from the case arrays, not hand-kept. It used
+  // to be a literal `21` in this sentence, which is the same defect class as
+  // the two prose counts leg 3 now pins (#11763) — a gate whose own summary
+  // line carries a hand-copied number cannot argue the point it is making.
+  const refusals = structural.length + registryStructural.length + proseStructural.length;
   console.log(
     '✓ check-overlay-whitelist-table self-test: positive control reproduces the 4 known ' +
       'divergences (leg 1: flow, permission, position; leg 2: translation), the corrected ' +
-      'table is green on both legs, and 21 structural/parser cases are refused.',
+      'table is green on all three legs, leg 3 goes red on a stale total and on a stale ' +
+      `true-set independently, and ${refusals} structural/parser cases are refused.`,
   );
 }
 
@@ -821,10 +1138,12 @@ function main() {
 
   const reg = readRegistry(registryText);
   const tab = readTable(docText);
+  const prose = readProseCounts(docText);
 
   const structural = [
     ...reg.findings.map((f) => ({ ...f, file: REGISTRY_FILE })),
     ...tab.findings.map((f) => ({ ...f, file: DOC_FILE })),
+    ...prose.findings.map((f) => ({ ...f, file: DOC_FILE })),
   ];
 
   if (structural.length > 0) {
@@ -839,7 +1158,9 @@ function main() {
   }
 
   const { leg1, leg2, tableTypes } = compare(reg.entries, tab.rows);
+  const leg3 = compareProse(reg.entries, prose.claims);
   const trueSet = reg.entries.filter((e) => e.allowOrgOverride).map((e) => e.type);
+  const claimList = prose.claims.map((c) => `${c.what}=${c.value} ("${c.token}" @:${c.line})`);
 
   if (process.argv.includes('--list')) {
     console.log(`${REGISTRY_FILE} — ${reg.entries.length} types, ${trueSet.length} overridable:\n`);
@@ -851,27 +1172,33 @@ function main() {
           `${row ? `table:${row.line}` : 'table: (not listed)'}`,
       );
     }
-    console.log('');
+    console.log(`\n  prose counts pinned by leg 3 — ${claimList.join(', ')}\n`);
   }
 
-  if (leg1.length === 0 && leg2.length === 0) {
+  if (leg1.length === 0 && leg2.length === 0 && leg3.length === 0) {
     console.log(
-      `✓ ${DOC_FILE}: the overlay whitelist table agrees with ${REGISTRY_CONST} in both ` +
-        `directions — leg 1 (table → registry) 0 divergence(s) over ` +
+      `✓ ${DOC_FILE}: the overlay whitelist table AND the counts in the sentence under it ` +
+        `agree with ${REGISTRY_CONST} — leg 1 (table → registry) 0 divergence(s) over ` +
         `${tableTypes.size} type(s) named in ${tab.rows.length} row(s); leg 2 ` +
         `(registry → table) 0 divergence(s) over ${trueSet.length} \`${COL_FLAG}: true\` ` +
-        `type(s) [${trueSet.join(', ')}] out of ${reg.entries.length} declared.`,
+        `type(s) [${trueSet.join(', ')}] out of ${reg.entries.length} declared; leg 3 ` +
+        `(prose → registry) 0 divergence(s) over ${prose.claims.length} count claim(s) ` +
+        `[${claimList.join(', ')}].`,
     );
     return;
   }
 
-  console.error(`\n✗ ${DOC_FILE} — the overlay whitelist table disagrees with ${REGISTRY_CONST}:\n`);
+  console.error(
+    `\n✗ ${DOC_FILE} — the overlay whitelist section disagrees with ${REGISTRY_CONST}:\n`,
+  );
   console.error(`  LEG 1  table → registry: ${leg1.length} divergence(s)`);
   for (const f of leg1) console.error(`    ${DOC_FILE}:${f.line}  [${f.kind}] ${f.message}`);
   console.error(`\n  LEG 2  registry → table: ${leg2.length} divergence(s)`);
   for (const f of leg2) console.error(`    ${REGISTRY_FILE}:${f.line}  [${f.kind}] ${f.message}`);
+  console.error(`\n  LEG 3  prose → registry: ${leg3.length} divergence(s)`);
+  for (const f of leg3) console.error(`    ${DOC_FILE}:${f.line}  [${f.kind}] ${f.message}`);
   console.error(`
-VERDICT: ${leg1.length + leg2.length} DIVERGENCE(S)
+VERDICT: ${leg1.length + leg2.length + leg3.length} DIVERGENCE(S)
 
 ⛔ Fix the TABLE, not the registry. \`${REGISTRY_CONST}\` is the single
    machine-readable whitelist and the page says so in its own first sentence.
@@ -887,6 +1214,11 @@ VERDICT: ${leg1.length + leg2.length} DIVERGENCE(S)
    leg 2 [missing-row]   an overridable type the table never names -> add it. This is
                          the \`translation\` shape from #11664: invisible to any gate
                          that only checks the rows it can see.
+   leg 3 [count-drift]   the sentence under the table states a registry-derived count
+                         that the registry no longer bears -> update the WORD or DIGIT
+                         in the prose. Registering a new type moves the total; flipping
+                         a flag moves the true-set. Both are hand-kept copies (#11763),
+                         and this leg is the only thing making them true.
 `);
   process.exit(1);
 }
