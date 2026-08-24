@@ -9,6 +9,8 @@
 
 - 重活(build/test)一律走共享验证锁入口 `bash scripts/pm/os-verify-lock.sh -c '<cmd>'`
   —— 结论读它印的 VERDICT 行,⛔ 不读裸 `$?`(排队语义与预算见 os-dev 定义)。
+- 该锁 **Linux-only**:宿主无可用 `flock` 时入口点不拒绝,改跑声明式 unlocked 模式 ——
+  降级写进 VERDICT 行,并印出 PR 正文该照抄的申报原文(⛔ 别另写一套措辞)。
 - 门禁族派生:`node scripts/pm/dispatch-gates.mjs` **不传路径**,脚本自己从 merge-base
   取变更集;⛔ 不自己 `git diff` 喂清单 —— 两点差按此刻的 `origin/main` 求值,姊妹
   PR 的文件会被算进来,而退出码照样 0。

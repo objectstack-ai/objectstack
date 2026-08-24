@@ -15,6 +15,11 @@
 # ends with a VERDICT line naming which of the two happened. Read the verdict
 # line, never a bare `$?`.
 #
+# A host with no usable `flock` runs in DECLARED UNLOCKED MODE (see the block
+# below): the command runs and its own exit code passes through, so 99 keeps
+# meaning exactly what it meant — "never got a turn" — and never doubles as
+# "this host has no lock". The VERDICT line is where the difference is stated.
+#
 # ---------------------------------------------------------------------------
 # WHY AN ENTRY POINT AND NOT A CONVENTION
 #
@@ -87,6 +92,39 @@
 # a kill -9 at any point releases the lock the moment the process dies.
 #
 # ---------------------------------------------------------------------------
+# THE LOCK IS LINUX-ONLY, AND A HOST WITHOUT `flock` SAYS SO RATHER THAN STOPS
+#
+# Maintainer ruling, 2026-08-22: the shared verification lock is declared
+# Linux-only. `flock` is util-linux; a stock macOS does not ship it, and it is
+# the only mutual-exclusion primitive here. On such a host this entry point runs
+# in DECLARED UNLOCKED MODE — it runs the command, with no exclusion, and writes
+# the degradation into the VERDICT line so it is visible and auditable — instead
+# of refusing at exit 99 and leaving the agent with no route at all.
+#
+# Three properties of that mode, each load-bearing:
+#
+#   - IT IS NOT A SECOND PRIMITIVE. No lockfile, no PID file, no holder record,
+#     no queue ticket — nothing is created that could outlive the process, so
+#     there is nothing to reap and `kill -9` stays free. A hand-rolled lockfile
+#     was the option this ruling rejected; anything here that needs reaping is
+#     that option built by accident.
+#
+#   - IT BRANCHES ON THE PRIMITIVE, NOT ON THE PLATFORM. The trigger is the
+#     FUNCTIONAL flock probe in `preflight` failing — so a Linux container
+#     without util-linux degrades the same way, and a macOS host that HAS
+#     `flock` (brew) takes the ordinary locked path. `uname` is never consulted.
+#
+#   - IT IS LOUD, AND IT HANDS OVER THE DISCLOSURE TEXT. Verification that runs
+#     unlocked has to be declared in the PR body; two cards did that by hand
+#     before this mode existed, and their wording is the official format
+#     `unlocked_disclosure` prints — ready to paste, so the declaration is a
+#     copy rather than a composition.
+#
+# Everything above this block is unchanged by that mode: where `flock` works,
+# the acquisition path, the ordering layer, the budget and every verdict are
+# exactly what they were.
+#
+# ---------------------------------------------------------------------------
 # THE BASH 3.2 FLOOR, AND WHY A MISSING BUILTIN IS THE WORST FAILURE HERE
 #
 # `/usr/bin/env bash` is bash 3.2.57 on macOS. A bash 4+/5+ construct in this
@@ -114,11 +152,14 @@
 # constructs, and a run with `EPOCHSECONDS`/`EPOCHREALTIME` unset and
 # `mapfile`/`readarray` disabled, which is what bash 3.2 actually looks like.
 #
-# Two host capabilities are checked up front instead (`preflight`), for the same
-# reason: `flock` — the only mutual-exclusion primitive here — is not present on
-# a stock macOS, and a `flock` that exits 127 on every slice is an unbounded
-# retry, not a wait. A refusal at second zero WITH a verdict is the correct
-# outcome; a silent spin is the one outcome this wrapper must never produce.
+# Host capabilities are checked up front instead (`preflight`), for the same
+# reason: a `flock` that exits 127 on every slice is an unbounded retry, not a
+# wait. At second zero, WITH a verdict, is where that has to be decided — a
+# silent spin is the one outcome this wrapper must never produce. WHICH verdict
+# depends on what failed: a missing clock or an unusable arrival stamp is still
+# a refusal (`lock-unusable`, exit 99), because without them the wait itself is
+# unbounded; a missing `flock` is the declared unlocked run above, because there
+# is nothing left to wait FOR.
 # ---------------------------------------------------------------------------
 
 set -uo pipefail
@@ -143,11 +184,11 @@ readonly PROGRESS_EVERY_S=30
 # private lock defeats the serialisation the lock exists for; don't.
 LOCK_FILE="${OS_VERIFY_LOCK_FILE:-/tmp/os-heavy-verify.lock}"
 
-# `flock` is the ONLY mutual-exclusion primitive here, so its absence is a
-# refusal and not a degradation. `OS_VERIFY_LOCK_FLOCK` exists so --self-test can
-# prove the refusal path with a flock that is missing on purpose. Pointing real
-# verification at a flock that isn't one removes the exclusion the lock exists
-# for; don't.
+# `flock` is the ONLY mutual-exclusion primitive here, so its absence is the
+# whole of the degradation: no flock, no exclusion, and the run says so.
+# `OS_VERIFY_LOCK_FLOCK` exists so --self-test can drive that path with a flock
+# that is missing on purpose. Pointing real verification at a flock that isn't
+# one removes the exclusion the lock exists for; don't.
 FLOCK_BIN="${OS_VERIFY_LOCK_FLOCK:-flock}"
 
 QUEUE_DIR="${LOCK_FILE}.q"
@@ -454,10 +495,19 @@ clock_disagrees() {
 # Fills PREFLIGHT_PROBLEMS (one per line) and returns 1 if there are any.
 PREFLIGHT_PROBLEMS=""
 
+# The flock finding is kept OUT of PREFLIGHT_PROBLEMS, because the two lead to
+# opposite outcomes and summing them into one verdict is what would hide that:
+# a problem in that list is a refusal, while "no usable flock" is the declared
+# unlocked run. A host can have neither, one, or both.
+PREFLIGHT_NO_FLOCK=0
+PREFLIGHT_NO_FLOCK_NOTE=""
+
 pf_add() { PREFLIGHT_PROBLEMS="${PREFLIGHT_PROBLEMS}${1}"$'\n'; }
 
 preflight() {
   PREFLIGHT_PROBLEMS=""
+  PREFLIGHT_NO_FLOCK=0
+  PREFLIGHT_NO_FLOCK_NOTE=""
   local probe
 
   if ((BASH_VERSINFO[0] < 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] < 2))); then
@@ -475,10 +525,26 @@ preflight() {
 
   # Probe flock FUNCTIONALLY, on a private file: 'present on PATH' does not
   # distinguish a flock that does not understand `-E`, and both failures land in
-  # the same place — a slice that can never succeed and is retried forever.
+  # the same place — a slice that can never succeed and is retried forever. It
+  # is also why this is not a platform test: `uname` would send a Linux
+  # container without util-linux down the locked path and a brew-equipped macOS
+  # down the unlocked one, which is backwards in both directions.
+  #
+  # The probe file's CREATION is checked separately from the lock on it, and the
+  # split is load-bearing rather than tidy. A probe file that cannot be created
+  # says nothing whatever about flock — the temp dir is unusable, which is also
+  # where the lock file itself lives, so `exec 9>>` would fail next — and that
+  # stays a refusal. Only flock failing on a file we demonstrably own is the
+  # "this host has no usable flock" finding the declared unlocked mode rests on.
+  # Merged, a full or read-only /tmp on an ordinary Linux host would read as
+  # "no flock" and silently drop serialisation for the whole container, which is
+  # the one regression this mode must not be able to cause.
   probe="${TMPDIR:-/tmp}/os-verify-lock.probe.$$"
-  if ! "$FLOCK_BIN" -n -E 99 "$probe" -c true > /dev/null 2>&1; then
-    pf_add "\`${FLOCK_BIN}\` could not take a test lock on ${probe}. flock is the ONLY mutual-exclusion primitive this entry point has, and a stock macOS does not ship it (\`brew install util-linux\`, or run verification on the Linux container)."
+  if ! : > "$probe" 2> /dev/null; then
+    pf_add "cannot create a probe file at ${probe}, so flock usability cannot be decided here. The lock file lives in the same place, so this is a refusal and not a degradation."
+  elif ! "$FLOCK_BIN" -n -E 99 "$probe" -c true > /dev/null 2>&1; then
+    PREFLIGHT_NO_FLOCK=1
+    PREFLIGHT_NO_FLOCK_NOTE="\`${FLOCK_BIN}\` could not take a test lock on ${probe}. flock is util-linux and the ONLY mutual-exclusion primitive this entry point has; a stock macOS does not ship it (\`brew install util-linux\`, or run verification on the Linux container, restores the locked path)."
   fi
   rm -f "$probe" 2> /dev/null || true
 
@@ -564,7 +630,88 @@ OS_VERIFY_LOCK_NO_FILTER_CHECK=1 skips that check for one call.
 Exit 99 means this call never acquired the lock; every run prints a VERDICT line
 — including the refusals: `lock-unusable` (this host cannot operate the lock at
 all) and `usage-error`. A run that prints no verdict is a bug in this script.
+
+The lock is declared Linux-only. A host with no usable `flock` does not refuse:
+the command runs UNLOCKED with no mutual exclusion, its own exit code passes
+through, and the VERDICT line says `UNLOCKED (declared)`. That run prints the
+disclosure its PR body must carry — paste it, do not rewrite it.
 USAGE
+}
+
+# --- declared unlocked mode -------------------------------------------------
+
+# The disclosure a PR body must carry when verification ran without the lock.
+#
+# This is a QUOTE, not a composition. Two cards ran verification unlocked and
+# declared it by hand before this mode existed, and the maintainer's 2026-08-22
+# ruling made their wording the official format. What they wrote, between them,
+# filled four slots: (a) `scripts/pm/os-verify-lock.sh` could not be used on this
+# host, (b) why — no flock here, (c) the commands "were therefore run directly",
+# without the lock, and (d) "a declared narrowing, not a silent one." All four
+# are reproduced below, filled in for THIS run, so that declaring an unlocked
+# verification is a copy rather than a fresh composition each time.
+#
+# Printed WITHOUT the `os-verify-lock: ` prefix every other line in this file
+# carries. That is deliberate and this is the only place it happens: the block
+# exists to be pasted into a PR body, and a prefix would have to be stripped
+# line by line by whoever pastes it — which is how a quoted format stops being
+# one.
+unlocked_disclosure() {
+  local label="$1"
+  cat >&2 << DISCLOSURE
+
+**Declared narrowing — verification ran UNLOCKED.** \`scripts/pm/os-verify-lock.sh\`
+could not take the shared verify lock on this host: no usable \`flock\`. The shared
+verify lock is declared Linux-only (\`flock\` is util-linux, and a stock macOS does
+not ship it), so the command below was run directly, without the lock —
+a declared narrowing, not a silent one. No serialization guarantee held for this
+run, nor for any sibling agent in this container while it ran.
+
+    ${label}
+
+DISCLOSURE
+}
+
+# Run the command with NO lock, because this host has no primitive to take one
+# with (maintainer ruling 2026-08-22: the lock is Linux-only, and macOS gets a
+# declared unlocked mode rather than a refusal).
+#
+# It creates NOTHING: no lock file, no holder record, no queue ticket, no fd 9 —
+# so a `kill -9` anywhere in here leaves nothing behind to reap, and no sibling
+# can read stale state and conclude the lock is held. That is not incidental
+# tidiness; a hand-rolled lockfile is the option this ruling rejected, and
+# anything in this function that outlived the process would be that option
+# rebuilt by accident. There is deliberately no `9>&-` on the command either:
+# closing an fd nobody opened would only imply one was.
+run_unlocked() {
+  local kind="$1" label="$2"
+  shift 2
+  local started ended ran rc=0
+
+  log "⚠ NO USABLE flock ON THIS HOST — running in DECLARED UNLOCKED MODE."
+  log "⚠   · ${PREFLIGHT_NO_FLOCK_NOTE}"
+  log "⚠   · Nothing is serialised: this run takes no lock, so every sibling agent"
+  log "⚠     in this container is unserialised against it for as long as it runs."
+  log "⚠   · Nothing is created either — no lockfile, no holder record, no ticket —"
+  log "⚠     so there is nothing here for a kill -9 to leave behind."
+  log "⚠ This must be declared in the PR body. The official wording follows; paste it:"
+  unlocked_disclosure "$label"
+
+  started="$(now_s 2> /dev/null)"
+  case "$started" in '' | *[!0-9]*) started=0 ;; esac
+  log "RUNNING UNLOCKED — ${label}"
+
+  if [[ "$kind" == shell ]]; then
+    bash -c "$1" || rc=$?
+  else
+    "$@" || rc=$?
+  fi
+
+  ended="$(now_s 2> /dev/null)"
+  case "$ended" in '' | *[!0-9]*) ended="$started" ;; esac
+  ran=$((ended - started))
+  log "VERDICT command-exit ${rc} · UNLOCKED (declared) · no usable \`${FLOCK_BIN}\` on this host, so the shared verify lock was NEVER taken and NOTHING was serialized · ran $(human_s "$ran") · declare it in the PR body · ${label}"
+  exit "$rc"
 }
 
 mode_status() {
@@ -575,11 +722,24 @@ mode_status() {
     while IFS= read -r problem; do
       [[ -n "$problem" ]] && printf '  · %s\n' "$problem"
     done <<< "$PREFLIGHT_PROBLEMS"
+  elif ((PREFLIGHT_NO_FLOCK == 1)); then
+    printf 'host: NO USABLE flock — the shared verify lock is Linux-only, so a run here does\n'
+    printf '      NOT refuse: it runs in DECLARED UNLOCKED MODE, with no mutual exclusion,\n'
+    printf '      prints the disclosure its PR body must carry, and ends with\n'
+    printf '      VERDICT command-exit N · UNLOCKED (declared) ...\n'
+    printf '  · %s\n' "$PREFLIGHT_NO_FLOCK_NOTE"
   fi
   case "$(stamp_resolution)" in
     s) printf 'note: whole-second arrival stamps only on this host — FIFO ordering degrades to per-second granularity (exclusion and the cap are unaffected).\n' ;;
   esac
-  printf 'state: %s\n' "$(holder_line)"
+  # `holder_line` decides held-vs-free by attempting the lock, so on a host with
+  # no flock it would answer 'lock is free' — true only in the sense that nobody
+  # can hold it. Say the useful thing instead of the technically-true one.
+  if ((PREFLIGHT_NO_FLOCK == 1)); then
+    printf 'state: no exclusion on this host — nothing can hold this lock here, and this entry point takes it from nobody.\n'
+  else
+    printf 'state: %s\n' "$(holder_line)"
+  fi
   if [[ -d "$QUEUE_DIR" ]]; then
     while IFS= read -r file; do
       [[ -n "$file" ]] || continue
@@ -624,6 +784,17 @@ mode_run() {
   if ! filter_preflight "$label"; then
     log "VERDICT filter-matches-nothing (exit 2) · never acquired · refused before waiting · nothing was built or tested · ${label}"
     exit 2
+  fi
+
+  # No usable flock on this host: the declared unlocked run, and it never
+  # returns. Its position is chosen, not incidental. AFTER the filter preflight,
+  # because a command that would measure nothing is refused whether or not there
+  # is a lock to spend on it — the two checks are independent and both still
+  # apply. BEFORE everything below, because none of it means anything without
+  # the primitive: there is no budget to spend, no queue to be head of, and no
+  # fd to release.
+  if ((PREFLIGHT_NO_FLOCK == 1)); then
+    run_unlocked "$kind" "$label" "$@"
   fi
 
   effective_budget
@@ -972,28 +1143,102 @@ mode_self_test() {
   st_case 'and printed a command-exit verdict, not nothing' \
     "$([[ "$sim" == *'VERDICT command-exit 0'* ]] && echo yes || echo no)" yes
 
-  # (c) the bounded refusal. A host that cannot operate the lock must produce a
-  # VERDICT at second zero. The failure this replaces produced none at all, for
-  # as long as it was left running.
+  # (c) the two host-failure outcomes, which are DIFFERENT and must stay so.
+  #
+  # A host that cannot operate the lock still has to produce a VERDICT at second
+  # zero — the failure this replaces produced none at all for as long as it was
+  # left running. What that verdict SAYS now depends on WHICH capability is
+  # missing (maintainer ruling 2026-08-22: the lock is declared Linux-only):
+  #
+  #   no usable flock         → DECLARED UNLOCKED run. The command runs, its own
+  #                             exit code passes through, the degradation is
+  #                             written into the VERDICT line, and nothing is
+  #                             left on disk.
+  #   any other host problem  → refusal, exit 99, VERDICT lock-unusable — the
+  #                             behaviour that was there before, unchanged.
+  #
   # "did it run?" is a FILE, not a string in the output: the verdict line names
-  # the command it refused, so any marker inside the command text is echoed back
-  # whether or not it ran. That false green is the first thing this case caught.
-  local t0 t1 refuse refuserc ranfile
-  ranfile="${tmp}/refused-command-ran"
+  # the command, so any marker inside the command TEXT is echoed back whether or
+  # not it ran. That false green is the first thing these cases caught.
+  local t0 t1 unl unlrc ranfile ulock
+  ulock="${tmp}/unlocked-lock"
+  ranfile="${tmp}/unlocked-command-ran"
   rm -f "$ranfile"
   t0="$(now_s)"
-  refuse="$(OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" -c ": > '${ranfile}'" 2>&1)"
-  refuserc=$?
+  unl="$(OS_VERIFY_LOCK_FILE="$ulock" OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" \
+    bash "$SELF" -c ": > '${ranfile}'" 2>&1)"
+  unlrc=$?
   t1="$(now_s)"
-  st_case 'an unusable flock exits 99 rather than retrying it' "$refuserc" 99
+  st_case 'an unusable flock RUNS the command unlocked instead of refusing' "$unlrc" 0
+  st_case 'and the command really ran' \
+    "$([[ -e "$ranfile" ]] && echo ran || echo 'did not run')" ran
+  st_case 'and the VERDICT carries the degradation, so the run cannot read as an ordinary one' \
+    "$([[ "$unl" == *'VERDICT command-exit 0 · UNLOCKED (declared)'* ]] && echo yes || echo no)" yes
+  st_case 'and names what was lost, not merely that something was' \
+    "$([[ "$unl" == *'NEVER taken and NOTHING was serialized'* ]] && echo yes || echo no)" yes
+  st_case 'and never claims to have acquired anything' \
+    "$([[ "$unl" == *ACQUIRED* ]] && echo CLAIMED-ACQUIRED || echo no)" no
+  st_case 'and hands over the disclosure wording the PR body must carry' \
+    "$([[ "$unl" == *'a declared narrowing, not a silent one'* ]] && echo yes || echo no)" yes
+  st_case 'and proceeds immediately instead of spinning (<= 10s)' \
+    "$((t1 - t0 <= 10))" 1
+
+  # THE INVARIANT THIS MODE IS MOST EASILY LOST TO. The option this ruling
+  # rejected was a hand-rolled lockfile, whose whole cost is that a killed
+  # holder leaves the lock HELD and needs reaping. So the unlocked path is
+  # pinned to create nothing at all — after an ordinary exit, and again after a
+  # `kill -9` mid-run, which is exactly where a lockfile would show itself.
+  st_case 'an unlocked run leaves no lock file' \
+    "$([[ -e "$ulock" ]] && echo yes || echo no)" no
+  st_case 'no holder record' \
+    "$([[ -e "${ulock}.holder" ]] && echo yes || echo no)" no
+  st_case 'no queue ticket directory' \
+    "$([[ -e "${ulock}.q" ]] && echo yes || echo no)" no
+  local killpid
+  OS_VERIFY_LOCK_FILE="$ulock" OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" \
+    bash "$SELF" -c 'sleep 5' > /dev/null 2>&1 &
+  killpid=$!
+  sleep 1.5
+  kill -9 "$killpid" 2> /dev/null
+  wait "$killpid" 2> /dev/null
+  st_case 'and a kill -9 mid-run leaves nothing behind to reap either' \
+    "$(ls -A "${ulock}"* 2> /dev/null | wc -l | tr -d ' ')" 0
+
+  # THE OTHER OUTCOME, and the reason the probe file's CREATION is checked apart
+  # from the lock taken on it. A temp dir that cannot hold the probe says
+  # nothing whatever about flock, and stays a refusal. Merged into one finding,
+  # a full or read-only /tmp on an ordinary Linux host would read as "no flock"
+  # and silently drop serialisation for every agent in the container — the one
+  # regression this mode must not be able to cause. This case is what keeps the
+  # two apart, and it asserts BOTH halves: the refusal fires, and the unlocked
+  # mode does not.
+  local refuse refuserc rranfile
+  rranfile="${tmp}/refused-command-ran"
+  rm -f "$rranfile"
+  refuse="$(TMPDIR="${tmp}/no-such-dir" bash "$SELF" -c ": > '${rranfile}'" 2>&1)"
+  refuserc=$?
+  st_case 'a host problem that is NOT the flock one still exits 99' "$refuserc" 99
   st_case 'and says lock-unusable, not queue-timeout' \
     "$([[ "$refuse" == *'VERDICT lock-unusable'* ]] && echo yes || echo no)" yes
   st_case 'and does not run the command' \
-    "$([[ -e "$ranfile" ]] && echo yes || echo no)" no
-  st_case 'and refuses immediately instead of spinning (<= 10s)' \
-    "$((t1 - t0 <= 10))" 1
-  st_case '--status reports the same host as unusable' \
-    "$(OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" --status 2>&1 | grep -c 'CANNOT OPERATE THIS LOCK')" 1
+    "$([[ -e "$rranfile" ]] && echo ran || echo 'did not run')" 'did not run'
+  st_case 'and does NOT degrade to unlocked — flock was never the thing that failed' \
+    "$([[ "$refuse" == *UNLOCKED* ]] && echo DEGRADED || echo no)" no
+
+  # and the same split, seen through --status.
+  st_case '--status calls a no-flock host unlocked rather than unusable' \
+    "$(OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" --status 2>&1 | grep -c 'DECLARED UNLOCKED MODE')" 1
+  st_case 'and does not report a free lock it has no primitive to observe' \
+    "$(OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" --status 2>&1 | grep -c 'lock is free')" 0
+  st_case '--status still reports a genuinely unusable host as unusable' \
+    "$(TMPDIR="${tmp}/no-such-dir" bash "$SELF" --status 2>&1 | grep -c 'CANNOT OPERATE THIS LOCK')" 1
+
+  # The other direction, and the one a regression here would be silent about:
+  # this host HAS flock, so nothing may take the unlocked path. A wrapper that
+  # degraded when it did not have to would remove serialisation for every agent
+  # in the container without failing anybody's PR.
+  st_case 'a host WITH a working flock never enters unlocked mode' \
+    "$(bash "$SELF" -c true 2>&1 | grep -c 'UNLOCKED')" 0
 
   # A STOPPED CLOCK, with the lock genuinely held. This is the same bug class as
   # the one this card is about but in the other loop: the deadline is computed
@@ -1255,6 +1500,18 @@ mode_self_test() {
   # A command with no --filter at all must be untouched by any of this.
   (cd "$repo_root" && bash "$SELF" -c true) > /dev/null 2>&1
   st_case 'a command with no --filter is unaffected' "$?" 0
+
+  # The filter preflight is independent of the lock, so the declared unlocked
+  # mode must not smuggle a would-measure-nothing command past it: there is no
+  # lock to save, but there is still a fictitious green to prevent.
+  : > "${fp_ran}.unlocked"
+  rm -f "${fp_ran}.unlockedran"
+  (cd "$repo_root" && OS_VERIFY_LOCK_FILE="${tmp}/unlocked-lock" \
+    OS_VERIFY_LOCK_FLOCK="${tmp}/no-such-flock" bash "$SELF" \
+    -c "echo pnpm --filter @objectstack/adapter-hono test; : > '${fp_ran}.unlockedran'") > /dev/null 2>&1
+  st_case 'a filter naming no package is refused in unlocked mode too (exit 2)' "$?" 2
+  st_case 'and that command did not run either' \
+    "$([[ -e "${fp_ran}.unlockedran" ]] && echo ran || echo 'did not run')" 'did not run'
 
   printf '\n'
   if ((st_fail > 0)); then
