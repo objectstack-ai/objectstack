@@ -633,7 +633,7 @@ rather than black-holing a working deployment.
 
 <Callout type="info">
 `GET /health` returns a compact liveness body (`status`, `timestamp`, `version`,
-`uptime`) and `GET /ready` returns readiness. The richer per-subsystem report
+`uptime`) and `GET /ready` returns readiness. The per-plugin health report
 and the plugin-declared custom checks below describe the internal health-monitor model
 (`PluginHealthMonitor`), which covers **plugins, not driver connections** — they
 are **not yet** exposed as a dedicated HTTP endpoint or as a declarative plugin
@@ -694,49 +694,37 @@ export default {
 };
 ```
 
-The richer per-subsystem view the callout above refers to is sketched below. It
-is **illustrative only**: no endpoint serves this shape, and it is not the
-monitor's own serialized type either — `PluginHealthReport`
-(`@objectstack/spec/kernel`) is per-plugin, carries `checks` as an array of
-`{ name, status: "passed" | "failed" | "warning" }`, and reports `uptime` under
-`metrics`. Read the sketch as a picture of what per-subsystem health reporting
-would carry, not as a contract.
+The monitor keeps one report per plugin rather than one aggregate document. Each
+round of checks builds a `PluginHealthReport` (`@objectstack/spec/kernel`,
+constructed in `packages/core/src/health-monitor.ts`) and stores it under the
+plugin's name, where `getHealthReport(pluginName)` reads it back. Nothing serves
+this shape over HTTP — it is an in-process model, not a wire body.
 
 ```json
 {
   "status": "healthy",
-  "uptime": 3600,
-  "version": "2.0.0",
   "timestamp": "2024-01-15T11:00:00.000Z",
-  "checks": {
-    "database": {
-      "status": "healthy",
-      "latency_ms": 5,
-      "connections": {
-        "active": 8,
-        "idle": 2,
-        "max": 10
-      }
-    },
-    "redis": {
-      "status": "healthy",
-      "latency_ms": 2
-    },
-    "plugins": {
-      "status": "healthy",
-      "loaded": 3,
-      "enabled": 3,
-      "failed": 0
-    },
-    "jobs": {
-      "status": "healthy",
-      "pending": 5,
-      "running": 2,
-      "failed": 0
-    }
-  }
+  "metrics": {
+    "uptime": 3600000
+  },
+  "checks": [
+    { "name": "healthCheck", "status": "passed" }
+  ]
 }
 ```
+
+`checks` is an **array**, and a check's `status` is `"passed" | "failed" |
+"warning"` — the six-value `"healthy" | "degraded" | "unhealthy" | "failed" |
+"recovering" | "unknown"` vocabulary belongs to the report's own top-level
+`status`, never to an entry inside `checks`. Each entry is named after the
+plugin's configured `checkMethod`, or `"plugin-loaded"` when a plugin configures
+none. `metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
+the seconds-valued `uptime` of `GET /health` above, and the report carries no
+`version` field — it identifies its plugin by the key it is stored under. The
+optional `message` is set only when a check fails; the schema's remaining
+`metrics` fields (`memoryUsage`, `cpuUsage`, `activeConnections`, `errorRate`,
+`responseTime`) and its `dependencies` array are declared but left unset by the
+monitor today.
 
 ## Shutdown Sequence
 
