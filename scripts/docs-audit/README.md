@@ -27,7 +27,7 @@ node scripts/docs-audit/affected-docs.mjs --self-test
 
 # how much of the DECLARED client-bound route surface the `sdk` bridge can reach (diff-free)
 node scripts/docs-audit/affected-docs.mjs --bridge-coverage
-node scripts/docs-audit/affected-docs.mjs --bridge-coverage --json   # + the unreachable rows themselves
+node scripts/docs-audit/affected-docs.mjs --bridge-coverage --json   # + the unreachable rows themselves, each with WHY and its witness
 ```
 
 **Derivation (#9192): a doc is *affected* when it NAMES something the change touched.**
@@ -105,17 +105,45 @@ Two things it deliberately is **not**:
   section). Those cannot fire on a tree where the scan works at all, and each of them
   otherwise reports `0 of 0 unreachable`, which is arithmetically true and reads exactly
   like a healthy bridge.
-- **Not a fix for the 176.** The card measured the causes and they are unrelated: ~97 rows
-  have no static registration of any shape in `packages/**` (better-auth mounts the auth
-  table; the runtime dispatcher matches `cleanPath` with `===`), ~50 have a `path:` literal
-  in a scanned registrar whose static remainder `routeTailOf` declines once the
-  `${basePath}` interpolation is stripped, and the rest are method-call registrations in
-  files outside `REGISTRAR_FILE_RE`. Each needs its own before/after measurement per
-  #9432's standard.
+- **Not a fix for the 176.** The causes are unrelated to each other and each needs its own
+  before/after measurement per #9432's standard. They are no longer estimated: the run
+  splits them (next section).
 
 Half the blind spot is load-bearing: **88 of the 176** unreachable rows name a client
 method that at least one hand-written page carries (31 distinct pages, `api/client-sdk.mdx`
 among them), so the silence is not an empty region.
+
+### Why a row is unreachable is measured, not one column (#11178)
+
+`56 of 56` and `46 of 87` used to print in the same words, and they are not the same
+finding. Every unreachable row is now attributed against a **ceiling** — every `path:` any
+`packages/**` file declares, with `REGISTRAR_FILE_RE` ignored entirely, built by
+`maximalTailsFrom` from the same `parseRegistrarSource` over the same walk. Measured on
+`589758d22`, the 177 unreachable rows partition as:
+
+| cause | rows | what it means |
+| --- | --- | --- |
+| `discovery-gap` | 14 | an in-repo file declares this exact path; the filename convention did not scan that file. The JSON **names the witness**. |
+| `no-in-repo-registrar` | 56 | on a ledger where **not one** row is declared in-repo — declared upstream and catch-all-mounted. No discovery change reaches it. |
+| `undecided` | 107 | no in-repo declaration for the row, on a ledger that *has* in-repo registrars. Absence and an unreadable spelling are not distinguishable here, so neither is claimed. |
+
+Exactly **one** of the seven ledgers is `no-in-repo-registrar` today: `auth-route-ledger.ts`,
+whose own header has said so since #3656 — better-auth declares those routes inside
+`node_modules` and the plugin mounts them with a single ``rawApp.all(`${basePath}/*`)``,
+which `routeTailOf` cannot and should not turn into a tail. That is why widening
+`REGISTRAR_FILE_RE` to admit `auth-plugin.ts` was measured to move `registrar files
+scanned` 12 → 13 and **nothing else**.
+
+⛔ **This changes no discovery and moves no reach.** `REGISTRAR_FILE_RE` is byte-identical,
+the bridge still rides on `registrarByTail` alone, and `reachable` is 45 before and after —
+pinned in `--self-test`. The ceiling only explains the number; it never participates in it,
+and because it is a superset by construction a ceiling that misses a *reachable* row is a
+`brokenScan` verdict rather than a quieter result.
+
+The classification is **derived, never listed**. Control on `589758d22`: adding one
+in-repo file that declares one auth route — under a filename the convention does not match
+— moves the auth ledger out of `no-in-repo-registrar` on its own (structural 56 → 0,
+`reachable` still 45), and removing it restores 56.
 
 ### A PARTIAL ledger read is a verdict too (#9896)
 
