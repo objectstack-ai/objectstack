@@ -40,7 +40,10 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  * @param localization Resolved ONCE for the life of the transport and threaded
  * in — see the hoist in `start()` for why this function must not resolve it
  * itself, and [#11580] for why that resolution happens at `kernel:bootstrapped`
- * rather than in the `start()` body.
+ * rather than in the `start()` body. [#11622] "Once" begins when that bind
+ * window CLOSES: a call that races the boot is answered from a fresh
+ * resolution that is deliberately not kept, so a pre-bind answer can never
+ * become the memoized one.
  */
 async function resolveStdioExecutionContext(
   ql: { find: (object: string, opts: unknown) => Promise<unknown> },
@@ -286,6 +289,7 @@ export class MCPServerPlugin implements Plugin {
       }
       const scopedQl = ql;
       // ── Localization, resolved ONCE for the life of the transport (#7279) ──
+      // (once the settings bind window has closed — see the #11622 clause below)
       // `resolveStdioExecutionContext` re-runs on EVERY call below, deliberately
       // (ADR-0101 D1: a revoked key must stop working on the next one). The
       // IDENTITY has to be re-read for that; the workspace's timezone/locale
@@ -320,36 +324,89 @@ export class MCPServerPlugin implements Plugin {
       // `kernel:bootstrapped` is the earliest phase strictly after that bind
       // (`kernel:ready` → `kernel:bootstrapped` → `kernel:listening`) and the
       // one `SettingsService.reportPreBindRead` names as the remedy. The memo
-      // is what keeps #7279's property across both entry points: whoever gets
-      // there first pays for the single resolution, everyone else awaits it.
-      // The lazy entry is not decoration — it is why this cannot deadlock a
-      // host that never fires the boot hooks (a bare kernel, a test harness):
-      // such a host resolves at first use instead, which is still later than
-      // `start()` and still once for the life of the transport.
-      let localizationOnce: Promise<EntryLocalization> | undefined;
-      const resolveLocalizationOnce = (): Promise<EntryLocalization> => {
-        localizationOnce ??= (async () => {
-          let settingsService: unknown;
-          try {
-            settingsService = ctx.getService('settings');
-          } catch {
-            settingsService = undefined;
-          }
-          return resolveLocalizationContext({
-            ql: scopedQl,
-            settings: settingsService,
-            tenantId: initial.tenantId,
-            userId: initial.userId,
-          });
-        })();
-        return localizationOnce;
+      // is what keeps #7279's property: the hook pays for the single
+      // resolution and every later call awaits it. The lazy entry is not
+      // decoration — it is why this cannot deadlock a host that never fires
+      // the boot hooks (a bare kernel, a test harness): such a host resolves
+      // at first use instead, which is still later than `start()`. What that
+      // lazy entry may KEEP is the #11622 clause below — it landed here
+      // memoizing unconditionally, which is the residual that card is about.
+      //
+      // [#11622] The memo is ARMED BY THE BIND, not by the first read.
+      //
+      // The lazy entry above is what keeps a hookless host alive, and it is
+      // also the residual #11580 left behind. The transport goes live at
+      // `runtime.start()` below, which runs BEFORE the remaining plugins'
+      // `start()` bodies and before every `kernel:ready` handler — seconds of
+      // schema sync and backfills on a real deployment. A client that lands a
+      // data call in that stretch reaches `resolvePrincipal()` first, and a
+      // memo armed by the first READ would freeze that call's pre-bind
+      // `UTC` / `en-US` for the life of the process: the narrow race becomes
+      // the permanent wrong value #11580 was about, and never self-corrects.
+      //
+      // So the memo is scoped to the BIND EPOCH rather than to the transport.
+      // A resolution taken while the window is open is memoized for the
+      // duration of THAT window and discarded when it closes; the first
+      // resolution taken after the close is the one that lives for the life
+      // of the transport. Steady state is exactly #7279's — one resolution,
+      // never a per-call settings read — because the hook takes that
+      // resolution the moment the window closes, before any ordinary call can
+      // ask for it. A raced boot costs one extra resolution, once, ever.
+      //
+      // ## Why the epoch, and not simply "do not memoize before the bind"
+      //
+      // That is the card's wording, it was built first, and the tree refused
+      // it: `plugin-execution-context.test.ts`'s #7279 pin ("resolves
+      // localization ONCE for the transport, not once per read") drives a
+      // context whose `hook()` never fires, so on that host the window never
+      // closes — and a memo armed only by the close resolves on EVERY read.
+      // Three reads, three resolutions, a declared property broken. The
+      // hookless host is not a test artefact either: it is the bare kernel
+      // the lazy entry above exists for. Under the epoch, that host arms one
+      // pre-bind memo and keeps it, which is both what #7279 asks for and the
+      // best answer available where no bind is ever coming.
+      //
+      // The price is stated rather than hidden: while the window is open all
+      // callers share ONE answer, so a call arriving after the settings
+      // engine binds but before `kernel:bootstrapped` is served the earlier
+      // pre-bind value instead of a fresh one. That residue is bounded by the
+      // remaining `kernel:ready` handlers, it is corrected the moment the
+      // window closes, and it can never outlive the boot — which is the whole
+      // of what this card is about.
+      let bindWindowClosed = false;
+      let localizationOnce: { readonly postBind: boolean; readonly value: Promise<EntryLocalization> } | undefined;
+      const resolveLocalizationFresh = (): Promise<EntryLocalization> => {
+        let settingsService: unknown;
+        try {
+          settingsService = ctx.getService('settings');
+        } catch {
+          settingsService = undefined;
+        }
+        return resolveLocalizationContext({
+          ql: scopedQl,
+          settings: settingsService,
+          tenantId: initial.tenantId,
+          userId: initial.userId,
+        });
+      };
+      const localizationForRead = (): Promise<EntryLocalization> => {
+        // Reusable only while the memo is as authoritative as a fresh
+        // resolution would be right now: a post-bind answer always is, a
+        // pre-bind one only while the window it was taken in is still open.
+        if (localizationOnce && (localizationOnce.postBind || !bindWindowClosed)) {
+          return localizationOnce.value;
+        }
+        const value = resolveLocalizationFresh();
+        localizationOnce = { postBind: bindWindowClosed, value };
+        return value;
       };
       ctx.hook('kernel:bootstrapped', async () => {
-        await resolveLocalizationOnce();
+        bindWindowClosed = true;
+        await localizationForRead();
       });
       // Re-resolve per call so a revoked/expired key stops working on the next read.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
-        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, await resolveLocalizationOnce());
+        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, await localizationForRead());
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
         return ec;
       };

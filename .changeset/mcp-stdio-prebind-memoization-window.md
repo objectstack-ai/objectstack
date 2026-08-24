@@ -1,0 +1,7 @@
+---
+"@objectstack/mcp": patch
+---
+
+The stdio MCP transport no longer freezes a pre-bind localization when a data call races the boot. #11580 moved the localization read onto a `kernel:bootstrapped` hook, but its lazy entry point memoized whatever the FIRST read produced — and the transport goes live inside `MCPServerPlugin.start()`, before the remaining plugins' `start()` bodies and before every `kernel:ready` handler, which is where `SettingsServicePlugin` binds its data engine. A client fast enough to send a data call in that stretch resolved localization pre-bind, received `UTC` / `en-US` from the manifest defaults, and kept them for the life of the process — the narrow race turning into the permanent wrong value #11580 was about.
+
+The memo is now armed by the bind rather than by the first read: a resolution taken while the settings bind window is still open is answered but not kept, so a call arriving after the bind (even before `kernel:bootstrapped`) already sees the configured value, and the first resolution taken once the window has closed is the one that lives for the life of the transport. #7279's steady state is unchanged — one resolution, never a per-call settings read — because the `kernel:bootstrapped` hook takes that resolution the moment the window closes. A host that never fires the boot hooks (a bare kernel, a test harness) still answers rather than deadlocking, which is why the read is not made to wait for the bind.
