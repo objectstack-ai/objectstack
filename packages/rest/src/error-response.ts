@@ -362,6 +362,12 @@ function declaredHttpStatus(error: any): number | undefined {
  * reaches the flat body at all. It could not have been a legal ADR-0112 code in
  * any case; a number in the field callers branch on is the loudest possible
  * violation of a closed vocabulary. All four flat arms now ask ONE question.
+ *
+ * [#10345] Five arms, since the sandbox unwrap door joined them. It emitted no
+ * `code` at all, so #9232 found nothing there to narrow and left it out — and
+ * an exit that never speaks the vocabulary is the one a vocabulary sweep
+ * cannot see. `rest-thrown-code-vocabulary.test.ts`'s `ARMS` table enumerates
+ * all five.
  */
 function thrownCodeFields(error: any, status: number): { code?: string; declaredCode?: string } {
     const thrown = resolveThrownHttpError(error, status);
@@ -613,9 +619,48 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // the custom-action route performs in http-dispatcher's handleAction.
     // The full wrapper still reaches server logs via the callers'
     // "[REST] Unhandled error" logging and the BodyRunner's own error log.
-    // Deliberately NO `code` field: older @objectstack/client builds (still
-    // bundled in deployed consoles) prepend any `code` to the human-readable
-    // message, which would reintroduce the English noise this branch removes.
+    //
+    // [#10345] The `code` the producer declared rides too — via
+    // {@link thrownCodeFields}, the same one definition the three arms around
+    // it use. This branch used to omit `code` unconditionally, and that
+    // omission is what the card measured: a QuickJS hook throwing
+    // `{ code: 'RECORD_LOCKED', status: 409 }` reached the client with the
+    // status and no machine-readable code, so a caller could tell "frozen
+    // record" from "value already taken" only by substring-matching localised
+    // prose — the failure mode the ADR-0112 enum exists to remove.
+    //
+    // The old rationale, recorded because it was load-bearing until it wasn't:
+    // "older @objectstack/client builds (still bundled in deployed consoles)
+    // prepend any `code` to the human-readable message". Both halves are now
+    // false, measured rather than assumed:
+    //
+    //  - The shipping client does the OPPOSITE by explicit rule. Its error
+    //    construction keeps `.message` to "the server's human-readable message
+    //    — no `[ObjectStack]` branding and no `CODE:` prefix" and attaches the
+    //    code programmatically as `error.code` (`packages/client/src/index.ts`,
+    //    the `fetch` failure path).
+    //  - "Older bundled client, current server" is not a supported pairing.
+    //    #4007 retired the compat read for exactly that combination: SDK and
+    //    server ship on one release train (a changesets fixed group), and
+    //    ADR-0112 renamed the code VALUES anyway, so a code an old console
+    //    could mis-render is a code it could no longer match either.
+    //
+    // And the omission was never the status policy it looked like from
+    // outside. It dropped `code` on a declared 400 exactly as on a declared
+    // 409, and KEPT it on a declared 5xx by falling through to the passthrough
+    // below — so one sandboxed producer got its code on 503 and lost it on
+    // 409. What made the card's reading look status-shaped is which codes have
+    // a bespoke arm ABOVE this one: `DELETE_RESTRICTED` and
+    // `VALIDATION_FAILED` do and never reach here, `RECORD_LOCKED` /
+    // `DUPLICATE_VALUE` / `FORBIDDEN` do not and did.
+    //
+    // ⛔ Nothing is invented for a producer that declared no code:
+    // `thrownCodeFields` answers `{}` there, which is ADR-0112's rule and the
+    // answer the sibling arms already give (`rest-thrown-code-vocabulary.test.ts`
+    // §3). Adding `code` here narrows nothing and widens nothing about the
+    // VOCABULARY either — an unregistered spelling is demoted to
+    // `declaredCode` by the same shared resolver, so this door stops being the
+    // one flat exit #9232 could not reach.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
         // [#7543] …but only when the body REPORTED something. A body that
         // CRASHED arrives here too, and its `TypeError: not a function` is an
@@ -638,10 +683,17 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // pins (`hook-error-format.dogfood.test.ts`) require.
         const declared = declaredHttpStatus(error);
         if (declared === undefined || declared < 500) {
+            // [#10345] `status` is resolved BEFORE the code fields are asked
+            // for, and handed to {@link thrownCodeFields} as the fallback, so
+            // an unregistered spelling demotes against the status the client
+            // actually receives rather than against a default — the #9232 §5
+            // rule, applied here for the first time.
+            const status = declared ?? 400;
             return {
-                status: declared ?? 400,
+                status,
                 body: {
                     error: error.innerMessage,
+                    ...thrownCodeFields(error, status),
                     ...(object ? { object } : {}),
                 },
             };
@@ -1424,7 +1476,8 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // [#9232] The surviving `code` is the NARROWED one — see
         // {@link thrownCodeFields}. This arm's old gate was bare truthiness, so
         // it also admitted a non-string `code`; that limb is gone with the
-        // narrowing, and the four flat arms now ask one question.
+        // narrowing, and the flat arms now ask one question (five of them since
+        // #10345 brought the sandbox unwrap door into the vocabulary).
         // [#9934] Both passthrough arms ride a producer-declared `userMessage`
         // onto the body, the same rule as the exported `mapDataError` wrapper —
         // see {@link withDeclaredUserMessage}. On the 5xx arm the PROSE is
