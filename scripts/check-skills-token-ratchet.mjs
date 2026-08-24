@@ -142,7 +142,7 @@ export const CEILING_BASIS = {
  */
 export const CEILINGS = new Map([
   ['skills/objectstack-ai/SKILL.md', 6824],
-  ['skills/objectstack-api/SKILL.md', 6348],
+  ['skills/objectstack-api/SKILL.md', 6342],
   ['skills/objectstack-automation/SKILL.md', 12543],
   // basis 7228d6c25 (PR #10402 head), not main — see CEILING_BASIS.
   // +20 (13797→13817): maintainer ruling 2026-08-23 on PR #11141 — the three
