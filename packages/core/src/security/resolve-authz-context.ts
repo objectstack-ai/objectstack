@@ -627,6 +627,62 @@ export async function resolveUserAuthzGrants(
   return grants;
 }
 
+/**
+ * hasPlatformAdminStanding — the ID-SHAPED platform-admin question, asked in
+ * exactly one place.
+ *
+ * ADR-0068 D2 defines PLATFORM standing as one thing: an UNSCOPED
+ * (`organization_id = null`) `sys_user_permission_set` grant on the
+ * `admin_full_access` set, held **now**. A surface that only knows a user id —
+ * a session-payload derivation, a platform-operator route gate, an
+ * impersonation oracle — asks here, so it never has to re-read the grant tables
+ * itself, which is the prohibition this module's header states.
+ *
+ * It is a PROJECTION of {@link resolveUserAuthzGrants}, never a second
+ * derivation: the answer is the `PLATFORM_ADMIN` rung of the posture ladder,
+ * and that rung is derived from the unscoped-grant evidence and nothing else.
+ * Everything that governs those grants therefore applies here by construction
+ * and cannot drift from it — the ADR-0091 validity window (§6), the ADR-0049
+ * `active` flag on the catalogue row (§6b), the system-identity read, and the
+ * resolution of `admin_full_access` BY ID rather than by scanning a page of the
+ * catalogue. Each of those was missing from a hand-written copy of this
+ * predicate; none of them can be missing from a projection.
+ *
+ * ⛔ Read the RUNG — never `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)`.
+ * The positions list is wider on purpose: an ADR-0057 D4 `sys_user_position`
+ * row may spell that very name, and a platform-RBAC assignment is not the D2
+ * capability grant. The two readings genuinely differ, so the narrow one is the
+ * one that gets a name here.
+ *
+ * ⛔ The options are deliberately NOT {@link ResolveUserAuthzGrantsOptions}.
+ * That type carries caller-supplied seeds (`seedEmail`, `seedPermissions`) for
+ * transports that already resolved part of a principal; an authorization
+ * predicate that accepted them would let a caller supply part of its own
+ * verdict. Clock injection is the only thing a caller may pass, so this
+ * function's answer is a function of `(ql, userId)` and the stored rows alone.
+ *
+ * ⚠️ This is the PER-USER predicate. The POPULATION question ("which user is
+ * the platform admin?" — `ensure-default-organization.ts`) is a different kind
+ * and is deliberately not expressible through it; do not widen this to serve
+ * it.
+ *
+ * Fail-CLOSED: an empty id, a missing engine, or any unreadable lookup answers
+ * `false`. This backs security gates, and an unverifiable actor never passes.
+ */
+export async function hasPlatformAdminStanding(
+  ql: any,
+  userId: string,
+  opts: { nowMs?: number } = {},
+): Promise<boolean> {
+  if (!ql || typeof userId !== 'string' || userId.length === 0) return false;
+  try {
+    const grants = await resolveUserAuthzGrants(ql, userId, { nowMs: opts.nowMs });
+    return grants.posture === 'PLATFORM_ADMIN';
+  } catch {
+    return false;
+  }
+}
+
 // ── Localization (ADR-0053 Phase 2) ─────────────────────────────────────────
 
 function isValidTimeZone(tz: string): boolean {
