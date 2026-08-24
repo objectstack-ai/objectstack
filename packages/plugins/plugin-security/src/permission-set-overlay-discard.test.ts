@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   discardPermissionSetOverlay,
   PermissionSetNotFoundError,
@@ -39,18 +40,31 @@ function makeQl(declared: any[] = []) {
       const rows = tableFor(object);
       return rows ? rows.filter((r) => matches(r, q?.where)) : [];
     },
-    async update(object: string, data: any) {
+    // Routed through the real dispatch predicate (#4434 / check:engine-double-contract):
+    // a fake looser than ObjectQL.update would let discardPermissionSetOverlay's
+    // fallback (degraded-kernel) path drift to a call shape the real engine refuses.
+    async update(object: string, data: any, options?: any) {
       const rows = tableFor(object);
-      const r = rows?.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const targets = dispatch.kind === 'by-id'
+        ? (rows ?? []).filter((r: any) => r.id === dispatch.id)
+        : (rows ?? []).filter((r: any) => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
+    // Same reason, delete half: this is the exact mouth `discardPermissionSetOverlay`
+    // uses to remove the stale `sys_metadata` overlay row.
     async delete(object: string, opts: any) {
       const rows = tableFor(object);
-      if (!rows) return false;
-      const id = opts?.where?.id;
-      const i = rows.findIndex((x: any) => x.id === id);
-      if (i >= 0) { rows.splice(i, 1); return true; }
-      return false;
+      const dispatch = assertEngineDeleteDispatch(opts);
+      if (!rows) return dispatch.kind === 'by-id' ? false : 0;
+      const targets = dispatch.kind === 'by-id'
+        ? rows.filter((r: any) => r.id === dispatch.id)
+        : rows.filter((r: any) => matches(r, opts?.where));
+      const remaining = rows.filter((r: any) => !targets.includes(r));
+      rows.length = 0;
+      rows.push(...remaining);
+      return dispatch.kind === 'by-id' ? targets.length > 0 : targets.length;
     },
   };
 }

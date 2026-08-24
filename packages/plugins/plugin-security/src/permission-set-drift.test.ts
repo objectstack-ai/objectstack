@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   computePermissionSetDriftDiagnostics,
   persistPermissionSetDriftDiagnostics,
@@ -46,10 +47,17 @@ function makeQl(declared: any[] = []) {
       const rows = tableFor(object);
       return rows ? rows.filter((r) => matches(r, q?.where)) : [];
     },
-    async update(object: string, data: any) {
+    // Routed through the real dispatch predicate (#4434 / check:engine-double-contract):
+    // a fake looser than ObjectQL.update would let persistPermissionSetDriftDiagnostics
+    // drift to a call shape the real engine refuses while this suite stayed green.
+    async update(object: string, data: any, options?: any) {
       const rows = tableFor(object);
-      const r = rows?.find((x) => x.id === data.id);
-      if (r) Object.assign(r, data);
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const targets = dispatch.kind === 'by-id'
+        ? (rows ?? []).filter((r: any) => r.id === dispatch.id)
+        : (rows ?? []).filter((r: any) => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
+      return dispatch.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
   };
 }
