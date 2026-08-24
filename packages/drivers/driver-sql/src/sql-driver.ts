@@ -3941,6 +3941,20 @@ export type SqlDriverConfig = Knex.Config & {
  * Implements the IDataDriver contract via Knex.js for optimal SQL
  * generation against PostgreSQL, MySQL, SQLite and other SQL databases.
  */
+/**
+ * One column's contribution to MySQL's per-ROW budget over DECLARED widths
+ * (#11565).
+ *
+ * `chars` is the `varchar(n)` width {@link SqlDriver.createColumn} emits for
+ * the field; `bytes` is what the server charges for it — the payload
+ * (`chars x bytesPerChar`) plus varchar's own length prefix.
+ */
+interface RowWidthContribution {
+  name: string;
+  chars: number;
+  bytes: number;
+}
+
 export class SqlDriver implements IDataDriver {
   // IDataDriver metadata
   public readonly name: string = 'com.objectstack.driver.sql';
@@ -8853,17 +8867,26 @@ export class SqlDriver implements IDataDriver {
       });
 
       if (!exists) {
-        await this.knex.schema.createTable(tableName, (table) => {
-          table.string('id').primary();
-          this.createAuditTimestampColumn(table, 'created_at');
-          this.createAuditTimestampColumn(table, 'updated_at');
-          if (obj.fields) {
-            for (const [name, field] of Object.entries(obj.fields)) {
-              if (builtinColumns.has(name)) continue;
-              this.createColumn(table, name, field, keyedColumns.get(name));
+        try {
+          await this.knex.schema.createTable(tableName, (table) => {
+            table.string('id').primary();
+            this.createAuditTimestampColumn(table, 'created_at');
+            this.createAuditTimestampColumn(table, 'updated_at');
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (builtinColumns.has(name)) continue;
+                this.createColumn(table, name, field, keyedColumns.get(name));
+              }
             }
-          }
-        });
+          });
+        } catch (e: any) {
+          // #11565: MySQL charges every bounded column's DECLARED width against
+          // a per-ROW budget, and refuses the CREATE naming no column and no
+          // declaration — about a table its author described entirely in
+          // metadata. Re-throw the SAME failure carrying the field-level fix;
+          // anything that is not that refusal is re-thrown untouched.
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, null, e);
+        }
         this.tablesWithTimestamps.add(tableName);
       } else {
         const columnInfo = await this.knex(tableName).columnInfo();
@@ -8873,15 +8896,26 @@ export class SqlDriver implements IDataDriver {
           this.tablesWithTimestamps.add(tableName);
         }
 
-        await this.knex.schema.alterTable(tableName, (table) => {
-          if (obj.fields) {
-            for (const [name, field] of Object.entries(obj.fields)) {
-              if (!existingColumns.includes(name)) {
-                this.createColumn(table, name, field, keyedColumns.get(name));
+        // #11565: the row budget is a property of the WHOLE row, so adding one
+        // ordinary column to a wide table is refused by the width of columns
+        // nobody is touching — with the same column-less server error. Named
+        // here so the ADD COLUMN path is not the one that keeps it.
+        const addedColumns = Object.keys(obj.fields ?? {}).filter(
+          (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
+        );
+        try {
+          await this.knex.schema.alterTable(tableName, (table) => {
+            if (obj.fields) {
+              for (const [name, field] of Object.entries(obj.fields)) {
+                if (!existingColumns.includes(name)) {
+                  this.createColumn(table, name, field, keyedColumns.get(name));
+                }
               }
             }
-          }
-        });
+          });
+        } catch (e: any) {
+          await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
+        }
       }
 
       // Materialize the table's index set: field-level `unique` (tenancy-aware
@@ -13124,6 +13158,334 @@ export class SqlDriver implements IDataDriver {
       `unenforced. A prefix index is deliberately not substituted: on a UNIQUE index it constrains the ` +
       `prefix rather than the value, and rejects two different values that share one.`
     );
+  }
+
+  /**
+   * MySQL's per-ROW budget over the DECLARED byte widths of a table's columns
+   * (#11565) — the number its own refusal quotes and the only part of that
+   * refusal an operator can act on.
+   *
+   * Independent of the per-column `varchar` ceiling {@link MAX_VARCHAR_CHARS}
+   * bounds: every declaration can be individually legal and the table still be
+   * un-creatable. Measured on live MySQL 8.0.46 (utf8mb4 / InnoDB / DYNAMIC),
+   * through this driver rather than in raw SQL, so the built-in `id`,
+   * `created_at` and `updated_at` columns are inside the numbers:
+   *
+   * ```
+   * 15 fields @ maxLength 1024  CREATE ok      63 fields @ maxLength 255  CREATE ok
+   * 16 fields @ maxLength 1024  ER_TOO_BIG_ROWSIZE   64 fields @ maxLength 255  ER_TOO_BIG_ROWSIZE
+   * ```
+   *
+   * Postgres has no equivalent — it TOASTs — so nothing here is dialect-neutral
+   * behaviour that happens to be measured on MySQL. It is MySQL-only, and it is
+   * selected as MySQL-only **by the error code**, never by a dialect getter.
+   */
+  protected static readonly MYSQL_ROW_BYTE_BUDGET = 65535;
+
+  /**
+   * utf8mb4's bytes-per-character, used ONLY when the server cannot be asked
+   * (see {@link schemaBytesPerChar}). The real multiplier is a property of the
+   * schema, not of the metadata: measured on 8.0.46, `64 x varchar(1024)` is
+   * refused on a utf8mb4 database and CREATES on a latin1 one. That asymmetry
+   * is the whole reason this arithmetic is only ever run to EXPLAIN a refusal
+   * the server has already issued — see {@link explainRowSizeOverflow}.
+   */
+  protected static readonly ASSUMED_BYTES_PER_CHAR = 4;
+
+  /**
+   * What MySQL charges for one `varchar(chars)` column: the payload plus
+   * varchar's own length prefix, which is 1 byte while the payload fits in 255
+   * and 2 bytes after.
+   *
+   * Bracketed by measurement rather than read off a doc page — the boundary is
+   * visible in the column counts a table can hold. On utf8mb4 a `varchar(63)`
+   * payload is 252 bytes and 32 such columns fit InnoDB's 8126-byte page limit
+   * (32 x 253 = 8096; at 254 bytes each they would not), so 252 takes ONE
+   * prefix byte; a `varchar(64)` payload of 256 bytes takes two. A payload of
+   * exactly 255 is the documented last one-byte width and is the one point
+   * neither limit can discriminate — a column that narrow is never stored
+   * off-page, so the page limit binds long before 256 vs 257 bytes could show.
+   * Off by one byte there would move a number in a message, never a verdict.
+   */
+  protected static varcharPackLength(chars: number, bytesPerChar: number): number {
+    const payload = chars * bytesPerChar;
+    return payload + (payload < 256 ? 1 : 2);
+  }
+
+  /**
+   * The `varchar(n)` width {@link SqlDriver.createColumn} emits for a field, or
+   * `null` when the column it emits is not a varchar at all (#11565).
+   *
+   * A READ-ONLY mirror of that switch, not a second decision: the two families
+   * that size a column from metadata delegate to the very helpers
+   * `createColumn` calls ({@link declaredVarcharLength},
+   * {@link keyableTextLength}), and the remaining branches are grouped by what
+   * `createColumn` does with them, not restated per type.
+   *
+   * ⚠️ The branch that matters most for the row budget is the one that declares
+   * nothing: `lookup` / `user` / `auto_number` and the catch-all all spell
+   * `table.string(name)`, which is knex's `varchar(255)` — 1022 bytes on
+   * utf8mb4. An object with sixty lookups therefore reaches the budget having
+   * declared no `maxLength` anywhere, and a diagnostic that only looked at
+   * declared bounds would name nothing at all on the most reachable shape.
+   *
+   * The agreement between this mirror and `createColumn` is PINNED rather than
+   * asserted in prose: `sql-driver-11565-row-byte-budget.test.ts` builds one
+   * field of every `FieldType` the spec declares, creates the table, and
+   * compares this answer against `columnInfo()` column by column. A type added
+   * to the spec enters that pin automatically.
+   */
+  protected varcharColumnChars(field: any, keyed?: { unique: boolean }): number | null {
+    // `multiple` is decided before the type switch in `createColumn` — a JSON
+    // column, whatever the element type would have been.
+    if (field?.multiple) return null;
+    const type = field?.type || 'string';
+    switch (type) {
+      case 'string':
+      case 'email':
+      case 'url':
+      case 'phone':
+      case 'password':
+        return this.declaredVarcharLength(field);
+      case 'text':
+      case 'textarea':
+      case 'html':
+      case 'markdown':
+        return keyed ? this.keyableTextLength(field) : null;
+      // Virtual — `createColumn` returns without emitting anything.
+      case 'formula':
+        return null;
+      // The non-string primitives: INTEGER / REAL / BOOLEAN / DATE / DATETIME /
+      // TIME columns. None of them is sized from metadata and none is a varchar.
+      case 'integer':
+      case 'int':
+      case 'float':
+      case 'number':
+      case 'currency':
+      case 'percent':
+      case 'rating':
+      case 'slider':
+      case 'progress':
+      case 'summary':
+      case 'boolean':
+      case 'toggle':
+      case 'date':
+      case 'datetime':
+      case 'time':
+        return null;
+      default:
+        // `createColumn`'s catch-all, spelled the same way so the two cannot
+        // disagree about which types are JSON: everything else is
+        // `table.string(name)` at knex's default width.
+        return JSON_COLUMN_TYPES.has(type) ? null : SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
+    }
+  }
+
+  /**
+   * Every varchar column this object's fields produce, widest first, with what
+   * each costs against the row budget at a given bytes-per-character (#11565).
+   *
+   * The built-in `id` / `created_at` / `updated_at` columns are excluded for the
+   * same reason `initObjects` skips them when iterating `obj.fields`: they are
+   * not authored, so naming them in a diagnostic addressed to the author points
+   * at something no declaration can change. They are NOT free — `id` alone is a
+   * `varchar(255)` — which is why the message says the sum sits on top of them
+   * rather than claiming to be the server's own total.
+   */
+  protected rowWidthProfile(
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    bytesPerChar: number,
+  ): { columns: RowWidthContribution[]; totalBytes: number } {
+    const builtin = new Set<string>(['id', ...AUDIT_TIMESTAMP_COLUMNS]);
+    const columns: RowWidthContribution[] = [];
+    for (const [name, field] of Object.entries(fields ?? {})) {
+      if (builtin.has(name)) continue;
+      const chars = this.varcharColumnChars(field, keyedColumns.get(name));
+      if (chars === null) continue;
+      columns.push({ name, chars, bytes: SqlDriver.varcharPackLength(chars, bytesPerChar) });
+    }
+    columns.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+    return { columns, totalBytes: columns.reduce((sum, c) => sum + c.bytes, 0) };
+  }
+
+  /**
+   * The bytes-per-character the tables this driver creates actually get, read
+   * from the server.
+   *
+   * Knex emits no `CHARACTER SET` clause, so a created table takes the
+   * DATABASE's default charset — verified on 8.0.46: a table created with no
+   * clause in a `CHARACTER SET latin1` database comes back
+   * `TABLE_COLLATION = latin1_swedish_ci`. So `@@character_set_database` is the
+   * right question, and `information_schema.CHARACTER_SETS.MAXLEN` answers the
+   * multiplier for it (utf8mb4 → 4, utf8mb3 → 3, latin1/ascii → 1).
+   *
+   * One round-trip, and only ever on a path that is already throwing — the same
+   * trade {@link explainUnkeyableTextColumn} makes with its `columnInfo()` read.
+   * `null` when the read fails: a diagnostic must not turn into a second
+   * failure, and the advice holds with the assumed multiplier.
+   */
+  protected async schemaBytesPerChar(): Promise<{ bytesPerChar: number; charset: string } | null> {
+    try {
+      const res: any = await this.knex.raw(
+        'select cs.CHARACTER_SET_NAME as charset, cs.MAXLEN as maxlen ' +
+          'from information_schema.CHARACTER_SETS cs ' +
+          'where cs.CHARACTER_SET_NAME = @@character_set_database',
+      );
+      const row = (Array.isArray(res) ? res[0]?.[0] : (res?.rows?.[0] ?? res?.[0])) ?? null;
+      const maxlen = Number(row?.maxlen ?? row?.MAXLEN);
+      const charset = String(row?.charset ?? row?.CHARSET ?? '');
+      if (!Number.isInteger(maxlen) || maxlen <= 0 || !charset) return null;
+      return { bytesPerChar: maxlen, charset };
+    } catch {
+      // Introspection is a nicety here; the advice below holds without it.
+      return null;
+    }
+  }
+
+  /**
+   * Turn MySQL's `ER_TOO_BIG_ROWSIZE` into a message that names the columns
+   * whose declared widths spent the row budget (#11565).
+   *
+   * ## Why a post-hoc translator and NOT a pre-flight
+   *
+   * The card that raised this preferred a pre-flight — sum the declared widths
+   * before issuing DDL and refuse — on the grounds that a translator "only
+   * knows the table failed". That premise does not survive contact with the
+   * call site: this runs inside `initObjects`' own loop, where `obj.fields` and
+   * the resolved `keyedColumns` are in scope, so it names EVERY contributing
+   * field exactly as a pre-flight would. The advantage claimed for the
+   * pre-flight is not an advantage it has here.
+   *
+   * What the two shapes do not share is their failure direction, and the
+   * asymmetry is the whole argument:
+   *
+   *  - A pre-flight has to REPRODUCE the server's arithmetic. Wrong in the lax
+   *    direction it is merely useless — the server still refuses, with today's
+   *    bad message. Wrong in the STRICT direction it refuses an object MySQL
+   *    would have accepted, which is a contract change: the same metadata now
+   *    means two different things depending on the driver's own model.
+   *  - A translator cannot over-refuse BY CONSTRUCTION. It speaks only after
+   *    the server has already refused, so no arithmetic error it makes can
+   *    change which objects are accepted — the worst case is a less precise
+   *    sentence attached to a refusal that was going to happen anyway.
+   *
+   * And the arithmetic is genuinely hard to hold, all four parts measured on
+   * 8.0.46 while choosing this shape:
+   *
+   *  1. **The charset multiplier is the schema's, not the metadata's.**
+   *     `64 x varchar(1024)` is refused on utf8mb4 and CREATES on latin1.
+   *     A pre-flight hard-coding 4 bytes/char over-refuses by 4x on a latin1
+   *     deployment.
+   *  2. **The length prefix moves** at a 255-byte payload boundary (see
+   *     {@link varcharPackLength}).
+   *  3. **The null bitmap counts.** `163 x varchar(100)` is refused when the
+   *     columns are nullable and CREATES when they are `NOT NULL` — same
+   *     declared widths, different verdict.
+   *  4. **There is a SECOND, independent limit.** InnoDB's per-page limit
+   *     (`Row size too large (> 8126)` on a 16K page) fires far below 65535
+   *     for many NARROW columns, because a column whose maximum is under ~256
+   *     bytes is never pushed off-page: measured, `varchar(63)` tops out at 32
+   *     columns and `varchar(64)` at 196. Through this driver, an object of 40
+   *     ordinary `maxLength: 63` fields is refused — a shape a 65535-byte
+   *     pre-flight would have waved through, leaving the author with the
+   *     unactionable server error the card was filed about.
+   *
+   * A pre-flight would also need a dialect predicate to know it is on MySQL.
+   * This needs none: `ER_TOO_BIG_ROWSIZE` is a MySQL code, so the diagnostic is
+   * MySQL-scoped by construction and costs nothing on every other dialect and
+   * on the success path.
+   *
+   * @param addedColumns the columns an `ALTER TABLE` was adding, or `null` for
+   *   a `CREATE TABLE`. The budget is the whole ROW either way — a column added
+   *   years later is refused by the width of columns nobody is touching — so
+   *   the offender list is the same and only the opening clause differs.
+   */
+  protected async explainRowSizeOverflow(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    addedColumns: string[] | null,
+    cause: unknown,
+  ): Promise<string | null> {
+    if ((cause as { code?: string } | undefined)?.code !== 'ER_TOO_BIG_ROWSIZE') return null;
+
+    const server = await this.schemaBytesPerChar();
+    const bytesPerChar = server?.bytesPerChar ?? SqlDriver.ASSUMED_BYTES_PER_CHAR;
+    const charsetNote = server
+      ? `${bytesPerChar} bytes/character (${server.charset}, this schema's charset)`
+      : `${bytesPerChar} bytes/character (utf8mb4 assumed — the server's charset could not be read)`;
+    const { columns, totalBytes } = this.rowWidthProfile(fields, keyedColumns, bytesPerChar);
+
+    // Two DIFFERENT limits answer with this one code, and they quote different
+    // numbers. Reading the server's own text keeps the message from asserting
+    // the 65535 one over a refusal that was really InnoDB's page limit.
+    const serverText = String((cause as { sqlMessage?: string; message?: string }).sqlMessage ?? '');
+    const pageLimit = /row size too large \(>\s*(\d+)\)/i.exec(serverText)?.[1] ?? null;
+    const limitClause = pageLimit
+      ? `InnoDB's per-PAGE limit of ${pageLimit} bytes — which many NARROW bounded columns reach far below the ` +
+        `${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte one, because a column narrower than about 256 bytes is never ` +
+        `stored off-page (measured on 8.0.46: 40 fields at \`maxLength: 63\` are refused)`
+      : `the server's ${SqlDriver.MYSQL_ROW_BYTE_BUDGET}-byte budget for one ROW`;
+
+    const SHOWN = 8;
+    const listed = columns
+      .slice(0, SHOWN)
+      .map((c) => `"${c.name}" varchar(${c.chars}) = ${c.bytes} bytes`)
+      .join(', ');
+    const rest = columns.length > SHOWN ? `, and ${columns.length - SHOWN} more` : '';
+    const inventory =
+      columns.length === 0
+        ? `This object produces no varchar column at all, so the width is in the built-in columns or in a ` +
+          `type this diagnostic does not size — report it, because that is not a shape it was measured on.`
+        : `Its ${columns.length} varchar column(s) take ${totalBytes} bytes at ${charsetNote}, on top of the ` +
+          `built-in \`id\` (a varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS})), \`created_at\` and ` +
+          `\`updated_at\` columns. Widest first: ${listed}${rest}.`;
+
+    const opening =
+      addedColumns && addedColumns.length > 0
+        ? `[sql-driver] cannot add column(s) ${addedColumns.map((c) => `"${c}"`).join(', ')} to "${tableName}"`
+        : `[sql-driver] cannot create table "${tableName}"`;
+
+    return (
+      `${opening} — MySQL refuses the whole row: every bounded column's DECLARED width is charged against ` +
+      `${limitClause}, whether or not a row ever holds that much. ${inventory} ` +
+      `Fix it on the declarations: lower \`maxLength\` on the widest field(s), or drop the bound from a ` +
+      `text-family field no index keys on so it is emitted as TEXT — an off-page TEXT column costs this ` +
+      `budget a small pointer rather than its full declared width. Note that a field declaring NO ` +
+      `\`maxLength\` still takes varchar(${SqlDriver.DEFAULT_STRING_VARCHAR_CHARS}) ` +
+      `(${SqlDriver.varcharPackLength(SqlDriver.DEFAULT_STRING_VARCHAR_CHARS, bytesPerChar)} bytes here), and ` +
+      `so do \`lookup\`, \`user\`, \`auto_number\` and the option types — an object can reach this limit ` +
+      `without declaring a bound anywhere. The server's own error names no column, which is the whole reason ` +
+      `this one does (#11565).`
+    );
+  }
+
+  /**
+   * Re-throw a schema-mutation failure carrying {@link explainRowSizeOverflow}'s
+   * explanation, or the original untouched when it is not a row-size refusal.
+   *
+   * The SAME failure, re-worded — the boot still fails, loudly, and no object is
+   * registered that MySQL declined to build. `sqlMessage` rather than `message`
+   * for the quoted server text: knex prefixes `message` with the entire DDL
+   * statement, which for the object that trips this is thousands of characters
+   * of `varchar(...)` and buries the one sentence the server actually said.
+   */
+  private async rethrowWithRowSizeExplanation(
+    tableName: string,
+    fields: Record<string, any> | undefined,
+    keyedColumns: ReadonlyMap<string, { unique: boolean }>,
+    addedColumns: string[] | null,
+    e: any,
+  ): Promise<never> {
+    const overflow = await this.explainRowSizeOverflow(tableName, fields, keyedColumns, addedColumns, e);
+    if (!overflow) throw e;
+    const said = String(e?.sqlMessage ?? e?.message ?? e);
+    (this.logger.error ?? this.logger.warn)(overflow, said);
+    throw Object.assign(new Error(`${overflow} (server said: ${said})`), {
+      code: (e as { code?: string }).code,
+      cause: e,
+    });
   }
 
   protected createColumn(
