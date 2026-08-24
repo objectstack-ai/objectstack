@@ -187,9 +187,7 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   它。作数的断言是 `check:authorable-surface` 绿;`baseRev` 允许滞后(一行信息,不是错
   误)。⛔ 永不在 MERGE 态跑 `gen:schema`:HEAD 还是 merge 前的 tip,锚点会静默回滚到旧
   分叉点 —— 依然真实、门禁全绿、一次已落地的推进被吞掉。先 commit merge 再重生成(已机
-  械化:`bash scripts/pm/os-regen-merge.sh`)。姊妹陷阱:`gen:schema` 的清理会抹掉
-  `gen:openapi` 的产物(rest 里冒出假 5xx 失败);用
-  `pnpm --filter @objectstack/spec gen:openapi` 恢复。
+  械化:`bash scripts/pm/os-regen-merge.sh`)。
 - **家族规则:`git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切 —— refs(含
   `refs/remotes/*`)、stash 栈、config、hooks —— 全 worktree 共享;配方只有不点名共享态
   才 worktree-safe。家族同签名:操作看着本地、报成功,唯一症状是 `git status` 里出现他
