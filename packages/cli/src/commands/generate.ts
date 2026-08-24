@@ -5,28 +5,30 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
+import { metadataFileName } from '../utils/metadata-file-name.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
+/**
+ * The scaffold templates, keyed by metadata type.
+ *
+ * A generator declares WHAT to write. It does not declare what the file is
+ * called: every filename comes from {@link metadataFileName}, which reads the
+ * type's own `filePatterns` out of `DEFAULT_METADATA_TYPE_REGISTRY`. The
+ * harness wrote `NAME.ts` for years, which matches no pattern the registry
+ * declares for any type; #11025 closed that for `skill` alone through a
+ * per-generator override, and #11071 replaced the override with the derived
+ * default so a type added here cannot arrive misnamed by omission.
+ *
+ * A type registered here that the registry gives no TypeScript pattern is
+ * refused at generation time rather than written to a name nothing globs, and
+ * `generate-file-name-registry-parity.test.ts` turns that runtime refusal into
+ * a CI failure so nobody meets it as a user.
+ */
 const GENERATORS: Record<string, {
   description: string;
   defaultDir: string;
   generate: (name: string) => string;
-  /**
-   * Per-generator override for the written file's name. Optional, and today
-   * exactly one generator sets it — see `skill` below for why that one is
-   * different and why the divergence was not resolved the other way.
-   *
-   * The default is `NAME.ts`, which is what this harness has always written.
-   * `DEFAULT_METADATA_TYPE_REGISTRY` (`packages/spec`) meanwhile gives every
-   * metadata type `filePatterns` of the form `NAME.TYPE.ts`, and the example
-   * apps author that way (`account.object.ts`, `lead.view.ts`). Converging
-   * the harness on the registry's convention for all seven types is the
-   * repo-wide change that would settle the mismatch properly — it moves every
-   * generator's output plus the docs and examples that show it, so it is its
-   * own decision and deliberately does NOT ride in here (#11025).
-   */
-  fileName?: (name: string) => string;
 }> = {
   object: {
     description: 'Business data object',
@@ -183,36 +185,24 @@ export default ${toCamelCase(name)}App;
     description: 'AI skill (ADR-0063 extension primitive)',
     defaultDir: 'src/skills',
     /**
-     * The ONE generator that overrides the harness's `NAME.ts` convention, and
-     * the reason is not cosmetic.
+     * Written as `NAME.skill.ts` — from the registry's own pattern now, not
+     * from a per-generator override.
      *
-     * `DEFAULT_METADATA_TYPE_REGISTRY` declares this type's file convention
-     * as `*.skill.ts` / `*.skill.yml`, and that declaration is load-bearing:
-     * `MetadataPlugin._loadFromFileSystem` globs each registered type by its
-     * own `filePatterns`, `MetadataManager.getTypeInfo` publishes them to
-     * Studio and every other type-descriptor consumer, and it is the shape
-     * the example apps and the manifest's own glob keys are written in
-     * throughout (`account.object.ts`, `lead.view.ts`, and so on for every
-     * type).
+     * `skill` is where the consequence of getting this wrong was first
+     * measured (#11025). It is `allowRuntimeCreate: true`, a type the platform
+     * expects to DISCOVER rather than one wired in by hand, so a scaffold
+     * named `lead_qualification.ts` matches neither `*.skill.ts` nor
+     * `*.skill.yml`, and then type-checks, passes `os validate` and publishes
+     * with nothing anywhere saying it was skipped — the silent-strip shape
+     * ADR-0063's retirement of `os g agent` closed (#10359), re-entering
+     * through the scaffolder that replaced it.
      *
-     * A scaffold written as `lead_qualification.ts` matches NEITHER pattern.
-     * `skill` is `allowRuntimeCreate: true` — a type the platform expects to
-     * discover rather than one wired in by hand — and a file no pattern
-     * matches still type-checks, still passes `os validate` and still
-     * publishes, with nothing anywhere saying it was skipped. That is the
-     * silent-strip shape ADR-0063's retirement of `os g agent` closed
-     * (#10359), re-entering through the scaffolder that replaced it
-     * (#11025), which is why a template alone would have been worse than no
-     * generator at all.
-     *
-     * Scoped to `skill` rather than fixed for all seven types on purpose: the
-     * other six write into the same mismatch, but nothing there is
-     * filesystem-discovered today, and moving the whole harness to
-     * `NAME.TYPE.ts` moves every existing generator's output plus the docs
-     * and examples that show it. That is a repo-wide decision of its own —
-     * see the `fileName` docblock above.
+     * That reasoning was scoped to `skill` on the belief that the other six
+     * types were not filesystem-discovered. #11071 measured the loader
+     * instead: `MetadataPlugin._loadFromFileSystem` globs EVERY registry entry
+     * by its own `filePatterns`, so all seven wrote into the same
+     * invisibility. The override is gone and the rule is the harness default.
      */
-    fileName: (name: string) => `${toSnakeCase(name)}.skill.ts`,
     generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
 
 /**
@@ -264,6 +254,17 @@ export default ${toCamelCase(name)}Skill;
 `,
   },
 };
+
+/**
+ * Every metadata type `os generate` can scaffold, with the directory it
+ * scaffolds into — derived from `GENERATORS` rather than restated.
+ *
+ * Exported for `generate-file-name-registry-parity.test.ts`, and derived on
+ * purpose: the pin's job is to hold for the NEXT generator somebody adds, and
+ * a hand-kept list would leave that one unmeasured while still reading green.
+ */
+export const GENERATOR_SCAFFOLD_TARGETS: readonly { type: string; defaultDir: string }[] =
+  Object.entries(GENERATORS).map(([type, gen]) => ({ type, defaultDir: gen.defaultDir }));
 
 // ─── Retired Generators ─────────────────────────────────────────────
 
@@ -466,15 +467,35 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     }
 
     const dir = flags.dir || generator.defaultDir;
-    // `NAME.ts` unless the generator declares otherwise — see the `fileName`
-    // docblock on GENERATORS, and `skill`, the one type that must not use it.
-    const fileName = generator.fileName ? generator.fileName(name) : `${toSnakeCase(name)}.ts`;
+    // The written name comes from the registry's `filePatterns` for this type
+    // — see `metadataFileName`, which carries why it is derived rather than
+    // tabulated.
+    const fileName = metadataFileName(type, toSnakeCase(name));
+    if (fileName === null) {
+      // Unreachable for every registered generator, and pinned that way by
+      // `generate-file-name-registry-parity.test.ts`. Reached only if someone
+      // adds a generator for a type the registry gives no TypeScript pattern,
+      // and refusing is the point: the alternative is a file that type-checks,
+      // validates, publishes and is never loaded, with no diagnostic at any
+      // step.
+      printError(`No file naming convention is declared for type: ${type}`);
+      console.log('');
+      console.log(chalk.dim(
+        `  DEFAULT_METADATA_TYPE_REGISTRY has no recursive TypeScript file pattern`,
+      ));
+      console.log(chalk.dim(
+        `  for \`${type}\`, so there is no name this scaffold could be written to`,
+      ));
+      console.log(chalk.dim(
+        '  that the metadata loader would ever glob. Declare one there first.',
+      ));
+      console.log('');
+      process.exit(1);
+    }
     // The barrel re-export has to name the file that was actually written, so
-    // it is derived from `fileName` rather than rebuilt from `name`. For the
-    // six generators that take the default this is byte-identical to the old
-    // `./${toSnakeCase(name)}`; for `skill` it keeps the `.skill` infix the
-    // loader's file pattern requires instead of pointing at a module that
-    // does not exist.
+    // it is derived from `fileName` rather than rebuilt from `name` — the
+    // infix is part of the module specifier, and a barrel rebuilt from the
+    // metadata name alone would resolve to nothing.
     const moduleSpecifier = `./${fileName.replace(/\.ts$/, '')}`;
     const filePath = path.join(process.cwd(), dir, fileName);
 
