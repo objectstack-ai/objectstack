@@ -342,7 +342,27 @@ export interface ShareLinkServiceOptions {
     context: ExecutionContext,
   ) => Promise<boolean>;
   /** [#5190] Optional logger for the record-delete cascade / orphan sweep. */
-  logger?: { info?: Function; warn?: Function; error?: Function; debug?: Function };
+  logger?: {
+    info?: (msg: any, ...rest: any[]) => void;
+    /**
+     * The GUARANTEED fallback channel (#9754, ruled on #10556). `error` stays
+     * optional — hosts do inject reduced sinks — so `warn` is where a
+     * durability report lands when `error` is absent, and a fallback that may
+     * itself be missing is not a fallback. Call sites keep the
+     * `logger?.warn?.(…)` spelling as the backstop for hosts the TYPE cannot
+     * reach; `SweepLogger` in plugin-email's `outbox-sweep.ts` carries the full
+     * reasoning and the measurement.
+     *
+     * ⚠️ This member is REQUIRED, and `ShareLinkServiceOptions` is PUBLICLY EXPORTED
+     * from this package's `index.ts` — so a host passing `{ info, error }`
+     * compiled before this landed and does not after. That break is declared,
+     * shipped `minor`, and named in the changeset (maintainer ruling
+     * 2026-08-24, #10556 limb (c)).
+     */
+    warn: (msg: any, ...rest: any[]) => void;
+    error?: (msg: any, ...rest: any[]) => void;
+    debug?: (msg: any, ...rest: any[]) => void;
+  };
 }
 
 /**

@@ -542,6 +542,65 @@ function requiredCapsForOperation(
   return caps.length > 0 ? [...new Set(caps)] : [];
 }
 
+/**
+ * The plugin's OWN report sink — the channel its fail-closed refusals reach an
+ * operator through, distinct from `ctx.logger`, which exists only once a host
+ * has driven this plugin's lifecycle.
+ *
+ * ## `warn` is NON-optional, and the default below is what stops that being a lie
+ *
+ * #9754: a sink declaring an optional `error` must declare a NON-optional
+ * `warn`, so a durability report always has somewhere to land. This field could
+ * not satisfy that by dropping a `?` while it was initialised `= {}` — a
+ * required member on an empty object literal is a type that lies, and every
+ * report site here is spelled `this.logger.warn?.(…)`, so an unbound sink is
+ * not a state any caller can notice. It reports nothing, quietly. #10556
+ * escalated the question rather than answering it to make a checker green, and
+ * the maintainer ruled (2026-08-24): the DEFAULT becomes a console-backed sink,
+ * loud until a host injects one; silent-by-declaration is REJECTED.
+ *
+ * `error` stays OPTIONAL, deliberately, by the same ruling that created the
+ * rule (#9754 option C, falsified): hosts do inject reduced sinks, so requiring
+ * `error` forecloses the legitimate `{ warn }`-only host. What changed is that
+ * its ABSENCE now has a guaranteed destination.
+ */
+interface SecurityReportSink {
+  info?: (...a: any[]) => void;
+  /**
+   * The GUARANTEED fallback channel (#9754). A durability report degrades to
+   * `warn` and no further — `info` is the level AGENTS.md → "Degradation log
+   * levels" calls the reassuring half-truth — so this is the one member every
+   * value of this type must carry.
+   */
+  warn: (...a: any[]) => void;
+  error?: (...a: any[]) => void;
+}
+
+/**
+ * The default {@link SecurityReportSink}: console-backed, so a plugin nobody
+ * injected a sink into still REPORTS (#10556 limb (a), maintainer ruling
+ * 2026-08-24).
+ *
+ * ## What it carries, and what it deliberately does not
+ *
+ * The two REPORT channels only. `info` is left undefined: it carries no
+ * durability report, so a host-less boot spraying routine chatter at stdout
+ * would be noise bought with nothing. `info` being optional in the type above
+ * is the same statement from the other side.
+ *
+ * ## Why one shared frozen value
+ *
+ * It holds no state and closes over no instance, so a fresh object per plugin
+ * would differ only in identity; `Object.freeze` records that the plugin does
+ * not mutate its own default. Nothing here replaces a host sink — `start()`
+ * ASSIGNS `ctx.logger` over this field, above both of its early bail-outs
+ * (#10706), so a degraded boot reports through the host too.
+ */
+const CONSOLE_SECURITY_SINK: SecurityReportSink = Object.freeze({
+  warn: (...a: any[]) => { console.warn(...a); },
+  error: (...a: any[]) => { console.error(...a); },
+});
+
 export interface SecurityPluginOptions {
   /**
    * Additional permission sets to register with the metadata service on
@@ -844,7 +903,12 @@ export class SecurityPlugin implements Plugin {
    * why the guard exists and what it is guarding against.
    */
   private writeEpoch = 0;
-  private logger: { info?: (...a: any[]) => void; warn?: (...a: any[]) => void; error?: (...a: any[]) => void } = {};
+  /**
+   * This plugin's report sink. Console-backed until a host injects one — see
+   * {@link SecurityReportSink} and {@link CONSOLE_SECURITY_SINK} for the ruling
+   * and for why `warn` is the member that is guaranteed (#9754 / #10556 (a)).
+   */
+  private logger: SecurityReportSink = CONSOLE_SECURITY_SINK;
 
   constructor(options: SecurityPluginOptions = {}) {
     this.bootstrapPermissionSets =
