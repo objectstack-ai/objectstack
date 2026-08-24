@@ -7750,7 +7750,31 @@ export class SqlDriver implements IDataDriver {
         // their own mistake instead of a dialect's syntax error wrapped in a
         // 500 (see {@link refuseDistinctAggregateWithoutField}).
         if (lowering.distinct && fieldExpr === '*') refuseDistinctAggregateWithoutField(funcName);
-        const rawFunc = lowering.distinct ? `${lowering.sql}(distinct ??)` : `${lowering.sql}(??)`;
+        // [#11635] A boolean aggregand is CAST for the arithmetic/order
+        // aggregates on Postgres — the one dialect that stores `Field.boolean`
+        // as a real `boolean` column and defines no `sum`/`avg`/`min`/`max`
+        // over it (SQLSTATE `42883`, measured on PG 16.13; SQLite stores 0/1
+        // INTEGER and MySQL `tinyint(1)`, so both compute natively). #11249
+        // ruled the answers (maintainer 2026-08-23): `sum`/`avg` answer
+        // arithmetic over 1/0, and `min`/`max` answer `false`/`true` — a
+        // member of the input domain — so this face must ANSWER; refusing
+        // cannot satisfy the ruled contract. `cast(?? as int)` keeps the
+        // column in a knex identifier binding exactly as the uncast form does.
+        // `count`/`count_distinct` are deliberately NOT cast (both lower to
+        // `count`, defined over boolean everywhere — their answers were
+        // correct before this and must not move). The 1/0 the cast computes
+        // for `min`/`max` is presented back as a JSON boolean below, where the
+        // result column is tracked.
+        const castBooleanAggregand =
+          this.isPostgres &&
+          lowering.sql !== 'count' &&
+          fieldExpr !== '*' &&
+          table !== null &&
+          (this.booleanFields[table]?.includes(fieldExpr) ?? false);
+        const argExpr = castBooleanAggregand ? 'cast(?? as int)' : '??';
+        const rawFunc = lowering.distinct
+          ? `${lowering.sql}(distinct ${argExpr})`
+          : `${lowering.sql}(${argExpr})`;
         if (agg.alias) {
           if (fieldExpr === '*') {
             builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
@@ -7765,7 +7789,21 @@ export class SqlDriver implements IDataDriver {
           // (`max("closed_at")` on SQLite, `max` on Postgres) and is defensive
           // only, so it is deliberately not tracked.
           if ((funcName === 'min' || funcName === 'max') && agg.field) {
-            const kind = this.readPresentationKind(table, agg.field);
+            // [#11249/#11635] A boolean aggregand presents on EVERY dialect,
+            // not only under `readPresentationKind`'s SQLite gate. That gate
+            // mirrors `formatOutput`'s ROW reads, where the native dialects
+            // hand storage back as-is — but on this door the backend answers
+            // `min`/`max` as 1/0 on MySQL (`tinyint(1)`) and on Postgres (the
+            // `cast(?? as int)` above), and the ruled contract is `false` /
+            // `true` in JSON: order statistics return a member of the input
+            // domain, and SQL drivers convert at the driver boundary.
+            // `presentReadValue('boolean', …)` leaves `null` (no rows / all
+            // NULL) untouched and is idempotent on a value already boolean.
+            const kind =
+              this.readPresentationKind(table, agg.field) ??
+              (table !== null && this.booleanFields[table]?.includes(agg.field)
+                ? ('boolean' as const)
+                : null);
             if (kind) presentedOutput.set(agg.alias, kind);
           }
         } else {
@@ -7794,13 +7832,13 @@ export class SqlDriver implements IDataDriver {
     // forward, which is the #1116/#1117 gap {@link mapAggregateFunc} closed for
     // the FUNCTION NAME while leaving the STATEMENT half open.
     //
-    // ⛔ Nothing here decides whether a boolean aggregate should ANSWER (by
-    // casting boolean to int in {@link SQL_AGGREGATE_FUNCTIONS}) or REFUSE —
-    // that contract question is #11152's, and #11249's for `min`/`max`. The
-    // three dialects genuinely disagree today (SQLite and MySQL's `tinyint(1)`
-    // both answer arithmetically, Postgres refuses), which is exactly why the
-    // envelope is the half that can land first: *when* it fails, the failure
-    // carries a catalogued code and a status, either way that card is ruled.
+    // When #11455 landed, whether a boolean aggregate should ANSWER or REFUSE
+    // was deliberately left to #11152 / #11249 — the envelope was the half
+    // that could land first. #11249 has since RULED (maintainer 2026-08-23):
+    // the face answers, and [#11635] delivered the Postgres cast in the
+    // statement builder above, so a boolean aggregand no longer reaches this
+    // exit at all. The envelope itself is unchanged — it never recognised
+    // `42883`, so removing one of its inputs removes nothing from it.
     //
     // ⛔ And no boolean-specific recognizer: the envelope comes from the EXIT,
     // not from matching `42883` or the words `does not exist`. That is the
