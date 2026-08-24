@@ -65,14 +65,16 @@ type AnyObject = {
   indexes?: Array<{ fields?: string[]; unique?: boolean }>;
 };
 
-const identityObjects: AnyObject[] = Object.values(Identity).filter(
-  (v): v is AnyObject =>
-    !!v &&
-    typeof v === 'object' &&
-    typeof (v as AnyObject).name === 'string' &&
-    (v as AnyObject).name.startsWith('sys_') &&
-    !!(v as AnyObject).fields,
-);
+const identityObjects: AnyObject[] = Object.values(Identity)
+  .map((v) => v as unknown as AnyObject)
+  .filter(
+    (v) =>
+      !!v &&
+      typeof v === 'object' &&
+      typeof v.name === 'string' &&
+      v.name.startsWith('sys_') &&
+      !!v.fields,
+  );
 
 function keyedTextColumns(o: AnyObject): Array<{ column: string; maxLength: unknown }> {
   const keyed = new Set<string>();
