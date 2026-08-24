@@ -12,10 +12,12 @@ version". Both halves were false: the runtime version never reached the field,
 and the `|| enriched.info.version` fallback published exactly the compile-time
 version the comment said the line existed to avoid.
 
-The fallback was reachable rather than dead — `normalizeConfig` defaults with
-`??` and `PluginRestApiSchema` declares a bare `z.string()`, so a configured
-`api.version: ''` arrives falsy and the document advertised
-`@objectstack/spec`'s package version. It now serves the configured value as
+The fallback was reachable rather than dead, though not because the contract
+permits it: `RestApiConfigSchema` declares
+`version: z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`, which refuses `''`. Nothing
+parses this config against that schema — both hops into the server are casts —
+so `normalizeConfig`'s `??` is the only guard, it does not catch `''`, and the
+document advertised `@objectstack/spec`'s package version. It now serves the configured value as
 written, so a misconfigured deployment stays visibly misconfigured instead of
 silently switching the field to a different kind of fact. Every non-empty
 `api.version` — including the default — serves exactly what it served before.

@@ -427,11 +427,13 @@ describe('GET /openapi.json — what `info.version` carries (#11546)', () => {
   });
 
   it('serves a falsy `api.version` as itself rather than falling back to the artifact', async () => {
-    // The removed `|| enriched.info.version` was reachable, not dead:
-    // `normalizeConfig` defaults with `??` and `PluginRestApiSchema` declares a
-    // bare `z.string()`, so `version: ''` arrives here falsy. Measured on the
-    // pre-fix code this served the spec package's compile-time version — the
-    // exact value the old comment said the line existed to keep off the wire.
+    // The removed `|| enriched.info.version` was reachable, not dead — though
+    // not because the contract permits `''`. `RestApiConfigSchema` refuses it
+    // (`z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`); nothing parses this config
+    // against that schema, so `??` is the only guard and `''` walks past it.
+    // Measured on the pre-fix code this served the spec package's compile-time
+    // version — the exact value the old comment said the line existed to keep
+    // off the wire.
     //
     // An empty version is a broken deployment either way (the mount doubles its
     // slash, below). The point of the pin is that it stays visibly broken

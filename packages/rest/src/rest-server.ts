@@ -3640,14 +3640,25 @@ export class RestServer {
                 // wants the serving artifact asks a producer that means it.
                 //
                 // No `|| enriched.info.version` fallback. It was reachable,
-                // not dead: `normalizeConfig` defaults with `??` and the
-                // schema declares a bare `z.string()`, so a configured empty
-                // version reaches here falsy — and firing the fallback
-                // published the spec package's compile-time version, the one
-                // value the old comment claimed this line existed to keep off
-                // the wire. A falsy `api.version` now serves itself, so a
-                // misconfigured deployment reads as misconfigured instead of
-                // silently switching this field to a different kind of fact.
+                // not dead — and NOT because the contract allows an empty
+                // version. `RestApiConfigSchema` declares
+                // `version: z.string().regex(/^[a-zA-Z0-9_\-\.]+$/)`, which
+                // refuses `''`. Nothing ever runs it: this config arrives
+                // through casts on both hops (`config.api as any` in
+                // `rest-api-plugin.ts`, then `as Partial<RestApiConfig>` in
+                // `normalizeConfig` below), the plugin declares no
+                // `configSchema` for the kernel's validator to parse, and the
+                // repo's only `RestApiConfigSchema.parse` parses `{}` in a QA
+                // helper. So the regex never executes on a deployment path,
+                // `??` is the only guard left, and `''` walks past it —
+                // whereupon the fallback published the spec package's
+                // compile-time version, the one value the old comment claimed
+                // this line existed to keep off the wire. A falsy
+                // `api.version` now serves itself, so a misconfigured
+                // deployment reads as misconfigured instead of silently
+                // switching this field to a different kind of fact. The
+                // unenforced regex is a defect in its own right, filed
+                // separately rather than fixed here.
                 if (enriched.info) {
                     enriched.info = {
                         ...enriched.info,
