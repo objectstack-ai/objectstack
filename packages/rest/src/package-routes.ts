@@ -700,9 +700,18 @@ export function registerPackageRoutes(
       // code through the declared envelope rather than re-deciding them.
       //
       // ⭐ This ALIGNS the two read doors rather than inventing a posture:
-      // `GET /packages/:id` next door has never had an inner catch, so it has
-      // answered that same 503 since #10965. The list door answering 200 while
-      // the detail door refused was the inconsistency, not the fix.
+      // `GET /packages/:id` next door has never had an inner catch on its
+      // DURABLE read, so THAT half has answered this same 503 since #10965. The
+      // list door answering 200 while the detail door refused was the
+      // inconsistency, not the fix.
+      //
+      // ⚠️ [#11376] The qualifier is load-bearing and this note was written
+      // without it, as a claim about the whole door. It was false: the detail
+      // door's REGISTRY read carried its own `catch {}`, and swallowing there
+      // was worse than here — control fell through to a terminal
+      // `404 RESOURCE_NOT_FOUND` for a read that could not happen. #11376
+      // removed it. Both halves of both read doors now carry the producer's
+      // refusal, which is what makes the alignment claim above true.
       //
       // ⛔ The alternative the card sketched — keep the 200 and add a declared
       // partial-result marker — is a response-shape change and therefore a
@@ -752,19 +761,67 @@ export function registerPackageRoutes(
         return;
       }
 
-      // Fall back to registry (in-memory loaded packages)
+      // Fall back to registry (in-memory loaded packages).
+      //
+      // [#11376] NOT wrapped in a catch, deliberately. This read used to carry
+      // its own inner catch:
+      //
+      //     } catch {
+      //       // Protocol unavailable
+      //     }
+      //
+      // and it is the WORSE half of this family, not a smaller one. Control
+      // fell straight through to the `sendError` below, so a registry read that
+      // COULD NOT HAPPEN was answered as `404 RESOURCE_NOT_FOUND` —
+      // `Package "<id>" was not found.` The list door's version of the same
+      // swallow (#11130) at least answered a 200 whose `total` merely
+      // UNDER-COUNTED; this one answers a TERMINAL NEGATIVE FACT, and a caller
+      // acts on it: an installer decides the package is not installed and
+      // offers to install it, a console hides the entry, a script branches to
+      // the create path. The producer's own words for this condition are the
+      // opposite — *"whether this item exists is unknown"*.
+      //
+      // Same standing family ruling as every sibling — #10965 · #10677 /
+      // PR #10788 · #10789 / PR #10964 · #11063 · #11130: **a read that could
+      // not happen must not be reported as a read that found nothing.**
+      //
+      // ⭐ It is #5532's defect resurfacing one layer up, which is why removing
+      // the catch is the whole repair. `ObjectStackProtocolImplementation`
+      // (`packages/metadata-protocol`) — the live `protocol` service this
+      // registrar is handed — was taught by #5532 NOT to report an unreadable
+      // `sys_metadata` as "that item does not exist"; this consumer-side catch
+      // then re-applied precisely that relabelling to the protocol's answer.
+      // The PRODUCER therefore already declares the refusal: every non-benign
+      // `sys_metadata` overlay read failure leaves `getMetaItems` through
+      // `rethrowUnlessMetadataStoreUnprovisioned` → `metadataStoreUnavailableError`,
+      // i.e. `SERVICE_UNAVAILABLE` / 503 with an ADR-0112 status+code ON the
+      // error — the same envelope #10965 gave `PackageService.get()` one line
+      // above. {@link sendThrownError} carries that status and code through the
+      // declared envelope rather than re-deciding them. The one benign reason a
+      // registry read can fail — `sys_metadata` not provisioned yet — is NOT a
+      // throw at all on that path (`isMissingTableError`), so first boot still
+      // resolves a registry hit.
+      //
+      // ⛔ What did NOT move. The defect is that a failed read was
+      // INDISTINGUISHABLE from an absent resource, so the repair has to keep
+      // the other direction intact, and both are pinned in
+      // `package-id-registry-read-refusal.test.ts`:
+      //   - a genuine MISS — both sources read fine and neither holds the id —
+      //     is still `404 RESOURCE_NOT_FOUND`, unchanged;
+      //   - a composition with NO protocol service is an absence, not a failed
+      //     read; the `if` guard below is untouched and that deployment still
+      //     reaches the same 404.
+      //
+      // ⛔ No wire field is added: the response shape is a contract decision
+      // and this card does not carry one.
       if (options.protocol && typeof options.protocol.getMetaItems === 'function') {
-        try {
-          const result = await options.protocol.getMetaItems({ type: 'package' });
-          const match = result?.items?.find((item: any) =>
-            (item.manifest?.id || item.id) === packageId
-          );
-          if (match) {
-            sendOk(res, { package: { ...match, source: 'registry' } });
-            return;
-          }
-        } catch {
-          // Protocol unavailable
+        const result = await options.protocol.getMetaItems({ type: 'package' });
+        const match = result?.items?.find((item: any) =>
+          (item.manifest?.id || item.id) === packageId
+        );
+        if (match) {
+          sendOk(res, { package: { ...match, source: 'registry' } });
+          return;
         }
       }
 
