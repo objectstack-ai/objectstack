@@ -10,18 +10,35 @@ import { hashApiKey } from './api-key.js';
  * (sys_member, permission-set link tables, …) resolves to an empty set so the
  * tests isolate the API-key verify path.
  */
+/**
+ * [#10978] Enforce the caller's `limit`, the way a real driver does.
+ *
+ * A double that matches `where` and returns every matched row cannot tell a read
+ * bounded at 200 from the same read bounded at 1000, or from an unbounded one —
+ * so any limit change is green by construction, and the production symptom is a
+ * silently truncated result set rather than an error. The reads this file drives
+ * carry real bounds (1, 10, 100, 200, 500, 1000).
+ *
+ * PRESENCE, not truthiness: `limit: 0` means "return no records" and `0` is
+ * falsy, so `opts.limit ? …` would answer a request for NOTHING with the WHOLE
+ * table — the door `driver-memory` fixed for itself (`query.limit !== undefined`).
+ */
+function bounded<T>(rows: T[], opts: any): T[] {
+  return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+}
+
 function makeQl(apiKeyRows: any[]) {
   return {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
       if (object !== 'sys_api_key') return [];
-      return apiKeyRows.filter((row) => {
+      return bounded(apiKeyRows.filter((row) => {
         for (const [k, v] of Object.entries(where)) {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (row[k] !== v) return false;
         }
         return true;
-      });
+      }), opts);
     },
   };
 }
@@ -192,13 +209,13 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
       async find(object: string, opts: any) {
         const rows = tables[object] ?? [];
         const where = opts?.where ?? {};
-        return rows.filter((row) => {
+        return bounded(rows.filter((row) => {
           for (const [k, v] of Object.entries(where)) {
             if (v !== null && typeof v === 'object') continue; // skip $in/operators
             if (row[k] !== v) return false;
           }
           return true;
-        });
+        }), opts);
       },
     };
     return {
@@ -314,7 +331,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
       async find(object, opts) {
         const rows = tables[object] ?? [];
         const where = opts?.where ?? {};
-        return rows.filter((row) => {
+        return bounded(rows.filter((row) => {
           for (const [k, v] of Object.entries(where)) {
             if (v !== null && typeof v === 'object') {
               if (Array.isArray(v.$in) && !v.$in.includes(row[k])) return false;
@@ -323,7 +340,7 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
             if ((v ?? null) !== (row[k] ?? null)) return false;
           }
           return true;
-        });
+        }), opts);
       },
     };
   }
@@ -374,7 +391,7 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
       async find(object: string, opts: any) {
         const rows = tables[object] ?? [];
         const where = opts?.where ?? {};
-        return rows.filter((row) => {
+        return bounded(rows.filter((row) => {
           for (const [k, v] of Object.entries(where)) {
             if (v !== null && typeof v === 'object') {
               if (Array.isArray((v as any).$in) && !(v as any).$in.includes(row[k])) return false;
@@ -383,7 +400,7 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
             if ((v ?? null) !== (row[k] ?? null)) return false;
           }
           return true;
-        });
+        }), opts);
       },
     };
   }
@@ -488,13 +505,13 @@ describe('resolveExecutionContext — ADR-0090 D10 agent principal (OAuth on /mc
     };
     return {
       async find(object: string, opts: any) {
-        return (tables[object] ?? []).filter((row) =>
+        return bounded((tables[object] ?? []).filter((row) =>
           Object.entries(opts?.where ?? {}).every(([k, v]) =>
             v !== null && typeof v === 'object'
               ? (Array.isArray((v as any).$in) ? (v as any).$in.includes(row[k]) : true)
               : (v ?? null) === (row[k] ?? null),
           ),
-        );
+        ), opts);
       },
     };
   };

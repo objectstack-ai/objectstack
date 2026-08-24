@@ -26,6 +26,7 @@ import path from 'path';
 // a confident page from a tree nobody rebuilt (#4675, #4723).
 import { schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
 
+import { categoryGrid } from './lib/category-index';
 import { resolveCategoryTitles } from './lib/category-title';
 import {
   evaluateBaseline,
@@ -154,6 +155,23 @@ const categoryZodFiles = new Map<string, Set<string>>();
  * grand total — cannot disagree with the pages themselves (#4759).
  */
 const categoryPageSchemas = new Map<string, Map<string, string[]>>();
+/**
+ * `category` -> the `pages` array written to that category's `meta.json`,
+ * separators included.
+ *
+ * Filled by §2 as it emits each `meta.json`, and read back by §2.5 so the card
+ * grid enumerates the pages the category DECLARES instead of re-deriving a
+ * second list from the `.zod.ts` files on disk. Those two enumerations
+ * disagreed for exactly one bucket — the `misc` catch-all, which by definition
+ * has no `.zod.ts` behind it — and the grid was the side that lost it (#11260).
+ * See `lib/category-index.ts` for the defect and why the fix is by
+ * construction rather than a `misc` special case.
+ *
+ * Absent for a category that published no page: §2 writes no `meta.json` for
+ * one, and §2.5 correspondingly writes no `index.mdx`, so the overview exists
+ * exactly when the thing it is an overview OF does.
+ */
+const categoryMetaPages = new Map<string, string[]>();
 /**
  * Page slug -> its real path under `packages/spec/src/<category>/`.
  *
@@ -788,12 +806,41 @@ PAGES_BY_CATEGORY.forEach((zodFileSchemas, category) => {
     pages
   };
   emit(path.join(categoryDir, 'meta.json'), JSON.stringify(meta, null, 2));
+
+  // Hand the declared list to §2.5 — never a second enumeration, the same
+  // discipline `categoryPageSchemas` applies two statements up for the root
+  // index. The grid used to re-derive its own list and lost `misc` (#11260).
+  categoryMetaPages.set(category, pages);
 });
 
 // 2.5 Generate Category Overviews (index.mdx in each folder)
 Object.entries(CATEGORIES).forEach(([category, title]) => {
-  const zodFiles = categoryZodFiles.get(category) || new Set<string>();
-  if (zodFiles.size === 0) return;
+  // The pages §2 DECLARED for this category, not a second list derived from the
+  // `.zod.ts` files: `misc` is a real page with no `.zod.ts` behind it, so a
+  // source-derived list cannot contain it and the grid dropped it (#11260).
+  // Keyed off the same map that decides `meta.json`, so "no meta.json ⇒ no
+  // index.mdx" needs no second guard to agree with §2's.
+  const declared = categoryMetaPages.get(category) || [];
+  if (declared.length === 0) return;
+
+  const { cards, undelivered } = categoryGrid(declared, page =>
+    wasEmitted(path.join(DOCS_ROOT, category, `${page}.mdx`)),
+  );
+
+  // Both lists come from the page map §2 emitted from, so this cannot fire on
+  // any content state — only on a future edit that reintroduces the split the
+  // `misc` omission came from. Loud, because the failure mode it replaces was
+  // a grid quietly one card short of the pages it claimed to align with.
+  if (undelivered.length > 0) {
+    console.error(
+      `\n✗ ${path.relative(REPO_ROOT, path.join(DOCS_ROOT, category, 'index.mdx'))} would card ` +
+        `${cards.length} of the ${cards.length + undelivered.length} pages its meta.json declares.\n` +
+        `   Undelivered: ${undelivered.join(', ')}\n\n` +
+        `   meta.json and this grid are built from the same page map, so a declared page this\n` +
+        `   run did not emit is a generator bug, not a content state (#11260).`,
+    );
+    process.exit(1);
+  }
 
   let mdx = `---\n`;
   mdx += `title: ${title}\n`;
@@ -803,19 +850,16 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
   mdx += `This section contains all protocol schemas for the ${category} layer of ObjectStack.\n\n`;
   
   mdx += `<Cards>\n`;
-  Array.from(zodFiles).sort().forEach(zodFile => {
-      // Only card zod files that actually produced a reference page. A
-      // `.zod.ts` whose schemas are all unrepresentable in JSON Schema — e.g.
-      // they embed a transform (the ADR-0031 control-flow constructs and the
-      // Flow edge schema carry CEL-expression transforms) — generates no page,
-      // so carding it would be a dangling 404 link. This aligns the index with
-      // `meta.json`, which already lists only generated pages.
-      //
-      // Asks the sink, not the disk: this run's own output is the authority on
-      // what pages exist. (Equivalent on disk, since the folder was just wiped
-      // and rewritten — but it stays correct under --check, where nothing is
-      // written and the stale files are still lying around.)
-      if (!wasEmitted(path.join(DOCS_ROOT, category, `${zodFile}.mdx`))) return;
+  // `cards` is the declared pages that this run emitted — the `wasEmitted`
+  // guard is kept and applied in `categoryGrid`, so a `.zod.ts` whose schemas
+  // are all unrepresentable in JSON Schema (they embed a transform — the
+  // ADR-0031 control-flow constructs and the Flow edge schema carry
+  // CEL-expression transforms) still cannot be carded into a dangling 404.
+  // What changed is that the guard now runs over the SAME list `meta.json` was
+  // built from, so "this aligns the index with meta.json" is true by
+  // construction instead of true for the categories where two independent
+  // enumerations happened to agree.
+  cards.forEach(zodFile => {
       const fileTitle = zodFile.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
       const cardSource = sourcePathFor(category, zodFile);
       // Link relative to the category folder (where index.mdx lives)

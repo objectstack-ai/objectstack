@@ -1,0 +1,88 @@
+// The TEST-layer type-check program (the #5286 mechanism `packages/spec` set and
+// PR #5546 / PR #5478 carried to `packages/client`, `packages/metadata-core` and
+// `packages/metadata-fs`). `tsconfig.json` beside this one stays exactly as it
+// is: it is the BUILD config, and `package.json`'s `typecheck` script NAMES this
+// sibling (`tsc --noEmit -p tsconfig.test.json`), because a config no script
+// invokes reads as coverage and delivers none.
+//
+// WHY THE SIBLING AND NOT THE ONE-LINE REMEDY. The type-check-debt gate offers
+// two remedies for a hidden test layer -- add a `typecheck` script, or drop the
+// `**/*.test.ts` exclusion from `tsconfig.json` -- and presents them as
+// interchangeable. For this package NEITHER description fits and the second one
+// is a red `main`, both measured before this file was written:
+//
+//   - The `typecheck` script was ALREADY here (`tsc --noEmit`) and always had
+//     been. This package was never in the "src does not check" hole; it was in
+//     the "src checks, tests are hidden" one, which is the other ledger.
+//   - Dropping the exclusion resolves a 10-file program (3 src + 7 tests, `tsc
+//     --showConfig`) that is byte-for-byte the file set the ledger's re-measure
+//     scored at 0, and the tsup build is unaffected (entry is `src/index.ts`
+//     alone, so `dist/` comes out identical and no test file reaches it). It
+//     still fails: those 7 tests import `@objectstack/driver-sql`,
+//     `@objectstack/formula`, `@objectstack/objectql` and
+//     `@objectstack/service-automation`, none of which the BUILD config's
+//     program has ever contained, so `pnpm check:type-source-resolution` goes
+//     from exit 0 to exit 1 -- "NEW dist-resolved type import(s) since this
+//     entry was measured" -- against a registry that is SHRINK-ONLY and whose
+//     own message rules that widening the entry is not the fix. That gate reads
+//     each package's `tsconfig.json` and only that one, so the excluded region
+//     put back HERE leaves its population unchanged.
+//
+// The remediation it actually asks for -- `paths` rules pointing those four
+// dependencies at their source -- is a separate card by that gate's own ruling
+// ("Remediation is per-package and lands as its own card, because the switch is
+// not free"), and this file does not pre-empt it.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - `exclude` drops `**/*.test.ts` and nothing else. That single subtraction
+//     IS the hole; `include` already names `src/**/*` and all 7 test files live
+//     under it, so there is nothing to widen and no glob that could bill this
+//     layer for a non-test file.
+//   - `noEmit` is asserted rather than left to the CLI flag, so an editor's TS
+//     server reading this config cannot emit into `dist/`.
+//   - MODULE SEMANTICS ARE UNTOUCHED, unlike the `packages/spec` and
+//     `packages/client` siblings. Those switched to `esnext`/`bundler` because
+//     the inherited NodeNext compiled their ESM tests as CJS and reported
+//     errors about the CHECK (TS2835, TS1470, TS2550). Nothing to fix here:
+//     these tests use no `import.meta` and no extensionless cross-package
+//     relative imports, and the whole layer compiles at 0 under the inherited
+//     settings. Matching the program the ledger's 0 was measured over is the
+//     point -- a different `module` would be a different measurement.
+//   - `rootDir` IS WIDENED to `../../..` (= `packages/`), which this file's
+//     first version deliberately did NOT do. That version's reason was a
+//     measurement -- "every test file is already under `./src`, the re-measure
+//     reported TS6059 x0" -- and [#11081] moved the measurement rather than the
+//     rule: `src/record-change-integration.test.ts` now imports
+//     `packages/runtime/src/expected-read-refusal-noise.ts` (the shared
+//     expected-noise capture, declared in
+//     `scripts/check-cross-package-test-inputs.mjs`), so the program contains a
+//     file outside `./src` and `tsc` reports TS6059 x1 against it. `rootDir` is
+//     enforced over every program file even under `--noEmit`, so the widening
+//     is the same consequence-of-an-import that `packages/plugins/
+//     plugin-approvals` records for #10101 and `packages/rest` for #9960 --
+//     `../../..` is the directory that genuinely contains every program file.
+//     ⛔ It buys nothing else: EMIT is unaffected (this config asserts `noEmit`
+//     and the tsup build reads `tsconfig.json`, whose entry is `src/index.ts`
+//     alone), `include` still names `src/**/*` so no new file may ENTER the
+//     program on its own, and STRICTNESS below is untouched.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns` and the rest are inherited from the root config.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+// There is NO `test-typecheck-debt.json` beside this config, on purpose -- the
+// same call `packages/metadata-core` and `packages/metadata-fs` made. The whole
+// test layer compiles at ZERO errors, so a per-file shrink-only ledger would
+// hold nothing while costing this package a `tsx` dependency and two more
+// scripts. A bare `tsc --noEmit -p tsconfig.test.json` is the strictly stronger
+// gate at zero residue: ANY error here is red immediately, with no ledger to be
+// added to.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../../.."
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

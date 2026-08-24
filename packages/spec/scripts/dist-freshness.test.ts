@@ -31,7 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { inspectDistFreshness } from './lib/dist-freshness';
+import { inspectDistFreshness, packageDirLabel } from './lib/dist-freshness';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -84,7 +84,12 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('stale');
-    expect(verdict.message).toContain('OLDER than packages/spec/src');
+    // The label is DERIVED from `sandbox`, not a hardcoded `packages/spec` —
+    // `sandbox` is a bare tmpdir with no `packages` path segment, so this
+    // exercises the fallback-to-raw-path branch of `packageDirLabel` (#11250).
+    // The `packages/<name>`-shaped branch is covered by its own case below.
+    expect(verdict.message).toContain(`OLDER than ${packageDirLabel(sandbox)}/src`);
+    expect(verdict.message).not.toContain('packages/spec');
   });
 
   it('refuses in --check mode too, so CI cannot pass against a stale dist either', () => {
@@ -107,6 +112,12 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
   });
 
   it('names the writing damage in generate mode, and prescribes the build', () => {
+    // The build-remedy line now reads `package.json#name` (#11250) rather than
+    // hardcoding `@objectstack/spec`, so THIS case seeds one — matching
+    // `sandbox`'s own docblock, "a throwaway `packages/spec`-SHAPED directory" —
+    // to keep asserting the spec-shaped remedy line. The non-spec-shaped case
+    // below is what proves that name is genuinely read, not assumed.
+    write('package.json', JSON.stringify({ name: '@objectstack/spec' }), NEW);
     write('dist/contracts/index.d.ts', 'export {};', OLD);
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
 
@@ -116,6 +127,45 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     expect(verdict.message).toContain('BREAKING');
     expect(verdict.message).toContain('pnpm --filter @objectstack/spec build');
     expect(verdict.message).toContain('gen:api-surface');
+  });
+
+  it('derives BOTH the cause label and the build-remedy package name from a NON-spec-shaped pkgDir (#11250)', () => {
+    // Every case above runs against `sandbox` directly, which (bare tmpdir, no
+    // `packages` path segment) already proves the label is not hardcoded — but
+    // it never exercises the `packages/<name>` MATCHING branch of
+    // `packageDirLabel`, and none of them give `pkgDir` a `package.json` naming
+    // anything other than `@objectstack/spec`. So a build that quietly special-
+    // cased "packages/spec" back in, or that only ever prints the one name
+    // every other case's fixture happens to share, would still pass all of
+    // them. This case is shaped like neither: a real `packages/widgets` path
+    // segment, with its OWN unrelated `package.json#name`.
+    const pkgDir = path.join(sandbox, 'packages', 'widgets');
+    write('packages/widgets/package.json', JSON.stringify({ name: '@acme/widgets' }), NEW);
+    write('packages/widgets/dist/index.d.ts', 'export {};', OLD);
+    write('packages/widgets/src/index.ts', 'export const live = 1;', NEW);
+
+    const verdict = inspectDistFreshness(pkgDir, 'generate', 'pnpm --filter @acme/widgets check:something');
+    expect(verdict.fresh).toBe(false);
+    if (verdict.fresh) return;
+    expect(verdict.state).toBe('stale');
+    expect(verdict.message).toContain('OLDER than packages/widgets/src');
+    expect(verdict.message).toContain('pnpm --filter @acme/widgets build');
+    expect(verdict.message).not.toContain('packages/spec');
+    expect(verdict.message).not.toContain('@objectstack/spec');
+  });
+
+  it('falls back to the raw pkgDir for the build-remedy name when package.json is unreadable', () => {
+    // `packageName`'s OTHER branch (#11250): a `pkgDir` with no `package.json`
+    // at all (or one that fails to parse) must not throw out of a diagnostic
+    // path. `sandbox` itself has none, so this reuses it directly rather than
+    // constructing a second fixture.
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+
+    const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
+    expect(verdict.fresh).toBe(false);
+    if (verdict.fresh) return;
+    expect(verdict.message).toContain(`pnpm --filter ${packageDirLabel(sandbox)} build`);
   });
 
   it('reads a MISSING dist as its own condition, not as staleness', () => {
@@ -130,7 +180,10 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('missing');
-    expect(verdict.message).toContain('no .d.ts declarations');
+    // Same fallback branch as above: `sandbox` has no `packages` segment, so
+    // the label in the cause string is the raw sandbox path, not `packages/spec`.
+    expect(verdict.message).toContain(`${packageDirLabel(sandbox)}/dist holds no .d.ts declarations`);
+    expect(verdict.message).not.toContain('packages/spec');
   });
 
   it('reads a JS-only dist as missing — the OS_SKIP_DTS=1 shape on a virgin tree', () => {

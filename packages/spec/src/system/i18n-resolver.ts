@@ -882,11 +882,12 @@ function lookupPageAttr(
  * skeleton bundle. Two hand-maintained copies of this list would drift into the
  * classic pair of failures — the extractor offering a key the resolver ignores,
  * or omitting one it reads — so there is one list and both sides import it.
- * `translation.zod.ts` declares the same six; `translation.test.ts` pins the
- * two in agreement.
+ * `translation.zod.ts` declares the same five; `translation.test.ts` pins the
+ * two in agreement. (`submitLabel` retired with its only declarer,
+ * `element:form` — #9249 / #10926.)
  */
 export const PAGE_COMPONENT_COPY_KEYS = [
-  'title', 'description', 'label', 'placeholder', 'emptyText', 'submitLabel',
+  'title', 'description', 'label', 'placeholder', 'emptyText',
 ] as const;
 
 export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
@@ -2029,4 +2030,310 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
     next.groups = form.groups.map(translateSection);
   }
   return next as T;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Screen-flow metadata resolvers (#7646 / #11287) — flows.<name>.…
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Minimal screen-node field shape consumed by {@link translateFlow} —
+ * `ScreenFieldConfigSchema` (`automation/builtin-node-config.zod.ts`) narrowed
+ * to what the overlay reads and writes. The served `ScreenFieldSpec`
+ * (`contracts/automation-service.ts`) satisfies it structurally too: the
+ * executor forwards `name` / `label` / `placeholder` verbatim, so the same
+ * overlay works whichever side of the wire the runner half lands on.
+ */
+export interface FlowScreenFieldLike {
+  /**
+   * Field name (`ScreenFieldConfig.name`) — the `fields` translation key,
+   * forwarded to the client verbatim as `ScreenFieldSpec.name`. A field
+   * without a name is skipped, matching the executor (which drops it).
+   */
+  name?: string;
+  label?: string;
+  placeholder?: string;
+  [key: string]: unknown;
+}
+
+/** Minimal flow-node shape consumed by {@link translateFlow}. */
+export interface FlowNodeLike {
+  /** `FlowNode.id` — the `screens` translation key (the client's `ScreenSpec.nodeId`). */
+  id?: string;
+  /** Node action type; only `'screen'` nodes carry the copy this family overlays. */
+  type?: string;
+  /** Designer-canvas node label — NOT overlaid; see {@link translateFlow}. */
+  label?: string;
+  /** Node configuration (`ScreenConfigSchema` for screen nodes). */
+  config?: Record<string, any>;
+  [key: string]: any;
+}
+
+/** Minimal flow metadata shape consumed by {@link translateFlow}. */
+export interface FlowLike {
+  /** `Flow.name` — the machine name the `flows` group is keyed by. */
+  name: string;
+  label?: string;
+  nodes?: FlowNodeLike[];
+  [key: string]: any;
+}
+
+/**
+ * Minimal screen shape consumed by {@link resolveFlowScreenTitle} — satisfied
+ * by the served `ScreenSpec` (`contracts/automation-service.ts`) a paused run
+ * hands the client, and equally by a `{ nodeId, title }` pair assembled from a
+ * screen node's `id` + `config.title` on the server side.
+ */
+export interface FlowScreenLike {
+  /** The screen node's id (`FlowNode.id`) — the `screens` translation key. */
+  nodeId: string;
+  /** The authored heading the runner would draw untranslated (`ScreenSpec.title`). */
+  title?: string;
+  [key: string]: unknown;
+}
+
+/** The flow-node type whose config copy {@link translateFlow} localizes. */
+const SCREEN_NODE_TYPE = 'screen';
+
+/**
+ * The copy keys `flows.<flow>.screens.<node_id>` carries (#7646 / #11287) —
+ * the per-SCREEN face; the per-field face is
+ * {@link FLOW_SCREEN_FIELD_COPY_KEYS}. Exported for the same reason
+ * {@link PAGE_COMPONENT_COPY_KEYS} is: the CLI's `i18n-extract` skeleton
+ * writer (the flow/screen coverage bucket is a downstream card of #11287) must
+ * offer exactly the keys this resolver reads — two hand-maintained copies
+ * would drift into the extractor offering a key the resolver ignores, or
+ * omitting one it reads. `translation.zod.ts` declares the same face;
+ * `translation.test.ts` pins the two in agreement.
+ *
+ * Deliberately NOT here, measured against the schema face rather than
+ * mirrored from the issue (#7646's report):
+ *
+ * - `description` — a screen's body text (`config.description`) is
+ *   guidance-refused by the schema, outside the recorded #7646 ruling's
+ *   enumeration (per-flow label, per-screen title, per-field copy). Growing
+ *   the face is a schema-side ruled step, never a resolver-side accretion.
+ * - runner chrome (Cancel / Submit / the terminal toast) — the console's own
+ *   words in every app, ruled into the console's message catalog, not the
+ *   per-app bundle.
+ */
+export const FLOW_SCREEN_COPY_KEYS = ['title'] as const;
+
+export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
+
+/**
+ * The copy keys `flows.<flow>.screens.<node_id>.fields.<field_name>` carries —
+ * the per-FIELD face of {@link FLOW_SCREEN_COPY_KEYS}, measured against
+ * `ScreenFieldConfigSchema`. `help` is deliberately absent: the screen field
+ * declares nothing help-shaped at all, so a `help` key would parse clean and
+ * translate nothing (the ADR-0078 shape #6080 kept out of the page-component
+ * face); `options` is absent because `ScreenFieldConfig.options[].value` is
+ * unconstrained, so a value-keyed map cannot address the labels. Both are
+ * refused by name with guidance at the schema.
+ */
+export const FLOW_SCREEN_FIELD_COPY_KEYS = ['label', 'placeholder'] as const;
+
+export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
+
+function lookupFlowLabel(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.flows?.[flowName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Per-screen copy for one node id, resolved across the locale chain — KEY BY
+ * KEY, like {@link lookupPageComponentCopy}: a partially-translated `zh` entry
+ * must still fall back to `en` for the keys it omits.
+ */
+function lookupFlowScreenCopy(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  opts?: ResolveOptions,
+): Partial<Record<FlowScreenCopyKey, string>> | undefined {
+  if (!bundle) return undefined;
+  let found: Partial<Record<FlowScreenCopyKey, string>> | undefined;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.flows?.[flowName]?.screens?.[nodeId];
+    if (!entry || typeof entry !== 'object') continue;
+    for (const key of FLOW_SCREEN_COPY_KEYS) {
+      if (found?.[key] !== undefined) continue;
+      const candidate = (entry as Record<string, unknown>)[key];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        (found ??= {})[key] = candidate;
+      }
+    }
+  }
+  return found;
+}
+
+/** The per-field half of {@link lookupFlowScreenCopy} — same key-by-key chain walk. */
+function lookupFlowScreenFieldCopy(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  fieldName: string,
+  opts?: ResolveOptions,
+): Partial<Record<FlowScreenFieldCopyKey, string>> | undefined {
+  if (!bundle) return undefined;
+  let found: Partial<Record<FlowScreenFieldCopyKey, string>> | undefined;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.flows?.[flowName]?.screens?.[nodeId]?.fields?.[fieldName];
+    if (!entry || typeof entry !== 'object') continue;
+    for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
+      if (found?.[key] !== undefined) continue;
+      const candidate = (entry as Record<string, unknown>)[key];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        (found ??= {})[key] = candidate;
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Resolve a translated screen heading against
+ * `flows.<flow_name>.screens.<node_id>.title`, falling back to the literal
+ * `screen.title` (the authored source string the runner would draw anyway),
+ * and to `undefined` when the screen declares none — the same
+ * bundle-then-literal order every resolver on this surface follows.
+ *
+ * Takes the screen rather than a bare node id so the call site that already
+ * holds a `ScreenSpec` — the shape a paused `AutomationResult` carries —
+ * passes it as-is; `nodeId` is the one screen identifier guaranteed stable
+ * and present client-side (it correlates the resume back to its pause point).
+ */
+export function resolveFlowScreenTitle(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  screen: FlowScreenLike,
+  opts?: ResolveOptions,
+): string | undefined {
+  const literal = typeof screen.title === 'string' ? screen.title : undefined;
+  if (!bundle || !flowName || typeof screen.nodeId !== 'string' || screen.nodeId.length === 0) {
+    return literal;
+  }
+  return lookupFlowScreenCopy(bundle, flowName, screen.nodeId, opts)?.title ?? literal;
+}
+
+/**
+ * Apply the active locale to a flow metadata document (#7646's recommendation
+ * B, the resolver half #11287): translates the flow's own `label` against
+ * `flows.<name>.label`, and — for every `type: 'screen'` node with an id —
+ * the screen heading and per-field copy against
+ * `flows.<name>.screens.<node_id>.{title,fields.<field_name>.{label,placeholder}}`.
+ * The input document is not mutated.
+ *
+ * **Where the translated title lands.** The bundle's `title` is written to
+ * `config.title` even when the author declared none: the executor builds the
+ * wire title as `config.title ?? node.label` (`ScreenSpec.title`), so writing
+ * `config.title` makes the translation reach the wire whichever of the two
+ * the author relied on — the one-key-covers-both rule the schema's own
+ * `flows` note records. The node's designer-canvas `label` itself is NOT
+ * overlaid: it is not on the declared vocabulary, and rewriting it would
+ * change the Studio canvas, not the wizard.
+ *
+ * **Schema-independent on purpose**, like every translator here: it reads
+ * whatever object it is handed, and overlays ONLY the declared copy keys —
+ * an off-spec bundle entry carrying a key the schema refuses (`description`,
+ * `help`) is ignored, never overlaid (the negative `translatePage` pins for
+ * the retired `submitLabel`).
+ *
+ * ⚠️ Deliberately NOT registered in {@link translateMetadataDocument}'s
+ * dispatch table: that table reaches the REST metadata boundary by itself
+ * (`TRANSLATABLE_METADATA_TYPES` drives `@objectstack/rest`, #3786), which
+ * would stand up a shipped reader of the `flows` group while its liveness
+ * rows are `planned` — the wiring decision (server-side vs client-side
+ * application) belongs to the downstream runner card of #11287, and the
+ * ledger flip rides that card, not this one.
+ */
+export function translateFlow<T extends FlowLike>(
+  flow: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!flow || typeof flow !== 'object') return flow;
+  const name = flow.name;
+  if (!name || !bundle) return flow;
+
+  const label = lookupFlowLabel(bundle, name, opts);
+
+  let nodesChanged = false;
+  const nodes = Array.isArray(flow.nodes)
+    ? flow.nodes.map((node) => {
+        const next = translateScreenNode(node, name, bundle, opts);
+        if (next !== node) nodesChanged = true;
+        return next;
+      })
+    : undefined;
+
+  if (label === undefined && !nodesChanged) return flow;
+  return {
+    ...flow,
+    ...(label !== undefined ? { label } : {}),
+    ...(nodesChanged ? { nodes } : {}),
+  };
+}
+
+/**
+ * The per-node half of {@link translateFlow}. Returns the node unchanged
+ * (same reference) when it is not a screen node, carries no id, or nothing
+ * resolved — so the caller can tell "translated" from "untouched" by
+ * identity, the discipline {@link translateInterfaceTabs} follows.
+ */
+function translateScreenNode(
+  node: FlowNodeLike,
+  flowName: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): FlowNodeLike {
+  if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) return node;
+  const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+  if (!nodeId) return node;
+
+  const copy = lookupFlowScreenCopy(bundle, flowName, nodeId, opts);
+
+  const cfg = node.config && typeof node.config === 'object' ? node.config : undefined;
+  let fieldsChanged = false;
+  const fields = cfg && Array.isArray(cfg.fields)
+    ? cfg.fields.map((field: FlowScreenFieldLike) => {
+        const next = translateScreenField(field, flowName, nodeId, bundle, opts);
+        if (next !== field) fieldsChanged = true;
+        return next;
+      })
+    : undefined;
+
+  if (copy?.title === undefined && !fieldsChanged) return node;
+  return {
+    ...node,
+    config: {
+      ...cfg,
+      ...(copy?.title !== undefined ? { title: copy.title } : {}),
+      ...(fieldsChanged ? { fields } : {}),
+    },
+  };
+}
+
+/** The per-field half of {@link translateScreenNode} — same identity discipline. */
+function translateScreenField(
+  field: FlowScreenFieldLike,
+  flowName: string,
+  nodeId: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): FlowScreenFieldLike {
+  if (!field || typeof field !== 'object') return field;
+  const fieldName = typeof field.name === 'string' && field.name.length > 0 ? field.name : undefined;
+  if (!fieldName) return field;
+  const copy = lookupFlowScreenFieldCopy(bundle, flowName, nodeId, fieldName, opts);
+  if (!copy) return field;
+  return { ...field, ...copy };
 }

@@ -14,7 +14,6 @@
 
 ## 常设承诺
 
-- **每轮巡检第一判据**:先读半状态巡查锚(`half-state-patrol.yml` 置顶 issue)点名本道卡/PR/座位贴的 H 行,逐行认领或处置,再做其余判据;锚行未处置 ⛔ 不开新派发。
 - 四维分析先于派发与复核。
 - governed PR 恒 draft 等人合;flip/arm 前跑 `check-governed-merges --test`(带
   路径);轮报的 governed 合并审计清单带 `--since` 四仓实跑,⛔ 不凭记忆汇总。

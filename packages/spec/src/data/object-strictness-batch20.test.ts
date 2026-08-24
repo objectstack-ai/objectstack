@@ -55,6 +55,7 @@ import {
 } from './object.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
+import { UserActionsConfigSchema } from '../ui/view.zod';
 
 /** Reject `value` through `schema` and return its issues as a searchable string. */
 function reject(
@@ -409,11 +410,30 @@ describe('#4001 批 20 — curation is anchored to the sibling contract that mak
 
     it('`userActions.sort` names the VIEW block it belongs to — same key NAME, disjoint vocabulary', () => {
       // `ui/view.zod.ts`'s UserActionsConfigSchema declares sort/search/filter/
-      // refresh/rowHeight/addRecordForm/editInline/buttons; the object block
-      // declares create/import/edit/delete/exportCsv. Nothing overlaps, which
-      // is exactly why an author who learned one writes it on the other.
+      // refresh/rowHeight/group/addRecordForm/editInline/hideFields/rowColor/
+      // buttons (group/hideFields/rowColor adopted at #11195, ruled A on
+      // objectui#5435); the object block declares create/import/edit/delete/
+      // exportCsv. Nothing overlaps, which is exactly why an author who
+      // learned one writes it on the other.
       const msg = rejectOnObject({ userActions: { sort: false } });
       expect(msg).toContain('VIEW');
+    });
+
+    it('the two `userActions` vocabularies stay disjoint — re-checked mechanically, not assumed (#11195)', () => {
+      // The enumeration above is prose and can drift; this reads the VIEW
+      // block's real shape. The object block's five verbs are transcribed —
+      // they are pinned individually across this file — and the overlap is
+      // asserted empty so the NEXT adoption re-runs this check for free.
+      const viewKeys = Object.keys(UserActionsConfigSchema.shape);
+      const objectVerbs = ['create', 'import', 'edit', 'delete', 'exportCsv'];
+      for (const k of ['group', 'hideFields', 'rowColor']) expect(viewKeys).toContain(k);
+      expect(viewKeys.filter((k) => objectVerbs.includes(k))).toEqual([]);
+      // …and the object block still REFUSES the three adopted view keys by
+      // name — the operative half of "disjoint": the wrong-layer write stays
+      // a loud rejection, never a silent second meaning.
+      for (const k of ['group', 'hideFields', 'rowColor']) {
+        expect(rejectOnObject({ userActions: { [k]: true } })).toContain(k);
+      }
     });
 
     it('`userActions.clone` points at the `enable` capability block, which really does declare it', () => {

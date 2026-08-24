@@ -29,8 +29,23 @@ function makeQl(declared: any[] = []) {
       // (called by several cases below) scopes its curated lookup with
       // `organization_id: null`, which strict `===` would make unsatisfiable
       // here while it works in production.
+      // [#11096] `$in` is supported because the real engine supports it — the
+      // seeder now issues ONE batched `{ name: { $in: [...] } }` existence read
+      // for the whole declaration. ⛔ A double that did not match it would
+      // return `[]`, which this seeder is REQUIRED to trust as the answer "none
+      // of these names exist" — so every provenance case below would silently
+      // become a first-boot insert while the suite reported green. That is the
+      // double's limits masquerading as the seeder's behaviour.
       return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return (v === null ? r[k] == null : r[k] === v); }),
+        Object.entries(where).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            const inList = (v as any).$in;
+            if (Array.isArray(inList)) return inList.includes(r[k]);
+            throw new Error(`fake driver: unsupported operator ${Object.keys(v).join(',')}`);
+          }
+          return (v === null ? r[k] == null : r[k] === v);
+        }),
       );
     },
     async insert(object: string, data: any) {

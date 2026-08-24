@@ -158,13 +158,18 @@ async function readNamePage(
   object: string,
   names: string[],
   organizationId?: string,
+  equals?: Readonly<Record<string, unknown>>,
 ): Promise<any[] | null> {
   let rows: any;
   try {
     rows = await ql.find(
       object,
       {
-        where: { name: { $in: names } },
+        // [#11451] `...(equals ?? {})` spreads NOTHING when no predicate was
+        // given, so a caller that passes none emits the exact key set it
+        // emitted before — not the same keys plus `undefined`-valued ones,
+        // which `toEqual` would have quietly accepted.
+        where: { name: { $in: names }, ...(equals ?? {}) },
         // [#10103] `names.length` was exactly right while one row existed per
         // name. Once the catalog is per organization the driver returns this
         // organization's rows AND any organization-less ones, so that cap
@@ -190,7 +195,12 @@ async function readNamePage(
  * `remember` is a deliberate no-op: this oracle re-reads the database on every
  * call, so it already sees rows the loop inserted a moment ago.
  */
-function perItemIndex(ql: any, object: string, organizationId?: string): ExistingByNameIndex {
+function perItemIndex(
+  ql: any,
+  object: string,
+  organizationId?: string,
+  equals?: Readonly<Record<string, unknown>>,
+): ExistingByNameIndex {
   return {
     async get(name: string): Promise<ExistingLookupResult> {
       let rows: any;
@@ -198,9 +208,14 @@ function perItemIndex(ql: any, object: string, organizationId?: string): Existin
         // Limit 5, not 1, when scoped: a single row would be whichever the
         // driver ordered first, and this read must be able to tell this
         // organization's row from an organization-less leftover.
+        //
+        // [#11451] The predicate rides the DEGRADATION read too. A fallback
+        // that dropped it would ask a WIDER question than the batched read it
+        // is standing in for — and for the caller that needs one, wider is not
+        // "slower but the same": it is a different row.
         rows = await ql.find(
           object,
-          { where: { name }, limit: organizationId ? 5 : 1 },
+          { where: { name, ...(equals ?? {}) }, limit: organizationId ? 5 : 1 },
           { context: lookupCtx(organizationId) },
         );
       } catch {
@@ -250,6 +265,28 @@ export async function buildExistingByName(
    * installation-wide question, which is what a `single`-posture pass wants.
    */
   organizationId?: string,
+  /**
+   * [#11451] An extra EQUALITY predicate ANDed onto the `$in`, for a caller
+   * whose existence question is narrower than "a row with this name".
+   *
+   * `bootstrapSystemCapabilities`' curated half asks for the platform's OWN
+   * organization-less row (`managed_by: 'platform'` + `organization_id: null`,
+   * #8470), not the first row that happens to share the name. Post-#8461 those
+   * are different questions: `sys_capability.name` is unique per ORGANIZATION,
+   * so one name can have a row per organization plus the platform's.
+   *
+   * ⚠️ PRECONDITION, and it is the caller's to discharge: the predicate must
+   * keep the result a SINGLETON per name. `readNamePage` caps an unscoped page
+   * at `names.length`, so a question that can return more than one row per name
+   * truncates — and a truncated page reads as `absent`, which INSERTS. The
+   * curated predicate discharges this by construction: the declared unique key
+   * is `(COALESCE(organization_id, '__global__'), name)` (ADR-0120 D3), so the
+   * NULL-organization bucket admits at most one row per name — "exactly the
+   * bucket this key part keeps a singleton", as `sys-capability.object.ts` puts
+   * it. Narrowing can only SHRINK a page, so passing a predicate never makes
+   * truncation likelier than the unpredicated read it replaces.
+   */
+  equals?: Readonly<Record<string, unknown>>,
 ): Promise<ExistingByNameIndex> {
   // Every row the page carried for a name, so the organization split can be
   // judged per name rather than by arrival order.
@@ -279,7 +316,7 @@ export async function buildExistingByName(
   if (wanted.length === 0) return fromIndex;
 
   for (let i = 0; i < wanted.length; i += NAME_CHUNK_SIZE) {
-    const page = await readNamePage(ql, object, wanted.slice(i, i + NAME_CHUNK_SIZE), organizationId);
+    const page = await readNamePage(ql, object, wanted.slice(i, i + NAME_CHUNK_SIZE), organizationId, equals);
     if (page === null) {
       // ⛔ NOT "none of them exist" — see the module header. Fall back to the
       // per-item read so behaviour is exactly what it was before the hoist.
@@ -287,7 +324,7 @@ export async function buildExistingByName(
         '[security] batched seed existence read failed — falling back to one read per item',
         { object, names: wanted.length, ...(organizationId ? { organization: organizationId } : {}) },
       );
-      return perItemIndex(ql, object, organizationId);
+      return perItemIndex(ql, object, organizationId, equals);
     }
     for (const row of page) {
       const name = row?.name;

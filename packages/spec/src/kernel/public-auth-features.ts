@@ -103,6 +103,12 @@ export const PUBLIC_AUTH_FEATURES = {
     semantics: 'default-on',
     gatedInputs: [
       'sys_user.actions.invite_user',
+      // [#11544] Third mirror of the email-invite entry — the org record
+      // page's default Members tab renders sys_member's toolbar, so this is
+      // where an admin looking to invite a teammate actually looks. Listed
+      // ahead of `add_member` to match the object's own declaration order,
+      // which IS the render order.
+      'sys_member.actions.invite_user',
       'sys_member.actions.add_member',
       'sys_member.actions.update_member_role',
       'sys_member.actions.remove_member',
@@ -200,7 +206,8 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_user.actions.unban_user',
       'sys_user.actions.unlock_user',
       'sys_user.actions.set_user_password',
-      'sys_user.actions.set_user_role',
+      // 'sys_user.actions.set_user_role' retired (#9968) — see the removal
+      // note beside `impersonate_user` in sys-user.object.ts.
       'sys_user.actions.impersonate_user',
     ],
     notes: 'SCIM forces the admin plugin (and this flag) on — ADR-0071.',

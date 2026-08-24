@@ -43,8 +43,8 @@
  * | # | caller | type | `force` | reaches gate | face | `issues` structurally |
  * |:--|:--|:--|:--|:--|:--|:--|
  * | 1 | `@objectstack/rest` `PUT /meta/:type/:name`   | any     | `?force` | **yes** | `handleRouteError` 409 body | **yes** — top-level `issues` |
- * | 2 | `@objectstack/rest` `PUT /meta/:type/:a/:b`   | any     | never    | **yes** | the same `handleRouteError` body | **yes** (same face as #1) |
- * | 3 | `@objectstack/runtime` dispatcher `PUT /meta` | any     | never    | **yes** | `errorFromThrown` → `details.issues` | **yes** |
+ * | 2 | `@objectstack/rest` `PUT /meta/:type/:a/:b`   | any     | `?force` — since #11095 | **yes** | the same `handleRouteError` body | **yes** (same face as #1) |
+ * | 3 | `@objectstack/runtime` dispatcher `PUT /meta` | any     | never — and no query string to put one on | **yes** | `errorFromThrown` → `details.issues` | **yes** |
  * | 4 | `@objectstack/runtime` ADR-0045 visibility flip | `'app'` | no     | no — type | (`unhideError`) | n/a |
  * | 5 | `migrateStoredMetadata` (this file's protocol) | any    | **true** | no — `force` | (`rows[].reason`) | n/a |
  * | 6 | {@link ObjectStackProtocolImplementation.duplicatePackage} | `row.type` incl. `object` | no | **yes** | `failed[].error` on a **200** | ⛔ **NO — sole carrier** |
@@ -91,19 +91,47 @@
  * ## [#11015] The same inventory, read one column further left
  *
  * The `force` column above is not decoration: it says which faces can lift
- * this refusal, and only ROW 1 can. Rows 2, 3 and 6 all reach the gate with no
- * way to set `force` — rows 2 and 3 because their routes never thread the
- * parameter, row 6 because `duplicatePackage` has no `force` field at all —
- * yet every one of them used to be handed the sentence `re-submit with
- * ?force=true to proceed.` A caller who does what it says gets the identical
- * refusal back.
+ * this refusal. When #11015 was written only ROW 1 could. Rows 2, 3 and 6 all
+ * reached the gate with no way to set `force` — rows 2 and 3 because their
+ * routes never threaded the parameter, row 6 because `duplicatePackage` has no
+ * `force` field at all — yet every one of them was handed the sentence
+ * `re-submit with ?force=true to proceed.` A caller who did what it said got
+ * the identical refusal back.
  *
- * #11015 repairs the clause on ROW 6, where a genuinely different remedy
+ * #11015 repaired the clause on ROW 6, where a genuinely different remedy
  * exists to prescribe (a free target namespace, or reconciling the collision).
- * Rows 2 and 3 are left as measured and filed as #11095: the honest repair for
+ * Rows 2 and 3 were left as measured and filed as #11095: the honest repair for
  * a `PUT` that cannot acknowledge a risk may be to thread `force` on those
  * routes, which is a contract decision and not a message fix. Section 4 pins
  * row 6; section 1's remedy guard pins that row 1's wording is untouched.
+ *
+ * ## [#11095] Rows 2 and 3, disposed of — and they went DIFFERENT ways
+ *
+ * The maintainer ruled a SPLIT (2026-08-23), so the two rows this file used to
+ * carry as one open item are no longer one item at all:
+ *
+ *  - **Row 2 threads `?force`.** `@objectstack/rest`'s compound-name
+ *    `PUT /meta/:type/:a/:b` now reads the parameter and passes `force: true`,
+ *    so the clause it renders became TRUE rather than being reworded — and its
+ *    face is still row 1's `'meta-envelope'`, which is now a statement rather
+ *    than an inherited default. The argument is #7019's, quoted at the call
+ *    site: that route is "word for word the same operation" as its
+ *    single-segment twin, and gating only the twin was MEASURED to leave this
+ *    one a bypass. #8805 and #7035 closed later divergences on the same
+ *    finding. **The `force` column above therefore reads `?force` on two rows,
+ *    and this file no longer pins row 2 as a defect** — `packages/rest`'s
+ *    `meta-compound-save-force-parity.test.ts` drives the door itself, both
+ *    directions, because whether a ROUTE reads a query parameter is not a fact
+ *    this package can observe.
+ *  - **Row 3 does NOT.** The runtime dispatcher gets `'meta-dispatch'`, a face
+ *    of its own, and section 5 below pins its clause. It has no twin precedent
+ *    and a different call shape: the branch is reached with a path, a method
+ *    and a body, so `?force=true` names a channel the transport does not have
+ *    rather than a parameter someone forgot to read.
+ *
+ * ⛔ The split is the ruling. A later reader who "harmonises" the two — either
+ * by giving the dispatcher a `force` or by taking row 2's back out — is undoing
+ * a decision, not tidying an inconsistency.
  *
  * ⛔ Never a bare `toThrow()` here. `duplicatePackage` does not throw, it
  * REPORTS, and what the report says IS the defect; and for the throw itself
@@ -244,6 +272,14 @@ const PUT_REMEDY = 're-submit with ?force=true to proceed.';
  * exists.
  */
 const DUPLICATE_REMEDY_HEAD = 'this copy cannot be forced';
+/**
+ * [#11095] …and as the runtime DISPATCHER renders it — the third distinct
+ * answer this one clause gives. Not a variant of the duplicate wording: that
+ * door has a `force`-shaped alternative (a free target namespace), this one has
+ * no query string at all, so what it denies and what it prescribes both differ.
+ * See section 5.
+ */
+const DISPATCH_REMEDY_HEAD = 'this save cannot be forced';
 /** One finding's prose, as `detectDestructiveObjectChanges` words it. */
 const FINDING_PROSE = "Field 'b' removed — existing data in this column will become inaccessible.";
 
@@ -499,5 +535,129 @@ describe('[#11015] [GUARD] the destructive remedy clause is face-aware', () => {
         expect(err.status).toBe(409);
         expect(err.message).toContain(PUT_REMEDY);
         expect(err.message).not.toContain(DUPLICATE_REMEDY_HEAD);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. [#11095] [GUARD] Inventory row 3 — the dispatcher face, which has no
+//    `force` to prescribe and must stop prescribing one
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#11095] [GUARD] the `meta-dispatch` face prescribes a remedy that door HAS', () => {
+    it('declares the ADR-0112 envelope — the refusal itself is unchanged', async () => {
+        const err = await destructiveRefusal('meta-dispatch');
+
+        // Minimum assertion set, restated on the new face rather than assumed
+        // from row 1: this card moves a SENTENCE, and a card that moved the
+        // status or the code by accident would still satisfy a prose-only test.
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'field_removed', field: 'b' }),
+        ]));
+    });
+
+    it('⛔ never prescribes `force` — the dispatcher has no query string to put one on', async () => {
+        const err = await destructiveRefusal('meta-dispatch');
+
+        // The defect, stated as the assertion that fails without the fix. The
+        // substring that must be gone is the MECHANISM NAME: a caller reading
+        // it goes looking for a parameter this transport cannot accept, does
+        // exactly what the sentence says, and is refused identically.
+        expect(err.message).not.toContain('force=true');
+        expect(err.message).not.toContain(PUT_REMEDY);
+    });
+
+    it('prescribes what the caller CAN do here, and says why force is absent', async () => {
+        const err = await destructiveRefusal('meta-dispatch');
+
+        // Named door + denied mechanism + two real remedies — the same grammar
+        // the duplicate face composes, because it is the same kind of answer.
+        expect(err.message).toContain(DISPATCH_REMEDY_HEAD);
+        expect(err.message).toContain('accepts no `force`');
+        expect(err.message).toContain('reconcile');
+        // …and WHICH item, so a caller reading a batch of these can tell them
+        // apart. `name` is the only fixture value the clause interpolates.
+        expect(err.message).toContain('crm_task');
+    });
+
+    it('[#10886 non-effect] the per-field findings prose is still there, untrimmed', async () => {
+        const err = await destructiveRefusal('meta-dispatch');
+
+        // ⛔ #10886's sole-carrier verdict is untouched by this card, exactly as
+        // it was untouched by #11015: only the remedy clause is face-aware, and
+        // the findings the refusal renders stay whole on every face.
+        expect(err.message).toContain(FINDING_PROSE);
+        expect(err.message).toContain('[destructive_change]');
+    });
+
+    it('⛔ the three faces are a SWITCH — repairing one did not move the others', async () => {
+        const [plain, envelope, dispatch] = await Promise.all([
+            destructiveRefusal(),
+            destructiveRefusal('meta-envelope'),
+            destructiveRefusal('meta-dispatch'),
+        ]);
+
+        // Row 1 and row 2 — both REST `PUT` doors, both reading `?force` since
+        // #11095 — keep the sentence that is now true of both of them.
+        expect(plain.message).toContain(PUT_REMEDY);
+        expect(envelope.message).toContain(PUT_REMEDY);
+        // Row 3 does not, and does not borrow the duplicate door's wording
+        // either: three faces, three answers, no shared fallback.
+        expect(dispatch.message).not.toContain(PUT_REMEDY);
+        expect(dispatch.message).not.toContain(DUPLICATE_REMEDY_HEAD);
+        expect(envelope.message).not.toContain(DISPATCH_REMEDY_HEAD);
+    });
+
+    /**
+     * ⭐ The coupling this card had to get right, and the one a future edit is
+     * most likely to break.
+     *
+     * `writeFace` feeds TWO switches — {@link destructiveChangeRemedy} (409,
+     * "which remedy exists here") and `specValidationFindings` (422, "does a
+     * structured channel reach the consumer"). The dispatcher's answers differ:
+     * it has no `force`, but it DOES carry `issues[]` (`errorFromThrown` →
+     * `details.issues`), which is why it was `'meta-envelope'` in the first
+     * place. So splitting the face for the 409's sake had to leave the 422
+     * exactly where it was.
+     *
+     * The 422's polarity makes that failure SILENT in the dangerous direction:
+     * silence renders the full prose, so a `'meta-dispatch'` that fell to the
+     * default would re-introduce #10888's duplication on one door only, with
+     * every 409 assertion above still green. This case is what says otherwise.
+     */
+    it('⛔ [COUPLING] the new face changes the 409 clause and NOTHING about the 422', async () => {
+        const { protocol } = makeKernel({ seed: [objectRow('crm_task', ['a', 'b', 'c', 'd'])] });
+        const invalid = async (writeFace?: string) => {
+            try {
+                await protocol.saveMetaItem({
+                    type: 'view',
+                    name: 'task_list',
+                    // A view whose `summary` carries a typo'd key — the same
+                    // shape `protocol.invalid-metadata-422-face-inventory.test.ts`
+                    // drives, so the two files agree about what a 422 looks like.
+                    item: {
+                        name: 'task_list', object: 'task', type: 'list', label: 'Tasks',
+                        columns: [{ field: 'title', summary: { type: 'sum', fieldd: 'amount' } }],
+                    },
+                    ...(writeFace ? { writeFace } : {}),
+                });
+            } catch (e: any) { return e; }
+            throw new Error('expected saveMetaItem to refuse the invalid body');
+        };
+
+        const envelope = await invalid('meta-envelope');
+        const dispatch = await invalid('meta-dispatch');
+
+        // Same refusal, same envelope …
+        expect(dispatch.code).toBe('INVALID_METADATA');
+        expect(dispatch.status).toBe(422);
+        // … and byte-for-byte the same headline the door had before it was
+        // given a face of its own. Not `toMatch(/\d+ issues?/)`: an equality
+        // against the sibling face is what catches a fall-through to the prose
+        // branch, which would also match a loose headline pattern.
+        expect(dispatch.message).toBe(envelope.message);
+        // The trim is still in force here — no finding restated in the sentence.
+        for (const i of dispatch.issues) expect(dispatch.message).not.toContain(i.message);
     });
 });

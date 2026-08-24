@@ -322,11 +322,14 @@ describe('[#7543] a hook that deliberately refuses still speaks in its own words
         expect(r.body.error).not.toBe(INTERNAL_ERROR_MESSAGE);
     });
 
-    it('the refusal envelope still carries NO `code` — #7543 did not relitigate that', () => {
-        // Deliberate and load-bearing: older @objectstack/client builds prepend
-        // any `code` to the human-readable message, which would reintroduce the
-        // English noise the unwrap removes. The fix changes WHICH errors take
-        // this branch, not what the branch emits.
+    it('the refusal envelope carries no `code` when the hook declared none', () => {
+        // [#10345] Re-read, not rewritten to fit. This assertion always tested a
+        // producer that declares NO code, so it pins ADR-0112's "nothing is
+        // invented for a half-declaration" and is green on both sides of that
+        // card. What it never tested — and what the comment here used to claim
+        // — is that the door withholds a code the producer DID declare; that
+        // claim was the defect, and its "older clients prepend the code to the
+        // message" rationale is retired (see `error-response.ts`).
         const r = mapDataError(hookRefusal('h', 'month-end close is in progress'), 'showcase_task');
         expect(r.body).not.toHaveProperty('code');
     });

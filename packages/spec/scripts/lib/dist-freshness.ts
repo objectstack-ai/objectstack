@@ -94,13 +94,67 @@
  * command string rather than an npm script name — that path is not reachable
  * through one.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { bundlesAreStale, distIsStale } from '../../../../scripts/check-regen-pending.mjs';
 
 /** What the generator is about to do, so the refusal can name the real damage. */
 export type DistReadMode = 'generate' | 'check';
+
+/**
+ * A `packages/<name>` display label for `pkgDir`, derived from the path
+ * itself rather than assumed — the refusal text used to hardcode
+ * `packages/spec` unconditionally, which misnamed the stale package for
+ * every non-spec caller (#11250; `check:skill-examples` became the first
+ * real one, adopting this for `packages/client` / `packages/client-react`
+ * in #10969).
+ *
+ * Finds the LAST `packages` path segment and takes the one right after it.
+ * Every real caller today passes an absolute path with a single `packages`
+ * segment, so "last" and "first" coincide; "last" is chosen so a
+ * hypothetical path with an ancestor directory also named `packages`
+ * (`.../packages/foo/packages/bar`) still names the package itself (`bar`)
+ * rather than the misleading earlier match.
+ *
+ * Falls back to the raw `pkgDir` when the shape doesn't match at all (no
+ * `packages` segment, or nothing after it) — a raw path is uglier than a
+ * clean label, but it is still the TRUE location, whereas a hardcoded
+ * `packages/spec` from a `pkgDir` this rule failed to parse would be a wrong
+ * one dressed as a right one.
+ */
+export function packageDirLabel(pkgDir: string): string {
+  const segments = pkgDir.split(/[\\/]+/).filter(Boolean);
+  const idx = segments.lastIndexOf('packages');
+  if (idx === -1 || idx === segments.length - 1) return pkgDir;
+  return `packages/${segments[idx + 1]}`;
+}
+
+/**
+ * The package's own declared `package.json#name` — what `pnpm --filter`
+ * actually resolves against, which is why the build-remedy line needs THIS
+ * and not `packageDirLabel` above (a directory label like `packages/client`
+ * is not a valid `--filter` argument; the published name is
+ * `@objectstack/client`).
+ *
+ * Read defensively: a missing or unparsable `package.json` falls back to the
+ * directory label. That fallback command will not resolve either, but it is
+ * no worse than the pre-fix behaviour (which unconditionally printed
+ * `@objectstack/spec` regardless of `pkgDir`) and it stays legible rather
+ * than throwing out of a diagnostic path.
+ */
+function packageName(pkgDir: string): string {
+  try {
+    const parsed = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
+      name?: unknown;
+    };
+    if (typeof parsed.name === 'string' && parsed.name.length > 0) return parsed.name;
+  } catch {
+    // Falls through to the directory-label fallback below — unreadable or
+    // unparsable package.json is not fatal to a diagnostic message.
+  }
+  return packageDirLabel(pkgDir);
+}
 
 export type DistFreshness =
   | { fresh: true }
@@ -164,11 +218,12 @@ export function inspectDistFreshness(
         `   check would reach its conclusion without ever reading the declarations under test —\n` +
         `   a FALSE GREEN on exactly the change it exists to catch (#7122).`;
 
+  const label = packageDirLabel(pkgDir);
   const cause =
     state === 'missing'
-      ? `packages/spec/dist holds no .d.ts declarations — the package is not built (or was built\n` +
+      ? `${label}/dist holds no .d.ts declarations — the package is not built (or was built\n` +
         `   with OS_SKIP_DTS=1, which emits JS and skips exactly the artifact this reads).`
-      : `packages/spec/dist/**/*.d.ts is OLDER than packages/spec/src — the declarations on disk\n` +
+      : `${label}/dist/**/*.d.ts is OLDER than ${label}/src — the declarations on disk\n` +
         `   predate the sources. If you built with OS_SKIP_DTS=1, that build did not rebuild them.`;
 
   return {
@@ -178,7 +233,7 @@ export function inspectDistFreshness(
       `\n❌ ${cause}\n\n` +
       `   ${damage}\n\n` +
       `   Build first, then re-run:\n\n` +
-      `     pnpm --filter @objectstack/spec build\n` +
+      `     pnpm --filter ${packageName(pkgDir)} build\n` +
       `     ${rerun}\n\n` +
       `   (Do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as the flag that emits JS\n` +
       `   and skips exactly the declarations this reads.)`,
@@ -239,11 +294,12 @@ export function inspectBundleFreshness(
         `   check would reach its conclusion without ever reading the module graph under test —\n` +
         `   NOT MEASURED reported as if it were measured and clean (#4690).`;
 
+  const label = packageDirLabel(pkgDir);
   const cause =
     state === 'missing'
-      ? `packages/spec/dist holds no .mjs/.js bundles — the package is not built. This gate reads\n` +
+      ? `${label}/dist holds no .mjs/.js bundles — the package is not built. This gate reads\n` +
         `   the module a consumer's import actually loads, so there is nothing here to read.`
-      : `packages/spec/dist's .mjs/.js bundles are OLDER than packages/spec/src (or than\n` +
+      : `${label}/dist's .mjs/.js bundles are OLDER than ${label}/src (or than\n` +
         `   tsup.config.ts, which decides the entries, the externals and whether entries are\n` +
         `   self-contained). The bundles on disk predate the sources.`;
 
@@ -254,7 +310,7 @@ export function inspectBundleFreshness(
       `\n❌ ${cause}\n\n` +
       `   ${damage}\n\n` +
       `   Build first, then re-run:\n\n` +
-      `     pnpm --filter @objectstack/spec build\n` +
+      `     pnpm --filter ${packageName(pkgDir)} build\n` +
       `     ${rerun}\n\n` +
       `   (OS_SKIP_DTS=1 is fine for THIS gate — it still emits every bundle this reads. It is\n` +
       `   the .d.ts-reading gates next door that it blinds.)`,

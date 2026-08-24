@@ -651,6 +651,64 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Publish Metadata Item Request
+ *
+ * Request shape for `POST /api/v1/meta/:type/:name/publish` (the
+ * `publishMetaItem` protocol method) — the promotion door: `saveMetaItem`
+ * (with `?mode=draft`) stages a body, and this verb promotes the pending
+ * DRAFT overlay to the live `active` row. Mirrors the implementation's
+ * parameter type in `@objectstack/metadata-protocol` member for member — a
+ * declared-surface catch-up, not a new capability (#11006, maintainer ruling
+ * 2026-08-22: option B, closing the half-declared door #7294 left — the
+ * response side was declared there while the request and the interface member
+ * were not). The verb and every member here already ship and are enforced.
+ *
+ * Two members the implementation's parameter type family carries are
+ * deliberately NOT declared:
+ *
+ * - `environmentId` — the TRANSPORT-level multi-kernel routing key, OUT of
+ *   protocol request shapes by the #9741 maintainer ruling (2026-08-18):
+ *   `resolveProtocol(environmentId)` has already selected the target kernel
+ *   before this method is entered, and `packages/rest` layers that one member
+ *   on top of the declared shape via its `TransportScopedMetaRequest` wrapper,
+ *   which is where a routing key belongs.
+ * - `_skipSeedApply` — internal coordination between `publishPackageDrafts`
+ *   and the per-item path (the batch door suppresses the per-item seed apply
+ *   and loads every seed body in one later pass). Never read from the wire,
+ *   so it is not part of the contract.
+ */
+export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  organizationId: z.string().optional().describe(
+    'Organization (tenant) scope for the promotion. The implementation resolves '
+    + 'the draft through the org partition (ADR-0005, #8805), so a draft '
+    + 'authored org-scoped must be published under the same scope or the lookup '
+    + 'answers 404 `[no_draft]`. Absent = environment-wide.',
+  ),
+  actor: z.string().optional().describe(
+    'Identity recorded on the `op=\'publish\'` history event. On the REST door '
+    + 'this is the request\'s authenticated identity (one producer, #7749) — '
+    + 'never a caller-supplied header.',
+  ),
+  message: z.string().optional().describe(
+    'Optional human-readable note recorded with the publish history event.',
+  ),
+  packageId: z.string().nullable().optional().describe(
+    'ADR-0048 — the software package the draft being promoted was listed '
+    + 'under, when the caller has one to state (`?package=<id>` on the REST '
+    + 'door; #10063 / #10350). ⚠️ `null` is NOT the same as absent, and the '
+    + 'difference is load-bearing: the implementation branches on the KEY '
+    + 'BEING PRESENT, so an ABSENT key keeps the historical "match any '
+    + 'package" resolution while `null` pins the lookup to the '
+    + 'package-UNBOUND row. Spread it in conditionally; a '
+    + 'present-and-`undefined` key coerces to `null` downstream and makes a '
+    + 'package-bound draft unfindable — a silent `no_draft` on the untouched '
+    + 'path.',
+  ),
+}));
+
+/**
  * Publish Metadata Item Response
  *
  * Describes the FULL body `POST /api/v1/meta/:type/:name/publish` returns
@@ -2220,6 +2278,7 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type PublishMetaItemRequest = z.input<typeof PublishMetaItemRequestSchema>;
 export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSchema>;
 /**
  * The batch publish door's response — `POST /packages/:id/publish-drafts`
@@ -2459,6 +2518,21 @@ export interface MetadataProtocol {
   getMetaItems(request: GetMetaItemsRequest): Promise<GetMetaItemsResponse>;
   getMetaItem(request: GetMetaItemRequest): Promise<GetMetaItemResponse>;
   saveMetaItem(request: SaveMetaItemRequest): Promise<SaveMetaItemResponse>;
+  /**
+   * Promote the pending DRAFT overlay to the live (`active`) row — the write
+   * sibling of `saveMetaItem` and the verb behind
+   * `POST /api/v1/meta/:type/:name/publish`, i.e. the second half of Studio's
+   * designer save-then-publish loop (ADR-0033 two-step: `?mode=draft` stages
+   * a body, this makes it live). Declared optional like its `deleteMetaItem`
+   * / `getMetaItemLayered` siblings: additive to a shipped contract, with the
+   * implementation (`@objectstack/metadata-protocol`) predating the
+   * declaration. #11006 (maintainer ruling 2026-08-22, option B) promotes
+   * what was an ADR-0076 D9 server-only extension into a declared optional
+   * member, closing the half-declared door #7294 left: the response side was
+   * declared there while the request and this member were not — so the
+   * request literal at the one HTTP call site had nothing checking it.
+   */
+  publishMetaItem?(request: PublishMetaItemRequest): Promise<PublishMetaItemResponse>;
   /**
    * Delete a metadata customization overlay row. Per ADR-0005 this is the
    * "reset to artifact factory default" semantic — it removes a sys_metadata

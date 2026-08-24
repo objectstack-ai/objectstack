@@ -79,7 +79,7 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
     key in row ? row[key] : row[camelOf(key)];
 
   return {
-    async find(object: string, opts: { where?: Record<string, unknown> } = {}) {
+    async find(object: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
       if (!seen.has(object)) seen.set(object, new Set<string>());
       const where = opts?.where ?? {};
       for (const key of Object.keys(where)) {
@@ -96,7 +96,12 @@ function makeRecordingQl(tables: Record<string, Array<Record<string, unknown>>>,
           return raw(row, key) === cond;
         }),
       );
-      return rows.map(
+      // [#10978] Enforce the caller's bound — presence, not truthiness, so
+      // `limit: 0` returns nothing rather than everything. Bounding BEFORE the
+      // Proxy wrap keeps the column-observation ledger honest: a row the real
+      // read would never have returned must not record column reads either.
+      const page = typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+      return page.map(
         (row) =>
           new Proxy(row, {
             get(target, prop, receiver) {

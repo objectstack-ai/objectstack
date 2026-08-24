@@ -177,6 +177,60 @@ describe('plugin auto-bridge → engine.aggregate (#3602)', () => {
   });
 });
 
+// ── #10413 phase 2 / #10576 — the auto-bridge must forward the field, not
+//    just build it ────────────────────────────────────────────────────────
+
+/**
+ * `ObjectQLStrategy.execute` lowering a measure filter onto its own
+ * `aggregations[].filter` entry is necessary but not sufficient: that array
+ * still has to survive the auto-bridge in `plugin.ts`, which RECONSTRUCTS
+ * each aggregation object to rename `method` → the engine's own `function`
+ * key. A bridge that copies only `{ function, field, alias }` — the shape
+ * this repo actually shipped until this card — makes the strategy's lowering
+ * a NO-OP on every real deployment that boots through the default
+ * `new AnalyticsServicePlugin({ cubes })` wiring, while every test that stubs
+ * `executeAggregate` directly (as `objectql-dataset-filter.test.ts` does)
+ * stays green — the declared-≠-enforced shape Prime Directive #10 names,
+ * one layer below where #10413 itself was measured. This test goes through
+ * the REAL bridge, not a stub, so it is the one place a regression here
+ * would be caught.
+ */
+describe('plugin auto-bridge forwards aggregations[].filter (#10413 phase 2 / #10576)', () => {
+  it('the engine.aggregate call carries the per-measure filter the strategy lowered', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const engine = {
+      aggregate: async (_object: string, options: Record<string, unknown>) => {
+        calls.push(options);
+        return [{ opp_count: 24, won_count: 8 }];
+      },
+      getObject: () => undefined,
+    };
+    const { ctx, registered } = fakePluginContext({ data: engine });
+
+    await new AnalyticsServicePlugin({ queryCapabilities: objectqlOnly }).init(ctx as never);
+    const service = registered.analytics as AnalyticsService;
+    service.registerDataset(DatasetSchema.parse({
+      name: 'won_metrics', label: 'Won metrics', object: 'opportunity',
+      dimensions: [],
+      measures: [
+        { name: 'opp_count', label: 'Opportunities', aggregate: 'count' },
+        { name: 'won_count', label: 'Won', aggregate: 'count', filter: { stage: 'closed_won' } },
+      ],
+    }));
+
+    await service.query({ cube: 'won_metrics', measures: ['opp_count', 'won_count'] });
+
+    // The unfiltered measure keeps the EXACT pre-#10413-phase-2 shape — no
+    // `filter` key at all, not even `filter: undefined` — and the filtered
+    // one carries its own predicate, translated with the same `function`
+    // rename the rest of this bridge already applies.
+    expect(calls[0].aggregations).toEqual([
+      { function: 'count', field: '*', alias: 'opp_count' },
+      { function: 'count', field: '*', alias: 'won_count', filter: { stage: 'closed_won' } },
+    ]);
+  });
+});
+
 // ── Item 2: the record-label lookup rides the same bridge ────────────────────
 
 const labelDataset = DatasetSchema.parse({

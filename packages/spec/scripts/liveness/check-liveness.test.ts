@@ -122,6 +122,73 @@ describe('check:liveness — evidence pointers (#5623)', () => {
     expect(output).not.toContain('cite a file that is missing');
   });
 
+  // #11210. Everything above validates the FILE half of a citation. These pin
+  // the LINE half, and they run against the real gate for the same reason the
+  // cases above do: the grading (✗ vs ⚠, exit 1 vs exit 0) lives in
+  // check-liveness.mts, and #5623's defect was a check that named its findings
+  // correctly and exited 0 anyway.
+  it('FAILS when a citation names a line past the end of a file that EXISTS', () => {
+    const root = path.join(tmp, 'past-eof');
+    cpSync(LEDGERS, root, { recursive: true });
+    // A real file, so the existence check is satisfied and this run has exactly
+    // one cause for its verdict — the defect itself: file resolves, line is gone.
+    setEvidence(root, 'query', 'limit', 'packages/spec/scripts/liveness/evidence.mts:99999');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('citation(s) name a line the cited file does not have');
+    expect(output).toContain('query/limit → packages/spec/scripts/liveness/evidence.mts:99999');
+    // ✗, not ⚠ — same grading argument as the missing-file case above.
+    expect(output).toMatch(/✗ 1 citation\(s\) name a line/);
+    expect(output).not.toMatch(/⚠ \d+ citation\(s\) name a line/);
+    // And it must NOT be reported as a missing FILE: two checks, two verdicts.
+    expect(output).not.toContain('query/limit → packages/spec/scripts/liveness/evidence.mts\n');
+  });
+
+  it('bounds EVERY citation in a concatenated entry, not just the first', () => {
+    // The dispatch-critical case: entries `+`-join several citations, so a
+    // parser that stopped at the head would leave the tail unfalsifiable — the
+    // exact shape of the shipped `permission.tabPermissions` string.
+    const root = path.join(tmp, 'past-eof-tail');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(
+      root,
+      'query',
+      'limit',
+      'packages/spec/scripts/liveness/evidence.mts:1 (fine) + packages/spec/scripts/liveness/orphans.mts:88888 (rotted tail)',
+    );
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('query/limit → packages/spec/scripts/liveness/orphans.mts:88888');
+  });
+
+  it('never bounds a citation attributed to ANOTHER repo', () => {
+    // Same boundary as the existence check: those files are absent here, so
+    // every line in them would read as past EOF and the gate would become
+    // unsatisfiable for every renderer-side property.
+    const root = path.join(tmp, 'foreign-line');
+    cpSync(LEDGERS, root, { recursive: true });
+    setEvidence(root, 'query', 'limit', 'objectui: packages/app-shell/src/RecordDetailView.tsx:99999');
+
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    expect(output).not.toContain('name a line the cited file does not have');
+  });
+
+  it('prints the citation count and how many are in range, equal on a green run', () => {
+    // The #5623 lesson applied to the new counter: printing only "in range"
+    // would read as a pass on a run where the parser extracted no citations.
+    const { status, output } = runGate(path.join(tmp, 'liveness'));
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('line citations:')) ?? '';
+    const m = /line citations: (\d+) pointer\(s\) written .*?, (\d+) inside the cited file/.exec(line);
+    expect(m, line).not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThan(100);
+    expect(m![2]).toBe(m![1]);
+    expect(line).not.toContain('PAST EOF');
+  });
+
   it('still fails a local path that shares a string with a foreign clause', () => {
     // A realm marker's scope ends at the clause boundary. If it did not, one
     // `objectui:` anywhere in an entry would silence the whole entry — a

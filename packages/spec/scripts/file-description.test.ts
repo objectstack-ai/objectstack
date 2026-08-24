@@ -245,6 +245,49 @@ describe('renderFileDescription', () => {
 });
 
 /**
+ * #10924 — the `check:skill-examples` opt-in marker never reaches the page.
+ *
+ * That gate marks a compilable docblock example with an HTML comment on the
+ * line above its fence. In a `.ts` source it must be the HTML form (the MDX
+ * wrapper form would close the JSDoc early), and it is a prose line, so the
+ * renderer emitted it verbatim into the generated MDX — measured on
+ * `studio/object-designer` and `studio/plugin`, whose marked examples live in
+ * the MODULE block rather than on a declaration. MDX has no HTML comments, so
+ * that both published an internal annotation to a customer-facing reference
+ * page and broke the docs build.
+ */
+describe('renderFileDescription — #10924: the os:check marker is machinery, not content', () => {
+  const ctx = { fromCategory: 'studio', sourcePathToDocsRoute: () => null };
+
+  const moduleBlock = (...body: string[]): string =>
+    ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
+
+  it('drops a marker line above a fence, keeping the example itself', () => {
+    const out = renderFileDescription(
+      moduleBlock('Studio plugin manifest.', '', '@example', '<!-- os:check -->', '```ts', 'const x = 1;', '```'),
+      ctx,
+    );
+    expect(out).not.toContain('os:check');
+    // The block it marked is the content — dropping the marker must not take
+    // the example with it, nor detach the fence from its `@example` tag.
+    expect(out).toContain('```ts');
+    expect(out).toContain('const x = 1;');
+    expect(out).toContain('@example');
+  });
+
+  it('keeps a marker shown INSIDE a fence — there it is an author illustrating the convention', () => {
+    // The same text fenced is documentation ABOUT the gate, which several
+    // sources legitimately write. Stripping by text alone would silently edit
+    // an author's example; the strip is prose-only for exactly this reason.
+    const out = renderFileDescription(
+      moduleBlock('How to mark a block:', '', '```md', '<!-- os:check -->', '```ts', '```'),
+      ctx,
+    );
+    expect(out).toContain('<!-- os:check -->');
+  });
+});
+
+/**
  * #5553 — the block is rendered as the markdown it was written as.
  *
  * The renderer used to drop blank lines and join what was left with `\n\n`,

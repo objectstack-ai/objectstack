@@ -736,8 +736,11 @@ User action toggles for the view toolbar
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
 | **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
+| **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
 | **editInline** | `boolean` | optional (default: `false`) | Allow users to edit records inline — click a cell to edit it with the field's type-aware widget (the same control the form uses). Off by default: the list is read-only unless the author opts in. |
+| **hideFields** | `boolean` | optional (default: `false`) | Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component's `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in. |
+| **rowColor** | `boolean` | optional (default: `false`) | Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in. |
 | **buttons** | `string[]` | optional | Custom action button IDs to show in the toolbar |
 
 

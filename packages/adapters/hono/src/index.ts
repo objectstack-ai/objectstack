@@ -102,8 +102,8 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
 /**
  * Creates a full-featured Hono app with all ObjectStack route dispatchers.
  *
- * Only routes that need framework-specific handling (auth service, GraphQL
- * raw result, discovery wrapper) are registered explicitly.
+ * Only routes that need framework-specific handling (auth service,
+ * discovery wrapper) are registered explicitly.
  * All other routes (meta, data, packages, analytics, automation, i18n, ui,
  * openapi, custom endpoints, and any future routes) are handled by a
  * catch-all that delegates to `HttpDispatcher.dispatch()`.

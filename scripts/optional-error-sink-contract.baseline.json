@@ -29,7 +29,26 @@
     "  -1     — #10556's follow-up dispatch repaired the serialisation leftover once its",
     "           fence (PR #10547/#10739) cleared: `logger@ApprovalServiceOptions` dropped the",
     "           `?` from `warn`, mechanically identical to the twelve already paid down.",
-    "  = 2    — both remaining rows are the escalated DESIGN calls; neither is a `?` deletion."
+    "  = 2    — both remaining rows are the escalated DESIGN calls; neither is a `?` deletion.",
+    "  +3     — #11069 widened the POPULATION, not the tree. The checker now reads bare `Function`",
+    "           as a channel, so three `plugin-sharing` sinks that were spelled",
+    "           `{ info?: Function; warn?: Function; error?: Function; debug?: Function }` became",
+    "           visible for the first time. All three were already red on the day this ledger was",
+    "           first written; none is new code, and none was written after it.",
+    "",
+    "  ⚠️ ON THAT +3, because it is the one line above that adds rows to a shrink-only file:",
+    "  the ⛔ below forbids appending a NEWLY WRITTEN violation, which is what would let this",
+    "  file launder new debt. It does not forbid recording a sink the checker previously could",
+    "  not see. The distinction is the whole point: a measurement fix that had to stay silent",
+    "  about what it measured would make widening the population cost more than leaving the",
+    "  blind spot in, and the blind spot is what #11069 was filed about. The alternative —",
+    "  flipping the three `warn`s — was ruled OUT of this card: all three options types are",
+    "  PUBLICLY EXPORTED from `plugin-sharing`'s `index.ts`, so requiring `warn` breaks any host",
+    "  passing `{ info, error }`. That is #10556's contract call. These rows exist to hand it a",
+    "  decidable question instead of a silence.",
+    "",
+    "  Shrink-only is unaffected: each row still fails the gate the moment its sink stops being",
+    "  red, so all three can only leave this file, never linger."
   ],
   "entries": [
     {
@@ -45,6 +64,27 @@
       "verdict": "no-fallback",
       "members": "{ error? }",
       "note": "⚠️ The ONLY `no-fallback` sink left in the tree: `{ error? }` and nothing else, so a call site here cannot be written correctly at all. Repairing it is a DESIGN call, not a `?` deletion: the type's own doc explains that the surface is kept to one member so that `Logger`, `ctx.logger`, `console.error` and a one-line spy all stay assignable, and a required `warn` breaks the one-line spy. Highest-priority entry in this ledger."
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/sharing-service.ts",
+      "sink": "logger@SharingServiceOptions",
+      "verdict": "optional-fallback",
+      "members": "{ info? warn? error? debug? }",
+      "note": "⚠️ NOT NEW — newly VISIBLE (#11069). Spelled with bare `Function`, which the checker did not read as a channel until #11069, so this sink was in no census bucket at all: not the population, not `impure`, not `noErrorMember`. `SharingServiceOptions` is PUBLICLY EXPORTED from this package's `index.ts`, so dropping the `?` from `warn` is a breaking change for any host passing `{ info, error }` — a #10556 contract call, explicitly out of scope for the card that made this row visible. Two further notes for whoever picks it up: the tightening costs ZERO compile errors inside the package (measured), and the bare `Function` spelling is itself the wrong contract (#10692) — `record-orphan-cleanup.ts` cannot tighten its own `MinimalLogger` until this producer is tightened first, because `Function` is not assignable to a concrete signature."
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-service.ts",
+      "sink": "logger@ShareLinkServiceOptions",
+      "verdict": "optional-fallback",
+      "members": "{ info? warn? error? debug? }",
+      "note": "⚠️ NOT NEW — newly VISIBLE (#11069), same bare-`Function` spelling and same reason as `logger@SharingServiceOptions` above. `ShareLinkServiceOptions` is PUBLICLY EXPORTED from this package's `index.ts`; tightening `warn` is #10556's contract call, not a `?` deletion a dev may take. Repair these three together — they are one contract decision about what `plugin-sharing`'s injected logger is, not three."
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/sharing-rule-service.ts",
+      "sink": "logger@SharingRuleServiceOptions",
+      "verdict": "optional-fallback",
+      "members": "{ info? warn? error? debug? }",
+      "note": "⚠️ NOT NEW — newly VISIBLE (#11069). The THIRD bare-`Function` sink in this package, and the one #11069's own body did not name: that card named two from a hand search, and widening the matcher found this one. It is the reason the repair is a population change rather than a two-line edit — a hand-listed set of shapes is exactly what a structural population exists to replace. `SharingRuleServiceOptions` is PUBLICLY EXPORTED; same #10556 contract call as its two siblings."
     }
   ]
 }

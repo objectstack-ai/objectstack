@@ -210,10 +210,42 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named config file per child directory — 3 of 238 (1.3%)',
   }],
+  ['check:i18n-coverage PACKAGES_DIR packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'files named i18n-extract.config.ts beneath a scripts segment — 9 of 5035 (0.18%), the '
+      + 'narrowest row on this list. Same filename-filter shape as its EXAMPLES_DIR sibling above, '
+      + 'and refused with it rather than split: a subtree hint would name this gate for 5035 files '
+      + 'to reach 9. The root was ALWAYS this invisible — it reached the sweep only once the fix '
+      + 'for #10907 gave the literal a population-constant name, so this row records a population '
+      + 'that was previously unnameable rather than one the fix introduced',
+  }],
   ['scripts/check-skills-token-ratchet.mjs SKILLS_DIR skills', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'one named file per child directory, 11 of 50 (22%). It already reaches its own cards '
       + 'through the artifact roster it names file by file, so the miss is smaller than the row',
+  }],
+  ['check:runner-env-posture SCANNED_ROOTS packages', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'non-test source beneath a `src` SEGMENT — 1757 of 5049 (35%). The segment is what makes '
+      + 'this unspellable rather than merely wide: `packages/**/src/**` is the true population and '
+      + 'collapseHint reduces it to `packages`, so the only spellable claim also names every '
+      + 'package manifest, changelog, fixture and the 2658 test files this gate deliberately skips. '
+      + 'Its nearest neighbour check:authz-resolver is REFUSE-WIDE at a similar 39% because ITS '
+      + 'population really is every non-test source under the root; this one is not',
+  }],
+  ['check:runner-env-posture SCANNED_ROOTS examples', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: '150 of 240 (63%), the same `src`-segment filter, refused with its packages half rather '
+      + 'than split: declaring the smaller root would name the gate on example cards and stay '
+      + 'silent on the package cards where product source actually lives',
+  }],
+  ['check:runner-env-posture SCANNED_ROOTS apps', {
+    verdict: 'REFUSE-UNSPELLABLE',
+    why: 'MEASURED AT ZERO — 0 of 35. No `src` tree exists under this root today, so a subtree '
+      + 'declaration here would not be imprecise but false: it would paste this gate into every '
+      + 'apps card to reach nothing. The root stays in SCANNED_ROOTS deliberately, so an apps '
+      + 'package that grows a src tree is covered the day it lands rather than the day someone '
+      + 'remembers — which is the same silent-coverage-loss this gate exists to prevent',
   }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS packages', {
     verdict: 'REFUSE-UNSPELLABLE',

@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { IntrospectedSchema } from '@objectstack/spec/contracts';
+
 /**
  * IDatasourceDriverFactory — host-provided capability that builds a live driver
  * from a connection spec (ADR-0015 Addendum §3.5).
@@ -76,6 +78,10 @@ export type DatasourceDriverOwnership = 'factory' | 'host';
  * A live (or lazily-connecting) driver handle. Intentionally structural and
  * fully optional so any concrete driver satisfies it — the admin service uses
  * whatever capabilities are present and skips the rest.
+ *
+ * "Fully optional" is about PRESENCE, not about shape: a member the driver
+ * does expose must honour that member's declared contract. The one place the
+ * distinction has already cost data is `introspectSchema` — see its own note.
  */
 export interface DatasourceDriverHandle {
   /** Open the connection / pool. */
@@ -86,8 +92,38 @@ export interface DatasourceDriverHandle {
   ownership?: DatasourceDriverOwnership;
   /** Cheap liveness round-trip (preferred for probes). */
   ping?(): Promise<unknown>;
-  /** Introspect the live schema (fallback probe when `ping` is absent). */
-  introspectSchema?(): Promise<unknown>;
+  /**
+   * Introspect the live schema (fallback probe when `ping` is absent, and the
+   * read the external-datasource federation path is built on).
+   *
+   * The return value is CONTRACTUAL: `packages/spec`'s one introspection
+   * shape — {@link IntrospectedSchema}, whose columns spell primary-key
+   * membership `primaryKey` and whose schema carries `dialect` and
+   * `introspectedAt`. This member was typed `Promise<unknown>` until #11381
+   * (option C of the #11123 ruling, 2026-08-23), which left the seam's OPEN
+   * producer population — host-built drivers, per this file's own header —
+   * unreachable by any compiler: a driver spelling the flag `isPrimary`, or
+   * emitting `{ tables }` alone, compiled clean, and the mis-shape surfaced
+   * only as a federated table whose records silently could not be located or
+   * updated. Typed against the spec contract, `tsc` now refuses a mis-shaped
+   * driver at the offending field (`Property 'primaryKey' is missing …` /
+   * `'isPrimary' does not exist in type 'IntrospectedColumn'`).
+   *
+   * Extra facts a richer driver carries stay legal — driver-sql's table-level
+   * `primaryKeys`, `foreignKeys`, per-column `maxLength` ride on declared
+   * types that EXTEND the spec contract, and assignability admits them on any
+   * non-literal value. What is refused is a WRONG spelling of a declared key,
+   * which is the defect class this seam has actually shipped.
+   *
+   * Runtime is deliberately untouched: the `primaryKeyReader` compatibility
+   * belt in `external-datasource-service.ts` keeps absorbing the retired
+   * `isPrimary` spelling from already-built drivers (plain-JS drivers and
+   * stale builds are reached by no compiler). Removing that belt is #11123
+   * option B — a later, separate step gated on this tightening being released
+   * AND the old spelling's retirement being published; it is not licensed by
+   * this type.
+   */
+  introspectSchema?(): Promise<IntrospectedSchema>;
   /** Liveness check on the underlying engine driver (probe fallback). */
   checkHealth?(): Promise<boolean>;
   /** Driver-reported server version, when available. */

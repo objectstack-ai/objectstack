@@ -479,11 +479,17 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
-    // [#11142] a by-id update carried a truthy scalar `options.where.id` naming
-    // a DIFFERENT row than the bound payload `data.id` — a condition that can
-    // never hold, refused 400 at dispatch instead of silently writing the
-    // payload row (the reversed #5748 pin; equal ids — the REST path-id fold —
-    // stay honoured). Stamped by `@objectstack/metadata-core`'s
+    // [#11142/#11230] a by-id update carried an `options.where.id` that is not
+    // the bound payload `data.id` — a truthy scalar naming a DIFFERENT row
+    // (#11142), or a non-scalar predicate over a row SET (#11230, which also
+    // swallowed a declared `multi: true`). Either way a condition the by-id
+    // path can never evaluate, refused 400 at dispatch instead of silently
+    // writing the payload row (the two halves of the reversed #5748 pin; equal
+    // ids — the REST path-id fold — stay honoured). ONE code for both shapes,
+    // deliberately: same defect class, same caller remedy (drop one of the two
+    // row-address spellings), and the difference rides the message, which is
+    // where D3/D4 put it rather than growing the closed `code` vocabulary.
+    // Stamped by `@objectstack/metadata-core`'s
     // `engineUpdateDispatchRejectError`, thrown in production by
     // `ObjectQL.update` (`engine.ts`), hence registered here. Not a
     // VALIDATION_ERROR synonym: the payload parses fine — the two row

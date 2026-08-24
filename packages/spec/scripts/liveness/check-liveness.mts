@@ -52,6 +52,19 @@
 // flagged 48 of 227 entries with a ~100% false-positive rate, so failing on it
 // would have failed every build. The parse fix is what turned a hit into signal.
 //
+// CITATION LINES (#11210): a citation written `path/to/file.ts:NNN` also has its
+// LINE bounded by the file's length. The existence check alone validated the
+// file and dropped the line on the floor — the parser did not even retain it —
+// so a consumer that moved out of a file which still exists kept a passing
+// pointer, was counted under the word "resolved", and left the entry reading as
+// freshly verified. Two shipped instances, both real, neither catchable by any
+// gate: `permission.tabPermissions` cited `hono-plugin.ts:1200` in a 717-line
+// file that no longer mentions the property, and `mapping.fieldMapping` cited a
+// range ending 3 lines past the end of `import-mapping.ts`. A range is bounded
+// by its END. The complementary case — a consumer that moved WITHIN its file —
+// is out of reach here by construction and is tracked separately; the ✗ text
+// below says why its obvious detector is not obviously right.
+//
 // PRODUCER-SIDE EVIDENCE (`producer`, #4837): `live` means AUTHORING the
 // property changes runtime behaviour. A consumer that reads the property is
 // necessary and not sufficient — when the effect also depends on a second input
@@ -122,7 +135,7 @@ import {
   type VerificationEntry,
   type VerificationReport,
 } from './verification.mts';
-import { checkEvidence } from './evidence.mts';
+import { checkCitationLines, checkEvidence, countLines, type EvidenceScan } from './evidence.mts';
 import { buildProducerReport, type ProducerEntry, type ProducerReport } from './producer.mts';
 import { ORPHAN_GUIDANCE, findOrphanEntries, type Orphan } from './orphans.mts';
 import {
@@ -423,6 +436,12 @@ const report: any = {
   evidenceLocal: 0, // repo-rooted evidence paths attributed to THIS repo — DECLARED, not yet proven
   evidenceMissing: 0, // ...of which this many do not exist here (=== staleEvidence.length) — FAILS the gate
   evidenceForeign: 0, // evidence paths attributed to objectui / cloud — not resolvable here, never failed
+  // The LINE half of a citation. `evidenceMissing` above answers "does the cited
+  // FILE exist"; nothing answered "does the cited LINE". A consumer that moves out
+  // of a file which still exists therefore rotted its pointer in complete silence,
+  // and the summary line reported it under "resolved".
+  citationsChecked: 0, // local citations written `path:NNN` — the subset a line bound can falsify
+  citationsOutOfRange: [] as string[], // ...of which this many name a line past EOF — FAILS the gate
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -433,6 +452,32 @@ const verificationEntries: VerificationEntry[] = [];
 const producerEntries: ProducerEntry[] = [];
 
 const proofFs = { existsSync, readFileSync };
+
+/**
+ * How many lines the cited file has, or `null` when it cannot be read. `null`
+ * is not a pass: it means the EXISTENCE check owns this path's verdict already
+ * (a rotted `evidence` pointer would otherwise be reported twice, once per
+ * check, which teaches a reader to discount both lists).
+ */
+function lineCountOf(p: string): number | null {
+  const f = join(repoRoot, p);
+  if (!existsSync(f)) return null;
+  return countLines(readFileSync(f, 'utf8'));
+}
+
+/**
+ * Bound a scanned pointer's `path:NNN` citations by the cited files' lengths.
+ * `producer` and `evidence` both come through here, deliberately: the producer
+ * pointer resolves through the SAME resolver as evidence (see below), and a
+ * standard that applied to one and not the other would leave the weaker one as
+ * the place a rotted line goes to hide.
+ */
+function collectOutOfRange(scan: EvidenceScan, label: string): void {
+  report.citationsChecked += scan.localCitations.length;
+  for (const c of checkCitationLines(scan, lineCountOf)) {
+    report.citationsOutOfRange.push(`${label} → ${c.path}:${c.line} (the file has ${c.lines} lines)`);
+  }
+}
 
 function classify(type: string, path: string, status: string, led: any, cat: any) {
   cat.classified++;
@@ -455,6 +500,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
   if (typeof led?.producer === 'string') {
     const pv = checkEvidence(led.producer, (p) => existsSync(join(repoRoot, p)));
     for (const miss of pv.missing) report.producerMissing.push(`${type}/${path} → ${miss}`);
+    collectOutOfRange(pv, `${type}/${path} [producer]`);
   }
   if (status === 'live' && led?.evidence) {
     // Extract every repo-rooted path the evidence claims and resolve the ones
@@ -466,6 +512,7 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     report.evidenceLocal += ev.local.length;
     report.evidenceMissing += ev.missing.length;
     for (const miss of ev.missing) report.staleEvidence.push(`${type}/${path} → ${miss}`);
+    collectOutOfRange(ev, `${type}/${path}`);
   }
   // ── ADR-0054 prove-it-runs ──
   const boundClass = BOUND_PROOF_PATHS.get(`${type}/${path}`);
@@ -702,6 +749,11 @@ const failed =
   // that now resolves 330 paths and reports zero. Cross-repo attribution never
   // reaches this list: checkEvidence only resolves the LOCAL bucket.
   report.staleEvidence.length > 0 ||
+  // ...and the same verdict for a citation whose FILE exists but whose LINE does
+  // not. Red rather than ⚠ from the start: unlike the #5623 case there is no
+  // false-positive era to calibrate against — a line past EOF is arithmetic, and
+  // the two shipped instances it found were both real (#11210).
+  report.citationsOutOfRange.length > 0 ||
   report.orphanEntries.length > 0 ||
   report.verification.errors.length > 0 ||
   report.producers.errors.length > 0 ||
@@ -738,6 +790,40 @@ if (asJson) {
     (report.evidenceMissing ? `, ${report.evidenceMissing} MISSING` : '') +
     `; ${report.evidenceForeign} attributed to another repo (objectui / cloud — not resolvable here).`,
   );
+  // Same two-number discipline one level down, and for the same reason: printing
+  // only "in range" would read as a pass on a run where the parser had degraded
+  // to extracting no citations at all.
+  console.log(
+    `line citations: ${report.citationsChecked} pointer(s) written \`path:NNN\`, ` +
+    `${report.citationsChecked - report.citationsOutOfRange.length} inside the cited file` +
+    (report.citationsOutOfRange.length ? `, ${report.citationsOutOfRange.length} PAST EOF` : '') + '.',
+  );
+  if (report.citationsOutOfRange.length) {
+    console.log(`\n✗ ${report.citationsOutOfRange.length} citation(s) name a line the cited file does not have:`);
+    report.citationsOutOfRange.forEach((s: string) => console.log(`    ${s}`));
+    console.log(
+      '\n   The file resolves, so the existence check above is happy — and the line is gone,\n' +
+      '   which is the half a moved consumer rots first. This is worse than a missing file:\n' +
+      '   it survives review because it LOOKS precise, and the next agent re-verifying the\n' +
+      '   entry follows it, finds nothing, and has to rebuild the call graph from scratch.\n\n' +
+      '   Repairs, same three as a missing file and picked the same way:\n' +
+      '     • the consumer MOVED (inside this file or out of it) → repoint at the real line,\n' +
+      '       MEASURED — open the file and read it, do not shift the number by the diff — and\n' +
+      '       stamp `verifiedAt` while you have the call graph open;\n' +
+      '     • the consumer moved to ANOTHER repo → attribute it with a realm marker; those\n' +
+      '       are counted, never resolved, and never bounded here;\n' +
+      '     • the consumer is GONE → the verdict is not `live` any more. Re-classify under\n' +
+      '       ADR-0049 enforce-or-remove rather than repointing at a plausible survivor.\n\n' +
+      '   A RANGE (`:12-34`) is bounded by its END: a range whose tail is past EOF overruns\n' +
+      '   the file even when its head is inside.\n\n' +
+      '   What this check does NOT see: a consumer that moved WITHIN the file it is cited to.\n' +
+      '   The line still exists, so nothing here fires. That case needs a different signal\n' +
+      '   (does the cited file mention the property at all) whose false positives are a\n' +
+      '   design problem of their own — camelCase authoring keys are read as snake_case data\n' +
+      '   values throughout this platform, so a naive match on the key misses the consumer\n' +
+      '   for every persisted field. Measured, not assumed: see #11210.',
+    );
+  }
   if (report.staleEvidence.length) {
     console.log(`\n✗ ${report.staleEvidence.length} 'live' entr(ies) cite a file that is missing from THIS repo:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));
@@ -992,7 +1078,8 @@ if (asJson) {
       '\n✓ every governed-type property at the walk\'s one-level granularity is classified, every ' +
       'registered type is governed or explicitly pending, no ledger row outlives its property, ' +
       'every container inheritance is declared, every `live` entry\'s repo-local evidence path ' +
-      'resolves, all bound high-risk proofs resolve, and the README state table carries a row ' +
+      'resolves and every `path:NNN` citation names a line that file actually has, all bound ' +
+      'high-risk proofs resolve, and the README state table carries a row ' +
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,
     );
     console.log(

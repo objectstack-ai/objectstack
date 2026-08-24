@@ -154,6 +154,6 @@ export interface IExternalDatasourceService {
   /** Validate one federated object against the live remote table. */
   validateObject(objectName: string): Promise<SchemaValidationResult>;
 
-  /** Validate every federated object, parallelised per datasource. */
+  /** Validate every federated object in parallel; each datasource's live schema is read once per call. */
   validateAll(): Promise<SchemaValidationReport>;
 }

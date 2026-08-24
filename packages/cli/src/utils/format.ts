@@ -330,6 +330,24 @@ export function formatZodErrors(error: ZodError) {
 
 // ─── Metadata Statistics ────────────────────────────────────────────
 
+/**
+ * Every field here is rendered by {@link printMetadataStats}.
+ *
+ * #11172 — `translations: number` used to sit in this interface, collected by
+ * {@link collectMetadataStats} (`count(config.translations)`) on every
+ * `os validate` / `os info` / `os compile` run and then read by nothing: the
+ * printer had no `translations` fragment at any value, so a stack with 40
+ * translation bundles reported them nowhere. The maintainer ruled
+ * implementation-first (2026-08-23) — delete the unread field rather than
+ * invent a row for it; an `i18n:` summary row was explicitly NOT approved.
+ *
+ * The invariant that replaces it: this struct carries no metric the summary
+ * does not print. It is enforced from both ends — TypeScript requires
+ * `collectMetadataStats` to populate every field declared here, and the
+ * `[#11172]` pin in `print-metadata-stats-zero-row.test.ts` requires every
+ * collected field to reach the rendered output. A metric that is declared but
+ * never rendered cannot satisfy both.
+ */
 export interface MetadataStats {
   objects: number;
   objectExtensions: number;
@@ -347,7 +365,6 @@ export interface MetadataStats {
   positions: number;
   permissions: number;
   datasources: number;
-  translations: number;
   plugins: number;
   devPlugins: number;
 }
@@ -386,7 +403,6 @@ export function collectMetadataStats(config: any): MetadataStats {
     positions: count(config.positions),
     permissions: count(config.permissions),
     datasources: count(config.datasources),
-    translations: count(config.translations),
     plugins: count(config.plugins),
     devPlugins: count(config.devPlugins),
   };
@@ -842,6 +858,25 @@ export function printMetadataStats(stats: MetadataStats) {
      * items; the rationale sits at its entry below.
      */
     zeroFallback: [string, ...string[]];
+    /**
+     * How this section's surviving items become the printed line.
+     *
+     * Omitted by every section that renders the shipped #10504 shape —
+     * `<count> <Item>` with the count in white and the item name dim, joined
+     * by two spaces (`Data: 1 Objects  2 Fields`). `Runtime:` is the one row
+     * that has never rendered that way and still does not: it prints
+     * `2 plugins, 1 devPlugins`, comma-joined and fully dim, with lowercase
+     * item names. That difference is pre-existing shipped output and #11172
+     * deliberately did NOT change it — the ruling was about the row's
+     * PRESENCE at zero, not its typography, and rewriting a user-visible row's
+     * look while fixing its zero state would be an unruled widening.
+     *
+     * This hook is what let `Runtime:` join the array (see its entry) instead
+     * of getting a second, parallel no-silent-drop mechanism bolted on beside
+     * the loop. One row's formatting is data on the row; the "never dropped"
+     * guarantee stays single-sourced in the loop below.
+     */
+    render?: (shown: Array<[string, number]>) => string;
   }> = [
     {
       label: 'Data',
@@ -897,13 +932,46 @@ export function printMetadataStats(stats: MetadataStats) {
       // so it is the shipped shape rather than a second formatting concept.
       zeroFallback: ['Positions', 'Permissions'],
     },
+    {
+      // #11172 — `Runtime:` used to be rendered OUTSIDE this loop, as a
+      // standalone `if (stats.plugins > 0 || stats.devPlugins > 0)` after the
+      // loop closed, so a stack with no plugins and no devPlugins printed no
+      // `Runtime:` line at all. Same "reads as never asked, not as zero" defect
+      // #10504 and #10952 removed from the sections, and measured the same way
+      // (`bin/run-dev.js validate`, `NO_COLOR=1`, a stack declaring nothing).
+      // The maintainer ruled it in (2026-08-23): `Runtime:` renders
+      // unconditionally, joining the no-silent-drop invariant.
+      //
+      // Folded into the array rather than fixed in place. Being outside the
+      // loop was not incidental to the defect — it is why #10952's mechanism
+      // could not reach this row, and a hand-rolled zero case beside the loop
+      // would have been a SECOND copy of the invariant, un-enforced by the
+      // `zeroFallback` typing that stops the next row from being added without
+      // one. The per-item `> 0` filter this row already applied is the same
+      // filter the loop applies, so the only thing that had to be carried over
+      // was its fragment style — see `render` on the type above.
+      label: 'Runtime',
+      items: [
+        ['plugins', stats.plugins],
+        ['devPlugins', stats.devPlugins],
+      ],
+      // `plugins` is this row's signal: `devPlugins` is a dev-only overlay on
+      // it, so `Runtime: 0 devPlugins` would report the narrower fact and stay
+      // silent about the broader one.
+      zeroFallback: ['plugins'],
+      render: (shown) => chalk.dim(shown.map(([k, v]) => `${v} ${k}`).join(', ')),
+    },
   ];
+
+  /** The shipped #10504 section shape — see `render` on the type above. */
+  const countFragments = (shown: Array<[string, number]>) =>
+    shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
 
   for (const section of sections) {
     let shown = section.items.filter(([, v]) => v > 0);
     if (shown.length === 0) {
-      // Never drop the row (#10504, #10952) — the row is what says "this
-      // project has none of this"; its absence says nothing at all.
+      // Never drop the row (#10504, #10952, #11172) — the row is what says
+      // "this project has none of this"; its absence says nothing at all.
       shown = section.zeroFallback
         .map((key) => section.items.find(([itemKey]) => itemKey === key))
         .filter((item): item is [string, number] => item !== undefined);
@@ -913,14 +981,81 @@ export function printMetadataStats(stats: MetadataStats) {
       if (shown.length === 0) continue;
     }
 
-    const line = shown.map(([k, v]) => `${chalk.white(v)} ${chalk.dim(k)}`).join('  ');
+    const line = (section.render ?? countFragments)(shown);
     console.log(`  ${chalk.bold(section.label + ':')} ${line}`);
   }
+}
 
-  if (stats.plugins > 0 || stats.devPlugins > 0) {
-    const parts: string[] = [];
-    if (stats.plugins > 0) parts.push(`${stats.plugins} plugins`);
-    if (stats.devPlugins > 0) parts.push(`${stats.devPlugins} devPlugins`);
-    console.log(`  ${chalk.bold('Runtime:')} ${chalk.dim(parts.join(', '))}`);
+// ─── Author-time advisories ─────────────────────────────────────────
+
+/**
+ * One author-time advisory, in the shape the authoring-rule registry reports
+ * (`@objectstack/lint`'s `splitBySeverity(...).advisories`) and the shape
+ * `os build --json` / `os validate --json` publish under `warnings`.
+ *
+ * Declared structurally rather than re-exported from `@objectstack/lint` so
+ * this rendering helper stays a pure formatter with no rule-engine import.
+ */
+export interface AuthoringAdvisory {
+  where: string;
+  message: string;
+  rule: string;
+  path: string;
+  hint?: string;
+}
+
+/**
+ * How many advisories `printAuthoringAdvisories` renders in full before it
+ * switches to the withheld-count line. The cap itself is not the defect it
+ * guards against — see below — so it keeps the value it has always had.
+ */
+export const AUTHORING_ADVISORY_PRINT_LIMIT = 50;
+
+/**
+ * Print author-time advisories, and — this is the point — say so when the
+ * list was cut.
+ *
+ * #11529: `os build` printed a fixed 50 detailed entries and then stopped,
+ * with nothing in the output saying the list had been truncated. Measured on
+ * `objectstack-ai/hotcrm` with the published 17.1.0 CLI: two runs, 80 and then
+ * 75 advisories, both printing exactly 50 entries and exactly 184 lines. The
+ * summary line counted all of them (`⚠ 80 author-time warning(s) — see
+ * above`) while only 50 were above, and removing five warnings made five
+ * previously-unprinted ones appear — which reads as a regression caused by the
+ * fix. Because the advisories are ordered by surface (pages, then views, then
+ * flows), a repo whose page warnings alone exceed the cap keeps every `view`
+ * and `flow` advisory permanently invisible.
+ *
+ * The defect is the SILENCE, not the cap. Truncated output that carries no
+ * notice is not merely incomplete — it is indistinguishable from complete, so
+ * an author who reads it and sees their file is clean has read a list that
+ * stopped early. That is the same shape as the dropped summary rows above
+ * (#10504, #10952): output that cannot distinguish "none" from "not shown".
+ *
+ * So the cap stays and the honesty line is added: over the limit, the exact
+ * remainder is named; at or under it, no such line appears. The pointer is
+ * `--json`, which already carries the whole set (`warnings: ruleAdvisories`)
+ * — a complete-output path that exists today, rather than a new flag.
+ *
+ * Rendering for a set at or under the limit is byte-for-byte what it was.
+ */
+export function printAuthoringAdvisories(
+  advisories: readonly AuthoringAdvisory[],
+  limit: number = AUTHORING_ADVISORY_PRINT_LIMIT,
+): void {
+  if (advisories.length === 0) return;
+
+  for (const f of advisories.slice(0, limit)) {
+    printWarning(`${f.where}: ${f.message}`);
+    if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
+    console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
+  }
+
+  const shown = Math.min(advisories.length, limit);
+  const withheld = advisories.length - shown;
+  if (withheld > 0) {
+    printWarning(
+      `… and ${withheld} more author-time warning(s) not shown (${shown} of ${advisories.length}) — re-run with --json for the full list`,
+    );
   }
 }

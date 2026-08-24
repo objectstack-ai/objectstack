@@ -346,9 +346,17 @@ describe('[#8136] a real sys_metadata failure, walked in process through this do
 // `.catch(() => undefined)` is attached. The list door's durable-read arm is
 // pinned separately in `package-list-durable-read-refusal.test.ts`.
 //
-// ⚠️ Still true of the REGISTRY source: `protocol.getMetaItems` keeps its own
-// inner catch, which #11063 deliberately did not touch (different producer, no
-// declared refusal to carry, and widening the change there was not authorized).
+// ⚠️ [#11376] The sentence here used to add: "Still true of the REGISTRY
+// source: `protocol.getMetaItems` keeps its own inner catch, which #11063
+// deliberately did not touch". Neither registry read in this registrar has one
+// any more — the list door lost its catch in #11130, the detail door's in
+// #11376, where the swallow was answering a terminal `404 RESOURCE_NOT_FOUND`
+// for a read that could not happen. So EVERY data source in all four handlers
+// now reaches the outer catch and this same `sendThrownError`, and this site
+// keeps driving the GATE for the reason above rather than because the sources
+// cannot get here. The two registry arms are pinned in
+// `package-list-registry-read-refusal.test.ts` and
+// `package-id-registry-read-refusal.test.ts`.
 
 interface Site {
   name: string;

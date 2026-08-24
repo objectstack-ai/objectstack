@@ -1538,6 +1538,33 @@ export const FieldSchema = lazySchema(() => {
     });
   }
 
+  // [#11437] (maintainer ruling 2026-08-22 on objectui#4015, Option C —
+  // reject at the entrance): an authored `radio` + `multiple: true` is
+  // refused at the schema/publish seam. The data layer honoured the flag
+  // (stored an array, validated as multi, split on import, inferred action
+  // -param arity) while the widget rendered a single-value radio group with
+  // zero diagnostics — declared multi, rendered single. Per the same ruling,
+  // `MULTI_CAPABLE_TYPES` / `isMultiValueField` (field-value.zod.ts) stay
+  // UNTOUCHED so at-rest data keeps its read path and no stored-shape
+  // migration is paid (why C beat B), and objectql record-validator's
+  // select/radio branch stays as a data-safety fallback. `multiple`
+  // materializes `.default(false)` above, so `true` here is always AUTHORED —
+  // this check can never fire on a defaulted value, and `parse(parse(x))`
+  // stays stable (#9689 class; pinned in field.test.ts).
+  if (field.type === 'radio' && field.multiple === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['multiple'],
+      message:
+        `Field "${field.name ?? '<unnamed>'}": \`type: 'radio'\` cannot be combined with \`multiple: true\` — ` +
+        'a radio group is single-choice by definition (its widget renders exactly one selected option ' +
+        'and has no multi arity), so the declaration would validate and store arrays no radio input can ' +
+        'ever produce: declared multi, rendered single. Use a multi-choice type instead: `checkboxes` ' +
+        '(all options visible, radio-like layout), `multiselect` (dropdown), or `tags` (free-form ' +
+        'values). For a single-choice field, drop `multiple`.',
+    });
+  }
+
   // #7918 (maintainer ruling 2026-08-12, Option A): the FIELD-level
   // `precision` key doubles as the currency display width — objectui's
   // CurrencyField reads it, and objectui#4361 pinned authored-precision-wins

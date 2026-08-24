@@ -3215,8 +3215,32 @@ export class RestServer {
                     const protocol = await this.resolveProtocol(environmentId, req);
                     const discovery = await protocol.getDiscovery();
 
-                    // Override discovery information with actual server configuration
-                    discovery.version = this.config.api.version;
+                    // [#11292] `version` is the PRODUCER's, and is deliberately
+                    // NOT overwritten here. `DiscoverySchema` declares the field
+                    // under "System Identity", grouped with `name` and
+                    // `environment` — the "what server is this" question, settled
+                    // by the #10993 ruling and reaffirmed by #11235/#11242.
+                    //
+                    // This line used to read `discovery.version =
+                    // this.config.api.version`, which is a different fact
+                    // entirely: `normalizeConfig()` defaults it to `'v1'` and the
+                    // SAME value builds the mounted path (`${basePath}/${version}`
+                    // → `/api/v1`), so `GET /api/v1/discovery` answered with the
+                    // path segment the caller had just typed to get there. On the
+                    // one producer most clients actually hit, the identity field
+                    // carried no identity.
+                    //
+                    // It also masked the producer. `getDiscovery()` derives the
+                    // value from `OS_RUNTIME_VERSION` (#11235) — the same stamp
+                    // `/health` and the runtime dispatcher's own `/discovery`
+                    // read (#10993/#11242) — so after #11297 this overwrote a
+                    // value that already AGREED with the other producer, turning
+                    // one answer back into two dialects of one field.
+                    //
+                    // The API-version fact is not lost: every entry in `routes`
+                    // below is prefixed with the mounted base path, which is
+                    // built from `api.version`. It is recoverable from the same
+                    // document, in the field that means it.
 
                     // Substitute the resolved environmentId into the advertised routes so
                     // clients can consume them verbatim (e.g. /api/v1/environments/abc/data).
@@ -6272,10 +6296,16 @@ export class RestServer {
                         });
                         return;
                     }
-                    // `next: null` = no FSM governs the field; `next: []` =
-                    // a declared dead end. Same three-valued answer the
-                    // dispatcher gives, because a UI asking "where can this
-                    // record go" must be able to tell those apart.
+                    // Three answer values — `next: null`, `next: []` (a
+                    // declared dead end), and the legal-next list — the same
+                    // answer the dispatcher gives, because a UI asking "where
+                    // can this record go" must tell those apart. But `null`
+                    // is overloaded across TWO input conditions: no FSM
+                    // governs the field, or the caller omitted `?from=` (no
+                    // `from` => no transition table to answer with), which
+                    // the line below folds onto the same `null` without
+                    // consulting the rule. A UI therefore cannot read `null`
+                    // as "no state machine" unless it passed a `from`.
                     const next = from === undefined ? null : legalNextStates(schema, field, from);
                     res.json({ object: name, field, from: from ?? null, next });
                 } catch (error: any) {
@@ -6643,7 +6673,51 @@ export class RestServer {
                     // `?package=` to `undefined`, i.e. wrote the row as an
                     // env-local overlay instead of into the package the caller
                     // named — a silent change of where the save LANDS.
-                    if (refuseRepeatedQueryParams(req, res, ['package'])) return;
+                    //
+                    // [#11095] `force` joins that list in the SAME stroke as the
+                    // parameter itself, and the order is not cosmetic: #6877's
+                    // sharpest measured case is on this very parameter one route
+                    // over — `?force=false&force=false` reaches the `typeof`
+                    // ternary below as an ARRAY, falls through to `!!forceRaw`,
+                    // and a non-empty array is truthy, so a caller repeating an
+                    // explicit opt-OUT turns the destructive-change guard ON.
+                    // Threading `force` here without also naming it here would
+                    // have re-opened that inversion on a fresh door, on a
+                    // destructive verb, reported as 200.
+                    if (refuseRepeatedQueryParams(req, res, ['force', 'package'])) return;
+                    // [#11095] Phase 3a-destructive: `?force=true` opts past the
+                    // destructive-change safety check — BYTE-IDENTICAL to the
+                    // single-segment `PUT /meta/:type/:name` above, truthy
+                    // spellings and all, because it is byte-identically the same
+                    // decision.
+                    //
+                    // Until this landed the request below was built field by
+                    // field with no `force` among the fields, so `saveMetaItem`'s
+                    // Phase 3a-destructive gate refused a save through this door
+                    // with `409 DESTRUCTIVE_CHANGE` and the remedy clause
+                    // `— re-submit with ?force=true to proceed.`, and a caller
+                    // who did exactly that got the identical refusal back. The
+                    // clause was true of the single-segment twin and false here.
+                    //
+                    // Threading rather than rewording is #7019's ruling applied
+                    // again, with its reason: this route is "word for word the
+                    // same operation" as its twin — one generic `saveMetaItem`
+                    // reached by a name spelled in two segments — and gating only
+                    // the single-segment door was MEASURED to leave this one a
+                    // bypass of it. #8805 (write-side organization) and #7035
+                    // (the 501 envelope) both cite that same finding. A twin pair
+                    // that disagrees about which risks a caller may acknowledge
+                    // is the same shape, one field along.
+                    //
+                    // ⛔ NOT a licence for every door that reaches this gate: the
+                    // runtime dispatcher's `PUT /meta` was ruled the other way in
+                    // the same stroke (it has no query string at all) and states
+                    // its own `writeFace` so its 409 stops prescribing a
+                    // parameter it does not have. See `destructiveChangeRemedy`.
+                    const forceRaw = req.query?.force;
+                    const force = typeof forceRaw === 'string'
+                        ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
+                        : !!forceRaw;
                     const packageRaw = req.query?.package;
                     const packageId = typeof packageRaw === 'string' && packageRaw && packageRaw !== 'all'
                         ? packageRaw
@@ -6676,10 +6750,20 @@ export class RestServer {
                         // Server-stated: this object is built field by field
                         // from named `req` values and never spreads the body, so
                         // a client cannot smuggle a face in.
+                        //
+                        // [#11095] The face stays `'meta-envelope'` — the same
+                        // one the single-segment twin states — and that is now
+                        // the whole point rather than an inherited default: the
+                        // 409 clause this face renders prescribes `?force=true`,
+                        // and with the line below this door finally HAS one. The
+                        // alternative repair (a face of its own, saying the
+                        // parameter is unavailable) is the option the ruling
+                        // rejected for this door and adopted for the dispatcher.
                         writeFace: 'meta-envelope',
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
+                        ...(force ? { force: true } : {}),
                         ...(packageId ? { packageId } : {}),
                     } as any);
                     res.json(result);
@@ -9851,6 +9935,45 @@ export class RestServer {
                 } catch (err: any) { handleError(err, res, 'SUGGESTION_DISMISS_FAILED'); }
             },
             metadata: { summary: 'Dismiss a suggested audience binding', tags: ['security'] },
+        });
+
+        /**
+         * [field report — rc→GA declared≠enforced surfacing] The sanctioned,
+         * audited operator action: discard a stale `sys_metadata` overlay
+         * shadowing a package-declared `sys_permission_set` (the
+         * `overlay_shadow` diagnostic on the record — see
+         * `permission-set-drift.ts`). Bound to `sys_permission_set`'s
+         * "Discard Overlay" Setup action (`{id}` route param, same
+         * convention as `/data/sys_permission_set/{id}`). Refuses (403) on a
+         * set that is not currently package-declared — see
+         * `permission-set-overlay-discard.ts`'s eligibility note — and 409s
+         * when there is no active overlay to discard.
+         *
+         *   POST {basePath}/security/permission-sets/:id/discard-overlay
+         */
+        this.routeManager.register({
+            method: 'POST',
+            path: `${dataPath}/security/permission-sets/:id/discard-overlay`,
+            handler: async (req: any, res: any) => {
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const context = await this.resolveExecCtx(environmentId, req);
+                    if (this.enforceAuth(req, res, context)) return;
+                    const svc = await resolveService(environmentId);
+                    if (!svc || typeof svc.discardPermissionSetOverlay !== 'function') return respond501(res);
+                    const result = await svc.discardPermissionSetOverlay(context ?? {}, String(req.params.id));
+                    res.json({ data: result });
+                // 'INTERNAL' (registered, generic — ADR-0112) is the default here
+                // deliberately, not a bespoke `..._FAILED` code: this route's typed
+                // errors (`PermissionSetNotFoundError` 404, `PermissionSetOverlayStateError`
+                // 409, `PermissionDeniedError` 403) already carry their own registered
+                // `code`, which `handleError`'s `status !== 500` arm reads ahead of this
+                // default — this string is reached only by a genuinely unexpected fault,
+                // and a NEW route-specific code for that arm is a `packages/spec` ledger
+                // entry this change deliberately does not make.
+                } catch (err: any) { handleError(err, res, 'INTERNAL'); }
+            },
+            metadata: { summary: 'Discard a stale environment overlay shadowing a package-declared permission set (ADR-0094)', tags: ['security'] },
         });
     }
 

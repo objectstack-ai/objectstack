@@ -375,6 +375,38 @@ function enforcesVarcharLength(dialect: SqlDialectName): boolean {
 }
 
 /**
+ * Is this physical column a `varchar`/`char` — the only kind that HAS a
+ * declared length to compare against (#11431)?
+ *
+ * Without this the length branch below read a MySQL **TEXT** column as a
+ * varchar 65535 wide, because that is literally what the server reports for it.
+ * Measured on MySQL 8.0.46 and Postgres 16, same two columns:
+ *
+ *   MySQL     `text`              character_maximum_length = 65535
+ *   Postgres  `text`              character_maximum_length = NULL
+ *   both      `varchar(30)`       character_maximum_length = 30
+ *
+ * So the defect was MySQL-only and invisible on Postgres. Every bounded,
+ * unkeyed text field — the shape `createColumn` deliberately leaves as TEXT —
+ * diffed as "declared 4000, column allows 65535" and produced a
+ * `narrow_varchar` op at severity `error`, category **destructive**, against a
+ * table the driver had just created and which held no rows. Measured on live
+ * MySQL: `sys_email`'s envelope alone accounts for seven such findings, each
+ * inviting `os migrate apply --allow-destructive` to rewrite a TEXT column into
+ * a varchar for no reason.
+ *
+ * A TEXT column refuses nothing a `maxLength` allows, so there is no
+ * divergence to plan an ALTER for; the bound is enforced at the write seam.
+ * Spelled as a substring test rather than an equality because the three
+ * dialects disagree on the word — Postgres says `character varying`, MySQL and
+ * SQLite say `varchar` — matching the predicate `introspectSchema` already
+ * uses for the same question.
+ */
+function isCharacterColumn(type: string | undefined): boolean {
+  return /char/i.test(String(type ?? ''));
+}
+
+/**
  * Diff one table's metadata fields against its physical columns and return the
  * set of *drift* findings. Metadata is authoritative.
  *
@@ -487,24 +519,45 @@ export function diffManagedTable(args: {
     }
 
     // ── varchar length (only where the dialect enforces it) ──────────
+    //
+    // `maxLength` must be a POSITIVE INTEGER to be a bound (#11431). Without
+    // that predicate this branch read a malformed declaration as authoritative
+    // and planned DDL no server will accept: `maxLength: 0` took the narrowing
+    // arm (`0 > col.maxLength` is false) and asked for `varchar(0)`, and
+    // `maxLength: 12.5` asked for `varchar(12.5)` — both reported at severity
+    // `error`, category `destructive`, i.e. as work `os migrate apply
+    // --allow-destructive` should go do.
+    //
+    // It is the same predicate the EMITTER applies
+    // (`SqlDriver.declaredVarcharLength`, and `keyableTextLength` before it):
+    // a malformed bound is treated as no bound at all, and the column keeps
+    // its default width. Sharing the predicate is the point — the two halves
+    // disagreeing about which declarations count is the defect class #11431
+    // exists to close, and a differ that still honoured a malformed
+    // `maxLength` would have re-opened it one case to the left.
+    const declaredMaxLength =
+      typeof field.maxLength === 'number' && Number.isInteger(field.maxLength) && field.maxLength > 0
+        ? field.maxLength
+        : undefined;
     if (
       enforcesVarcharLength(dialect) &&
-      typeof field.maxLength === 'number' &&
+      declaredMaxLength !== undefined &&
+      isCharacterColumn(col.type) &&
       typeof col.maxLength === 'number' &&
-      field.maxLength !== col.maxLength
+      declaredMaxLength !== col.maxLength
     ) {
-      if (field.maxLength > col.maxLength) {
+      if (declaredMaxLength > col.maxLength) {
         out.push({
           kind: 'type_mismatch',
           remoteName: table,
           table,
           column: fieldName,
-          expected: `varchar(${field.maxLength})`,
+          expected: `varchar(${declaredMaxLength})`,
           actual: `varchar(${col.maxLength})`,
           severity: 'warning',
           category: 'safe',
-          op: { type: 'widen_varchar', table, column: fieldName, to: field.maxLength, from: col.maxLength },
-          message: `${table}.${fieldName}: metadata allows ${field.maxLength} chars but the column caps at ${col.maxLength} — widen via "os migrate".`,
+          op: { type: 'widen_varchar', table, column: fieldName, to: declaredMaxLength, from: col.maxLength },
+          message: `${table}.${fieldName}: metadata allows ${declaredMaxLength} chars but the column caps at ${col.maxLength} — widen via "os migrate".`,
         });
       } else {
         out.push({
@@ -512,12 +565,12 @@ export function diffManagedTable(args: {
           remoteName: table,
           table,
           column: fieldName,
-          expected: `varchar(${field.maxLength})`,
+          expected: `varchar(${declaredMaxLength})`,
           actual: `varchar(${col.maxLength})`,
           severity: 'error',
           category: 'destructive',
-          op: { type: 'narrow_varchar', table, column: fieldName, to: field.maxLength, from: col.maxLength },
-          message: `${table}.${fieldName}: metadata caps at ${field.maxLength} chars but the column allows ${col.maxLength} — narrowing may truncate. "os migrate apply --allow-destructive".`,
+          op: { type: 'narrow_varchar', table, column: fieldName, to: declaredMaxLength, from: col.maxLength },
+          message: `${table}.${fieldName}: metadata caps at ${declaredMaxLength} chars but the column allows ${col.maxLength} — narrowing may truncate. "os migrate apply --allow-destructive".`,
         });
       }
     }
@@ -1048,6 +1101,49 @@ export function expectedIndexes(args: {
     if (norm) out.push(norm);
   }
   return out.filter((i) => i.columns.every((c) => physicalColumns.has(c)));
+}
+
+/**
+ * Every column any declared index on this object will use as a KEY PART, mapped
+ * to whether at least one of those indexes is UNIQUE.
+ *
+ * Computed from the same two normalizers {@link expectedIndexes} composes —
+ * field-level `unique` through {@link uniqueIndexesFromFields}, object-level
+ * `indexes[]` through {@link normalizeDeclaredIndex} — so "which columns end up
+ * in a key" has ONE answer, shared by the index sync that creates them and by
+ * the DDL that has to make them keyable in the first place (#11374).
+ *
+ * ⚠️ Deliberately NOT filtered by `physicalColumns`, unlike `expectedIndexes`:
+ * its caller runs BEFORE the columns exist — deciding a column's TYPE is the
+ * whole reason it asks — so a filter against the physical set would answer
+ * "nothing is indexed" on exactly the CREATE TABLE path that needs the answer.
+ *
+ * The UNIQUE flag is carried because the two dispositions genuinely differ on
+ * MySQL: a bounded key part is merely a storage choice for an ordinary index,
+ * but it is the CONSTRAINT itself for a unique one (see
+ * `mysqlKeyableTextLength` and the refusal it feeds).
+ */
+export function indexedKeyColumns(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+}): Map<string, { unique: boolean }> {
+  const { table, fields, tenantField, declaredIndexes } = args;
+  const out = new Map<string, { unique: boolean }>();
+  const record = (idx: ExpectedIndex) => {
+    for (const column of idx.columns) {
+      const prev = out.get(column);
+      if (prev) prev.unique ||= idx.unique;
+      else out.set(column, { unique: idx.unique });
+    }
+  };
+  for (const idx of uniqueIndexesFromFields(table, fields, tenantField)) record(idx);
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    const norm = normalizeDeclaredIndex(table, idx, tenantField);
+    if (norm) record(norm);
+  }
+  return out;
 }
 
 /**

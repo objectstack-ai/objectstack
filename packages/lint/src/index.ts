@@ -616,7 +616,11 @@ export {
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 export type { LivenessLintFinding } from './lint-liveness-properties.js';
-export { LIVENESS_DEAD_PROPERTY, LIVENESS_EXPERIMENTAL_PROPERTY } from './lint-liveness-properties.js';
+export {
+  LIVENESS_DEAD_PROPERTY,
+  LIVENESS_EXPERIMENTAL_PROPERTY,
+  LIVENESS_PLANNED_PROPERTY,
+} from './lint-liveness-properties.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
@@ -700,3 +704,25 @@ export type {
 // package is exactly what the module exists to prevent (#5405).
 export { walkPageComponents, isSourceAuthoredPage } from './page-walk.js';
 export type { WalkedComponent } from './page-walk.js';
+
+// The canonical-expression-envelope audit for raw-literal `Page` exports
+// (#11255 → #11480): a page authored as a typed object literal is never
+// PARSED, so every `ExpressionInputSchema` position on it reaches the wire
+// bare and the console silently routes it to its legacy evaluator. Built on
+// `walkPageComponents` above and exported for the same reason that walk is:
+// the detector's first home was package-local, which left every OTHER
+// published package's pages unreachable, and copying it per package is the
+// documented dead-rule failure mode. Each owning package runs a thin test
+// over its own `Page` exports; the detector's own behaviour is tested once,
+// in `page-envelope-audit.test.ts`. (`collectBare`, the single-door
+// primitive, is deliberately NOT re-exported — consumers always want the
+// three-door union.)
+export {
+  auditPageExpressionEnvelopes,
+  renderBareExpressionFindings,
+} from './page-envelope-audit.js';
+export type {
+  BareExpressionFinding,
+  EnvelopeAuditDoor,
+  PageEnvelopeAudit,
+} from './page-envelope-audit.js';

@@ -17,6 +17,11 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "@objectstack/docs#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "json-schema/**", ".next/**", "!.next/cache/**"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/content/**"]
+    },
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
@@ -100,6 +105,7 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/packages/services/service-datasource/src/datasource-route-ledger.conformance.test.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-auth/src/auth-route-ledger.conformance.test.ts",
         "$TURBO_ROOT$/scripts/check-route-envelope.mjs"
       ]
     },
@@ -147,6 +153,33 @@
         "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
         "$TURBO_ROOT$/packages/types/src/node-isolation.test.ts"
       ]
+    },
+    "@objectstack/trigger-record-change#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/scripts/slot-lookup-baseline.json",
+        "$TURBO_ROOT$/packages/core/src/kernel.ts"
+      ],
+      "outputs": []
+    },
+    "@objectstack/plugin-approvals#test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/runtime/src/expected-read-refusal-noise.ts",
+        "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/team-graph.ts"
+      ],
+      "outputs": []
     },
     "@objectstack/plugin-security#test": {
       "dependsOn": ["^build"],

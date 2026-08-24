@@ -11,7 +11,9 @@
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
-import { pluralToSingular } from '@objectstack/spec/shared';
+// [#10503] `canonicalMetaUrlType` is the FOLD this transport was missing.
+// See the two call sites below for what each one was deciding raw.
+import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
 import { CoreServiceName } from '@objectstack/spec/system';
 // [ADR-0106 / #3682] Metadata-plane FLS — the SAME projection the REST `/meta`
 // exits run. Two dispatchers, one normalizer (`@objectstack/metadata-core`),
@@ -230,8 +232,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // ADR-0020 D3.3 introspection: the legal next states declared by the
     // object's `state_machine` validation rule for `:field`. Lets UIs /
     // AI authors ask "from here, where can this record go?" instead of
-    // hard-coding the transition table. Returns `next: null` when no FSM
-    // governs the field, `next: []` for a declared dead-end state.
+    // hard-coding the transition table. `next: []` is a declared
+    // dead-end state. `next: null` has TWO causes: no FSM governs the
+    // field, or the caller omitted `?from=` (no `from` => no transition
+    // table to answer with) — the handler short-circuits on that before
+    // it ever consults the rule. So a `null` answered to a call
+    // that passed no `from` is not evidence the field has no state
+    // machine; re-ask with `?from=`.
     if (parts.length === 4 && (parts[0] === 'objects' || parts[0] === 'object') && parts[2] === 'state' && (!method || method === 'GET')) {
         const name = parts[1];
         const field = parts[3];
@@ -302,7 +309,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
-            const data = await (metadataService as any).getPublished(type, name);
+            // [#10503] FOLDED — the smaller second site of the same class,
+            // dispatcher edition (the REST twin folds at the same point). The
+            // layered consult above folds internally at the protocol boundary;
+            // this fallback reads the code/package registry, which stores
+            // CANONICAL types. Handed the raw segment it answered 404 under a
+            // recognised plural and 200 under the singular twin — of the same
+            // code-published item.
+            const data = await (metadataService as any).getPublished(canonicalMetaUrlType(type), name);
             if (data === undefined) return { handled: true, response: deps.error('Not found', 404) };
             return { handled: true, response: deps.success(data) };
         }
@@ -310,7 +324,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
         if (metaSvc && typeof (metaSvc as any).getPublished === 'function') {
             try {
-                const fallbackData = await (metaSvc as any).getPublished(type, name);
+                // [#10503] Same fold — this slot reads the same canonical store.
+                const fallbackData = await (metaSvc as any).getPublished(canonicalMetaUrlType(type), name);
                 if (fallbackData !== undefined) return { handled: true, response: deps.success(fallbackData) };
             } catch { /* fall through */ }
         }
@@ -413,7 +428,36 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // `isOverlayAllowed` — and, since #8805, why it lives there:
                     // the REST `/meta` write doors run the same one.
                     const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
-                    const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
+                    //
+                    // [#10503] The segment is FOLDED before the scope decision
+                    // — the correction #10340 landed for the REST `/meta`
+                    // doors, arriving on the second transport. This branch read
+                    // the RAW `parts[0]`, while `protocol.saveMetaItem` below
+                    // folds the same string through `canonicalizeMetaRequestType`
+                    // for storage. Two maps that must agree did not: storage
+                    // folds through `META_URL_TO_SINGULAR` (every spelling),
+                    // while `declaresOrgOverride` tolerates only the MANIFEST
+                    // collection spellings. For the two URL-only spellings of
+                    // `allowOrgOverride: true` types — `translations` and
+                    // `email_templates` — an org-active caller's write therefore
+                    // landed ENV-WIDE where the singular twin landed org-scoped:
+                    // one item, two partitions, addressed by spelling.
+                    //
+                    // ⛔ NOT repaired by widening `declaresOrgOverride`'s set —
+                    // a predicate below the boundary consuming the URL spelling
+                    // contract is what `metadata-url-spelling.ts`'s own header
+                    // forbids ("folding happens at the boundary and only
+                    // there"), and `meta-write-org-scope.ts`'s
+                    // `ORG_OVERRIDABLE_TYPES` header pins that limit.
+                    //
+                    // Only the scope ARGUMENT is folded. The request `type`
+                    // stays the raw segment, exactly as the REST doors leave
+                    // it: the protocol boundary folds it itself, and two
+                    // pre-folds would hide a drift between them from the
+                    // protocol's own tests.
+                    const organizationId = organizationIdForMetaWrite(
+                        canonicalMetaUrlType(type), activeOrganizationId,
+                    );
                     // [#10888] Server-stated face: this branch answers through
                     // `deps.errorFromThrown`, which carries the refusal's
                     // `issues[]` in `details` (see the `details.issues` pin in
@@ -421,9 +465,32 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // a headline rather than restating the per-key prose that
                     // already rides the envelope structurally. Not client-settable:
                     // the request object names each field explicitly.
+                    //
+                    // [#11095] …and the face is this door's OWN, not the REST
+                    // doors'. It read `'meta-envelope'` until the two switches
+                    // that consume it disagreed for the first time. The 422
+                    // answer is unchanged and shares `'meta-envelope'`'s case;
+                    // what moved is the `409 DESTRUCTIVE_CHANGE` REMEDY clause,
+                    // which used to tell a caller refused HERE to `re-submit
+                    // with ?force=true` — advice this transport cannot take. The
+                    // two REST `PUT` doors read `?force` off a query string (the
+                    // compound-name twin as of this same card, inheriting
+                    // #7019's twin-parity ruling); this branch is reached with a
+                    // path, a method and a body, so there is no query string for
+                    // an acknowledgement to arrive on.
+                    //
+                    // ⛔ This is the door the ruling deliberately did NOT give a
+                    // `force`, and the absence is settled rather than pending:
+                    // adding one — as a body key, a request field or anything
+                    // else — widens a public surface no ruling has widened, and
+                    // turns the clause into a lie in the other direction. The
+                    // request below is built field by field for exactly that
+                    // reason: `item` is data, never a channel, so a caller
+                    // cannot smuggle a `force` (or a `writeFace`) through it.
+                    // Pinned both ways in `meta-save-destructive-remedy.test.ts`.
                     const result = await protocol.saveMetaItem({
                         type, name, item, organizationId,
-                        writeFace: 'meta-envelope',
+                        writeFace: 'meta-dispatch',
                         ...(packageId ? { packageId } : {}),
                     });
                     return { handled: true, response: deps.success(result) };

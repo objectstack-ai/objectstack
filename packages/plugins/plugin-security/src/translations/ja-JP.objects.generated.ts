@@ -236,6 +236,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "カスタマイズ済み",
         help: "このパッケージ権限セットには環境カスタマイズのオーバーレイがあります（ADR-0094）。リセット（データドア経由で削除）すると出荷時のベースラインに戻ります。"
       },
+      drift_status: {
+        label: "Declaration Drift",
+        help: "Cause of a declared≠enforced mismatch for this package-declared set. 'overlay_shadow' = a Studio-authored environment overlay is shadowing the packaged declaration — resync it with the Discard Overlay action. 'provenance_skip' = this row predates package provenance tracking, so boot sync treats it as environment-authored and never reconciles it with the package (no automated fix — file an issue / see the ops runbook for the manual adoption recipe). Absent = enforced grants match the shipped artifact, or this set is not currently package-declared.",
+        options: {
+          overlay_shadow: "Overlay shadow",
+          provenance_skip: "Provenance skip",
+          other: "Drift (other)"
+        }
+      },
+      drift_detail: {
+        label: "Drift Detail",
+        help: "Human-readable detail for `drift_status` — names the grant-count mismatch and its cause."
+      },
       id: {
         label: "権限セット ID"
       },
@@ -255,6 +268,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_permsets: {
         label: "すべて"
+      },
+      drifted: {
+        label: "Needs Attention"
       }
     },
     _actions: {
@@ -266,6 +282,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "無効化",
         confirmText: "この権限セットを無効化しますか？既存の割り当ては維持されますが、再度有効化するまでアクセスの付与は停止されます。",
         successMessage: "権限セットが無効化されました"
+      },
+      discard_permission_set_overlay: {
+        label: "Discard Overlay",
+        confirmText: "Discard the environment overlay shadowing this package-declared set and resync it to the shipped artifact? This only removes the customization overlay — it never touches an environment-authored set.",
+        successMessage: "Overlay discarded — the set is resynced to the shipped artifact"
       },
       clone_permission_set: {
         label: "複製",

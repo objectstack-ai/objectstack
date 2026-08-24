@@ -4,13 +4,15 @@
  * Build-time lint that closes the spec-liveness loop on the AUTHOR side.
  *
  * The liveness ledgers (`@objectstack/spec/liveness/<type>.json`) classify every
- * authorable metadata property as live / experimental / dead with evidence. The
- * CI gate enforces that classification is *complete*, but the ledger's knowledge
- * never reached the person (very often an AI) writing the metadata. This lint
- * surfaces it: when an authored object/field sets a property the ledger marks as
- * dead-and-misleading (or experimental), it emits an advisory WARNING — "you set
- * this expecting it to do something; at runtime it does nothing" — with a hint
- * toward the supported alternative. It NEVER fails the build.
+ * authorable metadata property as live / experimental / planned / dead with
+ * evidence. The CI gate enforces that classification is *complete*, but the
+ * ledger's knowledge never reached the person (very often an AI) writing the
+ * metadata. This lint surfaces it: when an authored object/field sets a property
+ * the ledger marks `dead`-and-misleading, `experimental`, or `planned`, it emits
+ * an advisory WARNING with a verdict-specific message and hint — `dead` says
+ * remove it, `experimental`/`planned` say keep it (declared, just not enforced /
+ * not read yet) — under a verdict-specific rule id (`describe()` below is the one
+ * place that mapping lives; #11384). It NEVER fails the build.
  *
  * Signal over noise is the whole point, so the ledger opts in per entry via
  * `"authorWarn": true` (+ an optional `"authorHint"`). A property being merely
@@ -33,6 +35,7 @@ export interface LivenessLintFinding {
 
 export const LIVENESS_DEAD_PROPERTY = 'liveness-dead-property';
 export const LIVENESS_EXPERIMENTAL_PROPERTY = 'liveness-experimental-property';
+export const LIVENESS_PLANNED_PROPERTY = 'liveness-planned-property';
 
 type AnyRec = Record<string, unknown>;
 
@@ -105,11 +108,71 @@ function isAuthored(value: unknown): boolean {
   return true;
 }
 
-function describe(entry: LedgerEntry): { kind: string; rule: string } {
+/**
+ * `#11384`. The ledger ships (at least) three verdicts an author-facing finding
+ * can carry, and they imply OPPOSITE actions: `dead` means remove the property
+ * (nothing will ever read it), `planned` means keep it (a consumer is being
+ * built against it, contract-first — it just does not have runtime effect
+ * YET), `experimental` means keep it too but with the guarantee's status
+ * flagged. Collapsing `planned` into the `dead` branch — the bug this function
+ * fixes — told an author to delete metadata the platform had asked them to
+ * write, while the row's own `authorHint`/`note` (when present) said the
+ * opposite one sentence later on the SAME finding.
+ *
+ * Each verdict below also carries its own DEFAULT hint (used only when the
+ * ledger entry has neither `authorHint` nor `note`): the `dead` default says
+ * "Remove it"; `planned`'s must not, because removing a planned property is
+ * exactly the wrong author action.
+ *
+ * Unknown status: `LedgerEntry.status` is a plain `string` (see the interface
+ * above) because the ledger's status vocabulary is DOCUMENTED, not
+ * schema-enforced — `packages/spec/scripts/liveness/check-liveness.mts`'s own
+ * header states "Statuses: live | experimental | planned | dead" in a comment,
+ * and nothing in that gate (or anywhere else) rejects a ledger JSON file that
+ * spells one wrong or ships a status this function has never heard of; the
+ * gate only requires that a status be PRESENT, not that it be one of the four.
+ * An entry only reaches `describe()` once `shouldWarn()` has already said yes
+ * (`authorWarn: true`, or `status === 'experimental'`), so `live` can in
+ * principle arrive here too (an entry marked `authorWarn: true` on a `live`
+ * row would be a ledger authoring mistake, not a user error). Before this fix
+ * every one of those unrecognised cases fell silently into the `dead` branch —
+ * exactly the defect class #11384 reports, just with a different trigger — so
+ * the boundary below is LOUD on purpose: a status this function does not
+ * recognise is a bug in the shipped ledger, not something to guess about.
+ * This is deliberately narrower than the file's general "never throws"
+ * promise (see the `checkItem`/bundle-walk comments below): that promise
+ * covers malformed STACK input from an untrusted author, while a ledger
+ * status is OUR OWN shipped, framework-controlled data — failing loudly here
+ * cannot be triggered by anything an app author writes.
+ */
+function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint: string } {
   if (entry.status === 'experimental') {
-    return { kind: 'is experimental — declared but NOT enforced at runtime', rule: LIVENESS_EXPERIMENTAL_PROPERTY };
+    return {
+      kind: 'is experimental — declared but NOT enforced at runtime',
+      rule: LIVENESS_EXPERIMENTAL_PROPERTY,
+      defaultHint: 'It is declared in the spec as an experimental guarantee — not yet enforced at runtime.',
+    };
   }
-  return { kind: 'has no runtime effect (liveness: dead)', rule: LIVENESS_DEAD_PROPERTY };
+  if (entry.status === 'planned') {
+    return {
+      kind: 'is planned — declared, and a consumer is being built against it (not read YET)',
+      rule: LIVENESS_PLANNED_PROPERTY,
+      defaultHint: 'Keep it — a consumer is being built against this property; it has no runtime effect yet.',
+    };
+  }
+  if (entry.status === 'dead') {
+    return {
+      kind: 'has no runtime effect (liveness: dead)',
+      rule: LIVENESS_DEAD_PROPERTY,
+      defaultHint: 'Remove it — it is declared in the spec but not consumed at runtime.',
+    };
+  }
+  throw new Error(
+    `lintLivenessProperties: ledger entry has unrecognised status ${JSON.stringify(entry.status)} — ` +
+    "describe() only knows 'experimental' | 'planned' | 'dead'. This is a shipped-ledger integrity " +
+    'bug, not an authoring error: either the ledger JSON has a typo, or a new status was added to ' +
+    'the vocabulary without teaching describe() in lint-liveness-properties.ts about it (#11384).',
+  );
 }
 
 /** Check one metadata item's set properties against its type's warn-map. */
@@ -126,10 +189,8 @@ function checkItem(
       : [item[path]];
     for (const value of values instanceof Array ? values : [values]) {
       if (!isAuthored(value)) continue;
-      const { kind, rule } = describe(entry);
-      const hint = entry.authorHint
-        ?? entry.note
-        ?? 'Remove it — it is declared in the spec but not consumed at runtime.';
+      const { kind, rule, defaultHint } = describe(entry);
+      const hint = entry.authorHint ?? entry.note ?? defaultHint;
       findings.push({
         where: whereBase,
         message: `sets \`${path}\` but this ${type} property ${kind}.`,

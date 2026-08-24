@@ -26,7 +26,7 @@
  */
 
 import { buildExistingByName } from './seed-name-lookup.js';
-import { seedCtx, warnPreFixOrganizationLessRows } from './per-organization-catalog.js';
+import { seedCtx, warnOrganizationLessRows } from './per-organization-catalog.js';
 
 function genId(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -170,7 +170,9 @@ export async function bootstrapDeclaredPositions(
     }
   }
   if (organizationId) {
-    warnPreFixOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
+    // No `platformBucketNames`: nothing mints an organization-less `sys_position`
+    // row any more, so every leftover here really is pre-fix residue (#11532).
+    warnOrganizationLessRows(options.logger, 'sys_position', residue, organizationId);
   }
   if (unreadable > 0) {
     // Said once, with the count — see the sibling warn in

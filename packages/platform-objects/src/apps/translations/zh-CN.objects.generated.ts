@@ -209,15 +209,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
-      set_user_role: {
-        label: "设置平台角色",
-        successMessage: "角色已更新",
-        params: {
-          role: {
-            label: "平台角色"
-          }
-        }
-      },
       impersonate_user: {
         label: "模拟用户",
         confirmText: "要为该用户启动模拟会话吗？仅限合法支持场景使用——所有操作都会被记录。",
@@ -625,6 +616,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "邀请用户",
+        successMessage: "邀请已发送"
+      },
       add_member: {
         label: "添加成员",
         successMessage: "成员已添加"

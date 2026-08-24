@@ -89,9 +89,63 @@
 // converse, and one discipline serves both: measure EVERY config, then report every
 // DISTINCT cause once, with the configs it covers. A config that cannot be linted is
 // now collected (`measureI18nIssues` returns a failure), never thrown.
+//
+// Both of those are about a config that could not be MEASURED. #10907 is about
+// the population itself, and it is the failure this gate could not report at all:
+// every path here was resolved CWD-RELATIVELY — `examples`, `packages`, the
+// baseline, the CLI stub — so run from anywhere but the repo root the gate found
+// no configs, compared nothing, and printed
+//
+//     check-i18n-coverage: OK (0 config(s), 0 baselined untranslated string(s), none new).
+//     exit 0
+//
+// — the same sentence, and the same exit code, a real pass uses. What makes that
+// silent rather than merely wrong is an INTERLOCK: this is a two-sided ratchet, so
+// a config that vanishes is normally caught by the DOWN direction ("baselined
+// config is gone"). But the population and the baseline were resolved the same
+// way, so a wrong root emptied them TOGETHER and left the comparison with nothing
+// to disagree about. Anchoring one side alone would not have been a fix — it would
+// have turned the silence into twelve spurious errors.
+//
+// Two halves, and the file keeps both. (1) Every read is anchored to a root
+// derived from `import.meta.url`, as `check-skills-token-ratchet.mjs` and
+// `check-ratchet-remedy-authority.mjs` do; the repo-relative spellings stay, since
+// they are the committed baseline's KEYS and the text a reader acts on, and `at()`
+// is the one seam between the two. (2) An empty population is REFUSED rather than
+// returned — zero is a broken scan, not a repo with nothing to translate (#4690),
+// the same rule `trackedFiles` states in `scripts/pm/dispatch-gates.mjs`. Half 1
+// makes the off-root run correct; half 2 is what keeps "green over nothing"
+// unreachable by the routes half 1 does not know about.
+//
+// #11395 is #5217's rule failing INSIDE the machinery written to keep it. The
+// grouping keys a cause on its CONCLUSION — `[reason, fix]` — which holds only
+// while `fix` is a shared remedy. It was not: three of the five failure branches
+// set `fix` to `rerunFix(configPath)`, a string embedding the config path, so each
+// config got a unique key and one shared cause was split into one group per
+// config. Measured on an unbuilt worktree with the CLI probe deferring — all
+// twelve configs failed for ONE environment fact and the report read
+//
+//     check-i18n-coverage: COULD NOT MEASURE — 12 of 12 config(s) failed to lint (12 distinct causes)
+//
+// — twelve blocks, twelve identical `why:` lines, while its own closing paragraph
+// asserted "a cause shared by several configs is stated once, not once per config
+// (#5217)". Note WHERE that hid: CI builds the workspace first, so CI reaches this
+// report only over a green tree, and the environment that produces it is the one
+// nobody runs the gate from twice.
+//
+// Fixed at the IDENTITY, not by normalising the path back out of the key: the
+// classifiers no longer receive a config path at all, so no per-config string is
+// in reach of a cause. The rerun command is a per-config remedy DETAIL and
+// `reportUnmeasuredConfigs` renders it per config inside the block. The other half
+// of the key had the same defect one branch over — the non-JSON verdict
+// interpolated the byte count and the parser's message into `reason` — and a fix
+// addressing only `fix` would have left it splitting; readings belong in
+// `evidence`, which is not keyed. The classified branches (`WORKSPACE_BUILD_FIX` /
+// `INSTALL_THEN_BUILD_FIX`) group byte-for-byte as they did before.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
@@ -102,9 +156,33 @@ import {
   resolveCliCommandFile,
 } from './cli-build-prerequisite.mjs';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** This script lives in `scripts/`, so the repo root is one level up (#10907). */
+const REPO_ROOT = resolve(HERE, '..');
+
+// Repo-relative ON PURPOSE — these spellings are the committed baseline's KEYS,
+// the paths in every error message, and the commands `rerunCommand` tells a reader
+// to run. Making them absolute would silently re-key all twelve baseline entries.
+// `at()` below is the ONE seam that turns a repo-relative path into a path on
+// disk, so the vocabulary stays relative while every READ is anchored (#10907).
 // NOTE: covers both `examples/*` and every package with an extract config.
 const EXAMPLES_DIR = 'examples';
+const PACKAGES_DIR = 'packages';
 const BASELINE_PATH = 'scripts/i18n-coverage-baseline.json';
+
+// ⛔ Neither root above is declared to the dispatch derivation, and that is a
+// recorded REFUSAL rather than an omission. Both populations are FILENAME
+// filters — one `objectstack.config.ts` per example directory (3 of 240), and
+// files named `i18n-extract.config.ts` beneath a `scripts` segment (9 of 5035).
+// The `ROOT_DIR_WATCH_HINTS` idiom can only name a whole subtree, so the only
+// spellable claim here would name this gate for 5035 files to reach 9 — the
+// costlier error, per `hintCovers`. Both verdicts are recorded as
+// REFUSE-UNSPELLABLE in the triage that `scripts/pm/bare-root-worklist.mjs`
+// self-tests on every PR; giving `PACKAGES_DIR` a population-constant name is
+// what made this root visible to that sweep at all.
+
+/** A repo-relative path, resolved against the module-derived root. */
+const at = (rel) => join(REPO_ROOT, rel);
 /** The one command this gate invokes per config, as oclif topic/command parts. */
 const LINT_COMMAND_ID = ['lint'];
 
@@ -120,13 +198,13 @@ const INSTALL_THEN_BUILD_FIX = 'pnpm install && pnpm build';
 
 const update = process.argv.includes('--update');
 
-/** Every bundled example that has a stack config. */
+/** Every bundled example that has a stack config. Root-anchored, repo-relative out. */
 function discoverExamples() {
-  if (!existsSync(EXAMPLES_DIR)) return [];
-  return readdirSync(EXAMPLES_DIR, { withFileTypes: true })
+  if (!existsSync(at(EXAMPLES_DIR))) return [];
+  return readdirSync(at(EXAMPLES_DIR), { withFileTypes: true })
     .filter((e) => e.isDirectory())
     .map((e) => join(EXAMPLES_DIR, e.name, 'objectstack.config.ts'))
-    .filter((p) => existsSync(p))
+    .filter((p) => existsSync(at(p)))
     .sort();
 }
 
@@ -139,9 +217,9 @@ function discoverExamples() {
  * Studio. Covering only `examples/` is how `platform-objects` sat on 77
  * untranslated navigation and widget labels per locale without anything saying so.
  */
-function discoverPackages(dir = 'packages', out = []) {
-  if (!existsSync(dir)) return out;
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
+function discoverPackages(dir = PACKAGES_DIR, out = []) {
+  if (!existsSync(at(dir))) return out;
+  for (const e of readdirSync(at(dir), { withFileTypes: true })) {
     if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) discoverPackages(p, out);
@@ -163,8 +241,42 @@ function countI18nRuleIssues(report) {
   return issues.filter((i) => typeof i?.rule === 'string' && i.rule.startsWith('i18n/')).length;
 }
 
-/** The command that reproduces one config's failure by hand, for the reader. */
-function rerunFix(configPath) {
+/**
+ * The remedy for a failure this gate cannot prescribe one shared command for:
+ * nothing can be run once that clears every config, so the reader reproduces one
+ * by hand and reads `os lint`'s own words.
+ *
+ * A CONSTANT, and that is the entire point (#11395). This slot used to hold
+ * `rerunFix(configPath)` — a per-config string — and `groupFailuresByCause` keys
+ * on it, so every config reaching one of these three branches got a unique key and
+ * one shared cause was split into one group per config: exactly the "one cause
+ * reported as N results" shape the grouping exists to prevent (#5217).
+ *
+ * The per-config command is a remedy DETAIL, not part of the identity of a cause,
+ * so `reportUnmeasuredConfigs` renders `rerunCommand(configPath)` for each config
+ * INSIDE the block. What keeps the hole shut is not this constant but what it let
+ * us remove: no classifier in this file is handed a config path any more, so a
+ * per-config string is not in reach of a cause. A later `rerunFix`-shaped helper
+ * cannot re-open it without re-plumbing the config path into a classifier — a
+ * visible change, and one the `#11395` property assertions in `selfTest` red on.
+ */
+const RERUN_BY_HAND = 'no single command clears these — reproduce each config by hand and read `os lint`\'s own words:';
+
+/**
+ * Every remedy this gate can prescribe. `fix` is half of a cause's IDENTITY, so
+ * the set is CLOSED and every member is a constant (#11395) — a `fix` from
+ * outside it is a per-config string in the grouping key, which is the defect.
+ */
+const SHARED_REMEDIES = [WORKSPACE_BUILD_FIX, INSTALL_THEN_BUILD_FIX, RERUN_BY_HAND];
+
+/**
+ * The command that reproduces ONE config's failure by hand, for the reader.
+ *
+ * Called only by the REPORT, never by a classifier — see `RERUN_BY_HAND`. Its
+ * output is per-config by construction, which is why it must stay on the
+ * rendering side of the line.
+ */
+function rerunCommand(configPath) {
   return `node ${CLI} lint ${configPath} --json`;
 }
 
@@ -195,11 +307,16 @@ function evidenceLine(text, max = 200) {
  * over a genuinely broken config would be the #5862 defect — a confident diagnosis
  * pointing somewhere innocent — rebuilt one layer down.
  *
- * @param {string} configPath the config being measured, for the rerun command
+ * ⛔ Deliberately does NOT take the config path (#11395). What it returns is a
+ * CAUSE, and `groupFailuresByCause` keys on that — so a classifier able to name
+ * the config is a classifier able to put a per-config string in the key and split
+ * one cause into N. It took `configPath` for exactly one purpose, the rerun
+ * command, and that is a remedy detail the REPORT renders per config.
+ *
  * @param {string} text the CLI's own failure text (`report.error`, or a thrown message)
  * @returns {{ reason: string, evidence: string, fix: string }}
  */
-function explainConfigFailure(configPath, text) {
+function explainConfigFailure(text) {
   const evidence = evidenceLine(text);
   const missing = String(text ?? '').match(/Cannot find (?:module|package) '([^']+)'/);
   if (missing) {
@@ -222,7 +339,52 @@ function explainConfigFailure(configPath, text) {
   return {
     reason: '`os lint` failed on this config — the reading below is the CLI\'s own words, not this gate\'s',
     evidence,
-    fix: rerunFix(configPath),
+    fix: RERUN_BY_HAND,
+  };
+}
+
+/**
+ * `os lint` wrote nothing at all — the second of the three ways one config can
+ * fail to yield a number.
+ *
+ * Pure, and lifted out of `measureI18nIssues` for that reason (#11395): CI builds
+ * the workspace before this gate runs, so CI never reaches this branch, and a
+ * verdict constructed inline inside a function that spawns a CLI cannot be pinned
+ * by `--self-test`. It is the branch the twelve-way split was measured on.
+ *
+ * @param {string} stderr the only reading there is when stdout was empty
+ */
+function emptyOutputFailure(stderr) {
+  return {
+    reason: '`os lint` produced no output at all — no JSON payload to count',
+    // stderr is the only reading there is when stdout was empty. It was already
+    // captured for the signature net in `measureI18nIssues`; discarding it here
+    // would leave the reader a verdict with nothing under it.
+    evidence: evidenceLine(stderr),
+    fix: RERUN_BY_HAND,
+  };
+}
+
+/**
+ * `os lint` wrote something that is not JSON — the third way, pure for the same
+ * reason as above.
+ *
+ * The byte count and the parser's message are a READING, so they belong in
+ * `evidence`. They used to be interpolated into `reason`, which is the OTHER half
+ * of the grouping key — so two configs whose non-JSON output differed by a byte,
+ * or which tripped the parser at different offsets, were one cause reported as
+ * two. Same #5217 defect as `fix`'s, arriving through the other half, and it would
+ * have survived a fix that only addressed `fix` (#11395).
+ *
+ * @param {string} raw what landed in the capture file
+ * @param {unknown} parseError what `JSON.parse` said about it
+ */
+function nonJsonOutputFailure(raw, parseError) {
+  const said = parseError instanceof Error ? parseError.message : String(parseError);
+  return {
+    reason: '`os lint` wrote output that is not JSON — no payload to count',
+    evidence: evidenceLine(`${said} — ${raw.length} byte(s), beginning: ${raw}`, 160),
+    fix: RERUN_BY_HAND,
   };
 }
 
@@ -242,11 +404,63 @@ function packageNameFromSpecifier(specifier) {
 }
 
 /**
+ * The POPULATION classifier (#10907): is there anything to judge at all?
+ *
+ * Pure — list in, verdict out — so `--self-test` drives both directions. That
+ * matters more here than for any other classifier in this file: an empty
+ * population is the one failure that RENDERS AS A PASS, so a gate that had only
+ * ever observed its own green path could not tell the two apart. That is #4690
+ * exactly, and `trackedFiles` in `scripts/pm/dispatch-gates.mjs` refuses an empty
+ * listing on the same grounds — "zero is a broken scan, not a clean repo".
+ *
+ * Judged on the UNION, deliberately, not per half. A single vanished config is
+ * already this gate's business: the two-sided ratchet reports it as a DOWN and
+ * tells the reader to `--update`. Refusing on an empty HALF would preempt that
+ * legitimate path — the last example being retired is a real event, not a broken
+ * scan. Only a total wipe is indistinguishable from a scan that read nothing, and
+ * only a total wipe is refused here.
+ *
+ * @param {string[]} configPaths the discovered population, repo-relative
+ * @returns {{ headline: string, detail: string[] } | null} null when there is work to do
+ */
+function emptyPopulationVerdict(configPaths) {
+  if (configPaths.length > 0) return null;
+  return {
+    headline: 'the config population came back EMPTY — there is nothing to measure',
+    detail: [
+      `Neither \`${EXAMPLES_DIR}/*/objectstack.config.ts\` nor any`,
+      `\`${PACKAGES_DIR}/**/scripts/i18n-extract.config.ts\` was found under the root this`,
+      `script derives from its own location:`,
+      ``,
+      `  ${REPO_ROOT}`,
+      ``,
+      `Zero is a broken scan, not a repo with nothing to translate (#4690). Note what`,
+      `an empty population costs THIS gate specifically: it is a two-sided ratchet, so`,
+      `a config that really did vanish is caught by the DOWN direction — but the`,
+      `population and the baseline are read the same way, so a tree this script cannot`,
+      `read empties BOTH, leaving the comparison with nothing to disagree about and a`,
+      `verdict identical to a real pass. Refusing rather than reporting OK over nothing.`,
+    ],
+  };
+}
+
+/**
  * Distinct CAUSES, each carrying the configs it explains. Keyed on the CONCLUSION
  * (reason + fix) rather than the raw reading, because one unbuilt package produces
  * a different absolute path per config and those are the same fact told twelve
  * times — exactly the "one cause reported as N results" shape #5217 closed on the
  * neighbouring gate. The first reading is kept as the group's evidence.
+ *
+ * ⚠️ The key is only as good as its two halves, and #11395 is what happens when
+ * either one carries per-config detail: whatever a producer interpolates into
+ * `reason` or `fix` becomes part of a cause's identity, silently, and the grouping
+ * degrades into a per-config list while still printing "N distinct causes". So the
+ * invariant lives upstream of this function, in what the producers are ABLE to
+ * say: no classifier receives a config path, and `fix` is drawn from the closed
+ * `SHARED_REMEDIES` set. Both are pinned as properties over every failure branch
+ * in `selfTest` — ⛔ do not "fix" a future split by normalising a path back out of
+ * the key here, which restores the symptom's cure and leaves the next helper free
+ * to re-open it.
  *
  * @param {{configPath: string, reason: string, evidence: string, fix: string}[]} failures
  */
@@ -284,7 +498,13 @@ function measureI18nIssues(configPath) {
   try {
     let stderr = '';
     try {
+      // `CLI` and `configPath` are both REPO-RELATIVE, so the child's cwd is what
+      // resolves them — anchoring it here is what makes an off-root run measure the
+      // real population instead of failing twelve times (#10907). It also keeps
+      // `os lint`'s own workspace resolution pointed at the repo, not at wherever
+      // the caller happened to stand.
       execFileSync(process.execPath, [CLI, 'lint', configPath, '--json'], {
+        cwd: REPO_ROOT,
         stdio: ['ignore', fd, 'pipe'],
       });
     } catch (err) {
@@ -325,31 +545,14 @@ function measureI18nIssues(configPath) {
     // The three ways one config can fail to yield a number. Each is that config's
     // OWN cause, so each comes back as a collected failure rather than an
     // exception: the round continues, and the reader gets all of them at once.
-    if (!raw.trim()) {
-      return {
-        failure: {
-          reason: '`os lint` produced no output at all — no JSON payload to count',
-          // stderr is the only reading there is when stdout was empty. It was
-          // already captured for the signature net above; discarding it here would
-          // leave the reader a verdict with nothing under it.
-          evidence: evidenceLine(stderr),
-          fix: rerunFix(configPath),
-        },
-      };
-    }
+    if (!raw.trim()) return { failure: emptyOutputFailure(stderr) };
     let report;
     try {
       report = JSON.parse(raw);
     } catch (err) {
-      return {
-        failure: {
-          reason: `\`os lint\` wrote ${raw.length} byte(s) that are not JSON (${err.message})`,
-          evidence: evidenceLine(raw, 160),
-          fix: rerunFix(configPath),
-        },
-      };
+      return { failure: nonJsonOutputFailure(raw, err) };
     }
-    if (report.error) return { failure: explainConfigFailure(configPath, report.error) };
+    if (report.error) return { failure: explainConfigFailure(report.error) };
     return { count: countI18nRuleIssues(report) };
   } finally {
     try { unlinkSync(tmp); } catch { /* already gone */ }
@@ -380,7 +583,7 @@ function measureAllConfigs(configPaths, measure) {
     try {
       result = measure(configPath);
     } catch (err) {
-      result = { failure: explainConfigFailure(configPath, err?.message ?? String(err)) };
+      result = { failure: explainConfigFailure(err?.message ?? String(err)) };
     }
     if (result?.failure) failures.push({ configPath, ...result.failure });
     else current[configPath] = result.count;
@@ -492,7 +695,7 @@ function selfTest() {
     "Cannot find module '/repo/examples/app-showcase/node_modules/@objectstack/connector-mcp/dist/index.mjs' " +
     "imported from /repo/examples/app-showcase/objectstack.config.bundled_yqbr4ytyonb.mjs";
 
-  const unbuilt = explainConfigFailure('examples/app-showcase/objectstack.config.ts', REAL_UNBUILT_DEP_ERROR);
+  const unbuilt = explainConfigFailure(REAL_UNBUILT_DEP_ERROR);
   expect('#6033 blames the package, not the config', unbuilt.reason.includes('@objectstack/connector-mcp'), `got ${JSON.stringify(unbuilt.reason)}`);
   expect('#6033 concludes "installed but not built"', /has no build output/.test(unbuilt.reason), `got ${JSON.stringify(unbuilt.reason)}`);
   expect('#6033 prescribes the workspace build', unbuilt.fix === WORKSPACE_BUILD_FIX, `got ${JSON.stringify(unbuilt.fix)}`);
@@ -500,13 +703,13 @@ function selfTest() {
   expect('#6033 evidence is one line', !unbuilt.evidence.includes('\n'), 'evidence must be a line, not a stack');
 
   // A package that is not installed at all cannot be fixed by a build alone.
-  const uninstalled = explainConfigFailure('x/y.ts', "Cannot find package '@objectstack/nope' imported from /repo/x/y.ts");
+  const uninstalled = explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts");
   expect('#6033 uninstalled is not unbuilt', uninstalled.fix === INSTALL_THEN_BUILD_FIX, `got ${JSON.stringify(uninstalled.fix)}`);
 
   // A genuinely broken config must NOT be told to run a build: sending a reader to
   // a build that changes nothing, over a config that really is at fault, is the
   // #5862 defect (a confident diagnosis pointing somewhere innocent) inverted.
-  const brokenConfig = explainConfigFailure('examples/app-crm/objectstack.config.ts', "Duplicate object name 'contacts'");
+  const brokenConfig = explainConfigFailure("Duplicate object name 'contacts'");
   expect('#6033 a config error is not a missing build', brokenConfig.fix !== WORKSPACE_BUILD_FIX, `got ${JSON.stringify(brokenConfig.fix)}`);
   expect('#6033 a config error keeps the CLI words', brokenConfig.evidence.includes("Duplicate object name 'contacts'"), `got ${JSON.stringify(brokenConfig.evidence)}`);
 
@@ -515,7 +718,7 @@ function selfTest() {
   // how this path would go quiet — the report would render an empty bullet and the
   // round would still exit 1 with nothing for the reader to act on.
   for (const [name, sample] of [['unknown wording', 'something nobody has recorded yet'], ['empty', ''], ['absent', undefined]]) {
-    const verdict = explainConfigFailure('x/y.ts', sample);
+    const verdict = explainConfigFailure(sample);
     expect(`#6033 complete verdict (${name})`, !!verdict.reason && !!verdict.fix, `got ${JSON.stringify(verdict)}`);
   }
 
@@ -526,7 +729,7 @@ function selfTest() {
   const round = measureAllConfigs(['a.ts', 'b.ts', 'c.ts', 'd.ts'], (p) => {
     visited.push(p);
     if (p === 'a.ts') throw new Error("Cannot find module '/repo/a/node_modules/@objectstack/spec/dist/index.mjs'");
-    if (p === 'c.ts') return { failure: explainConfigFailure(p, "Cannot find module '/repo/c/node_modules/@objectstack/connector-rest/dist/index.mjs'") };
+    if (p === 'c.ts') return { failure: explainConfigFailure("Cannot find module '/repo/c/node_modules/@objectstack/connector-rest/dist/index.mjs'") };
     return { count: 7 };
   });
   expect('#6033 attempts every config', visited.length === 4, `the round stopped after ${visited.length} of 4 config(s)`);
@@ -547,18 +750,171 @@ function selfTest() {
       configPath: p,
       // Same missing package, different absolute path per config — the same fact
       // told three times, which must not become three verdicts.
-      ...explainConfigFailure(p, `Cannot find module '/repo/${p}/node_modules/@objectstack/spec/dist/index.mjs'`),
+      ...explainConfigFailure(`Cannot find module '/repo/${p}/node_modules/@objectstack/spec/dist/index.mjs'`),
     })),
   );
   expect('#6033 one cause is stated once', sharedCause.length === 1, `got ${sharedCause.length} cause(s) for one missing package`);
   expect('#6033 …carrying every config it covers', sharedCause[0]?.configPaths.length === 3, `got ${JSON.stringify(sharedCause[0]?.configPaths)}`);
+
+  // -------------------------------------------------------------------------
+  // #11395 — the same rule, pinned over EVERY failure branch instead of one.
+  //
+  // The assertion directly above passed throughout the defect: it drives the
+  // CLASSIFIED branch, whose `fix` was already a constant. Three other branches
+  // set `fix` to `rerunFix(configPath)`, so each config got a unique key and the
+  // report printed `12 of 12 config(s) failed to lint (12 distinct causes)` over
+  // one environment fact — twelve blocks, twelve identical `why:` lines. A fourth
+  // put the byte count and the parser's offset in `reason`, the other half of the
+  // key. One example per defect would have missed the second; this is written as a
+  // PROPERTY over every branch that can produce a failure, so a branch added later
+  // is a line in the table rather than a hole.
+  //
+  // Each branch is driven with THREE configs failing the SAME way, with per-config
+  // detail in the CLI's words — the shape a real round produces.
+  // -------------------------------------------------------------------------
+
+  const SAME_CAUSE_CONFIGS = [
+    'examples/app-crm/objectstack.config.ts',
+    'examples/app-todo/objectstack.config.ts',
+    'packages/plugins/plugin-audit/scripts/i18n-extract.config.ts',
+  ];
+  /** @type {[string, (configPath: string, i: number) => {reason: string, evidence: string, fix: string}][]} */
+  const FAILURE_BRANCHES = [
+    ['unbuilt dependency', (p) => explainConfigFailure(`Cannot find module '/repo/${p}/node_modules/@objectstack/spec/dist/index.mjs'`)],
+    ['uninstalled package', (p) => explainConfigFailure(`Cannot find package '@objectstack/nope' imported from /repo/${p}`)],
+    ['unrecognised CLI failure', (p) => explainConfigFailure(`os lint gave up while reading /repo/${p}`)],
+    ['no output at all', (p) => emptyOutputFailure(`Error [ERR_MODULE_NOT_FOUND]: nothing resolved for /repo/${p}`)],
+    // Different LENGTHS and different parser offsets on purpose: those were the
+    // per-config strings `reason` used to carry.
+    ['output that is not JSON', (p, i) => nonJsonOutputFailure(`<!DOCTYPE html>${'!'.repeat(i * 17)}`, new SyntaxError(`Unexpected token < in JSON at position ${i}`))],
+  ];
+  for (const [branch, make] of FAILURE_BRANCHES) {
+    const grouped = groupFailuresByCause(SAME_CAUSE_CONFIGS.map((p, i) => ({ configPath: p, ...make(p, i) })));
+    expect(
+      `#11395 one cause is stated once (${branch})`,
+      grouped.length === 1,
+      `three configs failing the same way produced ${grouped.length} cause(s) — a per-config string reached the key: ${JSON.stringify(grouped.map((g) => [g.reason, g.fix]))}`,
+    );
+    expect(
+      `#11395 …carrying every config it covers (${branch})`,
+      grouped[0]?.configPaths.length === 3,
+      `got ${JSON.stringify(grouped[0]?.configPaths)}`,
+    );
+    expect(
+      `#11395 …with no config path in the cause's identity (${branch})`,
+      SAME_CAUSE_CONFIGS.every((p) => !grouped[0]?.reason.includes(p) && !grouped[0]?.fix.includes(p)),
+      `\`reason\`/\`fix\` are the grouping key and must name no config; got ${JSON.stringify([grouped[0]?.reason, grouped[0]?.fix])}`,
+    );
+    expect(
+      `#11395 …prescribing a remedy from the closed set (${branch})`,
+      SHARED_REMEDIES.includes(grouped[0]?.fix),
+      `\`fix\` is half the key, so it must be one of this gate's constants; got ${JSON.stringify(grouped[0]?.fix)}`,
+    );
+  }
+
+  // The converse, and the reason the above is a property rather than "collapse
+  // everything": DIFFERENT causes must stay different. A `groupFailuresByCause`
+  // that keyed on nothing at all would satisfy every assertion above and destroy
+  // the report — this is the assertion that makes them mean something.
+  const sixDistinct = groupFailuresByCause([
+    { configPath: 'a.ts', ...explainConfigFailure("Cannot find module '/repo/a/node_modules/@objectstack/spec/dist/index.mjs'") },
+    { configPath: 'b.ts', ...explainConfigFailure("Cannot find module '/repo/b/node_modules/@objectstack/core/dist/index.mjs'") },
+    { configPath: 'c.ts', ...explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/c") },
+    { configPath: 'd.ts', ...explainConfigFailure('something nobody has recorded yet') },
+    { configPath: 'e.ts', ...emptyOutputFailure('') },
+    { configPath: 'f.ts', ...nonJsonOutputFailure('<html>', new SyntaxError('Unexpected token <')) },
+  ]);
+  expect('#11395 different causes stay different', sixDistinct.length === 6, `six distinct causes collapsed to ${sixDistinct.length}`);
+
+  // The classified branches must group EXACTLY as they did before this change —
+  // their `fix` was never per-config, so nothing about them was broken and nothing
+  // about them may move. Pinned as the literal remedy strings a reader acts on.
+  expect(
+    '#11395 the classified branches are untouched',
+    explainConfigFailure(REAL_UNBUILT_DEP_ERROR).fix === 'pnpm build' &&
+      explainConfigFailure("Cannot find package '@objectstack/nope' imported from /repo/x/y.ts").fix === 'pnpm install && pnpm build',
+    'the two classified remedies are the text a reader runs; they must not move',
+  );
+
+  // -------------------------------------------------------------------------
+  // Root anchoring and the population classifier (#10907). These are the only
+  // assertions in this file that can fail over a CORRECT tree in a WRONG place,
+  // and that is the whole point: every other classifier here is proven red with a
+  // recorded string, but "did this gate look at anything at all?" can only be
+  // proven by looking.
+  // -------------------------------------------------------------------------
+
+  // The derivation must land on THIS repo's root — one level off would still find
+  // a `scripts/` directory, so pin files only the root has, this gate's own two
+  // included.
+  expect(
+    '#10907 derives the repo root',
+    existsSync(at('package.json')) && existsSync(at(BASELINE_PATH)) && existsSync(at('scripts/check-i18n-coverage.mjs')),
+    `REPO_ROOT does not look like this repo's root: ${REPO_ROOT}`,
+  );
+
+  // The anchoring itself, proven the only way that means anything: from a cwd that
+  // is NOT the repo root. This single assertion is the #10907 defect — before the
+  // fix both discoveries read a bare `examples` / `packages`, came back empty from
+  // anywhere else, and the gate printed `OK (0 config(s))` and exited 0. cwd is
+  // restored in a `finally`: it is process-global state, and a self-test that
+  // leaves it moved would corrupt every measurement after it.
+  const cwdBefore = process.cwd();
+  let offRoot;
+  try {
+    process.chdir(tmpdir());
+    offRoot = [...discoverExamples(), ...discoverPackages()];
+  } finally {
+    process.chdir(cwdBefore);
+  }
+  const onRoot = [...discoverExamples(), ...discoverPackages()];
+  expect(
+    '#10907 discovery is CWD-independent',
+    offRoot.length > 0,
+    `discovery from ${tmpdir()} found ${offRoot.length} config(s) — the population is still resolved CWD-relatively, ` +
+      'which is the whole defect: an empty population renders as a pass',
+  );
+  expect(
+    '#10907 …and finds exactly the population the root does',
+    offRoot.join('\n') === onRoot.join('\n'),
+    `off-root found ${offRoot.length} config(s), on-root ${onRoot.length} — anchoring must not change WHAT is scanned`,
+  );
+  expect(
+    '#10907 …spelled repo-relative, as the baseline keys are',
+    offRoot.every((p) => !p.startsWith('/') && !p.includes(REPO_ROOT)),
+    `absolute paths would silently re-key every baseline entry; got ${JSON.stringify(offRoot.slice(0, 2))}`,
+  );
+
+  // Anti-#4690 on the population itself. Red on nothing is the assertion that
+  // matters — this is the one verdict whose failure mode is a green line.
+  expect('#10907 an empty population is refused', !!emptyPopulationVerdict([]), 'zero configs must never be a pass');
+  expect(
+    '#10907 …with a complete verdict',
+    !!emptyPopulationVerdict([])?.headline && (emptyPopulationVerdict([])?.detail?.length ?? 0) > 0,
+    `a refusal with no reading under it is not auditable; got ${JSON.stringify(emptyPopulationVerdict([]))}`,
+  );
+  expect(
+    '#10907 a real population is not refused',
+    emptyPopulationVerdict(['examples/app-crm/objectstack.config.ts']) === null,
+    'one config is work to do, not a broken scan — refusing it would preempt the ratchet-DOWN path',
+  );
+  expect(
+    '#10907 the live population is not refused',
+    emptyPopulationVerdict(onRoot) === null,
+    `the real tree resolved to ${onRoot.length} config(s) and must be judged, not refused`,
+  );
 
   if (failures.length) {
     console.error(`✗ check:i18n-coverage --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log('✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, stay distinct, and a failing config does not end the round.');
+  console.log(
+    `✓ check:i18n-coverage --self-test — the missing-CLI-build, i18n-rule and per-config-failure classifiers all go red, ` +
+      `stay distinct, and a failing config does not end the round; all ${FAILURE_BRANCHES.length} failure branches state ` +
+      `one shared cause ONCE, with no config path in the key; the population resolves to ${onRoot.length} config(s) ` +
+      `from outside the repo root as well as inside it, and an empty one is refused rather than reported OK.`,
+  );
 }
 
 if (process.argv.includes('--self-test')) {
@@ -632,6 +988,11 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  why:  ${g.reason}`,
       ...(g.evidence ? [`  saw:  ${g.evidence}`] : []),
       `  fix:  ${g.fix}`,
+      // The per-config remedy detail, rendered HERE — inside the block, once per
+      // config — precisely so it stays out of the cause's identity (#11395). Every
+      // other remedy is one command that clears every config it covers; this one
+      // is the branch where there is no such command, so the reader gets theirs.
+      ...(g.fix === RERUN_BY_HAND ? g.configPaths.map((p) => `        ${rerunCommand(p)}`) : []),
     ]
       .map((l) => (l ? `  ${l}` : ''))
       .join('\n'),
@@ -648,6 +1009,35 @@ function reportUnmeasuredConfigs(failures, measuredCount) {
       `  \`--update\` would freeze the survivors while silently dropping the rest. So this\n` +
       `  result says NOTHING about whether any declared label went untranslated, and the\n` +
       `  baseline was left exactly as committed (\`--update\` included).\n` +
+      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
+      `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+  );
+  process.exit(1);
+}
+
+/**
+ * The refusal for an empty population (#10907) — reached before a single CLI is
+ * spawned and before `--update` can write, which is the point on both counts.
+ *
+ * `--update` is the sharper of the two: it runs BEFORE any comparison, so over an
+ * empty population it would write `{}` and ratchet all twelve baselined configs
+ * out of existence — real, frozen debt discarded by a command whose whole purpose
+ * is to record it. Same invariant the two reports above state, and for the same
+ * reason: nothing measured, nothing written.
+ *
+ * Exits 1, the code every other verdict here uses.
+ *
+ * @param {{ headline: string, detail: string[] }} verdict
+ */
+function reportEmptyPopulation(verdict) {
+  console.error(
+    `\ncheck-i18n-coverage: POPULATION EMPTY — ${verdict.headline}\n\n` +
+      verdict.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
+      `\n\n  Fix:  run this gate from a complete checkout of the repo. \`pnpm check:i18n-coverage\`\n` +
+      `        is the invocation CI uses, and pnpm runs it from the repo root.\n\n` +
+      `  Nothing was measured: no config was linted and no count was compared, so this\n` +
+      `  result says NOTHING about whether any declared label went untranslated — and\n` +
+      `  the baseline was left exactly as committed (\`--update\` included).\n` +
       `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
       `  \`pnpm check:i18n-coverage | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
   );
@@ -676,7 +1066,12 @@ function checkCliBuildPrerequisite() {
     console.error(`check-i18n-coverage: ${resolved.unknown} — build prerequisite not pre-checked`);
     return;
   }
-  if (existsSync(resolved.file)) return;
+  // `resolved.file` is repo-relative (`packages/cli/dist/commands/lint.js`), so it
+  // needs the same anchoring as everything else — unanchored, an off-root run that
+  // got this far would report "the workspace CLI is not built" about a CLI that is
+  // built, which is the #5862 defect (a confident diagnosis pointing somewhere
+  // innocent) rebuilt one layer down.
+  if (existsSync(at(resolved.file))) return;
   reportPrerequisiteNotMet('the workspace CLI is not built', [
     `This gate counts what \`os lint\` reports, and it runs the BUILT CLI.`,
     `${CLI} is only a source stub that hands off to oclif, which`,
@@ -689,21 +1084,24 @@ function checkCliBuildPrerequisite() {
 
 checkCliBuildPrerequisite();
 
-const { current, failures: unmeasured } = measureAllConfigs(
-  [...discoverExamples(), ...discoverPackages()],
-  measureI18nIssues,
-);
+const configPaths = [...discoverExamples(), ...discoverPackages()];
+// Before a single CLI is spawned, and before `--update` can write: a round with no
+// population has no verdict to give and no baseline to rewrite (#10907).
+const emptyPopulation = emptyPopulationVerdict(configPaths);
+if (emptyPopulation) reportEmptyPopulation(emptyPopulation);
+
+const { current, failures: unmeasured } = measureAllConfigs(configPaths, measureI18nIssues);
 // Before `--update` writes anything, and before any comparison: a round that could
 // not measure every config has no verdict to give and no baseline to rewrite.
 if (unmeasured.length) reportUnmeasuredConfigs(unmeasured, Object.keys(current).length);
 
 if (update) {
-  writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + '\n');
+  writeFileSync(at(BASELINE_PATH), JSON.stringify(current, null, 2) + '\n');
   console.log(`i18n coverage baseline updated: ${Object.keys(current).length} config(s).`);
   process.exit(0);
 }
 
-const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : {};
+const baseline = existsSync(at(BASELINE_PATH)) ? JSON.parse(readFileSync(at(BASELINE_PATH), 'utf8')) : {};
 
 const errors = [];
 for (const [file, count] of Object.entries(current)) {

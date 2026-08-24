@@ -12,7 +12,13 @@ import type {
 } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveOrgLimit, isMcpServerEnabled } from '@objectstack/types';
+import {
+  readEnvWithDeprecation,
+  resolveTenancyPosture,
+  resolveOrgLimit,
+  isMcpServerEnabled,
+} from '@objectstack/types';
+import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -918,8 +924,9 @@ export function normalizeAuthEmailLocale(raw: string | undefined): string | unde
  *
  * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
  * `isAPIError(err) = err instanceof APIError || err?.name === 'APIError'`
- * (better-call@1.3.7 `dist/utils.mjs:57`), consumed at `dist/router.mjs:93`,
- * where everything else takes the `console.error` + `500 / null body` branch.
+ * (better-call@1.4.0 `dist/utils.mjs:55-56`), consumed at `dist/router.mjs:92`,
+ * where everything else takes the `console.error` + `500 / null body` branch
+ * (`:93-97`; re-measured 2026-08-23 against the installed copy).
  * A plain `Error` therefore buried `TOO_MANY_REQUESTS` in a server log while the
  * per-number wall on the same endpoint ({@link AuthManager.assertPhoneOtpSendAllowed})
  * answered 429 — one endpoint, two voices.
@@ -1673,10 +1680,21 @@ export class AuthManager {
             if (breakGlassActor?.userId) {
               try {
                 // `/delete-user` names no target in the vendor's own contract:
-                // the subject IS the authenticated caller, which is now already
-                // resolved rather than looked up a second time.
-                let targetId: string | undefined = ctx?.body?.userId ?? ctx?.body?.user_id;
-                if (!targetId && ctx.path === '/delete-user') targetId = breakGlassActor.userId;
+                // the subject IS the authenticated caller. That must hold
+                // UNCONDITIONALLY — a body-supplied `userId` on this
+                // self-service route is never the target, present or not.
+                // (A prior `if (!targetId && …)` form let a body value win
+                // whenever one was supplied, turning the guard's refusal into
+                // a per-record oracle over the break-glass holder for any
+                // authenticated caller, not just the caller acting on
+                // themselves. `/admin/remove-user` and `/admin/ban-user`
+                // legitimately name a target in their own contract, so only
+                // this route's resolution is keyed on the actor instead of
+                // the body.)
+                const targetId: string | undefined =
+                  ctx.path === '/delete-user'
+                    ? breakGlassActor.userId
+                    : (ctx?.body?.userId ?? ctx?.body?.user_id);
                 if (targetId) {
                   isLastLocalCredential = await isLastLocalCredentialHolder(
                     ctx.context.adapter,
@@ -2378,6 +2396,20 @@ export class AuthManager {
             return false;
           }
         },
+        // How many MEMBERS one organization may hold — a different question
+        // from `organizationLimit` above, and one this platform does not limit:
+        // entitlements meter AI seats, and plain membership is not a billed
+        // axis. It must still be stated, because better-auth substitutes a
+        // vendor default of 100 for an absent `membershipLimit`
+        // (`count >= (membershipLimit || 100)`), which reaches the operator as
+        // `Organization membership limit reached` — a refusal nobody here ever
+        // chose, on an axis nothing here bills. A deployment that DOES want a
+        // ceiling sets `OS_ORG_MEMBERSHIP_LIMIT`.
+        //
+        // MAX_SAFE_INTEGER rather than Infinity: the value is compared, but it
+        // also travels through option plumbing that may assume a finite number,
+        // and nine quadrillion members is unlimited by any measure that matters.
+        membershipLimit: resolveMembershipLimitOption(),
         ...(customOrgRoles ? { roles: customOrgRoles } : {}),
         // ── Slug-change guard ─────────────────────────────────────
         // An org's slug is baked into every env hostname at creation

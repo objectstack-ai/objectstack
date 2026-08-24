@@ -56,9 +56,11 @@ import { dirname, join } from 'node:path';
  * running under a key that won't survive a restart. Development and test keep
  * the ergonomic fallback so local loops and unit tests stay frictionless.
  *
- * `mode` is auto-detected from `NODE_ENV` (`production` → strict;
- * `test`/`VITEST` → ephemeral, no disk; otherwise `development`) and can be
+ * `mode` is auto-detected from `NODE_ENV` alone (`production` → strict;
+ * `test` → ephemeral, no disk; otherwise `development`) and can be
  * overridden via `opts.mode` for embedders that manage their own lifecycle.
+ * Which variables may and may not decide that is spelled out at `detectMode`
+ * below — it is a security question, not a formatting one.
  *
  * ## Handle format
  *   id        — `sec_` + 32 hex chars (122 bits of entropy)
@@ -129,8 +131,59 @@ export interface LocalCryptoProviderOptions {
 const processEnv = (): EnvMap =>
   ((globalThis as { process?: { env?: EnvMap } }).process?.env ?? {}) as EnvMap;
 
+/**
+ * Deployment posture — read from `NODE_ENV` and from NOTHING ELSE.
+ *
+ * ## ⛔ Never widen this to a test-RUNNER variable
+ *
+ * This function decides whether the fail-loud guarantee documented above is
+ * ARMED. `'test'` is not a softer flavour of `'production'`: it is the branch
+ * that takes an ephemeral key, never touches disk, and — the part that matters
+ * — never refuses to boot. **The refusal is the gate.** So a variable that can
+ * reach this function decides whether a security gate runs, and the only
+ * variables allowed to do that are the ones that describe the DEPLOYMENT.
+ *
+ * This line used to read:
+ *
+ *   if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+ *
+ * `VITEST` describes the RUNNER, not the deployment, and a runner variable is
+ * INHERITED by every process the runner spawns. Measured on this repo: a real
+ * `os serve` spawned from a vitest worker with `{ ...process.env }` carried
+ * `VITEST=true` into the child, so that boot's crypto layer sat in `test` mode
+ * — ephemeral key, no disk, no refusal — while the rest of the boot was in
+ * production posture. `packages/cli/test/serve-node-env-production-default`
+ * `.e2e.test.ts`, a pin whose entire subject is *"unset `NODE_ENV` means
+ * production"*, ran that way for its whole life: production for auth, test for
+ * crypto. Nothing said a word, because a gate that does not run prints nothing.
+ *
+ * ## Why deleting it does not move in-process unit tests
+ *
+ * Reading `VITEST` was intentional: in-process unit tests must get `test`
+ * posture so they neither mint a key file in `$HOME` nor fail on a machine
+ * without one. That intent is preserved here rather than dropped, because
+ * vitest sets BOTH variables on the same worker — measured in vitest 4.1.10's
+ * own source, `prepareVitest()`:
+ *
+ *   process.env.TEST = "true";
+ *   process.env.VITEST = "true";
+ *   process.env.NODE_ENV ??= "test";
+ *
+ * and it repeats `NODE_ENV: process.env.NODE_ENV || "test"` in the env it hands
+ * each worker. So an in-process test already satisfies `NODE_ENV === 'test'`
+ * and lands on this function's first line without `VITEST` participating at
+ * all. The two spellings are indistinguishable IN-PROCESS and differ only for
+ * an INHERITING child — which is precisely the defect. `local-crypto-provider`
+ * `.test.ts` pins both halves: the in-process posture (a real worker, real
+ * `process.env`, no injected map) and the refusal under a leaked runner
+ * variable.
+ *
+ * `pnpm check:runner-env-posture` keeps the whole class shut, so the next
+ * author who reaches for a runner variable in product code is told here rather
+ * than by an operator whose secrets stopped decrypting.
+ */
 const detectMode = (env: EnvMap): CryptoMode => {
-  if (env.VITEST || env.NODE_ENV === 'test') return 'test';
+  if (env.NODE_ENV === 'test') return 'test';
   if (env.NODE_ENV === 'production') return 'production';
   return 'development';
 };

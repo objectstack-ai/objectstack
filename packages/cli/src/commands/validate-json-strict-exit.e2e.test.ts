@@ -44,6 +44,36 @@
  * "fails whenever `--json` sees a warning" — two fixes that pass the matrix
  * above identically, only one of which is the one asked for.
  *
+ * ## The conversions-only cell (#11301)
+ *
+ * `--strict` gates on the TEXT face's warning list, and that list folds in the
+ * ADR-0087 D2 load-time conversion notices. The payload carries those notices
+ * separately, under `conversions`; its own `warnings` field is the five-way
+ * spread WITHOUT them. So a config whose only advisories are conversion notices
+ * exits 1 carrying `{ valid: true, warnings: [], conversions: [...] }` — the one
+ * cell where the exit code is decided by a collection absent from the payload
+ * field a reader reaches for first. Every fixture above raises zero conversions,
+ * so a regression narrowing the gate back to `payload.warnings` would restore
+ * the original divergence for exactly these configs with all of them green.
+ *
+ * The two fixtures below are a MINIMAL PAIR from one template, differing in a
+ * single key on one page-header component: `description`, the alias
+ * `page-header-subtitle-alias` rewrites at load, against `subtitle`, the
+ * canonical spelling that converts nothing. So the pin discriminates on the
+ * CONVERSION and not on "a page is present" — measured on the pair before it
+ * was written: `description` → text `--strict` 1, `--json --strict` 1, `--json`
+ * 0, `warnings: []`, one notice; `subtitle` → 0 on every face, no notices.
+ *
+ * The non-empty `conversions` assertion is the anti-vacuity guard, and it is
+ * load-bearing rather than decorative. `page-header-subtitle-alias` is a LIVE
+ * window that retires from the load path at protocol 18; the day it retires,
+ * this fixture raises nothing and, without that assertion, the file would keep
+ * passing while pinning an empty cell — precisely the failure this test exists
+ * to remove. It goes red instead, and whoever retires the entry re-points the
+ * fixture at another live conversion. (The obvious candidate for this fixture,
+ * `object-compactLayout-to-highlightFields`, is already `retiredFromLoadPath`:
+ * the schema tombstones the key, so it raises a validation ERROR, not a notice.)
+ *
  * ## Why a real child process
  *
  * `process.exitCode` set inside a vitest worker is not an exit status: the
@@ -103,6 +133,35 @@ export default {
 };
 `;
 
+/**
+ * The conversions-only minimal pair (#11301) — `CLEAN_SOURCE`'s shape plus one
+ * `page:header` component, whose second line is authored under the key named.
+ *
+ * Nothing else here raises an advisory: the unknown-key lints run on the
+ * POST-conversion `normalized`, so what they see is the canonical `subtitle`
+ * either way, and both members are pinned to `warnings: []` below rather than
+ * assumed to be.
+ */
+const headerPageSource = (headerTextKey: 'description' | 'subtitle'): string => `
+export default {
+  manifest: { id: 'com.example.strictexit', name: 'strictexit', version: '1.0.0', type: 'app', namespace: 'strictexit' },
+  objects: [{
+    name: 'strictexit_ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+  }],
+  apps: [{ name: 'strictexit_app', label: 'Strict Exit App' }],
+  pages: [{
+    name: 'strictexit_home',
+    label: 'Home',
+    regions: [{ name: 'main', components: [
+      { type: 'page:header', properties: { title: 'Tickets', ${headerTextKey}: 'All open tickets' } },
+    ] }],
+  }],
+};
+`;
+
 interface Run {
   code: number;
   stdout: string;
@@ -128,17 +187,25 @@ function runCli(args: string[], cwd: string): Promise<Run> {
 
 let warnsDir: string;
 let cleanDir: string;
+let conversionsDir: string;
+let conversionsCanonDir: string;
 
 beforeAll(() => {
   warnsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-warns-'));
   writeFileSync(join(warnsDir, 'objectstack.config.ts'), WARNS_SOURCE);
   cleanDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-clean-'));
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
+  conversionsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-'));
+  writeFileSync(join(conversionsDir, 'objectstack.config.ts'), headerPageSource('description'));
+  conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
+  writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), headerPageSource('subtitle'));
 });
 
 afterAll(() => {
   rmSync(warnsDir, { recursive: true, force: true });
   rmSync(cleanDir, { recursive: true, force: true });
+  rmSync(conversionsDir, { recursive: true, force: true });
+  rmSync(conversionsCanonDir, { recursive: true, force: true });
 });
 
 describe('#11174 — --strict reaches the same exit status on both faces', () => {
@@ -184,6 +251,62 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
 
     const json = await runCli(['validate', '--json', '--strict'], cleanDir);
     expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
+  }, 120_000);
+
+  it('conversions-only: the cell where --strict is decided by a collection the payload keeps OUT of `warnings`', async () => {
+    const text = await runCli(['validate', '--strict'], conversionsDir);
+    const json = await runCli(['validate', '--json', '--strict'], conversionsDir);
+
+    // Same floor as the first case: equality is only worth asserting over a run
+    // that genuinely had something to fail on.
+    expect(
+      text.code,
+      `text --strict must fail on the conversions-only config:\n${text.stdout}\n${text.stderr}`,
+    ).not.toBe(0);
+
+    expect(
+      json.code,
+      `--json --strict exited ${json.code} where --strict exited ${text.code}, same config.\n` +
+        `json stdout:\n${json.stdout}\njson stderr:\n${json.stderr}`,
+    ).toBe(text.code);
+
+    const payload = JSON.parse(json.stdout) as {
+      valid?: unknown;
+      warnings?: unknown;
+      conversions?: unknown;
+    };
+
+    // The cell spelled out. `warnings: []` is asserted, not tolerated: it is the
+    // whole point — narrow the gate to this field and the run above drops to 0
+    // while the text face stays at 1.
+    expect(payload.valid).toBe(true);
+    expect(payload.warnings).toEqual([]);
+    expect(
+      Array.isArray(payload.conversions) && (payload.conversions as unknown[]).length,
+      'the fixture raised NO conversion — the alias has most likely retired from ' +
+        'the load path; re-point `headerPageSource` at a live entry in ' +
+        '`packages/spec/src/conversions/registry.ts` rather than deleting this line',
+    ).toBeGreaterThan(0);
+
+    // Separates "gates on --strict" from "fails whenever a conversion is seen".
+    // The warnings fixture's own without-strict control cannot cover this: it
+    // raises no conversions, so it passes under either behaviour.
+    const loose = await runCli(['validate', '--json'], conversionsDir);
+    expect(loose.code, `--json without --strict must stay 0:\n${loose.stdout}\n${loose.stderr}`).toBe(0);
+  }, 120_000);
+
+  it('control: the same page under the CANONICAL key converts nothing and exits 0 on both faces', async () => {
+    // The discriminator. Byte-identical to the fixture above but for one key,
+    // so a pin that passed here too would be pinning the presence of a page.
+    const text = await runCli(['validate', '--strict'], conversionsCanonDir);
+    expect(text.code, `text --strict:\n${text.stdout}\n${text.stderr}`).toBe(0);
+
+    const json = await runCli(['validate', '--json', '--strict'], conversionsCanonDir);
+    expect(json.code, `json --strict:\n${json.stdout}\n${json.stderr}`).toBe(0);
+
+    const payload = JSON.parse(json.stdout) as { warnings?: unknown; conversions?: unknown };
+    expect(payload.warnings).toEqual([]);
+    expect(payload.conversions).toEqual([]);
   }, 120_000);
 
   it('control: without --strict, the same advisory-raising config still exits 0 under --json', async () => {

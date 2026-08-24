@@ -209,15 +209,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
-      set_user_role: {
-        label: "プラットフォームロールを設定",
-        successMessage: "ロールを更新しました",
-        params: {
-          role: {
-            label: "プラットフォームロール"
-          }
-        }
-      },
       impersonate_user: {
         label: "代理ログイン",
         confirmText: "このユーザーとして代理ログインを開始しますか？正当なサポート対応時のみ使用してください。操作は監査ログに記録されます。",
@@ -625,6 +616,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "ユーザーを招待",
+        successMessage: "招待を送信しました"
+      },
       add_member: {
         label: "メンバーを追加",
         successMessage: "メンバーを追加しました"

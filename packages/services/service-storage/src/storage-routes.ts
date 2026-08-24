@@ -6,6 +6,10 @@ import type { IHttpServer, IHttpRequest, IHttpResponse, IStorageService } from '
 import { sendOk, sendError } from '@objectstack/types';
 import type { StorageMetadataStore, FileRecord, UploadSessionRecord } from './metadata-store.js';
 import type { LocalStorageAdapter } from './local-storage-adapter.js';
+// Type only. The PREDICATE is never re-implemented in this file (#10246): it
+// arrives through `opts.resolveFileHolder`, which the plugin binds to the reap
+// guard's own `findFileHolder`.
+import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
 
 /** Authorization verdict for an attachments-scope download (#2970 item 2). */
@@ -47,6 +51,35 @@ export interface StorageRoutesOptions {
    * When absent (bare kernels, tests), all downloads stay open (back-compat).
    */
   authorizeFileRead?: (file: FileRecord, req: IHttpRequest) => Promise<FileReadVerdict>;
+  /**
+   * "Is anything still holding this file?" for a TOMBSTONED row (#10246).
+   *
+   * A `sys_file` tombstone (`status: 'deleted'` + `deleted_at`) is recoverable
+   * state, not a delete: re-pointing a `sys_attachment` join row onto it, or
+   * re-claiming it through the `ref_*` ownership columns, makes it live again
+   * — and the sweep already honours that, un-tombstoning and vetoing the reap
+   * instead of reclaiming the bytes. But the sweep is the only thing that ever
+   * asks, and it asks only AFTER the declared 30d TTL expires, so inside the
+   * grace window a live attachment pointed at a tombstone downloaded as 404
+   * for up to 30 days and then silently started working.
+   *
+   * ⛔ This does NOT add a second revival mechanism. Revival stays solely the
+   * sweep guard's; nothing on the read path writes to the row. What moves here
+   * is the JUDGEMENT — the download path stops treating the tombstone as the
+   * last word and asks the same question the guard asks.
+   *
+   * ⚠️ Wire this to `findFileHolder` (`attachment-lifecycle.ts`) and to
+   * nothing else. That function is the ONE definition of "still held", a
+   * deliberate union of the two surfaces that can hold a `sys_file` —
+   * `sys_attachment` join rows AND the `ref_*` ownership columns — and it is
+   * what decides whether the next sweep reaps this row. A read side that
+   * re-derived a narrower question (join rows only, say) would refuse files
+   * the sweep refuses to reap: the same defect, one limb over.
+   *
+   * Absent (bare kernels, no data engine, tests that don't wire it): tombstones
+   * stay refused, exactly as before this option existed.
+   */
+  resolveFileHolder?: (file: FileRecord) => Promise<FileHolder>;
   /**
    * TTL (seconds) for the signed URL minted on a GATED attachments download.
    * Short by design — the link is followed immediately after an explicit
@@ -131,6 +164,42 @@ export function registerStorageRoutes(
       return false;
     }
     return downloadTtl;
+  };
+
+  // ── Download servability (#10246) ────────────────────────────────────
+  // Written ONCE and called by both download endpoints. They used to carry a
+  // copy each of `file.status !== 'committed'`, which is how a rule that needs
+  // to widen turns into two rules that drift; `/files/:fileId/url` and
+  // `/files/:fileId` are the same decision reached through two doors.
+  //
+  //   - `committed` → servable, unconditionally and unchanged.
+  //   - `pending`   → refused, unconditionally and unchanged: an upload that
+  //                   was never completed has no bytes to promise.
+  //   - `deleted`   → servable for exactly as long as something still holds
+  //                   it. The tombstone is NOT the last word; it is a claim
+  //                   about the future (this row is reapable when the grace
+  //                   window ends) that the sweep re-checks and often
+  //                   withdraws. Asking the guard's own question here makes
+  //                   the two agree by construction: a file this returns
+  //                   `true` for is a file the next sweep would un-tombstone
+  //                   rather than reap, and the moment the last holder goes it
+  //                   returns `false` again — same instant the sweep starts
+  //                   reaping it.
+  //
+  // The row is never written to. Revival remains the sweep guard's alone
+  // (triage's ruling on this card: 复活机制仍唯一归 sweep guard,判断移到读侧,
+  // 不新增生命周期动词).
+  const isServableForDownload = async (file: FileRecord): Promise<boolean> => {
+    if (file.status === 'committed') return true;
+    if (file.status !== 'deleted' || !opts.resolveFileHolder) return false;
+    try {
+      return (await opts.resolveFileHolder(file)) !== null;
+    } catch {
+      // Unreadable evidence is not evidence of a holder. Refuse — the same
+      // answer this route gave before #10246, and the same direction the reap
+      // guard fails in (it vetoes rather than reaps when it cannot tell).
+      return false;
+    }
   };
 
   // ── Upload auth gate (#2755) ─────────────────────────────────────────
@@ -603,8 +672,8 @@ export function registerStorageRoutes(
     try {
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
-      if (!file || file.status !== 'committed') {
-        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not committed');
+      if (!file || !(await isServableForDownload(file))) {
+        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not downloadable');
         return;
       }
 
@@ -650,8 +719,8 @@ export function registerStorageRoutes(
     try {
       const { fileId } = req.params;
       const file = await store.getFile(fileId);
-      if (!file || file.status !== 'committed') {
-        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not committed');
+      if (!file || !(await isServableForDownload(file))) {
+        sendError(res, 404, 'FILE_NOT_FOUND', 'File not found or not downloadable');
         return;
       }
 

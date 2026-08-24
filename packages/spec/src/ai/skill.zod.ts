@@ -246,14 +246,20 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
  * Do not author one.
  *
  * @example
+ * <!-- os:check -->
  * ```ts
+ * import { defineSkill } from '@objectstack/spec';
+ *
  * const skill = defineSkill({
  *   name: 'case_management',
  *   label: 'Case Management',
  *   description: 'Handles support case lifecycle',
- *   instructions: 'Use these tools to create, update, and resolve support cases.',
+ *   // Natural-language intent lives in the strings actually put in front of
+ *   // the model. A skill is never activated by matching a phrase list.
+ *   instructions:
+ *     'Use these tools to create, update, and resolve support cases. Reach for this '
+ *     + 'skill when the user wants to open a ticket, chase an existing case, or close one out.',
  *   tools: ['create_case', 'update_case', 'resolve_case', 'query_cases'],
- *   triggerPhrases: ['create a case', 'open a ticket', 'resolve issue'],
  * });
  * ```
  */
@@ -432,14 +438,25 @@ export type SkillParsed = z.infer<typeof SkillSchema>;
  * Validates the config at creation time using Zod `.parse()`.
  *
  * @example
+ * Activation is a SPLIT, and this block shows both halves: programmatic
+ * routing in `triggerConditions`, natural-language intent in
+ * `description` / `instructions`.
+ *
+ * <!-- os:check -->
  * ```ts
+ * import { defineSkill } from '@objectstack/spec';
+ *
  * const skill = defineSkill({
  *   name: 'order_management',
  *   label: 'Order Management',
  *   description: 'Handles order lifecycle operations',
- *   instructions: 'Use these tools to manage customer orders.',
+ *   // Half one — natural language, read by the LLM.
+ *   instructions:
+ *     'Use these tools to manage customer orders. Reach for this skill when the user '
+ *     + 'wants to place an order, change one, or cancel one.',
  *   tools: ['create_order', 'update_order', 'cancel_order'],
- *   triggerPhrases: ['place an order', 'cancel my order'],
+ *   // Half two — a programmatic AND of context field/operator/value,
+ *   // evaluated by the cloud agent runtime.
  *   triggerConditions: [
  *     { field: 'objectName', operator: 'eq', value: 'order' },
  *   ],

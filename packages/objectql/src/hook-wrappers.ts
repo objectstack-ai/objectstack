@@ -746,6 +746,29 @@ function declaredFieldsFor(ctx: HookContext): Record<string, unknown> | undefine
  * Copies, never mutates: `ctx.previous` and `ctx.input.data` are the engine's
  * own objects, observed by the handlers that run after this gate.
  */
+/**
+ * The record state THIS hook is firing for — stored ⊕ payload, materialized
+ * over the object's declared fields (#11293).
+ *
+ * The public name for {@link pickRecordPayload}, exported so a consumer that
+ * has to answer "what record is this?" gets the SAME answer the declarative
+ * `condition` gate gets. The runtime's `ctx.title()` seam is the first such
+ * consumer: a title composed from a different record state than the one
+ * `condition: "record.status == 'closed'"` evaluated would be two meanings of
+ * "this record" one line apart in the same hook — the drift PD #12 forbids,
+ * and precisely the drift this accessor exists to remove.
+ *
+ * A copy, never the engine's own object: {@link pickRecordPayload} builds a new
+ * record from `ctx.previous` and `ctx.input.data` rather than handing either
+ * out, so a caller cannot mutate the write through it.
+ */
+export function hookRecordState(ctx: HookContext): Record<string, unknown> {
+  const record = pickRecordPayload(ctx);
+  return record && typeof record === 'object' && !Array.isArray(record)
+    ? (record as Record<string, unknown>)
+    : {};
+}
+
 function pickRecordPayload(ctx: HookContext): any {
   const input: any = ctx.input ?? {};
   const payload: Record<string, unknown> | undefined =

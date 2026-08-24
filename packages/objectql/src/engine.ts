@@ -1394,6 +1394,61 @@ function hydrateWriteFormulas(
 }
 
 /**
+ * Materialize ONE declared `formula` field against a record already in hand —
+ * the read path's own evaluation, narrowed to a single field, with no round
+ * trip (#11293).
+ *
+ * ## Why this exists rather than a second evaluator
+ *
+ * A hook body cannot reach a formula field: `ctx.previous` / `ctx.input` carry
+ * STORED columns, and a formula is computed on read, so a body that wants the
+ * record's title has to rebuild the formula inline. Measured in the exemplar
+ * app: five inline reimplementations of a record title inside hook bodies, four
+ * of them re-composing a `nameField` that is a formula. Each copy can drift
+ * from the declaration it copies, silently — which is the whole defect, so the
+ * remedy must not itself be a copy. This calls
+ * {@link planFormulaProjection} + {@link applyFormulaPlan}: the same plan
+ * builder, the same `Expression` normalization (string shorthand → CEL
+ * envelope), the same `scale` rounding and the same evaluation scope the read
+ * and write paths use. One formula semantic, not a hook-path dialect (PD #12).
+ *
+ * ## Narrowed to one field ON PURPOSE
+ *
+ * `planFormulaProjection(schema, undefined)` — the shape `find` and
+ * {@link hydrateWriteFormulas} use — plans EVERY formula field on the schema
+ * and `ExpressionEngine.compile`s each one at planning stage. Asking for one
+ * title would then throw on an unrelated malformed formula elsewhere on the
+ * object. Passing `[field]` plans exactly the requested field, so the blast
+ * radius of a title lookup is the title's own declaration.
+ *
+ * ## Read-path parity, including how it fails
+ *
+ * Both failure modes are the read path's, unchanged: a formula that does not
+ * COMPILE throws (as it does on every `find` of the object), while a formula
+ * that compiles and does not EVALUATE yields `null` — `applyFormulaPlan`'s own
+ * `r.ok ? … : null`. A caller therefore cannot mistake "this title could not be
+ * computed" for a computed value.
+ *
+ * Returns `undefined` when `field` is not a declared formula field, which is
+ * how a caller tells "read the stored column instead" from "the formula
+ * produced nothing". Evaluates against a shallow COPY: `applyFormulaPlan`
+ * writes the value onto the record it is handed, and the records reaching here
+ * are the engine's own hook payloads, observed by everything downstream.
+ */
+export function evaluateFormulaField(
+  schema: unknown,
+  record: Record<string, unknown>,
+  field: string,
+  execCtx?: ExecutionContext,
+): unknown {
+  const { plan } = planFormulaProjection(schema as any, [field]);
+  if (plan.length === 0) return undefined;
+  const scratch: Record<string, unknown> = { ...record };
+  applyFormulaPlan(plan, [scratch], execCtx);
+  return scratch[field];
+}
+
+/**
  * A hook body, as registered through {@link ObjectQL.registerHook} or bound
  * from metadata by `bindHooksToEngine`.
  *
@@ -5938,6 +5993,46 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Driver options for a PRIVILEGED, driver-level read so it JOINS the open
+   * ambient transaction instead of asking the pool for a second connection.
+   *
+   * The three privileged read verbs — {@link resolveSecret},
+   * {@link resolveSecretField}, {@link resolveInternalField} — deliberately
+   * read at DRIVER level, the only layer where the masked/omitted value still
+   * exists. That bypasses hooks, field-level security and sharing by design;
+   * what it must NOT bypass is the connection the surrounding transaction is
+   * holding. {@link buildDriverOptions} threads the ambient handle onto every
+   * ordinary read for that reason (ADR-0034); these three passed NO options at
+   * all, so their read went to a FRESH pooled connection.
+   *
+   * On a roomy pool that is invisible — the pool simply hands out a second
+   * connection. On a **single-connection pool it is a deadlock**: SQLite's knex
+   * pool is `max: 1` (`driver-sqlite-wasm` and `driver-sql`/better-sqlite3
+   * both), so the open transaction holds the one connection and the privileged
+   * read waits for a connection that cannot be freed until the transaction
+   * that is waiting on the read commits. Measured on the erasure path
+   * (`runSubjectErasureAtomically` → better-auth `/admin/remove-user` →
+   * `reattachInternalFieldsOnRead` → `resolveInternalField`): the read blocked
+   * until knex's own acquire timeout fired ("Timeout acquiring a connection.
+   * The pool is probably full", from `Transaction_Sqlite.acquireConnection`),
+   * and the vendor route degraded that into an authentication refusal — a
+   * signed-in caller answered `401` after ~120 s, on a route reachable without
+   * credentials. Postgres/MySQL (`max >= 10`) never exhibited it.
+   *
+   * Reads only, and only the transaction: the same-origin gate (#5351) still
+   * decides whether the handle is this object's driver's to use, so a
+   * privileged read that resolves to a DIFFERENT datasource keeps its own
+   * connection rather than executing on the wrong one. Returns `undefined`
+   * when there is no ambient transaction, which is the pre-existing shape.
+   */
+  private privilegedReadDriverOptions(object: string): { transaction: unknown } | undefined {
+    const tx = this.txStore.getStore()?.transaction;
+    if (tx === undefined) return undefined;
+    if (!this.transactionCoversDriverFor(object, tx)) return undefined;
+    return { transaction: tx };
+  }
+
+  /**
    * Dereference a stored secret ref back to its plaintext. Intended for
    * privileged, server-side consumers (e.g. a datasource connection-pool
    * binder) — NOT exposed through the generic read path, which only ever
@@ -5953,7 +6048,11 @@ export class ObjectQL implements IObjectQLEngine {
       throw new Error('Cannot resolve secret: no CryptoProvider is registered (fail-closed).');
     }
     const secretDriver = this.getDriver('sys_secret');
-    const found = await secretDriver.find('sys_secret', { where: { id } });
+    const found = await secretDriver.find(
+      'sys_secret',
+      { where: { id } },
+      this.privilegedReadDriverOptions('sys_secret'),
+    );
     const secret: any = Array.isArray(found) ? found[0] : found;
     if (!secret) {
       throw new Error(`Cannot resolve secret: sys_secret row "${id}" not found (fail-closed).`);
@@ -6018,7 +6117,11 @@ export class ObjectQL implements IObjectQLEngine {
       );
     }
     const driver = this.getDriver(object);
-    const found = await driver.find(object, { where: { id: recordId } });
+    const found = await driver.find(
+      object,
+      { where: { id: recordId } },
+      this.privilegedReadDriverOptions(object),
+    );
     const row: any = Array.isArray(found) ? found[0] : found;
     if (!row) return null;
     return this.resolveSecret(row[field], opts);
@@ -6100,10 +6203,14 @@ export class ObjectQL implements IObjectQLEngine {
     const out = new Map<string, unknown>();
     if (recordIds.length === 0) return out;
     const driver = this.getDriver(object);
-    const found = await driver.find(object, {
-      where: { id: { $in: [...recordIds] } },
-      fields: ['id', field],
-    });
+    const found = await driver.find(
+      object,
+      {
+        where: { id: { $in: [...recordIds] } },
+        fields: ['id', field],
+      },
+      this.privilegedReadDriverOptions(object),
+    );
     for (const row of Array.isArray(found) ? found : [found]) {
       if (!row || typeof row !== 'object') continue;
       const id = (row as Record<string, unknown>).id;
@@ -9868,8 +9975,9 @@ export class ObjectQL implements IObjectQLEngine {
                //  - A TRUTHY SCALAR `data.id` is left exactly as it is. There
                //    the payload's `id` IS the bound key (it outranks `where` —
                //    same case-set; since #11142 a truthy scalar `where.id`
-               //    naming a DIFFERENT row is refused at dispatch and never
-               //    reaches this branch), so the write is `SET id = 'rec_1'
+               //    naming a DIFFERENT row, and since #11230 a DECLARED
+               //    non-scalar `where.id` predicate, are refused at dispatch
+               //    and never reach this branch), so the write is `SET id = 'rec_1'
                //    WHERE id = 'rec_1'`: a same-value no-op, redundant rather
                //    than damaging, and long-standing behaviour. Widening the
                //    strip to cover it is a separate decision, not a rider

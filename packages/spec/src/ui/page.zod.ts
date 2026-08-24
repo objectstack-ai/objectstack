@@ -186,10 +186,48 @@ export const PageComponentSchema = lazySchema(() => strictObject({
 
   /**
    * Conditional-visibility predicate (CEL) — the component is rendered only when
-   * TRUE (ADR-0089, canonical `*When` name). Page predicates bind the live page
-   * surface: `record` + `current_user` plus page state as `page.<var>`.
+   * TRUE (ADR-0089, canonical `*When` name).
+   *
+   * ## Contract-bound roots
+   *
+   * `record`, `current_user`, and page state as `page.<var>`.
+   *
+   * `current_user` carries ADR-0068's aliases **`user`** and **`ctx.user`** —
+   * one object under three spellings. These are transcribed here as CONTRACT,
+   * not observed from the renderer: ADR-0068 D1 rules that a predicate
+   * "evaluates identically in a formula, an RLS policy, and a client `visible`
+   * gate", and `EvalUser`'s own docblock (`identity/eval-user.zod.ts`) states
+   * the same alias set for "every predicate surface (server formula, server
+   * RLS, **client UI gates**)". A page-component `visibleWhen` is a client UI
+   * gate, so naming only `current_user` here under-stated a ruling this
+   * package already makes elsewhere.
+   *
+   * ## Ambient roots — renderer behaviour, NOT contract-guaranteed
+   *
+   * The shipping renderer additionally mounts `app`, `features` and `os.user`
+   * from app-shell's `ExpressionProvider`, and binds `data`. **No ADR rules
+   * those on this surface**: ADR-0068's Non-goals fence its ruling to the user
+   * object ("only the user object is in scope here"), and ADR-0058 governs
+   * dialects/backends/fail-policy, not the UI root set. They are recorded as
+   * measured behaviour so an author is not misled into thinking they are
+   * unavailable — they are NOT promises, and widening the contract to cover
+   * them is an open question, deliberately not decided here.
+   *
+   * Measured at the `.objectui-sha` pin `190fbd01d061` (identical at objectui
+   * `origin/main` f2732afe): `app-shell/src/providers/ExpressionProvider.tsx:59`
+   * builds the ambient scope; `react/src/SchemaRenderer.tsx:463-471` composes
+   * this surface's evaluator.
+   *
+   * ## ⚠️ `data` is surface-dependent
+   *
+   * HERE `data` is the data-source **ADAPTER** — what `${data.total}` in a
+   * `properties` / `props` / `content` value interpolates against. On a
+   * `page:tabs` **item-level** `visibleWhen` a separate evaluator
+   * (`components/src/renderers/layout/containers.tsx:450-457`) binds `data` to
+   * the record **ROW** instead. Same key name, two bindings; see that key's own
+   * describe in `component.zod.ts` rather than assuming this one carries over.
    */
-  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Binds `record`, `current_user`, `page.<var>`. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: ExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `app`, `features`, `os.user` and binds `data` to the data-source ADAPTER here — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). ⚠️ `data` is surface-dependent: on a `page:tabs` item `visibleWhen` it is the record ROW instead. e.g. \"page.selectedProjectId != ''\""),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibility: ExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
 

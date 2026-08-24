@@ -20,7 +20,16 @@ interface DataEngineLike {
   aggregate(object: string, options: {
     where?: Record<string, unknown>;
     groupBy?: string[];
-    aggregations?: Array<{ function: string; field: string; alias: string }>;
+    /**
+     * `filter` (#10576, the contract half of #10413's ruling) is a
+     * per-aggregation predicate over the SOURCE rows — SQL
+     * `FILTER (WHERE …)` semantics — kept optional here in lockstep with
+     * `EngineAggregateOptions['aggregations'][number].filter` so the bridge
+     * below can forward a measure-scoped filter without widening this
+     * interface again the next time #10413's phase-2 lowering needs a place
+     * to put one.
+     */
+    aggregations?: Array<{ function: string; field: string; alias: string; filter?: Record<string, unknown> }>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
     /**
@@ -120,7 +129,14 @@ export interface AnalyticsServicePluginOptions {
    */
   executeAggregate?: (objectName: string, options: {
     groupBy?: string[];
-    aggregations?: Array<{ field: string; method: string; alias: string }>;
+    /**
+     * Per-aggregation `filter` (#10576, the #10413 contract field) — a
+     * CUSTOM bridge (an app author's own `executeAggregate`, as opposed to
+     * the auto-bridge below) MUST forward it to the real engine the same way
+     * the auto-bridge does, or a measure-scoped filter this plugin lowers
+     * onto the aggregation silently never reaches storage.
+     */
+    aggregations?: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>;
     filter?: Record<string, unknown>;
     /** Reference timezone (IANA) for date bucketing — ADR-0053 Phase 2. */
     timezone?: string;
@@ -270,10 +286,25 @@ export class AnalyticsServicePlugin implements Plugin {
         const rows = await engine.aggregate(objectName, {
           where: filter,
           groupBy,
+          // [#10413 phase 2 / #10576] `a.filter` is the per-aggregation
+          // predicate `ObjectQLStrategy` lowers a measure's own scoped
+          // `filter` into. This map already renames `method` → `function`
+          // for the engine's own vocabulary; dropping `filter` here — as this
+          // bridge did before this line existed — would have made the
+          // strategy's lowering a NO-OP on every real deployment that boots
+          // through this auto-bridge (the default path: `new
+          // AnalyticsServicePlugin({ cubes })` with no custom
+          // `executeAggregate`), passing every unit test that stubs
+          // `executeAggregate` directly while silently dropping the filter in
+          // production — the exact declared-≠-enforced shape Prime Directive
+          // #10 calls out. Omitted (not `filter: undefined`) when the
+          // aggregation carries none, matching the engine's own
+          // vacuous-filter convention.
           aggregations: aggregations?.map((a) => ({
             function: a.method,
             field: a.field,
             alias: a.alias,
+            ...(a.filter ? { filter: a.filter } : {}),
           })),
           // ADR-0053 Phase 2: thread the reference tz so date buckets resolve on
           // that zone's calendar days (engine buckets in-memory when non-UTC).

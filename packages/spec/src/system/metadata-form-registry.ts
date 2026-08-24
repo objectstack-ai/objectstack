@@ -55,6 +55,7 @@ import { emailTemplateForm } from './email-template.form';
  * when no explicit ordering is supplied by the consumer).
  *
  * @example
+ * <!-- os:check -->
  * ```ts
  * import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
  *

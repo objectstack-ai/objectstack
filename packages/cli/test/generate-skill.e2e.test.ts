@@ -40,13 +40,21 @@
  * avoid, one layer down: the whole point is that nothing in this file decides
  * what `**` + `*.skill.ts` mean.
  *
- * ## The fence this file also holds
+ * ## The control this file also holds (#11071)
  *
- * The filename override is scoped to `skill` alone; converging all seven
- * generators on `NAME.TYPE.ts` is a repo-wide decision that does not ride in
- * on a skill template (#11025). `os g object` is therefore exercised here as
- * a CONTROL: it must still write `customer.ts`, with a barrel line that still
- * says `'./customer'`.
+ * `os g object` is exercised here as a CONTROL, and what it controls for
+ * changed. #11025 scoped the filename fix to `skill` and fenced the repo-wide
+ * route, so the control pinned `customer.ts` and a `'./customer'` barrel line.
+ * #11071 measured the loader rather than assuming: `_loadFromFileSystem` globs
+ * every registry entry by its own `filePatterns`, so all seven generators wrote
+ * into the same invisibility, and the per-generator override was replaced by a
+ * default derived from the registry. The control now pins the OTHER side of
+ * that: `os g object` writes a name the `object` entry's own patterns match,
+ * proving the derivation is wired into the real command and not just unit-true.
+ *
+ * The exhaustive form of that property — every generator, plus the kebab-infix
+ * case no generator exercises yet — is `generate-file-name-registry-parity.test.ts`.
+ * This file keeps the end-to-end half: a real child process, a real write.
  *
  * Assertions run against a REAL CHILD PROCESS and read stdout, for the two
  * reasons `generate-agent-retired.e2e.test.ts` documents: `process.exitCode`
@@ -91,6 +99,9 @@ const RUN_TIMEOUT_MS = 180_000;
 
 /** The contract under test, read from the registry — never restated. */
 const SKILL_ENTRY = DEFAULT_METADATA_TYPE_REGISTRY.find(entry => entry.type === 'skill');
+
+/** Same, for the generator this file exercises end-to-end as a control (#11071). */
+const OBJECT_ENTRY = DEFAULT_METADATA_TYPE_REGISTRY.find(entry => entry.type === 'object');
 
 interface Run {
   code: number;
@@ -266,15 +277,44 @@ describe('[#11025] the generated skill parses', () => {
   });
 });
 
-describe('[#11025] the harness convention is unchanged for the other generators', () => {
-  it('`os g object` still writes `NAME.ts`, with no type infix', () => {
-    expect(control.code).toBe(0);
-    expect(existsSync(join(dir, 'src', 'objects', 'customer.ts'))).toBe(true);
-    expect(existsSync(join(dir, 'src', 'objects', 'customer.object.ts'))).toBe(false);
+describe('[#11071] the same rule reaches the other generators, end to end', () => {
+  it('the registry still describes `object` as filesystem-discovered', () => {
+    // Same self-check as the `skill` block above: if this stops holding, the
+    // pin below is measuring something other than what it claims.
+    expect(OBJECT_ENTRY).toBeDefined();
+    expect(OBJECT_ENTRY!.allowRuntimeCreate).toBe(true);
+    expect(OBJECT_ENTRY!.filePatterns.length).toBeGreaterThan(0);
   });
 
-  it('and its barrel line is byte-identical to what it was before', () => {
-    const objectBarrel = readFileSync(join(dir, 'src', 'objects', 'index.ts'), 'utf-8');
-    expect(objectBarrel).toContain("export { default as customer } from './customer';");
+  it('`os g object` writes a path matched by the `object` entry\'s own patterns', () => {
+    expect(control.code).toBe(0);
+
+    const objectDir = join(dir, 'src', 'objects');
+    const produced = existsSync(objectDir)
+      ? readdirSync(objectDir).filter(f => f !== 'index.ts')
+      : [];
+    // Listed, not assumed — a generator that wrote the wrong name has to fail
+    // the pattern assertion, not an existence one.
+    expect(produced).toHaveLength(1);
+
+    const relPath = toPosixRelative(dir, join(objectDir, produced[0]));
+    const matched = OBJECT_ENTRY!.filePatterns.filter(pattern => matchesGlob(relPath, pattern));
+
+    expect(
+      matched.length,
+      `generated "${relPath}" matches none of ${JSON.stringify(OBJECT_ENTRY!.filePatterns)} — `
+      + 'it would validate, publish and never load',
+    ).toBeGreaterThan(0);
+  });
+
+  it('and its barrel line names the module that was really written', () => {
+    const objectDir = join(dir, 'src', 'objects');
+    const written = readdirSync(objectDir).filter(f => f !== 'index.ts')[0];
+    const objectBarrel = readFileSync(join(objectDir, 'index.ts'), 'utf-8');
+    // Rebuilt from the metadata name rather than the filename, this would read
+    // `'./customer'` and resolve to nothing.
+    expect(objectBarrel).toContain(
+      `export { default as customer } from './${written.replace(/\.ts$/, '')}';`,
+    );
   });
 });

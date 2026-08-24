@@ -92,6 +92,13 @@
         "integration-system.job-scheduled-run"
       ]
     },
+    "manifest": {
+      "items": [
+        "platform-core.manifest-install-contract",
+        "cli.plugin-manifest-build-contract",
+        "api-backend.package-rest-lifecycle"
+      ]
+    },
     "mapping": {
       "items": [
         "records-forms.named-import-mapping"

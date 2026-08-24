@@ -36,9 +36,50 @@ export const SysMember = ObjectSchema.create({
   // Row-level actions: better-auth `organization/update-member-role` and
   // `organization/remove-member`. Generic CRUD is suppressed on better-auth
   // managed tables, so these are the canonical edit/delete entry points.
-  // The `add_member` toolbar action covers the admin "attach an existing
-  // user directly without sending an invitation" flow.
+  //
+  // The toolbar carries the TWO ways a teammate arrives, in the order an
+  // admin wants them: `invite_user` sends an email invitation (the common
+  // case), `add_member` attaches an ALREADY-REGISTERED user directly.
   actions: [
+    {
+      // THIRD mirror of `invite_user` (sys_user, sys_invitation are the other
+      // two — keep all three consistent). It is here because the org record
+      // page (ADR-0081) opens on tab-0 **Members**, and the email-invite entry
+      // used to live only on tab-1 Invitations: an admin looking to "invite a
+      // teammate by email" landed on Members, saw only "Add Member" (attach an
+      // existing user by id), and concluded the product had no invite entry.
+      // Declaration order is render order — the related-list toolbar bridge
+      // maps the child object's `list_toolbar` actions in array order
+      // (objectui `RelatedRecordActionsBridge.deriveActions` →
+      // `RelatedList`), so this sits left of `add_member`.
+      //
+      // ⚠️ `email` is NOT a field of sys_member, so unlike the sys_invitation
+      // copy this param MUST name its owner via `objectOverride`. Without it
+      // the field-backed param is unresolvable and objectui's
+      // `resolveActionParam` falls back to `type: 'text'` with the raw field
+      // name as its label — a dialog that still submits, but loses the email
+      // value shape and the i18n label, with nothing red anywhere (ADR-0078
+      // valid-but-inert metadata). Same device as sys_user's own copy, which
+      // reaches for `sys_member` for the `role` half. `role` needs no override
+      // here: sys_member declares it, from the same
+      // BUILTIN_MEMBERSHIP_ROLE_OPTIONS constant sys_invitation reads.
+      name: 'invite_user',
+      label: 'Invite User',
+      icon: 'user-plus',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/organization/invite-member',
+      // Same gate as the other two mirrors — the org CAPABILITY, not
+      // multi-org (ADR-0081 D1).
+      requiresFeature: 'organization',
+      successMessage: 'Invitation sent',
+      refreshAfter: true,
+      params: [
+        { field: 'email', objectOverride: 'sys_invitation', required: true },
+        { field: 'role', required: true },
+      ],
+    },
     {
       // Admin-only: directly attach an existing user to the active org,
       // bypassing the invite-accept flow. Better-auth:
@@ -55,10 +96,29 @@ export const SysMember = ObjectSchema.create({
       // — this action never sends it, so it never exercises the team half.
       // Pinned against a vendor bump that ADDS the fallback by
       // plugin-auth's `organization-add-member-team-fallback.test.ts`.
+      //
+      // Chrome DIFFERENTIATED from the `invite_user` sibling above, which used
+      // to be a byte-identical `primary` + `user-plus` pair — the visual half
+      // of the discoverability defect. Both halves are honoured by the
+      // related-list toolbar renderer, so neither is decoration:
+      //  - `variant: 'secondary'` — objectui's `RelatedToolbarButton` maps
+      //    `primary` to a FILLED button and every other variant to an
+      //    `outline` one, so the invite entry reads as the primary path and
+      //    this one as the secondary. (That mapping is also why `secondary`
+      //    and `ghost` are indistinguishable HERE; the choice is `secondary`
+      //    because it is what the button means, not what this surface draws.)
+      //  - `icon: 'link-2'` — "attach an EXISTING record", the same icon
+      //    sys_account's `link_social` uses for attaching an existing external
+      //    identity. `user-plus` is reserved for the flows that bring a NEW
+      //    person in.
+      // The LABEL is deliberately left alone: "Add Member" and "Invite User"
+      // already differ, and the four translation bundles' hand-written values
+      // fill only gaps — a renamed source label would leave three locales
+      // reading the old text under a green gate.
       name: 'add_member',
       label: 'Add Member',
-      icon: 'user-plus',
-      variant: 'primary',
+      icon: 'link-2',
+      variant: 'secondary',
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',

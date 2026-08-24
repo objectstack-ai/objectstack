@@ -249,22 +249,16 @@ export const SysUser = ObjectSchema.create({
         ],
       },
     },
-    {
-      name: 'set_user_role',
-      label: 'Set Platform Role',
-      icon: 'shield-check',
-      variant: 'secondary',
-      locations: ['list_item', 'record_header'],
-      type: 'api',
-      target: '/api/v1/auth/admin/set-role',
-      requiresFeature: 'admin',
-      recordIdParam: 'userId',
-      successMessage: 'Role updated',
-      refreshAfter: true,
-      params: [
-        { name: 'role', label: 'Platform Role', type: 'text', required: true },
-      ],
-    },
+    // #9968 — `set_user_role` (target: /api/v1/auth/admin/set-role) retired
+    // from here. Its only effect was `internalAdapter.updateUser(userId, {
+    // role })` — a gated, UI-driven writer for the legacy `sys_user.role`
+    // scalar ADR-0068 D2 stopped synthesizing. Platform-admin membership is
+    // granted through `sys_user_permission_set` / `admin_full_access`; a
+    // working "Set Platform Role" button was a supported, one-user-at-a-time
+    // resurrection channel for the dual identity representation the
+    // 2026-08-18 ruling permanently vetoed (Option 3). Removal, not a
+    // narrowed re-implementation — the vendor route itself stays mounted
+    // and vendor-gated, unchanged; only this action/button is gone.
     {
       name: 'impersonate_user',
       label: 'Impersonate User',

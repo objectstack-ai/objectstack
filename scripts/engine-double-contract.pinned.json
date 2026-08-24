@@ -1197,6 +1197,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1452,6 +1457,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/permission-set-drift.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-overlay-discard.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/permission-set-overlay-discard.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1508,6 +1528,11 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/vama-write-path-convergence.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/walled-platform-bucket-diagnostic.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1637,6 +1662,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-published-overlay.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1698,6 +1733,16 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1849,6 +1894,11 @@
     {
       "file": "packages/services/service-storage/src/stranded-orphan-inventory.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/tombstone-download-live-reference.test.ts",
+      "verb": "update",
       "pinned": 1
     }
   ]

@@ -130,6 +130,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           shared: "共有",
           assigned: "割り当て",
           completed: "完了",
+          scheduled: "予定",
           login: "ログイン",
           logout: "ログアウト",
           system: "システム"

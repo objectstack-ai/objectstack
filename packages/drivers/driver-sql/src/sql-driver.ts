@@ -81,6 +81,7 @@ import {
   expectedIndexes,
   fieldHasColumn,
   GLOBAL_TENANT,
+  indexedKeyColumns,
   isIndexDriftOp,
   isUniqueScopeDeclared,
   legacyUniqueReplacements,
@@ -4474,24 +4475,31 @@ export class SqlDriver implements IDataDriver {
         }
         : { ...knexConfig }; // host chose its own bound — respect it
 
+    // `!dialect` — sqlite, or a client with no connect-timeout knob — means
+    // there is no TIMEOUT to inject. It deliberately does not skip the session
+    // pins below: those answer a different question (what does a value MEAN on
+    // this connection), and the two lists are not the same list. Measured while
+    // fixing #11389: `redshift` speaks the pg wire protocol, and therefore
+    // needs the calendar-day pin, but carries no entry here — so a `return`
+    // placed at this point silently opted it out of a fix it needs.
     const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
-    if (!dialect) return bounded; // sqlite / unknown client — nothing to inject
-
-    const conn = knexConfig.connection;
-    if (typeof conn === 'string') {
-      // The URL must move into the dialect's own URL slot so the timeout can
-      // ride alongside it. Verified for both dialects: the connection attempt
-      // still goes to the URL's host/port, `?sslmode=` is still honoured.
-      bounded.connection = {
-        [dialect.urlKey]: conn,
-        [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
-      };
-    } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
-      bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+    if (dialect) {
+      const conn = knexConfig.connection;
+      if (typeof conn === 'string') {
+        // The URL must move into the dialect's own URL slot so the timeout can
+        // ride alongside it. Verified for both dialects: the connection attempt
+        // still goes to the URL's host/port, `?sslmode=` is still honoured.
+        bounded.connection = {
+          [dialect.urlKey]: conn,
+          [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
+        };
+      } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
+        bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+      }
+      // A function-valued `connection` (knex's per-acquire provider) is left
+      // alone: the host is building each connection itself and owns its timeouts.
     }
-    // A function-valued `connection` (knex's per-acquire provider) is left
-    // alone: the host is building each connection itself and owns its timeouts.
-    return SqlDriver.withUtcSession(bounded);
+    return SqlDriver.withPostgresCalendarDayAsText(SqlDriver.withUtcSession(bounded));
   }
 
   /**
@@ -4541,6 +4549,126 @@ export class SqlDriver implements IDataDriver {
           if (!hostAfterCreate) return done(undefined, connection);
           hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
         });
+      },
+    };
+    return out;
+  }
+
+  /**
+   * knex client names that route to the `pg` npm driver, and therefore reach
+   * {@link withPostgresCalendarDayAsText}. Wider than {@link isPostgres} on
+   * purpose: that getter answers "which dialect's SQL do I emit", while this
+   * answers "which npm package parses the wire format" — `postgres` (knex's
+   * own alias), `cockroachdb` and `redshift` all speak the pg wire protocol
+   * with the same type OIDs. The hook is additionally guarded on the
+   * connection really exposing `setTypeParser`, so a client name that turns
+   * out not to be a `pg.Client` degrades to a no-op instead of throwing.
+   */
+  private static readonly POSTGRES_WIRE_CLIENTS: ReadonlySet<string> = new Set([
+    'pg', 'postgres', 'postgresql', 'cockroachdb', 'redshift',
+  ]);
+
+  /** Postgres OID of `date` — a bare calendar day, no time and no zone. */
+  private static readonly PG_OID_DATE = 1082;
+  /** Postgres OID of `date[]`. */
+  private static readonly PG_OID_DATE_ARRAY = 1182;
+  /**
+   * Postgres OID of `text[]`. Borrowed, not used for its own type: pg's
+   * built-in `text[]` parser IS its array-literal splitter with an identity
+   * element transform, so applying it to a `date[]` literal yields the raw
+   * `YYYY-MM-DD` element strings — including `null` for a SQL NULL element,
+   * `[]` for an empty array, and nested arrays for the multi-dimensional case.
+   * Reusing it is what keeps this hook free of a hand-rolled array parser and
+   * free of any dependency on the `pg` module being importable from here.
+   */
+  private static readonly PG_OID_TEXT_ARRAY = 1009;
+
+  /**
+   * Keep a Postgres `date` a calendar-day STRING, never a JS `Date` (#11389).
+   *
+   * This is the Postgres counterpart of {@link withUtcSession}, and it exists
+   * for the same reason: the value a driver materialises must not depend on
+   * which machine's clock the Node process happens to be running.
+   *
+   * ## The measurement
+   *
+   * `node-postgres` parses OID 1082 with `new Date(y, m - 1, d)` — **local**
+   * midnight. `SqlDriver#toDateOnly` reads a `Date` with UTC components (its
+   * documented contract, see there), so on a process east of UTC the two
+   * disagree by a calendar day. Measured on PostgreSQL 16, one stored row
+   * `d = '2026-08-24'`, only the process `TZ` changed:
+   *
+   * | process TZ | pg materialises | `toDateOnly` returned |
+   * |---|---|---|
+   * | `UTC` | `2026-08-24T00:00:00.000Z` | `2026-08-24` |
+   * | `America/New_York` | `2026-08-24T04:00:00.000Z` | `2026-08-24` |
+   * | `Asia/Shanghai` | `2026-08-23T16:00:00.000Z` | **`2026-08-23`** |
+   *
+   * West of UTC the UTC components happen to name the right day, which is why
+   * the `Temporal Conformance (live PG + MySQL)` job — pinned at
+   * `TZ=America/New_York` — was green throughout. Only an east-of-UTC process
+   * zone can fail it, so the pin that guards this sweeps the process zone.
+   *
+   * ## Why the parser and not the reader
+   *
+   * The alternative — read local components in `toDateOnly` — was measured and
+   * rejected: that helper is shared by the READ path (`formatOutput`,
+   * `presentReadValue`), the WRITE path (`formatInput`) and the FILTER path
+   * (`coerceFilterValue`), and the `Date`s they receive are on different
+   * clocks. A caller's `new Date('2026-08-24')` is UTC midnight, so under
+   * `TZ=America/New_York` local components read it as `2026-08-23` — the same
+   * one-day error in the mirror direction, moved onto the write and filter
+   * paths. Fixing it at the parser leaves exactly one clock in play, because
+   * the driver then never produces a `Date` for a `date` column at all — which
+   * is already how SQLite behaves (TEXT round-trip) and, via
+   * {@link withUtcSession}'s `timezone: 'Z'`, how mysql2 behaves.
+   *
+   * `pool.afterCreate` is the hook rather than a `pg.types.setTypeParser`
+   * call because `setTypeParser` mutates the pg-types registry **process
+   * wide**, which would reach every other pg client in the host application.
+   * A parser registered on the connection is scoped to the pools this driver
+   * opened; a host's own `pg` clients keep the stock behaviour. `pg` is an
+   * optional peer dependency and is never imported here — `setTypeParser` /
+   * `getTypeParser` are read off the `pg.Client` knex hands the hook.
+   *
+   * `timestamptz` / `timestamp` are deliberately untouched: those are
+   * instants, a `Date` is the right materialisation for them, and
+   * `Field.datetime` depends on it.
+   *
+   * A host's existing `pool.afterCreate` is chained rather than replaced,
+   * exactly as in {@link withUtcSession}.
+   */
+  private static withPostgresCalendarDayAsText(
+    knexConfig: Record<string, any>,
+  ): Record<string, any> {
+    if (!SqlDriver.POSTGRES_WIRE_CLIENTS.has(String(knexConfig.client ?? ''))) return knexConfig;
+
+    const out: Record<string, any> = { ...knexConfig };
+    const pool = (out.pool ?? {}) as Record<string, any>;
+    const hostAfterCreate = pool.afterCreate as
+      | ((conn: unknown, done: (err?: unknown) => void) => void)
+      | undefined;
+    out.pool = {
+      ...pool,
+      afterCreate(connection: any, done: (err?: unknown, conn?: unknown) => void) {
+        const chain = (): void => {
+          if (!hostAfterCreate) return done(undefined, connection);
+          hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
+        };
+        // Not a `pg.Client` after all (a stub, a future knex shape): leave the
+        // connection exactly as it was rather than failing the acquire.
+        if (
+          typeof connection?.setTypeParser !== 'function' ||
+          typeof connection?.getTypeParser !== 'function'
+        ) {
+          return chain();
+        }
+        const parseTextArray = connection.getTypeParser(SqlDriver.PG_OID_TEXT_ARRAY, 'text');
+        // The wire form of `date` IS `YYYY-MM-DD`; handing it back verbatim is
+        // both the fix and the whole parser.
+        connection.setTypeParser(SqlDriver.PG_OID_DATE, (text: string) => text);
+        connection.setTypeParser(SqlDriver.PG_OID_DATE_ARRAY, parseTextArray);
+        chain();
       },
     };
     return out;
@@ -7633,7 +7761,57 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
-    const rows = await builder;
+    // [#11455] The third read exit joins the other two. `find()` and `count()`
+    // have carried the terminal envelope since #8931; this door executed BARE,
+    // so any dialect error the statement raised left the driver as the
+    // backend's own object — a raw SQLSTATE in `code`, `status` UNDEFINED, and
+    // the compiled statement as the message. Measured on live PostgreSQL 16.13:
+    //
+    //   sum(flag) => THREW code=42883 status=undefined
+    //                msg=select sum("flag") as "n" from "…" -
+    //                    function sum(boolean) does not exist
+    //
+    // A raw `42883` is on no list `@objectstack/rest` reads, so an ordinary
+    // analytics shape — a rate measure over a flag column — was logged as an
+    // UNHANDLED server fault. `mapDataError` then had nothing declared to
+    // forward, which is the #1116/#1117 gap {@link mapAggregateFunc} closed for
+    // the FUNCTION NAME while leaving the STATEMENT half open.
+    //
+    // ⛔ Nothing here decides whether a boolean aggregate should ANSWER (by
+    // casting boolean to int in {@link SQL_AGGREGATE_FUNCTIONS}) or REFUSE —
+    // that contract question is #11152's, and #11249's for `min`/`max`. The
+    // three dialects genuinely disagree today (SQLite and MySQL's `tinyint(1)`
+    // both answer arithmetically, Postgres refuses), which is exactly why the
+    // envelope is the half that can land first: *when* it fails, the failure
+    // carries a catalogued code and a status, either way that card is ruled.
+    //
+    // ⛔ And no boolean-specific recognizer: the envelope comes from the EXIT,
+    // not from matching `42883` or the words `does not exist`. That is the
+    // #8926 lesson applied in advance — a predicate arm that matches a WORDING
+    // is an arm that silently fails to fire on the dialect nobody measured.
+    //
+    // ⛔ Deliberately NOT the {@link isUnresolvableColumnError} arm that
+    // {@link SqlDriver.count} runs first. That refusal's words are "Filter on
+    // 'x' names a column that object 'o' has no column for", and THIS door
+    // names columns in three clauses — the WHERE, the `groupBy` fields and the
+    // aggregation `field`. A blanket arm would tell the author of
+    // `avg('nosuchcol')` that their FILTER was wrong, which is the
+    // unsupportable claim the #8931 ruling refuses to make. Answering it
+    // truthfully needs a classifier this card did not measure, so the gap is
+    // filed rather than guessed at.
+    //
+    // Only the EXECUTION is guarded. Every refusal this method composes —
+    // {@link refuseAggregateFunction}, {@link refuseDistinctAggregateWithoutField},
+    // {@link unsupportedAggregationFilterError}, {@link refuseDateBucketedGroupBy}
+    // — is raised while the statement is BUILT, upstream of this line, so the
+    // catch-all cannot bury a precise refusal under a generic 500.
+    let rows: unknown[];
+    try {
+      rows = await builder;
+    } catch (error) {
+      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+      throw this.backendStatementFault(object, error);
+    }
     return this.presentReadColumns(rows, presentedOutput);
   }
 
@@ -8035,6 +8213,14 @@ export class SqlDriver implements IDataDriver {
   protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     const exists = await this.knex.schema.hasTable(shardName);
+    // #11374: a shard carries the base table's declared indexes (below), so its
+    // columns need the same keyable-text decision the managed path makes.
+    const keyedColumns = indexedKeyColumns({
+      table: shardName,
+      fields: obj.fields ?? {},
+      tenantField: this.resolveTenantField(shardName),
+      declaredIndexes: (obj as any).indexes,
+    });
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
         table.string('id').primary();
@@ -8042,7 +8228,7 @@ export class SqlDriver implements IDataDriver {
         this.createAuditTimestampColumn(table, 'updated_at');
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (builtinColumns.has(name)) continue;
-          this.createColumn(table, name, field);
+          this.createColumn(table, name, field, keyedColumns.get(name));
         }
       });
     } else {
@@ -8051,7 +8237,7 @@ export class SqlDriver implements IDataDriver {
       await this.knex.schema.alterTable(shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
-            this.createColumn(table, name, field);
+            this.createColumn(table, name, field, keyedColumns.get(name));
           }
         }
       });
@@ -8476,6 +8662,18 @@ export class SqlDriver implements IDataDriver {
       // rejects CREATE TABLE with two columns of the same name).
       const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
 
+      // #11374: which columns this object's indexes will KEY ON, resolved before
+      // any DDL runs. `createColumn` needs it to decide whether a bounded text
+      // field takes `varchar(maxLength)` (keyable) or TEXT — a decision that is
+      // only makeable at CREATE time, since no dialect turns a TEXT column into
+      // a keyable one afterwards.
+      const keyedColumns = indexedKeyColumns({
+        table: tableName,
+        fields: obj.fields ?? {},
+        tenantField,
+        declaredIndexes: (obj as any).indexes,
+      });
+
       if (!exists) {
         await this.knex.schema.createTable(tableName, (table) => {
           table.string('id').primary();
@@ -8484,7 +8682,7 @@ export class SqlDriver implements IDataDriver {
           if (obj.fields) {
             for (const [name, field] of Object.entries(obj.fields)) {
               if (builtinColumns.has(name)) continue;
-              this.createColumn(table, name, field);
+              this.createColumn(table, name, field, keyedColumns.get(name));
             }
           }
         });
@@ -8501,7 +8699,7 @@ export class SqlDriver implements IDataDriver {
           if (obj.fields) {
             for (const [name, field] of Object.entries(obj.fields)) {
               if (!existingColumns.includes(name)) {
-                this.createColumn(table, name, field);
+                this.createColumn(table, name, field, keyedColumns.get(name));
               }
             }
           }
@@ -9815,7 +10013,16 @@ export class SqlDriver implements IDataDriver {
             const nullable = relax.has(c.name) ? true : tighten.has(c.name) ? false : c.nullable;
             if (!nullable && c.name !== 'id') col.notNullable();
             if (c.name === 'created_at' || c.name === 'updated_at') {
-              col.defaultTo(this.knex.fn.now());
+              // #11321: the SAME canonical default {@link createAuditTimestampColumn}
+              // emits, not `knex.fn.now()`. This method is SQLite-only (see the
+              // `isSqlite` branch in `applyMigrationEntries`), where
+              // `knex.fn.now()` is the zone-naive `CURRENT_TIMESTAMP` — so
+              // re-emitting it here would silently REVERT a table that was
+              // created with the canonical default the moment any unrelated
+              // drift (a relaxed NOT NULL, a dropped column) triggered a
+              // rebuild. A rebuild must hand back the column `initObjects`
+              // would have built.
+              col.defaultTo(this.nowColumnDefault('datetime'));
             } else if (!dropDefault.has(c.name)) {
               // Re-emit the METADATA-declared default. The rebuild dropped the
               // original table, so a column whose default is not restated here
@@ -10231,6 +10438,19 @@ export class SqlDriver implements IDataDriver {
         // `code` / `errno` / `message` / `cause`; see
         // `@objectstack/types`' `unique-violation.ts` for why it is the one
         // name for this question.
+        // #11374: MySQL's refusal of a TEXT key part names a column in a table
+        // that was just created successfully, which reads as an index quirk
+        // rather than what it is — the object is now registered with its
+        // declared uniqueness absent. Re-throw the SAME failure carrying the
+        // field-level fix; the boot still fails loudly, it just says why.
+        const unkeyable = await this.explainUnkeyableTextColumn(tableName, name, columns, e);
+        if (unkeyable) {
+          (this.logger.error ?? this.logger.warn)(unkeyable, msg);
+          throw Object.assign(new Error(`${unkeyable} (server said: ${msg})`), {
+            code: (e as { code?: string }).code,
+            cause: e,
+          });
+        }
         if (nullSafe.size > 0 && isUniqueViolationError(e)) {
           // Existing rows violate the NULL-safe unique — the #5030 defect made
           // visible. Do not take the boot down: the declared constraint is not
@@ -10623,12 +10843,43 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Collapse a `Field.date` value to a timezone-naive `YYYY-MM-DD`
-   * calendar-day string (ADR-0053 Phase 1). A `Date` collapses to its UTC
-   * calendar day; a string keeps its leading date and drops any time
-   * component. Anything else (and `null`/`undefined`) passes through
-   * unchanged. This is the single source of truth for date-only truncation,
-   * shared by the filter (`coerceFilterValue`), write (`formatInput`) and
-   * read (`formatOutput`) paths so all three agree on what a date *is*.
+   * calendar-day string (ADR-0053 Phase 1). A string keeps its leading date
+   * and drops any time component. Anything else (and `null`/`undefined`)
+   * passes through unchanged. This is the single source of truth for date-only
+   * truncation, shared by the filter (`coerceFilterValue`), write
+   * (`formatInput`) and read (`formatOutput`, `presentReadValue`) paths so all
+   * of them agree on what a date *is*.
+   *
+   * ## Which clock a `Date` argument is on — the contract, not an accident
+   *
+   * **A `Date` reaching this helper is read on the UTC clock**
+   * (`getUTCFullYear` / `getUTCMonth` / `getUTCDate`), and callers must hand it
+   * one whose UTC components name the intended calendar day. That is the same
+   * clock every other temporal canon in this driver folds through
+   * (`storageDatetimeValue`, `canonicalTimeOfDay`, `nowColumnDefault`'s
+   * `timezone('utc', now())::date`), so a `Field.date` means one day on every
+   * host regardless of the process `TZ`.
+   *
+   * It is written down because the three call paths do NOT hand it `Date`s
+   * from one source, and #11389 was the reading of that. Measured (PostgreSQL
+   * 16, one process, only `TZ` changed):
+   *
+   * | argument, for calendar day 2026-08-24 | `TZ=Asia/Shanghai` | `TZ=America/New_York` |
+   * |---|---|---|
+   * | caller's `new Date('2026-08-24')` — write/filter | `…T00:00Z` | `…T00:00Z` |
+   * | caller's `new Date(2026, 7, 24)` — write/filter | `…T16:00Z` (prev. day UTC) | `…T04:00Z` |
+   * | what `pg` used to hand the READ path for a `date` column | `…T16:00Z` (prev. day UTC) | `…T04:00Z` |
+   *
+   * So no single clock is right for every `Date` that could arrive: reading
+   * local components would fix the third row and break the first (a
+   * `new Date('2026-08-24')` comparand becomes `2026-08-23` west of UTC — the
+   * identical one-day error, moved onto the write and filter paths). The read
+   * path was fixed at its source instead — see
+   * {@link withPostgresCalendarDayAsText} — so on every dialect a `date`
+   * column now arrives here as TEXT and no driver-materialised `Date` reaches
+   * this helper at all. ⛔ Do not "repair" a residual date skew by switching
+   * the getters below to their local twins; that reintroduces #11389 in the
+   * mirror direction, and `sql-driver-11389-date-tz-skew.test.ts` pins it.
    */
   protected toDateOnly(value: any): any {
     if (value == null) return value;
@@ -12469,16 +12720,240 @@ export class SqlDriver implements IDataDriver {
    * `TIMESTAMP` problems on MySQL: no milliseconds, and a 2038 ceiling on the
    * column every list view sorts by (#3942). `CURRENT_TIMESTAMP` has to carry
    * matching precision for a `DATETIME(3)` default, hence `now(3)`.
+   *
+   * ## SQLite takes the SAME canonical default a declared field gets (#11321)
+   *
+   * "Must take the same physical type as a declared `Field.datetime`" is the
+   * paragraph above; the DEFAULT is the other half of that sentence, and on
+   * SQLite it used to diverge. `knex.fn.now()` compiles to an unqualified
+   * `CURRENT_TIMESTAMP`, which SQLite renders as a zone-NAIVE, space-separated,
+   * second-precision `'YYYY-MM-DD HH:MM:SS'` — the exact string
+   * {@link updatedAtStamp}'s docblock condemns, because `Date.parse` reads a
+   * zone-less string as LOCAL time and silently shifts the instant by the host
+   * offset. A declared `defaultValue: 'NOW()'` field in the SAME table already
+   * gets the canonical ISO-8601 form from {@link nowColumnDefault}, so one table
+   * carried two spellings of one conceptual value:
+   *
+   * ```
+   * created_at  "2026-08-23 14:54:17"          <- builtin audit (naive)
+   * when        "2026-08-23T14:54:17.796Z"     <- declared Field.datetime NOW()
+   * ```
+   *
+   * Routed through {@link nowColumnDefault} rather than restating the
+   * expression, so the two can never drift apart again — one source for "what
+   * does NOW() mean in DDL on this dialect".
+   *
+   * Postgres is deliberately untouched: `knex.fn.now()` there is a real
+   * zone-aware `TIMESTAMP` that never had the ambiguity. MySQL keeps `now(3)`
+   * (#11224) — a `DATETIME(3)` default must carry matching precision.
+   *
+   * ⚠️ Scope: a DDL default governs only NEWLY-created tables. A table already
+   * on disk keeps its legacy `CURRENT_TIMESTAMP` default; `formatOutput`'s read
+   * repair (`repairNaiveUtcAuditTimestamp`) folds those rows to canonical on
+   * read, which is why this needs no migration — the same disposition
+   * {@link nowColumnDefault} already documents for declared fields. Measured:
+   * schema-drift never compares this default, so an existing deployment does
+   * NOT start reporting drift on `created_at`/`updated_at` — the audit columns
+   * are skipped outright ({@link BUILTIN_COLUMNS}), and the only
+   * `default_mismatch` producer is the #4560 runtime-token check.
    */
   protected createAuditTimestampColumn(table: Knex.CreateTableBuilder, name: string): void {
     if (this.isMysql) {
       table.datetime(name, { precision: 3 }).defaultTo(this.knex.fn.now(3));
       return;
     }
+    if (this.isSqlite) {
+      table.timestamp(name).defaultTo(this.nowColumnDefault('datetime'));
+      return;
+    }
     table.timestamp(name).defaultTo(this.knex.fn.now());
   }
 
-  protected createColumn(table: Knex.CreateTableBuilder, name: string, field: any) {
+  /**
+   * The widest `varchar(n)` one utf8mb4 key part can hold on InnoDB: 3072 bytes
+   * of index key ÷ 4 bytes per character (#11374).
+   *
+   * Measured on MySQL 8.0.46 (DYNAMIC row format, the 8.0 default) rather than
+   * read off a doc page: `varchar(768) UNIQUE` creates, `varchar(769) UNIQUE`
+   * is refused with `ER_TOO_LONG_KEY: Specified key was too long; max key
+   * length is 3072 bytes`.
+   *
+   * The bound is per KEY, not per column, so a wide composite can exceed it
+   * while every part is individually legal — this constant cannot prevent that,
+   * and does not try to. It is the single-part ceiling below which emitting a
+   * bounded column is known to help; {@link explainUnkeyableTextColumn} handles
+   * whatever the server still refuses.
+   */
+  protected static readonly MAX_KEYABLE_VARCHAR_CHARS = 768;
+
+  /**
+   * The `varchar(n)` a KEYED text-family field should take, or `null` to leave
+   * the column TEXT (#11374).
+   *
+   * `null` has exactly two causes, and both are deliberate non-events rather
+   * than failures here:
+   *
+   *   - the field declares no `maxLength` — there is no bound to emit, and
+   *     inventing one would impose a truncation boundary (or, under
+   *     `STRICT_TRANS_TABLES`, an outright write refusal — measured:
+   *     `ER_DATA_TOO_LONG`) that the author never declared;
+   *   - the declared bound is wider than a single key part can be, where a
+   *     `varchar(n)` column would simply trade `ER_BLOB_KEY_WITHOUT_LENGTH` for
+   *     `ER_TOO_LONG_KEY`.
+   *
+   * Either way the column stays TEXT and, on MySQL, the index over it is
+   * refused with the diagnostic {@link explainUnkeyableTextColumn} writes.
+   */
+  /**
+   * knex's `table.string(name)` default, spelled out rather than inherited
+   * (#11431). It is the width a string-family field with no usable
+   * `maxLength` keeps — unchanged behaviour, and deliberately so: a field that
+   * declares no bound has not asked for one, and inventing a narrower column
+   * would impose a truncation boundary its author never wrote.
+   */
+  protected static readonly DEFAULT_STRING_VARCHAR_CHARS = 255;
+
+  /**
+   * The widest `varchar(n)` a column may declare, across every dialect this
+   * driver speaks (#11431).
+   *
+   * Measured, not read off a doc page. MySQL 8.0.46, utf8mb4/InnoDB:
+   * `varchar(16383)` creates and `varchar(16384)` is refused with
+   * `ERROR 1074 Column length too big for column 'c' (max = 16383); use BLOB
+   * or TEXT instead` — 65535 bytes ÷ 4 bytes per utf8mb4 character. Postgres
+   * 16 accepts up to `varchar(10485760)` and refuses `10485761` with
+   * `length for type varchar cannot exceed 10485760`; SQLite records the
+   * declared type verbatim and enforces nothing.
+   *
+   * ⚠️ ONE ceiling for every dialect, deliberately, and it is the LOWEST of
+   * the three. The alternative is one declaration with three physical shapes,
+   * so the same app would take a `maxLength: 100000` url as a bounded column
+   * on Postgres and refuse to create the table at all on MySQL — the
+   * dialect-divergent enforcement this file's conformance matrices exist to
+   * close, and the same call {@link keyableTextLength}'s neighbour already
+   * made for the text family.
+   *
+   * ⚠️ What this constant is NOT: a guarantee the table will create. MySQL
+   * also caps the SUM of a row's declared byte widths at 65535 (measured:
+   * 15 × `varchar(1024)` creates, 16 × `varchar(1024)` is refused with
+   * `ERROR 1118 Row size too large`), a limit no per-column decision can see.
+   * Postgres has no such limit (it TOASTs; 40 × `varchar(4096)` creates
+   * cleanly). No platform object comes near it — the widest declared bound on
+   * a string-family field in this repo is 2000, and no object carries more
+   * than six such fields — but an authored app can, and the server's own
+   * refusal is the only thing that reports it today.
+   */
+  protected static readonly MAX_VARCHAR_CHARS = 16383;
+
+  /**
+   * The `varchar(n)` a STRING-family column should take, or `null` to make it
+   * TEXT instead (#11431).
+   *
+   * Three outcomes, each a deliberate answer rather than a fallback:
+   *
+   *   - **no usable declaration** — `maxLength` absent, or not a positive
+   *     integer — keeps {@link DEFAULT_STRING_VARCHAR_CHARS}. Unchanged
+   *     behaviour for every field that never declared a bound, which is the
+   *     overwhelming majority of them.
+   *   - **a declaration this dialect can express** returns it verbatim, in
+   *     BOTH directions. Wider than 255 is the reported defect; narrower is
+   *     the same defect's other half — `maxLength: 20` took `varchar(255)`
+   *     too, so the bound bound in neither direction.
+   *   - **a declaration wider than {@link MAX_VARCHAR_CHARS}** returns `null`
+   *     and the column becomes TEXT. Emitting `varchar(100000)` would be DDL
+   *     MySQL refuses outright, and clamping it to the ceiling would reinstate
+   *     exactly the defect being fixed — a column narrower than the
+   *     declaration, refusing writes the declaration allows. TEXT refuses
+   *     nothing the author declared; the bound is still enforced, at the
+   *     write seam where `maxLength` enforcement actually lives (the record
+   *     validator's `max_length` check), with a field-named ADR-0112 envelope
+   *     instead of a raw `ER_DATA_TOO_LONG`.
+   *
+   * ⚠️ Deliberately mirrors {@link keyableTextLength} without sharing code
+   * with it. The two families answer different questions — that one asks
+   * "can this KEY?" and returns `null` for an unbounded field, this one asks
+   * "how wide is this column?" and returns 255 — and #11374's remaining half
+   * may still reshape the text side. A shared helper would couple a settled
+   * decision to an unsettled one.
+   */
+  protected declaredVarcharLength(field: any): number | null {
+    const declared = (field as { maxLength?: unknown }).maxLength;
+    const n = typeof declared === 'string' ? Number(declared) : declared;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) {
+      return SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
+    }
+    return n > SqlDriver.MAX_VARCHAR_CHARS ? null : n;
+  }
+
+  protected keyableTextLength(field: any): number | null {
+    const declared = (field as { maxLength?: unknown }).maxLength;
+    const n = typeof declared === 'string' ? Number(declared) : declared;
+    if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
+    if (n > SqlDriver.MAX_KEYABLE_VARCHAR_CHARS) return null;
+    return n;
+  }
+
+  /**
+   * Turn MySQL's `ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY` into a message
+   * that names the columns at fault and the declaration that fixes them
+   * (#11374).
+   *
+   * Worth the extra `columnInfo()` read because it only happens on the failure
+   * path, and because the raw server error is actively misleading about where
+   * the defect is: it names a COLUMN in a table the driver just created
+   * successfully, so the natural reading is "the table is fine, the index is
+   * odd" — when in truth the object is now registered-but-broken, its declared
+   * uniqueness silently absent, and the fix lives in the field's metadata
+   * rather than anywhere near the index.
+   *
+   * ⛔ What this deliberately does NOT do is substitute a prefix index
+   * (`KEY (col(191))`) and carry on. For an ordinary index that would be a
+   * transparent access-path choice, but for a UNIQUE one it silently REPLACES
+   * the declared constraint with a different, stricter one: a prefix-unique
+   * index enforces uniqueness over the PREFIX, so two genuinely different
+   * values that happen to share it collide. Measured on MySQL 8.0.46 —
+   * `UNIQUE KEY (token(191))`, then two distinct 200+ character tokens sharing
+   * their first 191 characters: the second insert was rejected with
+   * `ER_DUP_ENTRY` even though the tokens differ. On `sys_session.token` that
+   * is a valid sign-in refused as a duplicate. A refusal the operator can read
+   * is strictly better than a constraint that quietly means something else.
+   */
+  protected async explainUnkeyableTextColumn(
+    tableName: string,
+    indexName: string,
+    columns: string[],
+    cause: unknown,
+  ): Promise<string | null> {
+    const code = (cause as { code?: string } | undefined)?.code;
+    if (code !== 'ER_BLOB_KEY_WITHOUT_LENGTH' && code !== 'ER_TOO_LONG_KEY') return null;
+    let offenders: string[] = [];
+    try {
+      const info: Record<string, { type?: string }> = await this.knex(tableName).columnInfo();
+      offenders = columns.filter((c) => /text|blob/i.test(String(info?.[c]?.type ?? '')));
+    } catch {
+      // Introspection is a nicety here; the advice below holds without it.
+    }
+    const named =
+      offenders.length > 0
+        ? `Column(s) ${offenders.map((c) => `"${c}"`).join(', ')} are stored as TEXT`
+        : 'One or more of its key columns is stored as TEXT';
+    return (
+      `[sql-driver] cannot create index '${indexName}' on "${tableName}" — MySQL refuses a TEXT/BLOB ` +
+      `column in a key without a key length. ${named} because the field declares no \`maxLength\` (or one ` +
+      `wider than ${SqlDriver.MAX_KEYABLE_VARCHAR_CHARS} characters, the most a utf8mb4 key part can hold). ` +
+      `Declare \`maxLength\` on the field(s) so the column is emitted as varchar(n) and can be keyed ` +
+      `(#11374). The table exists but this index does NOT, so any uniqueness it declared is currently ` +
+      `unenforced. A prefix index is deliberately not substituted: on a UNIQUE index it constrains the ` +
+      `prefix rather than the value, and rejects two different values that share one.`
+    );
+  }
+
+  protected createColumn(
+    table: Knex.CreateTableBuilder,
+    name: string,
+    field: any,
+    keyed?: { unique: boolean },
+  ) {
     if (field.multiple) {
       table.json(name);
       return;
@@ -12491,15 +12966,90 @@ export class SqlDriver implements IDataDriver {
       case 'email':
       case 'url':
       case 'phone':
-      case 'password':
-        col = table.string(name);
+      case 'password': {
+        // #11431: the string family takes its declared `maxLength`, instead of
+        // knex's invented default of 255.
+        //
+        // The bound is the field's OWN — nothing is guessed. `schema-drift.ts`
+        // has always treated `varchar(field.maxLength)` as the EXPECTED
+        // physical shape of a bounded field (`widen_varchar` /
+        // `narrow_varchar` say so in as many words), so before this branch the
+        // differ and the emitter disagreed about every column the driver
+        // itself had just created. Measured on live MySQL 8.0.46 and Postgres
+        // 16 on the pre-fix tree: a `maxLength: 400` email, a `maxLength: 1024`
+        // url and a `maxLength: 20` phone all landed as `varchar(255)`, and the
+        // same table reported two `widen_varchar` (warning/safe) plus one
+        // `narrow_varchar` (error/DESTRUCTIVE) findings against itself, on a
+        // table with no rows in it.
+        //
+        // The write half is the reported defect. A 300-character value —
+        // legal under the declaration, and accepted by the record validator's
+        // own `max_length` check — was refused by BOTH enforcing dialects:
+        // MySQL `ER_DATA_TOO_LONG` under `STRICT_TRANS_TABLES`, Postgres
+        // `22001 value too long for type character varying(255)`.
+        //
+        // ⚠️ Both directions, and the narrowing one is NOT a destructive
+        // migration — a point worth stating because it reads like one:
+        // `createColumn` runs on `CREATE TABLE` and on `ALTER TABLE ADD
+        // COLUMN`, so the column it sizes is always EMPTY. Narrowing an
+        // EXISTING `varchar(255)` that holds rows stays exactly where it was
+        // before this change: the `narrow_varchar` drift op, category
+        // `destructive`, behind `os migrate apply --allow-destructive`.
+        // Nothing here plans an ALTER on an existing column, and the differ is
+        // untouched. What this removes is the permanent, self-inflicted drift
+        // report a fresh table used to raise against itself.
+        const declared = this.declaredVarcharLength(field);
+        col = declared === null ? table.text(name) : table.string(name, declared);
         break;
+      }
       case 'text':
       case 'textarea':
       case 'html':
-      case 'markdown':
-        col = table.text(name);
+      case 'markdown': {
+        // #11374: a text-family column that some declared index KEYS ON is
+        // emitted as `varchar(maxLength)` rather than TEXT, whenever the field
+        // declared a bound this dialect can key on.
+        //
+        // MySQL refuses a TEXT/BLOB column in a key without a prefix length
+        // (`ER_BLOB_KEY_WITHOUT_LENGTH`), so an unbounded TEXT is not merely a
+        // slower key there — it is not a key at all: `CREATE TABLE` succeeds and
+        // the following `ALTER TABLE … ADD [UNIQUE] INDEX` fails, leaving the
+        // table on disk WITHOUT the constraint it declared. Measured on MySQL
+        // 8.0.46 before this branch existed: 36 of the 44 platform objects
+        // failed schema-sync that way, so an auth stack could not stand up its
+        // own schema on a driver `createDefaultDatasourceDriverFactory` maps
+        // `mysql`/`mysql2` onto.
+        //
+        // The bound is the field's OWN `maxLength` — nothing is invented here.
+        // `schema-drift.ts` already treats `varchar(field.maxLength)` as the
+        // expected physical shape of a bounded field (its `widen_varchar` /
+        // `narrow_varchar` ops say so in as many words); this is the emitter
+        // finally agreeing with the differ. `Field.string` has always taken
+        // knex's `varchar(255)`, so a bounded text field is now LESS arbitrary
+        // than its string sibling, not more.
+        //
+        // Applied on every dialect rather than under `isMysql`, deliberately:
+        // the alternative is one declaration with two enforcement answers, so
+        // the same app would refuse an over-length write on MySQL and accept it
+        // on Postgres. Dialect-divergent enforcement of one declared bound is
+        // the defect class this repo's conformance matrices exist to close, and
+        // a `varchar(n)` is exactly what the SQLite and Postgres columns would
+        // have been had the field been declared `Field.string`.
+        //
+        // ⚠️ Scope, both halves load-bearing:
+        //   - KEYED only. A non-indexed `Field.text({ maxLength: 65000 })` stays
+        //     TEXT: `varchar(65000)` on utf8mb4 is 260000 bytes and blows MySQL's
+        //     65535-byte ROW limit, which would turn a working table into an
+        //     un-creatable one. Off-page TEXT has no such cost, and a column no
+        //     index keys on has nothing to gain from a bound.
+        //   - BOUNDED only. `maxLength` absent, or wider than a key part can be
+        //     ({@link keyableTextLength}), leaves the column TEXT — see
+        //     {@link explainUnkeyableTextColumn} for what happens next, which is
+        //     a named refusal and never a silently weaker constraint.
+        const keyable = keyed ? this.keyableTextLength(field) : null;
+        col = keyable === null ? table.text(name) : table.string(name, keyable);
         break;
+      }
       case 'integer':
       case 'int':
         col = table.integer(name);
@@ -12558,6 +13108,19 @@ export class SqlDriver implements IDataDriver {
       // primitive — it shares this exact DDL path so reads/$expand/FK stay uniform.
       case 'lookup':
       case 'user':
+        // ⛔ #11431 deliberately STOPS at the string family and does not reach
+        // here, even though these branches spell the same `table.string(name)`.
+        // A lookup column does not hold the declared value — it holds the
+        // REFERENCED ROW'S ID, whose width is the parent table's `id` column,
+        // not anything this field declared. Measured on MySQL 8.0.46: the FK
+        // itself is content with mismatched widths (`varchar(20)` child →
+        // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
+        // it too), so the type system gives no warning — but the first write
+        // is refused, because a platform id is 26 characters and
+        // `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)`
+        // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
+        // the column structurally incapable of holding ANY id — a strictly
+        // worse defect than the one #11431 fixes.
         col = table.string(name);
         if (field.reference_to) {
           table.foreign(name).references('id').inTable(field.reference_to);
@@ -12568,6 +13131,17 @@ export class SqlDriver implements IDataDriver {
         break;
       case 'auto_number':
       case 'autonumber':
+        // ⛔ Also out of #11431's scope, for a different reason than `lookup`
+        // above: the value is issued by the RUNTIME from its sequence, not
+        // supplied by a caller. `maxLength` has no write-time counterpart on
+        // this type — the record validator's `max_length` check covers the
+        // textual types only, and an autonumber never reaches it at all
+        // (runtime-owned types are excluded from its door) — so binding the
+        // DDL to it would create a refusal with nothing declaring it: the
+        // platform's own generated record number rejected by a column, with no
+        // author to hand the error to. Widening `maxLength` to a second
+        // meaning ("how wide is the generated number") is a spec decision, not
+        // a driver one.
         col = table.string(name);
         break;
       case 'formula':
@@ -12578,6 +13152,16 @@ export class SqlDriver implements IDataDriver {
         // (the read-side deserializer) can never drift — the drift between them
         // is exactly what let array-valued fields reach the binder un-serialized
         // (#field-zoo). Everything else is a plain string.
+        //
+        // ⛔ The third branch #11431 leaves alone. This is the CATCH-ALL, and
+        // what lands in it is precisely the set of types whose stored value is
+        // NOT the declared value: `secret` persists an opaque `sys_secret`
+        // ref rather than the credential it was given (ADR-0100), and
+        // `select` / `radio` / `checkboxes` / `code` / `tree` store option
+        // machine names or ids. Sizing any of those from the author's
+        // `maxLength` would size the wrong string. A type that genuinely wants
+        // the bound belongs in the string-family case above, named — never
+        // acquired by falling through to here.
         col = JSON_COLUMN_TYPES.has(type) ? table.json(name) : table.string(name);
     }
 

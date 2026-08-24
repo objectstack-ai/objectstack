@@ -171,15 +171,21 @@ const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
  *  - It is still not dead code, because the producer population here is open
  *    by design. `contracts/datasource-driver-factory.ts` says the framework
  *    "ships no universal driver-by-id registry" — concrete drivers are built
- *    by the HOST — and types the handle as `introspectSchema?(): Promise<unknown>`.
- *    The retirement shipped as a BREAKING change whose stated migration
- *    channel is the compiler, "precisely and at every site"; against an
- *    `unknown` result that channel never fires, so a host-built driver still
- *    emitting the old spelling is reached by nothing and would silently lose
- *    its key here.
- *  - The belt's clock has not run either: the union (#11001) and the
- *    retirement (#11124) are BOTH still unconsumed changesets at `17.1.0`, so
- *    no released version has ever emitted `primaryKey` from this driver.
+ *    by the HOST. Since #11381 (option C of the #11123 ruling) the handle
+ *    types `introspectSchema?(): Promise<IntrospectedSchema>` — the spec
+ *    contract — so the retirement's stated migration channel, the compiler,
+ *    finally reaches a host-built TypeScript driver "precisely and at every
+ *    site" the moment it RECOMPILES against this version. Whom no compiler
+ *    reaches, ever: drivers already built against older versions, plain-JS
+ *    drivers, and casts. For that population the old spelling still arrives
+ *    here at runtime, and this belt is what absorbs it.
+ *  - The belt's clock HAS started: the union (#11001) and the retirement
+ *    (#11124) were consumed into `17.2.0` (version-packages commit
+ *    `e7d2cc67fd`, 2026-08-23), so the "unconsumed changesets at 17.1.0"
+ *    argument this bullet used to carry is expired. Whether option B's gate —
+ *    the retirement actually PUBLISHED — is met is a release-record question
+ *    (npm, not this tree); B also waits on the #11381 tightening being
+ *    released. Re-judge both there before touching the arm.
  *
  * Dropping the arm is therefore a NARROWING OF ACCEPTED INPUT rather than a
  * dead-code deletion, and wants the contract-review gate. Its only exercise is
@@ -593,6 +599,25 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   async validateObject(objectName: string): Promise<SchemaValidationResult> {
+    // A direct call performs its own live read — no memo. Read reuse is the
+    // sweep's per-call concern ({@link validateEach}), never this method's: a
+    // long-lived service must answer every direct call from the remote's
+    // schema as it is NOW (pinned: two direct calls are two live reads).
+    return this.validateObjectUsing(objectName, (ds) => this.config.introspect(ds));
+  }
+
+  /**
+   * [#10962] The body of {@link validateObject}, with the live-schema read
+   * abstracted behind `readSchema` so one sweep can share a single read per
+   * datasource across all of its objects. `readSchema` is either
+   * `config.introspect` itself (the public single-object path above) or the
+   * per-sweep memoised reader from {@link sweepScopedIntrospect} — never a
+   * cache that outlives one call.
+   */
+  private async validateObjectUsing(
+    objectName: string,
+    readSchema: (datasource: string) => Promise<IntrospectedSchema>,
+  ): Promise<SchemaValidationResult> {
     const obj = await this.config.getObject(objectName);
     if (!obj) {
       throw new Error(`Object '${objectName}' not found.`);
@@ -605,7 +630,7 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
       return { ok: true, datasource, object: objectName, diffs: [] };
     }
 
-    const schema = await this.config.introspect(datasource);
+    const schema = await readSchema(datasource);
     const dialect = schema.dialect as SqlDialect | undefined;
     const remoteName = obj.external?.remoteName ?? obj.name;
     const table = this.findTable(schema, remoteName);
@@ -685,12 +710,43 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
   }
 
   /**
+   * [#10962] One live schema read per datasource per SWEEP.
+   *
+   * Returns a reader that memoises `config.introspect` by datasource name for
+   * the lifetime of ONE {@link validateEach} call. The memo is a local of that
+   * call — deliberately NOT an instance field — so a long-lived service can
+   * never serve a stale schema to a later sweep: the next `validateAll()` /
+   * `validateDatasource()` builds a fresh memo and reads live again (both
+   * directions pinned in `__tests__/external-datasource-service.test.ts`).
+   *
+   * The PROMISE is memoised, not the resolved value: the sweep validates its
+   * objects concurrently (`Promise.all`), so the first reader for a datasource
+   * starts the read and every concurrent sibling awaits the same in-flight
+   * promise. A rejected read is shared the same way — M objects on one
+   * unreachable datasource produce M failure rows from ONE connection attempt.
+   */
+  private sweepScopedIntrospect(): (datasource: string) => Promise<IntrospectedSchema> {
+    const memo = new Map<string, Promise<IntrospectedSchema>>();
+    return (datasource) => {
+      let read = memo.get(datasource);
+      if (!read) {
+        read = this.config.introspect(datasource);
+        memo.set(datasource, read);
+      }
+      return read;
+    };
+  }
+
+  /**
    * Validate a chosen set of objects, one report.
    *
    * A per-object throw becomes an `unreachable` row carrying the thrower's
    * message rather than rejecting the whole report: one unreachable remote (or
    * one object whose definition vanished mid-sweep) must not erase the verdicts
    * of the objects that did validate.
+   *
+   * [#10962] All objects in one call share one live schema read per datasource
+   * (see {@link sweepScopedIntrospect}); the memo dies with this call.
    *
    * ## Why the row's kind is `unreachable` for EVERY throw — no error sniffing
    *
@@ -719,9 +775,10 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * mislabel in a second direction.
    */
   private async validateEach(objects: ObjectLike[]): Promise<SchemaValidationReport> {
+    const readSchema = this.sweepScopedIntrospect();
     const results = await Promise.all(
       objects.map((o) =>
-        this.validateObject(o.name).catch((err): SchemaValidationResult => {
+        this.validateObjectUsing(o.name, readSchema).catch((err): SchemaValidationResult => {
           this.logger?.warn(`validateObject('${o.name}') failed`, err);
           return {
             ok: false,

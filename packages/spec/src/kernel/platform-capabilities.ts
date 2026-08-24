@@ -117,6 +117,11 @@ export interface PlatformCapabilityProvider {
  * A drift test (`serve-capability-vocabulary.test.ts`) asserts this map and the
  * vocabulary stay in 1:1 sync, and that every `open`-edition entry agrees with
  * the package the serve resolver actually loads — so the two can't diverge.
+ *
+ * One population is structurally OUTSIDE this map's key space: an out-of-repo
+ * runtime wired in via `plugins[]` that backs no `requires` token has no token
+ * to key a row by. {@link PLATFORM_PLUGIN_WIRED_RUNTIMES} is the sibling roster
+ * that records those — same provenance shape, keyed by package name.
  */
 export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapabilityProvider>> =
   Object.freeze({
@@ -169,6 +174,83 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
   });
 
 /**
+ * Provenance row for one out-of-repo platform runtime that reaches the kernel
+ * through app `plugins[]` wiring (host-app declaration) rather than through a
+ * `requires` capability token. Same provenance facts as
+ * {@link PlatformCapabilityProvider} minus `package` (here the package name is
+ * the KEY, so it cannot be `null` and cannot drift from a duplicate field).
+ */
+export interface PlatformPluginWiredRuntime {
+  /**
+   * Which edition ships the runtime. Never `open` — an open-edition package is
+   * part of the public framework distribution and is resolved through a
+   * `requires` token, so it belongs in {@link PLATFORM_CAPABILITY_PROVIDERS},
+   * not here. The exclusion is type-level so a mis-filed row cannot compile.
+   */
+  readonly edition: Exclude<CapabilityEdition, 'open'>;
+  /**
+   * Short human note on where the runtime ships from and how it is loaded.
+   * Required, not optional: recording that provenance is this roster's entire
+   * job — a row without it answers nothing.
+   */
+  readonly note: string;
+}
+
+/**
+ * The `plugins[]`-wired out-of-repo runtimes, keyed by npm package name — the
+ * companion roster to {@link PLATFORM_CAPABILITY_PROVIDERS} for the packages
+ * whose loading is NOT keyed by a `requires` token (#10921, #11263).
+ *
+ * Why it exists: this tree names closed-source `@objectstack/` packages it does
+ * not build — `serve` prints an install instruction for one of them at
+ * operators — and until this roster, "is that a real out-of-repo package or a
+ * fabricated name?" was answerable only by grep-and-judgement. A fabricated
+ * package name (`@objectstack/framework`) sat next to a real one
+ * (`@objectstack/organizations`) in published docs for months looking identical
+ * (#10921). A row here is the machine-readable declaration that the package is
+ * real and where it ships from.
+ *
+ * What this roster deliberately is NOT: a resolution registry. It does not make
+ * these packages `requires`-resolvable, adds nothing to
+ * {@link PLATFORM_CAPABILITY_TOKENS}, and does not relate tenancy posture to
+ * the capability vocabulary. Each runtime's load condition lives in the runtime
+ * that loads it (`serve` loads `@objectstack/organizations` off the resolved
+ * tenancy posture, ADR-0105; an app wires `@objectstack/security-enterprise`
+ * into its own `plugins[]`) — the rows record that fact as prose provenance,
+ * they do not encode it as a lookup.
+ *
+ * On the single-list rule (see {@link PLATFORM_ALWAYS_ON_CAPABILITIES} on why a
+ * second description nobody checks is a defect): this roster's key space is
+ * DISJOINT from the token-keyed map — package names, not tokens — and the one
+ * fact the two can state twice (the edition of a package that also backs a
+ * token, today `@objectstack/security-enterprise` behind `hierarchy-security`)
+ * is drift-tested to agree, in `serve-capability-vocabulary.test.ts` alongside
+ * the map's own 1:1 pins. The same test derives membership the other way too:
+ * every `enterprise`-edition provider row names a `plugins[]`-wired package (by
+ * {@link CapabilityEdition}'s own definition), so each must have a row here.
+ *
+ * Growing it: a new out-of-repo `plugins[]`-wired runtime adds its row HERE in
+ * the PR that first names the package at operators or in published docs.
+ */
+export const PLATFORM_PLUGIN_WIRED_RUNTIMES: Readonly<Record<string, PlatformPluginWiredRuntime>> =
+  Object.freeze({
+    '@objectstack/organizations': {
+      edition: 'enterprise',
+      note:
+        'closed-source multi-org runtime (ADR-0105); `serve` loads it from the host app ' +
+        'when the resolved tenancy posture is `group`/`isolated` — no `requires` token; ' +
+        'not on the public npm registry, distributed with an enterprise/cloud subscription',
+    },
+    '@objectstack/security-enterprise': {
+      edition: 'enterprise',
+      note:
+        'closed-source enterprise security runtime; the app wires it in via `plugins[]`. ' +
+        'Also backs the `hierarchy-security` token above (ADR-0057) — the drift test holds ' +
+        'both rows to one edition',
+    },
+  });
+
+/**
  * The foundational capability slate: what every server-side runtime is expected
  * to mount whether or not an app names it in `requires`.
  *
@@ -201,8 +283,17 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
  * `observability`), and `objectstack serve --preset minimal` opts out entirely.
  */
 export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
-  // The first six are the pinned foundational prefix — grow the slate AFTER them.
-  'queue', 'job', 'cache', 'settings', 'email', 'storage',
+  // Order is a CONTRACT, not a count. `queue`/`job`/`cache`/`settings` are the
+  // bind TARGETS — the services other entries bind into from their own
+  // `kernel:ready` hook — so every entry that is not one of them is mounted
+  // after all of them. A new entry joins the tail; a new BIND TARGET joins the
+  // line below. Pinned as that rule (never as a prefix length) in
+  // `platform-capabilities.test.ts`.
+  'queue', 'job', 'cache', 'settings',
+  // `email`, `storage` and `sms` each read a settings namespace from their own
+  // `kernel:ready` hook, so each is mounted after `settings` and declares the
+  // edge as well (ADR-0116; `serve-settings-ordering.pin.test.ts` in the CLI).
+  'email', 'storage',
   'sms',
   'sharing',
   // `messaging` is foundational post-ADR-0030: notifications flow through a

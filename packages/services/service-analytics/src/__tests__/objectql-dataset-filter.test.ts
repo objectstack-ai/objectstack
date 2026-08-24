@@ -113,7 +113,7 @@ const UNSCOPED_METRICS: Dataset = DatasetSchema.parse({
 
 interface AggOptions {
   groupBy?: string[];
-  aggregations?: Array<{ field: string; method: string; alias: string }>;
+  aggregations?: Array<{ field: string; method: string; alias: string; filter?: Record<string, unknown> }>;
   filter?: Record<string, unknown>;
 }
 interface AggCall { object: string; options: AggOptions }
@@ -159,12 +159,19 @@ function runAggregate(rows: Row[], options: AggOptions): Row[] {
     const out: Row = {};
     for (const g of groupBy) out[g] = bucket[0]?.[g];
     for (const agg of options.aggregations ?? []) {
+      // [#10413 phase 2] `agg.filter` is a PER-AGGREGATION predicate over the
+      // rows already admitted by the whole-call `filter` above — SQL
+      // `FILTER (WHERE …)` semantics (#10576) — never a second whole-call
+      // narrowing. Evaluated with the SAME strict `matches`, so an operator
+      // this probe cannot evaluate throws rather than silently answering the
+      // unfiltered number.
+      const admitted = agg.filter ? bucket.filter((r) => matches(r, agg.filter)) : bucket;
       if (agg.method === 'count') {
         out[agg.alias] = agg.field === '*'
-          ? bucket.length
-          : bucket.filter((r) => r[agg.field] != null).length;
+          ? admitted.length
+          : admitted.filter((r) => r[agg.field] != null).length;
       } else if (agg.method === 'sum') {
-        out[agg.alias] = bucket.reduce((a, r) => a + Number(r[agg.field] ?? 0), 0);
+        out[agg.alias] = admitted.reduce((a, r) => a + Number(r[agg.field] ?? 0), 0);
       } else {
         throw new Error(`[probe engine] cannot compute "${agg.method}"`);
       }
@@ -238,60 +245,108 @@ describe('[#10413] the three doors on one dataset', () => {
     });
   });
 
-  it('the OBJECTQL door applies the dataset scope — phase 1 of the same repair', async () => {
+  it('the OBJECTQL door now agrees with the other two — phase 1 AND phase 2 combined', async () => {
     const { svc, calls } = objectqlService([OPPORTUNITY_METRICS]);
     const result = await svc.query({ cube: 'opportunity_metrics', measures: MEASURES });
 
-    // The engine call carries the dataset's own predicate...
+    // The engine call carries the dataset's own predicate (phase 1)...
     expect(calls).toHaveLength(1);
     expect(JSON.stringify(calls[0].options.filter)).toContain('is_deleted');
-    // ...so the soft-deleted rows are gone from the aggregate. 30 is the number
-    // this door answered before the fix.
-    expect(result.rows[0]?.opp_count).toBe(24);
+    // ...and every measure now answers the SAME numbers the dashboard door
+    // answers two tests above — phase 2 closes the remaining gap. 30 / 24 /
+    // 5,632,500 are the numbers this door answered before phase 1 and phase 2
+    // respectively; asserting `not.toBe` on each keeps the fix falsifiable.
+    expect(result.rows[0]).toMatchObject({ opp_count: 24, won_count: 8, won_amount: 1_290_000 });
     expect(result.rows[0]?.opp_count).not.toBe(30);
+    expect(result.rows[0]?.won_count).not.toBe(24);
+    expect(result.rows[0]?.won_amount).not.toBe(5_632_500);
   });
 });
 
-// -- 2. the phase-2 half, pinned WRONG on purpose --------------------------
+// -- 2. per-measure filters lower into their own aggregation — phase 2 -----
 
-describe('[#10413 phase 2 — NOT DONE] per-measure filters are still not lowered', () => {
+describe('[#10413 phase 2] per-measure filters lower into the aggregation they belong to', () => {
   /**
-   * These expectations are the CURRENT, WRONG numbers, held here on purpose so
-   * the gap cannot be mistaken for a green path.
-   *
-   * `engine.aggregate` types an aggregation as `{ field, method, alias }` —
-   * there is no per-aggregation `filter` to lower a measure filter into.
-   * Widening that contract is #10576; doing the lowering is phase 2 of #10413.
-   * When #10576 lands, `won_count` must become 8 and `won_amount` 1,290,000 —
-   * the numbers the dashboard door already answers three tests above — and
-   * these assertions must be FLIPPED, not deleted.
+   * FLIPPED from the pre-#10576 pin this block used to carry (`won_count: 24`,
+   * `won_amount: 5,632,500` — the CURRENT-WRONG numbers, held on purpose so the
+   * gap could not be mistaken for a green path; see the git history of this
+   * file / #10413's issue comments for the shape that pinned). Now pinned
+   * RIGHT, against the same dashboard-door baseline the section above uses:
+   * `opp_count: 24 / won_count: 8 / won_amount: 1,290,000`.
    */
-  it('sends aggregations with NO per-aggregation filter field (the #10576 contract gap)', async () => {
+  it('sends each filtered measure its OWN per-aggregation `filter` — the #10576 contract field', async () => {
     const { svc, calls } = objectqlService([OPPORTUNITY_METRICS]);
     await svc.query({ cube: 'opportunity_metrics', measures: MEASURES });
 
     const aggregations = calls[0].options.aggregations ?? [];
     expect(aggregations).toHaveLength(3);
-    for (const agg of aggregations) {
-      expect(Object.keys(agg).sort()).toEqual(['alias', 'field', 'method']);
-    }
-    // And the measure comparand reaches the engine NOWHERE — not on the
-    // aggregations, and not smuggled into the whole-call filter, which would
-    // narrow every measure at once, `opp_count` included.
-    expect(JSON.stringify(calls[0].options)).not.toContain('closed_won');
+    const byAlias = Object.fromEntries(aggregations.map((a) => [a.alias, a]));
+    // The unfiltered measure carries NO filter key at all — unchanged shape,
+    // still eligible for native pushdown on a driver that has one (#10576's
+    // own positive pin, `engine-aggregate-filter.test.ts`).
+    expect(Object.keys(byAlias.opp_count).sort()).toEqual(['alias', 'field', 'method']);
+    // The two conditional measures each carry their OWN filter — not a shared
+    // reference, and not the measure's `field`/`method` disturbed by it.
+    expect(byAlias.won_count).toMatchObject({ method: 'count', filter: { stage: 'closed_won' } });
+    expect(byAlias.won_amount).toMatchObject({
+      field: 'amount', method: 'sum', filter: { stage: 'closed_won' },
+    });
+    // And the comparand does NOT ALSO leak into the whole-call filter — that
+    // would be the "narrow every measure" failure mode ① below is about.
+    expect(JSON.stringify(calls[0].options.filter)).not.toContain('closed_won');
   });
 
-  it('therefore still answers the UNFILTERED number for a conditional measure', async () => {
+  it('① both directions in ONE result: won_count is right (8) and opp_count STAYS right (24)', async () => {
     const { svc } = objectqlService([OPPORTUNITY_METRICS]);
     const result = await svc.query({ cube: 'opportunity_metrics', measures: MEASURES });
-    // Every live row counted / summed, because the measure's own
-    // `{ stage: 'closed_won' }` has nowhere to go on this contract.
-    expect(result.rows[0]?.won_count).toBe(24);
-    expect(result.rows[0]?.won_amount).toBe(5_632_500);
-    // Phase 1 still moved these: the deleted rows are excluded from BOTH, so the
-    // measure is now wrong by exactly the measure filter and nothing else.
-    expect(result.rows[0]?.won_count).not.toBe(30);
-    expect(result.rows[0]?.won_amount).not.toBe(10_132_500);
+    // A fix that ANDed the measure filter into the WHOLE-CALL filter instead
+    // of the one aggregation it belongs to would make won_count right (8) and
+    // opp_count WRONG (8 instead of 24, since opp_count would inherit the
+    // stage narrowing too) — asserting both in one result catches that shape;
+    // pinning won_count alone would score it green.
+    expect(result.rows[0]).toEqual({ opp_count: 24, won_count: 8, won_amount: 1_290_000 });
+  });
+
+  it('② an aggregation without a filter is unchanged and answers the same as before phase 2', async () => {
+    const { svc, calls } = objectqlService([UNSCOPED_METRICS]);
+    const result = await svc.query({ cube: 'unscoped_metrics', measures: ['opp_count'] });
+    expect(calls[0].options.aggregations).toEqual([{ field: '*', method: 'count', alias: 'opp_count' }]);
+    expect(result.rows[0]?.opp_count).toBe(30);
+  });
+
+  it('③ the dataset-level filter from phase 1 still applies and is not displaced', async () => {
+    const { svc, calls } = objectqlService([OPPORTUNITY_METRICS]);
+    await svc.query({ cube: 'opportunity_metrics', measures: MEASURES });
+    // Phase 1's whole-call conjunct is untouched by phase 2's per-aggregation
+    // addition — still exactly one dataset-scope conjunct, nothing merged in.
+    expect(calls[0].options.filter).toEqual({ $and: [{ is_deleted: false }] });
+  });
+
+  it('④ the native-SQL path is untouched by this change (#10411 already fixed it)', async () => {
+    const svc = sqlService([OPPORTUNITY_METRICS]);
+    const { sql } = await svc.generateSql({ cube: 'opportunity_metrics', measures: MEASURES });
+    expect(sql).toContain('THEN 1 END) AS "won_count"');
+    expect(sql).toContain('THEN amount END) AS "won_amount"');
+  });
+});
+
+// -- 2b. the ObjectQL SQL echo renders the per-measure filter too ----------
+
+describe('[#10413 phase 2] the ObjectQL SQL echo renders the measure filter it executes', () => {
+  it('renders a conditional aggregate for a filtered measure, mirroring execution', async () => {
+    const { svc } = objectqlService([OPPORTUNITY_METRICS]);
+    const { sql } = await svc.generateSql({ cube: 'opportunity_metrics', measures: MEASURES });
+    // Same shape as the native-SQL echo (test ④ above): the two previews read
+    // alike. An echo showing an unconditional aggregate here would understate
+    // what `execute()` really runs now that phase 2 lowers the filter.
+    expect(sql).toContain('THEN 1 END) AS "won_count"');
+    expect(sql).toContain('THEN amount END) AS "won_amount"');
+  });
+
+  it('renders no conditional wrapping for the unfiltered measure', async () => {
+    const { svc } = objectqlService([OPPORTUNITY_METRICS]);
+    const { sql } = await svc.generateSql({ cube: 'opportunity_metrics', measures: MEASURES });
+    expect(sql).toContain('COUNT(*) AS "opp_count"');
   });
 });
 

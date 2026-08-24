@@ -249,7 +249,7 @@ export const ObjectCapabilities = strictObject({
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
 
-  /** Enable REST/GraphQL API access */
+  /** Enable REST/MCP API access */
   apiEnabled: z.boolean().default(true).describe('Expose object via automatic APIs'),
 
   /**
@@ -591,12 +591,14 @@ const TENANCY_MODES_EXPLAINER =
  * credential tables they deliberately do not — `sys_api_key` records the
  * organization a key authenticates into under `active_organization_id`
  * precisely so the credential table does NOT become org-walled (#8287). The
- * key is consulted exclusively by audit stamping (plugin-audit's
- * `resolveRecordOrganizationField`); no read path reads it, and that
+ * key is consulted only by platform-row stamping — the three sanctioned
+ * writers below, via `@objectstack/metadata-core`'s
+ * `resolveRecordOrganizationField` (plugin-audit re-exports it from its
+ * original path; public surface unchanged) — never by a read path, and that
  * read-neutrality is pinned by tests beside each read path. ⛔ Scope-pinned by
  * the #8778 ruling: this is ONE stamp-only declaration key, not the opening
- * move of a general field-roles mechanism — a consumer other than audit
- * stamping needs its own ruling before reading it.
+ * move of a general field-roles mechanism — a consumer other than the three
+ * sanctioned writers needs its own ruling before reading it.
  *
  * That pin is WIDENED **by name** by the maintainer ruling recorded on
  * cloud#1395, 2026-08-17T03:18Z, accepting the decision-inbox recommendations
@@ -611,19 +613,22 @@ const TENANCY_MODES_EXPLAINER =
  *
  * The ruling sanctions exactly THREE consumers of this key, and no others:
  *
- *   1. **audit stamping** — plugin-audit's `resolveRecordOrganizationField`;
- *      the original #8778 consumer and, as of this annotation, still the only
- *      one wired up;
- *   2. **`plugin-approvals`** — the approval-row writer;
- *   3. **the automation-run recorder** — reached when
- *      `resolveRecordOrganizationField` is promoted to the shared platform-row
- *      resolver.
+ *   1. **audit stamping** — `@objectstack/metadata-core`'s
+ *      `resolveRecordOrganizationField`; the original #8778 consumer
+ *      (plugin-audit re-exports it from its original path; public surface
+ *      unchanged);
+ *   2. **`plugin-approvals`** — the approval-row writer (`openNodeRequest`,
+ *      the only `sys_approval_request` insert site);
+ *   3. **the automation-run recorder** — both write paths of
+ *      `ObjectStoreSuspendedRunStore` in `service-automation` (`serialize()`
+ *      for paused rows, `recordTerminal()` for terminal rows).
  *
- * Consumers 2 and 3 are sanctioned but not yet implemented: #10101 carries that
- * behaviour change (this card is annotation-only and changes no accept/reject
- * behaviour). Which is why the `.describe()` below still speaks of audit rows —
- * it states what reads the key TODAY, and #10101 updates it as the readers
- * actually land.
+ * All three are live on `main`: #10101's PR #11311 (merged 2026-08-23)
+ * promoted `resolveRecordOrganizationField` to the shared resolver in
+ * `@objectstack/metadata-core` and wired all three platform-row writers to
+ * it — each resolves the SUBJECT record's organization first, falling back
+ * to actor context, exactly as the ruling above states. The `.describe()`
+ * below names all three consumers accordingly.
  *
  * ⛔ The refusal posture is UNCHANGED for a FOURTH consumer. Three named
  * platform-row writers are still not a general field-roles mechanism: anything
@@ -663,9 +668,13 @@ export const TenancyConfigSchema = lazySchema(() => strictObject({
     'fallback applies. No default is materialized here on purpose (#5315).',
   ),
   organizationField: z.string().optional().describe(
-    'STAMP-ONLY (#8778): column carrying the organization a row is ABOUT, ' +
-    'consulted exclusively when audit rows are stamped. It does NOT ' +
-    'tenant-scope anything — no read path (`applyTenantScope`, ' +
+    'STAMP-ONLY (#8778, widened by cloud#1395): column carrying the ' +
+    'organization a row is ABOUT, consulted by the three sanctioned ' +
+    'platform-row writers — audit stamping, the approval-row writer ' +
+    '(`plugin-approvals`), and the automation-run recorder ' +
+    '(`service-automation`) — via the shared `resolveRecordOrganizationField` ' +
+    'resolver in `@objectstack/metadata-core`. It does NOT tenant-scope ' +
+    'anything — no read path (`applyTenantScope`, ' +
     '`injectTenantOnInsert`, `computeTenantLayer0Filter`) reads it, so ' +
     'declaring it never walls the object and never hides rows. Declare it ' +
     'only when the organization a row belongs to lives under a column that ' +
@@ -1724,9 +1733,10 @@ const ObjectSchemaBase = strictObject(
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
       // `ui/view.zod.ts` declares its own `userActions` with a completely
-      // disjoint vocabulary (sort/search/filter/refresh/rowHeight/
-      // addRecordForm/editInline/buttons), so an author who learned that block
-      // writes these here and gets a shape that has never heard of them.
+      // disjoint vocabulary (sort/search/filter/refresh/rowHeight/group/
+      // addRecordForm/editInline/hideFields/rowColor/buttons — the last three
+      // adopted at #11195), so an author who learned that block writes these
+      // here and gets a shape that has never heard of them.
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +

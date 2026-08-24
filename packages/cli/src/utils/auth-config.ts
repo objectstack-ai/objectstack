@@ -33,7 +33,7 @@ export interface AuthConfig {
    */
   lastUsedAt?: string;
   /**
-   * Active project id for subsequent CLI calls. Set via `os projects switch`;
+   * Active project id for subsequent CLI calls. Set via `os environments switch`;
    * read by `createApiClient` so every command lands in the right project
    * without an explicit flag.
    */
@@ -57,7 +57,7 @@ export async function readAuthConfig(): Promise<AuthConfig> {
     return JSON.parse(content) as AuthConfig;
   } catch (error: any) {
     if (error.code === 'ENOENT') {
-      throw new Error('No stored credentials found. Please run `os auth login` first.');
+      throw new Error('No stored credentials found. Please run `os login` first.');
     }
     throw new Error(`Failed to read credentials: ${error.message}`);
   }

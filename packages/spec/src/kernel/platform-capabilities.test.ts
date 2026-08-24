@@ -3,6 +3,7 @@ import {
   PLATFORM_CAPABILITY_TOKENS,
   isKnownPlatformCapability,
   PLATFORM_CAPABILITY_PROVIDERS,
+  PLATFORM_PLUGIN_WIRED_RUNTIMES,
   PLATFORM_ALWAYS_ON_CAPABILITIES,
   classifyRequiredCapability,
 } from './platform-capabilities';
@@ -70,6 +71,53 @@ describe('PLATFORM_CAPABILITY_PROVIDERS', () => {
   });
 });
 
+// #11263 — the companion roster for `plugins[]`-wired out-of-repo runtimes,
+// which the token-keyed provider map structurally cannot describe (no
+// `requires` token to key a row by). Shape invariants live here; the
+// cross-registry drift pins (edition agreement with the token-keyed map, the
+// serve-resolver exclusions) live in the CLI's
+// `serve-capability-vocabulary.test.ts` beside the map's own 1:1 pins.
+describe('PLATFORM_PLUGIN_WIRED_RUNTIMES (#11263)', () => {
+  it('is frozen and non-empty', () => {
+    expect(Object.isFrozen(PLATFORM_PLUGIN_WIRED_RUNTIMES)).toBe(true);
+    expect(Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES).length).toBeGreaterThan(0);
+  });
+
+  it('every key is an @objectstack/ npm package name — the key IS the package', () => {
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(pkg).toMatch(/^@objectstack\/[a-z0-9-]+$/);
+    }
+  });
+
+  it('every row carries a non-empty provenance note — recording it is the roster’s whole job', () => {
+    for (const [pkg, row] of Object.entries(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(row.note.trim().length, `empty note for '${pkg}'`).toBeGreaterThan(0);
+      // The type already excludes 'open'; assert the runtime value too so a
+      // cast or a JS caller cannot smuggle one in.
+      expect(['enterprise', 'cloud'], `bad edition for '${pkg}'`).toContain(row.edition);
+    }
+  });
+
+  it('keys are DISJOINT from the capability vocabulary — package names, never tokens', () => {
+    // The single-list rule's load-bearing half: this roster must never grow a
+    // second way to spell a `requires` token. A key that is also a vocabulary
+    // token would be exactly the divergent second description the provider
+    // map's header warns against.
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(PLATFORM_CAPABILITY_TOKENS).not.toContain(pkg);
+    }
+  });
+
+  it('no roster package is an open-edition provider package — plugins[]-wired means not requires-resolved as open', () => {
+    const openPackages = Object.values(PLATFORM_CAPABILITY_PROVIDERS)
+      .filter((p) => p.edition === 'open')
+      .map((p) => p.package);
+    for (const pkg of Object.keys(PLATFORM_PLUGIN_WIRED_RUNTIMES)) {
+      expect(openPackages).not.toContain(pkg);
+    }
+  });
+});
+
 describe('classifyRequiredCapability (#3366)', () => {
   const allInstalled = () => true;
   const noneInstalled = () => false;
@@ -126,6 +174,48 @@ describe('classifyRequiredCapability (#3366)', () => {
  * the single declaration trustworthy for both readers.
  */
 describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
+  /**
+   * The always-on entries that OTHER always-on entries bind into during their
+   * own `kernel:ready` phase. Mount order is what makes those bindings resolve,
+   * so the boundary is a ROLE — never a count.
+   *
+   * A literal `slice(0, 6)` prefix assertion stood here, under a comment telling
+   * the next author to grow the slate *after those six*. That instruction is
+   * what produced #10250: the six bundled these four bind targets together with
+   * two of their READERS (`email`, `storage`) and stopped one short of the third
+   * — `sms`, at index 6 — which was then added exactly as instructed, outside
+   * the pin, with its position relative to `settings` held by nothing at all.
+   *
+   * Adding a seventh entry to the count would have been the same defect moved
+   * one position. Derived from what the pin is FOR, the rule covers whatever is
+   * added tomorrow, wherever it goes.
+   *
+   * ⚠️ Scope of this pin: `packages/spec` sits below every plugin package, so
+   * this file cannot import the plugin classes and therefore cannot verify that
+   * `BIND_TARGETS` still lists the right services — it pins slate ORDER only.
+   * `serve-settings-ordering.pin.test.ts` in `@objectstack/cli` is the half that
+   * keeps the membership honest: it resolves the real plugin classes and proves
+   * each shipped settings reader declares the ordering edge (ADR-0116/ADR-0049).
+   * The two are complementary, not duplicates — neither subsumes the other.
+   */
+  const BIND_TARGETS = ['queue', 'job', 'cache', 'settings'] as const;
+
+  const slateIndex = (token: string) => PLATFORM_ALWAYS_ON_CAPABILITIES.indexOf(token);
+
+  /**
+   * The rule itself, as one predicate: every entry that is not a bind target
+   * must be mounted after all of them. Stated once so the pin below and its
+   * positive control cannot drift apart.
+   */
+  const orderingViolations = (
+    slate: readonly string[],
+    targets: readonly string[] = BIND_TARGETS,
+  ): string[] => {
+    const at = (t: string) => slate.indexOf(t);
+    const lastTarget = Math.max(...targets.map(at));
+    return slate.filter((c) => !targets.includes(c) && at(c) < lastTarget);
+  };
+
   it('is frozen, non-empty and free of duplicates', () => {
     expect(Object.isFrozen(PLATFORM_ALWAYS_ON_CAPABILITIES)).toBe(true);
     expect(PLATFORM_ALWAYS_ON_CAPABILITIES.length).toBeGreaterThan(0);
@@ -134,12 +224,52 @@ describe('PLATFORM_ALWAYS_ON_CAPABILITIES', () => {
     );
   });
 
-  it('pins the foundational prefix — grow the slate AFTER these six', () => {
-    // Order matters at mount time: settings/queue/job must precede the services
-    // that bind to them during their own `kernel:ready` phase.
-    expect(PLATFORM_ALWAYS_ON_CAPABILITIES.slice(0, 6)).toEqual([
-      'queue', 'job', 'cache', 'settings', 'email', 'storage',
-    ]);
+  it('mounts every bind target — the services other entries bind into at `kernel:ready`', () => {
+    // The floor for the ordering rule below. A missing target would make that
+    // rule constrain less without failing; with every target gone it would
+    // constrain nothing at all, and still pass.
+    for (const target of BIND_TARGETS) {
+      expect(slateIndex(target), `${target} must be on the slate`).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('mounts every other entry after ALL bind targets — derived, so tomorrow’s entry is covered on arrival', () => {
+    // THE BOUNDARY, DERIVED. Not "the first six": the rule is that the services
+    // other entries bind into during their own `kernel:ready` phase are mounted
+    // first, and everything else grows after them. `sms`, `sharing`,
+    // `messaging`, `analytics` — and an eleventh entry added tomorrow, wherever
+    // it goes — are all covered by this the moment they are added.
+    const tail = PLATFORM_ALWAYS_ON_CAPABILITIES.filter(
+      (c) => !(BIND_TARGETS as readonly string[]).includes(c),
+    );
+    // Non-vacuity: the tail is what this case is about, so an empty one would
+    // be a pass over nothing.
+    expect(tail.length).toBeGreaterThan(0);
+    expect(orderingViolations(PLATFORM_ALWAYS_ON_CAPABILITIES)).toEqual([]);
+  });
+
+  it('…and the rule is falsifiable — a hostile slate is named, not shrugged off', () => {
+    // The positive control for the derivation above. The SAME predicate over a
+    // slate with `settings` mounted last must name every entry that now
+    // precedes it; a predicate that reported nothing here would report nothing
+    // on a real regression either.
+    expect(
+      orderingViolations(['queue', 'job', 'cache', 'email', 'sms', 'storage', 'settings']),
+    ).toEqual(['email', 'sms', 'storage']);
+
+    // …and the class the retired `slice(0, 6)` pin structurally could not see.
+    // That pin constrained indices 0-5 and nothing else, so a bind target
+    // arriving anywhere past the prefix read as correct at a glance — the same
+    // blind spot that left `sms` at index 6 held by nothing. Model it: today's
+    // slate, unchanged, plus a NEW bind target appended. `slice(0, 6)` is
+    // untouched and the old pin passes; this rule names all six readers now
+    // mounted ahead of it.
+    expect(
+      orderingViolations(
+        [...PLATFORM_ALWAYS_ON_CAPABILITIES, 'secrets'],
+        [...BIND_TARGETS, 'secrets'],
+      ),
+    ).toEqual(['email', 'storage', 'sms', 'sharing', 'messaging', 'analytics']);
   });
 
   it('every member is a real platform capability token', () => {

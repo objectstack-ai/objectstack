@@ -202,7 +202,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
     note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
   { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
-    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts). [#7019] gated on `manage_metadata` (ADR-0066 D1), identical to the single-name PUT — it was MEASURED that with #6603 in place the same ADR-0106 masked round trip still deleted fields through this door' },
+    note: 'compound names pass through saveItem unencoded (URL-pinned in client.test.ts). [#7019] gated on `manage_metadata` (ADR-0066 D1), identical to the single-name PUT — it was MEASURED that with #6603 in place the same ADR-0106 masked round trip still deleted fields through this door. [#11095] reads `?force=true` too — the fourth divergence from its single-segment twin closed on #7019\'s reason (after that capability gate, #8805\'s write-side organization and #7035\'s 501 envelope): the Phase 3a-destructive `409 DESTRUCTIVE_CHANGE` prescribes that parameter, and until this card the prescription was true of the twin and false here. Repeated `?force` is refused (#6877) in the same stroke — an array falls to `!!raw`, turning a doubled opt-OUT into force ON' },
 
   // ── ui ────────────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/ui/view/:object/:type', family: 'ui', source: 'route-manager', disposition: 'sdk', client: 'meta.getView',
@@ -309,6 +309,13 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
   { route: 'POST /api/v1/security/suggested-bindings/:id/dismiss', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.dismiss',
     note: 'duplicate mount with the dispatcher /security domain' },
+  // [field report — rc→GA declared≠enforced surfacing] REST-only (no
+  // dispatcher twin, unlike the suggested-bindings family above): invoked by
+  // `sys_permission_set`'s "Discard Overlay" Setup action via a plain fetch
+  // to `target`, not through the typed SDK — see
+  // `permission-set-overlay-discard.ts`.
+  { route: 'POST /api/v1/security/permission-sets/:id/discard-overlay', family: 'security', source: 'route-manager', disposition: 'server-only',
+    note: 'Setup admin action only (sys_permission_set "Discard Overlay") — invoked via the declarative action target, not the SDK' },
 
   // ── reports ───────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/reports', family: 'reports', source: 'route-manager', disposition: 'sdk', client: 'reports.list' },

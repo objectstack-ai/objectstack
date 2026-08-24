@@ -687,6 +687,77 @@ export class QuickJSScriptRunner implements ScriptRunner {
     vm.setProp(ctxObj, 'crypto', cryptoObj);
     cryptoObj.dispose();
 
+    // ── [#11293] `ctx.title(field?)` — "what is this record called?" ────────
+    //
+    // Installed only when the host built the seam (hook bodies; the action face
+    // does not). It settles through the SAME deferred-promise + pump mechanism
+    // every other host call uses — never `newAsyncifiedFunction` — because a
+    // body will routinely `await ctx.title()` next to an `await
+    // ctx.api.object(...).findOne()`, and asyncify forbids a second unwind
+    // while one is in flight (ADR-0102 D2, the defect that moved this runner
+    // off the asyncify build).
+    //
+    // ## Why the capability gate is on the ARGUMENT, not on the function
+    //
+    // The two forms cost different things, and the token gates the cost:
+    //
+    //   ctx.title()             → this record. Resolved from the record state
+    //                             the hook is already firing on, formula title
+    //                             included. NO read, so no `api.read`.
+    //   ctx.title('account_id') → a related record. Exactly one `findOne`
+    //                             through the body's own read channel, so
+    //                             `api.read` — the same token the equivalent
+    //                             hand-written `ctx.api.object(...).findOne()`
+    //                             needs, gating the same read.
+    //
+    // Requiring `api.read` for the no-argument form would tax the majority case
+    // with a grant it never exercises, and the whole point of this accessor is
+    // that naming a record correctly must be CHEAPER to reach than `record.id`
+    // — which is what a body writes when the right answer is inconvenient.
+    // Declared = enforced, per form.
+    if (typeof ctx.title === 'function') {
+      const titleFn = vm.newFunction('title', (fieldH) => {
+        const field = fieldH === undefined ? undefined : vm.dump(fieldH);
+        // `vm.dump`, like every other host bridge here — `getString` on a
+        // non-string handle coerces INSIDE the VM and would turn a mistaken
+        // `ctx.title({})` into a lookup for a field literally named
+        // "[object Object]".
+        const fieldName = field === undefined || field === null ? undefined : String(field);
+        if (fieldName !== undefined && !caps.has('api.read')) {
+          throwSandboxFault(
+            vm,
+            `capability 'api.read' not granted to ${origin.kind} '${origin.name}' ` +
+              `(called ctx.title('${fieldName}'), which reads the related record). ` +
+              `ctx.title() with no argument needs no capability.`,
+          );
+        }
+        const deferred = vm.newPromise();
+        deferreds.add(deferred);
+        void (async () => {
+          try {
+            // Read `txState` HERE, at call time: a related-title read must ride
+            // a transaction the body opened after this function was installed,
+            // or it asks the pool for a second connection — a deadlock on
+            // `pool max=1` (SQLite, the `objectstack dev` default).
+            const source = txState.api ?? (ctx.api as Record<string, unknown> | undefined);
+            const value = await ctx.title!(fieldName, source);
+            if (!vm.alive) return;
+            const h = jsonToHandle(vm, value ?? null);
+            deferred.resolve(h);
+            h.dispose();
+          } catch (err) {
+            if (!vm.alive) return;
+            const errH = hostErrorToVm(vm, err);
+            deferred.reject(errH);
+            errH.dispose();
+          }
+        })();
+        return deferred.handle;
+      });
+      vm.setProp(ctxObj, 'title', titleFn);
+      titleFn.dispose();
+    }
+
     vm.setProp(vm.global, '__ctx', ctxObj);
     ctxObj.dispose();
 

@@ -4,9 +4,10 @@
 // matters most, because this is the shape a browser client actually receives.
 //
 // It is a COMPOSED shape: `getDiscovery()` (metadata-protocol) builds the base,
-// then `registerDiscoveryEndpoints` overrides `version` and `routes`, ANDs
+// then `registerDiscoveryEndpoints` overrides `routes`, ANDs
 // `capabilities.transactionalBatch` with its own `api.enableBatch`, and attaches
-// `scoping`. Neither producer alone could be checked against the schema and be
+// `scoping`. It no longer overrides `version` — see the #11292 suite at the
+// bottom, which pins the served value's PROVENANCE. Neither producer alone could be checked against the schema and be
 // meaningful here, so this test drives the REAL protocol implementation through
 // the REAL handler rather than the `createMockProtocol()` double the other
 // rest tests use — a mock would only prove the mock's shape conforms.
@@ -71,7 +72,7 @@ function createMockServer() {
  * deployment) or the environment-scoped `/api/v1/environments/:environmentId`
  * one, which is the only mount that can report `scoped: true`.
  */
-function discoveryHandler(opts: { scoped?: boolean } = {}) {
+function buildDiscovery(opts: { scoped?: boolean; apiVersion?: string } = {}) {
   const engine = {
     registry: {
       getObject: (_n: string) => undefined,
@@ -82,18 +83,30 @@ function discoveryHandler(opts: { scoped?: boolean } = {}) {
   const config: any = {
     api: {
       requireAuth: false,
+      ...(opts.apiVersion ? { version: opts.apiVersion } : {}),
       ...(opts.scoped ? { enableProjectScoping: true, projectResolution: 'auto' } : {}),
     },
   };
   const rest = new RestServer(createMockServer() as any, protocol as any, config);
   rest.registerRoutes();
 
+  // The mounted segment is `api.version`'s job (`getApiBasePath()`), which is
+  // exactly why it is not the identity answer — see the #11292 suite below.
+  const version = opts.apiVersion ?? 'v1';
   const path = opts.scoped
-    ? '/api/v1/environments/:environmentId/discovery'
-    : '/api/v1/discovery';
+    ? `/api/${version}/environments/:environmentId/discovery`
+    : `/api/${version}/discovery`;
   const entry = rest.getRouteManager().get('GET', path);
   if (!entry) throw new Error(`discovery route not registered at ${path}`);
-  return entry.handler as (req: any, res: any) => Promise<void>;
+  return {
+    handler: entry.handler as (req: any, res: any) => Promise<void>,
+    /** The REAL producer this server composes over — the provenance the wire answer must track. */
+    protocol,
+  };
+}
+
+function discoveryHandler(opts: { scoped?: boolean; apiVersion?: string } = {}) {
+  return buildDiscovery(opts).handler;
 }
 
 async function invoke(
@@ -316,6 +329,89 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
         'GET /api/v1 must not declare a responseSchema until this suite (or another) '
           + 'drives that mount — no coverage, no fill (#5791).',
       ).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // [#11292] `version` is the PRODUCER's — provenance, pinned without a literal
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // This seam used to run `discovery.version = this.config.api.version` one
+  // line after calling the producer, so the wire answer was the MOUNTED PATH
+  // SEGMENT (`'v1'` by default) — the string the caller had just typed to reach
+  // the endpoint. `DiscoverySchema` declares `version` under "System Identity"
+  // next to `name` and `environment`, and the #10993 ruling (reaffirmed by
+  // #11235/#11242) settled that as the SERVING ARTIFACT's version.
+  //
+  // Every assertion below pins PROVENANCE, never a literal version string: the
+  // wire answer is compared against the producer's own answer, or against a
+  // stamp this test injects. A pin spelling `'1.0.0'` would rot at the next
+  // release and would re-create the class #11295 is filed against.
+  describe("[#11292] the served `version` is the producer's, not the mounted API version", () => {
+    it('tracks the producer when the deployment stamps OS_RUNTIME_VERSION', async () => {
+      // `resolveDiscoveryVersion()` reads the stamp LIVE (documented in
+      // `metadata-protocol/src/discovery-version.ts`), so a value injected here
+      // must appear on the wire. This is the provenance assertion: the sentinel
+      // exists nowhere in the REST layer, so it can only have come through
+      // `getDiscovery()`.
+      const old = process.env.OS_RUNTIME_VERSION;
+      process.env.OS_RUNTIME_VERSION = '9.9.9-provenance-sentinel';
+      try {
+        const body = await invoke(discoveryHandler());
+
+        expect(body.version).toBe('9.9.9-provenance-sentinel');
+        expect(DiscoverySchema.safeParse(body).success).toBe(true);
+      } finally {
+        if (old === undefined) delete process.env.OS_RUNTIME_VERSION;
+        else process.env.OS_RUNTIME_VERSION = old;
+      }
+    });
+
+    it('agrees with the producer called directly, whatever the producer derives', async () => {
+      // No stamp: the producer falls through to its own package version. The
+      // assertion still names no literal — it asks only that the two answers
+      // are the SAME answer, which is the whole content of "the REST seam does
+      // not rewrite this field".
+      const { handler, protocol } = buildDiscovery();
+
+      const body = await invoke(handler);
+      const direct: any = await (protocol as any).getDiscovery();
+
+      expect(body.version).toBe(direct.version);
+      expect(typeof body.version).toBe('string');
+      expect(body.version.length).toBeGreaterThan(0);
+    });
+
+    it('answers the producer even when `api.version` is set to something else', async () => {
+      // The sharp edge, stated as a measurement. `api.version` still does its
+      // real job — it builds the mount — and that job is visible in the SAME
+      // document, on `routes`. What it no longer does is answer the identity
+      // question.
+      const { handler, protocol } = buildDiscovery({ apiVersion: 'v9' });
+
+      const body = await invoke(handler);
+      const direct: any = await (protocol as any).getDiscovery();
+
+      // Anti-vacuity: `api.version` really is 'v9' on this server, and really
+      // does drive the mounted path. Without this, the assertion below could
+      // pass on a server where the option was silently ignored.
+      expect(body.routes.data).toBe('/api/v9/data');
+
+      expect(body.version).toBe(direct.version);
+      expect(body.version).not.toBe('v9');
+    });
+
+    it('does not answer the mounted segment on the scoped mount either', async () => {
+      // The scoped mount runs the same closure but resolves a per-request
+      // protocol, so it is a second path to the same field.
+      const { handler, protocol } = buildDiscovery({ scoped: true, apiVersion: 'v9' });
+
+      const body = await invoke(handler, { environmentId: 'env_alpha' });
+      const direct: any = await (protocol as any).getDiscovery();
+
+      expect(body.routes.data).toBe('/api/v9/environments/env_alpha/data');
+      expect(body.version).toBe(direct.version);
+      expect(body.version).not.toBe('v9');
     });
   });
 });

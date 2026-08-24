@@ -25,7 +25,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { printMetadataStats, type MetadataStats } from '../src/utils/format.js';
+import { collectMetadataStats, printMetadataStats, type MetadataStats } from '../src/utils/format.js';
 
 /** Drop SGR sequences so an assertion reads the words, not chalk's opinion. */
 const stripAnsi = (s: string) => s.replace(/\u001B\[[0-9;]*m/g, '');
@@ -63,7 +63,6 @@ const ZERO_APPS_STATS: MetadataStats = {
   positions: 0,
   permissions: 0,
   datasources: 0,
-  translations: 0,
   plugins: 0,
   devPlugins: 0,
 };
@@ -176,5 +175,108 @@ describe('[#10952] printMetadataStats prints every section\'s zero state — no 
     const out = render({ ...ZERO_APPS_STATS, permissions: 3 });
     expect(out).toContain('Security: 3 Permissions');
     expect(out).not.toContain('0 Positions');
+  });
+});
+
+/**
+ * #11172 — the two rows of `printMetadataStats` that #10952 did not reach.
+ *
+ * Both measured at that card's head against the real CLI (`bin/run-dev.js
+ * validate`, `NO_COLOR=1`) on a stack declaring nothing. The whole summary was
+ *
+ *     Data: 0 Objects
+ *     UI: 0 Apps
+ *     Logic: 0 Flows
+ *     Security: 0 Positions  0 Permissions
+ *
+ * with no `Runtime:` row at all, and no report of `stats.translations` at any
+ * value — the count was collected on every run and read by nothing.
+ *
+ * The maintainer ruled both halves on 2026-08-23 (issue comment 5386673724),
+ * direction 1: `Runtime:` renders unconditionally, and `translations` is
+ * REMOVED from `MetadataStats` implementation-first. Giving `translations` a
+ * rendered home — in `UI:` or a new `i18n:` row — was explicitly not approved,
+ * so no pin here may assert one.
+ */
+describe('[#11172] printMetadataStats: the Runtime: row survives zero, and no metric is counted unread', () => {
+  it('Runtime: prints "Runtime: 0 plugins" on a stack with no plugins and no devPlugins', () => {
+    const out = render(ALL_ZERO_STATS);
+    // The regression: before the fix `Runtime:` was rendered OUTSIDE the
+    // sections loop, wrapped in `if (stats.plugins > 0 || stats.devPlugins > 0)`,
+    // so this output contained no `Runtime:` line whatsoever.
+    expect(out).toContain('Runtime: 0 plugins');
+  });
+
+  it('the zero row is the only thing that changed: the shipped non-zero rendering is byte-identical', () => {
+    // `2 plugins, 1 devPlugins` — comma-joined, lowercase item names, no
+    // two-space section join. Folding this row into the `sections` array is
+    // what let it inherit the no-silent-drop guarantee, and this pin is what
+    // stops that fold from quietly restyling it into `2 plugins  1 devPlugins`.
+    const out = render({ ...ALL_ZERO_STATS, plugins: 2, devPlugins: 1 });
+    expect(out).toContain('Runtime: 2 plugins, 1 devPlugins');
+    expect(out).not.toContain('Runtime: 0 plugins');
+  });
+
+  it('a non-zero peer still suppresses the zero fallback, one item at a time', () => {
+    expect(render({ ...ALL_ZERO_STATS, plugins: 3 })).toContain('Runtime: 3 plugins');
+    // devPlugins alone: the row reports the peer that exists and does NOT pad
+    // itself with the `0 plugins` fallback, exactly as `Security:` behaves.
+    const devOnly = render({ ...ALL_ZERO_STATS, devPlugins: 4 });
+    expect(devOnly).toContain('Runtime: 4 devPlugins');
+    expect(devOnly).not.toContain('0 plugins');
+  });
+
+  it('Runtime: stays the last row — the fold must not reorder the summary', () => {
+    const rows = render(ALL_ZERO_STATS).split('\n').filter((l) => l.includes(':'));
+    expect(rows.map((l) => l.trim().split(':')[0])).toEqual(['Data', 'UI', 'Logic', 'Security', 'Runtime']);
+  });
+
+  /**
+   * The `translations` half, pinned as the general property rather than as the
+   * absence of one field name.
+   *
+   * `collectMetadataStats` returns a `MetadataStats`, so TypeScript already
+   * forces every field DECLARED on that interface to be collected. This pin
+   * closes the other end — every field COLLECTED must reach the printed
+   * output. Declared ⇒ collected ⇒ rendered: a metric counted on every
+   * `os validate` and shown nowhere cannot satisfy the chain, whatever it is
+   * called, so this fails for the next unread metric as well as for the one
+   * the card measured.
+   *
+   * Every count is given a distinct non-zero value because a `0` is legitimately
+   * filtered out of its section's fragments — zero-valued items are covered by
+   * the zeroFallback pins above, and mixing the two would make this one unable
+   * to distinguish "filtered at zero" from "has no renderer at all".
+   */
+  it('every metric collectMetadataStats counts is rendered somewhere in the summary', () => {
+    const keys = Object.keys(collectMetadataStats({}));
+    // Anti-vacuity floor: an empty (or accidentally shrunken) key list would
+    // satisfy the loop below perfectly while asserting nothing. 18 is the count
+    // after #11172 retired `translations`; retiring another metric under
+    // enforce-or-remove means lowering this deliberately, which is the point.
+    expect(keys.length).toBeGreaterThanOrEqual(18);
+
+    // Distinct 3-digit counts, so no metric's value can be satisfied by another
+    // metric's rendered number.
+    const stats = Object.fromEntries(keys.map((k, i) => [k, 101 + i])) as unknown as MetadataStats;
+    const out = render(stats);
+
+    for (const [key, value] of Object.entries(stats)) {
+      expect(out, `${key} is counted by collectMetadataStats but never rendered by printMetadataStats`)
+        .toMatch(new RegExp(`\\b${value}\\b`));
+    }
+  });
+
+  it('translations specifically: the field the ruling deleted is neither collected nor rendered', () => {
+    // Named explicitly because the general pin above cannot see a field that is
+    // re-declared and re-collected under a rendered alias, and because the
+    // ruling was about THIS field. A config that declares 40 bundles must not
+    // put a `40` back into the summary through a `translations` count.
+    const collected = collectMetadataStats({
+      translations: Array.from({ length: 40 }, (_, i) => ({ [`l${i}`]: {} })),
+    });
+    expect(Object.keys(collected)).not.toContain('translations');
+    expect(render(collected as MetadataStats)).not.toMatch(/\b40\b/);
+    expect(render(collected as MetadataStats)).not.toMatch(/i18n|[Tt]ranslation/);
   });
 });

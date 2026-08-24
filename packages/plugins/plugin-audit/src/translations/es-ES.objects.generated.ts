@@ -130,6 +130,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           shared: "Compartido",
           assigned: "Asignado",
           completed: "Completado",
+          scheduled: "Programado",
           login: "Inicio de sesión",
           logout: "Cierre de sesión",
           system: "Sistema"

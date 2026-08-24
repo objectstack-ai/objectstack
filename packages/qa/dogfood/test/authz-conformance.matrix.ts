@@ -134,7 +134,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'anonymous-deny-meta', summary: 'anonymous-deny on the metadata endpoints (#2567 surface 1)', state: 'enforced',
     enforcement: 'rest/rest-server.ts registerMetadataEndpoints guarded registrar (enforceAuth → shouldDenyAnonymous) — every /meta route inherits the gate; runtime/http-dispatcher.ts handleMetadata mirrors it for the dispatcher metadata catch-all',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
-    covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'] },
+    covers: ['meta:rest-server.ts:registerMetadataEndpoints', 'meta:http-dispatcher.ts:handleMetadata'],
+    note: '#11373 — for most of this row\'s life the cited proof drove ONE anonymous `GET /meta`, so the row read as covering a surface while only its read face was exercised. The six mutating doors (`_migrate-stored`, the single and compound saves, the reset, publish, rollback) are now driven there as real HTTP: measured 2026-08-23 on the booted showcase, all six answer 401 UNAUTHENTICATED in the rest-flat envelope, nothing persists, and the same URL/method/body with a session answers 403 (member) or runs the door (admin) — so the 401 is the floor and not a broken probe. The write half was previously pinned only in `rest/src/meta-write-door-capability-enumeration.test.ts`, which invokes `route.handler` over a `vi.fn()` transport and therefore could not show that the composed app routes a real request into the guarded registrar at all.' },
   // #5519 — the two DISPATCHER-mounted execution surfaces. `@objectstack/rest`
   // gated `/data` and `/meta`; these routes are mounted by a SECOND
   // registration path (dispatcher-plugin.ts, straight onto the host

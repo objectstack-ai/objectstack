@@ -1302,6 +1302,116 @@ function typeDeclRegions(code) {
 }
 
 /**
+ * THE ONE SPELLING of a `route:` / `client:` LEAD — the key, the colon, and whatever may
+ * sit between the colon and the VALUE. Every scan below that asks "is a declaration written
+ * here?" builds its regex from this, so the eight of them cannot answer the same question
+ * differently while all eight look right.
+ *
+ * WHAT THE EIGHTH COPY COST (#11494). `declarationsIn` spelled the run after the colon
+ * `[ \t]*` and the other seven spelled it `\s*`. One character class, one character of
+ * difference — a NEWLINE — and a declaration whose value sits on the NEXT line was seen by
+ * BOTH scans, in two different buckets, and billed to the denominator twice: `declinedIn`
+ * read it as a declined quote and named it correctly, while `declarationsIn` saw `\n` as
+ * the character after the colon, classified `quote === null`, and `unreadableIn` billed the
+ * same declaration a second time as a non-literal. Measured on `cd932772`, one file
+ * declaring TWO `route:` values:
+ *
+ *     export const L = [
+ *       { route:
+ *           "GET /api/v1/gone", family: 'metadata', disposition: 'sdk' },
+ *       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+ *     ];
+ *   ⇒ rows 1 · routesDeclared 3 · declined 2 · brokenScan 1
+ *
+ * …and the second declined entry read `route: ` — an EMPTY value, naming nothing a reader
+ * can act on, which is the silence every other report in this file exists to break. Note
+ * `rows + declined === routesDeclared` still BALANCED (1 + 2 === 3): the partition held
+ * arithmetically over a population that counts one declaration twice, which is exactly the
+ * "correct from inside" shape #10500 / #10793 / #10901 each closed one instance of.
+ *
+ * `\s*` IS THE CLASS THAT WINS, and it is not a coin flip. The ROW RECOGNIZER spells
+ * `\s*`, so a wrapped SINGLE-quoted value is ALREADY read as a row — and was then billed
+ * unread by the same file, firing a PARTIAL-read verdict with exit 1 on a wholly accurate
+ * ledger (measured: `rows 1 · routesDeclared 2 · declined 1 · brokenScan 1` on a file
+ * declaring ONE row, the declined entry again empty-valued; the `client:` column did the
+ * same to `clientsDeclared`). That is the FALSE RED direction, which this file prices as
+ * costing the same trust a false green does. Making `[ \t]*` win instead would have had to
+ * move the recognizer too — a change to the MEASURED POPULATION, which the header of
+ * `--bridge-coverage` attaches a before/after standard to — and would have kept the
+ * empty-valued entry as the surviving one.
+ *
+ * Priced on the tree where the move is provably free: none of the seven ledgers ends a line
+ * at a `route:` / `client:` colon (`grep -nE '\b(route|client)[ \t]*:[ \t]*$'`, 0 hits),
+ * and `268 of 268` / `222 of 222` / 177 UNREACHABLE are byte-identical across the change.
+ *
+ * A FUNCTION DECLARATION rather than a `const`, for `declinedIn`'s reason: `--self-test`
+ * short-circuits near the top of this file, before any `const` down here has initialized,
+ * and a TDZ error there takes the whole self-test down instead of failing one check.
+ *
+ * THE KEY IS ANCHORED HERE TOO, AND ONLY HERE (#11542). It used to be each call site's own
+ * argument: `declarationsIn` wrote `\b(route|client)` and the other seven wrote the key bare,
+ * so `subroute: 'GET /api/v1/gone'` was a declaration to SEVEN of the eight scans and not to
+ * the eighth — the same family of divergence one spelling further out, and it minted a silent
+ * phantom ROW. Silent for the reason #10683 and #10793 were: the partial-read verdict is keyed
+ * on the gap between `rows` and `routesDeclared` and BOTH terms read the unanchored spelling,
+ * so both moved together and no verdict fired. `outsideCode` could not see it either, because
+ * the lead genuinely IS in code position, and `declarationsIn` — the one scan that got it
+ * right — sat on the side of the ledger where being right shows up only as a SHORTFALL, which
+ * is precisely what that arithmetic hides. Measured on `cd932772`, one file declaring ONE
+ * `route:`:
+ *
+ *     export const L = [
+ *       { subroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },
+ *       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+ *     ];
+ *   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 · brokenScan 0
+ *
+ * The phantom carries a path nobody mounts. In THAT fixture it carries no `client:` either,
+ * so it merely inflated `rows` and the denominator together and stopped there. Where the
+ * stray key sits BETWEEN a real `route:` and its `client:` it did worse, and this is the half
+ * a count comparison cannot see at all: the row WINDOW is delimited by the same lead, so the
+ * phantom CLOSED the real row's window, took its binding, and joined the UNREACHABLE
+ * population as a client-bound row on a path no registrar mounts — while the real row lost
+ * the binding it plainly declares. Same shape #10636 measured for the quote spellings,
+ * arriving through the key; `--self-test` pins that one on its own fixture.
+ *
+ * `\b` IS THE ANSWER ON THE MERITS, and it is the spelling the one scan that got it right
+ * already used: `subroute` is not `route`. The other direction — un-anchoring
+ * `declarationsIn` so that the eight agree — buys agreement at the price of being
+ * agreed-and-wrong, and no key exists that it would be meant to catch.
+ *
+ * ⛔ THIS MOVED THE MEASURED POPULATION, which the header of `--bridge-coverage` attaches a
+ * before/after standard to: anchoring REMOVES rows, it does not add them. Priced on the tree
+ * where the move is provably free — across all seven live ledgers there are ZERO leads that
+ * the unanchored spelling reads and the anchored one does not (every match of
+ * `(route|client)\s*:\s*` over RAW text is also a match of `\b(route|client)\s*:\s*` at the
+ * same index; 0 divergent leads), and `269 of 269` / `222 of 222` / 45 reachable /
+ * 177 UNREACHABLE / 0 prose-quoted leads / `brokenScan` 0 are byte-identical across the
+ * change. That is the same "provably free tree" argument #10683 and #10793 each made
+ * explicitly for their own population moves, and it is made explicitly here for the same
+ * reason: the alternative is moving a reported number quietly.
+ *
+ * ⛔ THE RESIDUE THIS DOES NOT CLOSE, named rather than left to be discovered. `\b` fails only
+ * against a preceding WORD character, so `$route:` — a legal JS identifier — is still read as
+ * a declaration. It is no longer a DIVERGENCE (all eight now agree on it), which is what this
+ * card was about, but it is still a phantom, and tightening to `(?<![\w$])` would move
+ * `declarationsIn` as well — the one scan this card's before/after was priced to leave
+ * byte-identical — so it is a SECOND population move with its own before/after to price.
+ * Filed as #11630 rather than folded in, for the reason this card was filed rather than
+ * folded into #11494, and pinned in `--self-test` so that card MOVES a pin rather than
+ * finding none.
+ *
+ * @param {string} keys  the key alternation ONLY — `(route|client)`, `route`,
+ *   `(?:route|client)`. The capture groups are the call site's question; the ANCHOR, the
+ *   colon and the run between the colon and the value are this function's. ⛔ A call site must
+ *   NOT restate the `\b`: a second copy is a second spelling, which is the entire defect this
+ *   closes, and `--self-test` pins that no argument carries one.
+ */
+function declLead(keys) {
+  return String.raw`\b${keys}\s*:\s*`;
+}
+
+/**
  * Every `route:` / `client:` declaration a ledger makes IN CODE POSITION, with the quote its
  * value opens in (`'`, `"`, backtick) or `null` for a value that is not a string literal at
  * all — `route: ROUTES.health`, `route: BASE + '/types'`. The two readers below are filters
@@ -1329,7 +1439,9 @@ function declarationsIn(text) {
   const code = codeOnly(text);
   const skip = typeDeclRegions(code);
   const out = [];
-  const re = /\b(route|client)\s*:[ \t]*/g;
+  // The `\b` this used to carry is now `declLead`'s (#11542) — it was the LAST spelling the
+  // eight scans decided for themselves, and this was the one scan that decided it correctly.
+  const re = new RegExp(declLead('(route|client)'), 'g');
   let m;
   while ((m = re.exec(code)) !== null) {
     if (skip.some(([a, b]) => m.index >= a && m.index <= b)) continue;
@@ -1422,12 +1534,51 @@ function unclaimedClientsIn(text, claimed) {
  * A FUNCTION DECLARATION rather than a `const` arrow, deliberately: `--self-test`
  * short-circuits near the top of this file, before any `const` down here has initialized,
  * and a TDZ error there takes the whole self-test down instead of failing one check.
+ *
+ * IT NO LONGER DECIDES "IS THIS A TYPE MEMBER?" FOR ITSELF (#10901). It used to run over
+ * raw text through NEITHER of #10500's discriminators while the recognizer read through
+ * both, so a literal-union `route: "GET /a" | "GET /b"` TYPE member — the identical shape
+ * #10793 kept out of `rows`, written in either of the two quotes this scan reads — was
+ * billed as a value the parse FAILED to read. That is a verdict, not a number: the entry
+ * is NAMED with its line and `bridgeCoverageFrom` raises a PARTIAL read with exit 1, on a
+ * ledger that is completely accurate. Measured on the tree this landed on, one file
+ * declaring ONE row:
+ *
+ *     export interface Entry { route: "GET /api/v1/gone" | "GET /api/v1/meta"; client: string }
+ *     export const L = [
+ *       { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },
+ *     ];
+ *   ⇒ rows 1 · routesDeclared 2 · declined 1 · brokenScan 1   (backtick: identical)
+ *
+ * So the region list arrives as a PARAMETER, from the one caller that already computes it,
+ * and there is no default: a call site that forgot the discriminator would silently
+ * reintroduce exactly the second opinion this closes, and the file argues twice that two
+ * scans each deciding "in code position" separately are two scans that can drift into
+ * disagreeing while both look right. `offset` is the absolute position of `s` in the file,
+ * so the translation between the in-window slice's coordinates and the region list's
+ * happens HERE, once, instead of at one of the two call sites — the returned `index` is
+ * absolute for both.
+ *
+ * ⛔ THE OTHER DISCRIMINATOR IS DELIBERATELY NOT APPLIED HERE. This still reads RAW bytes,
+ * so a `route: "GET /x"` written in a COMMENT is still billed as a declined row. That is
+ * #10794, closed `not planned` on the reasoning that it is the LOUD direction and has no
+ * puller — and it is not this card's to reverse. It is also not a free change of lens:
+ * `codeOnly` blanks string CONTENTS, and this scan's whole job is to quote the unread
+ * spelling back at the reader, so a masked window would name `route: ""` for every entry.
+ * `--self-test` pins that boundary in place, and a future card closing #10794 is expected
+ * to move that pin rather than to find it missing.
  */
-function declinedIn(s) {
-  return [...s.matchAll(/(route|client)\s*:\s*(["`])([^\n]{0,120})/g)].map((d) => {
+function declinedIn(s, offset, inTypeDecl) {
+  const out = [];
+  for (const d of s.matchAll(new RegExp(declLead('(route|client)') + /(["`])([^\n]{0,120})/.source, 'g'))) {
+    const index = offset + d.index;
+    // …and never a TYPE member (#10901), on the SAME region list the recognizer and the
+    // denominator read — not a second idea of what a type member is.
+    if (inTypeDecl(index)) continue;
     const end = d[3].indexOf(d[2]);
-    return { index: d.index, key: d[1], text: `${d[1]}: ${d[2]}${end === -1 ? d[3].slice(0, 60) : d[3].slice(0, end)}${d[2]}` };
-  });
+    out.push({ index, key: d[1], text: `${d[1]}: ${d[2]}${end === -1 ? d[3].slice(0, 60) : d[3].slice(0, end)}${d[2]}` });
+  }
+  return out;
 }
 
 /**
@@ -1557,16 +1708,18 @@ function parseLedgerSource(text) {
   // — including one carrying an escaped quote, which re-running the regex over the raw text
   // would cut short at the `\'` instead of at the literal's real end.
   const valueAt = (end, len) => text.slice(end - 1 - len, end - 1);
-  const routeRe = /route\s*:\s*'([^']+)'/g;
+  const routeRe = new RegExp(declLead('route') + /'([^']+)'/.source, 'g');
+  const nextRouteRe = new RegExp(declLead('route') + "'");
+  const windowClientRe = new RegExp(declLead('client') + /'([^']+)'/.source);
   let m;
   while ((m = routeRe.exec(code)) !== null) {
     // …and never a TYPE member (#10793). A literal-union member opens with the very quote
     // this regex reads, which is exactly why `typeDeclRegions` and not a spelling test.
     if (inTypeDecl(m.index)) continue;
     const rest = code.slice(m.index, routeRe.lastIndex + 1200);
-    const nextRoute = rest.slice(1).search(/route\s*:\s*'/);
+    const nextRoute = rest.slice(1).search(nextRouteRe);
     const window = nextRoute === -1 ? rest : rest.slice(0, nextRoute + 1);
-    const client = window.match(/client\s*:\s*'([^']+)'/);
+    const client = window.match(windowClientRe);
     rows.push({
       route: valueAt(routeRe.lastIndex, m[1].length),
       client: client ? valueAt(m.index + client.index + client[0].length, client[1].length) : null,
@@ -1580,20 +1733,27 @@ function parseLedgerSource(text) {
     // …over the RAW bytes of that same window. `declinedIn`'s whole job is to NAME an
     // unread spelling, and the masked window would name `client: ""` for every one of them.
     // The BYTE RANGE is the code-derived window's, so this is the same span, read for its
-    // text. ⛔ That leaves `declinedIn` itself still reading prose — a `route: "GET /x"`
-    // written in a comment is still billed as a declined row. It is the SAME asymmetry one
-    // scan over, but it fails in the opposite direction (a declined entry is NAMED and
-    // carries a verdict, so it is a false RED, not a phantom row), which makes it a
-    // separate call with its own before/after rather than a rider here. Filed as #10794.
-    for (const d of declinedIn(text.slice(m.index, m.index + window.length))) {
+    // text — but it now reads that span through the TYPE-DECLARATION discriminator (#10901),
+    // on the same `typeDecls` list the loop above and the denominator below read. An entry
+    // interface trailing the table lands INSIDE this window (measured: `client: "a" | "b"`
+    // on the line after the table's `];` was billed as a declined client, `clientsDeclared`
+    // 2 on a file declaring 1, exit 1), and a type member is not a row this parse failed to
+    // read — it is a correct declaration of a TYPE.
+    //
+    // ⛔ Still RAW, and still through no `codeOnly`: a `route: "GET /x"` written in a
+    // COMMENT is still billed as a declined row. That is #10794, closed `not planned`
+    // (loud direction, no puller), and this card does not reverse it — see `declinedIn`.
+    for (const d of declinedIn(text.slice(m.index, m.index + window.length), m.index, inTypeDecl)) {
       if (d.key !== 'client') continue;
-      claimed.add(m.index + d.index);
-      declined.push({ key: 'client', line: lineAt(m.index + d.index), text: d.text });
+      claimed.add(d.index);
+      declined.push({ key: 'client', line: lineAt(d.index), text: d.text });
     }
   }
   // `route:` is counted file-wide, because a declined row has no window to be found in —
-  // which is precisely why it was invisible.
-  for (const d of declinedIn(text)) {
+  // which is precisely why it was invisible. Type members are skipped here on the same list
+  // (#10901): a leading entry interface sits in no row window at all, so this is the call
+  // site the card's own fixture arrives through.
+  for (const d of declinedIn(text, 0, inTypeDecl)) {
     if (d.key === 'route') declined.push({ key: 'route', line: lineAt(d.index), text: d.text });
   }
   // …and the values no quote-keyed scan can see at all (#10500). File-wide for the same
@@ -1633,7 +1793,7 @@ function parseLedgerSource(text) {
   // move together or the partition `rows + declined === routesDeclared` breaks: a member
   // counted here but skipped there would read as a row this parse declined to read, and
   // fire a PARTIAL-read verdict on an accurate ledger.
-  const routesDeclared = [...code.matchAll(/route\s*:\s*'/g)].filter((d) => !inTypeDecl(d.index)).length
+  const routesDeclared = [...code.matchAll(new RegExp(declLead('route') + "'", 'g'))].filter((d) => !inTypeDecl(d.index)).length
     + declined.filter((d) => d.key === 'route').length;
   const clientsDeclared = rows.filter((r) => r.client).length + declined.filter((d) => d.key === 'client').length;
   declined.sort((a, b) => a.line - b.line || a.key.localeCompare(b.key));
@@ -1649,8 +1809,8 @@ function parseLedgerSource(text) {
   // would be exactly the false red the #9747 family's ruling declines, the same reason the
   // 45-of-221 reach ratio is reported rather than gated. It is here so the NEXT hole of
   // this shape is loud instead of silent. Measured across all seven live ledgers: 0.
-  const codeLeads = new Set([...code.matchAll(/(?:route|client)\s*:\s*'/g)].map((d) => d.index));
-  const outsideCode = [...text.matchAll(/(route|client)\s*:\s*'/g)]
+  const codeLeads = new Set([...code.matchAll(new RegExp(declLead('(?:route|client)') + "'", 'g'))].map((d) => d.index));
+  const outsideCode = [...text.matchAll(new RegExp(declLead('(route|client)') + "'", 'g'))]
     .filter((d) => !codeLeads.has(d.index))
     .map((d) => {
       // The LEAD and its VALUE are matched in two passes, not one. A single expression that
@@ -2419,6 +2579,361 @@ function selfTest() {
   check('bridgeCoverageFrom', 'and it is not billed as a prose lead either', 'leadsOutsideCode',
     0, typeUnionCov.leadsOutsideCode);
 
+  // ---- THE SAME TYPE MEMBER, IN THE TWO QUOTES THE RECOGNIZER DECLINES (#10901) ----
+  // #10793 (above) taught the ROW RECOGNIZER and the first term of its denominator to read
+  // through both of #10500's discriminators. Its complement did not move: `declinedIn` ran
+  // over RAW text through NEITHER, so the very same member — a `route:` union written in a
+  // double quote or a backtick instead of a single one — was billed as a value the parse
+  // FAILED to read. That is the LOUD twin of the bug above: not a phantom row joining the
+  // population in silence, but a named entry and a PARTIAL-read verdict with exit 1, on a
+  // ledger that is completely accurate. The type-declaration exclusion exists to prevent
+  // exactly that false red, and this is the last scan in the file that was not reading it.
+  //
+  // BOTH SPELLINGS ARE PINNED SEPARATELY. They come out of one regex alternation and one
+  // code path, and were measured behaving identically — which is the reason to pin them
+  // apart rather than to trust one for both: a later narrowing of that alternation would
+  // otherwise take one of them with nothing to say so.
+  for (const [spelling, q] of [['double-quoted', '"'], ['backtick-quoted', '`']]) {
+    const src = [
+      `export interface Entry { route: ${q}GET /api/v1/gone${q} | ${q}GET /api/v1/meta${q}; client: string }`,
+      'export const L = [',
+      "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+      '];',
+    ].join('\n');
+    const r = parseLedgerSource(src);
+    const cov = bridgeCoverageFrom([{ file: 'j-route-ledger.ts', ...r }], ['/api/v1/meta']);
+    check('parseLedgerSource', `a ${spelling} literal-union \`route:\` TYPE member is not an unread row`,
+      'declined', 0, r.declined.length);
+    check('parseLedgerSource', `and a ${spelling} member moves no denominator either`, 'declared',
+      '1 row / 1 route / 1 client',
+      `${r.rows.length} row / ${r.routesDeclared} route / ${r.clientsDeclared} client`);
+    check('parseLedgerSource', `and the row in CODE still reads, beside a ${spelling} member`, 'row',
+      'GET /api/v1/meta → meta.getTypes', `${r.rows[0]?.route} → ${r.rows[0]?.client}`);
+    // The verdict is the whole point: the number moving is a symptom, the exit code is the
+    // defect. An accurate ledger must carry NO broken-scan verdict in any spelling.
+    check('bridgeCoverageFrom', `a ${spelling} type member carries NO broken-scan verdict`, 'brokenScan',
+      0, cov.brokenScan.length);
+    // ⚠️ PINNED IN BOTH DIRECTIONS, like #10793's fixture: an exclusion that reached the
+    // member by swallowing the table after it would pass every assertion above while
+    // silently dropping every live row. Deleting the interface must change NOTHING.
+    const noInterface = parseLedgerSource(src.split('\n').slice(1).join('\n'));
+    check('parseLedgerSource', `and deleting a ${spelling} member's interface changes NOTHING`, 'declared',
+      `${r.rows.length} row / ${r.routesDeclared} route / ${r.declined.length} declined`,
+      `${noInterface.rows.length} row / ${noInterface.routesDeclared} route / ${noInterface.declined.length} declined`);
+  }
+
+  // THE OTHER CALL SITE, and the one no `route:` fixture can reach: declined `client:`
+  // values are collected per ROW WINDOW, so a member only arrives there when the entry
+  // interface TRAILS the table and lands inside the 1200-byte window. Measured before the
+  // fix on exactly this shape: `clientsDeclared` 2 on a file declaring one client, one
+  // named declined entry, exit 1. The `route:` twin below trails the table too, which is
+  // the file-wide call site reached from the other side.
+  for (const [spelling, q] of [['double-quoted', '"'], ['backtick-quoted', '`']]) {
+    const trailingClient = parseLedgerSource([
+      'export const L = [',
+      "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+      '];',
+      `export interface Entry { route: string; client: ${q}meta.getTypes${q} | ${q}meta.getAudit${q} }`,
+    ].join('\n'));
+    check('parseLedgerSource', `a ${spelling} literal-union \`client:\` TYPE member inside the row window is not an unread row`,
+      'declined', 0, trailingClient.declined.length);
+    check('parseLedgerSource', `and a ${spelling} \`client:\` member moves no denominator`, 'declared',
+      '1 route / 1 client', `${trailingClient.routesDeclared} route / ${trailingClient.clientsDeclared} client`);
+    const trailingRoute = parseLedgerSource([
+      'export const L = [',
+      "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+      '];',
+      `export interface Entry { route: ${q}GET /api/v1/meta${q} | ${q}GET /api/v1/gone${q}; client: string }`,
+    ].join('\n'));
+    check('parseLedgerSource', `a TRAILING ${spelling} \`route:\` member is not an unread row either`,
+      'declared', '1 route / 0 declined',
+      `${trailingRoute.routesDeclared} route / ${trailingRoute.declined.length} declined`);
+  }
+
+  // `type X = { … }` is the other spelling `typeDeclRegions` recognises, and this scan now
+  // reads the same region list rather than a second idea of what a type member is.
+  const declinedTypeAlias = parseLedgerSource([
+    'export type Entry = { route: "GET /api/v1/gone" | "GET /api/v1/meta"; client: string };',
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `type X = { … }` member is skipped in the declined spellings too',
+    'declared', '1 row / 1 route / 0 declined',
+    `${declinedTypeAlias.rows.length} row / ${declinedTypeAlias.routesDeclared} route / ${declinedTypeAlias.declined.length} declined`);
+
+  // ⚠️ THE LOAD-BEARING DIRECTION, asserted positively. Everything above says a spelling
+  // STOPS being reported; an exclusion that swallowed the declined report wholesale would
+  // pass every one of those and give back the silence #9896 closed. A real table row whose
+  // `route:` is spelled in a quote the recognizer declines is NOT a type member, and must
+  // still be named, still move the denominator, and still carry the verdict.
+  for (const [spelling, q] of [['double-quoted', '"'], ['backtick-quoted', '`']]) {
+    const realRow = parseLedgerSource([
+      'export interface Entry { route: string; client: string }',
+      'export const L = [',
+      `  { route: ${q}GET /api/v1/gone${q}, family: 'metadata', disposition: 'sdk' },`,
+      "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+      '];',
+    ].join('\n'));
+    const realCov = bridgeCoverageFrom([{ file: 'k-route-ledger.ts', ...realRow }], ['/api/v1/meta']);
+    check('parseLedgerSource', `a ${spelling} route in a REAL table row is still declined`, 'declined',
+      1, realRow.declined.length);
+    check('parseLedgerSource', `and the ${spelling} entry still NAMES itself, with its line`, 'line 3',
+      `3: route: ${q}GET /api/v1/gone${q}`,
+      realRow.declined.map((d) => `${d.line}: ${d.text}`).join(' | '));
+    check('parseLedgerSource', `and the partition still holds for the ${spelling} row — read + declined === declared`, 'partition',
+      realRow.routesDeclared, realRow.rows.length + realRow.declined.filter((d) => d.key === 'route').length);
+    check('bridgeCoverageFrom', `and the PARTIAL-read verdict still fires for a ${spelling} real row`, 'brokenScan',
+      true, realCov.brokenScan.some((v) => v.includes('PARTIAL read')));
+  }
+
+  // ⛔ THE BOUNDARY THIS CARD DELIBERATELY DID NOT CROSS. `declinedIn` still reads RAW
+  // bytes, so a `route:` quoted in a COMMENT in a declined spelling is still billed as an
+  // unread row — #10794, closed `not planned` because it is the loud direction with no
+  // puller. Pinned so the boundary is a recorded decision rather than an oversight, and so
+  // the card that eventually closes #10794 MOVES this pin instead of finding none.
+  const proseDeclined = parseLedgerSource([
+    '// The retired row read route: "GET /api/v1/gone" before #1234.',
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a declined spelling in PROSE is still billed as unread — #10794, deliberately unmoved',
+    'declined', 1, proseDeclined.declined.length);
+  check('parseLedgerSource', 'and its denominator still counts it — the type-member fix moved this none',
+    'declared', '1 row / 2 route', `${proseDeclined.rows.length} row / ${proseDeclined.routesDeclared} route`);
+
+
+  // ⛔ THE TWO SCANS NOW AGREE ON THE CHARACTER CLASS AFTER THE COLON (#11494) — the thing
+  // `declLead` exists to make structural rather than coincidental. A declaration whose VALUE
+  // SITS ON THE NEXT LINE used to be seen by BOTH: `declinedIn` named it correctly, while
+  // `declarationsIn` read the `\n` as the character after the colon, classified
+  // `quote === null`, and `unreadableIn` billed the SAME declaration a second time. One
+  // declaration, two entries, and the denominator counted it twice.
+  //
+  // ⛔ THE PARTITION KEPT BALANCING WHILE IT HAPPENED — `1 + 2 === 3` on a file declaring
+  // TWO `route:` values — which is exactly why no count comparison could see it. What moved
+  // was the POPULATION, not the arithmetic, and the reader was shown two entries for one line.
+  const wrappedDeclined = parseLedgerSource([
+    'export const L = [',
+    '  { route:',
+    '      "GET /api/v1/gone", family: \'metadata\', disposition: \'sdk\' },',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a wrapped DECLINED `route:` reaches the denominator ONCE, not once per scan',
+    'declared', '1 row / 2 route / 1 declined',
+    `${wrappedDeclined.rows.length} row / ${wrappedDeclined.routesDeclared} route / ${wrappedDeclined.declined.length} declined`);
+  // The second entry it used to emit read `route: ` — an EMPTY value, naming nothing a reader
+  // can act on, which is the silence every other report in this file exists to break.
+  check('parseLedgerSource', 'and the one entry NAMES the value, with its line', 'line 2 double-quoted route',
+    'line 2: route: "GET /api/v1/gone"',
+    wrappedDeclined.declined.map((d) => `line ${d.line}: ${d.text}`).join(', '));
+  check('parseLedgerSource', 'read + declined still accounts for every declared `route:`', 'partition', true,
+    wrappedDeclined.rows.length + wrappedDeclined.declined.filter((d) => d.key === 'route').length === wrappedDeclined.routesDeclared);
+
+  // …AND THE LOUDER HALF, which is why `\s*` won and not `[ \t]*`: a wrapped SINGLE-quoted
+  // value. The row recognizer's own `\s*` already reads it AS A ROW — and the file then
+  // billed that same declaration unread, firing a PARTIAL-read verdict with exit 1 on a
+  // wholly accurate ledger. That is the FALSE RED direction, which costs the same trust a
+  // false green does. Measured before the fix: rows 1 · routesDeclared 2 · declined 1 ·
+  // brokenScan 1, the declined entry again empty-valued.
+  const wrappedRead = parseLedgerSource([
+    'export const L = [',
+    '  { route:',
+    "      'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a wrapped single-quoted `route:` is READ, and never ALSO billed unread',
+    'declared', '1 row / 1 route / 0 declined',
+    `${wrappedRead.rows.length} row / ${wrappedRead.routesDeclared} route / ${wrappedRead.declined.length} declined`);
+  check('parseLedgerSource', 'and the row carries its value and its binding', 'row',
+    'GET /api/v1/meta → meta.getTypes', `${wrappedRead.rows[0]?.route} → ${wrappedRead.rows[0]?.client}`);
+  check('bridgeCoverageFrom', 'so a ledger that merely WRAPS a value carries NO verdict', 'brokenScan',
+    0, bridgeCoverageFrom([{ file: 'l-route-ledger.ts', ...wrappedRead }], ['/api/v1/meta']).brokenScan.length);
+
+  // The `client:` column, the same shape: it reached `clientsDeclared` twice — once as the
+  // row's binding, once as a non-literal — and fired the same verdict on an accurate ledger.
+  const wrappedClient = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client:",
+    "      'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a wrapped `client:` is counted once too', 'declared',
+    '1 row / 1 client / 0 declined',
+    `${wrappedClient.rows.length} row / ${wrappedClient.clientsDeclared} client / ${wrappedClient.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and carries no verdict either', 'brokenScan',
+    0, bridgeCoverageFrom([{ file: 'l-route-ledger.ts', ...wrappedClient }], ['/api/v1/meta']).brokenScan.length);
+
+  // A wrapped NON-LITERAL value was already counted once — but it NAMED nothing, because the
+  // snippet was cut at the newline. Widening the class moved the cut to the value itself.
+  const wrappedUnreadable = parseLedgerSource([
+    'export const L = [',
+    '  { route:',
+    "      ROUTES.health, family: 'metadata', disposition: 'sdk' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a wrapped non-literal `route:` is counted once', 'declared',
+    '0 row / 1 route / 1 declined',
+    `${wrappedUnreadable.rows.length} row / ${wrappedUnreadable.routesDeclared} route / ${wrappedUnreadable.declined.length} declined`);
+  check('parseLedgerSource', 'and NAMES the value, where it used to report an empty one',
+    'line 2 ROUTES.health', 'line 2: route: ROUTES.health',
+    wrappedUnreadable.declined.map((d) => `line ${d.line}: ${d.text}`).join(', '));
+
+  // ⛔ AND THE TYPE-MEMBER DISCRIMINATOR STILL OUTRANKS THE WRAP (#10901). A wrapped
+  // literal-union member is skipped by BOTH scans on the SAME region list, so widening the
+  // class handed `declinedIn` no member to bill — the regression #10901 closed does not
+  // reopen one spelling further out.
+  const wrappedTypeMember = parseLedgerSource([
+    'export interface Entry { route:',
+    '    "GET /api/v1/gone" | "GET /api/v1/meta"; client: string }',
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a WRAPPED literal-union `route:` TYPE member still contributes no count',
+    'declared', '1 row / 1 route / 0 declined',
+    `${wrappedTypeMember.rows.length} row / ${wrappedTypeMember.routesDeclared} route / ${wrappedTypeMember.declined.length} declined`);
+
+  // ⛔ THE KEY IS ANCHORED IN ONE PLACE NOW (#11542) — this is the pin the boundary comment
+  // used to hold, MOVED rather than deleted. `declLead` unified the run between the colon and
+  // the value (#11494) and left the KEY as each call site's own argument, so `declarationsIn`
+  // anchored with `\b` and the other seven did not: `subroute: 'GET /api/v1/gone'` was a
+  // declaration to SEVEN of the eight scans and not to the eighth. It was SILENT for the
+  // reason #10683 and #10793 were — the partial-read verdict is keyed on the gap between
+  // `rows` and `routesDeclared` and BOTH terms read the unanchored spelling, so both moved
+  // together and no verdict fired, while `outsideCode` could not see it either because the
+  // lead genuinely IS in code position.
+  //
+  // MEASURED ON THIS EXACT FIXTURE with the key unanchored:
+  //   ⇒ rows 2 · routesDeclared 2 · clientsDeclared 1 · declined 0 · outsideCode 0 ·
+  //     brokenScan 0   — a file declaring ONE `route:` produced TWO rows, exit 0.
+  //
+  // This one fixture moves the ROW RECOGNIZER (`routeRe`) and the FIRST TERM of the
+  // denominator; the seven scans are pinned one at a time below, because "all eight read the
+  // same spelling now" is a claim about seven behaviours and a fix that anchors one more scan
+  // and leaves six is this defect with a smaller denominator.
+  const unanchoredKey = parseLedgerSource([
+    'export const L = [',
+    "  { subroute: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `subroute:` mints NO row — the ROW RECOGNIZER anchors the key (#11542)',
+    'row count', 1, unanchoredKey.rows.length);
+  check('parseLedgerSource', 'and the row that survives is the REAL one, carrying its binding',
+    'row', 'GET /api/v1/meta → meta.getTypes',
+    `${unanchoredKey.rows[0]?.route} → ${unanchoredKey.rows[0]?.client}`);
+  check('parseLedgerSource', 'and the DENOMINATOR drops it too, so no phantom gap opens', 'declared',
+    '1 route / 1 client / 0 declined',
+    `${unanchoredKey.routesDeclared} route / ${unanchoredKey.clientsDeclared} client / ${unanchoredKey.declined.length} declined`);
+  check('bridgeCoverageFrom', 'and the anchored read carries no verdict on an accurate ledger',
+    'brokenScan', 0,
+    bridgeCoverageFrom([{ file: 'm-route-ledger.ts', ...unanchoredKey }], ['/api/v1/meta']).brokenScan.length);
+
+  // (3) THE WINDOW DELIMITER (`nextRouteRe`) — the worst of the seven, and the reason this is
+  // not merely a counting error. A `subroute:` written BETWEEN a real `route:` and its
+  // `client:` used to CLOSE the real row's window, so the real row lost its binding and the
+  // PHANTOM took it: a WRONG binding, on a path nobody mounts, which then joined the
+  // UNREACHABLE population. A count comparison is blind to it by construction — the same
+  // shape #10636 measured for the quote spellings, arriving through the key.
+  const keyWindow = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata',",
+    "    subroute: 'GET /api/v1/gone',",
+    "    disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `subroute:` does not CLOSE the real row window (#11542)', 'rows',
+    '1 row · GET /api/v1/meta → meta.getTypes',
+    `${keyWindow.rows.length} row · ${keyWindow.rows.map((r) => `${r.route} → ${r.client}`).join(' | ')}`);
+
+  // (4) THE IN-WINDOW `client:` MATCH (`windowClientRe`). `window.match()` takes the FIRST
+  // hit, so a `myclient:` written ahead of the real `client:` became the row's binding, and
+  // the real one — spelled exactly the way this recognizer reads — fell through to #10636's
+  // unclaimed sweep and was NAMED as a value no row read, on a ledger that binds it correctly.
+  const keyClient = parseLedgerSource([
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk',",
+    "    myclient: 'wrong.binding', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `myclient:` does not become the row BINDING (#11542)', 'binding',
+    'meta.getTypes', keyClient.rows[0]?.client);
+  check('parseLedgerSource', 'and the real `client:` is bound, not swept up as unclaimed', 'declared',
+    '1 client / 0 declined',
+    `${keyClient.clientsDeclared} client / ${keyClient.declined.length} declined`);
+
+  // (5) THE DECLINED SWEEP (`declinedIn`), which is the LOUD direction: a double-quoted
+  // `subroute:` was billed as a `route:` value the parse FAILED to read, so it entered the
+  // denominator, was NAMED with its line, and fired a PARTIAL-read verdict with exit 1 on a
+  // wholly accurate ledger. A false red costs the same trust a false green does.
+  const keyDeclined = parseLedgerSource([
+    'export const L = [',
+    '  { subroute: "GET /api/v1/gone", family: \'metadata\', disposition: \'sdk\' },',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a double-quoted `subroute:` is not billed as a DECLINED row (#11542)',
+    'declared', '1 row / 1 route / 0 declined',
+    `${keyDeclined.rows.length} row / ${keyDeclined.routesDeclared} route / ${keyDeclined.declined.length} declined`);
+  check('bridgeCoverageFrom', 'so no PARTIAL-read verdict fires on an accurate ledger', 'brokenScan',
+    0, bridgeCoverageFrom([{ file: 'n-route-ledger.ts', ...keyDeclined }], ['/api/v1/meta']).brokenScan.length);
+
+  // (6) THE RAW SWEEP behind `outsideCode`. A `subroute:` in a COMMENT was reported to the
+  // reader as a lead sitting where the mask says code is not — a finding printed on every
+  // `--bridge-coverage` run, naming something that is not a lead at all.
+  const keyProse = parseLedgerSource([
+    "// The retired row read subroute: 'GET /api/v1/gone' before #1234.",
+    'export const L = [',
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `subroute:` in PROSE is not reported as a prose-quoted lead (#11542)',
+    'outsideCode', 0, keyProse.outsideCode.length);
+  // (7) …and `codeLeads`, the other half of that pair, which has no behaviour of its own:
+  // it is the filter the sweep above is taken against, so the two must anchor TOGETHER. Were
+  // only `codeLeads` anchored, a `subroute:` in CODE position would fall OUT of the filter and
+  // be reported as prose — the card's own fixture, pinned here explicitly so the pair cannot
+  // drift apart while every other fixture stays green.
+  check('parseLedgerSource', 'and a `subroute:` in CODE position is not reported as one either',
+    'outsideCode', 0, unanchoredKey.outsideCode.length);
+
+  // (8) …AND THE EIGHTH SCAN'S ANSWER IS UNCHANGED, which is the whole point: it is the one
+  // that was already right. A `subroute:` whose value is not a string literal at all was never
+  // billed as an unreadable declaration — before the anchor moved or after.
+  const keyUnreadable = parseLedgerSource([
+    'export const L = [',
+    "  { subroute: ROUTES.gone, family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a non-literal `subroute:` is billed to nothing — the anchored scan always agreed',
+    'declared', '1 row / 1 route / 0 declined',
+    `${keyUnreadable.rows.length} row / ${keyUnreadable.routesDeclared} route / ${keyUnreadable.declined.length} declined`);
+
+  // ⛔ THE BOUNDARY THIS CARD DOES NOT CROSS. `\b` fails only against a preceding WORD
+  // character, so `$route:` — a legal JS identifier — is still read as a declaration. It is no
+  // longer a DIVERGENCE, which is what this card was about: all eight scans agree on it now,
+  // and they agree by reading the spelling `declarationsIn` already had. It is still a phantom
+  // row, and closing it means tightening to `(?<![\w$])`, which moves `declarationsIn` as well
+  // — a SECOND population move, with its own before/after to price against the header of
+  // `--bridge-coverage`. Filed as #11630 rather than folded in, for the reason this card was
+  // filed rather than folded into #11494, and pinned so that card MOVES this pin rather than
+  // finding none.
+  const dollarKey = parseLedgerSource([
+    'export const L = [',
+    "  { $route: 'GET /api/v1/gone', family: 'metadata', disposition: 'sdk' },",
+    "  { route: 'GET /api/v1/meta', family: 'metadata', disposition: 'sdk', client: 'meta.getTypes' },",
+    '];',
+  ].join('\n'));
+  check('parseLedgerSource', 'a `$route:` still mints a phantom row — #11630, deliberately unmoved',
+    'row count', 2, dollarKey.rows.length);
+  check('parseLedgerSource', 'and it is still SILENT — all eight scans agree on it, so both terms move together',
+    'declared', '2 route / 0 declined',
+    `${dollarKey.routesDeclared} route / ${dollarKey.declined.length} declined`);
+
   // ⛔ REPORTED, NEVER A VERDICT. A comment explaining a retired row by quoting its old path
   // is legitimate prose; reddening CI over it is the false red the #9747 family declines.
   const phantomCov = bridgeCoverageFrom([{ file: 'h-route-ledger.ts', ...phantom }], ['/api/v1/meta']);
@@ -3046,6 +3561,32 @@ function selfTest() {
     true, /const selects = selectsFrom\(registrarByTail\.keys\(\)\);/.test(ownSource));
   check('emit', 'and nothing else restates the suffix test inline', 'affected-docs.mjs',
     1, (ownSource.match(/\.some\(\(t\) => route\.replace\(/g) || []).length);
+
+  // WRITTEN ONCE, pinned at the source (#11494). The defect was not that `declarationsIn`
+  // chose the wrong class — it was that eight scans each spelled the class for themselves,
+  // so seven agreeing and one differing looked exactly like eight agreeing. A ninth inline
+  // copy is the same hole re-opening, and only a source pin can see it: every behavioural
+  // fixture above would keep passing while the new scan drifted on its own.
+  check('declLead', 'the run between a `route:`/`client:` colon and its value is spelled ONCE', 'affected-docs.mjs',
+    1, (ownSource.match(/String\.raw`\\b\$\{keys\}\\s\*:\\s\*`/g) || []).length);
+  check('declLead', 'and all eight lead scans are built from it, none inline', 'affected-docs.mjs',
+    8, (ownSource.match(/new RegExp\(declLead\(/g) || []).length);
+  // …AND THE KEY ANCHOR IS SPELLED ONCE TOO (#11542), which is the same pin one field over.
+  // It was the LAST part of the lead each call site decided for itself: `declarationsIn`
+  // passed `\b(route|client)` and the other seven passed the key bare, so seven agreeing and
+  // one differing looked exactly like eight agreeing — and the one that differed was the one
+  // that was right. A call site that restates the `\b` is that hole re-opening from the other
+  // side, and only a source pin can see it: every behavioural fixture above stays green while
+  // the argument drifts.
+  check('declLead', 'and the KEY anchor is spelled once too — no call site restates it', 'affected-docs.mjs',
+    0, (ownSource.match(/declLead\([^\n]*?\\b/g) || []).length);
+  // BEHAVIOURAL, not merely textual: the three key spellings the eight call sites pass all
+  // come back anchored, from the one place that spells the anchor. This is what "all eight
+  // read the same anchored spelling" means when checked rather than asserted.
+  check('declLead', 'every key spelling a call site passes comes back ANCHORED', 'declLead',
+    String.raw`\b(route|client)\s*:\s* | \broute\s*:\s* | \b(?:route|client)\s*:\s*`,
+    ['(route|client)', 'route', '(?:route|client)'].map((k) => declLead(k)).join(' | '));
+
 
   if (failed) {
     console.error(`\n✗ affected-docs self-test failed (${failed} case(s)).`);

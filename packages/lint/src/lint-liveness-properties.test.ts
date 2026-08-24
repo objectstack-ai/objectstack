@@ -783,8 +783,14 @@ describe('lintLivenessProperties', () => {
 // assertions say nothing about which properties the ledger warns on — that
 // stays the job of every other block in this file.
 describe('the array fan-out, against a synthetic warn map (#10262)', () => {
+  // #11384: `status: 'dead'` is explicit on purpose. Before that fix, `describe()`
+  // graded any non-`experimental` entry `dead` by fallthrough, so a synthetic
+  // entry with no `status` at all worked here by accident; now an entry that
+  // does not name a recognised status throws (the loud boundary the card asked
+  // for), so this walker-only fixture must declare one — `dead` is arbitrary,
+  // this block asserts nothing about verdicts, only about the fan-out.
   const warnOn = (...paths: string[]) =>
-    new Map(paths.map((p) => [p, { authorWarn: true, authorHint: 'synthetic (#10262)' }] as const));
+    new Map(paths.map((p) => [p, { status: 'dead', authorWarn: true, authorHint: 'synthetic (#10262)' }] as const));
 
   /** `n` navigation entries; those at `authored` set the warned key. */
   const navItems = (n: number, authored: number[]) =>
@@ -858,5 +864,138 @@ describe('the array fan-out, against a synthetic warn map (#10262)', () => {
       );
       expect(findings).toEqual([]);
     });
+  });
+});
+
+// ── #11384: `describe()` gives `dead` / `experimental` / `planned` DISTINCT
+// verdicts — own rule id, own message, own default hint — and refuses to guess
+// on a status it does not recognise instead of silently grading it `dead`.
+//
+// The bug: a `planned` row (declared, and a consumer is being built against it
+// — the OPPOSITE of `dead`) fell through the old two-branch `describe()` into
+// the `dead` branch, so the finding's MESSAGE told the author to remove
+// something the ledger's own `authorHint`/`note` on the SAME finding said to
+// keep. `field.relatedListFilter`, `object.externalSharingModel` and
+// `translation.flows` are the three shipped rows this hit.
+//
+// The real ledgers currently have PLANNED rows and EXPERIMENTAL rows, but — as
+// this file's other comments document at length (#2377, #3896, #4509) — no
+// `dead`+`authorWarn` row survives in tree; every one that existed was retired
+// via enforce-or-remove rather than kept around to warn about. So the `dead`
+// branch, the `live`-mistakenly-warned case, and the unrecognised-status throw
+// are pinned here against SYNTHETIC entries through the `checkItemAgainstWarnMap`
+// seam (#10262) — exactly the kind of verdict-level testing that seam exists
+// for; the PLANNED branch is pinned against BOTH the real ledgers (so it stays
+// a contract test) and a synthetic no-hint entry (to pin the DEFAULT wording).
+describe('dead / experimental / planned verdicts are distinct, and unknown statuses fail loud (#11384)', () => {
+  const oneEntry = (entry: Record<string, unknown>) => new Map([['gizmo', entry]]);
+
+  // ── REAL LEDGER: the three rows the card captured ──────────────────────
+  it('REAL LEDGER: translation.flows (planned) — planned rule id, non-contradictory message, hint preserved', () => {
+    const findings = lintLivenessProperties({
+      translations: [{
+        'zh-CN': { flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } } },
+      }],
+    });
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.rule).toBe('liveness-planned-property');
+    expect(f.message).not.toContain('dead');
+    expect(f.message).toContain('is planned');
+    // The card's own captured hint — unchanged by this fix, just no longer
+    // contradicted by the message sitting next to it.
+    expect(f.hint).toContain('screen-flow runner');
+  });
+
+  it('REAL LEDGER: field.relatedListFilter (planned) — planned rule id, non-contradictory message', () => {
+    const findings = lintLivenessProperties({
+      objects: [{
+        name: 'account',
+        fields: [{ name: 'related_orders', type: 'text', relatedListFilter: { field: 'account_id' } }],
+      }],
+    });
+    const f = findings.find((x) => x.message.includes('relatedListFilter'));
+    expect(f).toBeDefined();
+    expect(f!.rule).toBe('liveness-planned-property');
+    expect(f!.message).not.toContain('dead');
+  });
+
+  it('REAL LEDGER: object.externalSharingModel (planned, no authorHint — falls back to `note`) — planned rule id, note hint does not say Remove it', () => {
+    const findings = lintLivenessProperties({ objects: [{ name: 'widget', externalSharingModel: 'read' }] });
+    const f = findings.find((x) => x.message.includes('externalSharingModel'));
+    expect(f).toBeDefined();
+    expect(f!.rule).toBe('liveness-planned-property');
+    expect(f!.message).not.toContain('dead');
+    expect(f!.hint).not.toMatch(/^Remove it/);
+  });
+
+  // ── SYNTHETIC: the default hint per verdict, when neither authorHint nor
+  // note is present — the shape #11384 explicitly called out ("the default
+  // hint for a planned row without an authorHint must NOT say 'Remove it'") ──
+  it('SYNTHETIC: a planned entry with no authorHint/note gets the planned DEFAULT hint, never "Remove it"', () => {
+    const findings = checkItemAgainstWarnMap(
+      'gadget',
+      { name: 'g1', gizmo: 'x' },
+      "gadget 'g1'",
+      oneEntry({ status: 'planned', authorWarn: true }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe('liveness-planned-property');
+    expect(findings[0].message).not.toContain('dead');
+    expect(findings[0].hint).not.toContain('Remove it');
+    expect(findings[0].hint.toLowerCase()).toContain('keep it');
+  });
+
+  it('SYNTHETIC: a dead entry with no authorHint/note keeps the dead rule id, "liveness: dead" message and the "Remove it" default hint', () => {
+    const findings = checkItemAgainstWarnMap(
+      'gadget',
+      { name: 'g1', gizmo: 'x' },
+      "gadget 'g1'",
+      oneEntry({ status: 'dead', authorWarn: true }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe('liveness-dead-property');
+    expect(findings[0].message).toContain('liveness: dead');
+    expect(findings[0].hint).toBe('Remove it — it is declared in the spec but not consumed at runtime.');
+  });
+
+  it('SYNTHETIC: an experimental entry with no authorHint/note gets an experimental default hint, never "Remove it"', () => {
+    const findings = checkItemAgainstWarnMap(
+      'gadget',
+      { name: 'g1', gizmo: 'x' },
+      "gadget 'g1'",
+      oneEntry({ status: 'experimental' }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe('liveness-experimental-property');
+    expect(findings[0].hint).not.toContain('Remove it');
+  });
+
+  // ── SYNTHETIC: the unknown-status boundary — loud, never silently `dead` ──
+  it('SYNTHETIC: an unrecognised status fails LOUD, naming the status, instead of silently grading as dead', () => {
+    expect(() =>
+      checkItemAgainstWarnMap(
+        'gadget',
+        { name: 'g1', gizmo: 'x' },
+        "gadget 'g1'",
+        oneEntry({ status: 'quantum', authorWarn: true }),
+      ),
+    ).toThrow(/quantum/);
+  });
+
+  it('SYNTHETIC: a `live` row mistakenly marked authorWarn also fails LOUD rather than being graded dead', () => {
+    // Not a real shipped scenario (a `live` property should never carry
+    // `authorWarn: true`) — but exactly the class of ledger-authoring mistake
+    // the old silent fallthrough would have hidden by mislabelling it `dead`
+    // too, which is why the boundary in `describe()` is status-based rather
+    // than an `else if (status === 'planned') … else /* assume dead */`.
+    expect(() =>
+      checkItemAgainstWarnMap(
+        'gadget',
+        { name: 'g1', gizmo: 'x' },
+        "gadget 'g1'",
+        oneEntry({ status: 'live', authorWarn: true }),
+      ),
+    ).toThrow(/live/);
   });
 });

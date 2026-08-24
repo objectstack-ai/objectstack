@@ -481,8 +481,8 @@ describe('plugin-route door — MarketplaceInstallLocalPlugin error exits (#9267
 /**
  * `GET /api/v1/runtime/config` answers a BARE payload —
  * `{ cloudUrl, singleEnvironment, defaultOrgId, defaultEnvironmentId, features,
- * branding }` — with no `success` flag and six top-level keys the envelope does
- * not declare.
+ * branding, telemetry }` — with no `success` flag and seven top-level keys the
+ * envelope does not declare.
  *
  * ⚠️ This is NOT blessed, and this pin is not an assertion that the shape is
  * right. It is the honest record of measured drift, in the same spirit as the
@@ -527,6 +527,11 @@ describe('plugin-route door — RuntimeConfigPlugin is NOT enveloped (recorded, 
             'stray top-level key `defaultEnvironmentId` — the payload belongs under `data`',
             'stray top-level key `features` — the payload belongs under `data`',
             'stray top-level key `branding` — the payload belongs under `data`',
+            // #10805 added the seventh: the SPA telemetry permission. Recorded
+            // here for the same reason as the six above — this route is read
+            // bare by the Console before first paint, so the drift grows with
+            // the payload until #9364 envelopes it.
+            'stray top-level key `telemetry` — the payload belongs under `data`',
         ]);
     });
 });

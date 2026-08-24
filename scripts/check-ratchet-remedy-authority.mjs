@@ -666,6 +666,21 @@ const CONTROL = {
     why: 'PR for #10619. Refuses by binding a negation to the verb, over a shrink-only baseline that exists only to hold the instances predating the gate; their repair belongs to the #10371 lane, so no authority is missing.',
   },
 
+  // The fifth refusal instance, and the third gate to join the convention as a
+  // NEW gate rather than by retrofit (#11341). Read the same way as
+  // check-plugin-teardown-shape.mjs above, and for the same reason: its baseline
+  // holds only the leaks that predate the gate, and burning them down is a card
+  // per neighbourhood rather than an act anyone needs authority for. Refusal is
+  // therefore honest where marking would invent a missing owner. It carries a
+  // second registry, DELIBERATE, which is NOT a ratchet and is deliberately not
+  // described as one — an entry there is the correct outcome for a site whose
+  // whole-environment copy is the point, and the gate's own failure text sends
+  // an author there rather than to the baseline.
+  'check-cli-test-child-env.mjs': {
+    expect: 'refused',
+    why: 'PR for #11341. Refuses by binding a negation to the verb, over a shrink-only baseline holding only the child-environment leaks that predate the gate; their repair is a card per neighbourhood, so no authority is missing.',
+  },
+
   // ── Declaration registries and near-misses: recording the fact IS the fix ──
   'check-agent-model-declared.mjs': {
     expect: 'excluded',

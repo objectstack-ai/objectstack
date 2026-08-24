@@ -35,6 +35,8 @@ import {
   registerPermissionSetProjection,
   reconcilePermissionSetProjection,
 } from './permission-set-projection.js';
+import { runPermissionSetDriftDiagnostics } from './permission-set-drift.js';
+import { discardPermissionSetOverlay, type PermissionSetOverlayDiscardDeps } from './permission-set-overlay-discard.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
   reconcileAudienceBindingSuggestions,
@@ -1086,13 +1088,32 @@ export class SecurityPlugin implements Plugin {
           const fetched = Array.isArray(rows) ? rows : rows?.records ?? [];
           // One row per NAME: this organization's own where it has one, an
           // organization-less leftover only where it does not.
+          //
+          // The residue arm is load-bearing and was missing (#11121 shipped the
+          // comment without it, and its suite covers seeding rather than this
+          // loader). `resolveOwnOrganizationRow` is written for SEEDERS, where
+          // refusing to see a residue as "already seeded" is the whole point —
+          // so it never returns one as `own`. ENFORCEMENT wants the opposite
+          // reading: an organization-less row is still a row this principal was
+          // granted, and dropping it revokes standing access with no signal at
+          // the moment of loss — the failure mode this catalog's own header,
+          // and `resolve-authz-context`'s `sys_position` read, both call out as
+          // the thing not to do. The asymmetry was observable on a single row:
+          // its `system_permissions` and `tab_permissions` kept applying (that
+          // read is unscoped by id) while its `object_permissions` and
+          // `admin_scope` silently stopped.
+          //
+          // Preference order is unchanged and still closes the cross-tenant
+          // bleed #11121 fixed: this organization's own row WINS wherever it
+          // exists, and a leftover is consulted only in its absence.
           const byName = new Map<string, any>();
           for (const name of new Set(names)) {
-            const own = resolveOwnOrganizationRow(
+            const { own, organizationLessResidue } = resolveOwnOrganizationRow(
               fetched.filter((r: any) => r?.name === name),
               organizationId,
-            ).own;
-            if (own) byName.set(name, own);
+            );
+            const row = own ?? organizationLessResidue;
+            if (row) byName.set(name, row);
           }
           const all = Array.from(byName.values());
           // [ADR-0049] A DEACTIVATED set grants nothing. Not defence in depth
@@ -1175,6 +1196,20 @@ export class SecurityPlugin implements Plugin {
         ql,
         metadata,
         resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+        logger: ctx.logger,
+      };
+      // [field report — rc→GA declared≠enforced surfacing] Sanctioned overlay-
+      // discard deps — same tenant-admin resolution as the suggestion surface
+      // above. `getProtocol` is lazy (mirrors `createPermissionSetWriteThrough`'s
+      // own resolver further down): the protocol service may register after
+      // this plugin's `start()` runs.
+      const overlayDiscardDeps: PermissionSetOverlayDiscardDeps = {
+        ql,
+        metadata,
+        resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+        getProtocol: () => {
+          try { return (ctx as any).getService?.('protocol') ?? null; } catch { return null; }
+        },
         logger: ctx.logger,
       };
       // Typed against the published contract so the registered surface cannot
@@ -1334,9 +1369,15 @@ export class SecurityPlugin implements Plugin {
       const registeredSecurityService = Object.assign(securityService, {
         getMetadataReadableFields: (object: string, context?: any) =>
           this.getMetadataReadableFields(object, context),
+        // [field report — rc→GA declared≠enforced surfacing] Same extension
+        // pattern as `getMetadataReadableFields` above, same reason:
+        // `ISecurityService` lives in `packages/spec` and this seat there is a
+        // separate change. Consumers feature-detect.
+        discardPermissionSetOverlay: (callerContext: any, id: string) =>
+          discardPermissionSetOverlay(overlayDiscardDeps, callerContext, id),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions, discardPermissionSetOverlay) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0094 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -2904,9 +2945,20 @@ export class SecurityPlugin implements Plugin {
         ctx.logger.warn('[security] declared-position seeding failed', { error: (e as Error).message, organization: organizationId });
       }
     };
+    // [#11532] The names `bootstrapPlatformAdmin` seeds organization-less on
+    // every boot. The per-organization pass sees those rows through the driver's
+    // compatibility arm and used to report them as PRE-FIX leftovers with a
+    // remedy ("re-initialize the deployment") that mints them again — on a fresh
+    // walled deployment the whole line was false and its first branch was a
+    // loop. Handed over from here because this is where the one array lives:
+    // the same `bootstrapPermissionSets` goes to the platform bootstrap above
+    // and onto the manifest as `permissions`, so the two can never disagree.
+    const platformBucketNames = this.bootstrapPermissionSets
+      .map((p) => p.name)
+      .filter((n): n is string => typeof n === 'string' && n !== '');
     const seedCatalogPermissions = async (organizationId?: string): Promise<void> => {
       try {
-        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId });
+        await bootstrapDeclaredPermissions(ql, this.metadata, { logger: ctx.logger, organizationId, platformBucketNames });
       } catch (e) {
         ctx.logger.warn('[security] declared-permission seeding failed', { error: (e as Error).message, organization: organizationId });
       }
@@ -3138,6 +3190,18 @@ export class SecurityPlugin implements Plugin {
             });
           } catch (e) {
             ctx.logger.warn('[security] permission-set projection reconciliation failed (ADR-0094)', { error: (e as Error).message });
+          }
+          // [field report — rc→GA declared≠enforced surfacing] Recompute
+          // "declared ≠ enforced" per package-declared set AFTER both doors
+          // have settled for this boot (the package door above, and the env
+          // door's reconciliation just above this line) — so `drift_status`
+          // reflects the boot's TRUE final state, not a mid-boot snapshot.
+          // Own try/catch: a failure here must never take down boot, and must
+          // never be read as "reconciliation also failed" in the log above.
+          try {
+            await runPermissionSetDriftDiagnostics(ql, { logger: ctx.logger });
+          } catch (e) {
+            ctx.logger.warn('[security] permission-set drift diagnostics failed', { error: (e as Error).message });
           }
         } catch (e) {
           ctx.logger.warn('[security] permission publish-materializer registration failed', { error: (e as Error).message });

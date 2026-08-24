@@ -862,107 +862,110 @@
     },
     {
       "id": "cli.doctor-health-report",
-      "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored ✓s that bless an unexamined tree are the expected-fail",
+      "title": "os doctor: every check emits an attributed row, an unparseable posture is an ERROR not a swallow, ledger rows print under every posture, the ✓ is withheld when the read was incomplete — and the two monorepo-anchored scans announce a named skip in a user app instead of blessing a tree they never walked",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)"],
       "fixtures": {
         "app": "scaffold",
         "requires": [
-          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-doctor -t blank` + install — the same provisioning cli.scaffold-first-run drives) as the USER-APP shaped tree; the monorepo-vs-user-app split is load-bearing for the expected-fail clause",
+          "a scratch blank scaffold (`npx -y create-objectstack@latest qa-doctor -t blank` + install — the same provisioning cli.scaffold-first-run drives) as the USER-APP shaped tree; the monorepo-vs-user-app split is load-bearing for the monorepo-anchored-skip clause and BOTH cwds must be run — the skip rows exist only outside this checkout, and the rows they stand in for only inside it",
           "a scratch copy of the config for the deliberate config findings (orphan view, circular lookup pair, unreferenced object) — breakage never touches shared fixtures",
           "a writable .objectstack/installed-packages/ in the scratch tree, so an unreadable ledger entry can be staged per run"
         ],
         "knownGaps": [
           "no stock fixture ships a config with an orphan view / circular lookup / unused object, so the config-analysis rows must be staged; record the staged shapes in evidence rather than skipping the rows silently",
-          "the config-analysis block runs only `if (configExists())` (doctor.ts:1955) — a bare directory exercises the environment rows alone; run both shapes and label which produced which rows"
+          "the config-analysis block runs only `if (configExists())` (doctor.ts:2064) — a bare directory exercises the environment rows alone; run both shapes and label which produced which rows"
         ]
       },
       "steps": [
-        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the environment rows print first: Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, then the extended checks)",
+        "baseline: from the untouched scaffold run `os doctor; echo $?` and `os doctor -v; echo $?` — capture both full reports (the unconditional environment rows print first: Node.js, pnpm, TypeScript, Dependencies, Git, Environment files — then whichever finding-only rows are live, then the extended checks)",
         "stage the config findings in the scratch copy: a view whose object does not exist (orphan), two objects whose lookup fields point at each other (circular), and one object nothing references (unused); run `os doctor` and capture the three warning rows — then restore and capture the three ✓ rows (Dependencies / Object usage / View integrity)",
         "unparseable posture: `OS_TENANCY_POSTURE=isolatd os doctor; echo $?` — the Tenancy posture ERROR row must print naming the variable and the allowed set, the REST of the report must still run, and the exit must be 1 (#5382: report-not-refuse, resolved OUTSIDE the config-analysis try at doctor.ts:1752-1753, row pushed at :1891-1893)",
         "env provenance: put the same bad posture in a .env FILE (not the shell) and re-run — the finding must still fire (#5387 dotenv cascade) and the Environment files row must attribute the value to the file that supplied it",
         "ledger: write .objectstack/installed-packages/broken.json holding non-JSON; run `os doctor` with NO posture set (default `single`) and capture the Installed packages row; then with a valid config and OS_TENANCY_POSTURE=isolated, confirm the run does NOT print the 'Unique scope ✓' success line while that entry is unreadable",
         "exit split: on a warnings-only run capture `echo $?` (expect 0, '⚠️  Environment is functional' summary); on the posture-error run expect 1 ('❌ Some critical issues found' + the collected fix lines)",
-        "the expected-fail pair: in the scaffold — which has NO packages/spec/src — capture verbatim the '✓ Test coverage         All *.zod.ts files have matching tests' and '✓ Deprecations          No @deprecated tags found' lines, and note the sibling '@objectstack/spec  Not built' warning row from the same monorepo-anchored path family (doctor.ts:1837)"
+        "the monorepo-anchored skips: in the scaffold — which has NO packages/spec/src — capture verbatim the two informational rows 'ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)' and 'ℹ Deprecations          Skipped — no packages/spec/src in this directory (monorepo-only check)', then re-run with -v and capture the '→ Looked for <cwd>/packages/spec/src and found nothing to walk. …' detail line under each. Assert the ABSENCE of three lines in the SAME transcript: '✓ Test coverage         All *.zod.ts files have matching tests', '✓ Deprecations          No @deprecated tags found', and the '@objectstack/spec  Not built' warning row — that probe is now gated on <cwd>/packages/spec/package.json (doctor.ts:1929), so in a user app the row is correctly not printed at all. Then run the same command from a monorepo checkout for the counterpart transcript: there the '→ Checking…' step lines, the scan's own ✓/⚠ rows and '✓ @objectstack/spec    Built' all print"
       ],
       "acceptance": [
         {
-          "clause": "every environment check emits its own row — Node.js, pnpm, TypeScript, Dependencies, @objectstack/spec, Git, Environment files, Installed packages — and -v adds the fix/detail lines without changing the verdicts",
+          "clause": "every environment check emits its own row, and the finding-only rows appear exactly when their finding is live — Node.js, pnpm, TypeScript, Dependencies, Git and Environment files are unconditional; @objectstack/spec prints only where <cwd>/packages/spec/package.json exists (#10679), NODE_ENV only while NODE_ENV is unset (#5673), Tenancy posture only on an unrecognized value (#5382), and Installed packages only on a ledger failure or a skipped entry (#5429) — and -v adds the fix/detail lines without changing the verdicts",
           "oracle": "log",
-          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts:1918-1926); the -v run differs only by detail lines",
-          "evidence": "the paired transcripts"
+          "verify": "both transcripts carry one row per check through renderHealthCheckResult (doctor.ts:2014-2022); the six unconditional rows are pushed across doctor.ts:1838-1971 and the four finding-only rows at :1929-1948 (spec workspace, gated on the package.json probe), :1978-1981 (nodeEnvCheck), :1987-1989 (postureReading) and :2006-2007 (installedPackageLedgerChecks, which returns [] on a clean ledger); the -v run differs only by detail lines",
+          "evidence": "the paired scaffold transcripts, plus the same pair from a monorepo cwd — a conditional row that is absent and a row that was dropped read identically in one transcript alone"
         },
         {
           "clause": "#5387 env provenance: doctor resolves the same .env* cascade os serve reads, and the Environment files row names WHICH source supplied each value — the files are never silently merged into process.env",
           "oracle": "log",
-          "verify": "the .env-staged posture still produces the finding, and the Environment files row attributes it to that file rather than the shell (environmentSourcesCheck at doctor.ts:1875; pinned by doctor-env-provenance.test.ts — cite its pass as the attribution oracle, drive the CLI for the row itself)",
+          "verify": "the .env-staged posture still produces the finding, and the Environment files row attributes it to that file rather than the shell (environmentSourcesCheck at doctor.ts:1971; pinned by doctor-env-provenance.test.ts — cite its pass as the attribution oracle, drive the CLI for the row itself)",
           "evidence": "the transcript + the .env file staged"
         },
         {
           "clause": "#5382 posture honesty: an unrecognized OS_TENANCY_POSTURE is an ERROR row naming the variable — never swallowed by the config-analysis catch as 'Could not load config for analysis' — the rest of the report still runs, and the summary owns exit 1",
           "oracle": "log",
-          "verify": "the isolatd run prints the Tenancy posture error row, later report sections still print after it, and echo $? is 1 (posture resolved once at doctor.ts:1752-1753, outside every try; exit via the hasErrors summary at :2158-2163)",
+          "verify": "the isolatd run prints the Tenancy posture error row, later report sections still print after it, and echo $? is 1 (posture resolved once at doctor.ts:1828-1829, outside every try; exit via the hasErrors summary at :2296-2302)",
           "evidence": "transcript + exit code"
         },
         {
           "clause": "#5429 ledger independence: installed-package ledger rows print under EVERY posture including the default `single` — an unreadable entry under .objectstack/installed-packages/ is its own row whether or not a config loaded and whether or not any posture was set",
           "oracle": "log",
-          "verify": "the broken.json run with no posture set carries the Installed packages failure row (readInstalledPackageEntries called unconditionally at doctor.ts:1910-1911; posture-independence pinned by doctor-ledger-posture-independence.test.ts + doctor-ledger-read-failure.test.ts)",
+          "verify": "the broken.json run with no posture set carries the Installed packages failure row (readInstalledPackageEntries called unconditionally at doctor.ts:2006-2007; posture-independence pinned by doctor-ledger-posture-independence.test.ts + doctor-ledger-read-failure.test.ts)",
           "evidence": "the default-posture transcript"
         },
         {
           "clause": "the unique-scope ✓ is WITHHELD when the ledger read was incomplete: under `isolated` with an unreadable ledger entry, the 'Unique scope' success line must NOT print — a ✓ over an unexamined ledger is a false PASS (#5412/#5413/#5644)",
           "oracle": "log",
-          "verify": "the isolated+broken-ledger run prints no 'Unique scope … No unconfirmed installation-wide uniques' line (gated on ledgerReadingIsComplete at doctor.ts:2063-2065), while the same run with the entry removed prints it",
+          "verify": "the isolated+broken-ledger run prints no 'Unique scope … No unconfirmed installation-wide uniques' line (gated on ledgerReadingIsComplete at doctor.ts:2172-2174), while the same run with the entry removed prints it",
           "evidence": "the two isolated-run transcripts diffed on that line"
         },
         {
           "clause": "config-analysis rows both ways: the staged orphan view, circular lookup and unused object each produce a warning row naming the offender, and the restored config produces the three ✓ rows",
           "oracle": "log",
-          "verify": "detectCircularDependencies / findUnusedObjects / findOrphanViews rows (doctor.ts:1998-2080) name the staged shapes; the clean run prints 'Dependencies', 'Object usage', 'View integrity' successes",
+          "verify": "detectCircularDependencies / findUnusedObjects / findOrphanViews rows (called at doctor.ts:2110, :2122 and :2180) name the staged shapes; the clean run prints the 'Dependencies' (:2117), 'Object usage' (:2129) and 'View integrity' (:2187) successes",
           "evidence": "the staged and clean transcripts"
         },
         {
           "clause": "exit contract: 1 exactly when any ERROR row exists; warnings alone exit 0 under the '⚠️  Environment is functional' summary — warnings never flip the exit",
           "oracle": "log",
-          "verify": "echo $? per run matches the summary branch taken (process.exit(1) only under hasErrors, doctor.ts:2158-2169)",
+          "verify": "echo $? per run matches the summary branch taken (process.exit(1) only under hasErrors, doctor.ts:2296-2307)",
           "evidence": "exit codes paired with summary lines"
         },
         {
-          "clause": "EXPECTED-FAIL (product defect — record actual behavior): findMissingTests and findDeprecatedUsages examine only <cwd>/packages/spec/src (doctor.ts:1142-1143 and :1160-1161) and return [] in any user app, whereupon doctor prints '✓ Test coverage' (:1939) and '✓ Deprecations' (:1951) about a tree it never examined. By doctor's own withhold-the-✓ reasoning (the ledger clause above, :2049-2065) a ✓ over an unexamined tree is the FAIL: the ✓ must be withheld, scoped to the tree actually walked, or the check skipped with a named reason. Today it prints — the run records the verbatim lines as the failure evidence and extracts the defect card",
+          "clause": "the two monorepo-anchored scans report whether they RAN, and the ✓ is reachable only from the arm that did (#10679 — this clause was the EXPECTED-FAIL at revision 1 and is now an ordinary pass): findMissingTests and findDeprecatedUsages return a MonorepoTreeScan (doctor.ts:1173-1175, :1217-1233 and :1235-1257) whose `scanned: false` arm is taken in any app without <cwd>/packages/spec/src. There doctor prints neither ✓ and neither '→ Checking…' step line; each check KEEPS its name column and prints an informational skip naming the reason, and -v adds the directory doctor resolved and looked for. The skip goes through printInfo, never printWarning — withholding a false ✓ must not manufacture a false ⚠ (rationale at :1187-1191)",
           "oracle": "log",
-          "verify": "in the scaffold (no packages/spec/src anywhere) both ✓ lines print verbatim; the clause FAILS while they do, and flips to pass only when the tree ships a fix that withholds or scopes them",
-          "evidence": "the verbatim ✓ lines + an `ls packages/spec/src` refusal from the same cwd"
+          "verify": "in the scaffold (no packages/spec/src anywhere) the report carries 'ℹ Test coverage         Skipped — no packages/spec/src in this directory (monorepo-only check)' and the same row for 'Deprecations' (monorepoTreeSkipNotice :1193-1206, printed at :2034 and :2050); the two ✓ lines (:2043, :2059) and their step lines are absent; and the skip rows move neither hasErrors nor hasWarnings, so the summary branch is the one the other rows earned. The -v run adds '→ Looked for <cwd>/packages/spec/src and found nothing to walk. …' under each. From a monorepo checkout the scanned arm still runs and its ✓/⚠ findings still print — the fix scoped the check, it did not delete it",
+          "evidence": "the verbatim skip rows from both the plain and the -v scaffold run, an `ls packages/spec/src` refusal from the same cwd, and the monorepo-cwd transcript showing the scanned arm still reporting"
         }
       ],
       "negative": [
         "an unrecognized posture reported only as 'Could not load config for analysis' with exit 0 is the exact #5382 regression the placement fix closed",
         "a 'Unique scope ✓' printed while an installed-packages entry was unreadable is a false PASS — worse than a missing check, because it stops the operator looking further",
         "warnings flipping the exit to 1, or an error row exiting 0, breaks every CI wrapper that gates on doctor",
-        "adjacent, same class as the expected-fail: the '@objectstack/spec  Not built' WARNING in a user app (doctor.ts:1837 probes <cwd>/packages/spec/dist) is monorepo-anchored noise — record it in the run notes; it is not this item's fail but belongs on the same defect card"
+        "a '@objectstack/spec  Not built' WARNING in a user app is a REGRESSION of #10679, not a note to record: outside this checkout there is no such workspace, and that row used to flip every stock scaffold to '⚠️  Environment is functional but has some warnings' while prescribing `pnpm --filter @objectstack/spec build`, a command that cannot succeed there. The probe is now gated on <cwd>/packages/spec/package.json (doctor.ts:1929) and the honest report in a user app is no row at all",
+        "a ⚠ rather than a ℹ on the Test coverage / Deprecations skip rows is the same false-signal class inverted: nothing is wrong in an app that has no packages/spec/src, and routing the skip through printWarning would end every healthy user app's report on 'Environment is functional but has some warnings'",
+        "the skip rows disappearing instead of printing is the other wrong shape — an operator scans the report by its name column, so a check that did not run must be PRESENT and say so"
       ],
       "traps": ["absence-inference", "stale-dist"],
       "source": [
-        "packages/cli/src/commands/doctor.ts (class at :1712, flags -v/--scan-deprecations :1715-1718, run body :1720-2172; posture resolve :1752-1753 + row :1891-1893; env sources row :1875; ledger read :1910-1911; unique-scope withhold :2049-2065; findMissingTests :1141-1157; findDeprecatedUsages :1159-1181; summary exit :2158-2169)",
-        "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
+        "packages/cli/src/commands/doctor.ts (class at :1788, flags -v/--scan-deprecations :1792-1793, run body :1796-2311; posture resolve :1828-1829 + row :1987-1989; env sources row :1971; NODE_ENV row :1978-1981; spec-workspace probe :1929-1948; ledger read :2006-2007; unique-scope withhold :2172-2174; MonorepoTreeScan :1173-1175, monorepoTreeSkipNotice :1193-1206, printMonorepoTreeSkip :1209-1215, findMissingTests :1217-1233, findDeprecatedUsages :1235-1257, their print sites :2032-2045 and :2048-2061; summary exit :2296-2307)",
+        "packages/cli/src/commands/doctor-env-provenance.test.ts, doctor-tenancy-posture-report.test.ts, doctor-ledger-dir-authority.test.ts, doctor-ledger-posture-independence.test.ts, doctor-ledger-read-failure.test.ts, doctor-config-load-cause.test.ts, doctor-node-env-default.test.ts, doctor-unexamined-spec-tree.test.ts (the unit pins — they cover the row-building seams, none drives the CLI end-to-end, which is why this item carries no automated entry)",
         "sibling item cli.flag-command-error-ux (owns only `os doctor --help`; this item is the command's first functional coverage)",
         "sibling item cli.doctor-deprecation-scan (the --scan-deprecations flag's own item — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts:1720-2172 with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): `os doctor` as a whole had NO checklist item; it appeared only as a --help variant on cli.flag-command-error-ux while carrying seven unit-pinned seams (env provenance #5387, posture honesty #5382, ledger independence #5429, withheld ✓ #5412/#5413/#5644). Authored from the run body at doctor.ts:1720-2172 with the withhold-the-✓ discipline the command itself established turned back on its own monorepo-anchored Test-coverage/Deprecations ✓s, which bless a tree they never examined in every user app — encoded as an expected-fail probe rather than silently accepted", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-23", "change": "text refresh only, no capability change: #10679 landed the fix this item's expected-fail predicted, so that clause inverts into an ordinary pass. findMissingTests/findDeprecatedUsages now return a MonorepoTreeScan and the ✓ is reachable only from the scanned arm; outside a monorepo each check prints 'ℹ <name> Skipped — no packages/spec/src in this directory (monorepo-only check)', with the resolved directory under -v. Rewritten against a REAL run of the shipped CLI in a `create-objectstack -t blank` scaffold and again from a monorepo checkout, not from source: (a) the expected-fail clause, step 7 and the item title inverted; (b) the row enumeration in acceptance[0] and step 1 corrected — measurement falsified the premise that only @objectstack/spec became conditional: `Installed packages` was ALREADY findings-only (installedPackageLedgerChecks returns [] on a clean ledger) and had never been an unconditional row, and NODE_ENV/Tenancy posture are finding-only too, so the enumeration now splits unconditional from finding-only rather than naming one exception; (c) the '@objectstack/spec  Not built' negative flipped from an accepted note into a regression, its probe being gated at :1929; (d) two negatives added for the skip row's own wrong shapes (a ⚠ instead of a ℹ, and the row vanishing); (e) doctor-unexamined-spec-tree.test.ts added to the pins; (f) every line anchor in the item re-derived at this base — doctor.ts grew ~90 lines, so every number quoted at revision 1 had moved", "ref": "#10798" }
       ]
     },
     {
       "id": "cli.doctor-deprecation-scan",
-      "title": "os doctor --scan-deprecations: every retired pattern is found with file:line attribution, decoys are skipped, the run warns without gating — and the remediation hint prescribes a command that does not exist (expected-fail)",
+      "title": "os doctor --scan-deprecations: every retired pattern is found with file:line attribution, decoys are skipped, the run warns without gating — and the remediation hint prescribes NO command, routing the operator to the per-finding → replacement instead",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "cli",
       "personas": ["operator (local shell)", "upgrading author (pre-major sweep)"],
@@ -973,64 +976,69 @@
           "decoy files staged per run: a src/*.test.ts twin, a src/node_modules/dep/index.ts, and a src/*.json metadata file carrying a retired key — all three must stay unreported"
         ],
         "knownGaps": [
-          "no test anywhere in the repo references --scan-deprecations — this item is the surface's first coverage of any kind, so there is no automated entry and no pin to lean on"
+          "revision 2's claim that 'no test anywhere in the repo references --scan-deprecations' is FALSE at this base: #10680 added packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts, which drives Doctor.run(['--scan-deprecations']) against a temp cwd and pins the closing hint in BOTH --verbose branches, file:line attribution, the advisory exit code, and the clean-run success line",
+          "what that pin does NOT reach — and what this item therefore still owns: it stages no decoys, it mkdirs src/ on every case so the absent-src probe is never taken, it seeds two lines (three hits) rather than one per DEPRECATED_PATTERNS entry, and it calls the command CLASS in-process under vitest rather than the shipped binary — so the stale-dist trap is untested by it and a real scaffold run remains the only evidence `os` reports this way"
         ]
       },
       "steps": [
-        "scaffold and seed src/legacy.ts with one line per DEPRECATED_PATTERNS entry — count the table yourself at doctor.ts:1186-1234 (8 entries at authoring time): EnhancedObjectKernel, max_length, default_value, min_length, the retired lookup-scoping pair (one entry, BOTH spellings: reference_filters AND referenceFilters — seed both lines), unique_name, `import ... from '@objectstack/core/enhanced'`, `import ... from '@objectstack/spec/dist/x'`",
+        "scaffold and seed src/legacy.ts with one line per DEPRECATED_PATTERNS entry — count the table yourself at doctor.ts:1262-1310 (recounted at this revision's base: still 8 entries): EnhancedObjectKernel, max_length, default_value, min_length, the retired lookup-scoping pair (one entry, BOTH spellings: reference_filters AND referenceFilters — seed both lines), unique_name, `import ... from '@objectstack/core/enhanced'`, `import ... from '@objectstack/spec/dist/x'`",
         "stage the decoys: src/legacy.test.ts with the same content, src/node_modules/dep/index.ts with the same content, and src/meta.json carrying \"referenceFilters\"",
-        "run `os doctor --scan-deprecations; echo $?` and capture the per-hit rows and the closing hint line verbatim; re-run with `--scan-deprecations --verbose` and capture the replacement prescriptions",
+        "run `os doctor --scan-deprecations; echo $?` and capture the per-hit rows and the closing hint line verbatim; re-run with `--scan-deprecations --verbose` and capture the replacement prescriptions AND that run's closing hint line too — the hint is a two-branch template (doctor.ts:2283-2288) and the two runs do not print the same sentence",
         "clean pass: delete the seeds (keep the decoys) and re-run — expect '✓ Deprecation scan      No deprecated patterns found' and exit 0",
         "absent-src probe: run `os doctor --scan-deprecations` from a scratch dir with NO src/ at all and capture that the SAME success line prints",
-        "record `os help codemod; echo $?` (or `os codemod --help`) from the same shell — the command the hint prescribes"
+        "record `os codemod --help; echo $?` from the same shell — NOT because the hint prescribes it (it prescribes nothing), but to corroborate the hint's factual claim: no `codemod` command may be registered, oclif exiting nonzero with 'command codemod not found'. A registered codemod would make 'No automated codemod ships with the CLI' the new false statement"
       ],
       "acceptance": [
         {
-          "clause": "every seeded pattern is reported with file:line attribution matching the seeded lines — 8 registry entries, with the retired-lookup entry attributing BOTH its spellings (reference_filters and referenceFilters land on one regex, doctor.ts:1215)",
+          "clause": "every seeded pattern is reported with file:line attribution matching the seeded lines — 8 registry entries, with the retired-lookup entry attributing BOTH its spellings (reference_filters and referenceFilters land on one regex, doctor.ts:1291)",
           "oracle": "log",
-          "verify": "each warning row reads '<file>:<line> — <description>' (doctor.ts:2143) and the file:line pairs match where the seeds were written; no seeded line is missing and no unseeded line is reported",
+          "verify": "each warning row reads '<file>:<line> — <description>' (doctor.ts:2252) and the file:line pairs match where the seeds were written; no seeded line is missing and no unseeded line is reported",
           "evidence": "the seeded file with line numbers + the transcript rows"
         },
         {
           "clause": "--verbose prints each hit's replacement prescription ('Use maxLength (camelCase)', 'Use lookupFilters … removed in #2377', …); the bare run withholds them",
           "oracle": "log",
-          "verify": "the dim '→ <replacement>' lines appear under --verbose only (doctor.ts:2144-2146)",
+          "verify": "the dim '→ <replacement>' lines appear under --verbose only (doctor.ts:2253-2255 — the `if (flags.verbose)` guard and the dim line it wraps)",
           "evidence": "the two transcripts diffed"
         },
         {
           "clause": "the scan WARNS and never gates: a run with hits prints the warning rows and the count line yet exits 0 (hits feed hasWarnings only, never hasErrors), and the clean run prints the success line and exits 0 — both sides captured",
           "oracle": "log",
-          "verify": "echo $? is 0 for both the seeded and the clean run; the seeded run's summary is the '⚠️  Environment is functional' branch (doctor.ts:2140-2152 sets hasWarnings; exit 1 is reserved for error rows at :2158)",
+          "verify": "echo $? is 0 for both the seeded and the clean run; the seeded run's summary is the '⚠️  Environment is functional' branch (doctor.ts:2250 sets hasWarnings inside the hits branch :2249-2288; exit 1 is reserved for error rows at :2302)",
           "evidence": "both exit codes + summary lines"
         },
         {
-          "clause": "decoys stay silent, each for its own documented reason: *.test.ts filtered (doctor.ts:1240), node_modules pruned by the walk (:1130), and the .json file never visited because the walk is .ts-only (:1240) — the .json silence is recorded as a DOCUMENTED BOUNDARY of the scan (retired keys in JSON metadata are out of its reach), never as evidence the metadata is clean",
+          "clause": "decoys stay silent, each for its own documented reason: *.test.ts filtered (doctor.ts:1316), node_modules pruned by the walk (:1130 — the only anchor revision 2 quoted that did not move), and the .json file never visited because the walk is .ts-only (:1316) — the .json silence is recorded as a DOCUMENTED BOUNDARY of the scan (retired keys in JSON metadata are out of its reach), never as evidence the metadata is clean",
           "oracle": "log",
           "verify": "no transcript row names legacy.test.ts, node_modules, or meta.json; the run record states the .ts-only boundary explicitly",
           "evidence": "the transcript + the staged decoy listing"
         },
         {
-          "clause": "absent-src honesty: with no src/ directory the scanner returns [] (doctor.ts:1238) and doctor prints the SAME success line a genuinely clean tree gets — so the success line alone is NOT evidence of cleanliness. The run must pair the line with proof src/ existed and was walked; a run record citing the line without that proof is the absence-inference false positive this clause exists to block",
+          "clause": "absent-src honesty: with no src/ directory the scanner returns [] (doctor.ts:1314) and doctor prints the SAME success line a genuinely clean tree gets — so the success line alone is NOT evidence of cleanliness. The run must pair the line with proof src/ existed and was walked; a run record citing the line without that proof is the absence-inference false positive this clause exists to block",
           "oracle": "log",
           "verify": "the no-src run prints '✓ Deprecation scan      No deprecated patterns found'; the run record annotates it as scanned-nothing, with `ls src` refusal captured alongside",
           "evidence": "the no-src transcript + the ls refusal"
         },
         {
-          "clause": "EXPECTED-FAIL (shippable defect — record actual behavior): the remediation hint printed after hits (doctor.ts:2149) prescribes `objectstack codemod v2-to-v3`, but no codemod command is registered anywhere in packages/cli/src/commands/ — the prescription is a dead end, and content/docs/protocol/backward-compatibility.mdx:134 admits the command is 'not yet available'. The remediation path that DOES exist is `os migrate meta` (cli.migrate-meta-codemod) — but it is not a codemod: it replays the migration chain and PRINTS the mechanical edits for the author to apply by hand. It declares no --write/--fix/in-place flag (exactly from/to/step/out/stored/database-url/apply/yes/force/type/json, commands/migrate/meta.ts:195-239) and writes no source file — both writeFileSync calls are guarded by `if (flags.out)` (:347 and :394-396) and emit a JSON snapshot, and the header at :155-157 declines the AST rewrite as 'unsafe and lossy'. The in-place codemod is commissioned as #9591 (v18, pm:on-hold) and has not been built, so a hint rewritten to name `os migrate meta` must promise a LIST of edits, not an auto-fix. The clause: the hint must name a command os actually registers; today it does not",
+          "clause": "the remediation hint prescribes NO command at all — it states that no automated codemod ships and routes the operator to the per-finding `→ replacement` instead. #10680 REMOVED the dead `objectstack codemod v2-to-v3` prescription rather than repointing it, and the print site's own comment (doctor.ts:2258-2282) records why a repoint would have been the same defect respelled: `os migrate meta` declines the src/** TypeScript rewrite by design ('unsafe and lossy'), three of the eight patterns (EnhancedObjectKernel and the two deep-import paths) are not metadata at all, and `os lint --fix` is print-only. This clause is the INVERSION of revision 2's expected-fail, and NOT into 'the hint now names a registered command' — that assertion was the wrong SHAPE for head, where the hint deliberately names none",
           "oracle": "log",
-          "verify": "the hint line is captured verbatim from the seeded run, and `os codemod --help` errors 'command … not found' (nonzero) from the same binary — the pair is the failure evidence; the clause flips to pass when the hint names a registered command",
-          "evidence": "the hint line + the command-not-found capture"
+          "verify": "the closing hint is the blue `ℹ` info line (printInfo, not a `⚠` row) and reads 'Found <N> deprecated pattern(s). No automated codemod ships with the CLI — apply each finding’s replacement by hand (re-run with --verbose to print them).' in the bare run and '… — apply the → replacement shown under each finding above.' under --verbose (doctor.ts:2283-2288); no `os …`/`objectstack …` command name appears anywhere in the hint; and step 6's `os codemod --help` is STILL not-found — the hint's claim that no codemod ships is TRUE, which is what makes prescribing nothing the honest line rather than a second false one",
+          "evidence": "both hint lines verbatim (bare and --verbose) + the `os codemod --help` not-found capture"
         }
       ],
       "negative": [
         "a hit reported from a *.test.ts or node_modules path is a filter regression",
         "a run with hits exiting nonzero is a gate this surface never had — the scan is advisory by design",
         "a run record that ticks the clean clause on the success line alone, without proving src/ existed, is the absence-inference false positive",
-        "the retired-lookup entry reporting only one of its two spellings while both were seeded"
+        "the retired-lookup entry reporting only one of its two spellings while both were seeded",
+        "the hint prescribing an unregistered command again — any `os …`/`objectstack …` name resolving to no file under packages/cli/src/commands/ — is the #10680 regression its class-closing pin exists to catch",
+        "the hint repointed at `os migrate meta`: a REGISTERED command that still cannot do this job, so it would read as a PASS to any check that only asks whether the named command exists. That repoint was considered and deliberately refused",
+        "the closing hint vanishing along with the count line — removing a false prescription must not remove the finding summary, so a hits run printing rows but no 'Found <N> deprecated pattern(s).' line is a regression, not a cleanup"
       ],
       "traps": ["absence-inference", "stale-dist"],
       "source": [
-        "packages/cli/src/commands/doctor.ts (flag :1717; scan block :2136-2153 with the scanDir = <cwd>/src at :2138 and the hint at :2149; DEPRECATED_PATTERNS :1186-1234; scanDeprecatedPatterns :1236-1265 — absent-dir [] at :1238, .ts-only walk + .test.ts filter :1240; walkDir node_modules prune :1130)",
+        "packages/cli/src/commands/doctor.ts (flag :1793; scan block :2245-2292 with the scanDir = <cwd>/src at :2247, the per-hit warning row at :2252, the --verbose `→ replacement` at :2253-2255, the #10680 reasoning comment at :2258-2282, the two-branch hint at :2283-2288 and the clean-run success line at :2290; DEPRECATED_PATTERNS :1262-1310 — retired-lookup pair :1291; scanDeprecatedPatterns :1312-1341 — absent-dir [] at :1314, .ts-only walk + .test.ts filter :1316; walkDir node_modules prune :1130)",
+        "packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts (#10680's pin — the class-closing sweep that every `os …` hint doctor can PRINT resolves under src/commands/, plus six end-to-end cases over Doctor.run. Added to source at revision 3 because revision 2's knownGaps asserted this surface had no automated coverage of any kind)",
         "content/docs/protocol/backward-compatibility.mdx:126-134 (the documented workflow, including the :134 admission that the codemod command is not yet available)",
         "packages/cli/README.md §os doctor (documents -v and --scan-deprecations)",
         "packages/create-objectstack/src/templates/blank/ (the scaffold whose src/ the seeds land in)",
@@ -1039,7 +1047,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), found independently by two hunters and re-verified against source: --scan-deprecations had zero coverage of any kind (no test in the repo references it). The 8-entry pattern table was recounted from doctor.ts:1186-1234; brief line-drift corrected during authoring (absent-dir return is :1238 not :1273, the scanner body ends at :1265 not :1276). The dead `objectstack codemod v2-to-v3` prescription at :2149 is encoded as an expected-fail clause with the docs' own 'not yet available' admission as corroborating source", "ref": "claude/new-session-0pv25p" },
-        { "revision": 2, "date": "2026-08-21", "change": "corrected the two descriptors that called `os migrate meta` a codemod — the expected-fail clause's 'The real metadata codemod is os migrate meta' and the source list's 'cli.migrate-meta-codemod (the codemod that actually exists)'. It is not one. Re-derived at this base: the command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json (commands/migrate/meta.ts:195-239) with no --write/--fix/in-place; its only file writes are the two `if (flags.out)`-guarded writeFileSync calls at :347 and :394-396, which emit a JSON snapshot; and its header at :155-157 states the command does not silently rewrite TS config source because that AST rewrite is 'unsafe and lossy'. Both descriptors now say what it is — a chain replayer that PRINTS the mechanical edits for hand application — and name #9591 (v18, pm:on-hold) as the commissioned-but-unbuilt in-place codemod, which was added to `source` so the reference resolves. The clause the item turns on is UNCHANGED and still an expected-fail: the hint at doctor.ts:2149 prescribes `objectstack codemod v2-to-v3`, registered nowhere. The clause also now warns that a FIX which merely repoints the hint at `os migrate meta` must describe it as a list, not an auto-fix — otherwise the dead prescription is replaced by a false one. Sibling cli.migrate-meta-codemod was read and deliberately left alone: its revision-3 text (#9733 via PR #10412) already states the print-only contract correctly, and its `-codemod` id is immutable by README lifecycle", "ref": "#10418" }
+        { "revision": 2, "date": "2026-08-21", "change": "corrected the two descriptors that called `os migrate meta` a codemod — the expected-fail clause's 'The real metadata codemod is os migrate meta' and the source list's 'cli.migrate-meta-codemod (the codemod that actually exists)'. It is not one. Re-derived at this base: the command declares exactly from/to/step/out/stored/database-url/apply/yes/force/type/json (commands/migrate/meta.ts:195-239) with no --write/--fix/in-place; its only file writes are the two `if (flags.out)`-guarded writeFileSync calls at :347 and :394-396, which emit a JSON snapshot; and its header at :155-157 states the command does not silently rewrite TS config source because that AST rewrite is 'unsafe and lossy'. Both descriptors now say what it is — a chain replayer that PRINTS the mechanical edits for hand application — and name #9591 (v18, pm:on-hold) as the commissioned-but-unbuilt in-place codemod, which was added to `source` so the reference resolves. The clause the item turns on is UNCHANGED and still an expected-fail: the hint at doctor.ts:2149 prescribes `objectstack codemod v2-to-v3`, registered nowhere. The clause also now warns that a FIX which merely repoints the hint at `os migrate meta` must describe it as a list, not an auto-fix — otherwise the dead prescription is replaced by a false one. Sibling cli.migrate-meta-codemod was read and deliberately left alone: its revision-3 text (#9733 via PR #10412) already states the print-only contract correctly, and its `-codemod` id is immutable by README lifecycle", "ref": "#10418" },
+        { "revision": 3, "date": "2026-08-24", "change": "text refresh only, no capability change: #10680 landed the fix revision 2's expected-fail described, so acceptance[5] inverts — but NOT into 'the hint now names a registered command'. The route taken was prescribe-nothing: at this base the hint is a two-branch printInfo (doctor.ts:2283-2288) reading 'Found <N> deprecated pattern(s). No automated codemod ships with the CLI — apply each finding’s replacement by hand (re-run with --verbose to print them).' bare and '… — apply the → replacement shown under each finding above.' under --verbose, so revision 2's assertion 'the hint must name a command os actually registers' was the wrong SHAPE for head, not a fail that merely flipped. The print site's comment at :2258-2282 records why a repoint at `os migrate meta` was refused, and the clause now cites that comment instead of re-deriving the migrate/meta.ts anchors. Six texts changed beyond the named clause, all re-derived at this base: (a) the title's trailing expected-fail phrase inverted; (b) fixtures.knownGaps — revision 2's 'no test anywhere in the repo references --scan-deprecations' is FALSE at head, #10680 added packages/cli/src/commands/doctor-deprecation-hint-commands.test.ts, and the gap text now states what that pin does and does NOT reach (no decoys, no absent-src probe, two seeded lines rather than eight patterns, in-process Doctor.run rather than the shipped binary — so stale-dist stays this item's to catch), with the test added to source; (c) step 6 repurposed from 'record the command the hint prescribes' into a corroboration probe — `os codemod --help` must STILL be not-found, which is what makes 'No automated codemod ships' true rather than the next false statement; (d) step 3 now demands the closing hint from BOTH runs, since it is not the same sentence; (e) three negatives added for the inverted clause's wrong shapes — an unregistered name returning, a repoint at the registered-but-incapable `os migrate meta`, and the count line vanishing with the prescription; (f) every doctor.ts anchor re-derived by content: #10679 moved the scanner block +76 and #10680's comment pushed the print site to +109, so of the eleven numbers revision 2 quoted only walkDir's node_modules prune at :1130 still held. Verified accurate at head and deliberately LEFT ALONE: content/docs/protocol/backward-compatibility.mdx:126-134 (the :134 'not yet available' admission still reads as quoted — and at head the tool is consistent WITH it), packages/cli/README.md §os doctor :212-215, the blank template's src/objects/note.object.ts, #9591 (still open, target:v18, pm:on-hold), sibling cli.migrate-meta-codemod (still revision 3), the DEPRECATED_PATTERNS count of 8, the four original negatives, both personas and both traps. Out of scope and filed instead: FOLLOW-UPS.md §7b still lists this prescription as unfixed and names `os migrate meta` as 'the real path', the repoint #10680 refused (#11628)", "ref": "#11420" }
       ]
     },
     {
@@ -1147,15 +1156,15 @@
       "title": "os datasource list-tables/introspect/validate: the federation door answers, the generated draft is cwd-jailed and compiles, and schema drift maps to ✗ diffs with exit 1",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "cli",
-      "personas": ["operator (local shell)", "integration author (adopting a remote table)"],
+      "personas": ["operator (local shell) whose token HOLDS manage_platform_settings — all three commands address federation READ routes, which require it since #9901/#10255", "integration author (adopting a remote table), same capability"],
       "fixtures": {
         "app": "showcase",
         "requires": [
           "a booted showcase (`pnpm dev -- --fresh -p <port>`) — it ships the external datasource fixture: examples/app-showcase/src/system/datasources/showcase-external.datasource.ts (name 'showcase_external', sqlite file .objectstack/data/showcase_external.db) seeded by external-fixture.ts",
-          "an admin session token minted via POST /api/v1/auth/sign-in/email (the external-datasource routes sit behind the auth guard — external-datasource-routes-auth-guard.test.ts); pass it as --token / OS_TOKEN, with --url / OS_CLOUD_URL pointing at the boot port",
+          "an admin session token minted via POST /api/v1/auth/sign-in/email for a user HOLDING manage_platform_settings — authentication alone is NOT enough since #9901/#10255: every route these three commands address is a federation READ (list-tables → GET /external/tables, introspect → POST /external/tables/:remote/draft, validate → POST /external/validate), and each opens with refuseFederationRequest, which answers 401 UNAUTHENTICATED with no identity and then 403 PERMISSION_DENIED naming FEDERATION_READ_CAPABILITY = manage_platform_settings (external-datasource-routes.ts:157, :287-324; pinned in external-datasource-routes-auth-guard.test.ts). Pass it as --token / OS_TOKEN, with --url / OS_CLOUD_URL pointing at the boot port",
           "a scratch objects/ dir in the invocation cwd for the --out draft, and a scratch config to wire the draft into for the compile clause"
         ],
         "knownGaps": [
@@ -1214,7 +1223,8 @@
         "an --out escape that lands a server-authored file outside the project tree is the security FAIL the jail exists for — the refusal must be proven, not assumed from the code",
         "validate exiting 0 while an error-severity diff printed breaks every CI wrapper watching for schema drift",
         "a draft that does not compile through os build makes the adoption workflow a dead end — the whole point of codegen",
-        "route-spelling trap: the CLI addresses /external/tables (federation, packages/rest); probing the admin /remote-tables spelling and reading its 404 as 'the CLI's route is gone' conflates two mounts — the API-door coverage of the admin twin belongs to the integration-system area, not here"
+        "route-spelling trap: the CLI addresses /external/tables (federation, packages/rest); probing the admin /remote-tables spelling and reading its 404 as 'the CLI's route is gone' conflates two mounts — the API-door coverage of the admin twin belongs to the integration-system area, not here",
+        "wrong-persona shape, NOT a finding: all three commands failing alike with the server's 403 PERMISSION_DENIED naming manage_platform_settings means the token authenticated but is unentitled — re-mint it for a caller holding that capability and re-run before filing anything. Filing it as a CLI or route regression would be a report against the #9901/#10255 gate working as ruled"
       ],
       "traps": ["dispatcher-vs-hono-route", "seed-data-thin", "wrong-persona"],
       "source": [
@@ -1225,7 +1235,8 @@
         "sibling item cli.flag-command-error-ux (owned only the topic's --help until now)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts:65-74, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" }
+        { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能): the datasource topic's three subcommands had only a --help variant, no functional coverage. Re-verified against source during authoring: the hunter brief asked whether an --out escape refusal exists — it DOES (introspect.ts:65-74, absolute + traversal both refused before any write), so the jail is asserted positively with both escape probes rather than worded observe-and-flag. The /external/tables-vs-/remote-tables mount split is recorded as a runner trap with the admin twin explicitly routed to the integration-system area", "ref": "claude/new-session-0pv25p" },
+        { "revision": 2, "date": "2026-08-24", "change": "spell the CAPABILITY persona out. Read in the same pass as #11138 and confirmed rather than assumed: this item was authored 2026-08-20 against the pre-#9901 federation door, so its fixture asked only for \"an admin session token\" behind \"the auth guard\" — the #9686 AUTHENTICATION floor. At head all three commands address federation READ routes (list-tables GET /external/tables, introspect POST /external/tables/:remote/draft, validate POST /external/validate), each gated on FEDERATION_READ_CAPABILITY = manage_platform_settings by #9901/#10255, so a merely-authenticated token 403s every clause in the item. The capability is now named in both personas and in the token fixture, and the resulting all-403 run is recorded as a negative (the wrong-persona trap this item already declares) so a runner re-mints instead of filing the landed gate as a CLI regression", "ref": "#11138" }
       ]
     },
     {
@@ -1411,6 +1422,102 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-20", "change": "new — scoped scan-functionality sweep (扫描功能), authored VERIFY-FIRST as the brief required since the hunter had lower confidence here. Source confirmed the three-severity split and errors-only gating; two sketch claims were corrected against lint.ts before authoring: (1) the --json shape is lint's own {passed,total,errors,warnings,suggestions,issues,duration} (:543-553), not the os validate #3782 parity shape — the parity lint actually owes is the #4409 shared-registry agreement with os build (:407-436), encoded as its own clause; (2) the exit contract is 0/1 on both paths (process.exit(1) at :634, CliExitCode slot at :553), not build's human-path oclif-2 split. The i18n platform fold (:47-66) with its hiddenPlatform disclosure is covered as the third load-bearing surface", "ref": "claude/new-session-0pv25p" }
+      ]
+    },
+    {
+      "id": "cli.plugin-manifest-build-contract",
+      "title": "os plugin build enforces the manifest at the packaging boundary: an invalid manifest is refused with located errors, `packaging` forks the artifact, and the compiled manifest the artifact carries is readable back",
+      "since": "v15",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "plugin author (local shell, scratch plugin directory)"
+      ],
+      "fixtures": {
+        "app": "scaffold",
+        "requires": [
+          "a scratch plugin directory OUTSIDE the repo tree holding objectstack.plugin.json (the filename os plugin build reads — NOT objectstack.config.ts), an entry at src/index.ts, and a package.json declaring at least one real runtime dependency that the entry actually imports. ⛔ Without a genuinely imported dependency the two `packaging` modes produce the same bundle and the fork clause is unscoreable — an equal-artifacts observation would then be a fixture defect reported as a product fail",
+          "esbuild resolvable from that directory — os plugin build refuses with its own named error when it is not, which is a fixture failure rather than a clause verdict",
+          "a second scratch directory for the refusal probes, so a bad manifest never overwrites the good one"
+        ],
+        "knownGaps": [
+          "os plugin publish CANNOT complete locally: after extracting the artifact manifest it requires a cloud token and posts to <server>/api/v1/cloud/packages. Only its PRE-NETWORK legs are scoreable here — artifact discovery in cwd, manifest extraction, the id/version refusal, and the unsigned-artifact notice. Record blocked(environment) for anything past the auth step; the cloud control plane is not part of this checklist's fixture set",
+          "the SERVER-side mirror of the identity refusal — POST /api/v1/packages/publish answering 400 PACKAGE_MANIFEST_INVALID when id or version is missing (packages/rest/src/package-routes.ts:532) — is deliberately not scored here: it needs a deployment composing the `package` service, and one without it answers 404 with the 'composes no `package` service' message, which is not a failure of anything. Score it from the api lane if a marketplace-capable deployment is available",
+          "the artifact is a gzipped ustar with mtime pinned to 0 and entries emitted in sorted path order, so identical inputs produce byte-identical archives — that is what makes the two packaging builds comparable, and it is also why a stale artifact from an earlier run is indistinguishable from a fresh one by name alone. Build each mode into its own --out path"
+        ]
+      },
+      "steps": [
+        "in the scratch plugin dir, run `os plugin build` on the GOOD manifest (id, version, name, an imported dependency in package.json, no `packaging` key) → capture the full output: the Loaded line, Artifact, Plugin, Files, Integrity entries, Size, sha256. Keep the artifact at its own --out path",
+        "re-run with `packaging: \"manifest-deps\"` in objectstack.plugin.json, into a DIFFERENT --out path → capture the same output block",
+        "compare the two artifacts: extract each (gunzip + tar) and diff the FILE LISTS and the bundled entry. Expect package.json (and pnpm-lock.yaml when present) inside the manifest-deps artifact and absent from the bundled one, and expect the declared dependency's import to survive as an external import in the manifest-deps dist/index.mjs while its code is inlined in the bundled one",
+        "read the compiled manifest out of each artifact (the objectstack.plugin.json entry inside the archive) and compare it to the authored one: expect the authored keys plus `main` and an `integrity` map",
+        "run `os plugin publish` against the good artifact with no token → capture the output up to and including the auth refusal; then run it against an artifact whose compiled manifest lacks a version → capture that refusal",
+        "REFUSAL probes, each in the second scratch dir, each followed by a check that NO artifact file was written: (a) objectstack.plugin.json that is not valid JSON; (b) a manifest missing `id`; (c) a manifest whose `version` is not semver; (d) a manifest with `id: \"\"` — which z.string() admits, so it reaches the explicit post-parse guard; (e) a manifest with no `main` and no src/index.* entry candidate",
+        "run `os lint` on a scaffold config whose manifest declares NO engines range → capture the finding (rule, severity, path, fix); then run it on a bare metadata fragment that declares no manifest at all → confirm the rule does NOT fire there",
+        "teardown: delete both scratch directories. ⚠️ Do not re-run the packaging comparison over the artifacts of a previous run — each mode writes its own --out path and a leftover file from an earlier run reads exactly like a fresh one"
+      ],
+      "acceptance": [
+        {
+          "clause": "an invalid manifest is REFUSED at build with LOCATED errors and no artifact: an unparseable objectstack.plugin.json is refused by name ('Cannot read objectstack.plugin.json in <cwd>'), and a manifest that parses as JSON but fails ManifestSchema is refused with the per-key Zod errors printed — each exits nonzero and leaves no .osplugin behind",
+          "oracle": "log",
+          "verify": "run probes 6a-6c and read stdout plus the exit code; then list the directory and confirm no artifact was written. ⛔ Score the exit code and the absence of the file together — a refusal that prints and still writes an artifact is the shape that ships a broken plugin",
+          "evidence": "each refusal's full output with its exit code, plus the directory listing taken after it"
+        },
+        {
+          "clause": "identity is guarded in BOTH shapes, and the second guard is not redundant: `id` and `version` are required by the schema (an absent one fails safeParse with a located error, a non-semver version fails its regex), while `id: \"\"` satisfies z.string() and is caught only by the explicit post-parse refusal naming both keys — that guard is the one thing between an empty id and a nameless artifact",
+          "oracle": "log",
+          "verify": "probes 6b, 6c and 6d, read as three DIFFERENT refusals — 6b/6c located Zod errors, 6d the worded 'must declare both \"id\" and \"version\"' line. Collapsing them into one 'it refuses' observation cannot tell a working post-parse guard from a removed one",
+          "evidence": "the three refusals side by side, each with its exit code"
+        },
+        {
+          "clause": "`packaging` FORKS the artifact rather than annotating it: the same source tree built as `bundled` (the default) and as `manifest-deps` produces two DIFFERENT artifacts — manifest-deps keeps every package.json dependency external in the bundle and packs package.json (plus pnpm-lock.yaml when present) into the archive; bundled inlines the dependency's code and packs neither",
+          "oracle": "build",
+          "verify": "diff the extracted file lists and the entry bundles of the two artifacts. Both differences must hold: the file-list difference alone could come from any archive change, and the external-import difference alone could come from an esbuild default",
+          "evidence": "the two file lists and the two entry-bundle excerpts showing the dependency inlined in one and imported in the other"
+        },
+        {
+          "clause": "the artifact carries a COMPILED manifest — the authored manifest plus `main: \"dist/index.mjs\"` and an `integrity` map of archive-relative path → sha256 SRI digest, with the manifest itself and SIGNATURE excluded from the map — and os plugin publish reads that manifest back out of the artifact BEFORE any network call, refusing 'Artifact manifest is missing id or version.' when it cannot",
+          "oracle": "build",
+          "verify": "read the objectstack.plugin.json entry out of each archive and diff it against the authored file; then run publish against a good artifact (expect it to reach the auth refusal, proving the manifest was read) and against one whose manifest lacks a version (expect the artifact-manifest refusal, before any auth). ⚠️ The publish leg is scored on WHICH refusal arrives, not on success",
+          "evidence": "the compiled manifest of each artifact, and the two publish outputs distinguished by their refusal"
+        },
+        {
+          "clause": "os lint closes the grandfathering loop and is SCOPED while doing it: a config whose manifest declares no compatibility range gets rule protocol/missing-engines-range at severity warning, on path manifest.engines.protocol, carrying an `engines: { protocol: '^<major>' }` fix — and a config declaring no manifest at all is NOT flagged, because a bare metadata fragment has no package identity to hang a range on",
+          "oracle": "log",
+          "verify": "the two runs of step 7, read as a pair. ⛔ The negative half is the load-bearing one: an unscoped rule fires on every metadata fragment in a project and the warning becomes noise nobody reads, which is indistinguishable from the rule working",
+          "evidence": "the finding (rule, severity, path, fix) from the first run and the absence of it in the second"
+        }
+      ],
+      "negative": [
+        "an artifact written from a manifest that failed the schema, or from one missing id/version, is the FAIL this item exists for — the refusal is worthless if the build still produces something publishable",
+        "the two packaging modes producing byte-identical artifacts is a FAIL of the fork clause — but check the fixture first: without a dependency the entry genuinely imports there is nothing to externalize, and that is a fixture defect, not a product one",
+        "⛔ the `integrity` map's PRESENCE is not evidence of an integrity CHECK. os plugin build computes it and writes it into the compiled manifest, and nothing re-verifies it at unpack — #11331 is open on exactly that. Scoring the printed 'Integrity entries' count as a working integrity guarantee is the false-compliance shape the enforce-or-remove ledger exists for, and this item asserts only that the map is PRODUCED",
+        "⛔ likewise the plugin trust tier: build and publish both print `runtime: <value|unset>`, and nothing in this repo dispatches on it — #11330 is open. A run that reads that printed line as isolation has scored a log line, not a capability",
+        "a lint warning that fires on a manifest-less metadata fragment is a FAIL of the scoping half even though the rule itself works"
+      ],
+      "traps": [
+        "stale-dist",
+        "destructive-in-place"
+      ],
+      "source": [
+        "packages/cli/src/commands/plugin/build.ts — manifest read + named refusal :101-107; ManifestSchema.safeParse + formatZodErrors :111-117; the explicit id/version guard :120-125; packaging default and the Loaded line :127-128; entry resolution :131-142; the manifest-deps externalization :155-166; the manifest-deps package.json / pnpm-lock.yaml packing :202-207; computeIntegrity + the compiled manifest :209-213; the artifact write and its printed block :219-230",
+        "packages/cli/src/utils/osplugin.ts — MANIFEST_FILENAME = 'objectstack.plugin.json' :71; OSPLUGIN_EXT :73; computeIntegrity :61-69 (manifest and SIGNATURE excluded, keys sorted); the ustar writer with mtime pinned to 0 :100-135; readOspluginManifest :163-167",
+        "packages/cli/src/commands/plugin/publish.ts — artifact discovery :67-77; readOspluginManifest before any network call :82-89; the id/version refusal :90-94; the unsigned-artifact notice :103-105; the auth refusal :107-116",
+        "packages/spec/src/kernel/manifest.zod.ts — ManifestSchema id :140 and version :202 (both required, version regex-pinned); PluginPackagingSchema :95-97 ('bundled' | 'manifest-deps', ADR-0025 §3.3); PluginRuntimeSchema :85-86 (the trust tier, ADR-0025 §3.6)",
+        "packages/cli/src/commands/lint.ts :375-400 — the protocol/missing-engines-range rule, its manifest scoping and its fix string",
+        "packages/rest/src/package-routes.ts :525-536 — the server mirror (400 PACKAGE_MANIFEST_INVALID), recorded in knownGaps rather than scored here",
+        "content/docs/releases/v15.mdx :514-523 (the release that dated objectstack lint's protocol/missing-engines-range) · ADR-0025 §3.3 / §3.6",
+        "sibling items: platform-core.manifest-install-contract (the same manifest at the install boundary) · cli.build-own-contract and cli.lint-severity-exit-contract (the os build / os lint exit-code contracts this item leans on but does not re-prove)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-08-24",
+          "change": "new — the packaging half of classifying the `manifest` capability for the coverage ratchet, which had flagged it UNCLASSIFIED since its liveness ledger landed. Authored VERIFY-FIRST against source, and two plausible sketch claims were corrected before they became clauses: (1) `id`/`version` are REQUIRED by ManifestSchema (:140, :202), so the explicit post-parse guard in build.ts is the empty-string arm rather than the only identity check — the clause now asserts both shapes as different refusals; (2) the manifest os plugin build reads is objectstack.plugin.json, not the objectstack.config.ts the manifest liveness ledger names first. `since` is v15 as a FLOOR, not a discovery: the protocol/missing-engines-range rule this item's last clause covers is dated to v15 by the release notes, and os plugin build already predates the earliest release in the CLI changelog reachable from this checkout. The two open enforce-or-remove findings on this surface (#11330 runtime tier printed-not-enforced, #11331 integrity computed-not-verified) are recorded in `negative` so a run cannot score either as working machinery",
+          "ref": "#11421"
+        }
       ]
     }
   ]

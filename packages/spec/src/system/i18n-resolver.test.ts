@@ -1078,7 +1078,6 @@ describe('translatePage', () => {
               kpi_revenue_won: { label: '已赢收入' },
               ai_briefing: { title: '询问 AI 助手', description: '从右侧边缘打开助手面板。' },
               lead_picker: { placeholder: '搜索线索…', emptyText: '暂无记录' },
-              new_lead_form: { submitLabel: '创建' },
             },
           },
         },
@@ -1103,11 +1102,11 @@ describe('translatePage', () => {
           { type: 'element:kpi', id: 'kpi_revenue_won', properties: { label: 'Revenue (Won)', value: 42 } },
           { type: 'page:card', id: 'ai_briefing', properties: { title: 'Ask the AI Assistant', description: 'Open the assistant panel from the right edge…' } },
           { type: 'element:record_picker', id: 'lead_picker', properties: { object: 'lead', placeholder: 'Search leads…', emptyText: 'No records' } },
-          // Was `element:form` until #9249 retired that element whole; the
-          // resolver is id-addressed and type-agnostic, and the copy-key face
-          // documents bespoke component types as a legal route for the same
-          // vocabulary — so the `submitLabel` pin rides one of those, pending
-          // the #10926 carrier decision.
+          // Was `element:form` until #9249 retired that element whole, then a
+          // bespoke type carrying the `submitLabel` pin pending #10926. That
+          // ruling retired the key from the copy face, so the node now pins
+          // the NEGATIVE: a bespoke component's `submitLabel` is no longer
+          // overlaid, however the bundle spells it.
           { type: 'hotcrm:quick_form', id: 'new_lead_form', properties: { object: 'lead', submitLabel: 'Create' } },
           { type: 'page:card', id: 'untranslated_card', properties: { title: 'Still English' } },
         ],
@@ -1129,7 +1128,26 @@ describe('translatePage', () => {
       const out = translatePage(homePage(), homeBundle, { locale: 'zh-CN' });
       expect(byId(out, 'lead_picker').properties.placeholder).toBe('搜索线索…');
       expect(byId(out, 'lead_picker').properties.emptyText).toBe('暂无记录');
-      expect(byId(out, 'new_lead_form').properties.submitLabel).toBe('创建');
+    });
+
+    it('no longer overlays `submitLabel` — the key retired from the copy face (#10926)', () => {
+      // Flipped, not deleted: this used to assert the overlay ('创建'). The
+      // schema now refuses `submitLabel` in a bundle, but the resolver is
+      // deliberately schema-independent (it reads whatever object it is
+      // handed — stored rows predating the retirement reach it via the raw
+      // sync path), so the negative is worth pinning on its own: an off-spec
+      // entry carrying the retired key must be IGNORED, not overlaid.
+      const offSpecBundle = {
+        'zh-CN': {
+          pages: {
+            sales_home_page: {
+              components: { new_lead_form: { submitLabel: '创建' } },
+            },
+          },
+        },
+      } as unknown as TranslationBundle;
+      const out = translatePage(homePage(), offSpecBundle, { locale: 'zh-CN' });
+      expect(byId(out, 'new_lead_form').properties.submitLabel).toBe('Create');
     });
 
     it('preserves non-copy properties alongside the overlay', () => {
@@ -1992,5 +2010,215 @@ describe('translateObject — catalog vs explicit override (#8284)', () => {
     );
     expect(out.label).toBe('Customer');
     expect(out.pluralLabel).toBe('客户');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// Screen-flow copy resolvers (#7646 / #11287)
+// ════════════════════════════════════════════════════════════════════════════
+
+import {
+  translateFlow,
+  resolveFlowScreenTitle,
+  translateMetadataDocument as translateMetadataDocumentForFlows,
+  TRANSLATABLE_METADATA_TYPES as TRANSLATABLE_TYPES_FOR_FLOWS,
+} from './i18n-resolver';
+import { type TranslationBundle as FlowTestBundle } from './translation.zod';
+
+describe('translateFlow (#11287)', () => {
+  // Mirrors #11287's measurement: HotCRM's real `lead_conversion` flow with
+  // the real zh-CN bundle carrying the `flows` section. The probe
+  // `i18n.t('flows.lead_conversion.screens.screen_1.title','zh-CN') = 转化详情`
+  // resolved by key with the existing tree — this family is the reader that
+  // was missing.
+  const bundle: FlowTestBundle = {
+    'zh-CN': {
+      flows: {
+        lead_conversion: {
+          label: '转化线索',
+          screens: {
+            screen_1: {
+              title: '转化详情',
+              fields: {
+                createOpportunity: { label: '创建商机？' },
+                opportunityName: { label: '商机名称', placeholder: '输入商机名称' },
+                opportunityAmount: { label: '商机金额' },
+              },
+            },
+          },
+        },
+      },
+    },
+    en: {
+      flows: {
+        lead_conversion: {
+          screens: { screen_1: { fields: { createOpportunity: { label: 'Create Opportunity? (en)' } } } },
+        },
+      },
+    },
+  };
+
+  const leadConversion = () => ({
+    name: 'lead_conversion',
+    label: 'Convert Lead',
+    type: 'screen',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'screen_1',
+        type: 'screen',
+        label: 'Conversion Details',
+        config: {
+          title: 'Conversion Details',
+          description: 'Review the details below.',
+          fields: [
+            { name: 'createOpportunity', label: 'Create Opportunity?', type: 'boolean' },
+            { name: 'opportunityName', label: 'Opportunity Name', placeholder: 'Enter a name' },
+            { name: 'opportunityAmount', label: 'Opportunity Amount' },
+          ],
+        },
+      },
+      { id: 'finish', type: 'assignment', label: 'Assign', config: { assignments: [] } },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'screen_1' }],
+  });
+
+  const screenOf = (doc: any, id = 'screen_1') => doc.nodes.find((n: any) => n.id === id);
+
+  it('translates the flow label, screen title, field labels and placeholder — the measured surfaces', () => {
+    const out = translateFlow(leadConversion(), bundle, { locale: 'zh-CN' });
+    expect(out.label).toBe('转化线索');
+    const screen = screenOf(out);
+    expect(screen.config.title).toBe('转化详情');
+    const byName = (n: string) => screen.config.fields.find((f: any) => f.name === n);
+    expect(byName('createOpportunity').label).toBe('创建商机？');
+    expect(byName('opportunityName').label).toBe('商机名称');
+    expect(byName('opportunityName').placeholder).toBe('输入商机名称');
+    expect(byName('opportunityAmount').label).toBe('商机金额');
+  });
+
+  it('falls back to the authored source strings for keys the bundle omits', () => {
+    const out = translateFlow(leadConversion(), bundle, { locale: 'zh-CN' });
+    const screen = screenOf(out);
+    // The bundle carries no placeholder for these two — authored copy stands.
+    expect(screen.config.fields.find((f: any) => f.name === 'createOpportunity').placeholder)
+      .toBeUndefined();
+    expect(screen.config.fields.find((f: any) => f.name === 'opportunityAmount').placeholder)
+      .toBeUndefined();
+    // Non-copy config and field keys ride through untouched.
+    expect(screen.config.fields.find((f: any) => f.name === 'createOpportunity').type).toBe('boolean');
+    expect(screen.config.description).toBe('Review the details below.');
+  });
+
+  it('negative control — a flow the bundle does not carry comes back unchanged (same reference)', () => {
+    const doc = { ...leadConversion(), name: 'other_flow' };
+    expect(translateFlow(doc, bundle, { locale: 'zh-CN' })).toBe(doc);
+  });
+
+  it('resolves KEY BY KEY across the locale chain — a partial zh entry still falls back to en', () => {
+    const partialZh: FlowTestBundle = {
+      'zh-CN': {
+        flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } },
+      },
+      en: bundle.en,
+    };
+    const out = translateFlow(leadConversion(), partialZh, { locale: 'zh-CN' });
+    const screen = screenOf(out);
+    expect(screen.config.title).toBe('转化详情');
+    expect(screen.config.fields.find((f: any) => f.name === 'createOpportunity').label)
+      .toBe('Create Opportunity? (en)');
+  });
+
+  it('writes the translated title even when the author declared no `config.title`', () => {
+    // The executor builds the wire title as `config.title ?? node.label`, so
+    // writing `config.title` covers whichever of the two the author relied on
+    // — the one-key-covers-both rule the schema's `flows` note records.
+    const doc = leadConversion();
+    delete (screenOf(doc).config as any).title;
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(screenOf(out).config.title).toBe('转化详情');
+    // The designer-canvas node label is NOT on the vocabulary — untouched.
+    expect(screenOf(out).label).toBe('Conversion Details');
+  });
+
+  it('ignores off-spec bundle keys the schema refuses — never overlays them (`description`, `help`)', () => {
+    // The resolver is deliberately schema-independent (stored rows reach it
+    // via the raw sync path), so the negative is pinned on its own, the same
+    // way `translatePage` pins the retired `submitLabel`.
+    const offSpec = {
+      'zh-CN': {
+        flows: {
+          lead_conversion: {
+            screens: {
+              screen_1: {
+                description: '不应出现',
+                fields: { opportunityName: { help: '不应出现' } },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as FlowTestBundle;
+    const out = translateFlow(leadConversion(), offSpec, { locale: 'zh-CN' });
+    const screen = screenOf(out);
+    expect(screen.config.description).toBe('Review the details below.');
+    expect(screen.config.fields.find((f: any) => f.name === 'opportunityName').help).toBeUndefined();
+  });
+
+  it('touches only screen nodes with an id, and does not mutate the input document', () => {
+    const doc = leadConversion();
+    const frozen = JSON.parse(JSON.stringify(doc));
+    const out = translateFlow(doc, bundle, { locale: 'zh-CN' });
+    expect(doc).toEqual(frozen);                     // input untouched
+    expect(screenOf(out, 'start')).toBe(doc.nodes[0]);   // non-screen node: same reference
+    expect(screenOf(out, 'finish')).toBe(doc.nodes[2]);
+    const anonymous = {
+      ...leadConversion(),
+      nodes: [{ type: 'screen', label: 'No Id', config: { title: 'No Id' } }],
+    };
+    const outAnon = translateFlow(anonymous, bundle, { locale: 'zh-CN' });
+    expect(outAnon.nodes[0]).toBe(anonymous.nodes[0]);   // id-less screen: untouched
+  });
+
+  it('is deliberately NOT in the metadata-document dispatch — the runner card owns that wiring', () => {
+    // Registering `flow` in METADATA_DOCUMENT_TRANSLATORS reaches the REST
+    // metadata boundary by itself (TRANSLATABLE_METADATA_TYPES drives
+    // @objectstack/rest, #3786), which would stand up a shipped reader of the
+    // `flows` group while its liveness rows are `planned`. Pin the absence so
+    // adding it is a deliberate act on the runner card, not a drive-by.
+    expect(TRANSLATABLE_TYPES_FOR_FLOWS.has('flow')).toBe(false);
+    const doc = leadConversion();
+    expect(translateMetadataDocumentForFlows('flow', doc, bundle, { locale: 'zh-CN' })).toBe(doc);
+  });
+});
+
+describe('resolveFlowScreenTitle (#11287)', () => {
+  const bundle: FlowTestBundle = {
+    'zh-CN': {
+      flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } },
+    },
+  };
+
+  it('resolves against flows.<flow>.screens.<nodeId>.title from a ScreenSpec-shaped input', () => {
+    // The shape a paused AutomationResult carries client-side.
+    const screen = { nodeId: 'screen_1', title: 'Conversion Details', fields: [] };
+    expect(resolveFlowScreenTitle(bundle, 'lead_conversion', screen, { locale: 'zh-CN' }))
+      .toBe('转化详情');
+  });
+
+  it('falls back to the literal screen title, then undefined — the family order', () => {
+    expect(resolveFlowScreenTitle(bundle, 'lead_conversion', { nodeId: 'screen_2', title: 'Step 2' }, { locale: 'zh-CN' }))
+      .toBe('Step 2');
+    expect(resolveFlowScreenTitle(bundle, 'other_flow', { nodeId: 'screen_1', title: 'Details' }, { locale: 'zh-CN' }))
+      .toBe('Details');
+    expect(resolveFlowScreenTitle(undefined, 'lead_conversion', { nodeId: 'screen_1' }, { locale: 'zh-CN' }))
+      .toBeUndefined();
+    expect(resolveFlowScreenTitle(bundle, 'other_flow', { nodeId: 'screen_2' }, { locale: 'zh-CN' }))
+      .toBeUndefined();
+  });
+
+  it('applies the BCP-47 ladder the rest of the surface uses', () => {
+    expect(resolveFlowScreenTitle(bundle, 'lead_conversion', { nodeId: 'screen_1' }, { locale: 'zh' }))
+      .toBe('转化详情');
   });
 });
