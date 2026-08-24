@@ -9863,7 +9863,19 @@ export class ObjectStackProtocolImplementation implements
         // pre-tokenised channel is exactly the divergence this card closed.
         const terms = q.split(/\s+/).filter(Boolean).slice(0, 8);
 
-        const allObjects = (this.engine as any).registry?.getAllObjects?.() ?? [];
+        // [#11754] No `?.` and no `?? []` on this read. The invented empty
+        // list made the whole sweep a silent no-op — zero hits,
+        // `objectsScanned: 0`, and a successful response — for a host whose
+        // registry cannot enumerate at all. `SchemaRegistry.getAllObjects()`
+        // walks in-memory Maps and has no throwing path, so what the guards
+        // absorbed was only the STRUCTURAL omission (a registry without the
+        // method), which never throws and is therefore invisible by
+        // construction. A registry that cannot enumerate its objects is
+        // never truthfully "no objects" (ADR-0110 D3) — the omission
+        // propagates, the same disposition as the engine's own registry
+        // sweeps (#9284). `registry` is a declared member of
+        // `MetadataHostEngine`, so the cast went with the guards.
+        const allObjects = this.engine.registry.getAllObjects();
         const hits: Array<{ object: string; id: string; title: string; snippet?: string; record: any }> = [];
         let objectsScanned = 0;
 
