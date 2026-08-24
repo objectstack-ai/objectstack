@@ -1654,6 +1654,30 @@ jobs:
       - name: Node-version drift guard
         run: pnpm check:node-version
 
+      # pnpm-acquisition census. Sibling of the guard above, and here for the
+      # failure the guard above cannot have: a census that reaches ZERO while
+      # the thing it measures is still there. The `corepack enable` sites are
+      # moving onto .github/actions/setup-pnpm, and when that finishes a grep
+      # for `corepack enable` returns 0 — a true answer about Corepack that
+      # reads as a complete answer about pnpm acquisition. It is not one:
+      # showcase-smoke.yml acquires pnpm through `pnpm/action-setup`, which
+      # contains no Corepack string and is invisible to that key. A metric that
+      # hits zero while its subject survives is worse than no metric, because it
+      # retires the attention.
+      #
+      # So this gate is keyed on the NEED, not the mechanism: the population is
+      # every job that RUNS pnpm. A mechanism nobody has taught it cannot become
+      # a silent zero — it surfaces as a job running pnpm with no recognised
+      # acquisition, which fails loudly. It prints the full census on SUCCESS
+      # (every mechanism keeps a row, including the ones at 0), so the answer to
+      # "how does CI get pnpm" is one job log rather than a grep nobody thinks
+      # to re-derive. It also pins the ordering that killed two jobs in this
+      # repo with "Unable to locate executable file: pnpm": a setup-node asking
+      # for the pnpm store cache shells out to pnpm, so pnpm must be acquired
+      # strictly earlier. Runs its own --self-test first.
+      - name: pnpm-acquisition census
+        run: pnpm check:pnpm-acquisition
+
       # Workflow status-function guard (#5343, from #4900 and #4928). GitHub
       # wraps any `if:` that names no status function in an IMPLICIT success().
       # So a job-level condition written to read an upstream job's OUTPUT VALUE

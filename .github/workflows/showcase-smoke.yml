@@ -19,6 +19,31 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      # ⚠️ This is the ONLY job in the repo that acquires pnpm through
+      # `pnpm/action-setup`, and the only one using setup-node's `cache: pnpm`.
+      # Those are the same fact, and the order below is load-bearing — read this
+      # before "tidying" it onto `.github/actions/setup-pnpm` like every other
+      # caller.
+      #
+      # `cache: pnpm` makes setup-node shell out to pnpm to locate the store, so
+      # pnpm must already be on PATH when setup-node runs. That is the OPPOSITE
+      # ordering from every setup-pnpm caller here (setup-node first, then the
+      # composite). Getting it backwards does not degrade, it kills the job in
+      # the setup step with "Unable to locate executable file: pnpm" — the
+      # failure `partof-closing-keyword-guard.yml` and `single-claim-path-guard.yml`
+      # both carry receipts for. `pnpm check:pnpm-acquisition` fails on that
+      # inversion, so the naive conversion is caught rather than shipped.
+      #
+      # Converting is therefore not a swap: it means DROPPING `cache: pnpm` and
+      # adding the house pair (`pnpm store path` → actions/cache, as ci.yml does
+      # seven times over). Deliberately not done here. This job is nightly and
+      # non-blocking, its one uncached pnpm download is a single fetch rather
+      # than the per-queue-build multiplier the composite was built to remove,
+      # and the restructure trades that for re-plumbing the dependency cache of
+      # a green job nothing gates on. The site is not hidden by staying: it is
+      # counted and printed by `pnpm check:pnpm-acquisition`, which is keyed on
+      # jobs that RUN pnpm rather than on any one spelling — precisely so this
+      # path cannot vanish from a `corepack enable`-shaped census again.
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:

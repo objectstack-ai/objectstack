@@ -104,6 +104,7 @@
     "check:release-page-status": "node scripts/check-release-page-status.mjs --self-test && node scripts/check-release-page-status.mjs",
     "check:release-body": "node scripts/release-github-releases.mjs --self-test",
     "check:node-version": "node scripts/check-node-version.mjs",
+    "check:pnpm-acquisition": "node scripts/check-pnpm-acquisition.mjs --self-test && node scripts/check-pnpm-acquisition.mjs",
     "check:workflow-status-functions": "node scripts/check-workflow-status-functions.mjs --self-test && node scripts/check-workflow-status-functions.mjs",
     "check:shard-attestation": "node scripts/check-shard-attestation.mjs --self-test && node scripts/check-shard-attestation.mjs",
     "check:required-contexts": "node scripts/check-required-contexts.mjs --self-test && node scripts/check-required-contexts.mjs",
