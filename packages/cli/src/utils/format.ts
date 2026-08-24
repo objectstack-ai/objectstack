@@ -985,3 +985,77 @@ export function printMetadataStats(stats: MetadataStats) {
     console.log(`  ${chalk.bold(section.label + ':')} ${line}`);
   }
 }
+
+// ─── Author-time advisories ─────────────────────────────────────────
+
+/**
+ * One author-time advisory, in the shape the authoring-rule registry reports
+ * (`@objectstack/lint`'s `splitBySeverity(...).advisories`) and the shape
+ * `os build --json` / `os validate --json` publish under `warnings`.
+ *
+ * Declared structurally rather than re-exported from `@objectstack/lint` so
+ * this rendering helper stays a pure formatter with no rule-engine import.
+ */
+export interface AuthoringAdvisory {
+  where: string;
+  message: string;
+  rule: string;
+  path: string;
+  hint?: string;
+}
+
+/**
+ * How many advisories `printAuthoringAdvisories` renders in full before it
+ * switches to the withheld-count line. The cap itself is not the defect it
+ * guards against — see below — so it keeps the value it has always had.
+ */
+export const AUTHORING_ADVISORY_PRINT_LIMIT = 50;
+
+/**
+ * Print author-time advisories, and — this is the point — say so when the
+ * list was cut.
+ *
+ * #11529: `os build` printed a fixed 50 detailed entries and then stopped,
+ * with nothing in the output saying the list had been truncated. Measured on
+ * `objectstack-ai/hotcrm` with the published 17.1.0 CLI: two runs, 80 and then
+ * 75 advisories, both printing exactly 50 entries and exactly 184 lines. The
+ * summary line counted all of them (`⚠ 80 author-time warning(s) — see
+ * above`) while only 50 were above, and removing five warnings made five
+ * previously-unprinted ones appear — which reads as a regression caused by the
+ * fix. Because the advisories are ordered by surface (pages, then views, then
+ * flows), a repo whose page warnings alone exceed the cap keeps every `view`
+ * and `flow` advisory permanently invisible.
+ *
+ * The defect is the SILENCE, not the cap. Truncated output that carries no
+ * notice is not merely incomplete — it is indistinguishable from complete, so
+ * an author who reads it and sees their file is clean has read a list that
+ * stopped early. That is the same shape as the dropped summary rows above
+ * (#10504, #10952): output that cannot distinguish "none" from "not shown".
+ *
+ * So the cap stays and the honesty line is added: over the limit, the exact
+ * remainder is named; at or under it, no such line appears. The pointer is
+ * `--json`, which already carries the whole set (`warnings: ruleAdvisories`)
+ * — a complete-output path that exists today, rather than a new flag.
+ *
+ * Rendering for a set at or under the limit is byte-for-byte what it was.
+ */
+export function printAuthoringAdvisories(
+  advisories: readonly AuthoringAdvisory[],
+  limit: number = AUTHORING_ADVISORY_PRINT_LIMIT,
+): void {
+  if (advisories.length === 0) return;
+
+  for (const f of advisories.slice(0, limit)) {
+    printWarning(`${f.where}: ${f.message}`);
+    if (f.hint) console.log(chalk.dim(`    ${f.hint}`));
+    console.log(chalk.dim(`    rule: ${f.rule}  at ${f.path}`));
+  }
+
+  const shown = Math.min(advisories.length, limit);
+  const withheld = advisories.length - shown;
+  if (withheld > 0) {
+    printWarning(
+      `… and ${withheld} more author-time warning(s) not shown (${shown} of ${advisories.length}) — re-run with --json for the full list`,
+    );
+  }
+}
