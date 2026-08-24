@@ -100,7 +100,7 @@ import {
   MaskedValueWriteError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed, type EngineOwnedSchemaLike } from './system-write-guard.js';
-import { bootstrapPlatformAdmin } from './bootstrap-platform-admin.js';
+import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import {
   backfillOrgAdminGrants,
   extractMemberPairs,
@@ -3279,11 +3279,23 @@ export class SecurityPlugin implements Plugin {
       void runBootstrap();
     }
 
-    // Re-run bootstrap after a sys_user insert so the FIRST user that
-    // signs up after boot is auto-promoted to platform admin (and, in
-    // multi-tenant mode, bound to the seeded default organization)
-    // without requiring a server restart. The function itself is
-    // idempotent and bails out as soon as any platform admin exists.
+    // Re-run bootstrap after a sys_user write that can change the elevation
+    // answer, so the platform admin is promoted without a server restart:
+    //
+    //  - INSERT: the user that signs up after boot may be the promotion
+    //    target (and, in multi-tenant mode, gets bound to the seeded default
+    //    organization).
+    //  - UPDATE touching `email_verified` / `email` (#11343): under walled
+    //    postures elevation requires the declared owner's email to be
+    //    VERIFIED, and the verifying write is an update (better-auth flips
+    //    `emailVerified` when the link is clicked; change-email rewrites
+    //    both columns). Insert-only replay would refuse the owner at sign-up
+    //    and then never look again — the genuine owner would never be
+    //    elevated at all.
+    //
+    // The trigger set is `shouldReplayBootstrapFor` — the SAME predicate its
+    // pins consume — and the function itself is idempotent, bailing out as
+    // soon as any platform admin exists.
     //
     // We deliberately do NOT auto-create a "personal workspace" for
     // every subsequent self-service signup. In a B2B / invitation-
@@ -3294,10 +3306,7 @@ export class SecurityPlugin implements Plugin {
     // this case.
     ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
       await next();
-      if (
-        opCtx?.object === 'sys_user' &&
-        (opCtx?.operation === 'create' || opCtx?.operation === 'insert')
-      ) {
+      if (shouldReplayBootstrapFor(opCtx)) {
         if (bootstrapRanOnce) {
           await runBootstrap();
         }

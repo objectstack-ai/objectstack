@@ -98,6 +98,86 @@ describe('SecurityPlugin', () => {
     await expect(plugin.destroy()).resolves.toBeUndefined();
   });
 
+  // -------------------------------------------------------------------------
+  // [#11343] Bootstrap-replay wiring — the middleware registered in start()
+  // re-runs the bootstrap for exactly the writes `shouldReplayBootstrapFor`
+  // admits. The predicate itself is pinned exhaustively next to its producer
+  // (bootstrap-platform-admin-walled-owner.test.ts); THIS pin is that the
+  // middleware actually consults it — i.e. that a sys_user UPDATE touching
+  // `email_verified` re-runs the bootstrap. Insert-only replay + the verified
+  // requirement would strand the genuine owner unelevated forever, so the
+  // update leg is load-bearing, not an optimization.
+  // -------------------------------------------------------------------------
+  it('re-runs the bootstrap on the verifying sys_user update, and not on an unrelated profile edit (#11343)', async () => {
+    const plugin = new SecurityPlugin();
+    const middlewares: any[] = [];
+    const manifestService = { register: vi.fn() };
+    // A ql fake rich enough for runBootstrap to COMPLETE (that is what arms
+    // the replay: `bootstrapRanOnce` is only set on completion, right before
+    // the 'platform bootstrap complete' log this pin counts).
+    const ql: any = {
+      registerMiddleware: (mw: any) => middlewares.push(mw),
+      find: vi.fn(async () => []),
+      findOne: vi.fn(async () => null),
+      insert: vi.fn(async (_o: string, d: any) => ({ id: d?.id ?? 'x' })),
+      update: vi.fn(async () => true),
+      getSchema: () => undefined,
+    };
+    const metadata = { get: async () => null, list: async () => [] };
+    const services: Record<string, any> = { manifest: manifestService, objectql: ql, metadata };
+    const hook = vi.fn();
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: vi.fn(),
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`service not registered: ${name}`);
+        return services[name];
+      },
+      hook,
+    };
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+
+    // Drive the initial bootstrap to completion by firing every kernel:ready
+    // callback in registration order — exactly what the kernel does. start()
+    // registers several (runBootstrap is not the first), so firing only one
+    // would leave the replay disarmed and every assertion below vacuous.
+    const ready = hook.mock.calls.filter((c: any[]) => c[0] === 'kernel:ready');
+    expect(ready.length).toBeGreaterThan(0);
+    for (const [, cb] of ready) await cb();
+    const completions = () =>
+      ctx.logger.info.mock.calls.filter((c: any[]) => String(c[0]).includes('platform bootstrap complete')).length;
+    // Positive control: the initial run completed — the replay is armed. If
+    // this line fails, the fake ql was not rich enough and every assertion
+    // below would be vacuous.
+    expect(completions()).toBe(1);
+
+    const drive = async (opCtx: any) => {
+      for (const mw of middlewares) {
+        try {
+          await mw(opCtx, async () => {});
+        } catch {
+          // Another middleware (e.g. the CRUD-authorization one) may refuse a
+          // bare opCtx — irrelevant here: the replay middleware never throws.
+        }
+      }
+    };
+
+    // The verifying write (better-auth flips emailVerified on link click,
+    // snake_cased by the adapter) ⇒ ONE re-run.
+    await drive({ object: 'sys_user', operation: 'update', data: { id: 'u1', email_verified: true } });
+    expect(completions()).toBe(2);
+
+    // An unrelated profile edit ⇒ NO re-run.
+    await drive({ object: 'sys_user', operation: 'update', data: { id: 'u1', name: 'New Name' } });
+    expect(completions()).toBe(2);
+
+    // The original insert trigger still fires (control that the update leg
+    // did not narrow the existing behavior).
+    await drive({ object: 'sys_user', operation: 'insert', data: { email: 'a@b.c' } });
+    expect(completions()).toBe(3);
+  });
+
   // [ADR-0105 D2 / #3623] start() hands the engine a posture accessor so the
   // driver-level native tenant scope can widen to the membership union under
   // `group`. Wired from the enforcement layer on purpose: no SecurityPlugin,
