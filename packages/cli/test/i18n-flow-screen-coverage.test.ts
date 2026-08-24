@@ -30,8 +30,8 @@
 // hand-copied list here fails rather than silently offering a key nothing reads.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract';
-import { computeI18nCoverage, type CoverageIssue, type CoverageReport } from '../src/utils/i18n-coverage';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { computeI18nCoverage, type CoverageIssue, type CoverageReport } from '../src/utils/i18n-coverage.js';
 import {
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
