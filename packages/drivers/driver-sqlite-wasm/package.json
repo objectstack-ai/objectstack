@@ -34,7 +34,7 @@
     "@objectstack/spec": "workspace:*",
     "knex": "^3.3.0",
     "nanoid": "^6.0.1",
-    "sql.js": "^1.14.1"
+    "sql.js": "^1.14.2"
   },
   "devDependencies": {
     "@objectstack/formula": "workspace:*",

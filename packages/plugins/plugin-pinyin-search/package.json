@@ -21,7 +21,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/types": "workspace:*",
-    "pinyin-pro": "^3.29.1"
+    "pinyin-pro": "^3.29.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
