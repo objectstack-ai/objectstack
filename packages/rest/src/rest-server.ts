@@ -6296,10 +6296,16 @@ export class RestServer {
                         });
                         return;
                     }
-                    // `next: null` = no FSM governs the field; `next: []` =
-                    // a declared dead end. Same three-valued answer the
-                    // dispatcher gives, because a UI asking "where can this
-                    // record go" must be able to tell those apart.
+                    // Three answer values — `next: null`, `next: []` (a
+                    // declared dead end), and the legal-next list — the same
+                    // answer the dispatcher gives, because a UI asking "where
+                    // can this record go" must tell those apart. But `null`
+                    // is overloaded across TWO input conditions: no FSM
+                    // governs the field, or the caller omitted `?from=` (no
+                    // `from` => no transition table to answer with), which
+                    // the line below folds onto the same `null` without
+                    // consulting the rule. A UI therefore cannot read `null`
+                    // as "no state machine" unless it passed a `from`.
                     const next = from === undefined ? null : legalNextStates(schema, field, from);
                     res.json({ object: name, field, from: from ?? null, next });
                 } catch (error: any) {

@@ -232,8 +232,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // ADR-0020 D3.3 introspection: the legal next states declared by the
     // object's `state_machine` validation rule for `:field`. Lets UIs /
     // AI authors ask "from here, where can this record go?" instead of
-    // hard-coding the transition table. Returns `next: null` when no FSM
-    // governs the field, `next: []` for a declared dead-end state.
+    // hard-coding the transition table. `next: []` is a declared
+    // dead-end state. `next: null` has TWO causes: no FSM governs the
+    // field, or the caller omitted `?from=` (no `from` => no transition
+    // table to answer with) — the handler short-circuits on that before
+    // it ever consults the rule. So a `null` answered to a call
+    // that passed no `from` is not evidence the field has no state
+    // machine; re-ask with `?from=`.
     if (parts.length === 4 && (parts[0] === 'objects' || parts[0] === 'object') && parts[2] === 'state' && (!method || method === 'GET')) {
         const name = parts[1];
         const field = parts[3];
