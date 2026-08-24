@@ -92,10 +92,17 @@
 //
 // The sibling asserts "no non-admin ever gets a 2xx" over a DERIVED population.
 // This one asserts the dual over the same derived population: **no route
-// refuses the platform admin unless it is a recorded by-design refusal.** That
-// is what puts route N+1 in scope automatically — a newly mounted admin route
-// that forgets the ADR-0068 gate refuses the platform admin, and fails here by
-// name until someone either gates it properly or writes down why it refuses.
+// refuses the platform admin unless it is a recorded by-design refusal.**
+//
+// ⚠️ Which assertion actually catches route N+1 is worth being exact about,
+// because the obvious answer is wrong. Each route is fired with the payload
+// declared beside its classification — it has to be, or the vendor's pre-auth
+// body check answers `400 VALIDATION_ERROR` and the reading is void. So an
+// UNCLASSIFIED route has no payload, dies at that check, and never produces a
+// refusal to notice. The tripwire is therefore the CLASSIFICATION-COMPLETENESS
+// assertion, which runs first and fails by name; the refusal assertions cover
+// routes already classified. This is not a guess — it is what this file's own
+// ablation measured when one classification was deleted.
 //
 // @proof: admin-platform-admin-standing
 
@@ -672,6 +679,28 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       if (route === impersonate) adminToken = await stack.signIn(); // #8243 rotation
     }
 
+    // ⭐ FIRST, because this is the assertion a NEWLY MOUNTED route trips.
+    //
+    // It has to be first, and the reason is worth stating: the sweep fires each
+    // route with the payload DECLARED beside its classification, so a route
+    // nobody has classified is fired with no payload at all and dies at the
+    // vendor's pre-auth body check — a `400`, not a refusal. That means
+    // `unexplainedRefusals` below can NOT be relied on to notice route N+1;
+    // THIS check is what does, and it fails by name with the instruction.
+    // (Measured during this file's own ablation: deleting one classification
+    // produced exactly that 400, and only this assertion caught it.)
+    const unclassified = derived.filter(
+      (r) => !(r in refusedByDesign) && !(ADMITTED as readonly string[]).includes(r) && !(r in NOT_AN_AUTHORIZATION_ANSWER),
+    );
+    expect(
+      unclassified,
+      'the stack serves /admin/ route(s) this file neither admits, refuses-by-design, nor classifies as ' +
+        'answering for a non-authorization reason. A new admin route is IN SCOPE the moment it is mounted: ' +
+        'record what a PLATFORM ADMIN must get from it — 2xx if it carries the ADR-0068 gate, or an entry in ' +
+        'refusedByDesignFor() naming the card that ruled the refusal — together with a payload valid enough ' +
+        `to reach the gate:\n${unclassified.join('\n')}`,
+    ).toEqual([]);
+
     expect(
       neverReachedTheGate,
       'the probe payload for these routes was rejected before the authorization check ran, so their ' +
@@ -696,15 +725,5 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
         `assertion:\n${unexpectedlyAdmitted.join('\n')}`,
     ).toEqual([]);
 
-    // Every route the sweep passed over without an authorization reading is
-    // classified, so "not a refusal" can never quietly mean "not measured".
-    const unclassified = derived.filter(
-      (r) => !(r in refusedByDesign) && !(ADMITTED as readonly string[]).includes(r) && !(r in NOT_AN_AUTHORIZATION_ANSWER),
-    );
-    expect(
-      unclassified,
-      'the stack serves /admin/ route(s) this file neither admits, refuses-by-design, nor classifies as ' +
-        `answering for a non-authorization reason:\n${unclassified.join('\n')}`,
-    ).toEqual([]);
   }, 900_000);
 });
