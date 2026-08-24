@@ -61,7 +61,7 @@
 // real ObjectStack consumer appearing), and it belongs to #9969 / #9968, not to
 // whoever next reads this file and mistakes a deliberate refusal for a bug.
 // If you are here because you added that consumer: mount the route with the
-// ADR-0068 gate, move its entry from `REFUSED_BY_DESIGN` to `ADMITTED`, and the
+// ADR-0068 gate, move its entry from `refusedByDesignFor()` to `ADMITTED`, and the
 // sweep at the bottom will hold you to it.
 //
 // ── Why the fixture is NOT the one the unit tests use ───────────────────────
@@ -121,51 +121,75 @@ const rowsOf = (r: unknown): Array<Record<string, unknown>> =>
  * message, so a failure here reads as "the ruled refusal moved", never as
  * "found a 403, presumably a bug".
  */
-const REFUSED_BY_DESIGN: Record<
-  string,
-  { code: string; body?: Record<string, unknown>; query?: string; ruledBy: string; why: string }
-> = {
+interface RefusalSpec {
+  code: string;
+  /**
+   * ⚠️ LOAD-BEARING, and it cost an ablation to learn it. better-auth validates
+   * the request body BEFORE the admin check, so a route fired with no payload
+   * answers `400 VALIDATION_ERROR` — to a platform admin and a plain member
+   * alike — and a sweep built on empty bodies asserts NOTHING about
+   * authorization while looking exactly like a passing security suite. Every
+   * payload here is valid enough to REACH the gate, and the sweep below refuses
+   * to read a validation error as an authorization answer.
+   */
+  body?: Record<string, unknown>;
+  query?: string;
+  ruledBy: string;
+  why: string;
+}
+
+function refusedByDesignFor(targetUserId: string): Record<string, RefusalSpec> {
+  return {
   'POST /api/v1/auth/admin/remove-user': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS',
+    body: { userId: targetUserId },
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand. It also still carries better-auth\'s break-glass last-local-credential before-hook precisely BECAUSE it is not shadowed by a raw mount',
   },
   'POST /api/v1/auth/admin/revoke-user-session': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS',
+    body: { sessionToken: 'standing-probe-session-token' },
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand',
   },
   'POST /api/v1/auth/admin/revoke-user-sessions': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS',
+    body: { userId: targetUserId },
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand',
   },
   'POST /api/v1/auth/admin/list-user-sessions': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_LIST_USERS_SESSIONS',
+    body: { userId: targetUserId },
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand',
   },
   'POST /api/v1/auth/admin/update-user': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS',
+    body: { userId: targetUserId, data: { name: 'Renamed By A Refused Call' } },
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand',
   },
   'GET /api/v1/auth/admin/list-users': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_LIST_USERS',
+    query: '?limit=1',
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; the console reads the roster through the ObjectQL sys_user surface, not this endpoint',
   },
   'GET /api/v1/auth/admin/get-user': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_GET_USER',
+    query: `?id=${targetUserId}`,
     ruledBy: '#9969 (closed not_planned)',
     why: 'no ObjectStack consumer; re-implement on demand',
   },
   'POST /api/v1/auth/admin/set-role': {
     code: 'YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE',
+    body: { userId: targetUserId, role: 'admin' },
     ruledBy: '#9968 (ruled B 2026-08-20, reaffirmed 2026-08-22; action retired by PR #11530)',
     why: 'its ONLY effect is writing the ADR-0068-D2-retired legacy role scalar, which customSession folds back into positions[]. The sys_user console action was RETIRED rather than the route re-implemented — a working one would resurrect the dual identity representation the 2026-08-18 Option-3 veto killed',
   },
-};
+  };
+}
 
 /**
  * Every `/admin/` route that answers a platform admin WITHOUT a gate refusal.
@@ -226,6 +250,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
   let adminToken: string;
   let adminUserId: string;
   let targetUserId: string;
+  let refusedByDesign: Record<string, RefusalSpec>;
   let priorScim: string | undefined;
 
   /**
@@ -264,6 +289,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       await ql.find('sys_user', { where: { email: 'standing.probe.target@example.com' }, limit: 1 }, { context: SYS }),
     );
     targetUserId = String(target.id);
+    refusedByDesign = refusedByDesignFor(targetUserId);
   }, 300_000);
 
   afterAll(async () => {
@@ -308,7 +334,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
   /** INSTRUMENT 2 — the by-design refusal. Exact status AND exact code. */
   async function expectRefusedByDesign(route: string): Promise<Answer> {
     requireIdentityControl();
-    const spec = REFUSED_BY_DESIGN[route];
+    const spec = refusedByDesign[route];
     expect(spec, `${route} is not on the by-design list`).toBeDefined();
     const answer = await fire(route, spec.body, spec.query ?? '');
 
@@ -317,7 +343,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       `${route} answered the platform admin ${answer.status}, not 403.\n` +
         `⛔ This refusal is RULED, by ${spec.ruledBy}: ${spec.why}.\n` +
         `If the route now ADMITS the admin, someone re-implemented it — move its entry from ` +
-        `REFUSED_BY_DESIGN to ADMITTED and pin the effect. If it answers some OTHER refusal, the vendor's ` +
+        `refusedByDesignFor() to ADMITTED and pin the effect. If it answers some OTHER refusal, the vendor's ` +
         `posture moved and this pin is the thing that noticed.\n${answer.body}`,
     ).toBe(403);
 
@@ -457,24 +483,17 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     // would be plainly visible in it if they had.
     const [before] = rowsOf(await ql.find('sys_user', { where: { id: targetUserId }, limit: 1 }, { context: SYS }));
 
-    const specs: Record<string, unknown> = {
-      'POST /api/v1/auth/admin/remove-user': { userId: targetUserId },
-      'POST /api/v1/auth/admin/revoke-user-session': { sessionToken: 'standing-probe-session-token' },
-      'POST /api/v1/auth/admin/revoke-user-sessions': { userId: targetUserId },
-      'POST /api/v1/auth/admin/list-user-sessions': { userId: targetUserId },
-      'POST /api/v1/auth/admin/update-user': { userId: targetUserId, data: { name: 'Renamed By A Refused Call' } },
-      'POST /api/v1/auth/admin/set-role': { userId: targetUserId, role: 'admin' },
-    };
-    for (const [route, body] of Object.entries(specs)) {
-      const spec = REFUSED_BY_DESIGN[route];
-      expect(spec, `${route} has no REFUSED_BY_DESIGN entry — the by-design list and this loop disagree`).toBeDefined();
-      spec.body = body as Record<string, unknown>;
-      await expectRefusedByDesign(route);
-    }
-    REFUSED_BY_DESIGN['GET /api/v1/auth/admin/list-users'].query = '?limit=1';
-    await expectRefusedByDesign('GET /api/v1/auth/admin/list-users');
-    REFUSED_BY_DESIGN['GET /api/v1/auth/admin/get-user'].query = `?id=${targetUserId}`;
-    await expectRefusedByDesign('GET /api/v1/auth/admin/get-user');
+    // ⛔ This loop reads the declared table and mutates nothing. It used to
+    // assign each payload here, which made the SWEEP below silently depend on
+    // this test having run first — measured during ablation: with this test
+    // aborted early the sweep fired every by-design route with an EMPTY body,
+    // drew `400 VALIDATION_ERROR` from the vendor's pre-auth body check, and
+    // reported it as "the route now admits the platform admin". The payloads
+    // live with their entries now, and the sweep refuses to read a validation
+    // error as an authorization answer.
+    const byDesign = Object.keys(refusedByDesign);
+    expect(byDesign.length, 'the by-design list is empty — this test would assert nothing').toBe(8);
+    for (const route of byDesign) await expectRefusedByDesign(route);
 
     // The no-effect control. A refusal that still did the thing is the worst
     // possible reading of a green refusal assertion.
@@ -562,7 +581,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     // the sweep vacuous, and every by-design entry must still be served.
     expect(objectstack.length, 'no ObjectStack raw /admin/ mounts derived').toBeGreaterThan(0);
     expect(betterAuth.size, 'no better-auth /admin/ endpoints derived').toBeGreaterThan(0);
-    const missing = Object.keys(REFUSED_BY_DESIGN).filter((r) => !derived.includes(r));
+    const missing = Object.keys(refusedByDesign).filter((r) => !derived.includes(r));
     expect(missing, `by-design route(s) the stack no longer serves — the entries are stale:\n${missing.join('\n')}`).toEqual(
       [],
     );
@@ -570,7 +589,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     expect(admittedMissing, `ADMITTED route(s) no longer served:\n${admittedMissing.join('\n')}`).toEqual([]);
     // The two instruments must never be pointed at the same route.
     expect(
-      ADMITTED.filter((r) => r in REFUSED_BY_DESIGN),
+      ADMITTED.filter((r) => r in refusedByDesign),
       'a route is listed as both admitted and refused-by-design',
     ).toEqual([]);
 
@@ -618,12 +637,14 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       'POST /api/v1/auth/admin/has-permission': { body: { permissions: { user: ['list'] } } },
       'POST /api/v1/auth/admin/stop-impersonating': { body: {} },
       ...Object.fromEntries(
-        Object.entries(REFUSED_BY_DESIGN).map(([route, spec]) => [route, { body: spec.body, query: spec.query }]),
+        Object.entries(refusedByDesign).map(([route, spec]) => [route, { body: spec.body, query: spec.query }]),
       ),
     };
 
     const unexplainedRefusals: string[] = [];
     const unexpectedlyAdmitted: string[] = [];
+    /** Answers that never reached the gate — a void reading, not a verdict. */
+    const neverReachedTheGate: string[] = [];
     for (const route of order) {
       if (route === impersonate) {
         // Guarantee the target is not banned, so a 403 here can only be the
@@ -633,21 +654,37 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       const spec = bodies[route] ?? {};
       const answer = await fire(route, spec.body, spec.query ?? '');
       const isGateRefusal = answer.status === 401 || answer.status === 403;
+      const line = `${route} -> ${answer.status} ${answer.code ?? '(no code)'} ${answer.body}`;
 
-      if (isGateRefusal && !(route in REFUSED_BY_DESIGN)) {
-        unexplainedRefusals.push(`${route} -> ${answer.status} ${answer.code ?? '(no code)'} ${answer.body}`);
+      // A payload the server rejects before authorizing is a VOID reading. It
+      // must be separated from a real verdict in BOTH directions, or a probe
+      // with a stale body reads as "the route stopped refusing".
+      const diedBeforeTheGate =
+        answer.code === 'VALIDATION_ERROR' ||
+        (answer.status === 400 && /Invalid input|body\./i.test(answer.body));
+      if (diedBeforeTheGate && (route in refusedByDesign || (ADMITTED as readonly string[]).includes(route))) {
+        neverReachedTheGate.push(line);
+        continue;
       }
-      if (!isGateRefusal && route in REFUSED_BY_DESIGN) {
-        unexpectedlyAdmitted.push(`${route} -> ${answer.status} ${answer.code ?? '(no code)'} ${answer.body}`);
-      }
+
+      if (isGateRefusal && !(route in refusedByDesign)) unexplainedRefusals.push(line);
+      if (!isGateRefusal && route in refusedByDesign) unexpectedlyAdmitted.push(line);
       if (route === impersonate) adminToken = await stack.signIn(); // #8243 rotation
     }
+
+    expect(
+      neverReachedTheGate,
+      'the probe payload for these routes was rejected before the authorization check ran, so their ' +
+        'authorization was NOT measured. ⛔ This is not a pass and not a failure of the route — it is a ' +
+        'void reading, and the payload in the table needs updating to whatever the handler now requires:\n' +
+        neverReachedTheGate.join('\n'),
+    ).toEqual([]);
 
     expect(
       unexplainedRefusals,
       'an /admin/ route refused the PLATFORM ADMIN and is not on the by-design list. Either it is a new route ' +
         'that forgot the ADR-0068 gate — the #9652 defect, arriving on fresh surface — or it is a deliberate ' +
-        'refusal nobody wrote down. Gate it, or add it to REFUSED_BY_DESIGN with the card that ruled it and ' +
+        'refusal nobody wrote down. Gate it, or add it to refusedByDesignFor() with the card that ruled it and ' +
         `why:\n${unexplainedRefusals.join('\n')}`,
     ).toEqual([]);
 
@@ -662,7 +699,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     // Every route the sweep passed over without an authorization reading is
     // classified, so "not a refusal" can never quietly mean "not measured".
     const unclassified = derived.filter(
-      (r) => !(r in REFUSED_BY_DESIGN) && !(ADMITTED as readonly string[]).includes(r) && !(r in NOT_AN_AUTHORIZATION_ANSWER),
+      (r) => !(r in refusedByDesign) && !(ADMITTED as readonly string[]).includes(r) && !(r in NOT_AN_AUTHORIZATION_ANSWER),
     );
     expect(
       unclassified,
