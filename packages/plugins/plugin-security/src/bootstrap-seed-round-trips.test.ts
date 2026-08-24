@@ -45,6 +45,7 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
 import { bootstrapDeclaredPositions } from './bootstrap-declared-positions.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
+import { bootstrapSystemCapabilities, KNOWN_CAPABILITIES } from './bootstrap-system-capabilities.js';
 
 interface CountingQl {
   rows: any[];
@@ -83,6 +84,13 @@ function makeCountingQl(
       if (key.startsWith('$')) {
         throw new Error(`counting driver: unsupported combinator ${key}`);
       }
+      // [#11451] A `null` comparand is IS NULL, not `=== null`. `driver-sql`
+      // compiles `{ field: null }` to `IS NULL`; a column never written is NULL
+      // in the database and `undefined` in this double, and strict equality
+      // matches neither. Inert for every describe above — none of them issues a
+      // null comparand — and required by the curated capability read, which is
+      // predicated on `organization_id: null`.
+      if (cond === null) return row[key] == null;
       if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
         const inList = (cond as any).$in;
         if (Array.isArray(inList)) return inList.includes(row[key]);
@@ -733,5 +741,156 @@ describe('#11096 — a read that CANNOT ANSWER is not the answer "none exist"', 
     const ql = capabilityQl(declaredCaps(3));
     const r = await bootstrapDeclaredCapabilities(ql, undefined);
     expect(r.seeded).toBe(3);
+  });
+});
+
+/**
+ * [#11451] `bootstrapSystemCapabilities` — the OTHER capability seeder, whose
+ * definition set is the union of every `systemPermissions[]` string rather than
+ * the explicit `defineCapability` declarations.
+ *
+ * ## What is pinned, and what is deliberately NOT
+ *
+ * Two halves, and only ONE of them is batched:
+ *
+ *  - the CURATED half (`KNOWN_CAPABILITIES`) now costs ONE batched `$in` read
+ *    carrying the #8470 predicate, and zero writes on a steady-state rebuild;
+ *  - the DERIVED half keeps its per-item read, because its question is
+ *    cross-organization by construction and its counters are computed from the
+ *    lowest-id row installation-wide (see the seeder's header). The pins below
+ *    state that residue as `1 + derived` rather than hiding it — a later card
+ *    that batches it is expected to move these numbers deliberately.
+ *
+ * ⚠️ NO speedup is claimed. The hosted `bootstrap-curve.mjs` rig lives in
+ * `objectstack-ai/cloud` and its axes are permission sets / positions / objects,
+ * not this one. These tests count round trips and pin WHICH ROW each leg
+ * touched; nothing here measures wall time.
+ */
+describe('#11451 — the curated half is O(1) round trips, the derived half is the filed residue', () => {
+  const CURATED_NAMES = KNOWN_CAPABILITIES.map((c) => c.name);
+  const derivedSets = (n: number) => [{ systemPermissions: Array.from({ length: n }, (_, i) => `app.cap.${i}`) }];
+  const capQl = (behaviour = {}) => makeCountingQl('sys_capability', 'capability', [], behaviour);
+
+  it('the curated existence read is ONE round trip at every derived size', async () => {
+    const measure = async (d: number) => {
+      const ql = capQl();
+      await bootstrapSystemCapabilities(ql, derivedSets(d));      // first boot: seeds
+      ql.reset();
+      const r = await bootstrapSystemCapabilities(ql, derivedSets(d));  // REBUILD
+      expect(r.seeded).toBe(0);
+      expect(r.updated).toBe(0);                                   // ⬅ the gate
+      expect(r.unchanged).toBe(CURATED_NAMES.length + d);
+      return { finds: ql.calls.find, updates: ql.calls.update, derived: d };
+    };
+
+    const rows = [await measure(0), await measure(5), await measure(20)];
+    // The curated half contributes exactly 1 read at every size; the remaining
+    // `d` are the derived half's per-item reads, which this card does not batch.
+    expect(rows.map((x) => x.finds - x.derived)).toEqual([1, 1, 1]);
+    expect(rows.map((x) => x.finds)).toEqual([1, 6, 21]);
+    // ⬅ The unconditional UPDATE is gone from BOTH halves.
+    expect(rows.map((x) => x.updates)).toEqual([0, 0, 0]);
+  });
+
+  it('the batched read carries the #8470 predicate IN the query, with no other keys', async () => {
+    const ql = capQl();
+    await bootstrapSystemCapabilities(ql, []);
+    ql.reset();
+    await bootstrapSystemCapabilities(ql, []);
+    expect(ql.calls.find).toBe(1);
+    expect(ql.wheres[0]).toEqual({
+      name: { $in: CURATED_NAMES },
+      managed_by: 'platform',
+      organization_id: null,
+    });
+    // `toEqual` ignores `undefined`-valued properties, so the KEY SET is pinned
+    // separately: a predicate leaking in as `key: undefined` would pass the
+    // assertion above while changing what every other caller emits.
+    expect(Object.keys(ql.wheres[0]).sort()).toEqual(['managed_by', 'name', 'organization_id']);
+  });
+
+  it('the existing callers still emit their exact key set — no predicate leaked in', async () => {
+    // The measurement fence: `buildExistingByName` gained an optional predicate,
+    // and a caller that passes none must emit the keys it emitted before, not
+    // those keys plus `undefined`-valued ones.
+    const ql = permissionQl(declaredSets(3));
+    await bootstrapDeclaredPermissions(ql, undefined);
+    ql.reset();
+    await bootstrapDeclaredPermissions(ql, undefined);
+    expect(Object.keys(ql.wheres[0])).toEqual(['name']);
+  });
+
+  it('⭐ pins IDENTITY, not just the count: the rebuild re-reads and re-writes the same rows', async () => {
+    const ql = capQl();
+    await bootstrapSystemCapabilities(ql, derivedSets(2));
+    const idsAfterFirstBoot = ql.rows.map((r) => r.id).sort();
+    expect(idsAfterFirstBoot).toHaveLength(CURATED_NAMES.length + 2);
+
+    ql.reset();
+    await bootstrapSystemCapabilities(ql, derivedSets(2));
+    // Same rows, same ids — no row was re-created, and no offsetting pair of
+    // "one dropped, one inserted" is hiding behind a constant count.
+    expect(ql.rows.map((r) => r.id).sort()).toEqual(idsAfterFirstBoot);
+    expect(ql.calls.insert).toBe(0);
+
+    // …and when a curated row DRIFTS, the UPDATE lands on THAT row's id.
+    const target = ql.rows.find((r) => r.name === CURATED_NAMES[0])!;
+    target.label = 'Hand-edited';
+    ql.reset();
+    const r = await bootstrapSystemCapabilities(ql, derivedSets(2));
+    expect(r.updated).toBe(1);
+    expect(r.unchanged).toBe(CURATED_NAMES.length + 1);
+    expect(ql.calls.update).toBe(1);
+    expect(ql.rows.find((x) => x.id === target.id)!.label)
+      .toBe(KNOWN_CAPABILITIES.find((c) => c.name === CURATED_NAMES[0])!.label);
+  });
+
+  /**
+   * ⚠️ LOAD-BEARING. Without this, an implementation that simply stopped writing
+   * would satisfy every count above while reconciling nothing at all.
+   */
+  it('a curated row whose stored label/description drifted STILL gets its UPDATE', async () => {
+    const ql = capQl();
+    await bootstrapSystemCapabilities(ql, []);
+    const row = ql.rows.find((r) => r.name === CURATED_NAMES[1])!;
+    row.label = 'Renamed';
+    row.description = 'new text';
+    ql.reset();
+    const r = await bootstrapSystemCapabilities(ql, []);
+    expect(r.updated).toBe(1);
+    expect(ql.calls.update).toBe(1);
+    expect(row.label).toBe(KNOWN_CAPABILITIES.find((c) => c.name === CURATED_NAMES[1])!.label);
+    expect(row.description).toBe(KNOWN_CAPABILITIES.find((c) => c.name === CURATED_NAMES[1])!.description);
+  });
+
+  it('a genuinely absent curated name is still created — "absent" is not turned into "present"', async () => {
+    const ql = capQl();
+    await bootstrapSystemCapabilities(ql, []);
+    const dropped = ql.rows.findIndex((r) => r.name === CURATED_NAMES[2]);
+    ql.rows.splice(dropped, 1);
+    ql.reset();
+    const r = await bootstrapSystemCapabilities(ql, []);
+    expect(r.seeded).toBe(1);
+    expect(r.unchanged).toBe(CURATED_NAMES.length - 1);
+    expect(ql.roundTrips()).toBe(2);          // one batched read + one insert
+    expect(ql.rows.find((x) => x.name === CURATED_NAMES[2])).toBeDefined();
+  });
+
+  it('a read that CANNOT ANSWER is not the answer "none exist" — nothing is re-created', async () => {
+    const broken = capQl({ findThrows: true });
+    broken.rows.push(...KNOWN_CAPABILITIES.map((c, i) => ({
+      id: `cap_${i}`, name: c.name, label: c.label, description: c.description,
+      scope: c.scope, managed_by: 'platform', organization_id: null, active: true,
+    })));
+    const warns: string[] = [];
+    // No derived names: the derived half's `tryFind` swallows a failed read by
+    // design, so mixing one in would measure that half instead of this one.
+    const r = await bootstrapSystemCapabilities(broken, [], { logger: { warn: (m) => warns.push(m) } });
+    expect(r.unreadable).toBe(KNOWN_CAPABILITIES.length);
+    expect(r.seeded).toBe(0);
+    expect(broken.calls.insert).toBe(0);      // ⛔ no blind insert
+    expect(broken.rows).toHaveLength(KNOWN_CAPABILITIES.length);
+    expect(warns.some((w) => w.includes('batched seed existence read failed'))).toBe(true);
+    expect(warns.some((w) => w.includes('could not be read'))).toBe(true);
   });
 });

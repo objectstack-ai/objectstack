@@ -1195,3 +1195,129 @@ describe('MessagingService — plugin-facing inbox writes scoped to the authenti
         });
     });
 });
+
+/**
+ * [#11452] The plugin-facing inbox READ door.
+ *
+ * The measured BEFORE, the read-side sibling of #10753: the messaging service
+ * is registered as a kernel service and the kernel hands every plugin ONE
+ * shared `PluginContext` whose `getService` carries no caller identity, so
+ * `listInbox(userId, opts)`'s first parameter is a free string for an
+ * in-process caller — any plugin could read ANY user's inbox titles, bodies
+ * and read-state, with the read landing context-lessly on an `engine-owned`
+ * object so no engine permission check saw it either.
+ *
+ * `listInboxAsCaller` takes no target user at all. These pin that the
+ * recipient comes from the caller's authenticated `userId` and from NOTHING
+ * that merely resembles one, and that the options window is forwarded
+ * unchanged.
+ */
+describe('MessagingService — plugin-facing inbox read scoped to the authenticated caller (#11452)', () => {
+    const logger = silentLogger();
+
+    /** u1 and u2 each hold one unread message, so cross-user reach is visible. */
+    function twoUserInbox() {
+        return inboxEngine({
+            inbox: [
+                { id: 'm1', user_id: 'u1', notification_id: 'n1', topic: 'approval.request', title: 'Approve me', body_md: 'u1 body', created_at: '2026-01-01T00:00:01Z' },
+                { id: 'm2', user_id: 'u2', notification_id: 'n2', topic: 'approval.request', title: 'Approve me too', body_md: 'u2 body', created_at: '2026-01-01T00:00:02Z' },
+            ],
+            receipts: [
+                { id: 'r1', notification_id: 'n1', user_id: 'u1', channel: 'inbox', state: 'delivered' },
+                { id: 'r2', notification_id: 'n2', user_id: 'u2', channel: 'inbox', state: 'delivered' },
+            ],
+        });
+    }
+
+    it("lists the CALLER'S own inbox and nothing else", async () => {
+        const svc = new MessagingService({ logger, getData: () => twoUserInbox() });
+
+        const res = await svc.listInboxAsCaller({ userId: 'u1' });
+
+        expect(res.notifications.map((n) => n.id)).toEqual(['n1']);
+        expect(res.unreadCount).toBe(1);
+        // u2's rendered content appears nowhere in the answer, in any field.
+        expect(JSON.stringify(res)).not.toContain('Approve me too');
+        expect(JSON.stringify(res)).not.toContain('u2 body');
+    });
+
+    it('forwards the window/filter options unchanged — the same read listInbox performs', async () => {
+        const engine = inboxEngine({
+            inbox: [
+                { id: 'm1', user_id: 'u1', notification_id: 'n1', topic: 'a', title: 'A', created_at: '2026-01-01T00:00:01Z' },
+                { id: 'm2', user_id: 'u1', notification_id: 'n2', topic: 'b', title: 'B', created_at: '2026-01-01T00:00:02Z' },
+                { id: 'm3', user_id: 'u1', notification_id: 'n3', topic: 'b', title: 'C', created_at: '2026-01-01T00:00:03Z' },
+            ],
+            receipts: [
+                { id: 'r1', notification_id: 'n1', user_id: 'u1', channel: 'inbox', state: 'read' },
+            ],
+        });
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        // Same engine, same opts, both doors: the answers must be identical.
+        const viaCaller = await svc.listInboxAsCaller({ userId: 'u1' }, { type: 'b', limit: 1 });
+        const viaContract = await svc.listInbox('u1', { type: 'b', limit: 1 });
+        expect(viaCaller).toEqual(viaContract);
+        expect(viaCaller.notifications).toHaveLength(1);
+
+        const unreadOnly = await svc.listInboxAsCaller({ userId: 'u1' }, { read: false });
+        expect(unreadOnly.notifications.map((n) => n.id).sort()).toEqual(['n2', 'n3']);
+    });
+
+    describe('refusals — the ADR-0112 envelope, not a silent empty inbox', () => {
+        const svc = () => new MessagingService({ logger, getData: () => twoUserInbox() });
+
+        /** Assert the declared envelope pair a boundary reads: `status` + `code`. */
+        async function expectRefusal(run: () => Promise<unknown>): Promise<InboxCallerError> {
+            const err = await run().then(
+                () => { throw new Error('expected InboxCallerError, but the call resolved'); },
+                (e: unknown) => e as InboxCallerError,
+            );
+            expect(err).toBeInstanceOf(InboxCallerError);
+            expect(err.code).toBe('UNAUTHENTICATED');
+            expect(err.status).toBe(401);
+            return err;
+        }
+
+        it('refuses an absent context, an empty one, and a blank userId', async () => {
+            await expectRefusal(() => svc().listInboxAsCaller(undefined));
+            await expectRefusal(() => svc().listInboxAsCaller({}));
+            await expectRefusal(() => svc().listInboxAsCaller({ userId: '   ' }));
+        });
+
+        it('refuses a context carrying only attributedUserId — attribution never becomes authorization', async () => {
+            // Same invariant the write door pinned (ADR-0118 D2): a
+            // `userId ?? attributedUserId` fallback would read as working and
+            // hand a plugin the wrong person's inbox.
+            const err = await expectRefusal(() => svc().listInboxAsCaller({ attributedUserId: 'u1' }));
+            expect(err.message).toContain('attributedUserId');
+        });
+
+        it('refuses a service-principal label and a system context — neither owns an inbox', async () => {
+            await expectRefusal(() => svc().listInboxAsCaller({ actor: 'svc:flow:nightly' }));
+            await expectRefusal(() => svc().listInboxAsCaller({ isSystem: true }));
+        });
+
+        it('prescribes the READ contract door, not the write one', async () => {
+            // The refusal names the target-user door a legitimate named-target
+            // caller still has. For this verb that is `listInbox(userId, opts)`
+            // — sending a refused reader to `markRead` would be a wrong
+            // prescription wearing the right envelope.
+            const err = await expectRefusal(() => svc().listInboxAsCaller(undefined));
+            expect(err.message).toContain('listInboxAsCaller');
+            expect(err.message).toContain('listInbox(userId, opts)');
+            expect(err.message).not.toContain('markRead(userId, ids)');
+        });
+
+        it('refuses BEFORE the no-data-engine / no-user short-circuit', async () => {
+            // `listInbox` answers `{ notifications: [], unreadCount: 0 }` for a
+            // missing engine or blank user — a well-formed "empty inbox" that
+            // reads as an answer. An unauthenticated in-process caller must get
+            // the refusal, never that envelope: the read-side analog of the
+            // silent success the write door replaced, and the reason the order
+            // is pinned rather than left to reading.
+            await expectRefusal(() => new MessagingService({ logger }).listInboxAsCaller(undefined));
+            await expectRefusal(() => new MessagingService({ logger }).listInboxAsCaller({}));
+        });
+    });
+});

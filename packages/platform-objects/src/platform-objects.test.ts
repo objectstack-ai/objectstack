@@ -229,12 +229,46 @@ describe('@objectstack/platform-objects', () => {
       // header overflows extras into the ⋯ "More" menu). `record_header` is the
       // only detail-surface location objectui consumes (it does NOT read
       // `record_more`), so these must use `record_header` specifically.
-      const adminActions = ['ban_user', 'unban_user', 'unlock_user', 'set_user_password', 'set_user_role', 'impersonate_user'];
+      const adminActions = ['ban_user', 'unban_user', 'unlock_user', 'set_user_password', 'impersonate_user'];
       for (const name of adminActions) {
         const a = (SysUser.actions ?? []).find((x) => x.name === name);
         expect(a, `${name} action must exist`).toBeTruthy();
         expect(a?.locations, `${name} locations`).toContain('list_item');
         expect(a?.locations, `${name} must also surface on the detail header`).toContain('record_header');
+      }
+    });
+
+    it('#9968 — set_user_role is retired from sys_user, every sibling admin action survives', () => {
+      // set_user_role's only effect was internalAdapter.updateUser(userId,
+      // { role }) — a gated UI writer for the legacy sys_user.role scalar
+      // ADR-0068 D2 stopped synthesizing (platform-admin membership moved to
+      // sys_user_permission_set / admin_full_access). Removal, not a
+      // narrowed re-implementation (maintainer ruling, 2026-08-20/2026-08-22,
+      // Option B). Pinned in one test with its counter-direction so a
+      // retirement that removed the WRONG entry (or several) cannot pass:
+      // the retired name must be gone by name, and every sibling survivor
+      // must still be present by name.
+      const actionNames = (SysUser.actions ?? []).map((a) => a.name);
+      expect(actionNames, 'set_user_role must be gone').not.toContain('set_user_role');
+      const survivors = [
+        'invite_user',
+        'ban_user',
+        'unban_user',
+        'unlock_user',
+        'create_user',
+        'set_user_password',
+        'impersonate_user',
+        'update_my_profile',
+        'change_my_password',
+        'change_my_email',
+        'resend_verification_email',
+        'delete_my_account',
+        'enable_two_factor',
+        'disable_two_factor',
+        'generate_backup_codes',
+      ];
+      for (const name of survivors) {
+        expect(actionNames, `${name} must survive the set_user_role retirement`).toContain(name);
       }
     });
   });
@@ -509,7 +543,6 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysUser', SysUser, 'unban_user', 'features.admin == true'],
     ['SysUser', SysUser, 'unlock_user', 'features.admin == true'],
     ['SysUser', SysUser, 'set_user_password', 'features.admin == true'],
-    ['SysUser', SysUser, 'set_user_role', 'features.admin == true'],
     ['SysUser', SysUser, 'impersonate_user', 'features.admin == true'],
     ['SysUser', SysUser, 'enable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled != true) && features.twoFactor == true'],
     ['SysUser', SysUser, 'disable_two_factor', '(has(record.id) && record.id == ctx.user.id && has(record.two_factor_enabled) && record.two_factor_enabled == true) && features.twoFactor == true'],

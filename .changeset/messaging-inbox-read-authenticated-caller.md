@@ -1,0 +1,13 @@
+---
+"@objectstack/service-messaging": minor
+---
+
+**Feature:** `MessagingService` gains the plugin-facing inbox **read** door scoped to the authenticated caller — `listInboxAsCaller(caller, opts)` (#11452), completing the axis the write door (`markReadAsCaller` / `markAllReadAsCaller`, #10753) established.
+
+`listInbox(userId, opts)` is the REST door's contract method (`INotificationService.listInbox?`), and on that path its `userId` is trustworthy because `runtime/src/domains/notifications.ts` binds it to an already-authenticated session and answers 401 when there is none. But the service is also a kernel service, and the kernel hands every plugin one shared `PluginContext` whose `getService` carries no caller identity — so for an in-process caller that same parameter is a free string, and the read lands context-lessly on an `engine-owned` object (ADR-0103), so no engine permission check sees it either. Any plugin could read any user's inbox titles, bodies and read-state — the exact shape the write door closed, on the arguably more sensitive half: inbox bodies carry rendered business content.
+
+`listInboxAsCaller` takes **no target user at all**. The recipient is derived from the caller's `ExecutionContext.userId` through the same `resolveInboxRecipient` the write door uses — one refusal vocabulary, not two. `attributedUserId` (attribution only, ADR-0118 D2), `actor` (a service-principal label) and `isSystem` are refused rather than promoted, with `InboxCallerError` carrying the ADR-0112 envelope pair a boundary reads — `status: 401`, registered `code: 'UNAUTHENTICATED'`. The refusal is evaluated **before** `listInbox`'s no-data-engine / no-user short-circuit, which answers a well-formed empty `{ notifications: [], unreadCount: 0 }` inbox — the read-side analog of the silent success the write door replaced. The options window (`read` / `type` / `limit`) is forwarded unchanged.
+
+Honest about what it is, same as the write door: a **discipline** boundary, not a security boundary. An in-process plugin already holds the data engine and can read `sys_inbox_message` rows directly; nothing at this layer stops trusted code that means to. What changes is that the correct pattern is the only one the plugin-facing surface expresses, and the incorrect one now fails loudly at the call site.
+
+Nothing existing changes behaviour: `listInbox` / `markRead` / `markAllRead` keep their signatures (they are the published `INotificationService` contract the REST door needs), and no schema, column or object declaration moves. `resolveInboxRecipient` gains an optional third parameter naming the target-user door its refusal prescribes; it defaults to the write door's existing text, so existing call sites keep their refusal bytes unchanged.
