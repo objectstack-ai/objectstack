@@ -13,17 +13,44 @@ import type { AuthzPosture } from '@objectstack/spec/security';
  * sys_user_position / sys_position_permission_set / platform_admin / ai_seat).
  */
 
-// Minimal in-memory ObjectQL: find(object, { where }) with `===` + `$in` match.
+// Minimal in-memory ObjectQL: find(object, { where, limit }) with `===` + `$in`
+// match, and the caller's `limit` ENFORCED.
+//
+// [#10978] The bound is not decoration. A double that matches `where` and hands
+// back every row it matched cannot tell a read bounded at 200 from the same read
+// bounded at 1000, or from one carrying no bound at all — so raising a limit,
+// lowering it, or folding two reads that carry different ones is green BY
+// CONSTRUCTION, and the production symptom is a silently truncated result set
+// rather than an error. On this file's path that truncation is an authorization
+// input: `resolveUserAuthzGrants` reads `sys_member` twice, `{user_id}` at 200
+// and `{organization_id}` at 1000, and the obvious "same object, fold them"
+// cleanup silently caps the fellow-org peer list (`org_user_ids`, an RLS input)
+// at 200 for any organization with more members.
+//
+// PRESENCE, not truthiness — `limit: 0` means "return no records" and `0` is
+// falsy, so `opts.limit ? …` would answer a request for NOTHING with the WHOLE
+// table. That is a measured door in this repo, not a hypothetical: see the
+// `query.limit !== undefined` comment in `driver-memory`'s `memory-driver.ts`.
+// Bounding AFTER the filter matches the real read path (filter → sort → offset →
+// limit); these doubles implement no ordering, and no read on this path asks for
+// one.
+function bounded<T>(rows: T[], opts: any): T[] {
+  return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+}
+
 function makeQl(tables: Record<string, any[]>) {
   return {
     async find(object: string, opts: any) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
-      return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
-          if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
-          return r[k] === v;
-        }),
+      return bounded(
+        rows.filter((r) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            return r[k] === v;
+          }),
+        ),
+        opts,
       );
     },
   };
@@ -123,11 +150,14 @@ function makeCountingQl(tables: Record<string, any[]>) {
       counts[object] = (counts[object] ?? 0) + 1;
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
-      return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
-          if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
-          return r[k] === v;
-        }),
+      return bounded(
+        rows.filter((r) =>
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
+            return r[k] === v;
+          }),
+        ),
+        opts,
       );
     },
   };
@@ -1137,5 +1167,60 @@ describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
     const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1');
     expect(grants.permissions).not.toContain('contributor_ps');
     expect(grants.positions).not.toContain('contributor');
+  });
+});
+
+/**
+ * [#10978] The instrument's own contract.
+ *
+ * Every assertion in this file stands on `makeQl`, and a double that drops
+ * `opts.limit` cannot fail a limit regression: raising a bound, lowering it, or
+ * folding two reads that carry different ones all produce identical rows. These
+ * cases pin the bound itself, so the blindness cannot come back unnoticed —
+ * without them the `slice` is unverified and deleting it fails nothing.
+ *
+ * The measured population when this landed: 49 limit-blind query-honouring
+ * doubles across 43 files, all 49 reached at runtime and 44 handed a real bound
+ * (values 1 … 10000). Teaching all 49 to honour it broke 0 of 1062 tests — the
+ * class was unobservable, not wrong.
+ */
+describe('the in-memory ObjectQL double honours `limit` (#10978)', () => {
+  const rows = (n: number, org: string) =>
+    Array.from({ length: n }, (_, i) => ({ user_id: `u${i}`, organization_id: org, role: 'member' }));
+
+  it('bounds a matched read at the caller\'s limit', async () => {
+    const ql = makeQl({ sys_member: rows(205, 'o1') });
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 200 })).toHaveLength(200);
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' } })).toHaveLength(205);
+  });
+
+  it('tells two bounds apart on the same read — the fold this card exists for', async () => {
+    // `resolveUserAuthzGrants` reads sys_member twice: `{user_id}` at 200 and
+    // `{organization_id}` at 1000. Folding them into one read would cap the
+    // fellow-org peer list (`org_user_ids`, an RLS input) at 200. Under a
+    // limit-blind double both bounds return 1005 rows and the fold is invisible.
+    const ql = makeQl({ sys_member: rows(1005, 'o1') });
+    const atOrgBound = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 1000 });
+    const atUserBound = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 200 });
+    expect(atOrgBound).toHaveLength(1000);
+    expect(atUserBound).toHaveLength(200);
+    expect(atOrgBound.length).not.toBe(atUserBound.length);
+  });
+
+  it('reads the bound by PRESENCE, not truthiness — `limit: 0` returns nothing', async () => {
+    // `0` is falsy, so `opts.limit ? …` answers a request for NOTHING with the
+    // WHOLE table. Measured door in this repo: `driver-memory` carries the same
+    // fix as `query.limit !== undefined`.
+    const ql = makeQl({ sys_member: rows(3, 'o1') });
+    expect(await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 0 })).toHaveLength(0);
+  });
+
+  it('applies the bound AFTER the filter, never before it', async () => {
+    // Bounding first would return rows the `where` excludes — a double that is
+    // silently WRONG rather than merely unbounded.
+    const ql = makeQl({ sys_member: [...rows(5, 'other'), ...rows(5, 'o1')] });
+    const found = await ql.find('sys_member', { where: { organization_id: 'o1' }, limit: 3 });
+    expect(found).toHaveLength(3);
+    expect(found.every((r: any) => r.organization_id === 'o1')).toBe(true);
   });
 });

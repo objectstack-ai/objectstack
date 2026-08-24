@@ -13,13 +13,20 @@ import {
   effectiveTenancyPosture,
 } from './api-key.js';
 
-/** In-memory sys_api_key store exposing the `find` shape the verifier uses. */
+/**
+ * In-memory sys_api_key store exposing the `find` shape the verifier uses.
+ *
+ * [#10978] `limit` is ENFORCED — presence, not truthiness, so `limit: 0` returns
+ * nothing rather than everything. A double that drops the bound makes any limit
+ * change on this read green by construction; the verifier reads with `limit: 1`.
+ */
 function makeQl(rows: any[]) {
   return {
     find: async (object: string, opts: any) => {
       if (object !== 'sys_api_key') return [];
       const where = opts?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
     },
   };
 }
