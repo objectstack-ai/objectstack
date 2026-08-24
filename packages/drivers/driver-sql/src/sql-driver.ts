@@ -4475,24 +4475,31 @@ export class SqlDriver implements IDataDriver {
         }
         : { ...knexConfig }; // host chose its own bound — respect it
 
+    // `!dialect` — sqlite, or a client with no connect-timeout knob — means
+    // there is no TIMEOUT to inject. It deliberately does not skip the session
+    // pins below: those answer a different question (what does a value MEAN on
+    // this connection), and the two lists are not the same list. Measured while
+    // fixing #11389: `redshift` speaks the pg wire protocol, and therefore
+    // needs the calendar-day pin, but carries no entry here — so a `return`
+    // placed at this point silently opted it out of a fix it needs.
     const dialect = SqlDriver.DIALECT_CONNECT_TIMEOUT[String(knexConfig.client ?? '')];
-    if (!dialect) return bounded; // sqlite / unknown client — nothing to inject
-
-    const conn = knexConfig.connection;
-    if (typeof conn === 'string') {
-      // The URL must move into the dialect's own URL slot so the timeout can
-      // ride alongside it. Verified for both dialects: the connection attempt
-      // still goes to the URL's host/port, `?sslmode=` is still honoured.
-      bounded.connection = {
-        [dialect.urlKey]: conn,
-        [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
-      };
-    } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
-      bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+    if (dialect) {
+      const conn = knexConfig.connection;
+      if (typeof conn === 'string') {
+        // The URL must move into the dialect's own URL slot so the timeout can
+        // ride alongside it. Verified for both dialects: the connection attempt
+        // still goes to the URL's host/port, `?sslmode=` is still honoured.
+        bounded.connection = {
+          [dialect.urlKey]: conn,
+          [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS,
+        };
+      } else if (conn && typeof conn === 'object' && (conn as any)[dialect.key] === undefined) {
+        bounded.connection = { ...(conn as object), [dialect.key]: SqlDriver.DEFAULT_CONNECT_TIMEOUT_MS };
+      }
+      // A function-valued `connection` (knex's per-acquire provider) is left
+      // alone: the host is building each connection itself and owns its timeouts.
     }
-    // A function-valued `connection` (knex's per-acquire provider) is left
-    // alone: the host is building each connection itself and owns its timeouts.
-    return SqlDriver.withUtcSession(bounded);
+    return SqlDriver.withPostgresCalendarDayAsText(SqlDriver.withUtcSession(bounded));
   }
 
   /**
@@ -4542,6 +4549,126 @@ export class SqlDriver implements IDataDriver {
           if (!hostAfterCreate) return done(undefined, connection);
           hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
         });
+      },
+    };
+    return out;
+  }
+
+  /**
+   * knex client names that route to the `pg` npm driver, and therefore reach
+   * {@link withPostgresCalendarDayAsText}. Wider than {@link isPostgres} on
+   * purpose: that getter answers "which dialect's SQL do I emit", while this
+   * answers "which npm package parses the wire format" — `postgres` (knex's
+   * own alias), `cockroachdb` and `redshift` all speak the pg wire protocol
+   * with the same type OIDs. The hook is additionally guarded on the
+   * connection really exposing `setTypeParser`, so a client name that turns
+   * out not to be a `pg.Client` degrades to a no-op instead of throwing.
+   */
+  private static readonly POSTGRES_WIRE_CLIENTS: ReadonlySet<string> = new Set([
+    'pg', 'postgres', 'postgresql', 'cockroachdb', 'redshift',
+  ]);
+
+  /** Postgres OID of `date` — a bare calendar day, no time and no zone. */
+  private static readonly PG_OID_DATE = 1082;
+  /** Postgres OID of `date[]`. */
+  private static readonly PG_OID_DATE_ARRAY = 1182;
+  /**
+   * Postgres OID of `text[]`. Borrowed, not used for its own type: pg's
+   * built-in `text[]` parser IS its array-literal splitter with an identity
+   * element transform, so applying it to a `date[]` literal yields the raw
+   * `YYYY-MM-DD` element strings — including `null` for a SQL NULL element,
+   * `[]` for an empty array, and nested arrays for the multi-dimensional case.
+   * Reusing it is what keeps this hook free of a hand-rolled array parser and
+   * free of any dependency on the `pg` module being importable from here.
+   */
+  private static readonly PG_OID_TEXT_ARRAY = 1009;
+
+  /**
+   * Keep a Postgres `date` a calendar-day STRING, never a JS `Date` (#11389).
+   *
+   * This is the Postgres counterpart of {@link withUtcSession}, and it exists
+   * for the same reason: the value a driver materialises must not depend on
+   * which machine's clock the Node process happens to be running.
+   *
+   * ## The measurement
+   *
+   * `node-postgres` parses OID 1082 with `new Date(y, m - 1, d)` — **local**
+   * midnight. `SqlDriver#toDateOnly` reads a `Date` with UTC components (its
+   * documented contract, see there), so on a process east of UTC the two
+   * disagree by a calendar day. Measured on PostgreSQL 16, one stored row
+   * `d = '2026-08-24'`, only the process `TZ` changed:
+   *
+   * | process TZ | pg materialises | `toDateOnly` returned |
+   * |---|---|---|
+   * | `UTC` | `2026-08-24T00:00:00.000Z` | `2026-08-24` |
+   * | `America/New_York` | `2026-08-24T04:00:00.000Z` | `2026-08-24` |
+   * | `Asia/Shanghai` | `2026-08-23T16:00:00.000Z` | **`2026-08-23`** |
+   *
+   * West of UTC the UTC components happen to name the right day, which is why
+   * the `Temporal Conformance (live PG + MySQL)` job — pinned at
+   * `TZ=America/New_York` — was green throughout. Only an east-of-UTC process
+   * zone can fail it, so the pin that guards this sweeps the process zone.
+   *
+   * ## Why the parser and not the reader
+   *
+   * The alternative — read local components in `toDateOnly` — was measured and
+   * rejected: that helper is shared by the READ path (`formatOutput`,
+   * `presentReadValue`), the WRITE path (`formatInput`) and the FILTER path
+   * (`coerceFilterValue`), and the `Date`s they receive are on different
+   * clocks. A caller's `new Date('2026-08-24')` is UTC midnight, so under
+   * `TZ=America/New_York` local components read it as `2026-08-23` — the same
+   * one-day error in the mirror direction, moved onto the write and filter
+   * paths. Fixing it at the parser leaves exactly one clock in play, because
+   * the driver then never produces a `Date` for a `date` column at all — which
+   * is already how SQLite behaves (TEXT round-trip) and, via
+   * {@link withUtcSession}'s `timezone: 'Z'`, how mysql2 behaves.
+   *
+   * `pool.afterCreate` is the hook rather than a `pg.types.setTypeParser`
+   * call because `setTypeParser` mutates the pg-types registry **process
+   * wide**, which would reach every other pg client in the host application.
+   * A parser registered on the connection is scoped to the pools this driver
+   * opened; a host's own `pg` clients keep the stock behaviour. `pg` is an
+   * optional peer dependency and is never imported here — `setTypeParser` /
+   * `getTypeParser` are read off the `pg.Client` knex hands the hook.
+   *
+   * `timestamptz` / `timestamp` are deliberately untouched: those are
+   * instants, a `Date` is the right materialisation for them, and
+   * `Field.datetime` depends on it.
+   *
+   * A host's existing `pool.afterCreate` is chained rather than replaced,
+   * exactly as in {@link withUtcSession}.
+   */
+  private static withPostgresCalendarDayAsText(
+    knexConfig: Record<string, any>,
+  ): Record<string, any> {
+    if (!SqlDriver.POSTGRES_WIRE_CLIENTS.has(String(knexConfig.client ?? ''))) return knexConfig;
+
+    const out: Record<string, any> = { ...knexConfig };
+    const pool = (out.pool ?? {}) as Record<string, any>;
+    const hostAfterCreate = pool.afterCreate as
+      | ((conn: unknown, done: (err?: unknown) => void) => void)
+      | undefined;
+    out.pool = {
+      ...pool,
+      afterCreate(connection: any, done: (err?: unknown, conn?: unknown) => void) {
+        const chain = (): void => {
+          if (!hostAfterCreate) return done(undefined, connection);
+          hostAfterCreate(connection, (hostErr?: unknown) => done(hostErr, connection));
+        };
+        // Not a `pg.Client` after all (a stub, a future knex shape): leave the
+        // connection exactly as it was rather than failing the acquire.
+        if (
+          typeof connection?.setTypeParser !== 'function' ||
+          typeof connection?.getTypeParser !== 'function'
+        ) {
+          return chain();
+        }
+        const parseTextArray = connection.getTypeParser(SqlDriver.PG_OID_TEXT_ARRAY, 'text');
+        // The wire form of `date` IS `YYYY-MM-DD`; handing it back verbatim is
+        // both the fix and the whole parser.
+        connection.setTypeParser(SqlDriver.PG_OID_DATE, (text: string) => text);
+        connection.setTypeParser(SqlDriver.PG_OID_DATE_ARRAY, parseTextArray);
+        chain();
       },
     };
     return out;
@@ -10666,12 +10793,43 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * Collapse a `Field.date` value to a timezone-naive `YYYY-MM-DD`
-   * calendar-day string (ADR-0053 Phase 1). A `Date` collapses to its UTC
-   * calendar day; a string keeps its leading date and drops any time
-   * component. Anything else (and `null`/`undefined`) passes through
-   * unchanged. This is the single source of truth for date-only truncation,
-   * shared by the filter (`coerceFilterValue`), write (`formatInput`) and
-   * read (`formatOutput`) paths so all three agree on what a date *is*.
+   * calendar-day string (ADR-0053 Phase 1). A string keeps its leading date
+   * and drops any time component. Anything else (and `null`/`undefined`)
+   * passes through unchanged. This is the single source of truth for date-only
+   * truncation, shared by the filter (`coerceFilterValue`), write
+   * (`formatInput`) and read (`formatOutput`, `presentReadValue`) paths so all
+   * of them agree on what a date *is*.
+   *
+   * ## Which clock a `Date` argument is on — the contract, not an accident
+   *
+   * **A `Date` reaching this helper is read on the UTC clock**
+   * (`getUTCFullYear` / `getUTCMonth` / `getUTCDate`), and callers must hand it
+   * one whose UTC components name the intended calendar day. That is the same
+   * clock every other temporal canon in this driver folds through
+   * (`storageDatetimeValue`, `canonicalTimeOfDay`, `nowColumnDefault`'s
+   * `timezone('utc', now())::date`), so a `Field.date` means one day on every
+   * host regardless of the process `TZ`.
+   *
+   * It is written down because the three call paths do NOT hand it `Date`s
+   * from one source, and #11389 was the reading of that. Measured (PostgreSQL
+   * 16, one process, only `TZ` changed):
+   *
+   * | argument, for calendar day 2026-08-24 | `TZ=Asia/Shanghai` | `TZ=America/New_York` |
+   * |---|---|---|
+   * | caller's `new Date('2026-08-24')` — write/filter | `…T00:00Z` | `…T00:00Z` |
+   * | caller's `new Date(2026, 7, 24)` — write/filter | `…T16:00Z` (prev. day UTC) | `…T04:00Z` |
+   * | what `pg` used to hand the READ path for a `date` column | `…T16:00Z` (prev. day UTC) | `…T04:00Z` |
+   *
+   * So no single clock is right for every `Date` that could arrive: reading
+   * local components would fix the third row and break the first (a
+   * `new Date('2026-08-24')` comparand becomes `2026-08-23` west of UTC — the
+   * identical one-day error, moved onto the write and filter paths). The read
+   * path was fixed at its source instead — see
+   * {@link withPostgresCalendarDayAsText} — so on every dialect a `date`
+   * column now arrives here as TEXT and no driver-materialised `Date` reaches
+   * this helper at all. ⛔ Do not "repair" a residual date skew by switching
+   * the getters below to their local twins; that reintroduces #11389 in the
+   * mirror direction, and `sql-driver-11389-date-tz-skew.test.ts` pins it.
    */
   protected toDateOnly(value: any): any {
     if (value == null) return value;
